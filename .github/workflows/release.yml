@@ -65,3 +65,17 @@ jobs:
           releaseBody: Download the dmg, open it and drag Lantern to Applications. Requires Claude Code installed and logged in.
           releaseDraft: true
           args: --target universal-apple-darwin --bundles dmg
+
+      # tauri-action notarizes the app but not the dmg around it, which Gatekeeper also checks after a download.
+      - name: Notarize and staple the dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          dmg=$(ls src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait
+          xcrun stapler staple "$dmg"
+          spctl -a -vv -t open --context context:primary-signature "$dmg"
+          gh release upload "$TAG" "$dmg" --clobber
