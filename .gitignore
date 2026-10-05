@@ -1,0 +1,8 @@
+.remember/
+node_modules/
+dist/
+target/
+.DS_Store
+
+.superpowers/
+docs/superpowers/
