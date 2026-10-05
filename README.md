@@ -27,11 +27,7 @@ The terminal is a fine place to talk to Claude Code, but a hard place to follow 
 
 ## Install
 
-Download the latest `.dmg` from [Releases](../../releases), open it and drag Lantern to Applications.
-
-The app isn't signed or notarized yet, so the first time macOS will refuse to open it. Right-click Lantern in Applications and choose **Open**, then confirm. If macOS still says the app is damaged, run:
-
-    xattr -dr com.apple.quarantine /Applications/Lantern.app
+Download the latest `.dmg` from [Releases](../../releases), open it and drag Lantern to Applications. The app is signed and notarized by Apple, so it opens like any other Mac app.
 
 ## Build from source
 
