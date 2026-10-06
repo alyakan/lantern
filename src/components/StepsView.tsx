@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { Md } from "./Md";
 import { AWAY_FROM_END, JumpToLatest } from "./JumpToLatest";
 import { useSlot } from "../lib/slot";
+import { useModeGuide } from "../lib/modeGuide";
+import { InfoIcon } from "./icons";
 import { recallScroll, rememberScroll } from "../lib/scrollMemory";
 import { messageTime } from "../lib/time";
 import { initials, useUserName } from "../lib/userName";
@@ -35,7 +37,7 @@ interface Props extends StreamHandlers {
   onNext: (message?: string) => void;
   /** Sends a message as if typed (the review summary's actions). */
   onSend?: (text: string) => void;
-  /** Build, Teach or Review: which flavour of Step-by-step runs. */
+  /** Build, Learn or Review: which flavour of Step-by-step runs. */
   onFlavour: (mode: Mode) => void;
   /** Claude Code's auto mode approves actions instead of the app asking; each step is still reviewed as a page. */
   autoApprove?: boolean;
@@ -45,6 +47,9 @@ interface Props extends StreamHandlers {
   /** Review: the file of the page that's on screen, so the Changes pane can show it. */
   onReviewFile?: (path: string) => void;
 }
+
+/** What the style switch calls a flavour ("teach" is shown as Learn: what you're there to do). */
+const flavourLabel = (m: Mode) => (m === "teach" ? "Learn" : m === "review" ? "Review" : "Build");
 
 const isTyping = (el: Element | null) => !!el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el as HTMLElement).isContentEditable);
 
@@ -106,6 +111,7 @@ export function StepsView({ state, onNext, onSend, onFlavour, onPage, onReviewFi
     if (restingFile) onReviewFile?.(restingFile);
   }, [restingFile]);
 
+  const guide = useModeGuide();
   const go = (i: number) => setIndex(Math.max(0, Math.min(last, i)));
   // Moving to a page (Next, Previous, arrows, a new step coming in) starts at its top. Not when the view is drawn
   // (switching back to this chat): then each page is where you left it.
@@ -146,6 +152,8 @@ export function StepsView({ state, onNext, onSend, onFlavour, onPage, onReviewFi
   const phase = !heading ? null : review ? "Reviewing" : heading.kind === "step" || heading.kind === "done" ? "Building" : "Planning";
   const newest = at === last;
   const teach = state.mode === "teach";
+  // Review: whether a file has come yet, so Next opens the first one or the next.
+  const filesSoFar = review && pages.slice(0, at + 1).some((p) => p.heading?.kind === "file");
 
   // Review verdicts, per page and finding; the page's Next carries them.
   const [verdicts, setVerdicts] = useState<Record<string, Record<number, Verdict>>>({});
@@ -185,7 +193,7 @@ export function StepsView({ state, onNext, onSend, onFlavour, onPage, onReviewFi
           </span>
         )}
         <div className="spacer" />
-        <div className="scope-track" role="radiogroup" aria-label="Style">
+        <div className="scope-track steps-style" role="radiogroup" aria-label="Style">
           {(["steps", "teach", "review"] as const).map((m) => (
             <button
               key={m}
@@ -196,10 +204,15 @@ export function StepsView({ state, onNext, onSend, onFlavour, onPage, onReviewFi
               title={m === "teach" ? "Explain each step: the why, the concept, the alternatives" : m === "review" ? "Review a pull request, a file per page (incremental-pr-review)" : "Short steps to review"}
               onClick={() => onFlavour(m)}
             >
-              {m === "teach" ? "Teach" : m === "review" ? "Review" : "Build"}
+              {flavourLabel(m)}
             </button>
           ))}
         </div>
+        {guide && (
+          <button className="icon-button steps-how" aria-label={`How ${flavourLabel(state.mode)} works`} title={`How ${flavourLabel(state.mode)} works`} onClick={() => guide(state.mode)}>
+            <InfoIcon />
+          </button>
+        )}
         {onAutoApprove && (
           <button className={`steps-auto${autoApprove ? " on" : ""}`} role="switch" aria-checked={autoApprove} disabled={running} title={autoApprove ? "Auto-approve is on: Claude Code's auto mode approves routine actions and stops risky ones. Click to be asked instead." : "Commands and other actions ask you first. Click to auto-approve them (you still review every step)."} onClick={() => onAutoApprove(!autoApprove)}>
             <span className="steps-auto-knob" aria-hidden />
@@ -263,7 +276,7 @@ export function StepsView({ state, onNext, onSend, onFlavour, onPage, onReviewFi
             </span>
           ) : (
             <button className="primary" disabled={waiting || heading?.kind === "done" || heading?.kind === "summary"} title={review ? "Send your verdicts and go on to the next file" : "Approve this step and go on to the next"} onClick={next}>
-              {heading?.kind === "done" || heading?.kind === "summary" ? "Done" : review ? (heading?.kind === "file" ? (heading.n === heading.total ? "Summary →" : "Next file →") : "First file →") : "Next step →"}
+              {heading?.kind === "done" || heading?.kind === "summary" ? "Done" : review ? (heading?.kind === "file" && heading.n === heading.total ? "Summary →" : filesSoFar ? "Next file →" : "First file →") : "Next step →"}
             </button>
           )
         ) : (

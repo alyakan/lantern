@@ -143,3 +143,11 @@ export const RestartIcon = () => (
     <path d="M9.4 1v2.2H7.2" />
   </svg>
 );
+
+export const InfoIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 13 13" {...base}>
+    <circle cx="6.5" cy="6.5" r="5.6" />
+    <line x1="6.5" y1="5.8" x2="6.5" y2="9.4" />
+    <circle cx="6.5" cy="3.9" r="0.35" fill="currentColor" />
+  </svg>
+);

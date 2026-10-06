@@ -407,7 +407,7 @@ button.icon.queue-remove { flex: none; width: 20px; height: 20px; font-size: 14p
 .review { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--pane); }
 /* Changes | Files as a macOS segmented control. */
 .pane-tabs { display: flex; align-items: center; height: 44px; flex: none; padding: 0 10px; }
-/* Changes | Files | Tests: the same size as the pane's other pills (the Changes filter, Build | Teach | Review), not the
+/* Changes | Files | Tests: the same size as the pane's other pills (the Changes filter, Build | Learn | Review), not the
    title bar's larger capsules. */
 .pane-tabs-track { display: inline-flex; gap: 2px; height: 26px; align-items: center; padding: 0 2px; border-radius: 999px; background: var(--glass); border: 0.5px solid var(--glass-line); }
 .pane-tabs-track button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 64px; height: 22px; padding: 0 10px; border: none; border-radius: 999px; background: none; color: var(--muted); font-size: 11.5px; }
@@ -698,7 +698,7 @@ button.background-task-stop:hover:not(:disabled) { background: var(--bg-hover); 
 .user-note-body p { margin: 0 0 4px; }
 .user-note-body > :last-child { margin-bottom: 0; }
 .step-content { display: flex; flex-direction: column; gap: 10px; }
-/* The page's own message reads larger than chat text; Teach pages are longer, so a touch more air. */
+/* The page's own message reads larger than chat text; Learn pages are longer, so a touch more air. */
 .step-content .msg.assistant { font-size: 14px; line-height: 1.65; }
 .step-page-body.teach .msg.assistant { line-height: 1.75; }
 .step-content .msg.assistant pre { font-size: 12px; }
@@ -845,3 +845,43 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 .setup-row { display: flex; gap: 8px; }
 .setup-row input { flex: 1; font: inherit; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: inherit; }
 .center { display: flex; height: 100%; align-items: center; justify-content: center; }
+
+/* The chat's mode, under the chat box: a chip you notice, naming Step by step's style too. */
+.meta-item.mode-chip { margin: 0; padding: 0 8px; border: 0.5px solid var(--glass-line); background: var(--glass); color: var(--text-2); font-weight: 500; }
+.meta-item.mode-chip svg { color: var(--text-2); }
+.mode-menu-more .menu-row-title { color: var(--text-2); }
+
+/* Step by step's header: the style is what you're in, so it reads as a control, not a hint. */
+.steps-head .steps-style { height: 28px; }
+.steps-head .steps-style button { height: 24px; padding: 0 12px; font-size: 12px; color: var(--text-2); }
+.steps-head .steps-style button.active { font-weight: 600; color: var(--text); }
+.steps-how { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: -4px; padding: 0; border: none; border-radius: 999px; background: none; color: var(--muted); }
+.steps-how:hover { background: var(--bg-hover); color: var(--text); }
+.steps-intro-more { font-size: 12.5px; }
+
+/* How the modes work: every mode, one page each. */
+.mode-guide { width: min(760px, calc(100vw - 48px)); height: min(600px, calc(100vh - 48px)); padding: 0; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--field); color: var(--text); box-shadow: var(--shadow); }
+.mode-guide::backdrop { background: rgba(0, 0, 0, 0.28); }
+.mode-guide[open] { animation: guide-in 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes guide-in { from { opacity: 0; transform: translateY(6px) scale(0.99); } }
+@media (prefers-reduced-motion: reduce) { .mode-guide[open] { animation: none; } }
+.mode-guide-body { display: flex; height: 100%; }
+.mode-guide-nav { flex: none; width: 210px; display: flex; flex-direction: column; gap: 14px; padding: 16px 10px; border-right: 1px solid var(--line); background: var(--sidebar); overflow-y: auto; }
+.mode-guide-group { display: flex; flex-direction: column; gap: 1px; }
+.mode-guide-group-title { padding: 0 8px 4px; font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.mode-guide-tab { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: none; border-radius: var(--radius-chip); background: none; color: var(--text-2); font-size: 12.5px; text-align: left; }
+.mode-guide-tab .mode-icon { margin-top: 0; }
+.mode-guide-tab:hover:not(.active) { background: var(--bg-hover); }
+.mode-guide-tab.active { background: var(--bg-active); color: var(--text); font-weight: 500; }
+.mode-guide-now { margin-left: auto; padding: 0 6px; border-radius: 999px; background: var(--accent); color: var(--accent-text); font-size: 10px; font-weight: 600; line-height: 16px; }
+.mode-guide-page { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 22px 26px 18px; overflow-y: auto; }
+.mode-guide-eyebrow { font-size: 11.5px; color: var(--muted); }
+.mode-guide-title { margin: 2px 0 8px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+.mode-guide-summary { margin: 0 0 6px; font-size: 13.5px; line-height: 1.55; color: var(--text); }
+.mode-guide-heading { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.mode-guide-list { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.55; color: var(--text-2); }
+.mode-guide-list li + li { margin-top: 3px; }
+.mode-guide-text { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text-2); }
+.mode-guide-note { margin: 16px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--bg-subtle); font-size: 12px; line-height: 1.5; color: var(--text-2); }
+.mode-guide-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: auto; padding-top: 20px; }
+.mode-guide-using { font-size: 12px; color: var(--muted); }

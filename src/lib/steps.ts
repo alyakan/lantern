@@ -22,10 +22,15 @@ const HEADING = /^#{1,3}\s*(Frame|Plan step\s+(\d+)|Plan complete|Step\s+(\d+)\s
 const FILE_LINE = /^\*\*\s*`?([^*`\n]+?)`?\s*\*\*\s*\(\s*(\+\d+\s*[−–-]\s*\d+)\s*\)\s*$/;
 const SUMMARY_LINE = /^(?:\*\*Summary\*\*|Summary:)\s*[—–:-]?\s*(.*)$/i;
 
+const fileTitle = (file: RegExpExecArray) => `${file[1].trim()} (${file[2].replace(/\s+/g, " ")})`;
+
+/** The line after the heading, if it's the skill's file line. */
+const fileLineUnder = (text: string) => FILE_LINE.exec((text.split("\n").filter((l) => l.trim())[1] ?? "").trim());
+
 export function parseHeading(text: string): Heading | null {
   const first = (text.split("\n").find((l) => l.trim()) ?? "").trim();
   const file = FILE_LINE.exec(first);
-  if (file) return { kind: "file", n: null, total: null, title: `${file[1].trim()} (${file[2].replace(/\s+/g, " ")})` };
+  if (file) return { kind: "file", n: null, total: null, title: fileTitle(file) };
   const summary = SUMMARY_LINE.exec(first);
   if (summary) return { kind: "summary", n: null, total: null, title: summary[1].replace(/\*\*/g, "").trim() };
   const m = HEADING.exec(first);
@@ -37,7 +42,13 @@ export function parseHeading(text: string): Heading | null {
   if (word === "frame") return { kind: "frame", n: null, total: null, title };
   if (word.startsWith("plan step")) return { kind: "plan", n: Number(m[2]), total: null, title };
   if (word === "plan complete") return { kind: "plan-complete", n: null, total: Number(/(\d+)/.exec(title)?.[1] ?? NaN) || null, title };
-  if (word.startsWith("step")) return { kind: "step", n: Number(m[3]), total: Number(m[4]), title };
+  if (word.startsWith("step")) {
+    // A review written under Build's headings (the chat was switched to Review and Claude kept the old format): a
+    // "Step N of M" whose first line is the skill's file line is that file.
+    const under = fileLineUnder(text);
+    if (under) return { kind: "file", n: Number(m[3]), total: Number(m[4]), title: fileTitle(under) };
+    return { kind: "step", n: Number(m[3]), total: Number(m[4]), title };
+  }
   return { kind: "done", n: null, total: null, title };
 }
 
@@ -73,11 +84,13 @@ export interface StepPage {
   range: { from: number; to: number } | null;
 }
 
-// The heading line comes out of the message: a "#" heading, or the skill's bold file or summary line.
+// The heading line comes out of the message: a "#" heading, or the skill's bold file or summary line. A file line
+// right under a "#" heading says the same as the heading, so it goes too.
 const withoutHeading = (text: string) => {
   const first = (text.split("\n").find((l) => l.trim()) ?? "").trim();
   const isLine = FILE_LINE.test(first) || /^\*\*Summary\*\*\s*$/i.test(first);
-  return (isLine ? text.replace(/^\s*[^\n]*\n?/, "") : text.replace(/^\s*#{1,3}[^\n]*\n?/, "")).replace(/^\s+/, "");
+  const rest = (isLine ? text.replace(/^\s*[^\n]*\n?/, "") : text.replace(/^\s*#{1,3}[^\n]*\n?/, "")).replace(/^\s+/, "");
+  return !isLine && fileLineUnder(text) ? rest.replace(/^[^\n]*\n?/, "").replace(/^\s+/, "") : rest;
 };
 
 // Files the skill's way have no number: they're told apart by path.
@@ -90,6 +103,26 @@ export const andNext = (text: string) => `${text.trim()}\n\n${NEXT_SUFFIX}`;
 export const movesOn = (text: string) => isApproval(text) || isVerdictNext(text) || text.trimEnd().endsWith(NEXT_SUFFIX);
 /** What to show of a prompt: without the ⌘Enter suffix. */
 export const promptText = (text: string) => text.trimEnd().replace(NEXT_SUFFIX, "").trimEnd();
+
+/**
+ * Put before the first message sent after switching Build, Learn or Review in a chat that has already started. The
+ * restart gives Claude the new mode's system prompt, but the conversation it resumes is all in the old format, which
+ * it otherwise keeps to (a review written as "# Step N of M").
+ */
+export function modeSwitchNote(mode: "steps" | "teach" | "review"): string {
+  const build = "follow incremental-dev, and start each message you stop on with its headings (# Frame, # Plan step N, # Plan complete, # Step N of M, # Done)";
+  const how =
+    mode === "review"
+      ? "Step-by-step Review mode. From here on follow incremental-pr-review, and start each message you stop on with Review's headings (# Frame, # File N of M — <path> (+added −removed), # Summary)"
+      : mode === "teach"
+        ? `Step-by-step Teach mode. From here on ${build}, and explain the why of every step`
+        : `Step-by-step Build mode. From here on ${build}`;
+  return `[Lantern: this chat switched to ${how}, not the format used earlier in this chat.]`;
+}
+const MODE_NOTE = /^\[Lantern: this chat switched to [^\]]*\]\s*/;
+export const withModeNote = (mode: "steps" | "teach" | "review", text: string) => `${modeSwitchNote(mode)}\n\n${text}`;
+/** A prompt as you wrote it: without a mode-switch note Lantern put before it. */
+export const withoutModeNote = (text: string) => text.replace(MODE_NOTE, "");
 
 function turnsOf(items: ChatItem[]): StepTurn[] {
   const turns: StepTurn[] = [];
