@@ -556,6 +556,9 @@ export function installMockBackend() {
         }
         case "read_file":
           return a.path === FILE ? CURRENT : `// ${String(a.path).slice(FOLDER.length + 1)}\nexport {};\n`;
+        // &update: a newer Lantern is downloaded and waiting.
+        case "update_status":
+          return new URLSearchParams(location.search).has("update") ? { version: "0.1.2" } : null;
         default:
           return null;
       }

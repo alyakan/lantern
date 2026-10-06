@@ -398,6 +398,9 @@ button.icon.queue-remove { flex: none; width: 20px; height: 20px; font-size: 14p
 .meta-item { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 6px; margin: 0 -6px; border: none; background: none; font-size: 12px; color: var(--muted); border-radius: var(--radius-chip); }
 .meta-item:hover:not(:disabled):not(.static) { background: var(--bg-hover); color: var(--text-2); }
 .meta-item:disabled { opacity: 0.6; }
+.update-menu { right: -6px; bottom: calc(100% + 6px); width: 300px; padding: 10px 12px; gap: 10px; }
+.update-question { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--text); white-space: normal; }
+.update-actions { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* Right pane */
 /* No overflow: hidden on the pane itself so the file picker menu can extend past it; the diff clips its own corner. */

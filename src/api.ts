@@ -55,6 +55,11 @@ export const api = {
   searchText: (slot: string, query: TextQuery) => invoke<TextResults>("search_text", { slot, query }),
   /** For each file mention in Claude's text, the file in the chat's folder it means (null: not a file there). */
   resolveFiles: (slot: string, mentions: string[]) => invoke<(string | null)[]>("resolve_files", { slot, mentions }),
+  /** A newer Lantern already downloaded and verified, if there is one. */
+  updateStatus: () => invoke<{ version: string } | null>("update_status"),
+  /** Installs the downloaded update and relaunches Lantern (stopping every chat's claude). */
+  restartToUpdate: () => invoke<void>("restart_to_update"),
+  onUpdateReady: (cb: (update: { version: string }) => void): Promise<UnlistenFn> => listen<{ version: string }>("update-ready", (e) => cb(e.payload)),
   onUiEvent: (cb: (slot: string, event: UiEvent) => void): Promise<UnlistenFn> =>
     listen<{ slot: string; event: UiEvent }>("ui-event", (e) => cb(e.payload.slot, e.payload.event)),
 };
