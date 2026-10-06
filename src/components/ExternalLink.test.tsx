@@ -18,6 +18,20 @@ describe("ExternalLink", () => {
     expect(openUrl).toHaveBeenCalledWith("https://example.com/x");
   });
 
+  it("opens middle-clicked links via the opener instead of navigating the app", () => {
+    render(<ExternalLink href="https://example.com/x">docs</ExternalLink>);
+    const link = screen.getByText("docs");
+    const event = createEvent(
+      "auxclick",
+      link,
+      { button: 1, bubbles: true, cancelable: true },
+      { EventType: "MouseEvent" },
+    );
+    fireEvent(link, event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(openUrl).toHaveBeenCalledWith("https://example.com/x");
+  });
+
   it("does not open javascript: links", () => {
     render(<ExternalLink href="javascript:alert(1)">bad</ExternalLink>);
     const link = screen.getByText("bad");

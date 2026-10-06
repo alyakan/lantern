@@ -4,6 +4,7 @@ pub mod cli_locator;
 pub mod files;
 pub mod git;
 pub mod history;
+pub mod navigation;
 pub mod permission;
 pub mod pr;
 pub mod session;
@@ -488,6 +489,7 @@ async fn restart_to_update(app: AppHandle, state: State<'_, AppState>, updates: 
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(navigation::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
