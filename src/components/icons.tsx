@@ -135,3 +135,11 @@ export const StepsIcon = () => (
     <path d="M4 1.5h5.5a1 1 0 0 1 1 1V8" />
   </svg>
 );
+
+// A ready update: a circular arrow, restart to take it.
+export const RestartIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" {...base}>
+    <path d="M10.2 6a4.2 4.2 0 1 1-1.3-3" />
+    <path d="M9.4 1v2.2H7.2" />
+  </svg>
+);

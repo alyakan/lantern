@@ -13,6 +13,7 @@ pub mod stream_parser;
 pub mod test_runs;
 pub mod titles;
 pub mod ui_event;
+pub mod updates;
 
 use args::{HelperConfig, Mode};
 use changes::FileDiff;
@@ -466,15 +467,37 @@ async fn open_session(
     Ok(replayed.events)
 }
 
+/// A newer Lantern already downloaded and verified, for a window that started listening after it was found.
+#[tauri::command]
+fn update_status(updates: State<'_, updates::Updates>) -> Option<updates::UpdateInfo> {
+    updates.ready()
+}
+
+/// Installs the downloaded update, stops every chat's claude, and relaunches into the new version. A failed install
+/// leaves the chats running.
+#[tauri::command]
+async fn restart_to_update(app: AppHandle, state: State<'_, AppState>, updates: State<'_, updates::Updates>) -> Result<(), String> {
+    updates.install()?;
+    for s in state.slots.drain() {
+        s.shut_down().await;
+    }
+    app.restart()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let titles = titles::TitleStore::load(app.path().app_data_dir().ok().map(|d| d.join("titles.json")));
             app.manage(AppState { slots: Slots::default(), login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), prs: Default::default() });
+            app.manage(updates::Updates::default());
+            if updates::checks_enabled() {
+                tauri::async_runtime::spawn(updates::watch(app.handle().clone()));
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -501,7 +524,9 @@ pub fn run() {
             search_text,
             list_sessions,
             title_session,
-            open_session
+            open_session,
+            update_status,
+            restart_to_update
         ])
         .build(tauri::generate_context!())
         .expect("error while building Lantern")
@@ -513,6 +538,14 @@ pub fn run() {
                             s.shut_down().await;
                         }
                     });
+                }
+                // An update the user didn't restart for goes in now, for the next launch.
+                if let Some(updates) = app.try_state::<updates::Updates>() {
+                    if updates.ready().is_some() {
+                        if let Err(e) = updates.install() {
+                            eprintln!("{e}");
+                        }
+                    }
                 }
             }
         });

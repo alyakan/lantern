@@ -51,6 +51,8 @@ jobs:
 
       # Signs with the Developer ID certificate, then notarizes and staples. The certificate expires on
       # 1 Feb 2027: after that, export a new one into APPLE_CERTIFICATE. Builds signed before then keep working.
+      # The `app` bundle also makes the self-update: Lantern.app.tar.gz, signed with the updater key (whose loss would
+      # strand every install on its version), and latest.json, which installed apps read once the release is published.
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -59,12 +61,14 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Lantern ${{ github.ref_name }}
-          releaseBody: Download the dmg, open it and drag Lantern to Applications. Requires Claude Code installed and logged in.
+          releaseBody: Download the dmg, open it and drag Lantern to Applications. Requires Claude Code installed and logged in. From 0.1.1 on, Lantern updates itself.
           releaseDraft: true
-          args: --target universal-apple-darwin --bundles dmg
+          args: --target universal-apple-darwin --bundles app,dmg
 
       # tauri-action notarizes the app but not the dmg around it, which Gatekeeper also checks after a download.
       - name: Notarize and staple the dmg

@@ -29,6 +29,8 @@ The terminal is a fine place to talk to Claude Code, but a hard place to follow 
 
 Download the latest `.dmg` from [Releases](../../releases), open it and drag Lantern to Applications. The app is signed and notarized by Apple, so it opens like any other Mac app.
 
+From 0.1.1 on, Lantern updates itself: when a new release is out, "Update ready" appears under the chat box. Click it to restart onto the new version, or leave it and it installs when you quit.
+
 ## Build from source
 
 Requires Node 20.19 or newer (see `.nvmrc`) and a stable Rust toolchain.

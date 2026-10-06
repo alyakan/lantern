@@ -109,6 +109,9 @@ export default function App() {
   const [finishedAt, setFinishedAt] = useState<Record<string, Date>>({});
   // The pop-up shown when the chat on screen finishes a turn.
   const [hud, setHud] = useState<HudEvent | null>(null);
+  // A newer Lantern, downloaded and ready; `updateLater`: the user chose to take it when they quit.
+  const [update, setUpdate] = useState<{ version: string } | null>(null);
+  const [updateLater, setUpdateLater] = useState(false);
 
   // Actions for one chat. Async results always go to the chat that asked, even if another is on screen by then.
   const to = (slot: string) => (action: Action) => dispatchChats({ type: "in", slot, action });
@@ -123,6 +126,15 @@ export default function App() {
   useEffect(() => {
     const unlisten = api.onUiEvent((slot, event) => dispatchChats({ type: "in", slot, action: { type: "ui_event", event } }));
     locate(null);
+    return () => {
+      unlisten.then((stop) => stop());
+    };
+  }, []);
+
+  // The update may have been found before this window was listening, so ask as well as listen.
+  useEffect(() => {
+    const unlisten = api.onUpdateReady(setUpdate);
+    api.updateStatus().then((u) => u && setUpdate(u), () => {});
     return () => {
       unlisten.then((stop) => stop());
     };
@@ -570,6 +582,16 @@ export default function App() {
       queue={{ items: state.queued, set: (items) => dispatch({ type: "queue_set", items }) }}
       commands={state.commands}
       draft={{ initial: drafts.current[active] ?? "", save: (text) => (drafts.current[active] = text) }}
+      update={
+        update && !updateLater
+          ? {
+              version: update.version,
+              busy: Object.values(chats.slots).filter(isBusy).length,
+              onRestart: () => api.restartToUpdate().catch((e) => dispatch({ type: "failed", text: errText(e) })),
+              onLater: () => setUpdateLater(true),
+            }
+          : undefined
+      }
     />
   );
 

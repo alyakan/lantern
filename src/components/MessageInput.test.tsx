@@ -3,6 +3,11 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { MessageInput } from "./MessageInput";
 
 describe("MessageInput", () => {
+  it("shows a ready update under the box, even with no mode or branch to show", () => {
+    render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} update={{ version: "0.1.2", busy: 0, onRestart: () => {}, onLater: () => {} }} />);
+    expect(screen.getByRole("button", { name: /Update ready/ })).toBeInTheDocument();
+  });
+
   it("sends trimmed text on Enter and clears", () => {
     const onSend = vi.fn();
     render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} />);

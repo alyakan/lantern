@@ -12,6 +12,7 @@ import { ModeMenu } from "./ModeMenu";
 import { ModelPicker } from "./ModelPicker";
 import type { OpenChat } from "./HistoryMenu";
 import { SessionPill } from "./SessionPill";
+import { UpdateButton } from "./UpdateButton";
 
 const MAX_HEIGHT = 200; // about 8 lines
 
@@ -48,9 +49,11 @@ interface Props {
   commands?: SlashCommand[];
   /** The chat's unsent text, kept while another chat is on screen. */
   draft?: { initial: string; save: (text: string) => void };
+  /** A downloaded update of Lantern, shown under the box until it's taken or left for quitting. */
+  update?: { version: string; busy: number; onRestart: () => void; onLater: () => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, mode, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], draft, effort }: Props) {
+export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, mode, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], draft, effort, update }: Props) {
   const [text, setTextState] = useState(draft?.initial ?? "");
   const setText = (next: string) => {
     setTextState(next);
@@ -269,10 +272,11 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           )}
         </div>
       </div>
-      {(mode || branch) && (
+      {(mode || branch || update) && (
         <div className="composer-meta">
           {mode && onModeChange && <ModeMenu mode={mode} onChange={onModeChange} disabled={busy} />}
           <div className="spacer" />
+          {update && <UpdateButton {...update} />}
           {branch && (
             <span className="meta-item static" title="Git branch">
               <BranchIcon />
