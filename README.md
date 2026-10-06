@@ -12,8 +12,8 @@ The terminal is a fine place to talk to Claude Code, but a hard place to follow 
 
 - **Readable turns.** Every tool call is a card. Edits and new files show as diffs, and the Changes list opens any touched file in a full side-by-side diff.
 - **Ask and Auto.** In Ask mode edits apply and anything else asks you with Allow/Deny. In Auto mode Claude Code's own classifier approves most actions.
-- **Step by step.** Build, Learn or Review a change one page at a time. Each step is a page with Previous and Next; you approve it, ask about it, or ask for a change, and only that step is rewritten.
-- **Review mode.** Point it at a pull request or branch. Each changed file gets its own page, findings become cards you Agree with or Reject, and your verdicts go back to Claude together.
+- **Step by step.** One page at a time, with Previous and Next; you approve a page, ask about it, or ask for a change, and only that page is rewritten. Claude suggests how to work from your task, and starts when you say so: **Build** plans and builds a step per page, **Learn** does the same and explains the why, **Review** walks a pull request or branch a file per page, and **Debug** finds the cause from evidence before fixing it. You can also pick one yourself.
+- **Reviews.** Point Step by step at a pull request or branch. Each changed file gets its own page, findings become cards you Agree with or Reject, and your verdicts go back to Claude together.
 - **Tests tab.** Test runs from pytest, jest, vitest, cargo and xcodebuild are parsed into passes and failures with file:line links.
 - **Search.** ⌘P finds files, ⌘⇧F searches text (regex, case, whole word), ⌘F searches inside an open file or diff.
 - **History and sessions.** Pick up any earlier Claude Code session for a folder, including ones started in the terminal. Several chats can run side by side, with a notice when one finishes or needs you.

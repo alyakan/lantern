@@ -24,7 +24,6 @@ export const api = {
   interrupt: (slot: string) => invoke<void>("interrupt", { slot }),
   /** `autoApprove`: Step by step's auto-approve (null keeps the chat's current setting). */
   restartSession: (slot: string, mode: Mode, effort: string | null, autoApprove: boolean | null = null) => invoke<void>("restart_session", { slot, mode, effort, autoApprove }),
-  setPermissionMode: (slot: string, mode: Mode) => invoke<void>("set_permission_mode", { slot, mode }),
   /** `turn`: with the "turn" scope, which turn (the latest when null); `toTurn`: the end of a range of turns from it. */
   /** `pr`: with the "pr" scope, the pull request's number. */
   getFileDiff: (slot: string, path: string, scope: ChangeScope = "session", turn: number | null = null, toTurn: number | null = null, pr: number | null = null) =>

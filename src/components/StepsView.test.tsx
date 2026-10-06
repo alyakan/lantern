@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { initialState, type ChatItem, type State } from "../store";
+import type { Flavour } from "../lib/flavour";
 import { StepsView, UPDATE_STEP } from "./StepsView";
 
 vi.mock("../api", () => ({ api: { userName: () => Promise.resolve("Ada Lovelace") } }));
@@ -14,7 +15,7 @@ const items: ChatItem[] = [
   { type: "turn", id: "t2", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
 ];
 const state = (extra: Partial<State> = {}): State => ({ ...initialState, folder: "/p", status: "idle", mode: "steps", items, ...extra });
-const handlers = () => ({ onDecide: () => {}, onOpenFile: () => {}, onNext: vi.fn(), onFlavour: vi.fn(), onPage: vi.fn() });
+const handlers = (flavour: Flavour | null = "build") => ({ onDecide: () => {}, onOpenFile: () => {}, onNext: vi.fn(), flavour, onPickFlavour: vi.fn(), onPage: vi.fn() });
 const current = () => document.querySelector('.step-page[aria-hidden="false"]')!;
 
 describe("StepsView", () => {
@@ -186,8 +187,8 @@ describe("StepsView", () => {
       { type: "assistant", id: "a2", text: file },
       turn("t2"),
     ];
-    const h = handlers();
-    const { rerender } = render(<StepsView state={state({ mode: "review", items: reviewed })} {...h} />);
+    const h = handlers("review");
+    const { rerender } = render(<StepsView state={state({ items: reviewed })} {...h} />);
     expect(current().querySelector(".review-file-name")).toHaveTextContent("retry.ts");
     expect([...current().querySelectorAll(".finding")].map((f) => f.className)).toEqual(["finding sev-blocker", "finding sev-nit"]);
     expect(current()).not.toHaveTextContent('Say "Next"');
@@ -200,7 +201,7 @@ describe("StepsView", () => {
 
     const onSend = vi.fn();
     const summed: ChatItem[] = [...reviewed, { type: "user", id: "u3", text: sent, turn: 2 }, { type: "assistant", id: "a3", text: "# Summary — 1 file reviewed\n\nOne thing to fix." }, turn("t3")];
-    rerender(<StepsView state={state({ mode: "review", items: summed })} {...h} onSend={onSend} />);
+    rerender(<StepsView state={state({ items: summed })} {...h} onSend={onSend} />);
     // The verdicts Next carried aren't shown as a question on the page.
     expect(current().querySelector(".step-asked")).toBeNull();
     expect([...current().querySelectorAll(".review-table tbody tr")].map((r) => r.lastElementChild!.textContent)).toEqual(["Agreed", "Rejected"]);
@@ -218,18 +219,50 @@ describe("StepsView", () => {
       { type: "user", id: "u3", text: "Next", turn: 2 },
       { type: "assistant", id: "a3", text: "# Step 1 of 2 — `utils.js`\n\n**utils.js** (+5 −0)\n\n### What changed\nslugify.\n\n### Findings\nNone." },
     ];
-    render(<StepsView state={state({ mode: "review", items })} {...handlers()} />);
+    render(<StepsView state={state({ items })} {...handlers("review")} />);
     expect(current().querySelector(".review-file-name")).toHaveTextContent("utils.js");
     expect(screen.getByRole("button", { name: "Next file →" })).toBeEnabled();
   });
 
-  it("shows Claude working instead of Next while a step runs, and switches Build and Learn", () => {
+  it("shows Claude working instead of Next while a step runs, and picks a flavour from the header's badge", () => {
     const h = handlers();
     render(<StepsView state={state({ status: "running" })} {...h} />);
     expect(screen.queryByRole("button", { name: "Next step →" })).toBeNull();
-    expect(screen.getByRole("radio", { name: "Learn" })).toBeDisabled();
-    const { container } = render(<StepsView state={state()} {...handlers()} onFlavour={h.onFlavour} />);
-    fireEvent.click(container.querySelector('[role="radio"][aria-checked="false"]')!);
-    expect(h.onFlavour).toHaveBeenCalledWith("teach");
+    expect(screen.getByRole("button", { name: /^Build/ })).toBeDisabled();
+    const idle = handlers();
+    const { container } = render(<StepsView state={state()} {...idle} />);
+    fireEvent.click(container.querySelector(".flavour-badge")!);
+    expect(screen.getByRole("menuitemradio", { name: /^Build/ })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Debug/ }));
+    expect(idle.onPickFlavour).toHaveBeenCalledWith("debug");
+  });
+
+  it("shows Claude's suggestion as a card: start it, stay, or start another; then how you answered", () => {
+    const suggested: ChatItem[] = [
+      ...items,
+      { type: "user", id: "u3", text: "saving crashes when the title is empty", turn: 2 },
+      { type: "assistant", id: "a3", text: "# Switch to Debug — this is a bug, so the cause comes first\n\nI'd find the cause before changing anything." },
+      { type: "turn", id: "t3", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
+    ];
+    const onSend = vi.fn();
+    const { rerender } = render(<StepsView state={state({ items: suggested })} {...handlers()} onSend={onSend} />);
+    const card = screen.getByRole("group", { name: "Claude suggests Debug" });
+    expect(card).toHaveTextContent("this is a bug, so the cause comes first");
+    expect(current().querySelector(".step-title")).toHaveTextContent("Debug?");
+    // The card has the answers, not the Next button.
+    expect(screen.queryByRole("button", { name: "Next step →" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stay in Build" }));
+    expect(onSend).toHaveBeenLastCalledWith("Stay in Build.");
+    fireEvent.click(screen.getByRole("button", { name: "Learn" }));
+    expect(onSend).toHaveBeenLastCalledWith("Start Learn.");
+    fireEvent.click(screen.getByRole("button", { name: "Start Debug" }));
+    expect(onSend).toHaveBeenLastCalledWith("Start Debug.");
+
+    const started: ChatItem[] = [...suggested, { type: "user", id: "u4", text: "Start Debug.", turn: 3 }, { type: "assistant", id: "a4", text: "# Frame — Empty titles crash the save\n\n1. A null title." }];
+    rerender(<StepsView state={state({ items: started })} {...handlers("debug")} onSend={onSend} />);
+    // The answer isn't shown as a question on the next page, and the card says how it went.
+    expect(current().querySelector(".step-asked")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "← Previous" }));
+    expect(screen.getByRole("group", { name: "Claude suggests Debug" })).toHaveTextContent("You started Debug");
   });
 });

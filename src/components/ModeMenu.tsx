@@ -1,22 +1,18 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Mode } from "../types";
+import type { Flavour } from "../lib/flavour";
 import { useModeGuide } from "../lib/modeGuide";
-import { BoltIcon, BugIcon, InfoIcon, PlanIcon, ShieldIcon, StepsIcon } from "./icons";
+import { BoltIcon, InfoIcon, ShieldIcon, StepsIcon } from "./icons";
 import { modeName } from "./ModeGuide";
 
 const MODES: { value: Mode; label: string; hint: string; icon: ReactNode }[] = [
   { value: "ask", label: "Ask before actions", hint: "Edits apply; commands and other actions ask you first", icon: <ShieldIcon /> },
   { value: "auto", label: "Auto-approve", hint: "A classifier approves most actions; you're rarely asked", icon: <BoltIcon /> },
-  { value: "plan", label: "Plan first", hint: "Claude researches and proposes a plan; nothing changes until you approve it", icon: <PlanIcon /> },
-  { value: "debug", label: "Debug", hint: "Claude adds temporary logs, has you reproduce the bug, then fixes the root cause", icon: <BugIcon /> },
-  { value: "steps", label: "Step by step", hint: "Claude plans and builds one step at a time, shown as pages; Next approves each", icon: <StepsIcon /> },
+  { value: "steps", label: "Step by step", hint: "One page at a time: Claude suggests whether to build, teach, review or debug, and you start it", icon: <StepsIcon /> },
 ];
 
-// Learn ("teach") and Review are Step by step's other flavours (switched in its view), so the menu shows them as one.
-const shown = (mode: Mode): Mode => (mode === "teach" || mode === "review" ? "steps" : mode);
-
 // Under the chat box: how much Claude may do on its own. It opens a menu upwards, like the model chip.
-export function ModeMenu({ mode, onChange, disabled }: { mode: Mode; onChange: (mode: Mode) => void; disabled?: boolean }) {
+export function ModeMenu({ mode, flavour = null, onChange, disabled }: { mode: Mode; flavour?: Flavour | null; onChange: (mode: Mode) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const guide = useModeGuide();
   const root = useRef<HTMLDivElement>(null);
@@ -33,12 +29,12 @@ export function ModeMenu({ mode, onChange, disabled }: { mode: Mode; onChange: (
     };
   }, [open]);
 
-  const current = MODES.find((m) => m.value === shown(mode)) ?? MODES[0];
+  const current = MODES.find((m) => m.value === mode) ?? MODES[0];
   return (
     <div className="model-picker mode-menu-anchor" ref={root}>
       <button className="meta-item mode-chip" aria-haspopup="menu" aria-expanded={open} disabled={disabled} title={current.hint} onClick={() => setOpen(!open)}>
         {current.icon}
-        {modeName(mode)}
+        {modeName(mode, flavour)}
         <span className="chev down" aria-hidden />
       </button>
       {open && (
@@ -47,11 +43,11 @@ export function ModeMenu({ mode, onChange, disabled }: { mode: Mode; onChange: (
             <button
               key={m.value}
               role="menuitemradio"
-              aria-checked={m.value === shown(mode)}
-              className={`menu-row${m.value === shown(mode) ? " current" : ""}`}
+              aria-checked={m.value === mode}
+              className={`menu-row${m.value === mode ? " current" : ""}`}
               onClick={() => {
                 setOpen(false);
-                if (m.value !== shown(mode)) onChange(m.value);
+                if (m.value !== mode) onChange(m.value);
               }}
             >
               <span className="mode-icon">{m.icon}</span>
@@ -69,7 +65,7 @@ export function ModeMenu({ mode, onChange, disabled }: { mode: Mode; onChange: (
                 className="menu-row mode-menu-more"
                 onClick={() => {
                   setOpen(false);
-                  guide(mode);
+                  guide(mode === "steps" && flavour ? flavour : mode);
                 }}
               >
                 <span className="mode-icon">

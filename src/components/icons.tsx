@@ -151,3 +151,29 @@ export const InfoIcon = () => (
     <circle cx="6.5" cy="3.9" r="0.35" fill="currentColor" />
   </svg>
 );
+
+// Step by step's flavours (Debug has BugIcon). Build: a hammer.
+export const BuildIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" {...base}>
+    <path d="M6.6 5.4 1.8 10.2" />
+    <path d="M4.6 2.3 6.2 1h2.2l2.1 2.1-1.6 1.6-1.4-1.4-1.3 1.3L4.6 2.9z" />
+  </svg>
+);
+
+// Learn: an open book.
+export const LearnIcon = () => (
+  <svg width="13" height="12" viewBox="0 0 13 12" {...base}>
+    <path d="M6.5 2.6C5.3 1.7 3.6 1.3 1.2 1.4v7.8c2.4-.1 4.1.3 5.3 1.2 1.2-.9 2.9-1.3 5.3-1.2V1.4c-2.4-.1-4.1.3-5.3 1.2z" />
+    <line x1="6.5" y1="2.6" x2="6.5" y2="10.4" />
+  </svg>
+);
+
+// Review: a magnifier over lines.
+export const ReviewIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" {...base}>
+    <circle cx="5.2" cy="5.2" r="3.7" />
+    <line x1="7.9" y1="7.9" x2="10.8" y2="10.8" />
+    <line x1="3.6" y1="4.4" x2="6.8" y2="4.4" />
+    <line x1="3.6" y1="6" x2="5.8" y2="6" />
+  </svg>
+);

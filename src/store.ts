@@ -1,6 +1,6 @@
 import type { Hunk, ModelOption, Mode, SlashCommand, UiEvent, TestRun } from "./types";
 import { countChanges } from "./lib/diff";
-import { withoutModeNote } from "./lib/steps";
+import { readFlavourNote, type Flavour } from "./lib/flavour";
 
 export interface EditInfo {
   path: string;
@@ -30,6 +30,8 @@ export type ChatItem =
       at?: number;
       /** Not something the user sent: Claude replied on its own (a background task ended); `text` says why. */
       auto?: boolean;
+      /** Step by step: sent with the flavour the user had just picked (Claude was told in a note before the text). */
+      switchedTo?: Flavour;
     }
   | { type: "assistant"; id: string; text: string }
   | ToolItem
@@ -78,6 +80,10 @@ export interface State {
   cleared: boolean;
   contextWindow: number | null;
   mode: Mode;
+  /** Step by step: a flavour picked from the header and not yet sent (it goes with the next message). */
+  flavourPick: Flavour | null;
+  /** Step by step: the flavour an older session was in, when its mode was Debug, Teach or Review. */
+  flavourStart: Flavour | null;
   model: string | null;
   items: ChatItem[];
   changedFiles: ChangedFile[];
@@ -129,6 +135,8 @@ export const initialState: State = {
   cleared: false,
   contextWindow: null,
   mode: "ask",
+  flavourPick: null,
+  flavourStart: null,
   model: null,
   items: [],
   changedFiles: [],
@@ -155,8 +163,9 @@ export type Action =
   | { type: "folder_cleared" }
   | { type: "history_loaded"; sessionId: string; events: UiEvent[] }
   | { type: "session_ready" }
-  | { type: "user_sent"; text: string }
-  | { type: "mode_changed"; mode: Mode }
+  | { type: "user_sent"; text: string; switchedTo?: Flavour }
+  | { type: "mode_changed"; mode: Mode; flavourStart?: Flavour | null }
+  | { type: "flavour_picked"; flavour: Flavour | null }
   | { type: "permission_decided"; id: string; allow: boolean; note?: string }
   | { type: "stop_requested" }
   | { type: "restarting" }
@@ -225,7 +234,7 @@ function settleRunning(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {} };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {} };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -249,7 +258,8 @@ function applyEvent(state: State, ev: UiEvent): State {
       return { ...state, model: ev.model, sessionId: ev.session_id, status: state.status === "starting" ? "idle" : state.status };
     case "user_text": {
       const seq = state.seq + 1;
-      return { ...state, seq, items: [...state.items, { type: "user", id: `u${seq}`, text: withoutModeNote(ev.text), at: ev.at }] };
+      const { text, flavour } = readFlavourNote(ev.text);
+      return { ...state, seq, items: [...state.items, { type: "user", id: `u${seq}`, text, at: ev.at, ...(flavour ? { switchedTo: flavour } : {}) }] };
     }
     case "thinking":
       return { ...wake(state), thinking: true };
@@ -375,10 +385,14 @@ export function reducer(state: State, action: Action): State {
       return state.status === "starting" ? { ...state, status: "idle" } : state;
     case "user_sent": {
       const seq = state.seq + 1;
-      return { ...state, status: "running", thinking: true, stopRequested: false, seq, items: [...state.items, { type: "user", id: `u${seq}`, text: action.text, at: Date.now() }] };
+      const item: ChatItem = { type: "user", id: `u${seq}`, text: action.text, at: Date.now(), ...(action.switchedTo ? { switchedTo: action.switchedTo } : {}) };
+      // A picked flavour went with this message.
+      return { ...state, status: "running", thinking: true, stopRequested: false, seq, flavourPick: action.switchedTo ? null : state.flavourPick, items: [...state.items, item] };
     }
     case "mode_changed":
-      return { ...state, mode: action.mode };
+      return { ...state, mode: action.mode, ...(action.flavourStart !== undefined ? { flavourStart: action.flavourStart } : {}) };
+    case "flavour_picked":
+      return { ...state, flavourPick: action.flavour };
     case "permission_decided":
       return {
         ...state,

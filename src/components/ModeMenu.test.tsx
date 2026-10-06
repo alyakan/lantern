@@ -4,13 +4,13 @@ import { ModeMenu } from "./ModeMenu";
 import { PermissionCard } from "./PermissionCard";
 
 describe("ModeMenu", () => {
-  it("offers ask, auto-approve, plan first, debug and step by step, and switches", () => {
+  it("offers ask before actions, auto-approve and step by step, and switches", () => {
     const onChange = vi.fn();
     render(<ModeMenu mode="ask" onChange={onChange} />);
     fireEvent.click(screen.getByRole("button", { name: /Ask before actions/ }));
-    expect(screen.getAllByRole("menuitemradio").map((r) => r.querySelector(".menu-row-title")?.textContent)).toEqual(["Ask before actions", "Auto-approve", "Plan first", "Debug", "Step by step"]);
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Plan first/ }));
-    expect(onChange).toHaveBeenCalledWith("plan");
+    expect(screen.getAllByRole("menuitemradio").map((r) => r.querySelector(".menu-row-title")?.textContent)).toEqual(["Ask before actions", "Auto-approve", "Step by step"]);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Step by step/ }));
+    expect(onChange).toHaveBeenCalledWith("steps");
   });
 });
 

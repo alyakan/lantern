@@ -9,6 +9,7 @@ import { ContextMeter } from "./ContextMeter";
 import { EFFORT_LEVELS, EffortPicker } from "./EffortPicker";
 import { FolderPill } from "./FolderPill";
 import { ModeMenu } from "./ModeMenu";
+import type { Flavour } from "../lib/flavour";
 import { ModelPicker } from "./ModelPicker";
 import type { OpenChat } from "./HistoryMenu";
 import { SessionPill } from "./SessionPill";
@@ -26,6 +27,8 @@ interface Props {
   onSend: (text: string) => void;
   onStop: () => void;
   mode?: Mode;
+  /** Step by step's flavour, which the mode chip names too. */
+  flavour?: Flavour | null;
   onModeChange?: (mode: Mode) => void;
   model?: string | null;
   branch?: string | null;
@@ -53,7 +56,7 @@ interface Props {
   update?: { version: string; busy: number; onRestart: () => void; onLater: () => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, mode, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], draft, effort, update }: Props) {
+export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], draft, effort, update }: Props) {
   const [text, setTextState] = useState(draft?.initial ?? "");
   const setText = (next: string) => {
     setTextState(next);
@@ -274,7 +277,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
       </div>
       {(mode || branch || update) && (
         <div className="composer-meta">
-          {mode && onModeChange && <ModeMenu mode={mode} onChange={onModeChange} disabled={busy} />}
+          {mode && onModeChange && <ModeMenu mode={mode} flavour={flavour} onChange={onModeChange} disabled={busy} />}
           <div className="spacer" />
           {update && <UpdateButton {...update} />}
           {branch && (

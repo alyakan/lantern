@@ -320,11 +320,7 @@ button.code-block-copy:hover:not(:disabled) { background: var(--bg-hover); color
 .steps-intro-head { display: flex; align-items: center; gap: 10px; }
 .steps-intro-title { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--text); }
 .steps-intro-title svg { color: var(--text-2); }
-.steps-intro .scope-track { margin-left: auto; }
 .steps-intro-line { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--text-2); }
-.steps-intro-stages { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 2px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); }
-.steps-intro-stages li { display: inline-flex; align-items: center; gap: 6px; }
-.steps-intro-n { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--bg-active); color: var(--text-2); font-size: 10px; font-weight: 600; }
 .composer-pills { display: flex; gap: 6px; margin-bottom: 8px; }
 /* Capsule like VS Code's folder picker: transparent with a hairline border; a subtle fill only on hover. */
 .pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px 0 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: transparent; color: var(--text-2); font-size: 12.5px; transition: background 0.12s; }
@@ -662,7 +658,6 @@ button.background-task-stop:hover:not(:disabled) { background: var(--bg-hover); 
 .steps-dot.build { border-color: var(--muted); background: var(--muted); }
 .steps-dot:hover:not(.current) { border-color: var(--text-2); }
 .steps-dot.current { width: 22px; border-color: var(--text); background: var(--text); }
-.steps-phase { flex: none; font-size: 11.5px; color: var(--muted); }
 /* Still running in the background, beside the phase (the title bar's count, where you're looking). */
 .steps-background { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--working) 12%, transparent); color: var(--working); font-size: 11px; }
 .steps-background .spinner { width: 9px; height: 9px; border-color: color-mix(in srgb, var(--working) 30%, transparent); border-top-color: var(--working); }
@@ -851,12 +846,6 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 .meta-item.mode-chip svg { color: var(--text-2); }
 .mode-menu-more .menu-row-title { color: var(--text-2); }
 
-/* Step by step's header: the style is what you're in, so it reads as a control, not a hint. */
-.steps-head .steps-style { height: 28px; }
-.steps-head .steps-style button { height: 24px; padding: 0 12px; font-size: 12px; color: var(--text-2); }
-.steps-head .steps-style button.active { font-weight: 600; color: var(--text); }
-.steps-how { flex: none; display: inline-grid; place-items: center; width: 24px; height: 24px; margin-left: -4px; padding: 0; border: none; border-radius: 999px; background: none; color: var(--muted); }
-.steps-how:hover { background: var(--bg-hover); color: var(--text); }
 .steps-intro-more { font-size: 12.5px; }
 
 /* How the modes work: every mode, one page each. */
@@ -885,3 +874,36 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 .mode-guide-note { margin: 16px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--bg-subtle); font-size: 12px; line-height: 1.5; color: var(--text-2); }
 .mode-guide-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: auto; padding-top: 20px; }
 .mode-guide-using { font-size: 12px; color: var(--muted); }
+
+/* Step by step's flavour, in the header: what it's doing, picked from its menu. It flashes when the flavour changes. */
+.flavour-anchor { position: relative; flex: none; }
+.flavour-badge { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px 0 11px; border: 0.5px solid var(--glass-line); border-radius: 999px; background: var(--seg-thumb); color: var(--text); font-size: 12.5px; font-weight: 600; box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.12); animation: flavour-in 0.9s ease-out; }
+.flavour-badge.none { background: var(--glass); color: var(--text-2); font-weight: 500; box-shadow: none; animation: none; }
+.flavour-badge:hover:not(:disabled) { background: var(--bg-hover); }
+.flavour-badge svg { color: var(--text-2); }
+@keyframes flavour-in { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--text) 35%, transparent); } 100% { box-shadow: 0 0 0 8px transparent; } }
+@media (prefers-reduced-motion: reduce) { .flavour-badge { animation: none; } }
+.flavour-menu { top: calc(100% + 6px); right: 0; width: 320px; }
+.flavour-menu .menu-row { align-items: flex-start; gap: 10px; padding: 7px 8px; }
+.steps-dot.switch { border-style: dashed; }
+.steps-hint { font-size: 12px; color: var(--muted); }
+
+/* Claude's suggestion of a flavour, on its page: start it, stay, or start another. */
+.suggestion { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; padding: 14px 16px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--field); }
+.suggestion.answered { gap: 6px; padding: 10px 14px; border-color: var(--line); background: var(--bg-subtle); }
+.suggestion-head { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text); }
+.suggestion-icon { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: var(--bg-active); color: var(--text); }
+.suggestion-why { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text-2); }
+.suggestion-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.suggestion-others { display: inline-flex; align-items: center; gap: 8px; margin-left: 4px; font-size: 12px; color: var(--muted); }
+.suggestion-outcome { font-size: 12px; color: var(--muted); }
+
+/* An empty Step-by-step chat: the four flavours with what to ask for each; one can be picked here. */
+.steps-intro-flavours { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 2px; }
+.steps-intro-flavour { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); text-align: left; }
+.steps-intro-flavour:hover { border-color: var(--line-strong); }
+.steps-intro-flavour.picked { border-color: var(--text); box-shadow: inset 0 0 0 0.5px var(--text); }
+.steps-intro-flavour-name { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.steps-intro-flavour-name svg { color: var(--text-2); }
+.steps-intro-flavour-example { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
+.mode-guide-tab.flavour { padding-left: 16px; }
