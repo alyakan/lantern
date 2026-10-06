@@ -17,10 +17,12 @@ import { activityStatus } from "./lib/status";
 import { failedCount } from "./lib/activity";
 
 import { SlotContext } from "./lib/slot";
+import { ModeGuideContext } from "./lib/modeGuide";
+import { ModeGuide } from "./components/ModeGuide";
 import { BannerView } from "./components/BannerView";
 import { ChatView } from "./components/ChatView";
 import { StepsView } from "./components/StepsView";
-import { andNext } from "./lib/steps";
+import { andNext, withModeNote } from "./lib/steps";
 import { FileLinksProvider } from "./lib/fileLinks";
 import { Hud, type HudEvent } from "./components/Hud";
 import type { OpenChat } from "./components/HistoryMenu";
@@ -276,9 +278,13 @@ export default function App() {
     return () => window.removeEventListener("focus", onFocus);
   }, [active, state.folder]);
 
+  // Chats switched between Build, Learn and Review since their last message: the next one tells Claude.
+  const switchedTo = useRef<Record<string, "steps" | "teach" | "review">>({});
   const sendIn = (slot: string, text: string) => {
     to(slot)({ type: "user_sent", text });
-    api.sendMessage(slot, text).then(
+    const switched = switchedTo.current[slot];
+    delete switchedTo.current[slot];
+    api.sendMessage(slot, switched ? withModeNote(switched, text) : text).then(
       (turn) => typeof turn === "number" && to(slot)({ type: "turn_numbered", turn }),
       (e) => to(slot)({ type: "failed", text: errText(e) }),
     );
@@ -303,6 +309,8 @@ export default function App() {
   const changeMode = (mode: Mode) => {
     // The mode to come back to after a plan, or out of Step by step: a chat mode.
     if (mode === "ask" || mode === "auto" || mode === "debug") setExecMode(mode);
+    if ((mode === "steps" || mode === "teach" || mode === "review") && mode !== state.mode && state.items.length > 0) switchedTo.current[active] = mode;
+    else delete switchedTo.current[active];
     dispatch({ type: "mode_changed", mode });
     if (state.folder) restart(active, mode);
   };
@@ -554,6 +562,8 @@ export default function App() {
     },
   };
   const hero = state.items.length === 0 && !state.thinking;
+  // "How the modes work", open on a mode's page.
+  const [guideAt, setGuideAt] = useState<Mode | null>(null);
   const composer = (
     <MessageInput
       key={`input-${active}`}
@@ -599,7 +609,7 @@ export default function App() {
   if (state.status === "setup") return <SetupScreen error={state.setupError} onCheck={locate} />;
 
   return (
-    <SlotContext.Provider value={active}>
+    <SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}>
       <div className="app">
         <TopBar
           folder={state.folder}
@@ -684,7 +694,16 @@ export default function App() {
             />
           }
         />
+        <ModeGuide
+          open={guideAt}
+          current={state.mode}
+          onUse={state.folder && !isBusy(state) ? (mode) => {
+            setGuideAt(null);
+            changeMode(mode);
+          } : undefined}
+          onClose={() => setGuideAt(null)}
+        />
       </div>
-    </SlotContext.Provider>
+    </ModeGuideContext.Provider></SlotContext.Provider>
   );
 }

@@ -1,5 +1,6 @@
 import type { Hunk, ModelOption, Mode, SlashCommand, UiEvent, TestRun } from "./types";
 import { countChanges } from "./lib/diff";
+import { withoutModeNote } from "./lib/steps";
 
 export interface EditInfo {
   path: string;
@@ -248,7 +249,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       return { ...state, model: ev.model, sessionId: ev.session_id, status: state.status === "starting" ? "idle" : state.status };
     case "user_text": {
       const seq = state.seq + 1;
-      return { ...state, seq, items: [...state.items, { type: "user", id: `u${seq}`, text: ev.text, at: ev.at }] };
+      return { ...state, seq, items: [...state.items, { type: "user", id: `u${seq}`, text: withoutModeNote(ev.text), at: ev.at }] };
     }
     case "thinking":
       return { ...wake(state), thinking: true };

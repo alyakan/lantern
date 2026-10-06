@@ -1,4 +1,5 @@
 import type { Mode } from "../types";
+import { useModeGuide } from "../lib/modeGuide";
 import { StepsIcon } from "./icons";
 
 type Flavour = "steps" | "teach" | "review";
@@ -10,7 +11,7 @@ const ABOUT: Record<Flavour, { label: string; line: string; stages: [string, str
     stages: ["Frames the task", "Plans one step", "Builds it when you say Next"],
   },
   teach: {
-    label: "Teach",
+    label: "Learn",
     line: "Like Build, and every step explains the why: the idea behind it, how it fits, what else it could have been.",
     stages: ["Frames the task", "Plans and explains a step", "Builds it when you say Next"],
   },
@@ -28,6 +29,7 @@ const ABOUT: Record<Flavour, { label: string; line: string; stages: [string, str
 export function StepsIntro({ mode, onFlavour }: { mode: Mode; onFlavour: (mode: Mode) => void }) {
   const flavour: Flavour = mode === "teach" || mode === "review" ? mode : "steps";
   const about = ABOUT[flavour];
+  const guide = useModeGuide();
   return (
     <section className="steps-intro" aria-label="Step by step">
       <div className="steps-intro-head">
@@ -43,7 +45,17 @@ export function StepsIntro({ mode, onFlavour }: { mode: Mode; onFlavour: (mode: 
           ))}
         </div>
       </div>
-      <p className="steps-intro-line">{about.line}</p>
+      <p className="steps-intro-line">
+        {about.line}
+        {guide && (
+          <>
+            {" "}
+            <button className="link-button steps-intro-more" onClick={() => guide(flavour)}>
+              Read more
+            </button>
+          </>
+        )}
+      </p>
       <ol className="steps-intro-stages">
         {about.stages.map((s, i) => (
           <li key={s}>

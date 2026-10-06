@@ -208,11 +208,26 @@ describe("StepsView", () => {
     expect(onSend).toHaveBeenCalledWith(expect.stringMatching(/^Write it up/));
   });
 
-  it("shows Claude working instead of Next while a step runs, and switches Build and Teach", () => {
+  it("moves on from the first file in a chat switched to Review from Build", () => {
+    // Claude kept Build's headings: the file pages still count as files, and Next isn't stuck on "First file".
+    const items: ChatItem[] = [
+      { type: "user", id: "u1", text: "Add slugify", turn: 0 },
+      { type: "assistant", id: "a1", text: "# Done — slugify" },
+      { type: "user", id: "u2", text: "Start the review", turn: 1 },
+      { type: "assistant", id: "a2", text: "# Frame — Review slugify" },
+      { type: "user", id: "u3", text: "Next", turn: 2 },
+      { type: "assistant", id: "a3", text: "# Step 1 of 2 — `utils.js`\n\n**utils.js** (+5 −0)\n\n### What changed\nslugify.\n\n### Findings\nNone." },
+    ];
+    render(<StepsView state={state({ mode: "review", items })} {...handlers()} />);
+    expect(current().querySelector(".review-file-name")).toHaveTextContent("utils.js");
+    expect(screen.getByRole("button", { name: "Next file →" })).toBeEnabled();
+  });
+
+  it("shows Claude working instead of Next while a step runs, and switches Build and Learn", () => {
     const h = handlers();
     render(<StepsView state={state({ status: "running" })} {...h} />);
     expect(screen.queryByRole("button", { name: "Next step →" })).toBeNull();
-    expect(screen.getByRole("radio", { name: "Teach" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Learn" })).toBeDisabled();
     const { container } = render(<StepsView state={state()} {...handlers()} onFlavour={h.onFlavour} />);
     fireEvent.click(container.querySelector('[role="radio"][aria-checked="false"]')!);
     expect(h.onFlavour).toHaveBeenCalledWith("teach");
