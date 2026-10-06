@@ -97,7 +97,7 @@ button.ghost:hover:not(:disabled) { background: var(--bg-hover); color: var(--te
 button.icon { border: none; background: none; color: var(--muted); padding: 0; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-inner); font-size: 15px; }
 button.icon:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 code, pre { font-family: var(--mono); font-size: 12px; }
-textarea, input, .msg, .step-output, .permission-detail { user-select: text; cursor: auto; }
+textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-preface, .review-changed, .review-notes, .review-table { user-select: text; cursor: auto; }
 .muted { color: var(--muted); }
 .spacer { flex: 1; align-self: stretch; }
 .empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); padding: 24px; text-align: center; }
