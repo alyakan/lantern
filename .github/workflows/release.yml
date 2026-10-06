@@ -14,6 +14,9 @@ jobs:
     environment: release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The release notes read the history back to the previous tag.
+          fetch-depth: 0
 
       - name: Tag matches the app version
         env:
@@ -41,6 +44,20 @@ jobs:
 
       - run: npm ci
 
+      # What's new since the previous tag, from the merged PRs, above the install line.
+      - name: Write the release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          {
+            echo 'body<<END_OF_NOTES'
+            .github/release-notes.sh "$TAG"
+            echo 'Download the dmg, open it and drag Lantern to Applications. Requires Claude Code installed and logged in. From 0.1.1 on, Lantern updates itself.'
+            echo 'END_OF_NOTES'
+          } >> "$GITHUB_OUTPUT"
+
       # notarytool wants the App Store Connect key as a file.
       - name: Write the notarization key
         env:
@@ -66,7 +83,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Lantern ${{ github.ref_name }}
-          releaseBody: Download the dmg, open it and drag Lantern to Applications. Requires Claude Code installed and logged in. From 0.1.1 on, Lantern updates itself.
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           args: --target universal-apple-darwin --bundles app,dmg
 
