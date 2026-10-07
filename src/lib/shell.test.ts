@@ -66,6 +66,14 @@ describe("reducer and shells", () => {
     expect(reducer(s, { type: "ui_event", event: { kind: "shell_done", id: "s1", code: null, stopped: true } }).items[0]).toMatchObject({ status: "stopped" });
   });
 
+  it("knows when a command reads a secret, until it's done", () => {
+    let s = reducer(idle, { type: "shell_started", id: "s1", command: "sudo true" });
+    s = reducer(s, { type: "ui_event", event: { kind: "shell_secret", id: "s1", secret: true } });
+    expect(s.items[0]).toMatchObject({ secret: true });
+    s = reducer(s, { type: "ui_event", event: { kind: "shell_done", id: "s1", code: 0, stopped: false } });
+    expect(s.items[0]).toMatchObject({ secret: false });
+  });
+
   it("marks commands as sent with the next message, but not with a slash command", () => {
     const s = reducer(idle, { type: "shell_started", id: "s1", command: "ls" });
     expect(reducer(s, { type: "user_sent", text: "/clear" }).items[0]).toMatchObject({ shared: false });

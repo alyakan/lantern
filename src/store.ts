@@ -33,6 +33,8 @@ export interface ShellItem {
   endedAt?: number;
   /** Went to Claude with a message (see lib/shell.ts). */
   shared: boolean;
+  /** It's reading a secret (a password): echo is off in its terminal. */
+  secret?: boolean;
 }
 
 export type ChatItem =
@@ -293,8 +295,10 @@ function applyEvent(state: State, ev: UiEvent): State {
     case "shell_done":
       return {
         ...state,
-        items: mapShell(state.items, ev.id, (s) => ({ ...s, status: ev.stopped ? "stopped" : ev.code === 0 ? "done" : "failed", code: ev.code, endedAt: Date.now() })),
+        items: mapShell(state.items, ev.id, (s) => ({ ...s, status: ev.stopped ? "stopped" : ev.code === 0 ? "done" : "failed", code: ev.code, endedAt: Date.now(), secret: false })),
       };
+    case "shell_secret":
+      return { ...state, items: mapShell(state.items, ev.id, (s) => ({ ...s, secret: ev.secret })) };
     case "thinking":
       return { ...wake(state), thinking: true };
     case "text_delta": {

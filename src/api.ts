@@ -23,6 +23,8 @@ export const api = {
   sendMessage: (slot: string, text: string) => invoke<number>("send_message", { slot, text }),
   /** Runs a command the user typed after "!" in the chat's folder; its output comes as shell_output, then shell_done. */
   runShell: (slot: string, id: string, command: string) => invoke<void>("run_shell", { slot, id, command }),
+  /** Types into a running command: a reply ending in "\r", or "\u0004" to end its input. */
+  shellInput: (slot: string, id: string, text: string) => invoke<void>("shell_input", { slot, id, text }),
   stopShell: (slot: string, id: string) => invoke<void>("stop_shell", { slot, id }),
   interrupt: (slot: string) => invoke<void>("interrupt", { slot }),
   /** `autoApprove`: Step by step's auto-approve (null keeps the chat's current setting). */

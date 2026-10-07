@@ -946,3 +946,14 @@ button.shell-stop:hover { background: color-mix(in srgb, var(--term-bright) 12%,
 button.shell-more { display: block; margin: 0 0 4px 26px; padding: 0; border: none; background: none; color: var(--term-dim); font: 11px var(--mono); text-decoration: underline; }
 button.shell-more:hover { color: var(--term-text); }
 .shell-output { margin: 0; padding: 0 10px 9px 26px; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11.5px; line-height: 1.5; color: #9fdcae; background: none; user-select: text; cursor: auto; }
+/* A running command asking something: its question, and the field to answer it. */
+.shell-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 8px 8px 26px; padding: 8px 8px 8px 10px; border: 1px solid color-mix(in srgb, var(--term-bright) 35%, var(--term-line)); border-radius: var(--radius-inner); background: color-mix(in srgb, var(--term-bright) 6%, var(--term-bg)); box-shadow: 0 0 14px rgba(92, 242, 138, 0.08); animation: jump-in 0.15s ease-out; }
+.shell-ask-label { flex: 1; min-width: 200px; display: flex; align-items: center; gap: 8px; }
+.shell-ask-prompt { flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: #e8ffee; }
+.shell-ask-field { flex: 1; min-width: 0; height: 24px; padding: 0 8px; border: 1px solid var(--term-line); border-radius: var(--radius-chip); background: #030805; color: var(--term-text); font: 12px var(--mono); caret-color: var(--term-bright); outline: none; }
+.shell-ask-field:focus { border-color: color-mix(in srgb, var(--term-bright) 55%, var(--term-line)); }
+.shell-ask.secret .shell-ask-field { letter-spacing: 2px; }
+button.shell-ask-send { flex: none; height: 24px; padding: 0 12px; border: none; border-radius: 999px; background: var(--term-bright); color: var(--term-bg); font: 600 11.5px var(--mono); }
+button.shell-ask-send:hover { opacity: 0.85; }
+.shell-ask-hint { flex-basis: 100%; font-size: 10.5px; color: var(--term-dim); }
+@media (prefers-reduced-motion: reduce) { .shell-ask { animation: none; } }

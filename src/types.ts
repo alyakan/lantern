@@ -35,6 +35,7 @@ export type UiEvent =
   | { kind: "session_ended"; code: number | null; stderr_tail: string }
   | { kind: "shell_output"; id: string; text: string }
   | { kind: "shell_done"; id: string; code: number | null; stopped: boolean }
+  | { kind: "shell_secret"; id: string; secret: boolean }
   | { kind: "unknown"; raw: unknown }
   | { kind: "parse_error"; line: string };
 

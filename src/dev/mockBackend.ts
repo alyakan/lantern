@@ -454,8 +454,50 @@ function autoplay(allow: boolean, openOnly: boolean, history = false) {
 /** Commands the user runs from the chat box, while they stream: how to stop each. */
 const mockShells: Record<string, () => void> = {};
 
+/** Commands waiting for the user's reply in the mock: what to do with it. */
+const mockReplies: Record<string, (text: string) => void> = {};
+
+/** Interactive commands in the mock: sudo asks for a password (echo off), rm -i asks y/n. */
+function playAsking(slot: string, id: string, command: string): boolean {
+  const send = sendTo(slot);
+  const key = `${slot}:${id}`;
+  const done = (code: number | null, stopped = false) => {
+    delete mockReplies[key];
+    delete mockShells[key];
+    void send({ kind: "shell_done", id, code, stopped });
+  };
+  mockShells[key] = () => done(null, true);
+  if (command.startsWith("sudo")) {
+    let tries = 0;
+    const ask = () => {
+      void send({ kind: "shell_output", id, text: "Password:" });
+      setTimeout(() => void send({ kind: "shell_secret", id, secret: true }), 100);
+    };
+    setTimeout(ask, 150);
+    mockReplies[key] = (text) => {
+      void send({ kind: "shell_secret", id, secret: false });
+      // Wrong the first time, like a mistyped password.
+      if (tries++ === 0) setTimeout(() => (send({ kind: "shell_output", id, text: "\r\nSorry, try again.\r\n" }), ask()), 600);
+      else if (text !== "\u0004") setTimeout(() => (send({ kind: "shell_output", id, text: "\r\n==> Installing redis\r\n🍺  redis was installed\r\n" }), done(0)), 400);
+      else done(1);
+    };
+    return true;
+  }
+  if (command.startsWith("rm -i")) {
+    const file = command.split(/\s+/).pop();
+    setTimeout(() => void send({ kind: "shell_output", id, text: `remove ${file}? ` }), 150);
+    mockReplies[key] = (text) => {
+      void send({ kind: "shell_output", id, text: `${text.replace("\r", "")}\r\n` });
+      done(text.startsWith("y") ? 0 : 1);
+    };
+    return true;
+  }
+  return false;
+}
+
 /** A few believable outputs for "!command" in the mock; anything else prints a line and fails. */
 function playShell(slot: string, id: string, command: string) {
+  if (playAsking(slot, id, command)) return;
   const send = sendTo(slot);
   const name = command.trim().split(/\s+/)[0];
   const scripts: Record<string, { lines: string[]; code: number; every: number; forever?: boolean }> = {
@@ -526,6 +568,9 @@ export function installMockBackend() {
           return null;
         case "run_shell":
           playShell(String(a.slot), String(a.id), String(a.command));
+          return null;
+        case "shell_input":
+          mockReplies[`${String(a.slot)}:${String(a.id)}`]?.(String(a.text));
           return null;
         case "stop_shell":
           mockShells[`${String(a.slot)}:${String(a.id)}`]?.();
