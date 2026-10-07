@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { initialState, type ChatItem } from "../store";
 import { ChatView } from "./ChatView";
@@ -28,5 +28,20 @@ describe("ChatView", () => {
     expect(top).toBe(2000);
     fireEvent.scroll(chat);
     expect(screen.queryByRole("button", { name: /Latest/ })).toBeNull();
+  });
+
+  it("follows new messages by scrolling only the chat, never the page around it", () => {
+    // scrollIntoView scrolls every scrollable ancestor too, the page included: message by message, the whole app
+    // slid up and out of the window.
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    const props = { onDecide: () => {}, onOpenFile: () => {} };
+    const { container, rerender } = render(<ChatView state={{ ...initialState, status: "running", folder: "/p", items }} {...props} />);
+    const chat = container.querySelector(".chat") as HTMLElement;
+    Object.defineProperty(chat, "scrollHeight", { value: 2000, configurable: true });
+
+    rerender(<ChatView state={{ ...initialState, status: "running", folder: "/p", items: [...items, { type: "assistant", id: "a2", text: "More." }] }} {...props} />);
+    expect(chat.scrollTop).toBe(2000);
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 });

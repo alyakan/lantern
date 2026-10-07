@@ -4,6 +4,7 @@ import type { ModelOption, Mode, RecentFolder, SessionSummary, SlashCommand } fr
 import { basename } from "../lib/diff";
 import { useShortcut } from "../lib/shortcuts";
 import { matchCommands, slashQuery } from "../lib/slash";
+import { scrollWithin } from "../lib/scrollWithin";
 import { ArrowUpIcon, BranchIcon, FolderIcon, SparkIcon } from "./icons";
 import { ContextMeter } from "./ContextMeter";
 import { EFFORT_LEVELS, EffortPicker } from "./EffortPicker";
@@ -296,7 +297,8 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
 function SlashMenu({ commands, pick, onPick, onHover }: { commands: SlashCommand[]; pick: number; onPick: (c: SlashCommand) => void; onHover: (i: number) => void }) {
   const list = useRef<HTMLUListElement>(null);
   useEffect(() => {
-    list.current?.children[pick]?.scrollIntoView?.({ block: "nearest" });
+    const item = list.current?.children[pick];
+    if (list.current && item instanceof HTMLElement) scrollWithin(list.current, item, "nearest");
   }, [pick]);
   return (
     <ul className="menu slash-menu" role="listbox" aria-label="Commands" ref={list}>
