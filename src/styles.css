@@ -84,7 +84,8 @@
 
 /* Base */
 * { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; }
+/* The app fills the window and scrolls inside its panes; the page around it never scrolls. */
+html, body, #root { height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--bg); color: var(--text); font: 13px/1.5 var(--ui); -webkit-font-smoothing: antialiased; user-select: none; cursor: default; }
 button { font: inherit; color: inherit; background: var(--field); border: 1px solid var(--line-strong); border-radius: var(--radius-inner); padding: 3px 10px; cursor: default; }
 button:hover:not(:disabled) { background: var(--bg-hover); }

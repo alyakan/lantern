@@ -7,7 +7,6 @@ import { workingVerb } from "../lib/verbs";
 import { ChatStream, type StreamHandlers } from "./ChatStream";
 
 export function ChatView({ state, ...handlers }: { state: State } & StreamHandlers) {
-  const bottom = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   // Back in this chat: where you left it; at the end if you were there (or it's new).
   const slot = useSlot();
@@ -16,8 +15,10 @@ export function ChatView({ state, ...handlers }: { state: State } & StreamHandle
   useLayoutEffect(() => {
     if (left !== undefined && left >= 0 && scroller.current) scroller.current.scrollTop = left;
   }, []);
+  // Only the chat scrolls: scrollIntoView would scroll the page around it too, and slide the whole app out of the window.
   useEffect(() => {
-    if (nearBottom.current) bottom.current?.scrollIntoView?.({ block: "end" });
+    const el = scroller.current;
+    if (nearBottom.current && el) el.scrollTop = el.scrollHeight;
   }, [state.items, state.thinking]);
   // The chat box grows as you type, which makes this area shorter without scrolling it: stay at the end if you were
   // there, so the box doesn't end up over the last lines.
@@ -61,7 +62,6 @@ export function ChatView({ state, ...handlers }: { state: State } & StreamHandle
             </span>
           </div>
         )}
-        <div ref={bottom} />
       </div>
       <JumpToLatest show={away} onJump={jump} />
     </div>

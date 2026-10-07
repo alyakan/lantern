@@ -15,6 +15,7 @@ import { notify } from "./lib/notify";
 import { useShortcut } from "./lib/shortcuts";
 import { activityStatus } from "./lib/status";
 import { failedCount } from "./lib/activity";
+import { scrollWithin } from "./lib/scrollWithin";
 
 import { SlotContext } from "./lib/slot";
 import { ModeGuideContext } from "./lib/modeGuide";
@@ -363,7 +364,8 @@ export default function App() {
     if (!block) return;
     const line = block.querySelector<HTMLButtonElement>(".activity-line");
     if (line?.getAttribute("aria-expanded") === "false") line.click();
-    block.scrollIntoView({ block: "center", behavior: "smooth" });
+    const chat = block.closest<HTMLElement>(".chat");
+    if (chat) scrollWithin(chat, block as HTMLElement, "center", "smooth");
     block.classList.remove("flash");
     void (block as HTMLElement).offsetWidth;
     block.classList.add("flash");
