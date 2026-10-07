@@ -167,4 +167,48 @@ describe("MessageInput", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send & next" }));
     expect(sendAndNext).toHaveBeenLastCalledWith("and this");
   });
+  describe("terminal mode", () => {
+    it("turns on with \"!\", runs the command on Enter (even while Claude works) and leaves on Backspace", () => {
+      const onRun = vi.fn();
+      const onSend = vi.fn();
+      const { container } = render(<MessageInput status="running" onSend={onSend} onStop={() => {}} onRun={onRun} folder="/Users/you/app" />);
+      const box = screen.getByPlaceholderText("Queue a message…");
+      fireEvent.change(box, { target: { value: "!" } });
+      expect(container.querySelector(".composer-box")).toHaveClass("terminal");
+      expect(box).toHaveValue("");
+      expect(box).toHaveAttribute("placeholder", "Run a command in app…");
+      fireEvent.change(box, { target: { value: " git status " } });
+      fireEvent.keyDown(box, { key: "Enter" });
+      expect(onRun).toHaveBeenCalledWith("git status");
+      expect(onSend).not.toHaveBeenCalled();
+      expect(screen.queryByLabelText("Queued messages")).not.toBeInTheDocument();
+      // Ran: the box is empty and back to normal.
+      expect(container.querySelector(".composer-box")).not.toHaveClass("terminal");
+
+      fireEvent.change(box, { target: { value: "!" } });
+      fireEvent.keyDown(box, { key: "Backspace" });
+      expect(container.querySelector(".composer-box")).not.toHaveClass("terminal");
+      expect(box).toHaveValue("");
+    });
+
+    it("pasting \"!command\" starts it with the command in the box", () => {
+      const onRun = vi.fn();
+      render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} onRun={onRun} />);
+      const box = screen.getByPlaceholderText("Ask Claude…");
+      fireEvent.change(box, { target: { value: "!ls -la" } });
+      expect(box).toHaveValue("ls -la");
+      fireEvent.click(screen.getByRole("button", { name: "Run" }));
+      expect(onRun).toHaveBeenCalledWith("ls -la");
+    });
+
+    it("is a plain \"!\" without a way to run commands", () => {
+      const onSend = vi.fn();
+      const { container } = render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} />);
+      const box = screen.getByPlaceholderText("Ask Claude…");
+      fireEvent.change(box, { target: { value: "!important" } });
+      expect(container.querySelector(".composer-box")).not.toHaveClass("terminal");
+      fireEvent.keyDown(box, { key: "Enter" });
+      expect(onSend).toHaveBeenCalledWith("!important");
+    });
+  });
 });

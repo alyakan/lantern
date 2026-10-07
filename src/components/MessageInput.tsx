@@ -27,6 +27,8 @@ interface Props {
   sendAndNext?: (text: string) => void;
   onSend: (text: string) => void;
   onStop: () => void;
+  /** "!" at the start of the box turns it into a terminal: Enter runs the rest as a shell command in the folder. */
+  onRun?: (command: string) => void;
   mode?: Mode;
   /** Step by step's flavour, which the mode chip names too. */
   flavour?: Flavour | null;
@@ -57,7 +59,7 @@ interface Props {
   update?: { version: string; busy: number; onRestart: () => void; onLater: () => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], draft, effort, update }: Props) {
+export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onRun, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], draft, effort, update }: Props) {
   const [text, setTextState] = useState(draft?.initial ?? "");
   const setText = (next: string) => {
     setTextState(next);
@@ -72,9 +74,20 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   const running = status === "running";
   const busy = running || status === "starting";
   const canType = status === "idle" || running;
-  const canSend = canType && text.trim() !== "";
+  // Terminal mode, like Claude Code's: the "!" that starts it isn't shown; the box shows the command after it.
+  const terminal = !!onRun && text.startsWith("!");
+  const shown = terminal ? text.slice(1) : text;
+  const canSend = canType && shown.trim() !== "";
   const placeholder =
-    status === "no_folder" ? "Open a folder to start" : status === "starting" ? "Starting Claude…" : running ? "Queue a message…" : (idlePlaceholder ?? "Ask Claude…");
+    status === "no_folder"
+      ? "Open a folder to start"
+      : status === "starting"
+        ? "Starting Claude…"
+        : terminal
+          ? `Run a command in ${folder ? basename(folder) : "the folder"}…`
+          : running
+            ? "Queue a message…"
+            : (idlePlaceholder ?? "Ask Claude…");
 
   // Stop means "not like that": queued messages go back into the box instead of being sent.
   const stop = () => {
@@ -90,7 +103,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
     if (!el) return;
     // Measuring means collapsing the box for a moment; the box around it holds its height meanwhile, or the page
     // above would get taller for that moment and the browser would reset its scroll to fit.
-    const box = el.parentElement;
+    const box = el.closest<HTMLElement>(".composer-box");
     if (box) box.style.minHeight = `${box.offsetHeight}px`;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
@@ -100,6 +113,11 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   useLayoutEffect(() => {
     if (hero && canType) area.current?.focus();
   }, [hero, canType]);
+  // The first message or command moves the box from the middle to the bottom (a new box): keep typing in it, unless
+  // something else has focus.
+  useLayoutEffect(() => {
+    if (canType && (document.activeElement === document.body || !document.activeElement)) area.current?.focus();
+  }, []);
 
   useShortcut("l", () => area.current?.focus(), canType);
   useShortcut(".", () => stop(), running);
@@ -113,12 +131,14 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
 
   const submit = () => {
     if (!canSend) return;
-    sendText(text.trim());
+    // A command runs now, even while Claude works: it doesn't wait in the queue.
+    if (terminal) onRun!(shown.trim());
+    else sendText(text.trim());
     setText("");
   };
 
   const submitAndNext = () => {
-    if (!canSend || !sendAndNext || running) return;
+    if (!canSend || !sendAndNext || running || terminal) return;
     sendAndNext(text.trim());
     setText("");
   };
@@ -156,7 +176,9 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
     const value = typed.current.trim();
     if (!canSend || !value) return;
     declined.current = Date.now();
-    if (next && sendAndNext && !running) sendAndNext(value);
+    if (terminal) {
+      if (value.slice(1).trim()) onRun!(value.slice(1).trim());
+    } else if (next && sendAndNext && !running) sendAndNext(value);
     else sendText(value);
     setText("");
     typed.current = "";
@@ -204,48 +226,65 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           ))}
         </ul>
       )}
-      <div className={`composer-box${running ? " working" : ""}`} onClick={() => area.current?.focus()}>
+      <div className={`composer-box${running ? " working" : ""}${terminal ? " terminal" : ""}`} onClick={() => area.current?.focus()}>
         {matches.length > 0 && <SlashMenu commands={matches} pick={pick} onPick={accept} onHover={setPick} />}
-        <textarea
-          ref={area}
-          // WebKit otherwise applies macOS's "Capitalize words automatically" and autocorrect to what you type.
-          autoCapitalize="off"
-          autoCorrect="off"
-          rows={hero ? 2 : 1}
-          value={text}
-          disabled={!canType}
-          placeholder={placeholder}
-          onChange={(e) => setText(e.target.value)}
-          onCompositionStart={() => {
-            composing.current = true;
-            predicting.current = !imeKey.current;
-          }}
-          onCompositionEnd={() => {
-            composing.current = false;
-            predicting.current = false;
-            // Enter just sent the text without the prediction; WebKit committed it anyway: empty the box again.
-            if (Date.now() - declined.current < 500) setTimeout(() => setText(""));
-          }}
-          onKeyDown={(e) => {
-            imeKey.current = e.nativeEvent.keyCode === 229;
-            // A grey prediction is showing: Enter sends what you typed, without it (Tab or → is for taking it).
-            if (e.key === "Enter" && !e.shiftKey && composing.current && predicting.current) {
-              e.preventDefault();
-              sendDeclining(e.metaKey || e.ctrlKey);
-              return;
-            }
-            if (onMenuKey(e)) return;
-            // Enter sends, unless an input method (Japanese, Chinese…) is composing: then it confirms that. macOS's
-            // grey inline predictions also mark the key as composing; Enter doesn't take them (Tab or → does).
-            if (e.key === "Enter" && !e.shiftKey && !composing.current) {
-              e.preventDefault();
-              if ((e.metaKey || e.ctrlKey) && sendAndNext) submitAndNext();
-              else submit();
-            }
-          }}
-        />
+        <div className="composer-line">
+          {terminal && (
+            <span className="terminal-prompt" aria-hidden>
+              $
+            </span>
+          )}
+          <textarea
+            ref={area}
+            aria-label={terminal ? "Shell command" : undefined}
+            spellCheck={!terminal}
+            // WebKit otherwise applies macOS's "Capitalize words automatically" and autocorrect to what you type.
+            autoCapitalize="off"
+            autoCorrect="off"
+            rows={hero ? 2 : 1}
+            value={shown}
+            disabled={!canType}
+            placeholder={placeholder}
+            onChange={(e) => setText(terminal ? `!${e.target.value}` : e.target.value)}
+            onCompositionStart={() => {
+              composing.current = true;
+              predicting.current = !imeKey.current;
+            }}
+            onCompositionEnd={() => {
+              composing.current = false;
+              predicting.current = false;
+              // Enter just sent the text without the prediction; WebKit committed it anyway: empty the box again.
+              if (Date.now() - declined.current < 500) setTimeout(() => setText(""));
+            }}
+            onKeyDown={(e) => {
+              imeKey.current = e.nativeEvent.keyCode === 229;
+              // A grey prediction is showing: Enter sends what you typed, without it (Tab or → is for taking it).
+              if (e.key === "Enter" && !e.shiftKey && composing.current && predicting.current) {
+                e.preventDefault();
+                sendDeclining(e.metaKey || e.ctrlKey);
+                return;
+              }
+              if (onMenuKey(e)) return;
+              // Backspace in an empty terminal leaves it, taking the "!" away.
+              if (terminal && e.key === "Backspace" && shown === "") {
+                e.preventDefault();
+                setText("");
+                return;
+              }
+              // Enter sends, unless an input method (Japanese, Chinese…) is composing: then it confirms that. macOS's
+              // grey inline predictions also mark the key as composing; Enter doesn't take them (Tab or → does).
+              if (e.key === "Enter" && !e.shiftKey && !composing.current) {
+                e.preventDefault();
+                if ((e.metaKey || e.ctrlKey) && sendAndNext && !terminal) submitAndNext();
+                else submit();
+              }
+            }}
+          />
+        </div>
         <div className="composer-footer">
-          {models ? (
+          {terminal ? (
+            <span className="terminal-hint">Claude sees the output with your next message · backspace to leave</span>
+          ) : models ? (
             <ModelPicker running={model ?? null} chosen={models.chosen} defaultModel={models.defaultModel} ids={models.ids} options={models.options} onChoose={models.onChoose} disabled={busy} />
           ) : (
             model && (
@@ -255,10 +294,14 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               </span>
             )
           )}
-          {effort && effortLevels.length > 0 && <EffortPicker chosen={effort.chosen} levels={effortLevels} onChoose={effort.onChoose} disabled={busy} />}
+          {!terminal && effort && effortLevels.length > 0 && <EffortPicker chosen={effort.chosen} levels={effortLevels} onChoose={effort.onChoose} disabled={busy} />}
           <div className="spacer" />
           {usage && <ContextMeter used={usage.used} window={usage.window} running={running} lastTurnMs={usage.lastTurnMs} />}
-          {running ? (
+          {terminal ? (
+            <button className="send run" aria-label="Run" title="Run (Enter)" disabled={!canSend} onClick={submit}>
+              <ArrowUpIcon />
+            </button>
+          ) : running ? (
             <button className="send stop" aria-label="Stop" title="Stop (⌘.)" onClick={stop}>
               <span className="stop-square" />
             </button>

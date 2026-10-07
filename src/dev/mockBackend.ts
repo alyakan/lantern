@@ -451,6 +451,32 @@ function autoplay(allow: boolean, openOnly: boolean, history = false) {
   })();
 }
 
+/** Commands the user runs from the chat box, while they stream: how to stop each. */
+const mockShells: Record<string, () => void> = {};
+
+/** A few believable outputs for "!command" in the mock; anything else prints a line and fails. */
+function playShell(slot: string, id: string, command: string) {
+  const send = sendTo(slot);
+  const name = command.trim().split(/\s+/)[0];
+  const scripts: Record<string, { lines: string[]; code: number; every: number; forever?: boolean }> = {
+    git: { lines: ["On branch main", "Changes not staged for commit:", "  modified:   src/net/fetchJson.ts", "", "Untracked files:", "  src/net/fetchJson.test.ts"], code: 0, every: 30 },
+    ls: { lines: ["README.md", "package.json", "src", "tsconfig.json"], code: 0, every: 20 },
+    npm: { lines: ["> retry-demo@0.1.0 dev", "> vite", "", "  VITE v5.4.0  ready in 212 ms", "", "  ➜  Local:   http://localhost:5173/", "\x1b[2m12:01:04\x1b[0m [vite] page reload src/net/fetchJson.ts"], code: 0, every: 250, forever: true },
+  };
+  const script = scripts[name] ?? { lines: [`zsh: command not found: ${name}`], code: 127, every: 20 };
+  let i = 0;
+  const timer = setInterval(() => {
+    if (i < script.lines.length) void send({ kind: "shell_output", id, text: `${script.lines[i++]}\n` });
+    else if (!script.forever) finish(false);
+  }, script.every);
+  const finish = (stopped: boolean) => {
+    clearInterval(timer);
+    delete mockShells[`${slot}:${id}`];
+    void send({ kind: "shell_done", id, code: stopped ? null : script.code, stopped });
+  };
+  mockShells[`${slot}:${id}`] = () => finish(true);
+}
+
 export function installMockBackend() {
   const mode = new URLSearchParams(location.search).get("mock");
   // ?mock = UI with no folder; ?mock=ready = folder open, empty chat; ?mock=demo = a scripted turn.
@@ -497,6 +523,12 @@ export function installMockBackend() {
           slotMode[String(a.slot)] = String(a.mode);
           return null;
         case "interrupt":
+          return null;
+        case "run_shell":
+          playShell(String(a.slot), String(a.id), String(a.command));
+          return null;
+        case "stop_shell":
+          mockShells[`${String(a.slot)}:${String(a.id)}`]?.();
           return null;
         case "send_message": {
           const slot = String(a.slot);

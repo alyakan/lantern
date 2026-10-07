@@ -30,6 +30,8 @@ pub struct Slot {
     pub file_index: Mutex<Option<FileIndex>>,
     /// Bumped by every text search, so an older one still running stops.
     pub text_search: std::sync::atomic::AtomicU64,
+    /// Commands the user runs from the chat box.
+    pub shells: Arc<crate::shell::Shells>,
 }
 
 /// Slot ids come from the UI and end up in a socket path (macOS allows ~104 bytes), so they're short and plain.
@@ -55,7 +57,7 @@ impl Slots {
         }
         let socket = socket_dir.join(format!("lantern-{}-{id}.sock", std::process::id()));
         let bridge = PermissionBridge::start(socket, tagged(id, emit)).map_err(|e| e.to_string())?;
-        let slot = Arc::new(Slot { session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default() });
+        let slot = Arc::new(Slot { session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default() });
         slots.insert(id.to_string(), slot.clone());
         Ok(slot)
     }
@@ -84,6 +86,7 @@ impl Slot {
     /// Stops the session (denying pending prompts) and removes the bridge's socket.
     pub async fn shut_down(&self) {
         self.bridge.cancel_all();
+        self.shells.stop_all();
         if let Some(s) = self.session.lock().await.take() {
             s.stop().await;
         }

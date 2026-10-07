@@ -916,3 +916,33 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 .steps-intro-flavour-name svg { color: var(--text-2); }
 .steps-intro-flavour-example { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
 .mode-guide-tab.flavour { padding-left: 16px; }
+
+/* Terminal: "!" in the chat box runs a shell command. The box and the commands' blocks look like a terminal in both
+   themes: near-black with phosphor green, a faint scanline and glow. */
+:root { --term-bg: #07110b; --term-line: #1c3a26; --term-text: #b9f6c9; --term-bright: #5cf28a; --term-dim: #4d8a5f; --term-fail: #ff6b6b; }
+.composer-line { display: flex; align-items: flex-start; gap: 8px; }
+.composer-line textarea { flex: 1; min-width: 0; }
+.composer-box.terminal { background: var(--term-bg); border-color: var(--term-line); color: var(--term-text); box-shadow: inset 0 0 24px rgba(92, 242, 138, 0.06), 0 0 0 1px rgba(92, 242, 138, 0.04); transition: background 0.15s, border-color 0.15s; }
+.composer-box.terminal:focus-within { border-color: color-mix(in srgb, var(--term-bright) 45%, var(--term-line)); }
+.composer-box.terminal::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: repeating-linear-gradient(transparent 0 2px, rgba(0, 0, 0, 0.18) 2px 3px); }
+.composer-box.terminal textarea { font: 13px/1.5 var(--mono); color: var(--term-text); caret-color: var(--term-bright); text-shadow: 0 0 6px rgba(92, 242, 138, 0.35); }
+.composer-box.terminal textarea::placeholder { color: var(--term-dim); text-shadow: none; }
+.terminal-prompt { flex: none; font: 600 13px/1.5 var(--mono); color: var(--term-bright); text-shadow: 0 0 8px rgba(92, 242, 138, 0.6); user-select: none; }
+.terminal-hint { font: 11px var(--mono); color: var(--term-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.composer-box.terminal .context-meter { color: var(--term-dim); }
+.send.run:not(:disabled) { background: var(--term-bright); color: var(--term-bg); box-shadow: 0 0 10px rgba(92, 242, 138, 0.45); }
+.send.run:hover:not(:disabled) { background: var(--term-bright); opacity: 0.85; }
+.send.run:disabled { color: var(--term-dim); }
+.shell-block { border: 1px solid var(--term-line); border-radius: var(--radius-inner); background: var(--term-bg); color: var(--term-text); font-family: var(--mono); overflow: hidden; }
+.shell-head { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 5px 8px 5px 10px; font-size: 12px; }
+.shell-prompt { flex: none; color: var(--term-bright); text-shadow: 0 0 8px rgba(92, 242, 138, 0.5); }
+.shell-command { flex: 1; min-width: 0; color: #e8ffee; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: auto; }
+.shell-status { flex: none; display: inline-flex; gap: 8px; font-size: 11px; color: var(--term-dim); }
+.shell-block.failed .shell-status { color: var(--term-fail); }
+.shell-time { color: var(--term-dim); }
+.shell-block .spinner { border-color: color-mix(in srgb, var(--term-bright) 25%, transparent); border-top-color: var(--term-bright); }
+button.shell-stop { flex: none; height: 20px; padding: 0 9px; border: 1px solid var(--term-line); border-radius: 999px; background: transparent; color: var(--term-text); font: 11px var(--mono); }
+button.shell-stop:hover { background: color-mix(in srgb, var(--term-bright) 12%, transparent); border-color: var(--term-dim); }
+button.shell-more { display: block; margin: 0 0 4px 26px; padding: 0; border: none; background: none; color: var(--term-dim); font: 11px var(--mono); text-decoration: underline; }
+button.shell-more:hover { color: var(--term-text); }
+.shell-output { margin: 0; padding: 0 10px 9px 26px; max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11.5px; line-height: 1.5; color: #9fdcae; background: none; user-select: text; cursor: auto; }

@@ -33,6 +33,8 @@ export type UiEvent =
   | { kind: "conversation_reset" }
   | { kind: "permission_requested"; request_id: string; tool_name: string; input: unknown }
   | { kind: "session_ended"; code: number | null; stderr_tail: string }
+  | { kind: "shell_output"; id: string; text: string }
+  | { kind: "shell_done"; id: string; code: number | null; stopped: boolean }
   | { kind: "unknown"; raw: unknown }
   | { kind: "parse_error"; line: string };
 
