@@ -53,6 +53,8 @@ describe("SettingsView", () => {
     const postgres = within(list).getAllByRole("listitem")[1];
     fireEvent.click(within(postgres).getByRole("button", { name: "Reconnect" }));
     await waitFor(() => expect(claudeRequest).toHaveBeenCalledWith("s1", { subtype: "mcp_reconnect", serverName: "postgres" }));
+    // Its buttons wait while claude answers.
+    await waitFor(() => expect(within(postgres).getByRole("button", { name: "Turn off" })).toBeEnabled());
     fireEvent.click(within(postgres).getByRole("button", { name: "Turn off" }));
     await waitFor(() => expect(claudeRequest).toHaveBeenCalledWith("s1", { subtype: "mcp_toggle", enabled: false, serverName: "postgres" }));
   });
