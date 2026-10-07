@@ -311,23 +311,45 @@ function Page({ page, first, live, teach, review, suggestion, verdicts, onVerdic
   // While Claude answers in the discussion, follow the end of it if you're there; a new step is read from its top.
   const root = useRef<HTMLDivElement>(null);
   const turnCount = page.turns.length;
+  // Latches off the moment you scroll up from the end, so reading back through a step doesn't fight the stream pulling
+  // you down; scroll back to the end and following resumes.
+  const nearEnd = useRef(true);
+  const lastTop = useRef(0);
   useEffect(() => {
     const el = root.current?.closest(".step-page");
-    if (!el || !live || turnCount < 2) return;
+    if (!el) return;
+    const onScroll = () => {
+      // Any scroll up, however small, means you're reading back: stop following. Reaching the end turns it on again.
+      // (A distance-only check leaves a band near the end where a soft scroll is snapped back before it can get clear;
+      // the auto-snap only ever scrolls down, so it never reads as a scroll up.)
+      if (el.scrollTop < lastTop.current - 1) nearEnd.current = false;
+      else if (el.scrollHeight - el.scrollTop - el.clientHeight < 80) nearEnd.current = true;
+      lastTop.current = el.scrollTop;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+  useEffect(() => {
+    const el = root.current?.closest(".step-page");
+    if (!el || !live || turnCount < 2 || !nearEnd.current) return;
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
   });
   // And once the answer is done, what comes under it (Update the step with this) is followed too.
   const wasLive = useRef(live);
   useEffect(() => {
     const el = root.current?.closest(".step-page");
-    if (wasLive.current && !live && el && turnCount > 1 && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
+    if (wasLive.current && !live && el && turnCount > 1 && nearEnd.current && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
     wasLive.current = live;
   }, [live]);
-  // Something new sent in the discussion: show it. (Not when the page is first drawn: that starts at the top.)
+  // Something new sent in the discussion: show it, and follow its reply from here. (Not when the page is first drawn:
+  // that starts at the top.)
   const counted = useRef(turnCount);
   useEffect(() => {
     const el = root.current?.closest(".step-page");
-    if (el && turnCount > counted.current) el.scrollTop = el.scrollHeight;
+    if (el && turnCount > counted.current) {
+      nearEnd.current = true;
+      el.scrollTop = el.scrollHeight;
+    }
     counted.current = turnCount;
   }, [turnCount]);
 
