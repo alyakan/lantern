@@ -640,6 +640,8 @@ export default function App() {
     onDecide: decide,
     onOpenFile: openFile,
     onStopShell: (id: string) => api.stopShell(active, id).catch(() => {}),
+    // A reply that couldn't be typed says so in the command's block (the command most likely just ended).
+    onShellInput: (id: string, text: string) => api.shellInput(active, id, text).catch((e) => dispatch({ type: "ui_event", event: { kind: "shell_output", id, text: `\n${errText(e)}\n` } })),
     testRunFor: (id: string) => state.testRuns.find((r) => r.id === id),
     onOpenTestRun: (id: string) => {
       setFocusRun({ id, key: Date.now() });

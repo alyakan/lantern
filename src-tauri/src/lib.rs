@@ -227,6 +227,12 @@ async fn run_shell(app: AppHandle, state: State<'_, AppState>, slot: String, id:
     s.shells.run(&id, &command, &folder, path_env.as_deref(), slots::tagged(&slot, emitter(&app)))
 }
 
+/// Types into a running command: the user's reply to what it asked.
+#[tauri::command]
+fn shell_input(state: State<'_, AppState>, slot: String, id: String, text: String) -> Result<(), String> {
+    state.slots.get(&slot)?.shells.input(&id, &text)
+}
+
 #[tauri::command]
 fn stop_shell(state: State<'_, AppState>, slot: String, id: String) -> Result<(), String> {
     state.slots.get(&slot)?.shells.stop(&id);
@@ -515,6 +521,7 @@ pub fn run() {
             close_session,
             send_message,
             run_shell,
+            shell_input,
             stop_shell,
             interrupt,
             stop_task,

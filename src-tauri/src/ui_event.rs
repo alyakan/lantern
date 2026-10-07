@@ -92,6 +92,8 @@ pub enum UiEvent {
     ShellOutput { id: String, text: String },
     /// That command ended: its exit code (None when a signal ended it), and whether the user stopped it.
     ShellDone { id: String, code: Option<i32>, stopped: bool },
+    /// That command turned echo off to read a secret (a password), or back on.
+    ShellSecret { id: String, secret: bool },
     Unknown { raw: Value },
     ParseError { line: String },
 }

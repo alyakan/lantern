@@ -17,6 +17,8 @@ export interface StreamHandlers {
   onOpenTestRun?: (id: string) => void;
   /** Stops a command the user ran from the chat box. */
   onStopShell?: (id: string) => void;
+  /** Types the user's reply into a running command. */
+  onShellInput?: (id: string, text: string) => void;
 }
 
 interface Props extends StreamHandlers {
@@ -67,7 +69,7 @@ export function ChatStream({ items, folder, sections, live = false, ...handlers 
       case "turn":
         return <TurnNote key={row.id} item={row} />;
       case "shell":
-        return <ShellBlock key={row.id} item={row} onStop={handlers.onStopShell} />;
+        return <ShellBlock key={row.id} item={row} onStop={handlers.onStopShell} onInput={handlers.onShellInput} />;
     }
   };
 
