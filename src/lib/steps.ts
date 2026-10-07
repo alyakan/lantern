@@ -1,19 +1,22 @@
 import type { ChatItem } from "../store";
+import type { Flavour } from "./flavour";
 import { isVerdictNext } from "./review";
 import { parsePlanStep } from "./markdown";
 
 /** What a Step-by-step message says it is, from the heading it starts with (see STEPS_PROMPT in args.rs). */
 export interface Heading {
-  kind: "frame" | "plan" | "plan-complete" | "step" | "done" | "file" | "summary";
+  kind: "frame" | "plan" | "plan-complete" | "step" | "done" | "file" | "summary" | "evidence" | "fix" | "switch";
   /** The step's number, and for implementation steps the plan's length. */
   n: number | null;
   total: number | null;
   title: string;
+  /** A switch page: the flavour Claude suggests. */
+  flavour?: Flavour;
 }
 
 type UserItem = Extract<ChatItem, { type: "user" }>;
 
-const HEADING = /^#{1,3}\s*(Frame|Plan step\s+(\d+)|Plan complete|Step\s+(\d+)\s+of\s+(\d+)|File\s+(\d+)\s+of\s+(\d+)|Summary|Done)\b\s*(?:[—–-]+\s*(.*))?$/i;
+const HEADING = /^#{1,3}\s*(Frame|Plan step\s+(\d+)|Plan complete|Step\s+(\d+)\s+of\s+(\d+)|File\s+(\d+)\s+of\s+(\d+)|Summary|Done|Evidence(?:\s+(\d+))?|Fix|Switch to\s+(Build|Learn|Review|Debug))\b\s*(?:[—–-]+\s*(.*))?$/i;
 
 /**
  * incremental-pr-review's own file line, when Claude writes the skill's format rather than a "# File N of M" heading:
@@ -36,7 +39,10 @@ export function parseHeading(text: string): Heading | null {
   const m = HEADING.exec(first);
   if (!m) return null;
   const word = m[1].toLowerCase();
-  const title = (m[7] ?? "").trim();
+  const title = (m[9] ?? "").trim();
+  if (word.startsWith("switch to")) return { kind: "switch", n: null, total: null, title, flavour: m[8].toLowerCase() as Flavour };
+  if (word.startsWith("evidence")) return { kind: "evidence", n: m[7] ? Number(m[7]) : null, total: null, title };
+  if (word === "fix") return { kind: "fix", n: null, total: null, title };
   if (word.startsWith("file")) return { kind: "file", n: Number(m[5]), total: Number(m[6]), title };
   if (word === "summary") return { kind: "summary", n: null, total: null, title };
   if (word === "frame") return { kind: "frame", n: null, total: null, title };
@@ -93,36 +99,27 @@ const withoutHeading = (text: string) => {
   return !isLine && fileLineUnder(text) ? rest.replace(/^[^\n]*\n?/, "").replace(/^\s+/, "") : rest;
 };
 
-// Files the skill's way have no number: they're told apart by path.
-const headingKey = (h: Heading | null) => (h ? `${h.kind}:${h.n ?? (h.kind === "file" ? h.title : "")}` : null);
+// Files the skill's way (and Evidence pages without a number) are told apart by title; suggestions by flavour.
+const headingKey = (h: Heading | null) => (h ? `${h.kind}:${h.n ?? (h.kind === "file" || h.kind === "evidence" ? h.title : (h.flavour ?? ""))}` : null);
 
 /** Added to a message sent with ⌘Enter on a Step-by-step page: do this, and count the step as approved. */
 export const NEXT_SUFFIX = "Once that's done, this step is approved: go on to the next step.";
 export const andNext = (text: string) => `${text.trim()}\n\n${NEXT_SUFFIX}`;
-/** A prompt that moves on to the next step: an approval, or a message sent with ⌘Enter. */
-export const movesOn = (text: string) => isApproval(text) || isVerdictNext(text) || text.trimEnd().endsWith(NEXT_SUFFIX);
+/** A prompt that moves on to the next step: an approval, a flavour started, or a message sent with ⌘Enter. */
+export const movesOn = (text: string) => isApproval(text) || isVerdictNext(text) || startedFlavour(text) !== null || stayedIn(text) || text.trimEnd().endsWith(NEXT_SUFFIX);
+
+/** The answers to a switch page: start a flavour, or stay in the one you're in. */
+export const startText = (label: string) => `Start ${label}.`;
+export const stayText = (label: string) => `Stay in ${label}.`;
+/** The flavour a "Start Debug." answer starts, if that's what the prompt is. */
+export function startedFlavour(text: string): Flavour | null {
+  const m = /^start\s+(build|learn|review|debug)\b[.!]*$/i.exec(text.trim());
+  return m ? (m[1].toLowerCase() as Flavour) : null;
+}
+/** A "Stay in Build." answer: carry on as before. */
+export const stayedIn = (text: string) => /^stay in\s+(build|learn|review|debug)\b[.!]*$/i.test(text.trim());
 /** What to show of a prompt: without the ⌘Enter suffix. */
 export const promptText = (text: string) => text.trimEnd().replace(NEXT_SUFFIX, "").trimEnd();
-
-/**
- * Put before the first message sent after switching Build, Learn or Review in a chat that has already started. The
- * restart gives Claude the new mode's system prompt, but the conversation it resumes is all in the old format, which
- * it otherwise keeps to (a review written as "# Step N of M").
- */
-export function modeSwitchNote(mode: "steps" | "teach" | "review"): string {
-  const build = "follow incremental-dev, and start each message you stop on with its headings (# Frame, # Plan step N, # Plan complete, # Step N of M, # Done)";
-  const how =
-    mode === "review"
-      ? "Step-by-step Review mode. From here on follow incremental-pr-review, and start each message you stop on with Review's headings (# Frame, # File N of M — <path> (+added −removed), # Summary)"
-      : mode === "teach"
-        ? `Step-by-step Teach mode. From here on ${build}, and explain the why of every step`
-        : `Step-by-step Build mode. From here on ${build}`;
-  return `[Lantern: this chat switched to ${how}, not the format used earlier in this chat.]`;
-}
-const MODE_NOTE = /^\[Lantern: this chat switched to [^\]]*\]\s*/;
-export const withModeNote = (mode: "steps" | "teach" | "review", text: string) => `${modeSwitchNote(mode)}\n\n${text}`;
-/** A prompt as you wrote it: without a mode-switch note Lantern put before it. */
-export const withoutModeNote = (text: string) => text.replace(MODE_NOTE, "");
 
 function turnsOf(items: ChatItem[]): StepTurn[] {
   const turns: StepTurn[] = [];
@@ -210,6 +207,12 @@ export function pageLabel(h: Heading | null): string {
       return h.total ? `File ${h.n} of ${h.total}` : h.n ? `File ${h.n}` : "File";
     case "summary":
       return "Summary";
+    case "evidence":
+      return h.n ? `Evidence ${h.n}` : "Evidence";
+    case "fix":
+      return "Fix";
+    case "switch":
+      return "Suggestion";
   }
 }
 

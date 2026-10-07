@@ -83,45 +83,90 @@ const MODELS = [
 // Each chat's permission mode, as the backend would run it.
 const slotMode: Record<string, string> = {};
 
-/** Plan mode: look around, then propose a plan through ExitPlanMode's prompt; approving it carries on and edits. */
-async function playPlan(slot: string) {
+/** Step by step's Debug: hypotheses, a round of evidence with the reproduce card, the fix, then done; Next moves on. */
+async function playDebug(slot: string, text: string) {
   const send = sendTo(slot);
-  await send({ kind: "session_started", session_id: `mock-${slot}`, model: "claude-opus-5-5", cwd: FOLDER, permission_mode: "plan", claude_version: "2.1.284" });
-  await send({ kind: "tool_started", parent: null, tool_use_id: "p1", name: "Read", summary: FILE });
-  await sleep(400);
-  await send({ kind: "tool_finished", parent: null, tool_use_id: "p1", is_error: false, output: ORIGINAL });
-  await send({ kind: "tool_started", parent: null, tool_use_id: "p2", name: "ExitPlanMode", summary: "" });
-  const plan = "## Add retries to `fetchJson`\n\nRetry transient failures with exponential backoff.\n\n1. Add a `RETRYABLE` set: 429, 502, 503, 504.\n2. Loop up to `attempts` (default 3), returning on `res.ok`.\n3. Back off `250 * 2^i` ms between tries; throw on the last one.\n4. Run the retry tests.";
-  await send({ kind: "permission_requested", request_id: "plan-1", tool_name: "ExitPlanMode", input: { plan } });
-  const approved = await new Promise<boolean>((resolve) => (pendingPermission[slot] = resolve));
-  await send({ kind: "tool_finished", parent: null, tool_use_id: "p2", is_error: !approved, output: approved ? "User approved the plan" : "User wants to keep planning" });
-  if (!approved) {
-    await streamText(send, "k1:0", "Sure. What should I change in the plan?");
-    return send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, duration_ms: 3000, auth_hint: false, denied: 1, context_window: 200_000 });
+  const done = () => send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, duration_ms: 2400, auth_hint: false, denied: 0, context_window: 200_000 });
+  const moves = /^(next|ok|yes|start)/i.test(text.trim());
+  const n = stepPage[slot] === undefined ? 0 : moves ? stepPage[slot] + 1 : stepPage[slot];
+  stepPage[slot] = n;
+  if (n === 0) {
+    await streamText(send, `db0-${Date.now()}:0`, "# Frame — Saving a todo reloads the page and loses it\n\nClicking **Save** clears the list instead of adding to it.\n\n**Likely causes, most likely first:**\n\n1. The form submits natively, so the page reloads.\n2. The list re-renders from empty state after the save.");
+    return done();
   }
-  await send({ kind: "tool_started", parent: null, tool_use_id: "p3", name: "Edit", summary: FILE });
-  await sleep(400);
-  await send({ kind: "edit_applied", parent: null, tool_use_id: "p3", path: FILE, created: false, hunks: [{ old_start: 1, old_lines: 1, new_start: 1, new_lines: 2, lines: ["+const RETRYABLE = new Set([429, 502, 503, 504]);", " export async function fetchJson(url: string) {"] }] });
-  await send({ kind: "tool_finished", parent: null, tool_use_id: "p3", is_error: false, output: "updated" });
-  await streamText(send, "k2:0", "Done: `fetchJson` retries transient errors as planned.");
-  await send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, duration_ms: 6000, auth_hint: false, denied: 0, context_window: 200_000 });
+  if (n === 1) {
+    await send({ kind: "tool_started", parent: null, tool_use_id: `d2-${slot}`, name: "Edit", summary: FILE });
+    await sleep(300);
+    await send({ kind: "tool_finished", parent: null, tool_use_id: `d2-${slot}`, is_error: false, output: "updated" });
+    await send({ kind: "tool_started", parent: null, tool_use_id: `d3-${slot}`, name: "mcp__lantern__reproduce", summary: "" });
+    const steps = "1. Open `index.html` with DevTools open, **Console** tab, and **Preserve log** on.\n2. Type a title and click **Save**.\n3. Paste the lines starting with `[lantern-debug]`.";
+    await send({ kind: "permission_requested", request_id: `repro-${slot}`, tool_name: "Reproduce", input: { steps } });
+    await new Promise<boolean>((resolve) => (pendingPermission[slot] = resolve));
+    await send({ kind: "tool_finished", parent: null, tool_use_id: `d3-${slot}`, is_error: false, output: "The user reproduced the problem." });
+    await streamText(send, `db1-${Date.now()}:0`, "# Evidence 1 — Does the page reload on Save?\n\nI logged the submit handler and page load, marked `lantern-debug`.\n\n**What the logs show:** the handler runs, then the page loads again.\n\n- Cause 1 (native submit): **confirmed**.\n- Cause 2 (re-render from empty): ruled out; the list is never re-rendered before the reload.");
+    return done();
+  }
+  const pages = [
+    "# Fix — Stop the form's native submit\n\n- `src/app.ts:14`: `e.preventDefault()` at the top of the submit handler.\n\nReproduced again: the todo stays and the page doesn't reload.",
+    "# Done — The form submitted natively and reloaded the page\n\nThe temporary logs are removed (no `lantern-debug` left). The fix is the one line in `src/app.ts`.",
+  ];
+  await streamText(send, `db${n}-${Date.now()}:0`, pages[Math.min(n - 2, pages.length - 1)]);
+  return done();
 }
 
-/** Debug mode: hypotheses, a temporary log, then the user reproduces through the card. */
-async function playDebug(slot: string) {
+/** Step by step: the flavour each chat is in, what Claude suggested, and the task it was suggested for. */
+const flavourOfSlot: Record<string, string> = {};
+const suggestedFor: Record<string, { flavour: string; task: string }> = {};
+const LABEL: Record<string, string> = { build: "Build", learn: "Learn", review: "Review", debug: "Debug" };
+
+/** What Claude would suggest for a task. */
+function suggestionFor(text: string): { flavour: string; why: string } {
+  if (/\breview\b|\bPR\b|pull request/i.test(text)) return { flavour: "review", why: "you asked for a review of a change" };
+  if (/crash|bug|broken|fails|error|wrong|reload|loses/i.test(text)) return { flavour: "debug", why: "this is a bug, so the cause comes first" };
+  if (/learn|teach|interview|understand|exam|test prep/i.test(text)) return { flavour: "learn", why: "you said you want to learn this" };
+  return { flavour: "build", why: "it's something to add, one step at a time" };
+}
+
+/**
+ * Step by step: Claude suggests a flavour and waits; "Start X." plays that flavour's pages from the task; a flavour you
+ * picked comes as a note and starts without asking; a bug reported during a build gets Debug suggested.
+ */
+async function playStepByStep(slot: string, raw: string) {
   const send = sendTo(slot);
-  await send({ kind: "session_started", session_id: `mock-${slot}`, model: "claude-opus-5-5", cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
-  await streamText(send, "d1:0", "Two likely causes: the form submits natively and reloads the page, or the list is re-rendered from empty state. I'll log both.");
-  await send({ kind: "tool_started", parent: null, tool_use_id: "d2", name: "Edit", summary: FILE });
-  await sleep(300);
-  await send({ kind: "tool_finished", parent: null, tool_use_id: "d2", is_error: false, output: "updated" });
-  await send({ kind: "tool_started", parent: null, tool_use_id: "d3", name: "mcp__lantern__reproduce", summary: "" });
-  const steps = "1. Open `index.html` with DevTools open, **Console** tab, and **Preserve log** on.\n2. Type a title and click **Save**.\n3. Paste the lines starting with `[lantern-debug]`.";
-  await send({ kind: "permission_requested", request_id: "repro-1", tool_name: "Reproduce", input: { steps } });
-  await new Promise<boolean>((resolve) => (pendingPermission[slot] = resolve));
-  await send({ kind: "tool_finished", parent: null, tool_use_id: "d3", is_error: false, output: "The user reproduced the problem." });
-  await streamText(send, "d4:0", "Confirmed: the submit handler runs, then the page reloads. Adding `e.preventDefault()` and removing the logs.");
-  await send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, duration_ms: 9000, auth_hint: false, denied: 0, context_window: 200_000 });
+  const done = () => send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, duration_ms: 1400, auth_hint: false, denied: 0, context_window: 200_000 });
+  const note = /^\[Lantern: this chat switched to (Build|Learn|Review|Debug)\b[^\]]*\]\s*/.exec(raw);
+  const text = note ? raw.slice(note[0].length) : raw;
+  if (stepPage[slot] === undefined && flavourOfSlot[slot] === undefined && !note) {
+    await send({ kind: "session_started", session_id: `mock-${slot}`, model: "claude-opus-5-5", cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
+  }
+  const start = /^start (build|learn|review|debug)\b/i.exec(text.trim());
+  let task = text;
+  if (note) {
+    flavourOfSlot[slot] = note[1].toLowerCase();
+    delete stepPage[slot];
+  } else if (start && suggestedFor[slot]) {
+    flavourOfSlot[slot] = start[1].toLowerCase();
+    task = suggestedFor[slot].task;
+    delete suggestedFor[slot];
+    delete stepPage[slot];
+  } else if (/^stay in/i.test(text.trim()) && suggestedFor[slot]) {
+    delete suggestedFor[slot];
+    task = "Next";
+  } else {
+    const fresh = flavourOfSlot[slot] === undefined;
+    const s = suggestionFor(text);
+    const changes = !fresh && !/^(next|ok|yes)/i.test(text.trim()) && s.flavour === "debug" && flavourOfSlot[slot] !== "debug";
+    if (fresh || changes) {
+      suggestedFor[slot] = { flavour: s.flavour, task: text };
+      await sleep(300);
+      await streamText(send, `sw-${Date.now()}:0`, `# Switch to ${LABEL[s.flavour]} — ${s.why}\n\n${s.flavour === "debug" ? "I'd find the cause from evidence before changing anything: likely causes first, then logs and a reproduction." : s.flavour === "review" ? "I'd read it one file at a time, with findings you can agree with or reject." : s.flavour === "learn" ? "I'd build it with you step by step, explaining the why of each step." : "I'd frame it, plan it one step at a time, then build each step when you say Next."}`);
+      return done();
+    }
+  }
+  const flavour = flavourOfSlot[slot];
+  if (flavour === "debug") return playDebug(slot, task);
+  if (flavour === "review") return playReview(slot, task);
+  return playSteps(slot, task, flavour === "learn");
 }
 
 /** Step-by-step mode: each message sent gets the next page of a scripted incremental-dev session. */
@@ -447,8 +492,6 @@ export function installMockBackend() {
             sendTo(String(a.slot))({ kind: "models", models: MODELS });
           }, 50);
           return null;
-        case "set_permission_mode":
-          slotMode[String(a.slot)] = String(a.mode);
           return null;
         case "restart_session":
           slotMode[String(a.slot)] = String(a.mode);
@@ -458,7 +501,7 @@ export function installMockBackend() {
         case "send_message": {
           const slot = String(a.slot);
           const mode = slotMode[slot];
-          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : mode === "plan" ? playPlan(slot) : mode === "debug" ? playDebug(slot) : mode === "review" ? playReview(slot, String(a.text)) : mode === "steps" || mode === "teach" ? playSteps(slot, String(a.text), mode === "teach") : playTurn(slot));
+          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
           // Like the backend: the turn's number.
           turnCount[slot] = (turnCount[slot] ?? -1) + 1;
           return turnCount[slot];

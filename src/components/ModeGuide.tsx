@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Mode } from "../types";
-import { BoltIcon, BugIcon, PlanIcon, ShieldIcon, StepsIcon } from "./icons";
+import { FLAVOUR_LABEL, type Flavour } from "../lib/flavour";
+import { BoltIcon, BugIcon, BuildIcon, LearnIcon, ReviewIcon, ShieldIcon, StepsIcon } from "./icons";
+
+/** A page of the guide: a mode, or one of Step by step's flavours. */
+export type GuideKey = Mode | Flavour;
 
 interface About {
   label: string;
@@ -9,10 +13,14 @@ interface About {
   claude: string[];
   you: string[];
   goodFor: string;
+  /** What to ask for to get this flavour, as an example. */
+  example?: string;
 }
 
-/** What each mode does, in more detail than the menu's one line. */
-export const GUIDE: Record<Mode, About> = {
+export const FLAVOUR_ICON: Record<Flavour, ReactNode> = { build: <BuildIcon />, learn: <LearnIcon />, review: <ReviewIcon />, debug: <BugIcon /> };
+
+/** What each mode and flavour does, in more detail than the menus' one line. */
+export const GUIDE: Record<GuideKey, About> = {
   ask: {
     label: "Ask before actions",
     icon: <ShieldIcon />,
@@ -29,56 +37,49 @@ export const GUIDE: Record<Mode, About> = {
     you: ["Check the result when it's done, in the chat and the Changes pane"],
     goodFor: "Tasks you trust Claude with from start to finish.",
   },
-  plan: {
-    label: "Plan first",
-    icon: <PlanIcon />,
-    summary: "Claude researches and writes a plan. Nothing in your project changes until you approve it.",
-    claude: ["Reads the code and asks questions, without changing anything", "Proposes a plan, in a card you approve or send back"],
-    you: ["Approve the plan, or keep planning and say what to change", "Once it's approved, Claude carries on in the chat mode you used last (Ask, Auto-approve or Debug)"],
-    goodFor: "Bigger changes, where you want to agree on the approach first.",
-  },
-  debug: {
-    label: "Debug",
-    icon: <BugIcon />,
-    summary: "Claude finds the cause of a bug from evidence before changing anything.",
-    claude: [
-      "Lists the likely causes, most likely first",
-      "Adds temporary logs that tell them apart, all marked lantern-debug",
-      "Reproduces the bug itself, or gives you a card with the steps when only you can",
-      "Fixes the cause it confirmed, then removes every temporary log",
-    ],
-    you: ["Reproduce the bug when the card asks, and paste what you saw", "Say if it couldn't be reproduced: Claude adjusts the logs and asks again"],
-    goodFor: "Bugs whose cause isn't obvious.",
-  },
   steps: {
-    label: "Build",
+    label: "Step by step",
     icon: <StepsIcon />,
-    summary: "Claude plans and builds one small step at a time and stops after each one. Every step is a page you review.",
+    summary: "Claude works one page at a time and stops after each one. It suggests how to work from your task: Build, Learn, Review or Debug.",
+    claude: [
+      "Reads your task and suggests a flavour, with why, then waits for you to start it",
+      "Suggests another one when the work changes (a crash during a build is a debug)",
+      "Writes one page per message: a step, a file, a round of evidence",
+    ],
+    you: [
+      "Start the flavour Claude suggests, or pick another",
+      "Pick a flavour yourself from the badge in the header at any time; Claude is told with your next message",
+      "Next approves a page; ask about a page or change it in the box",
+      "Auto-approve, in the header, lets Claude act without asking; you still review every page",
+    ],
+    goodFor: "Work you want to read and steer while it's being done.",
+  },
+  build: {
+    label: "Build",
+    icon: <BuildIcon />,
+    summary: "Claude plans and builds one small step at a time. Every step is a page you review.",
     claude: [
       "Frames the task: what it understood and what's unclear",
       "Plans one step per page (the files, the change, how to check it), then sums up the plan",
       "Builds one step per page, saying what changed and how it checked it",
       "Follows your incremental-dev skill if you have one",
     ],
-    you: [
-      "Next approves the page, and Claude goes on to the next step",
-      "Ask about a step or change it in the box: the discussion stays on its page",
-      "Send & next (⌘Enter) sends a change and approves the step in one go",
-      "Auto-approve, in the header, lets Claude act without asking; you still review every page",
-    ],
-    goodFor: "Work you want to read and steer while it's being done.",
+    you: ["Next approves the page, and Claude goes on to the next step", "Send & next (⌘Enter) sends a change and approves the step in one go"],
+    goodFor: "Adding or changing something you want to steer.",
+    example: "Add retries with backoff to fetchJson",
   },
-  teach: {
+  learn: {
     label: "Learn",
-    icon: <StepsIcon />,
+    icon: <LearnIcon />,
     summary: "Build, explained. Each step also covers the why: the idea behind it, how it fits, and what else it could have been.",
     claude: ["Goes through the same pages as Build: frame, plan, build", "Explains each step with short sections and small code excerpts", "Says what it considered instead and why it didn't choose it"],
-    you: ["Next approves the page, as in Build", "Ask about anything you don't follow: the answer stays on the step's page"],
-    goodFor: "Unfamiliar code, a new language or framework, or learning a codebase.",
+    you: ["Say you want to learn: for a job, an interview, a test, a codebase that's new to you", "Ask about anything you don't follow: the answer stays on the step's page"],
+    goodFor: "Learning a language, a framework or a codebase while something real gets built.",
+    example: "Teach me Swift concurrency for my interview, by building the image loader",
   },
   review: {
     label: "Review",
-    icon: <StepsIcon />,
+    icon: <ReviewIcon />,
     summary: "Claude reviews a pull request or your branch one file at a time. Nothing is posted to GitHub.",
     claude: [
       "Frames the change: what it claims to do, and the order it will read the files in",
@@ -86,38 +87,51 @@ export const GUIDE: Record<Mode, About> = {
       "Ends with a summary of every finding and your verdict on it",
       "Follows your incremental-pr-review skill if you have one",
     ],
-    you: [
-      "Agree with or reject each finding; Next file sends your verdicts with it",
-      "A rejected finding is dropped for good",
-      "Ask about a file in the box: the answer stays on that file's page",
-      "At the summary, have the findings written up, or fixed step by step",
-    ],
+    you: ["Agree with or reject each finding; Next file sends your verdicts with it", "A rejected finding is dropped for good", "At the summary, have the findings written up, or fixed step by step"],
     goodFor: "Someone else's pull request, or your own branch before you open one.",
+    example: "Review PR 128",
+  },
+  debug: {
+    label: "Debug",
+    icon: <BugIcon />,
+    summary: "Claude finds the cause of a bug from evidence before changing anything.",
+    claude: [
+      "Frames the bug, with the likely causes, most likely first",
+      "Adds temporary logs that tell them apart (marked lantern-debug), one page per round of evidence",
+      "Reproduces the bug itself, or gives you a card with the steps when only you can",
+      "Fixes the cause it confirmed, then removes every temporary log",
+    ],
+    you: ["Reproduce the bug when the card asks, and paste what you saw", "Say if it couldn't be reproduced: Claude adjusts the logs and asks again"],
+    goodFor: "Bugs whose cause isn't obvious.",
+    example: "Saving a form crashes when the title is empty",
   },
 };
 
-const GROUPS: { title: string; modes: Mode[]; note?: string }[] = [
-  { title: "Chat", modes: ["ask", "auto", "plan", "debug"] },
-  { title: "Step by step", modes: ["steps", "teach", "review"], note: "You can switch between Build, Learn and Review in the middle of a chat: Claude is told when you send your next message." },
+const GROUPS: { title: string; keys: GuideKey[] }[] = [
+  { title: "Modes", keys: ["ask", "auto", "steps"] },
+  { title: "Step by step's flavours", keys: ["build", "learn", "review", "debug"] },
 ];
 
-/** "Step by step · Review": a mode's full name. */
-export const modeName = (mode: Mode) => (mode === "steps" || mode === "teach" || mode === "review" ? `Step by step · ${GUIDE[mode].label}` : GUIDE[mode].label);
+const isFlavour = (k: GuideKey): k is Flavour => k in FLAVOUR_LABEL;
+
+/** "Step by step · Review": a mode's full name, with the flavour it's in. */
+export const modeName = (mode: Mode, flavour: Flavour | null = null) => (mode === "steps" && flavour ? `Step by step · ${FLAVOUR_LABEL[flavour]}` : GUIDE[mode].label);
 
 interface Props {
-  /** The mode whose page is open; null: closed. */
-  open: Mode | null;
-  /** The chat's mode, marked in the list and not offered as a switch. */
-  current: Mode;
-  /** Switch the chat to a mode; absent while it can't be switched (Claude is working). */
-  onUse?: (mode: Mode) => void;
+  /** The page that's open; null: closed. */
+  open: GuideKey | null;
+  /** The chat's mode and flavour, marked in the list and not offered as a switch. */
+  mode: Mode;
+  flavour: Flavour | null;
+  /** Switch the chat to a mode, or Step by step's flavour; absent while it can't be switched (Claude is working). */
+  onUse?: (key: GuideKey) => void;
   onClose: () => void;
 }
 
-/** How the modes work: every mode with what Claude does in it, what you do, and what it's for. */
-export function ModeGuide({ open, current, onUse, onClose }: Props) {
+/** How the modes work: every mode and flavour with what Claude does in it, what you do, and what it's for. */
+export function ModeGuide({ open, mode, flavour, onUse, onClose }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [shown, setShown] = useState<Mode>(open ?? current);
+  const [shown, setShown] = useState<GuideKey>(open ?? mode);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -133,8 +147,8 @@ export function ModeGuide({ open, current, onUse, onClose }: Props) {
     }
   }, [open]);
 
+  const now = (k: GuideKey) => (isFlavour(k) ? mode === "steps" && flavour === k : mode === k);
   const about = GUIDE[shown];
-  const group = GROUPS.find((g) => g.modes.includes(shown))!;
   return (
     <dialog ref={ref} className="mode-guide" aria-label="How the modes work" onClose={onClose} onClick={(e) => e.target === e.currentTarget && onClose()}>
       {open && (
@@ -143,31 +157,31 @@ export function ModeGuide({ open, current, onUse, onClose }: Props) {
             {GROUPS.map((g) => (
               <div key={g.title} className="mode-guide-group">
                 <div className="mode-guide-group-title">{g.title}</div>
-                {g.modes.map((m) => (
-                  <button key={m} className={`mode-guide-tab${m === shown ? " active" : ""}`} aria-current={m === shown ? "page" : undefined} onClick={() => setShown(m)}>
-                    <span className="mode-icon">{GUIDE[m].icon}</span>
-                    {GUIDE[m].label}
-                    {m === current && <span className="mode-guide-now">Now</span>}
+                {g.keys.map((k) => (
+                  <button key={k} className={`mode-guide-tab${isFlavour(k) ? " flavour" : ""}${k === shown ? " active" : ""}`} aria-current={k === shown ? "page" : undefined} onClick={() => setShown(k)}>
+                    <span className="mode-icon">{GUIDE[k].icon}</span>
+                    {GUIDE[k].label}
+                    {now(k) && <span className="mode-guide-now">Now</span>}
                   </button>
                 ))}
               </div>
             ))}
           </nav>
           <article className="mode-guide-page">
-            <div className="mode-guide-eyebrow">{group.title === "Chat" ? "Chat mode" : "Step by step"}</div>
+            <div className="mode-guide-eyebrow">{isFlavour(shown) ? "Step by step" : "Mode"}</div>
             <h2 className="mode-guide-title">{about.label}</h2>
             <p className="mode-guide-summary">{about.summary}</p>
             <Section title="What Claude does" items={about.claude} />
             <Section title="What you do" items={about.you} />
             <h3 className="mode-guide-heading">Good for</h3>
             <p className="mode-guide-text">{about.goodFor}</p>
-            {group.note && <p className="mode-guide-note">{group.note}</p>}
+            {about.example && <p className="mode-guide-note">Try: “{about.example}”</p>}
             <div className="mode-guide-actions">
-              {shown === current && <span className="mode-guide-using">You're in this mode</span>}
+              {now(shown) && <span className="mode-guide-using">{isFlavour(shown) ? "You're in this flavour" : "You're in this mode"}</span>}
               <button onClick={onClose}>Close</button>
-              {shown !== current && onUse && (
+              {!now(shown) && onUse && (
                 <button className="primary" onClick={() => onUse(shown)}>
-                  Use {modeName(shown)}
+                  {isFlavour(shown) ? `Start ${about.label}` : `Use ${about.label}`}
                 </button>
               )}
             </div>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatItem } from "../store";
-import { andNext, isApproval, isQuestion, modeSwitchNote, movesOn, pageLabel, pagesOf, pageTitle, parseHeading, promptText, withModeNote, withoutModeNote } from "./steps";
+import { andNext, isApproval, isQuestion, movesOn, pageLabel, pagesOf, pageTitle, parseHeading, promptText, startedFlavour, stayedIn } from "./steps";
 
 describe("parseHeading", () => {
   it("reads each kind of heading the prompt asks for", () => {
@@ -19,6 +19,22 @@ describe("parseHeading", () => {
     expect(page.turns[0].items.map((it) => (it.type === "assistant" ? it.text : ""))).toEqual(["### What changed\nOpacity.\n\n### Findings\nNone."]);
     // A Build step stays a step.
     expect(parseHeading("# Step 1 of 3 — Add slugify\n\n**What changed:** utils.js")).toMatchObject({ kind: "step" });
+  });
+
+  it("reads Claude's suggestion of a flavour, and Debug's pages", () => {
+    expect(parseHeading("# Switch to Debug — this is a bug\n\nCause first.")).toEqual({ kind: "switch", n: null, total: null, title: "this is a bug", flavour: "debug" });
+    expect(parseHeading("# Evidence 2 — Does the page reload?")).toMatchObject({ kind: "evidence", n: 2, title: "Does the page reload?" });
+    expect(parseHeading("# Evidence — the logs")).toMatchObject({ kind: "evidence", n: null });
+    expect(parseHeading("# Fix — preventDefault on submit")).toMatchObject({ kind: "fix" });
+    expect(pageLabel(parseHeading("# Evidence 2 — x"))).toBe("Evidence 2");
+  });
+
+  it("tells answers to a suggestion apart, and counts them as moving on", () => {
+    expect(startedFlavour("Start Debug.")).toBe("debug");
+    expect(startedFlavour("start learn")).toBe("learn");
+    expect(startedFlavour("Start debugging the parser")).toBeNull();
+    expect(stayedIn("Stay in Build.")).toBe(true);
+    expect(movesOn("Start Review.") && movesOn("Stay in Build.")).toBe(true);
   });
 
   it("ignores messages without one", () => {
@@ -147,15 +163,5 @@ describe("isApproval", () => {
   it("tells moving on from asking for a change", () => {
     for (const t of ["Next", "next.", "ok", "Yes!", "go ahead", "LGTM"]) expect(isApproval(t)).toBe(true);
     for (const t of ["Next, but rename it", "use a regex instead"]) expect(isApproval(t)).toBe(false);
-  });
-});
-
-describe("modeSwitchNote", () => {
-  it("names the new mode's headings, and comes off a prompt as you wrote it", () => {
-    expect(modeSwitchNote("review")).toMatch(/Review mode.*incremental-pr-review.*# File N of M/);
-    expect(modeSwitchNote("steps")).toMatch(/Build mode.*incremental-dev.*# Step N of M/);
-    expect(modeSwitchNote("teach")).toMatch(/Teach mode.*why/);
-    for (const m of ["steps", "teach", "review"] as const) expect(withoutModeNote(withModeNote(m, "Next"))).toBe("Next");
-    expect(withoutModeNote("[Lantern] something else")).toBe("[Lantern] something else");
   });
 });

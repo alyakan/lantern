@@ -1,10 +1,8 @@
 /**
- * How Claude may act: ask before actions, auto-approve, plan first (approving the plan returns to the mode before),
- * debug (ask, plus a loop: hypotheses, temporary logs, the user reproduces, then the fix), or step by step ("steps"
- * builds one reviewed step at a time; "teach" does the same and explains each step; "review" reviews a pull request a
- * file per page).
+ * How Claude may act: ask before actions, auto-approve, or step by step (a page per message, in a flavour: see
+ * lib/flavour.ts).
  */
-export type Mode = "ask" | "auto" | "plan" | "debug" | "steps" | "teach" | "review";
+export type Mode = "ask" | "auto" | "steps";
 
 export interface Hunk {
   old_start: number;

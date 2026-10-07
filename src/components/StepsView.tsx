@@ -2,14 +2,14 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import { Md } from "./Md";
 import { AWAY_FROM_END, JumpToLatest } from "./JumpToLatest";
 import { useSlot } from "../lib/slot";
-import { useModeGuide } from "../lib/modeGuide";
-import { InfoIcon } from "./icons";
+import { FLAVOUR_LABEL, FLAVOURS, type Flavour } from "../lib/flavour";
+import { FlavourBadge } from "./FlavourBadge";
+import { FLAVOUR_ICON } from "./ModeGuide";
 import { recallScroll, rememberScroll } from "../lib/scrollMemory";
 import { messageTime } from "../lib/time";
 import { initials, useUserName } from "../lib/userName";
 import type { State } from "../store";
-import type { Mode } from "../types";
-import { isApproval, movesOn, pageLabel, pagesOf, pageTitle, promptText, type StepPage, type StepTurn } from "../lib/steps";
+import { isApproval, movesOn, pageLabel, pagesOf, pageTitle, promptText, startedFlavour, startText, stayedIn, stayText, type StepPage, type StepTurn } from "../lib/steps";
 import { mattersToTask } from "../lib/commands";
 import type { BackgroundRun, ChatItem, ToolItem } from "../store";
 import { workingVerb } from "../lib/verbs";
@@ -20,8 +20,8 @@ import { ReviewFileHeader, ReviewFileView, ReviewSummaryTable, type ReviewedFind
 /** What "Update the step with this" sends. */
 export const UPDATE_STEP = "Update the step with this: write the whole step again under its heading, in the same format as before, with what we just discussed worked in and everything else kept.";
 
-/** A plain move-on prompt: "Next", or a Next carrying review verdicts; nothing to show as "You asked". */
-const justMovesOn = (text: string) => isApproval(text) || isVerdictNext(text);
+/** A plain move-on prompt: "Next", a Next carrying review verdicts, an answer to a suggestion; nothing to show as "You asked". */
+const justMovesOn = (text: string) => isApproval(text) || isVerdictNext(text) || startedFlavour(text) !== null || stayedIn(text);
 
 /** A Review file page's parts, if its message has the skill's sections. */
 function reviewOf(page: StepPage): ReviewFile | null {
@@ -37,8 +37,10 @@ interface Props extends StreamHandlers {
   onNext: (message?: string) => void;
   /** Sends a message as if typed (the review summary's actions). */
   onSend?: (text: string) => void;
-  /** Build, Learn or Review: which flavour of Step-by-step runs. */
-  onFlavour: (mode: Mode) => void;
+  /** The flavour Step by step is in (one picked and not yet sent included); null before one is chosen. */
+  flavour: Flavour | null;
+  /** Pick a flavour from the header's badge: Claude is told with the next message. */
+  onPickFlavour: (flavour: Flavour) => void;
   /** Claude Code's auto mode approves actions instead of the app asking; each step is still reviewed as a page. */
   autoApprove?: boolean;
   onAutoApprove?: (on: boolean) => void;
@@ -48,15 +50,12 @@ interface Props extends StreamHandlers {
   onReviewFile?: (path: string) => void;
 }
 
-/** What the style switch calls a flavour ("teach" is shown as Learn: what you're there to do). */
-const flavourLabel = (m: Mode) => (m === "teach" ? "Learn" : m === "review" ? "Review" : "Build");
-
 const isTyping = (el: Element | null) => !!el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el as HTMLElement).isContentEditable);
 
 // Step-by-step mode's view of the conversation: a page per step, side by side, one on screen. Questions about a step
 // and changes to it stay on its page; Previous and Next (or ← →) slide between pages, and on the newest page Next
 // approves the step and Claude carries on.
-export function StepsView({ state, onNext, onSend, onFlavour, onPage, onReviewFile, autoApprove = false, onAutoApprove, ...handlers }: Props) {
+export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPage, onReviewFile, autoApprove = false, onAutoApprove, ...handlers }: Props) {
   // A revision you undid: the page shows the version you went back to, until Claude revises the step again.
   const [kept, setKept] = useState<Record<string, { turn: number; over: number }>>({});
   const claudes = pagesOf(state.items);
@@ -111,7 +110,6 @@ export function StepsView({ state, onNext, onSend, onFlavour, onPage, onReviewFi
     if (restingFile) onReviewFile?.(restingFile);
   }, [restingFile]);
 
-  const guide = useModeGuide();
   const go = (i: number) => setIndex(Math.max(0, Math.min(last, i)));
   // Moving to a page (Next, Previous, arrows, a new step coming in) starts at its top. Not when the view is drawn
   // (switching back to this chat): then each page is where you left it.
@@ -148,10 +146,9 @@ export function StepsView({ state, onNext, onSend, onFlavour, onPage, onReviewFi
   }, [at, last]);
 
   const heading = page?.heading;
-  const review = state.mode === "review";
-  const phase = !heading ? null : review ? "Reviewing" : heading.kind === "step" || heading.kind === "done" ? "Building" : "Planning";
+  const review = flavour === "review";
   const newest = at === last;
-  const teach = state.mode === "teach";
+  const teach = flavour === "learn";
   // Review: whether a file has come yet, so Next opens the first one or the next.
   const filesSoFar = review && pages.slice(0, at + 1).some((p) => p.heading?.kind === "file");
 
@@ -182,10 +179,9 @@ export function StepsView({ state, onNext, onSend, onFlavour, onPage, onReviewFi
       <div className="steps-head">
         <div className="steps-rail" role="tablist" aria-label="Pages">
           {pages.map((p, i) => (
-            <button key={p.key} role="tab" aria-selected={i === at} aria-label={`${pageLabel(p.heading)}${pageTitle(p) ? `: ${pageTitle(p)}` : ""}`} title={`${pageLabel(p.heading)}${pageTitle(p) ? ` — ${pageTitle(p)}` : ""}`} className={`steps-dot${i === at ? " current" : ""}${p.heading?.kind === "step" || p.heading?.kind === "done" || p.heading?.kind === "file" ? " build" : ""}`} onClick={() => go(i)} />
+            <button key={p.key} role="tab" aria-selected={i === at} aria-label={`${pageLabel(p.heading)}${pageTitle(p) ? `: ${pageTitle(p)}` : ""}`} title={`${pageLabel(p.heading)}${pageTitle(p) ? ` — ${pageTitle(p)}` : ""}`} className={`steps-dot${i === at ? " current" : ""}${p.heading?.kind === "step" || p.heading?.kind === "done" || p.heading?.kind === "file" || p.heading?.kind === "fix" ? " build" : ""}${p.heading?.kind === "switch" ? " switch" : ""}`} onClick={() => go(i)} />
           ))}
         </div>
-        {phase && <span className="steps-phase">{phase}</span>}
         {state.backgroundTasks.length > 0 && (
           <span className="steps-background" title={`Still running in the background:\n${state.backgroundTasks.map((t) => t.description).join("\n")}`}>
             <span className="spinner" aria-hidden />
@@ -193,26 +189,7 @@ export function StepsView({ state, onNext, onSend, onFlavour, onPage, onReviewFi
           </span>
         )}
         <div className="spacer" />
-        <div className="scope-track steps-style" role="radiogroup" aria-label="Style">
-          {(["steps", "teach", "review"] as const).map((m) => (
-            <button
-              key={m}
-              role="radio"
-              aria-checked={state.mode === m}
-              className={state.mode === m ? "active" : ""}
-              disabled={running}
-              title={m === "teach" ? "Explain each step: the why, the concept, the alternatives" : m === "review" ? "Review a pull request, a file per page (incremental-pr-review)" : "Short steps to review"}
-              onClick={() => onFlavour(m)}
-            >
-              {flavourLabel(m)}
-            </button>
-          ))}
-        </div>
-        {guide && (
-          <button className="icon-button steps-how" aria-label={`How ${flavourLabel(state.mode)} works`} title={`How ${flavourLabel(state.mode)} works`} onClick={() => guide(state.mode)}>
-            <InfoIcon />
-          </button>
-        )}
+        <FlavourBadge flavour={flavour} onPick={onPickFlavour} disabled={running} />
         {onAutoApprove && (
           <button className={`steps-auto${autoApprove ? " on" : ""}`} role="switch" aria-checked={autoApprove} disabled={running} title={autoApprove ? "Auto-approve is on: Claude Code's auto mode approves routine actions and stops risky ones. Click to be asked instead." : "Commands and other actions ask you first. Click to auto-approve them (you still review every step)."} onClick={() => onAutoApprove(!autoApprove)}>
             <span className="steps-auto-knob" aria-hidden />
@@ -243,6 +220,7 @@ export function StepsView({ state, onNext, onSend, onFlavour, onPage, onReviewFi
                   live={i === last && running}
                   teach={teach}
                   review={review}
+                  suggestion={p.heading?.kind === "switch" ? { current: flavour, answer: pages[i + 1]?.turns[0].prompt.text ?? null, onAnswer: i === last && !running && onSend ? onSend : undefined } : null}
                   verdicts={verdicts[p.key]}
                   onVerdict={i === last && !running ? (index, v) => setVerdict(p.key, index, v) : undefined}
                   summary={p.heading?.kind === "summary" && onSend ? { rows: reviewed, onAction: onSend } : null}
@@ -274,9 +252,12 @@ export function StepsView({ state, onNext, onSend, onFlavour, onPage, onReviewFi
                 <span className="activity-text">{workingVerb(page?.key ?? "start")}</span>
               </span>
             </span>
+          ) : heading?.kind === "switch" ? (
+            // The suggestion's card has the answers.
+            <span className="steps-hint">Start it, or pick another</span>
           ) : (
-            <button className="primary" disabled={waiting || heading?.kind === "done" || heading?.kind === "summary"} title={review ? "Send your verdicts and go on to the next file" : "Approve this step and go on to the next"} onClick={next}>
-              {heading?.kind === "done" || heading?.kind === "summary" ? "Done" : review ? (heading?.kind === "file" && heading.n === heading.total ? "Summary →" : filesSoFar ? "Next file →" : "First file →") : "Next step →"}
+            <button className="primary" disabled={waiting || heading?.kind === "done" || heading?.kind === "summary"} title={review ? "Send your verdicts and go on to the next file" : "Approve this page and go on to the next"} onClick={next}>
+              {heading?.kind === "done" || heading?.kind === "summary" ? "Done" : review ? (heading?.kind === "file" && heading.n === heading.total ? "Summary →" : filesSoFar ? "Next file →" : "First file →") : flavour === "debug" ? "Next →" : "Next step →"}
             </button>
           )
         ) : (
@@ -295,6 +276,11 @@ interface PageProps extends StreamHandlers {
   live: boolean;
   teach: boolean;
   review: boolean;
+  /**
+   * A switch page: the flavour the chat was in, how you answered (the next page's opening prompt), and how to answer
+   * (only on the newest page, when idle).
+   */
+  suggestion?: { current: Flavour | null; answer: string | null; onAnswer?: (text: string) => void } | null;
   /** Review: your verdicts on this page's findings, and how to set one (only on the newest page, when idle). */
   verdicts?: Record<number, Verdict>;
   onVerdict?: (index: number, v: Verdict | null) => void;
@@ -311,7 +297,7 @@ interface PageProps extends StreamHandlers {
   onUpdate?: () => void;
 }
 
-function Page({ page, first, live, teach, review, verdicts, onVerdict, summary, folder, latest, runs, onKeep, onUpdate, ...handlers }: PageProps) {
+function Page({ page, first, live, teach, review, suggestion, verdicts, onVerdict, summary, folder, latest, runs, onKeep, onUpdate, ...handlers }: PageProps) {
   const h = page.heading;
   const opening = page.turns[0];
   const asked = opening.prompt.auto ? null : first ? opening.prompt.text : justMovesOn(opening.prompt.text) ? null : promptText(opening.prompt.text);
@@ -348,11 +334,12 @@ function Page({ page, first, live, teach, review, verdicts, onVerdict, summary, 
   return (
     <div ref={root} className={`step-page-body${teach ? " teach" : ""}`}>
       <div className="step-eyebrow">{pageLabel(h)}</div>
-      <h1 className="step-title">{reviewFile?.path ? <ReviewFileHeader path={reviewFile.path} added={reviewFile.added} removed={reviewFile.removed} /> : pageTitle(page) || (live ? "Working…" : "Untitled step")}</h1>
+      <h1 className="step-title">{reviewFile?.path ? <ReviewFileHeader path={reviewFile.path} added={reviewFile.added} removed={reviewFile.removed} /> : h?.kind === "switch" && h.flavour ? `${FLAVOUR_LABEL[h.flavour]}?` : pageTitle(page) || (live ? "Working…" : "Untitled step")}</h1>
       {asked && <UserMessage className="step-asked" text={asked} at={opening.prompt.at} tag={first ? "Task" : movesOn(opening.prompt.text) ? "Then moved on" : null} />}
       <div className="step-content">
         <ChatStream items={mainItems} folder={folder} live={live && page.main === page.turns.length - 1} {...handlers} />
         {reviewFile && <ReviewFileView file={reviewFile} verdicts={verdicts} onVerdict={onVerdict} />}
+        {h?.kind === "switch" && h.flavour && suggestion && <SuggestionCard flavour={h.flavour} why={h.title} {...suggestion} />}
         {summary && <ReviewSummaryTable rows={summary.rows} onAction={summary.onAction} />}
       </div>
       <StepCommands page={page} runs={runs} />
@@ -381,6 +368,47 @@ function Page({ page, first, live, teach, review, verdicts, onVerdict, summary, 
             );
           })}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Claude's suggestion to work in a flavour: start it, stay in the one you're in, or start another. Once answered, it
+ * says how.
+ */
+function SuggestionCard({ flavour, why, current, answer, onAnswer }: { flavour: Flavour; why: string; current: Flavour | null; answer: string | null; onAnswer?: (text: string) => void }) {
+  const label = FLAVOUR_LABEL[flavour];
+  const started = answer === null ? null : startedFlavour(answer) ?? (isApproval(answer) ? flavour : null);
+  const outcome = answer === null ? null : started ? `You started ${FLAVOUR_LABEL[started]}` : stayedIn(answer) ? "You kept going as before" : "You answered in the chat";
+  return (
+    <div className={`suggestion${outcome ? " answered" : ""}`} role="group" aria-label={`Claude suggests ${label}`}>
+      <div className="suggestion-head">
+        <span className="suggestion-icon">{FLAVOUR_ICON[flavour]}</span>
+        <span>
+          Claude suggests <strong>{label}</strong>
+        </span>
+      </div>
+      {why && <p className="suggestion-why">{why}</p>}
+      {outcome ? (
+        <div className="suggestion-outcome">{outcome}</div>
+      ) : (
+        onAnswer && (
+          <div className="suggestion-actions">
+            <button className="primary" onClick={() => onAnswer(startText(label))}>
+              Start {label}
+            </button>
+            {current && current !== flavour && <button onClick={() => onAnswer(stayText(FLAVOUR_LABEL[current]))}>Stay in {FLAVOUR_LABEL[current]}</button>}
+            <span className="suggestion-others">
+              or
+              {FLAVOURS.filter((f) => f !== flavour && f !== current).map((f) => (
+                <button key={f} className="link-button" onClick={() => onAnswer(startText(FLAVOUR_LABEL[f]))}>
+                  {FLAVOUR_LABEL[f]}
+                </button>
+              ))}
+            </span>
+          </div>
+        )
       )}
     </div>
   );

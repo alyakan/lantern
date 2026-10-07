@@ -141,12 +141,6 @@ impl Session {
         if self.control(request).await { Ok(()) } else { Err("Claude isn't running.".into()) }
     }
 
-    /// Switches the permission mode in-band, e.g. out of plan mode once the plan is approved.
-    pub async fn set_permission_mode(&mut self, mode: crate::args::Mode) -> Result<(), String> {
-        let request = serde_json::json!({"subtype": "set_permission_mode", "mode": mode.cli_name()});
-        if self.control(request).await { Ok(()) } else { Err("Claude isn't running.".into()) }
-    }
-
     /// Stops one background task (a run_in_background command, a background agent) by its task id.
     pub async fn stop_task(&mut self, task_id: &str) -> Result<(), String> {
         if self.control(serde_json::json!({"subtype": "stop_task", "task_id": task_id})).await { Ok(()) } else { Err("Claude isn't running.".into()) }

@@ -18,16 +18,17 @@ import { failedCount } from "./lib/activity";
 
 import { SlotContext } from "./lib/slot";
 import { ModeGuideContext } from "./lib/modeGuide";
-import { ModeGuide } from "./components/ModeGuide";
+import { ModeGuide, type GuideKey } from "./components/ModeGuide";
 import { BannerView } from "./components/BannerView";
 import { ChatView } from "./components/ChatView";
 import { StepsView } from "./components/StepsView";
-import { andNext, withModeNote } from "./lib/steps";
+import { andNext } from "./lib/steps";
+import { flavourOf, savedMode, withFlavourNote, type Flavour } from "./lib/flavour";
 import { FileLinksProvider } from "./lib/fileLinks";
 import { Hud, type HudEvent } from "./components/Hud";
 import type { OpenChat } from "./components/HistoryMenu";
 import { MessageInput } from "./components/MessageInput";
-import { describeInput, PLAN_TOOL } from "./components/PermissionCard";
+import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { SetupScreen } from "./components/SetupScreen";
 import { SplitPane } from "./components/SplitPane";
@@ -39,6 +40,15 @@ function countFinished(items: ChatItem[], name: string): number {
   return items.reduce((n, it) => (it.type === "tool" ? n + (it.name === name && it.status !== "running" ? 1 : 0) + countFinished(it.children, name) : n), 0);
 }
 
+/** What an empty Step-by-step chat's box asks, for the flavour picked (or none yet). */
+const HERO_PLACEHOLDER: Record<Flavour | "none", string> = {
+  none: "What are you working on? Claude suggests how to go about it",
+  build: "What should we build, step by step?",
+  learn: "What do you want to learn, and what for?",
+  review: "Which change? e.g. Review PR 128, or Review my branch",
+  debug: "What's going wrong, and when?",
+};
+
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
 // J/K should navigate files unless the user is typing. Monaco's read-only diff uses a textarea too, so allow that one.
@@ -48,15 +58,14 @@ const isTyping = (el: Element | null) =>
 export default function App() {
   // Remembered across launches: the permission mode and the last project opened.
   // Each project remembers its own mode (a project in Step by step stays there; another stays a chat).
-  const [modes, setModes] = usePersistentState<Record<string, Mode>>("settings.modeByFolder", {});
-  const modeFor = (folder: string): Mode => modes[folder] ?? "ask";
+  // Saved as strings: older ones can name modes that are gone (see savedMode).
+  const [modes, setModes] = usePersistentState<Record<string, string>>("settings.modeByFolder", {});
+  const modeFor = (folder: string): Mode => savedMode(modes[folder]).mode;
   // Each session's own mode, so reopening one from History brings back the mode it was in, not the folder's latest.
-  const [sessionModes, setSessionModes] = usePersistentState<Record<string, Mode>>("settings.modeBySession", {});
+  const [sessionModes, setSessionModes] = usePersistentState<Record<string, string>>("settings.modeBySession", {});
   // Step by step's auto-approve, per project too.
   const [autoBy, setAutoBy] = usePersistentState<Record<string, boolean>>("settings.autoApproveByFolder", {});
   const autoFor = (folder: string | null) => (folder ? (autoBy[folder] ?? false) : false);
-  // The mode to carry on in once a plan is approved: the last non-plan mode chosen.
-  const [execMode, setExecMode] = usePersistentState<Mode>("settings.execMode", "ask");
   const [lastFolder, setLastFolder] = usePersistentState<string | null>("settings.lastFolder", null);
   const [model, setModel] = usePersistentState<string | null>("settings.model", null);
   // Thinking effort (--effort); null = Claude Code's default. App-wide, like the model.
@@ -245,14 +254,14 @@ export default function App() {
     const already = Object.entries(chats.slots).find(([, s]) => s.sessionId === sessionId);
     if (already) return switchTo(already[0]);
     const { claudePath, folder } = state;
-    // The mode it was last in; one from before modes were kept per session reopens as a plain chat, in the chat mode
-    // you use, not in whatever this folder's newest chat is doing (Step by step, say).
-    const mode = sessionModes[sessionId] ?? execMode;
+    // The mode it was last in (and for an older Debug, Teach or Review session, that flavour of Step by step); one from
+    // before modes were kept per session reopens as a plain chat, not as whatever this folder's newest chat is doing.
+    const { mode, flavour: flavourStart } = savedMode(sessionModes[sessionId]);
     if (!claudePath || !folder) return;
     const reuse = state.items.length === 0 && !isBusy(state);
     const slot = takeSlot();
     to(slot)(reuse ? { type: "restarting" } : { type: "folder_opened", folder });
-    to(slot)({ type: "mode_changed", mode });
+    to(slot)({ type: "mode_changed", mode, flavourStart });
     api
       .openSession(slot, claudePath, folder, { mode, model, effort, auto_approve: autoFor(folder) }, sessionId)
       .then((events) => {
@@ -278,13 +287,11 @@ export default function App() {
     return () => window.removeEventListener("focus", onFocus);
   }, [active, state.folder]);
 
-  // Chats switched between Build, Learn and Review since their last message: the next one tells Claude.
-  const switchedTo = useRef<Record<string, "steps" | "teach" | "review">>({});
+  // A flavour picked since the chat's last message goes with this one, in a note telling Claude.
   const sendIn = (slot: string, text: string) => {
-    to(slot)({ type: "user_sent", text });
-    const switched = switchedTo.current[slot];
-    delete switchedTo.current[slot];
-    api.sendMessage(slot, switched ? withModeNote(switched, text) : text).then(
+    const pick = chats.slots[slot]?.flavourPick ?? null;
+    to(slot)({ type: "user_sent", text, ...(pick ? { switchedTo: pick } : {}) });
+    api.sendMessage(slot, pick ? withFlavourNote(pick, text) : text).then(
       (turn) => typeof turn === "number" && to(slot)({ type: "turn_numbered", turn }),
       (e) => to(slot)({ type: "failed", text: errText(e) }),
     );
@@ -307,12 +314,22 @@ export default function App() {
   }, [chats.slots]);
 
   const changeMode = (mode: Mode) => {
-    // The mode to come back to after a plan, or out of Step by step: a chat mode.
-    if (mode === "ask" || mode === "auto" || mode === "debug") setExecMode(mode);
-    if ((mode === "steps" || mode === "teach" || mode === "review") && mode !== state.mode && state.items.length > 0) switchedTo.current[active] = mode;
-    else delete switchedTo.current[active];
+    if (mode !== "steps") dispatch({ type: "flavour_picked", flavour: null });
     dispatch({ type: "mode_changed", mode });
     if (state.folder) restart(active, mode);
+  };
+
+  // Step by step's flavour as you see it: one you picked and haven't sent yet, or the conversation's.
+  const chatFlavour = (s: typeof state) => (s.mode === "steps" ? (s.flavourPick ?? flavourOf(s.items, s.flavourStart)) : null);
+  const flavour = chatFlavour(state);
+  // Picking the flavour the chat is already in takes back a pick; one from outside Step by step switches to it.
+  const pickFlavour = (next: Flavour | null) => {
+    const inChat = state.mode === "steps" ? flavourOf(state.items, state.flavourStart) : null;
+    dispatch({ type: "flavour_picked", flavour: next === inChat ? null : next });
+    if (state.mode !== "steps") {
+      dispatch({ type: "mode_changed", mode: "steps" });
+      if (state.folder) restart(active, "steps");
+    }
   };
 
   // Effort is a launch flag, so the chat's claude restarts on the same session to pick it up (like the mode).
@@ -335,14 +352,8 @@ export default function App() {
   // `note`: what the user wrote on a reproduce card; it goes back to Claude with the answer.
   const decide = (id: string, allow: boolean, note?: string) => {
     const slot = active;
-    const asked = state.items.find((it) => it.type === "permission" && it.id === id);
     to(slot)({ type: "permission_decided", id, allow, note });
     api.respondPermission(slot, id, allow, note ?? null).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
-    // An approved plan: Claude leaves plan mode in-band and carries on in the mode used before planning.
-    if (allow && asked?.type === "permission" && asked.toolName === PLAN_TOOL) {
-      to(slot)({ type: "mode_changed", mode: execMode });
-      api.setPermissionMode(slot, execMode).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
-    }
   };
 
   // From the title bar's failure count: bring the latest failed step's activity into view, opened.
@@ -358,7 +369,7 @@ export default function App() {
     block.classList.add("flash");
   };
 
-  const stepsMode = state.mode === "steps" || state.mode === "teach" || state.mode === "review";
+  const stepsMode = state.mode === "steps";
   const stepsView = stepsMode && state.items.length > 0;
   // "Last turn" (on a Step-by-step page: that page's turn) asks the backend, which compares with how files stood when
   // the turn began. Re-asked as edits land, when a turn starts or ends, and when the session-wide list is re-synced;
@@ -390,7 +401,7 @@ export default function App() {
   }, [changeScope, active, state.folder, state.changedFiles, state.status, state.seq]);
   // "PR #N" while a pull request is reviewed: its files against its base. Picked when the review names its PR.
   // Reviewing with no PR named (a local branch): "Branch", its commits since it left the default branch.
-  const reviewing = state.mode === "review" && state.items.length > 0;
+  const reviewing = flavour === "review" && state.items.length > 0;
   const reviewPr = reviewing ? prNumberOf(state.items) : null;
   const reviewBranch = reviewing && reviewPr === null;
   const hints = reviewing ? reviewHints(state.items, state.folder) : [];
@@ -563,7 +574,7 @@ export default function App() {
   };
   const hero = state.items.length === 0 && !state.thinking;
   // "How the modes work", open on a mode's page.
-  const [guideAt, setGuideAt] = useState<Mode | null>(null);
+  const [guideAt, setGuideAt] = useState<GuideKey | null>(null);
   const composer = (
     <MessageInput
       key={`input-${active}`}
@@ -571,15 +582,10 @@ export default function App() {
       onSend={(text) => sendIn(active, text)}
       onStop={stop}
       mode={state.folder ? state.mode : undefined}
+      flavour={flavour}
       onModeChange={changeMode}
       model={state.model}
-      idlePlaceholder={
-        stepsView
-          ? state.mode === "review" ? "Ask about this file…" : "Ask about this step or change it…"
-          : stepsMode && hero
-            ? state.mode === "review" ? "Which change? e.g. Review PR 128, or Review my branch" : "What should we build, step by step?"
-            : undefined
-      }
+      idlePlaceholder={stepsView ? (flavour === "review" ? "Ask about this file…" : "Ask about this page or change it…") : stepsMode && hero ? HERO_PLACEHOLDER[flavour ?? "none"] : undefined}
       sendAndNext={stepsView ? (text) => sendIn(active, andNext(text)) : undefined}
       hero={hero}
       folder={state.folder}
@@ -646,7 +652,7 @@ export default function App() {
               {hero ? (
                 <div className="hero-wrap">
                   <div className="hero-stack">
-                    {stepsMode && state.folder && <StepsIntro mode={state.mode} onFlavour={changeMode} />}
+                    {stepsMode && state.folder && <StepsIntro picked={state.flavourPick} onPick={pickFlavour} />}
                     {composer}
                   </div>
                 </div>
@@ -654,7 +660,7 @@ export default function App() {
                 <>
                   <FileLinksProvider slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention}>
                     {stepsView ? (
-                      <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} onFlavour={changeMode} autoApprove={autoFor(state.folder)}
+                      <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} onPickFlavour={pickFlavour} autoApprove={autoFor(state.folder)}
                         onAutoApprove={(on) => {
                           if (!state.folder) return;
                           setAutoBy({ ...autoBy, [state.folder]: on });
@@ -696,10 +702,12 @@ export default function App() {
         />
         <ModeGuide
           open={guideAt}
-          current={state.mode}
-          onUse={state.folder && !isBusy(state) ? (mode) => {
+          mode={state.mode}
+          flavour={flavour}
+          onUse={state.folder && !isBusy(state) ? (key) => {
             setGuideAt(null);
-            changeMode(mode);
+            if (key === "ask" || key === "auto" || key === "steps") changeMode(key);
+            else pickFlavour(key);
           } : undefined}
           onClose={() => setGuideAt(null)}
         />

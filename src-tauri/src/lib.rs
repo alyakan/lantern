@@ -205,17 +205,6 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
     }
 }
 
-/// Changes a chat's permission mode without a restart (used to leave plan mode), and remembers it for restarts.
-#[tauri::command]
-async fn set_permission_mode(state: State<'_, AppState>, slot: String, mode: Mode) -> Result<(), String> {
-    let s = state.slots.get(&slot)?;
-    if let Some(cfg) = s.config.lock().unwrap().as_mut() {
-        cfg.mode = mode;
-    }
-    let mut session = s.session.lock().await;
-    session.as_mut().ok_or("No Claude session is running")?.set_permission_mode(mode).await
-}
-
 #[tauri::command]
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
 async fn send_message(state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
@@ -513,7 +502,6 @@ pub fn run() {
             stop_task,
             branch_review,
             set_model,
-            set_permission_mode,
             recent_folders,
             get_file_diff,
             change_summary,
