@@ -10,6 +10,7 @@ import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, 
 import type { Mode } from "./types";
 import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
+import { withShellContext } from "./lib/shell";
 import { stepFile, usePersistentState } from "./lib/layout";
 import { notify } from "./lib/notify";
 import { useShortcut } from "./lib/shortcuts";
@@ -39,6 +40,9 @@ import { TopBar } from "./components/TopBar";
 import "./styles.css";
 
 /** How many `name` steps have finished, subagents' included. */
+/** Commands the user ran from the chat box that have ended. */
+const shellsDone = (items: ChatItem[]) => items.filter((it) => it.type === "shell" && it.status !== "running").length;
+
 function countFinished(items: ChatItem[], name: string): number {
   return items.reduce((n, it) => (it.type === "tool" ? n + (it.name === name && it.status !== "running" ? 1 : 0) + countFinished(it.children, name) : n), 0);
 }
@@ -326,7 +330,7 @@ export default function App() {
     api.changeSummary(slot).then((files) => to(slot)({ type: "changes_synced", files }), () => {});
 
   // A command can create or change files without an edit (cp, mv, a generator): re-check once each one finishes.
-  const commandsDone = countFinished(state.items, "Bash");
+  const commandsDone = countFinished(state.items, "Bash") + shellsDone(state.items);
   useEffect(() => {
     if (commandsDone > 0) syncChanges(active);
   }, [commandsDone]);
@@ -342,10 +346,23 @@ export default function App() {
   const sendIn = (slot: string, text: string) => {
     const pick = chats.slots[slot]?.flavourPick ?? null;
     to(slot)({ type: "user_sent", text, ...(pick ? { switchedTo: pick } : {}) });
-    api.sendMessage(slot, pick ? withFlavourNote(pick, text) : text).then(
+    // Commands run since the last message go first, so Claude sees what they printed.
+    const items = chats.slots[slot]?.items ?? [];
+    api.sendMessage(slot, withShellContext(items, pick ? withFlavourNote(pick, text) : text)).then(
       (turn) => typeof turn === "number" && to(slot)({ type: "turn_numbered", turn }),
       (e) => to(slot)({ type: "failed", text: errText(e) }),
     );
+  };
+
+  // "!command" in the chat box: run in the chat's folder, its output streaming into the conversation.
+  const shellSeq = useRef(0);
+  const runShell = (slot: string, command: string) => {
+    const id = `sh-${Date.now().toString(36)}-${++shellSeq.current}`;
+    to(slot)({ type: "shell_started", id, command });
+    api.runShell(slot, id, command).catch((e) => {
+      to(slot)({ type: "ui_event", event: { kind: "shell_output", id, text: errText(e) } });
+      to(slot)({ type: "ui_event", event: { kind: "shell_done", id, code: null, stopped: false } });
+    });
   };
 
   // A chat's queued messages go out when its turn ends normally, whether or not it's on screen.
@@ -622,6 +639,7 @@ export default function App() {
   const streamHandlers = {
     onDecide: decide,
     onOpenFile: openFile,
+    onStopShell: (id: string) => api.stopShell(active, id).catch(() => {}),
     testRunFor: (id: string) => state.testRuns.find((r) => r.id === id),
     onOpenTestRun: (id: string) => {
       setFocusRun({ id, key: Date.now() });
@@ -641,6 +659,10 @@ export default function App() {
         sendIn(active, text);
       }}
       onStop={stop}
+      onRun={(command) => {
+        if (hero) setOffer([]);
+        runShell(active, command);
+      }}
       mode={state.folder ? state.mode : undefined}
       flavour={flavour}
       onModeChange={changeMode}

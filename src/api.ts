@@ -21,6 +21,9 @@ export const api = {
   setModel: (slot: string, model: string | null) => invoke<void>("set_model", { slot, model }),
   /** Resolves to the turn's number (see the Changes pane's per-turn views). */
   sendMessage: (slot: string, text: string) => invoke<number>("send_message", { slot, text }),
+  /** Runs a command the user typed after "!" in the chat's folder; its output comes as shell_output, then shell_done. */
+  runShell: (slot: string, id: string, command: string) => invoke<void>("run_shell", { slot, id, command }),
+  stopShell: (slot: string, id: string) => invoke<void>("stop_shell", { slot, id }),
   interrupt: (slot: string) => invoke<void>("interrupt", { slot }),
   /** `autoApprove`: Step by step's auto-approve (null keeps the chat's current setting). */
   restartSession: (slot: string, mode: Mode, effort: string | null, autoApprove: boolean | null = null) => invoke<void>("restart_session", { slot, mode, effort, autoApprove }),

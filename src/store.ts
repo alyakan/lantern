@@ -1,6 +1,7 @@
 import type { Hunk, ModelOption, Mode, SlashCommand, UiEvent, TestRun } from "./types";
 import { countChanges } from "./lib/diff";
 import { readFlavourNote, type Flavour } from "./lib/flavour";
+import { KEEP_CHARS, readShellContext, takesShellContext } from "./lib/shell";
 
 export interface EditInfo {
   path: string;
@@ -19,6 +20,21 @@ export interface ToolItem {
   children: ChatItem[];
 }
 
+/** A command the user ran from the chat box ("!git status"), in the chat's folder, outside claude. */
+export interface ShellItem {
+  type: "shell";
+  id: string;
+  command: string;
+  /** What it printed, stdout and stderr together; only the end of it once it's long (see KEEP_CHARS). */
+  output: string;
+  status: "running" | "done" | "failed" | "stopped";
+  code: number | null;
+  startedAt: number;
+  endedAt?: number;
+  /** Went to Claude with a message (see lib/shell.ts). */
+  shared: boolean;
+}
+
 export type ChatItem =
   /** `turn`: the backend's number for the turn this prompt started, for that turn's changes (Step-by-step pages). */
   | {
@@ -35,6 +51,7 @@ export type ChatItem =
     }
   | { type: "assistant"; id: string; text: string }
   | ToolItem
+  | ShellItem
   | { type: "permission"; id: string; toolName: string; input: unknown; decision: "allowed" | "denied" | null; note?: string }
   | { type: "turn"; id: string; isError: boolean; stopped: boolean; result: string | null; durationMs: number | null; denied: number };
 
@@ -174,6 +191,7 @@ export type Action =
   | { type: "failed"; text: string }
   | { type: "dismiss_banner" }
   | { type: "queue_set"; items: string[] }
+  | { type: "shell_started"; id: string; command: string }
   /** The backend numbered the turn the latest prompt started. */
   | { type: "turn_numbered"; turn: number }
   /** The changed files as they stand on disk (from the backend): true counts, and files back to their original gone. */
@@ -246,6 +264,10 @@ function wake(state: State): State {
   return { ...state, status: "running", seq, lastEndedTask: null, items: [...state.items, { type: "user", id: `u${seq}`, text, at: Date.now(), auto: true }] };
 }
 
+function mapShell(items: ChatItem[], id: string, fn: (s: ShellItem) => ShellItem): ChatItem[] {
+  return items.map((it) => (it.type === "shell" && it.id === id ? fn(it) : it));
+}
+
 const isPlanFile = (path: string) => /\/\.claude\/plans\/[^/]+\.md$/.test(path);
 
 function lastLine(text: string): string {
@@ -258,9 +280,21 @@ function applyEvent(state: State, ev: UiEvent): State {
       return { ...state, model: ev.model, sessionId: ev.session_id, status: state.status === "starting" ? "idle" : state.status };
     case "user_text": {
       const seq = state.seq + 1;
-      const { text, flavour } = readFlavourNote(ev.text);
-      return { ...state, seq, items: [...state.items, { type: "user", id: `u${seq}`, text, at: ev.at, ...(flavour ? { switchedTo: flavour } : {}) }] };
+      const sent = readShellContext(ev.text);
+      const { text, flavour } = readFlavourNote(sent.text);
+      const at = ev.at ?? 0;
+      const shells = sent.shells.map((s, i): ShellItem => ({ type: "shell", id: `sh-u${seq}-${i}`, command: s.command, output: s.output, status: s.stopped ? "stopped" : s.code ? "failed" : "done", code: s.code, startedAt: at, endedAt: at, shared: true }));
+      // Commands alone (Claude Code's own `!` mode writes them so): no prompt to show after them.
+      if (shells.length > 0 && !text.trim()) return { ...state, seq, items: [...state.items, ...shells] };
+      return { ...state, seq, items: [...state.items, ...shells, { type: "user", id: `u${seq}`, text, at: ev.at, ...(flavour ? { switchedTo: flavour } : {}) }] };
     }
+    case "shell_output":
+      return { ...state, items: mapShell(state.items, ev.id, (s) => ({ ...s, output: (s.output + ev.text).slice(-KEEP_CHARS) })) };
+    case "shell_done":
+      return {
+        ...state,
+        items: mapShell(state.items, ev.id, (s) => ({ ...s, status: ev.stopped ? "stopped" : ev.code === 0 ? "done" : "failed", code: ev.code, endedAt: Date.now() })),
+      };
     case "thinking":
       return { ...wake(state), thinking: true };
     case "text_delta": {
@@ -387,7 +421,9 @@ export function reducer(state: State, action: Action): State {
       const seq = state.seq + 1;
       const item: ChatItem = { type: "user", id: `u${seq}`, text: action.text, at: Date.now(), ...(action.switchedTo ? { switchedTo: action.switchedTo } : {}) };
       // A picked flavour went with this message.
-      return { ...state, status: "running", thinking: true, stopRequested: false, seq, flavourPick: action.switchedTo ? null : state.flavourPick, items: [...state.items, item] };
+      // The commands run since the last message went with this one (unless it's a slash command).
+      const sent = takesShellContext(action.text) ? state.items.map((it): ChatItem => (it.type === "shell" && !it.shared ? { ...it, shared: true } : it)) : state.items;
+      return { ...state, status: "running", thinking: true, stopRequested: false, seq, flavourPick: action.switchedTo ? null : state.flavourPick, items: [...sent, item] };
     }
     case "mode_changed":
       return { ...state, mode: action.mode, ...(action.flavourStart !== undefined ? { flavourStart: action.flavourStart } : {}) };
@@ -427,6 +463,8 @@ export function reducer(state: State, action: Action): State {
       return { ...state, banner: null };
     case "queue_set":
       return { ...state, queued: action.items };
+    case "shell_started":
+      return { ...state, items: [...state.items, { type: "shell", id: action.id, command: action.command, output: "", status: "running", code: null, startedAt: Date.now(), shared: false }] };
     case "changes_synced": {
       const now = new Map(action.files.map((f) => [f.path, f]));
       // Keep the list's order (the order Claude touched things); anything the backend adds goes at the end.

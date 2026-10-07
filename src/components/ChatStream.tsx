@@ -5,6 +5,7 @@ import { groupItems, type Row } from "../lib/activity";
 import { workingVerb } from "../lib/verbs";
 import { ActivityGroup } from "./ActivityGroup";
 import { PermissionCard } from "./PermissionCard";
+import { ShellBlock } from "./ShellBlock";
 import { TurnNote } from "./TurnNote";
 
 export interface StreamHandlers {
@@ -14,6 +15,8 @@ export interface StreamHandlers {
   /** The test run a Bash step produced, if any, and how to show it in the Tests tab. */
   testRunFor?: (toolUseId: string) => TestRunItem | undefined;
   onOpenTestRun?: (id: string) => void;
+  /** Stops a command the user ran from the chat box. */
+  onStopShell?: (id: string) => void;
 }
 
 interface Props extends StreamHandlers {
@@ -63,6 +66,8 @@ export function ChatStream({ items, folder, sections, live = false, ...handlers 
         return <PermissionCard key={row.id} item={row} onDecide={handlers.onDecide} />;
       case "turn":
         return <TurnNote key={row.id} item={row} />;
+      case "shell":
+        return <ShellBlock key={row.id} item={row} onStop={handlers.onStopShell} />;
     }
   };
 

@@ -8,6 +8,7 @@ pub mod navigation;
 pub mod permission;
 pub mod pr;
 pub mod session;
+pub mod shell;
 pub mod slots;
 pub mod outside;
 pub mod stream_parser;
@@ -215,6 +216,21 @@ async fn send_message(state: State<'_, AppState>, slot: String, text: String) ->
     let mut session = s.session.lock().await;
     session.as_mut().ok_or("No Claude session is running")?.send(&text).await?;
     Ok(turn)
+}
+
+/// Runs a command the user typed after "!" in the chat's folder; its output arrives as ui-events.
+#[tauri::command]
+async fn run_shell(app: AppHandle, state: State<'_, AppState>, slot: String, id: String, command: String) -> Result<(), String> {
+    let s = state.slots.get(&slot)?;
+    let folder = s.folder()?;
+    let path_env = login_path(&state).await;
+    s.shells.run(&id, &command, &folder, path_env.as_deref(), slots::tagged(&slot, emitter(&app)))
+}
+
+#[tauri::command]
+fn stop_shell(state: State<'_, AppState>, slot: String, id: String) -> Result<(), String> {
+    state.slots.get(&slot)?.shells.stop(&id);
+    Ok(())
 }
 
 /// The checked-out branch's commits since it left the default branch, for reviewing a local branch.
@@ -498,6 +514,8 @@ pub fn run() {
             restart_session,
             close_session,
             send_message,
+            run_shell,
+            stop_shell,
             interrupt,
             stop_task,
             branch_review,

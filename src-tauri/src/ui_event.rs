@@ -88,6 +88,10 @@ pub enum UiEvent {
     ConversationReset,
     PermissionRequested { request_id: String, tool_name: String, input: Value },
     SessionEnded { code: Option<i32>, stderr_tail: String },
+    /// Output from a command the user ran from the chat box (see shell.rs).
+    ShellOutput { id: String, text: String },
+    /// That command ended: its exit code (None when a signal ended it), and whether the user stopped it.
+    ShellDone { id: String, code: Option<i32>, stopped: bool },
     Unknown { raw: Value },
     ParseError { line: String },
 }
