@@ -35,15 +35,34 @@ pub struct Shells {
 }
 
 /// A new terminal: (master, the command's side). Wide enough that tools don't wrap their output early.
+///
+/// Both ends are close-on-exec from the moment they exist (not set afterwards, as openpty would need): anything
+/// Lantern starts meanwhile on another thread (claude, another command) mustn't inherit them, or it could read what
+/// the user types (a password) and would keep the terminal open after the command ends. The command gets its side as
+/// its stdin, stdout and stderr only.
 fn open_pty() -> Result<(OwnedFd, OwnedFd), String> {
-    let (mut master, mut slave) = (0, 0);
-    let mut size = libc::winsize { ws_row: 40, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
-    if unsafe { libc::openpty(&mut master, &mut slave, std::ptr::null_mut(), std::ptr::null_mut(), &mut size) } != 0 {
-        return Err(format!("Could not open a terminal for the command: {}", std::io::Error::last_os_error()));
+    let fail = |what: &str| format!("Could not open a terminal for the command ({what}): {}", std::io::Error::last_os_error());
+    let master = unsafe { libc::open(c"/dev/ptmx".as_ptr(), libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC) };
+    if master < 0 {
+        return Err(fail("ptmx"));
     }
-    // The command gets its own side only.
-    unsafe { libc::fcntl(master, libc::F_SETFD, libc::FD_CLOEXEC) };
-    Ok(unsafe { (OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) })
+    let master = unsafe { OwnedFd::from_raw_fd(master) };
+    if unsafe { libc::grantpt(master.as_raw_fd()) } != 0 || unsafe { libc::unlockpt(master.as_raw_fd()) } != 0 {
+        return Err(fail("unlock"));
+    }
+    // The command side's name, from the master itself (ptsname's shared buffer isn't safe across threads).
+    let mut name = [0 as libc::c_char; 128];
+    if unsafe { libc::ioctl(master.as_raw_fd(), libc::TIOCPTYGNAME as _, name.as_mut_ptr()) } != 0 {
+        return Err(fail("name"));
+    }
+    let slave = unsafe { libc::open(name.as_ptr(), libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC) };
+    if slave < 0 {
+        return Err(fail("open"));
+    }
+    let slave = unsafe { OwnedFd::from_raw_fd(slave) };
+    let size = libc::winsize { ws_row: 40, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0 };
+    unsafe { libc::ioctl(slave.as_raw_fd(), libc::TIOCSWINSZ, &size) };
+    Ok((master, slave))
 }
 
 /// A program reading a password turns echo off but keeps reading lines; one that turns both off (a menu you move
@@ -229,6 +248,18 @@ mod tests {
         assert!(!valid_id(""));
         assert!(!valid_id("a;b"));
         assert!(!valid_id(&"s".repeat(33)));
+    }
+
+    #[test]
+    fn neither_end_of_a_terminal_outlives_exec() {
+        let (master, slave) = open_pty().unwrap();
+        for fd in [&master, &slave] {
+            let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) };
+            assert_ne!(flags & libc::FD_CLOEXEC, 0, "a process started on another thread mustn't inherit it");
+        }
+        let mut size: libc::winsize = unsafe { std::mem::zeroed() };
+        unsafe { libc::ioctl(slave.as_raw_fd(), libc::TIOCGWINSZ, &mut size) };
+        assert_eq!((size.ws_col, size.ws_row), (120, 40));
     }
 
     #[test]
