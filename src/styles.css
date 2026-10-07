@@ -892,7 +892,8 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 @media (prefers-reduced-motion: reduce) { .flavour-badge { animation: none; } }
 .flavour-menu { top: calc(100% + 6px); right: 0; width: 320px; }
 .flavour-menu .menu-row { align-items: flex-start; gap: 10px; padding: 7px 8px; }
-.steps-dot.switch { border-style: dashed; }
+/* A ring with a dot in it: WebKit draws a dashed border this small as a couple of dashes, so the circle looked cut off. */
+.steps-dot.switch:not(.current) { border-color: var(--muted); background: radial-gradient(circle, var(--muted) 1.25px, transparent 1.75px); }
 .steps-hint { font-size: 12px; color: var(--muted); }
 
 /* Claude's suggestion of a flavour, on its page: start it, stay, or start another. */
