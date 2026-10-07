@@ -95,6 +95,8 @@ export interface State {
   commands: SlashCommand[];
   /** The models claude offers, for the model menu. */
   models: ModelOption[];
+  /** The MCP tools claude can use this session ("mcp__server__tool"). */
+  mcpTools: string[];
   /** /clear just emptied the conversation; its turn's end adds no marker. */
   cleared: boolean;
   contextWindow: number | null;
@@ -151,6 +153,7 @@ export const initialState: State = {
   contextUsed: null,
   commands: [],
   models: [],
+  mcpTools: [],
   cleared: false,
   contextWindow: null,
   mode: "ask",
@@ -352,6 +355,8 @@ function applyEvent(state: State, ev: UiEvent): State {
       return { ...state, commands: ev.commands };
     case "models":
       return { ...state, models: ev.models };
+    case "mcp_tools":
+      return { ...state, mcpTools: ev.tools };
     // /clear: a new conversation in the same folder. Changed files stay listed; the edits are still on disk.
     case "conversation_reset":
       return { ...state, items: [], sessionId: null, contextUsed: null, thinking: false, cleared: true };

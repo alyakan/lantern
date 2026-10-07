@@ -21,6 +21,7 @@ import { scrollWithin } from "./lib/scrollWithin";
 import { SlotContext } from "./lib/slot";
 import { ModeGuideContext } from "./lib/modeGuide";
 import { ModeGuide, type GuideKey } from "./components/ModeGuide";
+import { SettingsView, type SettingsTab } from "./components/SettingsView";
 import { BannerView } from "./components/BannerView";
 import { ChatView } from "./components/ChatView";
 import { StepsView } from "./components/StepsView";
@@ -651,6 +652,8 @@ export default function App() {
   const hero = state.items.length === 0 && !state.thinking;
   // "How the modes work", open on a mode's page.
   const [guideAt, setGuideAt] = useState<GuideKey | null>(null);
+  const [settingsAt, setSettingsAt] = useState<SettingsTab | null>(null);
+  useShortcut(",", () => setSettingsAt(settingsAt ?? "mcp"));
   const composer = (
     <MessageInput
       key={`input-${active}-${composerEpoch}`}
@@ -714,6 +717,7 @@ export default function App() {
           reviewCollapsed={reviewCollapsed}
           onOpenFolder={openFolder}
           onToggleReview={() => setReviewCollapsed(!reviewCollapsed)}
+          onOpenSettings={() => setSettingsAt("mcp")}
           sessionId={state.sessionId}
           loadSessions={loadSessions}
           onOpenSession={openSession}
@@ -792,6 +796,16 @@ export default function App() {
               onFollow={() => dispatch({ type: "follow_latest" })}
             />
           }
+        />
+        <SettingsView
+          open={settingsAt}
+          onClose={() => setSettingsAt(null)}
+          slot={state.folder ? active : null}
+          live={state.status === "idle" || state.status === "running"}
+          mcpTools={state.mcpTools}
+          commands={state.commands}
+          onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
+          onRestartChat={() => restart(active, state.mode)}
         />
         <ModeGuide
           open={guideAt}

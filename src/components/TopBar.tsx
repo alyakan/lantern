@@ -7,7 +7,7 @@ import { useShortcut } from "../lib/shortcuts";
 import { FolderMenu } from "./FolderPill";
 import { HistoryMenu, type OpenChat } from "./HistoryMenu";
 import type { ActivityStatus } from "../lib/status";
-import { BranchIcon, ClockIcon, FailIcon, FolderIcon, PaneIcon, PlusIcon, WaitIcon } from "./icons";
+import { BranchIcon, ClockIcon, FailIcon, FolderIcon, GearIcon, PaneIcon, PlusIcon, WaitIcon } from "./icons";
 
 interface Props {
   folder: string | null;
@@ -16,6 +16,8 @@ interface Props {
   reviewCollapsed: boolean;
   onOpenFolder: () => void;
   onToggleReview: () => void;
+  /** Opens Settings (MCP servers, skills). */
+  onOpenSettings?: () => void;
   sessionId?: string | null;
   loadSessions?: () => Promise<SessionSummary[]>;
   onOpenSession?: (id: string) => void;
@@ -54,7 +56,7 @@ function taskKind(type: string): string {
 // No native title bar: the traffic lights sit in the left gutter and the bar drags the window. In the centre, like
 // Xcode's activity viewer: the folder and branch on the left (it opens the folder menu, like Xcode's scheme), what
 // Claude is doing on the right, and a progress bar along its bottom edge while it works.
-export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, sessionId = null, loadSessions, onOpenSession, onNewSession, loadRecent, onPickFolder, openChats = [], onSwitchChat, onCloseChat, branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures }: Props) {
+export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, sessionId = null, loadSessions, onOpenSession, onNewSession, loadRecent, onPickFolder, openChats = [], onSwitchChat, onCloseChat, branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures }: Props) {
   // A working chat keeps running in the background when you switch away, so only a starting one blocks switching.
   const busy = status === "starting";
   const backgroundRunning = openChats.some((c) => c.state === "running" || c.state === "waiting" || !!c.background);
@@ -246,6 +248,11 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
       </div>
       <div className="topbar-side end" data-tauri-drag-region>
         <div className="toolbar-group">
+          {onOpenSettings && (
+            <button className="icon" aria-label="Settings" title="Settings (⌘,)" onClick={onOpenSettings}>
+              <GearIcon />
+            </button>
+          )}
           <button className={`icon pane-toggle${reviewCollapsed ? "" : " active"}`} aria-label={toggleLabel} aria-pressed={!reviewCollapsed} title={`${toggleLabel} (⌘\\)`} onClick={onToggleReview}>
             <PaneIcon />
             {reviewCollapsed && changeCount > 0 && <span className="dot" aria-hidden="true" />}

@@ -82,6 +82,8 @@ pub enum UiEvent {
     TaskEnded { task_id: String, tool_use_id: String, status: String, summary: String },
     /// The slash commands this claude offers (reply to `initialize`).
     Commands { commands: Vec<SlashCommand> },
+    /// The MCP tools claude can use this session ("mcp__server__tool"), from its init message.
+    McpTools { tools: Vec<String> },
     /// The models it offers, in its own order: the recommended picks first, then older versions.
     Models { models: Vec<ModelOption> },
     /// `/clear` ran: the conversation starts over in the same process.

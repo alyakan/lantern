@@ -30,6 +30,7 @@ export type UiEvent =
   | { kind: "task_ended"; task_id: string; tool_use_id: string; status: string; summary: string }
   | { kind: "commands"; commands: SlashCommand[] }
   | { kind: "models"; models: ModelOption[] }
+  | { kind: "mcp_tools"; tools: string[] }
   | { kind: "conversation_reset" }
   | { kind: "permission_requested"; request_id: string; tool_name: string; input: unknown }
   | { kind: "session_ended"; code: number | null; stderr_tail: string }
@@ -70,6 +71,41 @@ export interface SlashCommand {
   name: string;
   description: string;
   argument_hint: string;
+}
+
+/** An MCP server as claude reports it (the mcp_status control request). */
+export interface McpServer {
+  name: string;
+  /** "connected", "needs-auth", "failed", "pending", "disabled"… */
+  status: string;
+  serverInfo?: { name?: string; title?: string; version?: string; icons?: { src: string }[]; websiteUrl?: string };
+  /** How it's reached: { type: "stdio", command, args, env } or { type: "http" | "sse", url, headers }, or a claude.ai connector. */
+  config?: Record<string, unknown>;
+  /** "user", "local", "project", "claudeai", "dynamic"… */
+  scope?: string;
+  /** "plugin", "claudeai"… */
+  source?: string;
+  error?: string;
+}
+
+/** A skill or custom command found on disk (see src-tauri/src/skills.rs). */
+export interface SkillEntry {
+  name: string;
+  kind: "skill" | "command";
+  source: "user" | "project" | "plugin";
+  plugin: string | null;
+  path: string;
+  description: string;
+}
+
+/** A server to add with `claude mcp add`. */
+export interface McpServerSpec {
+  name: string;
+  transport: "stdio" | "http" | "sse";
+  target: string;
+  scope: "local" | "user" | "project";
+  env: string[];
+  headers: string[];
 }
 
 /** A model claude offers, in its order (recommended picks first). `value` is what --model takes; "default" = none. */

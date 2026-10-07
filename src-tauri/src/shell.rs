@@ -205,6 +205,37 @@ fn kill_group(pgid: i32) {
     });
 }
 
+/// A command line as the shell would split it into words: spaces separate, quotes group, backslash escapes.
+pub fn split_words(line: &str) -> Result<Vec<String>, String> {
+    let (mut words, mut cur, mut quote, mut any) = (vec![], String::new(), None::<char>, false);
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            (Some('"'), '\\') | (None, '\\') => cur.extend(chars.next()),
+            (Some(_), c) => cur.push(c),
+            (None, '"' | '\'') => {
+                quote = Some(c);
+                any = true;
+            }
+            (None, c) if c.is_whitespace() => {
+                if any || !cur.is_empty() {
+                    words.push(std::mem::take(&mut cur));
+                }
+                any = false;
+            }
+            (None, c) => cur.push(c),
+        }
+    }
+    if quote.is_some() {
+        return Err("A quote isn't closed.".into());
+    }
+    if any || !cur.is_empty() {
+        words.push(cur);
+    }
+    Ok(words)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,6 +271,13 @@ mod tests {
             }
         }
         text
+    }
+
+    #[test]
+    fn splits_a_command_line_like_the_shell() {
+        assert_eq!(split_words(r#"npx -y "@scope/my server" --dir 'a b' x\ y """#).unwrap(), vec!["npx", "-y", "@scope/my server", "--dir", "a b", "x y", ""]);
+        assert!(split_words("echo 'open").is_err());
+        assert!(split_words("   ").unwrap().is_empty());
     }
 
     #[test]

@@ -177,3 +177,12 @@ export const ReviewIcon = () => (
     <line x1="3.6" y1="6" x2="5.8" y2="6" />
   </svg>
 );
+
+// A cog: Settings.
+export const GearIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <circle cx="7" cy="7" r="2" />
+    <path d="M7 1.2v1.6M7 11.2v1.6M1.2 7h1.6M11.2 7h1.6M2.9 2.9l1.15 1.15M9.95 9.95l1.15 1.15M2.9 11.1l1.15-1.15M9.95 4.05l1.15-1.15" />
+    <circle cx="7" cy="7" r="4.2" />
+  </svg>
+);
