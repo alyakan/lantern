@@ -1,10 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { Status } from "../store";
-import type { ModelOption, Mode, RecentFolder, SessionSummary, SlashCommand } from "../types";
+import type { FoundFile, ModelOption, Mode, RecentFolder, SessionSummary, SkillEntry, SlashCommand } from "../types";
 import { basename } from "../lib/diff";
 import { useShortcut } from "../lib/shortcuts";
-import { matchCommands, slashQuery } from "../lib/slash";
-import { scrollWithin } from "../lib/scrollWithin";
+import { matchCommands } from "../lib/slash";
+import { describeCommands, replaceTrigger, sections as menuSections, triggerAt, type MenuCommand } from "../lib/complete";
+import { CompletionMenu, type McpIssue } from "./CompletionMenu";
 import { ArrowUpIcon, BranchIcon, FolderIcon, SparkIcon } from "./icons";
 import { ContextMeter } from "./ContextMeter";
 import { EFFORT_LEVELS, EffortPicker } from "./EffortPicker";
@@ -53,13 +54,20 @@ interface Props {
   effort?: { chosen: string | null; onChoose: (level: string | null) => void };
   /** What "/" offers: claude's slash commands and skills. */
   commands?: SlashCommand[];
+  /** The skills and commands on disk, which tell claude's list apart into skills and commands. */
+  skillIndex?: SkillEntry[];
+  /** What "@" offers: files in the chat's folder matching what's typed. */
+  findFiles?: (query: string) => Promise<FoundFile[]>;
+  /** MCP servers that need something (a login), shown atop the "/" menu, and where to fix them. */
+  mcpIssues?: McpIssue[];
+  onOpenSettings?: () => void;
   /** The chat's unsent text, kept while another chat is on screen. */
   draft?: { initial: string; save: (text: string) => void };
   /** A downloaded update of Lantern, shown under the box until it's taken or left for quitting. */
   update?: { version: string; busy: number; onRestart: () => void; onLater: () => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onRun, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], draft, effort, update }: Props) {
+export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onRun, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, update }: Props) {
   const [text, setTextState] = useState(draft?.initial ?? "");
   const setText = (next: string) => {
     setTextState(next);
@@ -143,21 +151,65 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
     setText("");
   };
 
-  // "/" opens the command menu, filtered by what follows; Escape hides it until the text stops being a command.
-  const query = slashQuery(text);
-  const [dismissed, setDismissed] = useState(false);
-  const [pick, setPick] = useState(0);
-  const matches = query !== null && !dismissed && canType ? matchCommands(commands, query) : [];
+  // "/" or "@" starting the word at the caret, anywhere in the message, opens the menu for it; Escape hides it until
+  // the caret leaves that word.
+  const [caret, setCaret] = useState(text.length);
+  const trigger = canType && !terminal ? triggerAt(text, Math.min(caret, text.length)) : null;
+  const [dismissedAt, setDismissedAt] = useState<number | null>(null);
+  const open = trigger && dismissedAt !== trigger.start ? trigger : null;
   useEffect(() => {
-    setPick(0);
-    if (query === null) setDismissed(false);
-  }, [query]);
+    if (!trigger) setDismissedAt(null);
+  }, [trigger?.start]);
+  const described = useMemo(() => describeCommands(commands, skillIndex ?? []), [commands, skillIndex]);
+  // Each section shows its best few; at the start everything, mid-message only what can be named there.
+  const sections =
+    open?.kind === "/" ? menuSections(matchCommands(described, open.query, 60), open.atStart).map((s) => ({ ...s, items: s.items.slice(0, s.kind === "command" ? 8 : 6) })) : [];
+  const commandItems = sections.flatMap((s) => s.items);
+  const [files, setFiles] = useState<FoundFile[]>([]);
+  const fileQuery = open?.kind === "@" && !open.query.includes(":") ? open.query : null;
+  useEffect(() => {
+    setFiles([]);
+    if (!fileQuery || !findFiles) return;
+    let live = true;
+    const t = setTimeout(() => findFiles(fileQuery).then((f) => live && setFiles(f.slice(0, 8)), () => {}), 80);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [fileQuery]);
+  const count = open?.kind === "/" ? commandItems.length : open?.kind === "@" ? files.length : 0;
+  const issues = open?.kind === "/" ? (mcpIssues ?? []) : [];
+  const menuShown = !!open && (count > 0 || issues.length > 0 || (open.kind === "@" && !!findFiles && !open.query.includes(":")));
+  const [pick, setPick] = useState(0);
+  useEffect(() => setPick(0), [open?.kind, open?.query]);
 
-  /** A command that takes arguments is completed so they can be typed; one that doesn't runs right away. */
-  const accept = (c: SlashCommand) => {
-    if (c.argument_hint) return setText(`/${c.name} `);
-    sendText(`/${c.name}`);
-    setText("");
+  // After the menu puts something in the box, the caret goes after it.
+  const caretTo = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (caretTo.current === null || !area.current) return;
+    area.current.setSelectionRange(caretTo.current, caretTo.current);
+    setCaret(caretTo.current);
+    caretTo.current = null;
+  }, [text]);
+  const put = (value: string) => {
+    if (!open) return;
+    const next = replaceTrigger(text, open, value);
+    caretTo.current = next.caret;
+    setText(next.text);
+  };
+
+  /**
+   * A command alone at the start runs right away, unless it takes arguments (then it's completed so they can be
+   * typed). Everything else, skills included, goes into the text where the "/" was.
+   */
+  const accept = (c: MenuCommand) => {
+    const alone = open?.atStart && text.trim() === text.slice(open.start, open.end).trim();
+    if (alone && c.kind === "command" && !c.argument_hint) {
+      sendText(`/${c.name}`);
+      setText("");
+      return;
+    }
+    put(`/${c.name}`);
   };
 
   // Between compositionstart and compositionend. macOS shows its grey inline predictions as a composition too; a real
@@ -184,13 +236,19 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
     typed.current = "";
   };
 
+  const choose = (i: number, tab = false) => {
+    if (open?.kind === "@") return files[i] && put(`@${files[i].rel}`);
+    const c = commandItems[i];
+    if (c) tab ? put(`/${c.name}`) : accept(c);
+  };
   const onMenuKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (matches.length === 0) return false;
+    if (!menuShown || !open) return false;
     const move = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
-    if (move) setPick((pick + move + matches.length) % matches.length);
-    else if (e.key === "Tab") setText(`/${matches[pick].name} `);
-    else if (e.key === "Enter" && !e.shiftKey && !composing.current) accept(matches[pick]);
-    else if (e.key === "Escape") setDismissed(true);
+    if (e.key === "Escape") setDismissedAt(open.start);
+    else if (count === 0) return false;
+    else if (move) setPick((pick + move + count) % count);
+    else if (e.key === "Tab") choose(pick, true);
+    else if (e.key === "Enter" && !e.shiftKey && !composing.current) choose(pick);
     else return false;
     e.preventDefault();
     return true;
@@ -227,7 +285,20 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
         </ul>
       )}
       <div className={`composer-box${running ? " working" : ""}${terminal ? " terminal" : ""}`} onClick={() => area.current?.focus()}>
-        {matches.length > 0 && <SlashMenu commands={matches} pick={pick} onPick={accept} onHover={setPick} />}
+        {menuShown && open && (
+          <CompletionMenu
+            kind={open.kind}
+            sections={sections}
+            files={files}
+            pick={pick}
+            onPickCommand={accept}
+            onPickFile={(f) => put(`@${f.rel}`)}
+            onHover={setPick}
+            hint={open.kind === "@" && count === 0 ? (open.query ? "No files match" : "Type to find a file in this folder") : undefined}
+            issues={issues}
+            onOpenSettings={onOpenSettings}
+          />
+        )}
         <div className="composer-line">
           {terminal && (
             <span className="terminal-prompt" aria-hidden>
@@ -245,7 +316,11 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
             value={shown}
             disabled={!canType}
             placeholder={placeholder}
-            onChange={(e) => setText(terminal ? `!${e.target.value}` : e.target.value)}
+            onChange={(e) => {
+              setText(terminal ? `!${e.target.value}` : e.target.value);
+              setCaret(e.target.selectionStart ?? e.target.value.length);
+            }}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
             onCompositionStart={() => {
               composing.current = true;
               predicting.current = !imeKey.current;
@@ -333,30 +408,5 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
         </div>
       )}
     </div>
-  );
-}
-
-// Opens above the chat box while a command name is being typed.
-function SlashMenu({ commands, pick, onPick, onHover }: { commands: SlashCommand[]; pick: number; onPick: (c: SlashCommand) => void; onHover: (i: number) => void }) {
-  const list = useRef<HTMLUListElement>(null);
-  useEffect(() => {
-    const item = list.current?.children[pick];
-    if (list.current && item instanceof HTMLElement) scrollWithin(list.current, item, "nearest");
-  }, [pick]);
-  return (
-    <ul className="menu slash-menu" role="listbox" aria-label="Commands" ref={list}>
-      {commands.map((c, i) => (
-        <li key={c.name} role="option" aria-selected={i === pick}>
-          {/* mousedown would take focus from the box; the click still picks. */}
-          <button className={`menu-row${i === pick ? " current" : ""}`} onMouseDown={(e) => e.preventDefault()} onMouseEnter={() => onHover(i)} onClick={() => onPick(c)}>
-            <span className="slash-name">/{c.name}</span>
-            {c.argument_hint && <span className="slash-hint">{c.argument_hint}</span>}
-            <span className="slash-desc" title={c.description}>
-              {c.description}
-            </span>
-          </button>
-        </li>
-      ))}
-    </ul>
   );
 }

@@ -67,6 +67,9 @@ const COMMANDS = [
   { name: "config", description: "Open the settings panel", argument_hint: "" },
   { name: "grill-me", description: "Interview the user relentlessly about a plan or design until reaching shared understanding (user)", argument_hint: "" },
   { name: "superpowers:brainstorming", description: "You MUST use this before any creative work - creating features, building components (plugin)", argument_hint: "" },
+  { name: "pr-description", description: "Write a short, human-sounding pull request description from the real commits (user)", argument_hint: "" },
+  { name: "superpowers:systematic-debugging", description: "Use when encountering any bug or test failure, before proposing fixes (plugin)", argument_hint: "" },
+  { name: "mcp__claude_ai_Linear__triage", description: "Triage new issues into the right team (MCP)", argument_hint: "" },
 ];
 
 // The real initialize reply's model list (CLI 2.1.284, trimmed): recommended picks first, then older versions.

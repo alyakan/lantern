@@ -336,7 +336,20 @@ button.code-block-copy:hover:not(:disabled) { background: var(--bg-hover); color
 .pill .chev { margin-left: 2px; }
 .composer-box { position: relative; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px 8px 8px 12px; background: var(--field); cursor: text; transition: border-color 0.12s; }
 /* Slash commands: opens above the chat box as you type "/". */
-.slash-menu { bottom: calc(100% + 6px); left: 0; right: 0; max-height: 300px; overflow-y: auto; margin: 0; list-style: none; cursor: default; }
+.slash-menu { bottom: calc(100% + 6px); left: 0; right: 0; max-height: 300px; margin: 0; cursor: default; }
+/* In the middle of an empty chat there's only about half the window above the box. */
+.composer.hero .slash-menu { max-height: min(300px, calc(50vh - 130px)); }
+.slash-list, .slash-section-items { list-style: none; margin: 0; padding: 0; }
+.slash-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.slash-section { padding: 6px 8px 2px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint); }
+.slash-source { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--faint); }
+.slash-empty { padding: 6px 8px; font-size: 12px; color: var(--muted); }
+.slash-preview { flex: none; margin: 4px -4px -4px; padding: 7px 12px 8px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.5; color: var(--text-2); max-height: 84px; overflow-y: auto; }
+button.slash-issue { flex: none; display: flex; align-items: center; gap: 8px; width: 100%; margin-bottom: 4px; padding: 6px 8px; border: none; border-radius: var(--radius-chip); background: color-mix(in srgb, var(--working) 12%, transparent); text-align: left; font-size: 12px; color: var(--text); }
+button.slash-issue:hover:not(:disabled) { background: color-mix(in srgb, var(--working) 18%, transparent); }
+.slash-issue-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--working); }
+.slash-issue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slash-issue-go { flex: none; color: var(--muted); }
 .slash-menu .menu-row { align-items: baseline; }
 .slash-name { flex: none; font-family: var(--mono); font-size: 12px; color: var(--text); }
 .slash-hint { flex: none; font-family: var(--mono); font-size: 11.5px; color: var(--faint); }

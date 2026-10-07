@@ -9,7 +9,7 @@ export function slashQuery(text: string): string | null {
  * Commands matching what's typed, best first: names that start with it, then names with a part (after ":" or "-")
  * that starts with it, then names that contain it anywhere. Shorter names win ties, so "compact" beats "compact-x".
  */
-export function matchCommands(commands: SlashCommand[], query: string, limit = 8): SlashCommand[] {
+export function matchCommands<T extends SlashCommand>(commands: T[], query: string, limit = 8): T[] {
   const q = query.toLowerCase();
   const rank = (name: string) => {
     const n = name.toLowerCase();

@@ -1,5 +1,6 @@
 import type { ChatItem, EditInfo, ToolItem } from "../store";
 import { relativeTo } from "./diff";
+import { serverLabel } from "./complete";
 
 export type Step = ToolItem;
 type AssistantItem = Extract<ChatItem, { type: "assistant" }>;
@@ -59,7 +60,7 @@ function foldTurn(items: ChatItem[], live: boolean): Row[] {
   return [...before, block, ...rest.slice(before.length)];
 }
 
-type Category = "read" | "search" | "run" | "skill" | "agent" | "web" | "edit" | "plan" | "reproduce" | "other";
+type Category = "read" | "search" | "run" | "skill" | "agent" | "web" | "edit" | "plan" | "reproduce" | "mcp" | "other";
 
 const CATEGORY_OF: Record<string, Category> = {
   Read: "read", NotebookRead: "read",
@@ -85,10 +86,25 @@ const PHRASE: Record<Category, (n: number) => string> = {
   edit: (n) => `made ${plural(n, "edit")}`,
   plan: (n) => (n === 1 ? "proposed a plan" : `proposed ${n} plans`),
   reproduce: (n) => (n === 1 ? "had you reproduce it" : `had you reproduce it ${n} times`),
+  // Said per server instead (see summarize).
+  mcp: (n) => `used ${plural(n, "MCP tool")}`,
   other: (n) => `used ${plural(n, "other tool")}`,
 };
 
-const categoryOf = (step: Step): Category => CATEGORY_OF[step.name] ?? "other";
+/** An MCP tool call's server and tool as people say them ("Linear", "create issue"); null for other tools. */
+export function mcpTool(name: string): { server: string; tool: string } | null {
+  const m = /^mcp__(.+?)__(.+)$/.exec(name);
+  if (!m || CATEGORY_OF[name]) return null;
+  return { server: serverLabel(m[1]), tool: m[2].replace(/_/g, " ") };
+}
+
+const categoryOf = (step: Step): Category => CATEGORY_OF[step.name] ?? (mcpTool(step.name) ? "mcp" : "other");
+
+/** A step's tool, for its line: an MCP tool by its server and name ("Linear · create issue"). */
+export function stepLabel(step: Step): string {
+  const mcp = mcpTool(step.name);
+  return mcp ? `${mcp.server} · ${mcp.tool}` : step.name;
+}
 
 /** "Read 4 files, ran 1 command". Applied edits are left out unless asked for: they get their own visible lines. */
 export function summarize(steps: Step[], withEdits = false): string {
@@ -98,9 +114,15 @@ export function summarize(steps: Step[], withEdits = false): string {
     const c = categoryOf(s);
     counts.set(c, (counts.get(c) ?? 0) + 1);
   }
+  // MCP tools by server, in the order they were used: "used Linear 2 times".
+  const servers = new Map<string, number>();
+  for (const s of steps) {
+    const mcp = mcpTool(s.name);
+    if (mcp) servers.set(mcp.server, (servers.get(mcp.server) ?? 0) + 1);
+  }
   const text = (Object.keys(PHRASE) as Category[])
     .filter((c) => counts.has(c))
-    .map((c) => PHRASE[c](counts.get(c)!))
+    .flatMap((c) => (c === "mcp" ? [...servers].map(([server, n]) => `used ${server}${n === 1 ? "" : ` ${n} times`}`) : [PHRASE[c](counts.get(c)!)]))
     .join(", ");
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
@@ -121,6 +143,8 @@ export function stepTarget(tool: ToolItem, folder: string | null): string {
 }
 
 export function describeStep(tool: ToolItem, folder: string | null): string {
+  const mcp = mcpTool(tool.name);
+  if (mcp) return `Using ${mcp.server}: ${mcp.tool}`;
   const verb = VERB[categoryOf(tool)] ?? tool.name;
   return `${verb} ${stepTarget(tool, folder)}`.trim();
 }
