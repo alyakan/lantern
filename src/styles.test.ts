@@ -12,6 +12,14 @@ const selectable = css
   .flatMap((rule) => rule.split("{")[0].split(","))
   .map((s) => s.trim());
 
+describe("the History menu", () => {
+  it("doesn't let a long list of past sessions squeeze the open chats", () => {
+    const rule = css.match(/\.history-menu \.open-chats-list \{([^}]*)\}/)?.[1] ?? "";
+    expect(rule).toMatch(/flex:\s*none/);
+    expect(rule).toMatch(/max-height:/);
+  });
+});
+
 describe("text you can select and copy", () => {
   it("includes a review's findings, what changed, notes and summary table", () => {
     for (const cls of [".finding-text", ".review-preface", ".review-changed", ".review-notes", ".review-table"]) {

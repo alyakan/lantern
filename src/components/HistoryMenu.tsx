@@ -58,7 +58,7 @@ export function HistoryMenu({ sessions, currentId, onOpen, onClose, open = [], o
       {(current || shownOpen.length > 0) && (
         <>
           <div className="menu-heading">Open</div>
-          <ul className="menu-list" role="listbox" aria-label="Open chats">
+          <ul className="menu-list open-chats-list" role="listbox" aria-label="Open chats">
             {current && (
               <li role="option" aria-selected>
                 <button className="menu-row current" title={current.title} onClick={onClose}>
