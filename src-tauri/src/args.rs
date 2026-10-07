@@ -100,8 +100,9 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
         .collect();
     a.push("--permission-mode".into());
     a.push(if auto { "auto" } else { mode.cli_name() }.into());
-    // Plan mode needs the in-app prompt too: that's where the plan is approved.
-    if !auto {
+    // Every mode gets the in-app prompt. Plan mode approves its plan there; in auto mode the classifier decides, but
+    // when Claude Code falls back to asking (repeated blocks, an ask rule) a -p run without a prompt tool just denies.
+    {
         let cfg = serde_json::json!({"mcpServers": {"lantern": {
             "type": "stdio",
             "command": helper.exe,
@@ -170,11 +171,14 @@ mod tests {
         assert_eq!(server["env"]["LANTERN_SOCKET"], "/tmp/a.sock");
     }
 
+    /// The classifier approves or blocks; when Claude Code falls back to asking (repeated blocks, an ask rule), the
+    /// question has to reach the app, or the action is denied without the user ever seeing it.
     #[test]
-    fn auto_mode_has_no_helper() {
+    fn auto_mode_keeps_the_in_app_prompt_for_when_auto_mode_asks() {
         let a = build_args(Mode::Auto, false, None, None, None, &helper());
         assert_eq!(value_after(&a, "--permission-mode"), Some("auto"));
-        assert!(!a.iter().any(|x| x == "--mcp-config" || x == "--permission-prompt-tool"));
+        assert_eq!(value_after(&a, "--permission-prompt-tool"), Some("mcp__lantern__approve"));
+        assert!(a.iter().any(|x| x == "--mcp-config"));
     }
 
     #[test]
@@ -250,7 +254,7 @@ mod tests {
         for mode in [Mode::Steps, Mode::Teach] {
             let a = build_args(mode, true, None, None, None, &helper());
             assert_eq!(value_after(&a, "--permission-mode"), Some("auto"));
-            assert!(!a.iter().any(|x| x == "--permission-prompt-tool" || x == "--mcp-config"));
+            assert_eq!(value_after(&a, "--permission-prompt-tool"), Some("mcp__lantern__approve"));
             assert!(value_after(&a, "--append-system-prompt").unwrap().contains("incremental-dev"));
         }
         let ask = build_args(Mode::Ask, true, None, None, None, &helper());
