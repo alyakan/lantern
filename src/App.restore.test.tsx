@@ -4,7 +4,8 @@ import { clearMocks } from "@tauri-apps/api/mocks";
 import type { SavedChat } from "./lib/restore";
 
 // The editor isn't needed here, and doesn't load in jsdom.
-vi.mock("./monaco", () => ({}));
+// The diff and file viewers load lazily and may still ask for its theme names before a test ends.
+vi.mock("./monaco", () => ({ LIGHT_THEME: "lantern-light", DARK_THEME: "lantern-dark" }));
 vi.mock("@monaco-editor/react", () => ({ default: () => null, DiffEditor: () => null, loader: { config: () => {} } }));
 
 const FOLDER = "/Users/you/projects/acme-api";
