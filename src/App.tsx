@@ -32,6 +32,8 @@ import { MessageInput } from "./components/MessageInput";
 import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { SetupScreen } from "./components/SetupScreen";
+import { RestoreCard } from "./components/RestoreCard";
+import { chatsToSave, loadSaved, save, screenFirst, withOffered, type SavedChat } from "./lib/restore";
 import { SplitPane } from "./components/SplitPane";
 import { TopBar } from "./components/TopBar";
 import "./styles.css";
@@ -202,10 +204,13 @@ export default function App() {
 
   // `quiet`: reopening the remembered project at launch; if that fails (e.g. the folder is gone), just forget it.
   const startFresh = (folder: string, quiet = false) => {
-    if (!state.claudePath) return;
+    if (state.claudePath) startIn(takeSlot(), folder, quiet);
+  };
+
+  const startIn = (slot: string, folder: string, quiet = false) => {
     const { claudePath } = state;
+    if (!claudePath) return;
     const mode = modeFor(folder);
-    const slot = takeSlot();
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode });
     api.startSession(slot, claudePath, folder, { mode, model, effort, auto_approve: autoFor(folder) }).then(
@@ -255,12 +260,17 @@ export default function App() {
     const already = Object.entries(chats.slots).find(([, s]) => s.sessionId === sessionId);
     if (already) return switchTo(already[0]);
     const { claudePath, folder } = state;
+    if (!claudePath || !folder) return;
+    const reuse = state.items.length === 0 && !isBusy(state);
+    resumeIn(takeSlot(), folder, sessionId, reuse);
+  };
+
+  const resumeIn = (slot: string, folder: string, sessionId: string, reuse = false) => {
+    const { claudePath } = state;
+    if (!claudePath) return;
     // The mode it was last in (and for an older Debug, Teach or Review session, that flavour of Step by step); one from
     // before modes were kept per session reopens as a plain chat, not as whatever this folder's newest chat is doing.
     const { mode, flavour: flavourStart } = savedMode(sessionModes[sessionId]);
-    if (!claudePath || !folder) return;
-    const reuse = state.items.length === 0 && !isBusy(state);
-    const slot = takeSlot();
     to(slot)(reuse ? { type: "restarting" } : { type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode, flavourStart });
     api
@@ -270,6 +280,46 @@ export default function App() {
         to(slot)({ type: "session_ready" });
       })
       .catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+  };
+
+  // The chats that were open when Lantern last closed, offered back at launch until restored, dismissed, or a message
+  // is sent in a new chat instead.
+  const [offer, setOffer] = useState<SavedChat[]>(loadSaved);
+  // Bumped to remount the chat box when a restore puts unsent text back into the chat on screen.
+  const [composerEpoch, setComposerEpoch] = useState(0);
+
+  // A chat from last time, into `slot`: its conversation continued, or (typed but never sent) a new one in its folder;
+  // either way with its unsent text back in the box.
+  const restoreInto = (slot: string, c: SavedChat) => {
+    if (c.draft) drafts.current[slot] = c.draft;
+    if (c.sessionId) resumeIn(slot, c.folder, c.sessionId);
+    else startIn(slot, c.folder);
+  };
+  const openAlready = (c: SavedChat) => (c.sessionId ? Object.entries(chats.slots).find(([, s]) => s.sessionId === c.sessionId)?.[0] : undefined);
+
+  // One chat, on screen (in the empty chat on screen if there is one).
+  const restoreOne = (c: SavedChat) => {
+    setOffer((o) => o.filter((x) => x !== c));
+    const already = openAlready(c);
+    if (already) return switchTo(already);
+    if (!state.claudePath) return;
+    restoreInto(takeSlot(), c);
+    setComposerEpoch((e) => e + 1);
+    setLastFolder(c.folder);
+  };
+
+  // Every chat: the one that was on screen comes back on screen, the others open behind it.
+  const restoreAll = () => {
+    const [first, ...rest] = screenFirst(offer);
+    if (!first || !state.claudePath) return;
+    restoreOne(first);
+    setOffer([]);
+    for (const c of rest) {
+      if (openAlready(c)) continue;
+      const slot = `s${++slotSeq.current}`;
+      dispatchChats({ type: "add", slot });
+      restoreInto(slot, c);
+    }
   };
 
   const syncChanges = (slot: string) =>
@@ -505,6 +555,10 @@ export default function App() {
     }
   }, [chats.slots]);
 
+  // Saved as they change, so a crash or force-quit leaves them to restore too.
+  const saveOpen = () => save(withOffered(chatsToSave(chats.slots, active, drafts.current, titles), offer));
+  useEffect(saveOpen, [chats.slots, active, titles, offer]);
+
   const announced = useRef<Record<string, string>>({});
   // Chats that finished in the background and haven't been looked at since: a blue dot, like an unread message.
   const [unread, setUnread] = useState<Record<string, true>>({});
@@ -579,9 +633,13 @@ export default function App() {
   const [guideAt, setGuideAt] = useState<GuideKey | null>(null);
   const composer = (
     <MessageInput
-      key={`input-${active}`}
+      key={`input-${active}-${composerEpoch}`}
       status={state.status}
-      onSend={(text) => sendIn(active, text)}
+      onSend={(text) => {
+        // Starting something new instead: the chats from last time aren't offered any more.
+        if (hero) setOffer([]);
+        sendIn(active, text);
+      }}
       onStop={stop}
       mode={state.folder ? state.mode : undefined}
       flavour={flavour}
@@ -599,7 +657,13 @@ export default function App() {
       usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs }}
       queue={{ items: state.queued, set: (items) => dispatch({ type: "queue_set", items }) }}
       commands={state.commands}
-      draft={{ initial: drafts.current[active] ?? "", save: (text) => (drafts.current[active] = text) }}
+      draft={{
+        initial: drafts.current[active] ?? "",
+        save: (text) => {
+          drafts.current[active] = text;
+          saveOpen();
+        },
+      }}
       update={
         update && !updateLater
           ? {
@@ -654,6 +718,9 @@ export default function App() {
               {hero ? (
                 <div className="hero-wrap">
                   <div className="hero-stack">
+                    {offer.length > 0 && state.claudePath && (
+                      <RestoreCard chats={offer} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />
+                    )}
                     {stepsMode && state.folder && <StepsIntro picked={state.flavourPick} onPick={pickFlavour} />}
                     {composer}
                   </div>

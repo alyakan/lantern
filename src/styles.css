@@ -322,6 +322,10 @@ button.code-block-copy:hover:not(:disabled) { background: var(--bg-hover); color
 .steps-intro-title { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; color: var(--text); }
 .steps-intro-title svg { color: var(--text-2); }
 .steps-intro-line { margin: 0; font-size: 12.5px; line-height: 1.55; color: var(--text-2); }
+.restore-card .steps-intro-head { justify-content: space-between; }
+.restore-card button.restore-close { margin: -4px -6px -4px 0; }
+.restore-list { list-style: none; margin: 0 -6px; padding: 0; max-height: 180px; overflow-y: auto; }
+.restore-actions { display: flex; justify-content: flex-end; }
 .composer-pills { display: flex; gap: 6px; margin-bottom: 8px; }
 /* Capsule like VS Code's folder picker: transparent with a hairline border; a subtle fill only on hover. */
 .pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px 0 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: transparent; color: var(--text-2); font-size: 12.5px; transition: background 0.12s; }
