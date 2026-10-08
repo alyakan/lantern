@@ -31,6 +31,12 @@ export type UiEvent =
   | { kind: "commands"; commands: SlashCommand[] }
   | { kind: "models"; models: ModelOption[] }
   | { kind: "mcp_tools"; tools: string[] }
+  | { kind: "agent_model"; parent: string | null; model: string }
+  | { kind: "agent_started"; tool_use_id: string; subagent_type: string; description: string; model: string | null }
+  | { kind: "agent_progress"; tool_use_id: string; description: string; tokens: number; tool_uses: number; duration_ms: number }
+  | { kind: "advisor_started"; parent: string | null; id: string }
+  | { kind: "advisor_done"; parent: string | null; id: string; outcome: "reviewed" | "declined" | "unavailable"; error_code: string | null }
+  | { kind: "model_usage"; models: ModelCost[] }
   | { kind: "conversation_reset" }
   | { kind: "permission_requested"; request_id: string; tool_name: string; input: unknown }
   | { kind: "session_ended"; code: number | null; stderr_tail: string }
@@ -64,6 +70,14 @@ export interface FileDiff {
   current: string;
   created: boolean;
   deleted: boolean;
+}
+
+/** What a turn cost on one model (the main one, subagents', the advisor's). */
+export interface ModelCost {
+  model: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
 }
 
 /** A slash command claude offers: built-in, custom (.claude/commands) or a skill. */

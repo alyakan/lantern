@@ -1,4 +1,4 @@
-import type { Hunk, ModelOption, Mode, SlashCommand, UiEvent, TestRun } from "./types";
+import type { Hunk, ModelCost, ModelOption, Mode, SlashCommand, UiEvent, TestRun } from "./types";
 import { countChanges } from "./lib/diff";
 import { readFlavourNote, type Flavour } from "./lib/flavour";
 import { KEEP_CHARS, readShellContext, takesShellContext } from "./lib/shell";
@@ -10,6 +10,18 @@ export interface EditInfo {
   hunks: Hunk[];
 }
 
+/** A subagent's Agent step: what it is, the model it runs on, and what it's doing now. */
+export interface AgentInfo {
+  /** "Explore", "general-purpose", a custom agent's name. */
+  type: string;
+  description: string;
+  /** The model its messages come from, once one has. */
+  model?: string;
+  /** The model it asked for, if any. */
+  requested?: string | null;
+  progress?: { description: string; tokens: number; toolUses: number; durationMs: number };
+}
+
 export interface ToolItem {
   type: "tool";
   id: string;
@@ -19,6 +31,11 @@ export interface ToolItem {
   output: string | null;
   edit: EditInfo | null;
   children: ChatItem[];
+  /** When it started and ended (ms since the epoch), live only: a reopened session doesn't know. */
+  startedAt?: number;
+  endedAt?: number;
+  /** Set on a subagent's Agent (or Task) step. */
+  agent?: AgentInfo;
 }
 
 /** A command the user ran from the chat box ("!git status"), in the chat's folder, outside claude. */
@@ -98,6 +115,8 @@ export interface State {
   models: ModelOption[];
   /** The MCP tools claude can use this session ("mcp__server__tool"). */
   mcpTools: string[];
+  /** What the last turn cost per model (main, subagents', advisor's). */
+  modelUsage: ModelCost[];
   /** /clear just emptied the conversation; its turn's end adds no marker. */
   cleared: boolean;
   contextWindow: number | null;
@@ -155,6 +174,7 @@ export const initialState: State = {
   commands: [],
   models: [],
   mcpTools: [],
+  modelUsage: [],
   cleared: false,
   contextWindow: null,
   mode: "ask",
@@ -256,9 +276,14 @@ function settleRunning(items: ChatItem[]): ChatItem[] {
   );
 }
 
+// Replayed steps were all "started" at load time: not when they ran.
+function withoutTimes(items: ChatItem[]): ChatItem[] {
+  return items.map((it): ChatItem => (it.type === "tool" ? { ...it, startedAt: undefined, endedAt: undefined, children: withoutTimes(it.children) } : it));
+}
+
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {} };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [] };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -320,7 +345,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       return {
         ...s,
         thinking: false,
-        items: insert(s.items, ev.parent, { type: "tool", id: ev.tool_use_id, name: ev.name, summary: ev.summary, status: "running", output: null, edit: null, children: [] }),
+        items: insert(s.items, ev.parent, { type: "tool", id: ev.tool_use_id, name: ev.name, summary: ev.summary, status: "running", output: null, edit: null, children: [], startedAt: Date.now() }),
       };
     }
     // In plan mode Claude writes its plan to ~/.claude/plans; that's not a change to the project.
@@ -335,7 +360,29 @@ function applyEvent(state: State, ev: UiEvent): State {
         items: mapTools(state.items, ev.tool_use_id, (t) => ({ ...t, edit: { path: ev.path, created: ev.created, hunks: ev.hunks } })),
       };
     case "tool_finished":
-      return { ...state, items: mapTools(state.items, ev.tool_use_id, (t) => ({ ...t, status: ev.is_error ? "error" : "done", output: ev.output })) };
+      return { ...state, items: mapTools(state.items, ev.tool_use_id, (t) => ({ ...t, status: ev.is_error ? "error" : "done", output: ev.output, endedAt: Date.now() })) };
+    case "agent_started":
+      return { ...state, items: mapTools(state.items, ev.tool_use_id, (t) => ({ ...t, agent: { ...t.agent, type: ev.subagent_type, description: ev.description, requested: ev.model } })) };
+    case "agent_model":
+      // The main thread's: what the chat runs on now (the model menu names it).
+      if (!ev.parent) return { ...state, model: ev.model };
+      return { ...state, items: mapTools(state.items, ev.parent, (t) => ({ ...t, agent: { type: "general-purpose", description: "", ...t.agent, model: ev.model } })) };
+    case "agent_progress":
+      return {
+        ...state,
+        items: mapTools(state.items, ev.tool_use_id, (t) => ({ ...t, agent: { type: "general-purpose", description: "", ...t.agent, progress: { description: ev.description, tokens: ev.tokens, toolUses: ev.tool_uses, durationMs: ev.duration_ms } } })),
+      };
+    // The advisor is a step like any other in the turn's work: running while it's consulted, then what it said.
+    case "advisor_started": {
+      const s = wake(state);
+      return { ...s, thinking: false, items: insert(s.items, ev.parent, { type: "tool", id: ev.id, name: "advisor", summary: "", status: "running", output: null, edit: null, children: [], startedAt: Date.now() }) };
+    }
+    case "advisor_done": {
+      const summary = ev.outcome === "unavailable" ? `unavailable${ev.error_code ? ` (${ev.error_code})` : ""}` : ev.outcome;
+      return { ...state, items: mapTools(state.items, ev.id, (t) => ({ ...t, summary, status: ev.outcome === "unavailable" ? "error" : "done", endedAt: Date.now() })) };
+    }
+    case "model_usage":
+      return { ...state, modelUsage: ev.models };
     case "test_run": {
       const run: TestRunItem = { id: ev.tool_use_id, command: ev.command, run: ev.run };
       const others = state.testRuns.filter((r) => r.id !== run.id);
@@ -420,7 +467,7 @@ export function reducer(state: State, action: Action): State {
       // The backend keeps the replayed session's last turn as turn 0; earlier turns' changes aren't known.
       const last = replayed.items.map((it) => it.type).lastIndexOf("user");
       const items = replayed.items.map((it, i): ChatItem => (i === last && it.type === "user" ? { ...it, turn: 0 } : it));
-      return { ...replayed, status: "starting", thinking: false, items: settleRunning(items) };
+      return { ...replayed, status: "starting", thinking: false, items: settleRunning(withoutTimes(items)) };
     }
     case "turn_numbered": {
       const at = state.items.map((it) => it.type === "user" && it.turn === undefined).lastIndexOf(true);

@@ -60,7 +60,7 @@ function foldTurn(items: ChatItem[], live: boolean): Row[] {
   return [...before, block, ...rest.slice(before.length)];
 }
 
-type Category = "read" | "search" | "run" | "skill" | "agent" | "web" | "edit" | "plan" | "reproduce" | "mcp" | "other";
+type Category = "read" | "search" | "run" | "skill" | "agent" | "advisor" | "web" | "edit" | "plan" | "reproduce" | "mcp" | "other";
 
 const CATEGORY_OF: Record<string, Category> = {
   Read: "read", NotebookRead: "read",
@@ -68,6 +68,7 @@ const CATEGORY_OF: Record<string, Category> = {
   Bash: "run", BashOutput: "run",
   Skill: "skill",
   Task: "agent", Agent: "agent",
+  advisor: "advisor",
   WebFetch: "web", WebSearch: "web",
   Edit: "edit", MultiEdit: "edit", Write: "edit", NotebookEdit: "edit",
   ExitPlanMode: "plan",
@@ -82,6 +83,7 @@ const PHRASE: Record<Category, (n: number) => string> = {
   run: (n) => `ran ${plural(n, "command")}`,
   skill: (n) => `used ${plural(n, "skill")}`,
   agent: (n) => `ran ${plural(n, "subagent")}`,
+  advisor: (n) => (n === 1 ? "consulted the advisor" : `consulted the advisor ${n} times`),
   web: (n) => `made ${plural(n, "web lookup")}`,
   edit: (n) => `made ${plural(n, "edit")}`,
   plan: (n) => (n === 1 ? "proposed a plan" : `proposed ${n} plans`),
@@ -103,6 +105,7 @@ const categoryOf = (step: Step): Category => CATEGORY_OF[step.name] ?? (mcpTool(
 /** A step's tool, for its line: an MCP tool by its server and name ("Linear · create issue"). */
 export function stepLabel(step: Step): string {
   const mcp = mcpTool(step.name);
+  if (step.name === "advisor") return "Advisor";
   return mcp ? `${mcp.server} · ${mcp.tool}` : step.name;
 }
 
@@ -136,7 +139,7 @@ export function runningStep(steps: Step[]): ToolItem | null {
   return null;
 }
 
-const VERB: Partial<Record<Category, string>> = { read: "Reading", search: "Searching", run: "Running", skill: "Using skill", plan: "Proposing a plan", reproduce: "Waiting for you to reproduce", agent: "Running subagent:", web: "Fetching", edit: "Editing" };
+const VERB: Partial<Record<Category, string>> = { advisor: "Consulting the advisor", read: "Reading", search: "Searching", run: "Running", skill: "Using skill", plan: "Proposing a plan", reproduce: "Waiting for you to reproduce", agent: "Running subagent:", web: "Fetching", edit: "Editing" };
 
 export function stepTarget(tool: ToolItem, folder: string | null): string {
   return relativeTo(tool.edit?.path ?? tool.summary, folder);

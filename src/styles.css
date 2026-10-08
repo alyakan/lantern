@@ -1059,3 +1059,58 @@ label.mcp-scope-option { flex-direction: row; align-items: flex-start; gap: 8px;
 .harness-editor .wide { grid-column: 1 / -1; }
 .harness-editor p { margin: 0; }
 button.harness-restore { align-self: flex-start; border: none; background: none; padding: 0; font-size: 12px; color: var(--muted); text-decoration: underline; }
+
+/* Agents tab: which agent and model does what in the latest turn. Each model family has its own accent. */
+:root { --tone-opus: #8b5cf6; --tone-sonnet: #3b82f6; --tone-haiku: #10b981; --tone-fable: #f59e0b; --tone-none: var(--faint); }
+.tab-live { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--working); vertical-align: 1px; animation: agents-pulse 1.4s ease-in-out infinite; }
+@keyframes agents-pulse { 50% { opacity: 0.35; } }
+.tone-opus { --tone: var(--tone-opus); }
+.tone-sonnet { --tone: var(--tone-sonnet); }
+.tone-haiku { --tone: var(--tone-haiku); }
+.tone-fable { --tone: var(--tone-fable); }
+.tone-none { --tone: var(--tone-none); }
+.agents-empty { padding: 40px 28px; text-align: center; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.agents { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; padding: 14px 16px 12px; overflow-y: auto; }
+.agents-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.agents-state { flex: none; padding: 1px 8px; border-radius: 999px; background: var(--bg-subtle); font-size: 11px; font-weight: 600; color: var(--muted); }
+.agents-state.live { background: color-mix(in srgb, var(--working) 16%, transparent); color: var(--working); }
+.agents-prompt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--text-2); }
+.agents-board { display: flex; gap: 14px; align-items: flex-start; }
+.agents-flow { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; }
+.agents-card { position: relative; width: 100%; padding: 10px 12px; border: 1px dashed color-mix(in srgb, var(--tone) 55%, var(--line-strong)); border-radius: 8px; background: color-mix(in srgb, var(--tone) 5%, var(--field)); transition: border-color 0.2s, box-shadow 0.2s; }
+.agents-card.active { border-style: solid; border-color: var(--tone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 14%, transparent); }
+.agents-card-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.agents-model { font-family: var(--mono); font-size: 11.5px; font-weight: 500; color: var(--tone); }
+.agents-effort { font-size: 11px; font-weight: 500; color: var(--muted); }
+.agents-card-sub { margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: var(--muted); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.agents-now { margin-top: 6px; font-family: var(--mono); font-size: 11.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agents-card.active .agents-now::before { content: "▸ "; color: var(--tone); }
+.agents-card.advisor { flex: 0 0 34%; max-width: 230px; }
+.agents-quiet { margin-top: 8px; font-size: 11.5px; color: var(--faint); }
+.agents-calls { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
+.agents-call { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11.5px; color: var(--text-2); }
+.agents-call-moment { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agents-chip { flex: none; padding: 0 7px; border-radius: 999px; background: var(--bg-subtle); font-size: 10.5px; line-height: 17px; color: var(--muted); }
+.agents-call.advising .agents-chip, .agents-card.running .agents-chip { background: color-mix(in srgb, var(--tone) 18%, transparent); color: var(--text); }
+.agents-call.reviewed .agents-chip, .agents-card.done .agents-chip { background: color-mix(in srgb, var(--add) 16%, transparent); color: var(--text-2); }
+.agents-call.unavailable .agents-chip, .agents-call.declined .agents-chip, .agents-card.error .agents-chip { background: color-mix(in srgb, var(--del) 16%, transparent); color: var(--del); }
+.agents-subs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; width: 100%; }
+.agents-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 8px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The line work travels along: dots moving down to the subagents, and back up when they're done. */
+.agents-link { width: 2px; height: 22px; background: repeating-linear-gradient(to bottom, var(--line-strong) 0 3px, transparent 3px 7px); }
+.agents-link.flowing { background: repeating-linear-gradient(to bottom, var(--working) 0 3px, transparent 3px 7px); background-size: 2px 14px; animation: agents-flow 0.7s linear infinite; }
+.agents-link.flowing.up { animation-direction: reverse; }
+@keyframes agents-flow { to { background-position: 0 14px; } }
+.agents-card.back { opacity: 0.55; }
+.agents-card.back.reached { opacity: 1; border-style: solid; }
+.agents-log { flex: 1 1 120px; min-height: 90px; margin: 0; padding: 6px 0; list-style: none; overflow-y: auto; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11px; }
+.agents-log li { display: grid; grid-template-columns: 64px 92px 1fr auto; gap: 8px; padding: 2px 0; color: var(--text-2); }
+.agents-log li.error .agents-log-text { color: var(--del); }
+.agents-log li.latest { color: var(--text); }
+.agents-log-time, .agents-log-model { color: var(--faint); }
+.agents-log-agent { color: var(--tone); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agents-log-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agents-usage { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.agents-usage > span { display: inline-flex; align-items: center; gap: 6px; }
+.agents-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tone); }
+@media (prefers-reduced-motion: reduce) { .agents-link.flowing, .tab-live { animation: none; } }
