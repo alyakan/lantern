@@ -35,7 +35,7 @@ export function groupItems(items: ChatItem[], live = false): Row[] {
 }
 
 /** Cards that stay in the conversation once answered, instead of folding into the turn's activity. */
-const KEPT_CARDS = ["ExitPlanMode", "Reproduce"];
+const KEPT_CARDS = ["ExitPlanMode", "Reproduce", "AskUserQuestion"];
 
 function lastIndexWhere<T>(xs: T[], pred: (x: T) => boolean): number {
   for (let i = xs.length - 1; i >= 0; i--) if (pred(xs[i])) return i;

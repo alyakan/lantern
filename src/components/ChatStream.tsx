@@ -9,8 +9,8 @@ import { ShellBlock } from "./ShellBlock";
 import { TurnNote } from "./TurnNote";
 
 export interface StreamHandlers {
-  /** `note`: what the user typed on a reproduce card, passed back to Claude. */
-  onDecide: (id: string, allow: boolean, note?: string) => void;
+  /** `note`: what the user typed on a reproduce card, passed back to Claude; `answered`: AskUserQuestion's input with the answers. */
+  onDecide: (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>) => void;
   onOpenFile: (path: string) => void;
   /** The test run a Bash step produced, if any, and how to show it in the Tests tab. */
   testRunFor?: (toolUseId: string) => TestRunItem | undefined;

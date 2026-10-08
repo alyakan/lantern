@@ -49,8 +49,9 @@ export const api = {
     invoke<ChangedFile[]>("change_summary", { slot, scope, turn, toTurn, pr, hints }),
   branchReview: (slot: string, hints: string[]) => invoke<BranchReview>("branch_review", { slot, hints }),
   /** `message` goes back to Claude: a reason, or the user's note on a reproduce request. */
-  respondPermission: (slot: string, requestId: string, allow: boolean, message: string | null = null) =>
-    invoke<void>("respond_permission", { slot, requestId, allow, message }),
+  /** `updatedInput`: on allow, the tool's input as it should run (AskUserQuestion's, with the user's answers). */
+  respondPermission: (slot: string, requestId: string, allow: boolean, message: string | null = null, updatedInput: Record<string, unknown> | null = null) =>
+    invoke<void>("respond_permission", { slot, requestId, allow, message, updatedInput }),
   gitBranch: (folder: string) => invoke<string | null>("git_branch", { folder }),
   /** The user's name for their messages (macOS full name, else git's user.name); null if none. */
   userName: () => invoke<string | null>("user_name"),

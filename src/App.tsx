@@ -498,10 +498,11 @@ export default function App() {
   };
 
   // `note`: what the user wrote on a reproduce card; it goes back to Claude with the answer.
-  const decide = (id: string, allow: boolean, note?: string) => {
+  // `answered`: the tool's input with what the user chose in it (AskUserQuestion's answers).
+  const decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>) => {
     const slot = active;
     to(slot)({ type: "permission_decided", id, allow, note });
-    api.respondPermission(slot, id, allow, note ?? null).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+    api.respondPermission(slot, id, allow, note ?? null, answered ?? null).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
   };
 
   // From the title bar's failure count: bring the latest failed step's activity into view, opened.

@@ -1114,3 +1114,23 @@ button.harness-restore { align-self: flex-start; border: none; background: none;
 .agents-usage > span { display: inline-flex; align-items: center; gap: 6px; }
 .agents-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tone); }
 @media (prefers-reduced-motion: reduce) { .agents-link.flowing, .tab-live { animation: none; } }
+
+/* Claude's question (AskUserQuestion): options as buttons, or your own words. */
+.question-card { display: flex; flex-direction: column; gap: 12px; }
+.question { margin: 0; padding: 0; border: none; display: flex; flex-direction: column; gap: 6px; }
+.question legend { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; padding: 0; margin-bottom: 6px; }
+.question-header { padding: 0 7px; border-radius: 999px; background: var(--bg-subtle); font-size: 10.5px; font-weight: 600; line-height: 18px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.question-text { font-size: 13.5px; font-weight: 500; color: var(--text); }
+.question-hint { font-size: 11.5px; color: var(--muted); }
+.question-options { display: flex; flex-direction: column; gap: 4px; }
+button.question-option { display: flex; align-items: flex-start; gap: 9px; width: 100%; padding: 7px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); text-align: left; }
+button.question-option:hover:not(:disabled) { border-color: var(--faint); background: var(--bg-hover); }
+button.question-option.on { border-color: var(--text-2); background: var(--bg-active); }
+.question-mark { flex: none; width: 14px; font-size: 12px; line-height: 19px; color: var(--muted); }
+.question-option.on .question-mark { color: var(--text); }
+.question-option-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.question-label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); }
+.question-recommended { padding: 0 6px; border-radius: 999px; background: color-mix(in srgb, var(--add) 16%, transparent); font-size: 10.5px; line-height: 16px; color: var(--text-2); }
+.question-desc { font-size: 12px; line-height: 1.45; color: var(--muted); }
+.question-other { height: 30px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: 12.5px var(--ui); outline: none; }
+.question-other:focus { border-color: var(--faint); }

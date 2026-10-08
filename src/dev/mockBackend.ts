@@ -57,6 +57,8 @@ async function streamText(send: Send, blockId: string, text: string) {
 }
 
 const pendingPermission: Record<string, (allow: boolean) => void> = {};
+/** The answers sent with the last allowed AskUserQuestion, per chat. */
+const lastAnswers: Record<string, Record<string, string> | undefined> = {};
 
 // A few of what the real `initialize` reply lists: built-ins, and user skills with their "(user)" tag.
 const COMMANDS = [
@@ -345,6 +347,28 @@ async function playTeamTurn(slot: string) {
   await streamText(send, "tm:1", "Done: the fixtures mock the clock, and all 14 auth tests pass.");
   await send({ kind: "model_usage", models: [{ model: "claude-sonnet-5-5", cost_usd: 0.41, input_tokens: 182000, output_tokens: 6900 }, { model: "claude-haiku-5-5", cost_usd: 0.06, input_tokens: 96000, output_tokens: 3100 }, { model: "claude-opus-5-5", cost_usd: 0.38, input_tokens: 151000, output_tokens: 2400 }] });
   await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.85, duration_ms: 21000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+}
+
+/** Claude asks before starting (sent with "ask me" in the message): AskUserQuestion, then a reply using the answers. */
+async function playQuestionTurn(slot: string) {
+  const send = sendTo(slot);
+  await send({ kind: "thinking", parent: null });
+  await sleep(500);
+  await send({
+    kind: "permission_requested",
+    request_id: "q1",
+    tool_name: "AskUserQuestion",
+    input: {
+      questions: [
+        { question: "Where should retries live?", header: "Retries", multiSelect: false, options: [{ label: "In fetchJson (Recommended)", description: "Every caller gets them, with one place to tune backoff" }, { label: "In each caller", description: "Only the calls that need them, at the cost of repetition" }] },
+        { question: "Which status codes should be retried?", header: "Codes", multiSelect: true, options: [{ label: "429", description: "Rate limited" }, { label: "502", description: "Bad gateway" }, { label: "503", description: "Unavailable" }, { label: "504", description: "Gateway timeout" }] },
+      ],
+    },
+  });
+  const allowed = await new Promise<boolean>((resolve) => (pendingPermission[slot] = resolve));
+  const answers = lastAnswers[slot];
+  await streamText(send, "q:0", allowed && answers ? `Going with: ${Object.values(answers).join("; ")}.` : "No answer, so I'll put retries in fetchJson for 429 and 503.");
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.01, duration_ms: 3000, auth_hint: false, denied: 0, context_window: 1_000_000 });
 }
 
 async function playTurn(slot: string) {
@@ -698,12 +722,13 @@ export function installMockBackend() {
         case "send_message": {
           const slot = String(a.slot);
           const mode = slotMode[slot];
-          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
+          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : /\bask me\b/i.test(String(a.text)) ? playQuestionTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
           // Like the backend: the turn's number.
           turnCount[slot] = (turnCount[slot] ?? -1) + 1;
           return turnCount[slot];
         }
         case "respond_permission":
+          lastAnswers[String(a.slot)] = (a.updatedInput as { answers?: Record<string, string> } | null)?.answers;
           pendingPermission[String(a.slot)]?.(Boolean(a.allow));
           delete pendingPermission[String(a.slot)];
           return null;
