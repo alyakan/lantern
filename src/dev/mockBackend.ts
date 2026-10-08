@@ -293,6 +293,60 @@ async function playCommand(slot: string, text: string) {
   done();
 }
 
+/**
+ * A turn with a team (sent with "team" in the message): Sonnet main, the advisor consulted before starting, three
+ * subagents in parallel (one runs tests that fail), the advisor after the failure, a passing rerun, the advisor before
+ * finishing. For the Agents tab.
+ */
+async function playTeamTurn(slot: string) {
+  const send = sendTo(slot);
+  const step = async (parent: string | null, id: string, name: string, summary: string, ms: number, error = false) => {
+    await send({ kind: "tool_started", parent, tool_use_id: id, name, summary });
+    await sleep(ms);
+    await send({ kind: "tool_finished", parent, tool_use_id: id, is_error: error, output: error ? "1 failed" : "ok" });
+  };
+  const advise = async (id: string, outcome: "reviewed" | "unavailable" = "reviewed") => {
+    await send({ kind: "advisor_started", parent: null, id });
+    await sleep(1400);
+    await send({ kind: "advisor_done", parent: null, id, outcome, error_code: outcome === "unavailable" ? "overloaded" : null });
+  };
+  await send({ kind: "agent_model", parent: null, model: "claude-sonnet-5-5" });
+  await send({ kind: "thinking", parent: null });
+  await sleep(500);
+  await advise("adv1");
+  await streamText(send, "tm:0", "Splitting this up: an explorer maps the auth code, a researcher checks the OAuth spec, and a worker updates the fixtures and runs the tests.");
+  const agents: [string, string, string, string][] = [
+    ["ag-w", "general-purpose", "Update JWT fixtures and run auth tests", "claude-sonnet-5-5"],
+    ["ag-e", "Explore", "Map the auth module and its callers", "claude-haiku-5-5"],
+    ["ag-r", "researcher", "Check OAuth2 token rules in RFC 6749", "claude-haiku-5-5"],
+  ];
+  for (const [id, type, description] of agents) {
+    await send({ kind: "tool_started", parent: null, tool_use_id: id, name: "Agent", summary: description });
+    await send({ kind: "agent_started", tool_use_id: id, subagent_type: type, description, model: null });
+  }
+  for (const [id, , , model] of agents) await send({ kind: "agent_model", parent: id, model });
+  const progress = (id: string, description: string, tokens: number, uses: number, ms: number) => send({ kind: "agent_progress", tool_use_id: id, description, tokens, tool_uses: uses, duration_ms: ms });
+  await progress("ag-e", "Scanning src/auth for callers", 8400, 1, 900);
+  await step("ag-e", "e1", "Grep", "verifyToken", 500);
+  await progress("ag-r", "Reading RFC 6749 §5.1", 6100, 1, 1200);
+  await step("ag-w", "w1", "Edit", `${FOLDER}/test/fixtures/jwt.ts`, 600);
+  await progress("ag-w", "Running npm test -- auth", 14200, 2, 2600);
+  await step("ag-w", "w2", "Bash", "npm test -- auth", 900, true);
+  await step("ag-e", "e2", "Read", `${FOLDER}/src/auth/session.ts`, 500);
+  await send({ kind: "tool_finished", parent: null, tool_use_id: "ag-e", is_error: false, output: "3 callers" });
+  await step("ag-r", "r1", "WebFetch", "https://www.rfc-editor.org/rfc/rfc6749", 700);
+  await send({ kind: "tool_finished", parent: null, tool_use_id: "ag-r", is_error: false, output: "expires_in is seconds" });
+  await advise("adv2");
+  await progress("ag-w", "Mocking the system clock in the fixture", 19800, 3, 6200);
+  await step("ag-w", "w3", "Edit", `${FOLDER}/test/fixtures/clock.ts`, 600);
+  await step("ag-w", "w4", "Bash", "npm test -- auth", 800);
+  await send({ kind: "tool_finished", parent: null, tool_use_id: "ag-w", is_error: false, output: "14/14 pass" });
+  await advise("adv3");
+  await streamText(send, "tm:1", "Done: the fixtures mock the clock, and all 14 auth tests pass.");
+  await send({ kind: "model_usage", models: [{ model: "claude-sonnet-5-5", cost_usd: 0.41, input_tokens: 182000, output_tokens: 6900 }, { model: "claude-haiku-5-5", cost_usd: 0.06, input_tokens: 96000, output_tokens: 3100 }, { model: "claude-opus-5-5", cost_usd: 0.38, input_tokens: 151000, output_tokens: 2400 }] });
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.85, duration_ms: 21000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+}
+
 async function playTurn(slot: string) {
   const send = sendTo(slot);
   await send({ kind: "session_started", session_id: `mock-${slot}`, model: "claude-opus-5-5", cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
@@ -644,7 +698,7 @@ export function installMockBackend() {
         case "send_message": {
           const slot = String(a.slot);
           const mode = slotMode[slot];
-          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
+          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
           // Like the backend: the turn's number.
           turnCount[slot] = (turnCount[slot] ?? -1) + 1;
           return turnCount[slot];
