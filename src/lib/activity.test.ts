@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatItem, ToolItem } from "../store";
-import { describeStep, editsIn, failedCount, groupItems, runningStep, summarize } from "./activity";
+import { describeStep, editsIn, failedCount, groupItems, runningStep, stepLabel, summarize } from "./activity";
 
 const tool = (id: string, name: string, extra: Partial<ToolItem> = {}): ToolItem => ({
   type: "tool", id, name, summary: "/p/src/a.ts", status: "done", output: null, edit: null, children: [], ...extra,
@@ -72,6 +72,16 @@ describe("groupItems", () => {
     const items: ChatItem[] = [tool("t1", "Read"), tool("t2", "Read")];
     groupItems(items);
     expect(items).toHaveLength(2);
+  });
+});
+
+describe("MCP tools", () => {
+  it("are named by their server and tool", () => {
+    const steps = [tool("1", "mcp__claude_ai_Linear__create_issue"), tool("2", "mcp__claude_ai_Linear__list_issues"), tool("3", "mcp__sentry__find_errors"), tool("4", "Read")];
+    expect(summarize(steps)).toBe("Read 1 file, used Linear 2 times, used sentry");
+    expect(stepLabel(steps[0])).toBe("Linear · create issue");
+    expect(describeStep(steps[2], "/p")).toBe("Using sentry: find errors");
+    expect(stepLabel(tool("5", "mcp__lantern__reproduce"))).toBe("mcp__lantern__reproduce");
   });
 });
 

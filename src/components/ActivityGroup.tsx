@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Md } from "./Md";
-import { describeStep, editsIn, failedCount, runningStep, stepTarget, summarize, type Entry, type Step } from "../lib/activity";
+import { describeStep, editsIn, failedCount, runningStep, stepLabel, stepTarget, summarize, type Entry, type Step } from "../lib/activity";
 import { ChatStream, type StreamHandlers } from "./ChatStream";
 import type { EditInfo } from "../store";
 import { countChanges } from "../lib/diff";
@@ -119,7 +119,7 @@ function StepRow({ step, folder, ...handlers }: { step: Step; folder: string | n
   return (
     <div className={`step step-${step.status}`}>
       <button className="step-line" disabled={!expandable} aria-expanded={expandable ? open : undefined} onClick={() => setOpen(!open)}>
-        <span className="step-name">{step.name}</span>
+        <span className="step-name">{stepLabel(step)}</span>
         <span className="step-target">{stepTarget(step, folder)}</span>
         {step.status === "running" && <span className="spinner" aria-hidden />}
       </button>

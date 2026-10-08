@@ -2,6 +2,7 @@ import type { Hunk, ModelOption, Mode, SlashCommand, UiEvent, TestRun } from "./
 import { countChanges } from "./lib/diff";
 import { readFlavourNote, type Flavour } from "./lib/flavour";
 import { KEEP_CHARS, readShellContext, takesShellContext } from "./lib/shell";
+import { readSkillNote } from "./lib/skillNote";
 
 export interface EditInfo {
   path: string;
@@ -286,7 +287,9 @@ function applyEvent(state: State, ev: UiEvent): State {
     case "user_text": {
       const seq = state.seq + 1;
       const sent = readShellContext(ev.text);
-      const { text, flavour } = readFlavourNote(sent.text);
+      const read = readFlavourNote(sent.text);
+      const { flavour } = read;
+      const text = readSkillNote(read.text);
       const at = ev.at ?? 0;
       const shells = sent.shells.map((s, i): ShellItem => ({ type: "shell", id: `sh-u${seq}-${i}`, command: s.command, output: s.output, status: s.stopped ? "stopped" : s.code ? "failed" : "done", code: s.code, startedAt: at, endedAt: at, shared: true }));
       // Commands alone (Claude Code's own `!` mode writes them so): no prompt to show after them.

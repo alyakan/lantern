@@ -11,6 +11,10 @@ import type { Mode } from "./types";
 import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
 import { withShellContext } from "./lib/shell";
+import { withSkillNote } from "./lib/skillNote";
+import { describeCommands } from "./lib/complete";
+import type { McpIssue } from "./components/CompletionMenu";
+import type { McpServer, SkillEntry } from "./types";
 import { stepFile, usePersistentState } from "./lib/layout";
 import { notify } from "./lib/notify";
 import { useShortcut } from "./lib/shortcuts";
@@ -343,13 +347,41 @@ export default function App() {
     return () => window.removeEventListener("focus", onFocus);
   }, [active, state.folder]);
 
+  // The skills and commands on disk, which tell claude's command list apart (refreshed when claude lists them again).
+  const [skillIndex, setSkillIndex] = useState<SkillEntry[]>([]);
+  useEffect(() => {
+    if (state.folder && state.commands.length) api.skillIndex(active).then(setSkillIndex, () => {});
+  }, [active, state.commands]);
+  const skillNames = (slot: string) => new Set(describeCommands(chats.slots[slot]?.commands ?? [], skillIndex).filter((c) => c.kind === "skill").map((c) => c.name));
+
+  // MCP servers that need something, for the "/" menu: checked when a chat is ready and after its turns (not more
+  // than once every 30s). claude.ai connectors you never set up aren't listed: they're optional.
+  const [mcpIssues, setMcpIssues] = useState<Record<string, McpIssue[]>>({});
+  const mcpCheckedAt = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (state.status !== "idle" || !state.folder || Date.now() - (mcpCheckedAt.current[active] ?? 0) < 30_000) return;
+    mcpCheckedAt.current[active] = Date.now();
+    const slot = active;
+    api.claudeRequest<{ mcpServers?: McpServer[] }>(slot, { subtype: "mcp_status" }).then(
+      (r) => {
+        const issues = (r.mcpServers ?? [])
+          .filter((m) => m.scope !== "claudeai" && (m.status === "needs-auth" || m.status === "failed"))
+          .map((m) => ({ name: m.name.replace(/^plugin:[^:]+:/, ""), problem: m.status === "failed" ? "couldn't connect" : "needs you to log in" }));
+        setMcpIssues((all) => ({ ...all, [slot]: issues }));
+      },
+      () => {},
+    );
+  }, [active, state.status, state.folder]);
+
   // A flavour picked since the chat's last message goes with this one, in a note telling Claude.
   const sendIn = (slot: string, text: string) => {
     const pick = chats.slots[slot]?.flavourPick ?? null;
     to(slot)({ type: "user_sent", text, ...(pick ? { switchedTo: pick } : {}) });
-    // Commands run since the last message go first, so Claude sees what they printed.
+    // Commands run since the last message go first, so Claude sees what they printed; skills named mid-message get
+    // a note so Claude uses them.
     const items = chats.slots[slot]?.items ?? [];
-    api.sendMessage(slot, withShellContext(items, pick ? withFlavourNote(pick, text) : text)).then(
+    const noted = withSkillNote(text, skillNames(slot));
+    api.sendMessage(slot, withShellContext(items, pick ? withFlavourNote(pick, noted) : noted)).then(
       (turn) => typeof turn === "number" && to(slot)({ type: "turn_numbered", turn }),
       (e) => to(slot)({ type: "failed", text: errText(e) }),
     );
@@ -684,6 +716,10 @@ export default function App() {
       usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs }}
       queue={{ items: state.queued, set: (items) => dispatch({ type: "queue_set", items }) }}
       commands={state.commands}
+      skillIndex={skillIndex}
+      findFiles={state.folder ? (query) => api.findFiles(active, query) : undefined}
+      mcpIssues={mcpIssues[active]}
+      onOpenSettings={() => setSettingsAt("mcp")}
       draft={{
         initial: drafts.current[active] ?? "",
         save: (text) => {

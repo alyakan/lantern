@@ -93,9 +93,9 @@ describe("MessageInput", () => {
     const box = screen.getByPlaceholderText("Ask Claude…");
     fireEvent.change(box, { target: { value: "/c" } });
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
-      "/clearClear conversation history",
-      "/compact<instructions>Clear history but keep a summary",
-      "/contextShow context usage",
+      "/clearClear conversation historyBuilt-in",
+      "/compact<instructions>Clear history but keep a summaryBuilt-in",
+      "/contextShow context usageBuilt-in",
     ]);
     fireEvent.keyDown(box, { key: "ArrowDown" });
     fireEvent.keyDown(box, { key: "ArrowDown" });
@@ -103,6 +103,67 @@ describe("MessageInput", () => {
     fireEvent.keyDown(box, { key: "Enter" });
     expect(onSend).toHaveBeenCalledWith("/context");
     expect(box).toHaveValue("");
+  });
+
+  describe("anywhere in the message", () => {
+    const withSkills = [...commands, { name: "grill-me", description: "Interview the user (user)", argument_hint: "" }, { name: "mcp__github__review", description: "Review a PR (MCP)", argument_hint: "" }];
+    const index = [{ name: "grill-me", kind: "skill" as const, source: "user" as const, plugin: null, path: "/h/SKILL.md", description: "Interview the user" }];
+    const type = (box: HTMLElement, value: string) => {
+      fireEvent.change(box, { target: { value, selectionStart: value.length } });
+    };
+
+    it("sorts the menu into sections, and mid-message offers skills and MCP prompts but not commands", () => {
+      render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} commands={withSkills} skillIndex={index} />);
+      const box = screen.getByPlaceholderText("Ask Claude…");
+      type(box, "/");
+      const menu = screen.getByRole("listbox", { name: "Commands" });
+      expect(menu).toHaveTextContent("Skills");
+      expect(menu).toHaveTextContent("Commands");
+      expect(menu).toHaveTextContent("MCP prompts");
+      type(box, "plan this, then /");
+      const names = screen.getAllByRole("option").map((o) => o.querySelector(".slash-name")?.textContent);
+      expect(names).toEqual(["/grill-me", "/mcp__github__review"]);
+    });
+
+    it("puts a picked skill where the / was, and the caret after it", () => {
+      const onSend = vi.fn();
+      render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} commands={withSkills} skillIndex={index} />);
+      const box = screen.getByPlaceholderText("Ask Claude…") as HTMLTextAreaElement;
+      type(box, "design the cache, /gri");
+      fireEvent.keyDown(box, { key: "Enter" });
+      expect(onSend).not.toHaveBeenCalled();
+      expect(box).toHaveValue("design the cache, /grill-me ");
+      expect(box.selectionStart).toBe("design the cache, /grill-me ".length);
+      expect(screen.queryByRole("listbox")).toBeNull();
+    });
+
+    it("isn't fooled by paths", () => {
+      render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} commands={withSkills} />);
+      const box = screen.getByPlaceholderText("Ask Claude…");
+      type(box, "look at src/c");
+      expect(screen.queryByRole("listbox")).toBeNull();
+      type(box, "/Users/c");
+      expect(screen.queryByRole("listbox")).toBeNull();
+    });
+
+    it("warns about MCP servers that need you, linking to Settings", () => {
+      const onOpenSettings = vi.fn();
+      render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} commands={withSkills} mcpIssues={[{ name: "sentry", problem: "needs you to log in" }]} onOpenSettings={onOpenSettings} />);
+      type(screen.getByPlaceholderText("Ask Claude…"), "/");
+      fireEvent.click(screen.getByRole("button", { name: /sentry needs you to log in/ }));
+      expect(onOpenSettings).toHaveBeenCalled();
+    });
+
+    it("offers files after @ and puts the picked one in", async () => {
+      const findFiles = vi.fn().mockResolvedValue([{ path: "/p/src/net/fetchJson.ts", rel: "src/net/fetchJson.ts", hits: [] }]);
+      render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} findFiles={findFiles} />);
+      const box = screen.getByPlaceholderText("Ask Claude…");
+      type(box, "why does @fetch");
+      const option = await screen.findByRole("option", { name: "@src/net/fetchJson.ts" });
+      expect(findFiles).toHaveBeenCalledWith("fetch");
+      fireEvent.click(option.querySelector("button")!);
+      expect(box).toHaveValue("why does @src/net/fetchJson.ts ");
+    });
   });
 
   it("completes a command that takes arguments instead of running it, and Escape hides the menu", () => {
