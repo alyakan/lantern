@@ -2,7 +2,7 @@
 // It answers the app's Tauri commands and plays a scripted Claude turn. Never imported in production builds.
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
-import type { UiEvent } from "../types";
+import type { McpServer, SkillEntry, UiEvent } from "../types";
 
 const FOLDER = "/Users/you/projects/acme-api";
 const FILE = `${FOLDER}/src/client/retry.ts`;
@@ -454,6 +454,50 @@ function autoplay(allow: boolean, openOnly: boolean, history = false) {
 /** Commands the user runs from the chat box, while they stream: how to stop each. */
 const mockShells: Record<string, () => void> = {};
 
+/** MCP servers in the mock: one connected, one needing a login, one failing, one still connecting. */
+const mockServers: McpServer[] = [
+  { name: "claude.ai Linear", status: "connected", serverInfo: { name: "Linear MCP", title: "Linear", version: "1.0.0" }, config: { type: "claudeai-proxy", url: "https://mcp.linear.app/mcp" }, scope: "claudeai", source: "claudeai" },
+  { name: "sentry", status: "needs-auth", config: { type: "http", url: "https://mcp.sentry.dev/mcp", headers: { "X-Org": "acme" } }, scope: "user" },
+  { name: "postgres", status: "failed", error: "Connection closed: ECONNREFUSED 127.0.0.1:5432", config: { type: "stdio", command: "npx", args: ["-y", "@modelcontextprotocol/server-postgres", "postgres://localhost/acme"], env: { PGPASSWORD: "secret" } }, scope: "local" },
+  { name: "plugin:figma:figma", status: "pending", config: { type: "http", url: "https://mcp.figma.com/mcp" }, scope: "dynamic", source: "plugin" },
+];
+const MCP_TOOLS = ["mcp__claude_ai_Linear__list_issues", "mcp__claude_ai_Linear__create_issue", "mcp__claude_ai_Linear__update_issue", "mcp__claude_ai_Linear__list_projects"];
+
+const MOCK_SKILLS: SkillEntry[] = [
+  { name: "grill-me", kind: "skill", source: "user", plugin: null, path: "/Users/you/.claude/skills/grill-me/SKILL.md", description: "Interview the user relentlessly about a plan or design until reaching shared understanding." },
+  { name: "pr-description", kind: "skill", source: "user", plugin: null, path: "/Users/you/.claude/skills/pr-description/SKILL.md", description: "Write a short, human-sounding pull request description from the real commits." },
+  { name: "deploy", kind: "command", source: "project", plugin: null, path: `${FOLDER}/.claude/commands/deploy.md`, description: "Build, tag and deploy to staging" },
+  { name: "superpowers:brainstorming", kind: "skill", source: "plugin", plugin: "superpowers", path: "/Users/you/.claude/plugins/cache/x/superpowers/5.0/skills/brainstorming/SKILL.md", description: "You MUST use this before any creative work: explores intent, requirements and design." },
+  { name: "superpowers:systematic-debugging", kind: "skill", source: "plugin", plugin: "superpowers", path: "/Users/you/.claude/plugins/cache/x/superpowers/5.0/skills/systematic-debugging/SKILL.md", description: "Use when encountering any bug or test failure, before proposing fixes." },
+];
+
+function mockClaudeRequest(request: { subtype: string; serverName?: string; enabled?: boolean }): unknown {
+  const server = mockServers.find((s) => s.name === request.serverName);
+  switch (request.subtype) {
+    case "mcp_status":
+      // Figma finishes connecting after a moment.
+      for (const s of mockServers) if (s.status === "pending") setTimeout(() => (s.status = "connected"), 2000);
+      return { mcpServers: mockServers.map((s) => ({ ...s })) };
+    case "mcp_toggle":
+      if (server) server.status = request.enabled ? "connected" : "disabled";
+      return {};
+    case "mcp_reconnect":
+      if (server?.name === "postgres") return Promise.reject("Connection closed: ECONNREFUSED 127.0.0.1:5432");
+      return {};
+    case "mcp_authenticate":
+      // As if the login in the browser went through.
+      if (server) setTimeout(() => (server.status = "connected"), 3000);
+      return { authUrl: "https://example.com/oauth/authorize", requiresUserAction: true, callbackExpected: false };
+    case "mcp_clear_auth":
+      if (server) server.status = "needs-auth";
+      return {};
+    case "reload_plugins":
+    case "reload_skills":
+      return { commands: COMMANDS.map((c) => ({ name: c.name, description: c.description, argumentHint: c.argument_hint })) };
+  }
+  return Promise.reject(`${request.subtype} isn't in the mock`);
+}
+
 /** Commands waiting for the user's reply in the mock: what to do with it. */
 const mockReplies: Record<string, (text: string) => void> = {};
 
@@ -558,6 +602,7 @@ export function installMockBackend() {
           setTimeout(() => {
             sendTo(String(a.slot))({ kind: "commands", commands: COMMANDS });
             sendTo(String(a.slot))({ kind: "models", models: MODELS });
+            sendTo(String(a.slot))({ kind: "mcp_tools", tools: MCP_TOOLS });
           }, 50);
           return null;
           return null;
@@ -569,6 +614,24 @@ export function installMockBackend() {
         case "run_shell":
           playShell(String(a.slot), String(a.id), String(a.command));
           return null;
+        case "claude_request":
+          return mockClaudeRequest(a.request as { subtype: string });
+        case "skill_index":
+          return MOCK_SKILLS;
+        case "read_skill": {
+          const skill = MOCK_SKILLS.find((k) => k.path === a.path);
+          return `---\nname: ${skill?.name}\n---\n# ${skill?.name}\n\n${skill?.description}\n\n## How it works\n\n1. Read the request.\n2. Ask one question at a time.\n3. Summarise what was decided.\n`;
+        }
+        case "mcp_add": {
+          const spec = a.spec as { name: string; transport: string; target: string; scope: string };
+          mockServers.unshift({ name: spec.name, status: "pending", config: spec.transport === "stdio" ? { type: "stdio", command: spec.target } : { type: spec.transport, url: spec.target }, scope: spec.scope });
+          return `Added ${spec.transport} MCP server ${spec.name}`;
+        }
+        case "mcp_remove": {
+          const at = mockServers.findIndex((m) => m.name === a.name);
+          if (at >= 0) mockServers.splice(at, 1);
+          return `Removed MCP server ${String(a.name)}`;
+        }
         case "shell_input":
           mockReplies[`${String(a.slot)}:${String(a.id)}`]?.(String(a.text));
           return null;

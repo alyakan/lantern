@@ -41,6 +41,23 @@ pub struct Session {
     session_id: Arc<Mutex<Option<String>>>,
     /// Numbers each control request so its control_response can be told apart.
     requests: u64,
+    /// Requests whose reply someone waits for (see `request`), by request id.
+    replies: Replies,
+}
+
+type Replies = Arc<Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<Result<serde_json::Value, String>>>>>;
+
+/// A control_response for a request someone waits for: its reply (or error) goes to them, and true.
+fn deliver(replies: &Replies, line: &str) -> bool {
+    if !line.contains("\"control_response\"") {
+        return false;
+    }
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { return false };
+    let r = &v["response"];
+    let Some(tx) = r["request_id"].as_str().and_then(|id| replies.lock().unwrap().remove(id)) else { return false };
+    let reply = if r["subtype"] == "error" { Err(r["error"].as_str().unwrap_or("Claude couldn't do that.").to_string()) } else { Ok(r["response"].clone()) };
+    let _ = tx.send(reply);
+    true
 }
 
 impl Session {
@@ -63,6 +80,7 @@ impl Session {
         let stderr = child.stderr.take().ok_or("claude has no stderr pipe")?;
 
         let session_id = Arc::new(Mutex::new(cfg.resume.clone()));
+        let replies: Replies = Arc::default();
         let stopping = Arc::new(AtomicBool::new(false));
         let tail = Arc::new(Mutex::new(String::new()));
         let (exit_tx, exited) = watch::channel(false);
@@ -78,11 +96,14 @@ impl Session {
         };
 
         {
-            let (sid, stopping, tail) = (session_id.clone(), stopping.clone(), tail.clone());
+            let (sid, stopping, tail, replies) = (session_id.clone(), stopping.clone(), tail.clone(), replies.clone());
             tokio::spawn(async move {
                 let mut parser = StreamParser::default();
                 let mut lines = BufReader::new(stdout).lines();
                 while let Ok(Some(line)) = lines.next_line().await {
+                    if deliver(&replies, &line) {
+                        continue;
+                    }
                     for ev in parser.parse_line(&line) {
                         match &ev {
                             UiEvent::SessionStarted { session_id, .. } => {
@@ -104,7 +125,7 @@ impl Session {
             });
         }
 
-        Ok(Session { stdin, pid, stopping, exited, session_id, requests: 0 })
+        Ok(Session { stdin, pid, stopping, exited, session_id, requests: 0, replies })
     }
 
     pub fn session_id(&self) -> Option<String> {
@@ -150,6 +171,19 @@ impl Session {
     /// says the app stops background tasks one by one, so Stop only ends the turn and leaves them running.
     pub async fn initialize(&mut self) {
         self.control(serde_json::json!({"subtype": "initialize", "perTaskStopAffordance": true})).await;
+    }
+
+    /// Sends a control request whose reply the caller wants (MCP status, reloading skills…). Returns at once with
+    /// where the reply will arrive, so the session isn't held while claude answers; Err in it is claude's error.
+    pub async fn request(&mut self, request: serde_json::Value) -> Result<tokio::sync::oneshot::Receiver<Result<serde_json::Value, String>>, String> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.replies.lock().unwrap().insert(format!("lantern-{}", self.requests + 1), tx);
+        if self.control(request).await {
+            Ok(rx)
+        } else {
+            self.replies.lock().unwrap().remove(&format!("lantern-{}", self.requests));
+            Err("Claude isn't running.".into())
+        }
     }
 
     /// Writes a stream-json control_request; the parser turns the replies worth showing into events.
@@ -256,6 +290,32 @@ mod tests {
         })
         .await
         .expect("timed out waiting for event")
+    }
+
+    #[tokio::test]
+    async fn a_request_gets_its_own_reply_and_an_error_comes_back_as_one() {
+        let dir = tempfile::tempdir().unwrap();
+        // Answers each control request: mcp_status with a server, anything else with an error.
+        let fake = script(
+            dir.path(),
+            r#"while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"request_id":"\([^"]*\)".*/\1/p')
+  case "$line" in
+    *mcp_status*) printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s","response":{"mcpServers":[{"name":"linear","status":"connected"}]}}}\n' "$id" ;;
+    *) printf '{"type":"control_response","response":{"subtype":"error","request_id":"%s","error":"nope"}}\n' "$id" ;;
+  esac
+done"#,
+        );
+        let (sink, mut rx) = channel_sink();
+        let mut s = Session::spawn(&config(fake, dir.path(), None), sink, no_edits()).unwrap();
+        let status = s.request(serde_json::json!({"subtype": "mcp_status"})).await.unwrap();
+        let reply = tokio::time::timeout(Duration::from_secs(10), status).await.unwrap().unwrap().unwrap();
+        assert_eq!(reply["mcpServers"][0]["name"], "linear");
+        let toggle = s.request(serde_json::json!({"subtype": "mcp_toggle", "serverName": "linear", "enabled": false})).await.unwrap();
+        assert_eq!(tokio::time::timeout(Duration::from_secs(10), toggle).await.unwrap().unwrap(), Err("nope".to_string()));
+        // Replies someone waited for aren't shown as events.
+        assert!(rx.try_recv().is_err());
+        s.stop().await;
     }
 
     #[tokio::test]

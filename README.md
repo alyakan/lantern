@@ -16,6 +16,7 @@ The terminal is a fine place to talk to Claude Code, but a hard place to follow 
 - **Reviews.** Point Step by step at a pull request or branch. Each changed file gets its own page, findings become cards you Agree with or Reject, and your verdicts go back to Claude together.
 - **Tests tab.** Test runs from pytest, jest, vitest, cargo and xcodebuild are parsed into passes and failures with file:line links.
 - **Shell commands.** Start a message with `!` and the box turns into a terminal: `!git status` runs in the chat's folder, its output streams in, and Claude sees it with your next message. Long-running commands (a dev server) keep going until you stop them. When a command asks something (a password, a y/n) you answer it in place; passwords go in a secret field and only to the command.
+- **Settings (⌘,).** Your MCP servers with their status: log in, reconnect, turn off, add or remove them (through Claude Code's own settings). Your skills, the project's and plugins', each with a preview of its file.
 - **Search.** ⌘P finds files, ⌘⇧F searches text (regex, case, whole word), ⌘F searches inside an open file or diff.
 - **History and sessions.** Pick up any earlier Claude Code session for a folder, including ones started in the terminal. Several chats can run side by side, with a notice when one finishes or needs you. The chats open when Lantern closes are offered back the next time it opens.
 

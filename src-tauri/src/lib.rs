@@ -9,6 +9,7 @@ pub mod permission;
 pub mod pr;
 pub mod session;
 pub mod shell;
+pub mod skills;
 pub mod slots;
 pub mod outside;
 pub mod stream_parser;
@@ -216,6 +217,130 @@ async fn send_message(state: State<'_, AppState>, slot: String, text: String) ->
     let mut session = s.session.lock().await;
     session.as_mut().ok_or("No Claude session is running")?.send(&text).await?;
     Ok(turn)
+}
+
+/// The control requests Settings may send to a chat's claude: MCP servers' status and actions, and reloading
+/// skills and plugins. Anything else is refused.
+const SETTINGS_REQUESTS: &[&str] = &["mcp_status", "mcp_reconnect", "mcp_toggle", "mcp_authenticate", "mcp_oauth_callback_url", "mcp_clear_auth", "reload_skills", "reload_plugins"];
+
+/// Sends one of SETTINGS_REQUESTS to the chat's claude and returns its reply.
+#[tauri::command]
+async fn claude_request(state: State<'_, AppState>, slot: String, request: serde_json::Value) -> Result<serde_json::Value, String> {
+    let subtype = request["subtype"].as_str().unwrap_or("").to_string();
+    if !SETTINGS_REQUESTS.contains(&subtype.as_str()) {
+        return Err(format!("{subtype:?} can't be sent from Settings."));
+    }
+    let s = state.slots.get(&slot)?;
+    let reply = {
+        let mut session = s.session.lock().await;
+        session.as_mut().ok_or("Claude isn't running in this chat.")?.request(request).await?
+    };
+    // Logging in waits for the browser; the rest answer quickly.
+    let wait = if subtype == "mcp_authenticate" { 120 } else { 30 };
+    match tokio::time::timeout(std::time::Duration::from_secs(wait), reply).await {
+        Ok(Ok(r)) => r,
+        Ok(Err(_)) => Err("Claude stopped before it answered.".into()),
+        Err(_) => Err("Claude didn't answer in time.".into()),
+    }
+}
+
+/// The skills and custom commands on disk: yours, the chat folder's, and plugins'.
+#[tauri::command]
+async fn skill_index(state: State<'_, AppState>, slot: Option<String>) -> Result<Vec<skills::Entry>, String> {
+    let folder = slot.and_then(|id| state.slots.get(&id).ok()).and_then(|s| s.folder().ok());
+    let config = skills::config_dir().ok_or("HOME is not set")?;
+    tauri::async_runtime::spawn_blocking(move || skills::index(&config, folder.as_deref())).await.map_err(|e| e.to_string())
+}
+
+/// A skill or command file's text (only markdown under Claude Code's folders).
+#[tauri::command]
+async fn read_skill(state: State<'_, AppState>, slot: Option<String>, path: String) -> Result<String, String> {
+    let folder = slot.and_then(|id| state.slots.get(&id).ok()).and_then(|s| s.folder().ok());
+    let config = skills::config_dir().ok_or("HOME is not set")?;
+    tauri::async_runtime::spawn_blocking(move || skills::read(&config, folder.as_deref(), std::path::Path::new(&path))).await.map_err(|e| e.to_string())?
+}
+
+/// A server to add with `claude mcp add`.
+#[derive(serde::Deserialize)]
+struct McpServerSpec {
+    name: String,
+    /// "stdio", "http" or "sse".
+    transport: String,
+    /// The command line (stdio) or the URL.
+    target: String,
+    /// "local" (you, this project), "user" (you, everywhere) or "project" (shared in .mcp.json).
+    scope: String,
+    /// KEY=value, for stdio.
+    #[serde(default)]
+    env: Vec<String>,
+    /// "Name: value", for http and sse.
+    #[serde(default)]
+    headers: Vec<String>,
+}
+
+const MCP_SCOPES: &[&str] = &["local", "user", "project"];
+
+/// Runs `claude mcp …` in the chat's folder (scopes are per project), as the user would in a terminal.
+async fn claude_mcp(state: &AppState, slot: &str, args: Vec<String>) -> Result<String, String> {
+    let s = state.slots.get(slot)?;
+    let (claude, folder) = {
+        let cfg = s.config.lock().unwrap();
+        let cfg = cfg.as_ref().ok_or("No folder is open")?;
+        (cfg.claude.clone(), cfg.folder.clone())
+    };
+    let mut cmd = tokio::process::Command::new(claude);
+    cmd.args(&args).current_dir(folder).stdin(std::process::Stdio::null());
+    if let Some(p) = login_path(state).await {
+        cmd.env("PATH", p);
+    }
+    let out = tokio::time::timeout(std::time::Duration::from_secs(60), cmd.output()).await.map_err(|_| "claude mcp didn't finish in time.".to_string())?.map_err(|e| e.to_string())?;
+    let text = |b: &[u8]| String::from_utf8_lossy(b).trim().to_string();
+    if out.status.success() {
+        Ok(text(&out.stdout))
+    } else {
+        let err = text(&out.stderr);
+        Err(if err.is_empty() { text(&out.stdout) } else { err })
+    }
+}
+
+#[tauri::command]
+async fn mcp_add(state: State<'_, AppState>, slot: String, spec: McpServerSpec) -> Result<String, String> {
+    let name = spec.name.trim();
+    if name.is_empty() || name.starts_with('-') || !MCP_SCOPES.contains(&spec.scope.as_str()) || !["stdio", "http", "sse"].contains(&spec.transport.as_str()) {
+        return Err("Give the server a name, a type and where it applies.".into());
+    }
+    let mut args: Vec<String> = ["mcp", "add", "-s", &spec.scope, "-t", &spec.transport].map(String::from).to_vec();
+    if spec.transport == "stdio" {
+        for e in spec.env.iter().filter(|e| !e.trim().is_empty()) {
+            args.extend(["-e".into(), e.trim().into()]);
+        }
+        let words = shell::split_words(&spec.target)?;
+        if words.is_empty() {
+            return Err("Which command starts the server?".into());
+        }
+        args.extend(["--".into(), name.into()]);
+        args.extend(words);
+    } else {
+        for h in spec.headers.iter().filter(|h| !h.trim().is_empty()) {
+            args.extend(["-H".into(), h.trim().into()]);
+        }
+        let url = spec.target.trim();
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return Err("The server's address starts with https://.".into());
+        }
+        args.extend(["--".into(), name.into(), url.into()]);
+    }
+    claude_mcp(&state, &slot, args).await
+}
+
+#[tauri::command]
+async fn mcp_remove(state: State<'_, AppState>, slot: String, name: String, scope: Option<String>) -> Result<String, String> {
+    let mut args: Vec<String> = vec!["mcp".into(), "remove".into()];
+    if let Some(sc) = scope.filter(|s| MCP_SCOPES.contains(&s.as_str())) {
+        args.extend(["-s".into(), sc]);
+    }
+    args.extend(["--".into(), name]);
+    claude_mcp(&state, &slot, args).await
 }
 
 /// Runs a command the user typed after "!" in the chat's folder; its output arrives as ui-events.
@@ -521,6 +646,11 @@ pub fn run() {
             close_session,
             send_message,
             run_shell,
+            claude_request,
+            skill_index,
+            read_skill,
+            mcp_add,
+            mcp_remove,
             shell_input,
             stop_shell,
             interrupt,

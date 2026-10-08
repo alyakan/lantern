@@ -47,13 +47,18 @@ impl StreamParser {
     fn system(&mut self, v: &Value) -> Vec<UiEvent> {
         let sub = str_of(v, "subtype");
         match sub.as_str() {
-            "init" => vec![UiEvent::SessionStarted {
-                session_id: str_of(v, "session_id"),
-                model: str_of(v, "model"),
-                cwd: str_of(v, "cwd"),
-                permission_mode: str_of(v, "permissionMode"),
-                claude_version: str_of(v, "claude_code_version"),
-            }],
+            "init" => {
+                let started = UiEvent::SessionStarted {
+                    session_id: str_of(v, "session_id"),
+                    model: str_of(v, "model"),
+                    cwd: str_of(v, "cwd"),
+                    permission_mode: str_of(v, "permissionMode"),
+                    claude_version: str_of(v, "claude_code_version"),
+                };
+                // The MCP servers' tools it can use, for Settings ("mcp__server__tool").
+                let tools: Vec<String> = v["tools"].as_array().into_iter().flatten().filter_map(Value::as_str).filter(|t| t.starts_with("mcp__")).map(String::from).collect();
+                if v["tools"].is_array() { vec![started, UiEvent::McpTools { tools }] } else { vec![started] }
+            }
             "api_retry" => vec![UiEvent::Retrying {
                 attempt: v["attempt"].as_u64().unwrap_or(0),
                 max_retries: v["max_retries"].as_u64().unwrap_or(0),
@@ -339,6 +344,13 @@ mod tests {
     fn parse_all(text: &str) -> Vec<UiEvent> {
         let mut p = StreamParser::default();
         text.lines().flat_map(|l| p.parse_line(l)).collect()
+    }
+
+    #[test]
+    fn init_lists_the_mcp_tools() {
+        let mut p = StreamParser::default();
+        let evs = p.parse_line(r#"{"type":"system","subtype":"init","session_id":"s","model":"m","cwd":"/p","tools":["Read","mcp__claude_ai_Linear__create_issue","mcp__lantern__reproduce"]}"#);
+        assert_eq!(evs[1], UiEvent::McpTools { tools: vec!["mcp__claude_ai_Linear__create_issue".into(), "mcp__lantern__reproduce".into()] });
     }
 
     #[test]

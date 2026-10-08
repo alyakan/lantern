@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
-import type { DirEntry, FileDiff, FoundFile, Mode, RecentFolder, SessionSummary, Settings, TextQuery, TextResults, UiEvent } from "./types";
+import type { DirEntry, FileDiff, FoundFile, McpServerSpec, Mode, RecentFolder, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -23,6 +23,14 @@ export const api = {
   sendMessage: (slot: string, text: string) => invoke<number>("send_message", { slot, text }),
   /** Runs a command the user typed after "!" in the chat's folder; its output comes as shell_output, then shell_done. */
   runShell: (slot: string, id: string, command: string) => invoke<void>("run_shell", { slot, id, command }),
+  /** Asks the chat's claude something for Settings (MCP status and actions, reloading skills); resolves to its reply. */
+  claudeRequest: <T = unknown>(slot: string, request: { subtype: string; [k: string]: unknown }) => invoke<T>("claude_request", { slot, request }),
+  /** The skills and custom commands on disk: yours, the chat folder's, plugins'. */
+  skillIndex: (slot: string | null) => invoke<SkillEntry[]>("skill_index", { slot }),
+  readSkill: (slot: string | null, path: string) => invoke<string>("read_skill", { slot, path }),
+  mcpAdd: (slot: string, spec: McpServerSpec) => invoke<string>("mcp_add", { slot, spec }),
+  /** `scope` null: whichever scope it's in. */
+  mcpRemove: (slot: string, name: string, scope: string | null) => invoke<string>("mcp_remove", { slot, name, scope }),
   /** Types into a running command: a reply ending in "\r", or "\u0004" to end its input. */
   shellInput: (slot: string, id: string, text: string) => invoke<void>("shell_input", { slot, id, text }),
   stopShell: (slot: string, id: string) => invoke<void>("stop_shell", { slot, id }),
