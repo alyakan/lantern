@@ -125,6 +125,9 @@ export interface Settings {
   effort: string | null;
   /** In Step by step: Claude Code's auto mode approves actions instead of asking in the app. */
   auto_approve?: boolean;
+  /** The harness: the advisor model and the subagents' model (null or absent = Claude Code's own settings). */
+  advisor?: string | null;
+  subagent_model?: string | null;
 }
 
 /** A file search result (see files::find): the file, and which characters of `rel` matched. */

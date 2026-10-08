@@ -125,9 +125,21 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
     a
 }
 
+/// The harness's flags beyond model and effort: the advisor Claude consults (`--advisor`, which `claude --help` doesn't
+/// list). The subagents' model goes in the environment instead (see Session::spawn).
+pub fn harness_args(advisor: Option<&str>) -> Vec<String> {
+    advisor.map(|a| vec!["--advisor".to_string(), a.to_string()]).unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_advisor_is_a_flag_only_when_chosen() {
+        assert_eq!(harness_args(Some("opus")), vec!["--advisor", "opus"]);
+        assert!(harness_args(None).is_empty());
+    }
 
     fn helper() -> HelperConfig {
         HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into() }

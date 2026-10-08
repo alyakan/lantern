@@ -1043,3 +1043,19 @@ label.mcp-scope-option { flex-direction: row; align-items: flex-start; gap: 8px;
 .skill-preview-head button { margin-left: auto; font-size: 12px; white-space: nowrap; flex: none; }
 .skill-preview-head .skill-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skill-preview-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; font-size: 12.5px; user-select: text; cursor: auto; }
+
+/* Harness: the chip under the chat box and Settings → Harness. */
+.model-button.harness-on { color: var(--text-2); }
+.harness-menu { width: 380px; max-width: calc(100vw - 48px); left: auto; right: -6px; }
+.harness-row .settings-row-main { width: 100%; }
+.harness-menu .menu-row { align-items: baseline; }
+.harness-menu .menu-row-title { flex: none; }
+.harness-menu .harness-edit { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 7px; border-radius: 0 0 var(--radius-chip) var(--radius-chip); }
+.harness-folder { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-2); }
+.harness-folder select, .harness-editor select, .harness-editor input { height: 28px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: 12.5px var(--ui); }
+.harness-row .settings-row-main:disabled { opacity: 1; }
+.harness-editor { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; padding: 4px 12px 12px; }
+.harness-editor label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2); }
+.harness-editor .wide { grid-column: 1 / -1; }
+.harness-editor p { margin: 0; }
+button.harness-restore { align-self: flex-start; border: none; background: none; padding: 0; font-size: 12px; color: var(--muted); text-decoration: underline; }

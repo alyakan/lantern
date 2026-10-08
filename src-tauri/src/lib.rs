@@ -105,6 +105,11 @@ struct Settings {
     /// In Step by step: auto-approve actions (Claude Code's auto mode) instead of asking in the app.
     #[serde(default)]
     auto_approve: bool,
+    /// The harness: the advisor model and the subagents' model (None = Claude Code's own settings).
+    #[serde(default)]
+    advisor: Option<String>,
+    #[serde(default)]
+    subagent_model: Option<String>,
 }
 
 fn checked_effort(effort: Option<String>) -> Result<Option<String>, String> {
@@ -126,6 +131,8 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
         resume,
         model: checked_model(settings.model)?,
         effort: checked_effort(settings.effort)?,
+        advisor: checked_model(settings.advisor)?,
+        subagent_model: checked_model(settings.subagent_model)?,
         helper: helper_config(slot)?,
         path_env: login_path(state).await,
     })
@@ -170,6 +177,22 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
     if let Some(auto) = auto_approve {
         cfg.auto_approve = auto;
     }
+    cfg.resume = running_id.or(cfg.resume);
+    cfg.helper = helper_config(&s)?;
+    cfg.path_env = login_path(&state).await;
+    launch(&app, &slot, &s, cfg, false).await
+}
+
+/// Restarts a chat's claude on the same session with another harness: main model and effort, advisor, subagents' model.
+#[tauri::command]
+async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String, model: Option<String>, effort: Option<String>, advisor: Option<String>, subagent_model: Option<String>) -> Result<(), String> {
+    let s = state.slots.get(&slot)?;
+    let running_id = s.session.lock().await.as_ref().and_then(|x| x.session_id());
+    let mut cfg = s.config.lock().unwrap().clone().ok_or("No folder is open")?;
+    cfg.model = checked_model(model)?;
+    cfg.effort = checked_effort(effort)?;
+    cfg.advisor = checked_model(advisor)?;
+    cfg.subagent_model = checked_model(subagent_model)?;
     cfg.resume = running_id.or(cfg.resume);
     cfg.helper = helper_config(&s)?;
     cfg.path_env = login_path(&state).await;
@@ -643,6 +666,7 @@ pub fn run() {
             user_name,
             start_session,
             restart_session,
+            apply_harness,
             close_session,
             send_message,
             run_shell,

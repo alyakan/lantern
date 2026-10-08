@@ -13,6 +13,8 @@ import { FolderPill } from "./FolderPill";
 import { ModeMenu } from "./ModeMenu";
 import type { Flavour } from "../lib/flavour";
 import { ModelPicker } from "./ModelPicker";
+import { HarnessPicker } from "./HarnessPicker";
+import type { Harness } from "../lib/harness";
 import type { OpenChat } from "./HistoryMenu";
 import { SessionPill } from "./SessionPill";
 import { UpdateButton } from "./UpdateButton";
@@ -52,6 +54,8 @@ interface Props {
   models?: { chosen: string | null; onChoose: (model: string | null) => void; defaultModel?: string | null; ids?: Record<string, string>; options?: ModelOption[] };
   /** Thinking effort: the chosen level (null = default) and how to change it. */
   effort?: { chosen: string | null; onChoose: (level: string | null) => void };
+  /** The chat's harness (which models do what) and the presets to switch to. */
+  harness?: { presets: Harness[]; chosen: string; onChoose: (id: string) => void; onEdit?: () => void };
   /** What "/" offers: claude's slash commands and skills. */
   commands?: SlashCommand[];
   /** The skills and commands on disk, which tell claude's list apart into skills and commands. */
@@ -67,7 +71,7 @@ interface Props {
   update?: { version: string; busy: number; onRestart: () => void; onLater: () => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onRun, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, update }: Props) {
+export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onRun, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, harness, update }: Props) {
   const [text, setTextState] = useState(draft?.initial ?? "");
   const setText = (next: string) => {
     setTextState(next);
@@ -370,6 +374,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
             )
           )}
           {!terminal && effort && effortLevels.length > 0 && <EffortPicker chosen={effort.chosen} levels={effortLevels} onChoose={effort.onChoose} disabled={busy} />}
+          {!terminal && harness && <HarnessPicker {...harness} disabled={busy} />}
           <div className="spacer" />
           {usage && <ContextMeter used={usage.used} window={usage.window} running={running} lastTurnMs={usage.lastTurnMs} />}
           {terminal ? (

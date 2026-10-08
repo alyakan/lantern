@@ -12,6 +12,7 @@ import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
 import { withShellContext } from "./lib/shell";
 import { withSkillNote } from "./lib/skillNote";
+import { BUILT_IN, CUSTOM_HARNESS, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
 import type { McpServer, SkillEntry } from "./types";
@@ -86,6 +87,13 @@ export default function App() {
   const [modelIds, setModelIds] = usePersistentState<Record<string, string>>("settings.modelIds", {});
   // Each model's context window as last reported, so the meter can show a percentage before a turn reports one.
   const [windows, setWindows] = usePersistentState<Record<string, number>>("settings.contextWindows", {});
+  // Harness presets (which models do what), the one each folder starts with, and each session's, like modes.
+  const [savedPresets, setSavedPresets] = usePersistentState<Harness[]>("settings.harnessPresets", BUILT_IN.slice(1));
+  const presets = presetsOf(savedPresets);
+  const [harnessByFolder, setHarnessByFolder] = usePersistentState<Record<string, string>>("settings.harnessByFolder", {});
+  const [harnessBySession, setHarnessBySession] = usePersistentState<Record<string, string>>("settings.harnessBySession", {});
+  // Each open chat's preset.
+  const [harnessBySlot, setHarnessBySlot] = useState<Record<string, string>>({});
   // Every open chat. The one on screen is `active`; the others keep running in the background.
   const [chats, dispatchChats] = useReducer(chatsReducer, undefined, () => initialChats({ ...initialState, mode: lastFolder ? modeFor(lastFolder) : "ask" }));
   const active = chats.active;
@@ -163,7 +171,11 @@ export default function App() {
     };
   }, []);
 
-  const restart = (slot: string, mode: Mode, withEffort: string | null = effort) => {
+  const harnessOf = (slot: string) => findHarness(presets, harnessBySlot[slot]);
+  /** What a chat runs with: its preset's models, or (Default) the app's model and effort. */
+  const settingsFor = (slot: string, h: Harness = harnessOf(slot)) => settingsOf(h, { model, effort });
+
+  const restart = (slot: string, mode: Mode, withEffort: string | null = settingsFor(slot).effort) => {
     to(slot)({ type: "restarting" });
     api.restartSession(slot, mode, withEffort, autoFor(chats.slots[slot]?.folder ?? null)).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
   };
@@ -220,9 +232,11 @@ export default function App() {
     const { claudePath } = state;
     if (!claudePath) return;
     const mode = modeFor(folder);
+    const h = findHarness(presets, harnessByFolder[folder]);
+    setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode });
-    api.startSession(slot, claudePath, folder, { mode, model, effort, auto_approve: autoFor(folder) }).then(
+    api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder) }).then(
       () => {
         setLastFolder(folder);
         to(slot)({ type: "session_ready" });
@@ -241,6 +255,10 @@ export default function App() {
   useEffect(() => {
     if (state.sessionId && sessionModes[state.sessionId] !== state.mode) setSessionModes({ ...sessionModes, [state.sessionId]: state.mode });
   }, [state.mode, state.sessionId]);
+  useEffect(() => {
+    const id = harnessBySlot[active];
+    if (state.sessionId && id && harnessBySession[state.sessionId] !== id) setHarnessBySession({ ...harnessBySession, [state.sessionId]: id });
+  }, [harnessBySlot[active], state.sessionId]);
 
   // With no model chosen, whatever claude runs is Claude Code's default: remember it so the menu can name it.
   // And for an alias, the version it currently resolves to.
@@ -280,10 +298,13 @@ export default function App() {
     // The mode it was last in (and for an older Debug, Teach or Review session, that flavour of Step by step); one from
     // before modes were kept per session reopens as a plain chat, not as whatever this folder's newest chat is doing.
     const { mode, flavour: flavourStart } = savedMode(sessionModes[sessionId]);
+    // The preset it last ran with, else the folder's.
+    const h = findHarness(presets, harnessBySession[sessionId] ?? harnessByFolder[folder]);
+    setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)(reuse ? { type: "restarting" } : { type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode, flavourStart });
     api
-      .openSession(slot, claudePath, folder, { mode, model, effort, auto_approve: autoFor(folder) }, sessionId)
+      .openSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder) }, sessionId)
       .then((events) => {
         to(slot)({ type: "history_loaded", sessionId, events });
         to(slot)({ type: "session_ready" });
@@ -433,16 +454,41 @@ export default function App() {
     }
   };
 
+  /**
+   * Switches a chat to a preset (and makes it its folder's): its claude restarts on the same session with the
+   * preset's models, as for a new mode.
+   */
+  const switchHarness = (h: Harness, slot = active) => {
+    setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
+    const folder = chats.slots[slot]?.folder;
+    if (!folder) return;
+    setHarnessByFolder({ ...harnessByFolder, [folder]: h.id });
+    to(slot)({ type: "restarting" });
+    api.applyHarness(slot, settingsFor(slot, h)).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+  };
+  // Changing model or effort on a chat with a preset makes it Custom: that preset with the change.
+  const customize = (patch: Partial<Harness>) => {
+    const custom: Harness = { ...harnessOf(active), ...patch, id: CUSTOM_HARNESS, name: "Custom" };
+    setSavedPresets([...savedPresets.filter((h) => h.id !== CUSTOM_HARNESS), custom]);
+    switchHarness(custom);
+  };
+  const presetOn = harnessOf(active).id !== DEFAULT_HARNESS;
+
   // Effort is a launch flag, so the chat's claude restarts on the same session to pick it up (like the mode).
   const changeEffort = (next: string | null) => {
+    if (presetOn) return customize({ effort: next });
     setEffort(next);
     if (state.folder) restart(active, state.mode, next);
   };
 
-  // App-wide: applies in-band from each open chat's next message, and to new chats and restarts.
+  // App-wide: applies in-band from each open chat's next message, and to new chats and restarts. Chats on a preset
+  // keep the preset's model.
   const chooseModel = (next: string | null) => {
+    if (presetOn) return customize({ model: next });
     setModel(next);
-    for (const slot of Object.keys(chats.slots)) api.setModel(slot, next).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+    for (const slot of Object.keys(chats.slots)) {
+      if (harnessOf(slot).id === DEFAULT_HARNESS) api.setModel(slot, next).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+    }
   };
 
   const stop = () => {
@@ -711,8 +757,9 @@ export default function App() {
       onOpenFolder={openFolder}
       sessions={{ load: loadSessions, currentId: state.sessionId, onOpen: openSession, open: openChats, onSwitch: switchTo }}
       folders={{ load: api.recentFolders, onPick: (path) => startFresh(path) }}
-      models={{ chosen: model, onChoose: chooseModel, defaultModel, ids: modelIds, options: state.models }}
-      effort={{ chosen: effort, onChoose: changeEffort }}
+      models={{ chosen: settingsFor(active).model, onChoose: chooseModel, defaultModel, ids: modelIds, options: state.models }}
+      effort={{ chosen: settingsFor(active).effort, onChoose: changeEffort }}
+      harness={state.folder ? { presets, chosen: harnessOf(active).id, onChoose: (id) => switchHarness(findHarness(presets, id)), onEdit: () => setSettingsAt("harness") } : undefined}
       usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs }}
       queue={{ items: state.queued, set: (items) => dispatch({ type: "queue_set", items }) }}
       commands={state.commands}
@@ -842,6 +889,19 @@ export default function App() {
           commands={state.commands}
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
+          harness={{
+            saved: presets.slice(1),
+            onSave: (next) => {
+              setSavedPresets(next);
+              // The chat on screen runs its preset as edited (when it's not in the middle of a turn).
+              const mine = next.find((h) => h.id === harnessOf(active).id);
+              if (mine && state.folder && state.status === "idle" && JSON.stringify(settingsFor(active, mine)) !== JSON.stringify(settingsFor(active))) switchHarness(mine);
+            },
+            folder: state.folder,
+            folderDefault: state.folder ? (harnessByFolder[state.folder] ?? DEFAULT_HARNESS) : DEFAULT_HARNESS,
+            onFolderDefault: (id) => state.folder && setHarnessByFolder({ ...harnessByFolder, [state.folder]: id }),
+            fallbackModel: defaultModel,
+          }}
         />
         <ModeGuide
           open={guideAt}
