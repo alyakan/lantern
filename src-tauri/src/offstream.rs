@@ -107,17 +107,24 @@ fn find_agent(subagents: &Path, tool_use_id: &str) -> Option<PathBuf> {
     None
 }
 
-/// Follows `source` until `done` is set (claude said the task ended; a last read then catches what's left) or the
-/// session stops.
-pub async fn follow(source: Source, sink: Sink, done: Arc<AtomicBool>, stopping: Arc<AtomicBool>) {
-    let started = std::time::Instant::now();
-    let mut journal = Tail::default();
-    let mut feeds: HashMap<String, AgentFeed> = HashMap::new();
-    loop {
-        let last = done.load(Ordering::SeqCst);
-        match &source {
+/// What's been read of a source so far, to read only what's new each time.
+struct Follower {
+    source: Source,
+    journal: Tail,
+    feeds: HashMap<String, AgentFeed>,
+}
+
+impl Follower {
+    fn new(source: Source) -> Self {
+        Follower { source, journal: Tail::default(), feeds: HashMap::new() }
+    }
+
+    /// Reads what's been written since the last poll and sends it as events.
+    fn poll(&mut self, sink: &Sink) {
+        let feeds = &mut self.feeds;
+        match &self.source {
             Source::Workflow { tool_use_id, dir } => {
-                for line in journal.new_lines(&dir.join("journal.jsonl")) {
+                for line in self.journal.new_lines(&dir.join("journal.jsonl")) {
                     let Ok(entry) = serde_json::from_str::<Value>(&line) else { continue };
                     let (id, label, phase) = workflow_agent(dir, &entry);
                     if id.is_empty() {
@@ -136,7 +143,7 @@ pub async fn follow(source: Source, sink: Sink, done: Arc<AtomicBool>, stopping:
                         Some(kind @ ("result" | "failed")) => {
                             // What it found came back to the workflow: read the rest of its transcript first.
                             if let Some(f) = feeds.get_mut(&id) {
-                                f.poll(&sink);
+                                f.poll(sink);
                             }
                             let output = entry["result"].as_str().map(String::from).unwrap_or_else(|| entry["result"].to_string());
                             sink(UiEvent::ToolFinished { parent: Some(tool_use_id.clone()), tool_use_id: step, is_error: kind == "failed", output: crate::stream_parser::truncate(&output, 2000) });
@@ -154,8 +161,33 @@ pub async fn follow(source: Source, sink: Sink, done: Arc<AtomicBool>, stopping:
             }
         }
         for f in feeds.values_mut() {
-            f.poll(&sink);
+            f.poll(sink);
         }
+    }
+}
+
+/// Everything written so far, at once: for a reopened session, whose background work is over.
+pub fn read_once(source: Source) -> Vec<UiEvent> {
+    let out = Arc::new(Mutex::new(vec![]));
+    let collect = out.clone();
+    let sink: Sink = Arc::new(move |e| collect.lock().unwrap().push(e));
+    let mut f = Follower::new(source);
+    f.poll(&sink);
+    // Agents' transcripts open during the first pass are read now.
+    f.poll(&sink);
+    drop(sink);
+    let events = std::mem::take(&mut *out.lock().unwrap());
+    events
+}
+
+/// Follows `source` until `done` is set (claude said the task ended; a last read then catches what's left) or the
+/// session stops.
+pub async fn follow(source: Source, sink: Sink, done: Arc<AtomicBool>, stopping: Arc<AtomicBool>) {
+    let started = std::time::Instant::now();
+    let mut f = Follower::new(source);
+    loop {
+        let last = done.load(Ordering::SeqCst);
+        f.poll(&sink);
         if last || stopping.load(Ordering::SeqCst) || started.elapsed() > MAX_WATCH {
             return;
         }

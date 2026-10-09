@@ -447,6 +447,9 @@ function applyEvent(state: State, ev: UiEvent): State {
       return { ...state, debug: [...state.debug.slice(-99), JSON.stringify(ev.raw)] };
     case "parse_error":
       return { ...state, debug: [...state.debug.slice(-99), ev.line] };
+    default:
+      // An event this version doesn't know (a newer backend's): left alone, never an empty chat.
+      return state;
   }
 }
 
