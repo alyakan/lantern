@@ -11,6 +11,7 @@ pub mod session;
 pub mod shell;
 pub mod skills;
 pub mod slots;
+pub mod offstream;
 pub mod outside;
 pub mod stream_parser;
 pub mod test_runs;

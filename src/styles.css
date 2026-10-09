@@ -1146,3 +1146,9 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .graph-panel-line { color: var(--text-2); line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .graph-panel-hint { color: var(--faint); line-height: 36px; text-align: center; }
 @media (prefers-reduced-motion: reduce) { .graph-edge.active, .graph-node.running .graph-ring { animation: none; } .graph-node { transition: none; } }
+/* A workflow (many agents from a script) between the main agent and its agents. */
+.graph-workflow { fill: var(--field); stroke: var(--text-2); stroke-width: 1.4; stroke-dasharray: 5 3; }
+.graph-node.workflow.running .graph-workflow { stroke: var(--working); }
+.graph-node.workflow.running .graph-ring { animation: none; stroke-dasharray: 10 6; stroke: color-mix(in srgb, var(--working) 60%, transparent); animation: graph-flow 0.8s linear infinite; }
+.graph-workflow-name { text-anchor: middle; font: 600 11.5px var(--ui); fill: var(--text); pointer-events: none; }
+.graph-workflow-phase { text-anchor: middle; font: 10.5px var(--mono); fill: var(--muted); pointer-events: none; }

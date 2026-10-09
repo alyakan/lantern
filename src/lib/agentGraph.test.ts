@@ -76,3 +76,26 @@ describe("agentGraph", () => {
     expect(g.nodes.some((x) => x.kind === "advisor")).toBe(false);
   });
 });
+
+describe("agentGraph and workflows", () => {
+  it("puts a workflow between main and its agents, named with its phase", () => {
+    const s = run([
+      start(null, "wf", "Workflow", "settings-redesign"),
+      start("wf", "wfa-1", "Agent", "propose:reduce"),
+      { kind: "agent_started", tool_use_id: "wfa-1", subagent_type: "Propose", description: "propose:reduce", model: null },
+      { kind: "agent_model", parent: "wfa-1", model: "claude-haiku-5-5" },
+      start("wfa-1", "r", "Read", "a.swift"),
+    ]);
+    const g = agentGraph(s.items, opts);
+    const n = new Map(g.nodes.map((x) => [x.id, x]));
+    expect(n.get("wf:wf")).toMatchObject({ kind: "workflow", label: "settings-redesign", sub: "Propose", parent: "main" });
+    expect(n.get("agent:wfa-1")).toMatchObject({ label: "propose:reduce", sub: "Haiku 5.5", parent: "wf:wf" });
+    expect(n.get("agent:wfa-1/files")!.parent).toBe("agent:wfa-1");
+    expect(n.get("agent:wfa-1")!.y).toBeGreaterThan(n.get("wf:wf")!.y);
+    // An agent's start travels from the workflow, and on the way from main.
+    expect(g.stepEdge["wfa-1"]).toMatchObject({ edge: "wf:wf->agent:wfa-1", via: "main->wf:wf" });
+    // The Workflow call isn't a tool leaf of main.
+    expect(g.nodes.some((x) => x.id.startsWith("main/"))).toBe(false);
+  });
+});
+

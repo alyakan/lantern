@@ -10,7 +10,11 @@ interface Pulse {
 }
 
 const PULSE_MS = 900;
+const MIN_VIEW_WIDTH = 560;
 const R = 19;
+/** A workflow's box: wide enough for its name, its phase under it. */
+const WF_W = 124;
+const WF_H = 40;
 
 const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
@@ -19,9 +23,9 @@ function edgePath(e: GraphEdge, nodes: Map<string, GraphNode>): string {
   const a = nodes.get(e.from)!;
   const b = nodes.get(e.to)!;
   if (e.dashed) return `M ${a.x - R - 4} ${a.y} L ${b.x + R + 4} ${b.y}`;
-  // From under the label and model, so the line doesn't cross them.
-  const y1 = a.y + LABEL_DEPTH;
-  const y2 = b.y - (b.kind === "leaf" ? 14 : R + 6);
+  // From under the label and model, so the line doesn't cross them; a workflow's box holds its own.
+  const y1 = a.y + (a.kind === "workflow" ? WF_H / 2 + 4 : LABEL_DEPTH);
+  const y2 = b.y - (b.kind === "leaf" ? 14 : b.kind === "workflow" ? WF_H / 2 + 4 : R + 6);
   const mid = (y1 + y2) / 2;
   return `M ${a.x} ${y1} C ${a.x} ${mid}, ${b.x} ${mid}, ${b.x} ${y2}`;
 }
@@ -64,10 +68,12 @@ export function AgentGraph({ graph }: { graph: Graph }) {
   }, [graph]);
 
   const shown = nodes.get(pinned ?? hovered ?? "") ?? null;
+  const viewWidth = Math.max(graph.width, MIN_VIEW_WIDTH);
   const live = graph.nodes.some((n) => n.status === "running");
   return (
     <div className="agent-graph">
-      <svg viewBox={`0 0 ${graph.width} ${graph.height}`} preserveAspectRatio="xMidYMin meet" role="img" aria-label="Agent graph">
+      {/* At least this wide, so a graph of one or two nodes isn't blown up to fill the pane. */}
+      <svg viewBox={`${-(viewWidth - graph.width) / 2} 0 ${viewWidth} ${graph.height}`} preserveAspectRatio="xMidYMin meet" role="img" aria-label="Agent graph">
         {graph.edges.map((e) => (
           <path key={e.id} d={edgePath(e, nodes)} className={`graph-edge tone-${nodes.get(e.to)!.kind === "leaf" ? nodes.get(e.from)!.tone : nodes.get(e.to)!.tone}${e.active ? " active" : ""}${e.dashed ? " dashed" : ""}${live && !e.active ? " idle" : ""}`} />
         ))}
@@ -94,7 +100,18 @@ export function AgentGraph({ graph }: { graph: Graph }) {
             onBlur={() => setHovered(null)}
             onClick={() => setPinned(pinned === n.id ? null : n.id)}
           >
-            {n.kind === "leaf" ? (
+            {n.kind === "workflow" ? (
+              <>
+                <rect x={-WF_W / 2 - 4} y={-WF_H / 2 - 4} width={WF_W + 8} height={WF_H + 8} rx={14} className="graph-ring" />
+                <rect x={-WF_W / 2} y={-WF_H / 2} width={WF_W} height={WF_H} rx={10} className="graph-workflow" />
+                <text className="graph-workflow-name" y={-2}>
+                  {n.label}
+                </text>
+                <text className="graph-workflow-phase" y={12}>
+                  {n.sub}
+                </text>
+              </>
+            ) : n.kind === "leaf" ? (
               <>
                 <rect x={-38} y={-13} width={76} height={26} rx={13} className="graph-leaf" />
                 <text className="graph-leaf-text" y={4}>

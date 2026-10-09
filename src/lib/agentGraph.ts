@@ -1,6 +1,6 @@
 import type { ChatItem, ToolItem } from "../store";
 import { categoryOf, mcpTool, stepLabel, type Category } from "./activity";
-import { agentTree, shortModel, type AdvisorCall, type SubagentNode } from "./agents";
+import { agentTree, lastTurn, shortModel, type AdvisorCall, type SubagentNode } from "./agents";
 import { familyOf, type Family } from "./harness";
 
 /**
@@ -8,7 +8,7 @@ import { familyOf, type Family } from "./harness";
  * every agent the kinds of tools it uses (files, search, shell, web, each MCP server). Laid out as a tree.
  */
 
-export type NodeKind = "main" | "advisor" | "agent" | "leaf";
+export type NodeKind = "main" | "advisor" | "workflow" | "agent" | "leaf";
 export type NodeStatus = "running" | "done" | "error" | "idle";
 
 export interface GraphNode {
@@ -104,8 +104,8 @@ const advisorStatus = (calls: AdvisorCall[]): NodeStatus => {
 /** The graph of the chat's latest turn, laid out. */
 export function agentGraph(items: ChatItem[], opts: Parameters<typeof agentTree>[1]): AgentGraph {
   const tree = agentTree(items, opts);
-  const at = items.map((it) => it.type === "user").lastIndexOf(true);
-  const top = steps(items.slice(at + 1));
+  // The same turn as the tree: since your last message, Claude's own follow-ups included.
+  const top = steps(lastTurn(items).items);
   const out = { nodes: [] as GraphNode[], edges: [] as GraphEdge[], stepEdge: {} as AgentGraph["stepEdge"] };
 
   const mainStatus: NodeStatus = tree.live ? "running" : top.some((t) => t.status === "error") && !tree.back ? "error" : "done";
@@ -119,18 +119,41 @@ export function agentGraph(items: ChatItem[], opts: Parameters<typeof agentTree>
   }
 
   const fold = tree.subagents.length > MAX_UNFOLDED;
-  for (const s of tree.subagents) {
+  const nodeStatus = (st: ToolItem["status"]): NodeStatus => (st === "running" ? "running" : st === "error" ? "error" : "done");
+  const allTools = (list: ToolItem[]): ToolItem[] => list.flatMap((t) => [t, ...allTools(steps(t.children))]);
+  const tools = allTools(top);
+  // A subagent under its parent (main, or the workflow it runs in), with its kinds of tools under it.
+  const addAgent = (s: SubagentNode, parent: string, via?: string) => {
     const id = `agent:${s.id}`;
-    const status: NodeStatus = s.status === "running" ? "running" : s.status === "error" ? "error" : "done";
-    out.nodes.push({ id, kind: "agent", label: s.type, sub: shortModel(s.model) ?? "…", tone: toneOf(s.model), status, parent: "main", x: 0, y: 0, detail: agentDetail(s) });
-    out.edges.push({ id: `main->${id}`, from: "main", to: id, active: status === "running", dashed: false });
-    out.stepEdge[s.id] = { edge: `main->${id}`, status: s.status };
-    const tool = top.find((t) => t.id === s.id);
-    if (tool && !fold) leavesFor(id, steps(tool.children), out, `main->${id}`);
-    // Folded: its calls still show on its edge from main.
-    if (tool && fold) for (const c of steps(tool.children)) out.stepEdge[c.id] = { edge: `main->${id}`, status: c.status };
+    const status = nodeStatus(s.status);
+    // A workflow agent is named by its label ("propose:reduce"); a subagent by its type ("Explore").
+    const label = s.workflow ? s.description : s.type;
+    out.nodes.push({ id, kind: "agent", label, sub: shortModel(s.model) ?? "…", tone: toneOf(s.model), status, parent, x: 0, y: 0, detail: s.workflow ? [`${s.type} phase`, ...agentDetail(s).slice(1)] : agentDetail(s) });
+    const edge = `${parent}->${id}`;
+    out.edges.push({ id: edge, from: parent, to: id, active: status === "running", dashed: false });
+    out.stepEdge[s.id] = { edge, via, status: s.status };
+    const tool = tools.find((t) => t.id === s.id);
+    if (tool && !fold) leavesFor(id, steps(tool.children), out, edge);
+    // Folded: its calls still show on its edge.
+    if (tool && fold) for (const c of steps(tool.children)) out.stepEdge[c.id] = { edge, status: c.status };
+  };
+  // In the turn's order: subagents Claude started, and workflows with their agents.
+  for (const t of top) {
+    if (isAgent(t)) {
+      const s = tree.subagents.find((x) => x.id === t.id);
+      if (s) addAgent(s, "main");
+    } else if (t.name === "Workflow") {
+      const w = tree.workflows.find((x) => x.id === t.id)!;
+      const id = `wf:${w.id}`;
+      const status = nodeStatus(w.status);
+      const mine = tree.subagents.filter((x) => x.workflow === w.id);
+      out.nodes.push({ id, kind: "workflow", label: w.name.length > 22 ? `${w.name.slice(0, 21)}…` : w.name, sub: w.phase ?? "workflow", tone: "none", status, parent: "main", x: 0, y: 0, detail: [`Workflow: ${w.name}`, `${mine.length} agents${w.phase ? ` · now: ${w.phase}` : ""}`] });
+      out.edges.push({ id: `main->${id}`, from: "main", to: id, active: status === "running", dashed: false });
+      out.stepEdge[w.id] = { edge: `main->${id}`, status: w.status };
+      for (const s of mine) addAgent(s, id, `main->${id}`);
+    }
   }
-  leavesFor("main", top.filter((t) => !isAgent(t) && t.name !== "advisor"), out);
+  leavesFor("main", top.filter((t) => !isAgent(t) && t.name !== "advisor" && t.name !== "Workflow"), out);
 
   return layout(out);
 }

@@ -103,3 +103,50 @@ describe("store and agents", () => {
     expect(t && "startedAt" in t ? t.startedAt : "missing").toBeUndefined();
   });
 });
+
+describe("workflows and background work", () => {
+  const WF: UiEvent[] = [
+    { kind: "tool_started", parent: null, tool_use_id: "wf", name: "Workflow", summary: "settings-redesign" },
+    { kind: "tool_finished", parent: null, tool_use_id: "wf", is_error: false, output: "Workflow launched in background." },
+    { kind: "task_started", task_id: "t1", tool_use_id: "wf" },
+    { kind: "turn_done", is_error: false, result: null, cost_usd: 0, duration_ms: 1, auth_hint: false, denied: 0, context_window: null },
+    { kind: "tool_started", parent: "wf", tool_use_id: "wfa-1", name: "Agent", summary: "propose:reduce" },
+    { kind: "agent_started", tool_use_id: "wfa-1", subagent_type: "Propose", description: "propose:reduce", model: null },
+    { kind: "agent_model", parent: "wfa-1", model: "claude-haiku-5-5" },
+    ...step("wfa-1", "g", "Grep", "NavigationLink"),
+  ];
+
+  it("shows a workflow's agents under it, running while its background task does", () => {
+    const s = run(WF);
+    const tree = agentTree(s.items, { ...opts, live: true, background: s.backgroundRuns });
+    expect(tree.workflows).toEqual([{ id: "wf", name: "settings-redesign", status: "running", phase: "Propose" }]);
+    expect(tree.subagents.map((x) => [x.workflow, x.description, x.type, x.model, x.status])).toEqual([["wf", "propose:reduce", "Propose", "claude-haiku-5-5", "running"]]);
+    expect(tree.log.map((e) => e.text)).toContain("Started workflow: settings-redesign");
+  });
+
+  it("keeps background work in view after Claude follows up on its own, and marks it stopped if its task was", () => {
+    const s = run([
+      ...WF,
+      { kind: "task_ended", task_id: "t1", tool_use_id: "wf", status: "stopped", summary: "" },
+      // Claude replies on its own: a new turn, but not a new message from you.
+      { kind: "assistant_text", parent: null, block_id: "b", text: "The workflow stopped." },
+    ]);
+    expect(s.items.some((it) => it.type === "user" && it.auto)).toBe(true);
+    const tree = agentTree(s.items, { ...opts, background: s.backgroundRuns });
+    expect(tree.prompt).toBe("fix the auth tests");
+    expect(tree.workflows[0].status).toBe("error");
+    expect(tree.subagents[0]).toMatchObject({ status: "error", now: "Stopped" });
+  });
+
+  it("follows a background subagent by its task, not its call (which returns at once)", () => {
+    const s = run([
+      { kind: "tool_started", parent: null, tool_use_id: "bg", name: "Agent", summary: "Map auth" },
+      { kind: "agent_started", tool_use_id: "bg", subagent_type: "Explore", description: "Map auth", model: null },
+      { kind: "tool_finished", parent: null, tool_use_id: "bg", is_error: false, output: "launched" },
+      { kind: "task_started", task_id: "t2", tool_use_id: "bg" },
+    ]);
+    expect(agentTree(s.items, { ...opts, background: s.backgroundRuns }).subagents[0].status).toBe("running");
+    expect(agentTree(s.items, opts).subagents[0].status).toBe("done");
+  });
+});
+
