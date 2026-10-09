@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, reducer, type State } from "../store";
 import type { UiEvent } from "../types";
-import { MAX_UNFOLDED, agentGraph } from "./agentGraph";
+import { MAX_UNFOLDED, MIN_VIEW, agentGraph, fit, neighbor, branchOf, branchView, trailTo, wholeView, zoomTarget } from "./agentGraph";
 
 const run = (events: UiEvent[]) => {
   let s: State = reducer({ ...initialState, status: "idle" }, { type: "user_sent", text: "fix it" });
@@ -76,3 +76,89 @@ describe("agentGraph", () => {
     expect(g.nodes.some((x) => x.kind === "advisor")).toBe(false);
   });
 });
+
+describe("agentGraph and workflows", () => {
+  it("puts a workflow between main and its agents, named with its phase", () => {
+    const s = run([
+      start(null, "wf", "Workflow", "settings-redesign"),
+      start("wf", "wfa-1", "Agent", "propose:reduce"),
+      { kind: "agent_started", tool_use_id: "wfa-1", subagent_type: "Propose", description: "propose:reduce", model: null },
+      { kind: "agent_model", parent: "wfa-1", model: "claude-haiku-5-5" },
+      start("wfa-1", "r", "Read", "a.swift"),
+    ]);
+    const g = agentGraph(s.items, opts);
+    const n = new Map(g.nodes.map((x) => [x.id, x]));
+    expect(n.get("wf:wf")).toMatchObject({ kind: "workflow", label: "settings-redesign", sub: "Propose", parent: "main" });
+    expect(n.get("agent:wfa-1")).toMatchObject({ label: "propose:reduce", sub: "Haiku 5.5", parent: "wf:wf" });
+    expect(n.get("agent:wfa-1/files")!.parent).toBe("agent:wfa-1");
+    expect(n.get("agent:wfa-1")!.y).toBeGreaterThan(n.get("wf:wf")!.y);
+    // An agent's start travels from the workflow, and on the way from main.
+    expect(g.stepEdge["wfa-1"]).toMatchObject({ edge: "wf:wf->agent:wfa-1", via: "main->wf:wf" });
+    // The Workflow call isn't a tool leaf of main.
+    expect(g.nodes.some((x) => x.id.startsWith("main/"))).toBe(false);
+  });
+});
+
+describe("zooming into a branch", () => {
+  const s = run([
+    start(null, "wf", "Workflow", "settings-redesign"),
+    start("wf", "wfa-1", "Agent", "propose:reduce"),
+    { kind: "agent_started", tool_use_id: "wfa-1", subagent_type: "Propose", description: "propose:reduce", model: null },
+    start("wfa-1", "r", "Read", "a.swift"),
+    start("wf", "wfa-2", "Agent", "judge"),
+    { kind: "agent_started", tool_use_id: "wfa-2", subagent_type: "Judge", description: "judge", model: null },
+  ]);
+  const g = agentGraph(s.items, opts);
+
+  it("takes a node, its children and theirs, and zooms to a leaf's agent", () => {
+    expect([...branchOf(g, "wf:wf")].sort()).toEqual(["agent:wfa-1", "agent:wfa-1/files", "agent:wfa-2", "wf:wf"]);
+    expect(zoomTarget(g, "agent:wfa-1/files")).toBe("agent:wfa-1");
+    expect(zoomTarget(g, "agent:wfa-2")).toBe("agent:wfa-2");
+  });
+
+  it("frames the branch closer than the whole graph, never smaller than readable", () => {
+    const whole = wholeView(g);
+    const agent = branchView(g, "agent:wfa-1");
+    expect(agent.w).toBeLessThan(whole.w);
+    expect(agent.w).toBeGreaterThanOrEqual(MIN_VIEW.w);
+    const n = g.nodes.find((x) => x.id === "agent:wfa-1")!;
+    expect(n.x).toBeGreaterThan(agent.x);
+    expect(n.x).toBeLessThan(agent.x + agent.w);
+  });
+
+  it("gives the trail from main down to the node", () => {
+    expect(trailTo(g, "agent:wfa-1").map((x) => x.label)).toEqual(["main", "settings-redesign", "propose:reduce"]);
+  });
+});
+
+describe("moving between nodes with the arrow keys", () => {
+  const s = run([
+    { kind: "advisor_started", parent: null, id: "adv" },
+    ...agent("a", "Explore", "claude-haiku-5-5"),
+    start("a", "a1", "Grep"),
+    start("a", "a2", "Read"),
+    ...agent("b", "Explore", "claude-haiku-5-5"),
+    start("b", "b1", "Bash"),
+  ]);
+  const g = agentGraph(s.items, opts);
+
+  it("goes up to the parent, down to the nearest child, and along a row", () => {
+    expect(neighbor(g, "agent:a/search", "up")).toBe("agent:a");
+    expect(neighbor(g, "agent:a", "up")).toBe("main");
+    expect(neighbor(g, "main", "up")).toBeNull();
+    expect(neighbor(g, "advisor", "up")).toBe("main");
+    expect(["agent:a", "agent:b"]).toContain(neighbor(g, "main", "down"));
+    expect(neighbor(g, "agent:a", "right")).toBe("agent:b");
+    expect(neighbor(g, "agent:b", "left")).toBe("agent:a");
+    expect(neighbor(g, "main", "left")).toBe("advisor");
+    // Along the leaves' row, across agents.
+    expect(neighbor(g, "agent:a/files", "right")).toBe("agent:b/shell");
+    expect(neighbor(g, "agent:b/shell", "down")).toBeNull();
+  });
+
+  it("cuts text to fit, with an ellipsis", () => {
+    expect(fit("settings-redesign-design", 15)).toBe("settings-redes…");
+    expect(fit("short", 15)).toBe("short");
+  });
+});
+

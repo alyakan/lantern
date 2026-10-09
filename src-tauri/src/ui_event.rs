@@ -102,6 +102,10 @@ pub enum UiEvent {
     AdvisorStarted { parent: Option<String>, id: String },
     /// The advisor answered: "reviewed", "declined" or "unavailable" (with its error code).
     AdvisorDone { parent: Option<String>, id: String, outcome: String, error_code: Option<String> },
+    /// Work that runs off the stream, whose transcripts are on disk: a Workflow's agents (`dir`: its transcript
+    /// folder) or a background subagent (`dir` None: found by its Agent call). The session follows it (offstream.rs)
+    /// and doesn't pass this on.
+    Offstream { tool_use_id: String, dir: Option<String> },
     /// What the turn cost per model (the main model, subagents', the advisor's), from the result.
     ModelUsage { models: Vec<ModelCost> },
     /// The MCP tools claude can use this session ("mcp__server__tool"), from its init message.

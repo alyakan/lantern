@@ -1,6 +1,6 @@
 import type { ChatItem, ToolItem } from "../store";
 import { categoryOf, mcpTool, stepLabel, type Category } from "./activity";
-import { agentTree, shortModel, type AdvisorCall, type SubagentNode } from "./agents";
+import { agentTree, lastTurn, shortModel, type AdvisorCall, type SubagentNode } from "./agents";
 import { familyOf, type Family } from "./harness";
 
 /**
@@ -8,7 +8,7 @@ import { familyOf, type Family } from "./harness";
  * every agent the kinds of tools it uses (files, search, shell, web, each MCP server). Laid out as a tree.
  */
 
-export type NodeKind = "main" | "advisor" | "agent" | "leaf";
+export type NodeKind = "main" | "advisor" | "workflow" | "agent" | "leaf";
 export type NodeStatus = "running" | "done" | "error" | "idle";
 
 export interface GraphNode {
@@ -104,8 +104,8 @@ const advisorStatus = (calls: AdvisorCall[]): NodeStatus => {
 /** The graph of the chat's latest turn, laid out. */
 export function agentGraph(items: ChatItem[], opts: Parameters<typeof agentTree>[1]): AgentGraph {
   const tree = agentTree(items, opts);
-  const at = items.map((it) => it.type === "user").lastIndexOf(true);
-  const top = steps(items.slice(at + 1));
+  // The same turn as the tree: since your last message, Claude's own follow-ups included.
+  const top = steps(lastTurn(items).items);
   const out = { nodes: [] as GraphNode[], edges: [] as GraphEdge[], stepEdge: {} as AgentGraph["stepEdge"] };
 
   const mainStatus: NodeStatus = tree.live ? "running" : top.some((t) => t.status === "error") && !tree.back ? "error" : "done";
@@ -119,18 +119,41 @@ export function agentGraph(items: ChatItem[], opts: Parameters<typeof agentTree>
   }
 
   const fold = tree.subagents.length > MAX_UNFOLDED;
-  for (const s of tree.subagents) {
+  const nodeStatus = (st: ToolItem["status"]): NodeStatus => (st === "running" ? "running" : st === "error" ? "error" : "done");
+  const allTools = (list: ToolItem[]): ToolItem[] => list.flatMap((t) => [t, ...allTools(steps(t.children))]);
+  const tools = allTools(top);
+  // A subagent under its parent (main, or the workflow it runs in), with its kinds of tools under it.
+  const addAgent = (s: SubagentNode, parent: string, via?: string) => {
     const id = `agent:${s.id}`;
-    const status: NodeStatus = s.status === "running" ? "running" : s.status === "error" ? "error" : "done";
-    out.nodes.push({ id, kind: "agent", label: s.type, sub: shortModel(s.model) ?? "…", tone: toneOf(s.model), status, parent: "main", x: 0, y: 0, detail: agentDetail(s) });
-    out.edges.push({ id: `main->${id}`, from: "main", to: id, active: status === "running", dashed: false });
-    out.stepEdge[s.id] = { edge: `main->${id}`, status: s.status };
-    const tool = top.find((t) => t.id === s.id);
-    if (tool && !fold) leavesFor(id, steps(tool.children), out, `main->${id}`);
-    // Folded: its calls still show on its edge from main.
-    if (tool && fold) for (const c of steps(tool.children)) out.stepEdge[c.id] = { edge: `main->${id}`, status: c.status };
+    const status = nodeStatus(s.status);
+    // A workflow agent is named by its label ("propose:reduce"); a subagent by its type ("Explore").
+    const label = s.workflow ? s.description : s.type;
+    out.nodes.push({ id, kind: "agent", label, sub: shortModel(s.model) ?? "…", tone: toneOf(s.model), status, parent, x: 0, y: 0, detail: s.workflow ? [`${s.type} phase`, ...agentDetail(s).slice(1)] : agentDetail(s) });
+    const edge = `${parent}->${id}`;
+    out.edges.push({ id: edge, from: parent, to: id, active: status === "running", dashed: false });
+    out.stepEdge[s.id] = { edge, via, status: s.status };
+    const tool = tools.find((t) => t.id === s.id);
+    if (tool && !fold) leavesFor(id, steps(tool.children), out, edge);
+    // Folded: its calls still show on its edge.
+    if (tool && fold) for (const c of steps(tool.children)) out.stepEdge[c.id] = { edge, status: c.status };
+  };
+  // In the turn's order: subagents Claude started, and workflows with their agents.
+  for (const t of top) {
+    if (isAgent(t)) {
+      const s = tree.subagents.find((x) => x.id === t.id);
+      if (s) addAgent(s, "main");
+    } else if (t.name === "Workflow") {
+      const w = tree.workflows.find((x) => x.id === t.id)!;
+      const id = `wf:${w.id}`;
+      const status = nodeStatus(w.status);
+      const mine = tree.subagents.filter((x) => x.workflow === w.id);
+      out.nodes.push({ id, kind: "workflow", label: w.name, sub: w.phase ?? "workflow", tone: "none", status, parent: "main", x: 0, y: 0, detail: [`Workflow: ${w.name}`, `${mine.length} agents${w.phase ? ` · now: ${w.phase}` : ""}`] });
+      out.edges.push({ id: `main->${id}`, from: "main", to: id, active: status === "running", dashed: false });
+      out.stepEdge[w.id] = { edge: `main->${id}`, status: w.status };
+      for (const s of mine) addAgent(s, id, `main->${id}`);
+    }
   }
-  leavesFor("main", top.filter((t) => !isAgent(t) && t.name !== "advisor"), out);
+  leavesFor("main", top.filter((t) => !isAgent(t) && t.name !== "advisor" && t.name !== "Workflow"), out);
 
   return layout(out);
 }
@@ -174,4 +197,77 @@ function layout(g: { nodes: GraphNode[]; edges: GraphEdge[]; stepEdge: AgentGrap
   // Down to the lowest thing drawn: a leaf's bottom edge, or an agent's model line.
   const bottom = Math.max(...g.nodes.map((n) => n.y + (n.kind === "leaf" ? 14 : LABEL_DEPTH)));
   return { ...g, width: offset + treeWidth + SIZE.side, height: bottom + 8 };
+}
+
+/** The view the graph shows: a box in its coordinates. */
+export interface View {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Narrower than this and a zoomed branch of one or two nodes would be blown up to fill the pane. */
+export const MIN_VIEW = { w: 420, h: 260 };
+
+/** The whole graph, at least MIN_VIEW wide, centred. */
+export function wholeView(g: AgentGraph): View {
+  const w = Math.max(g.width, 560);
+  return { x: -(w - g.width) / 2, y: 0, w, h: g.height };
+}
+
+/** The node to zoom to for a click: a tool leaf's agent, otherwise the node itself. */
+export function zoomTarget(g: AgentGraph, id: string): string {
+  const n = g.nodes.find((x) => x.id === id);
+  return n?.kind === "leaf" && n.parent ? n.parent : id;
+}
+
+/** A node's branch: it, its children and their children. */
+export function branchOf(g: AgentGraph, id: string): Set<string> {
+  const ids = new Set([id]);
+  for (let depth = 0; depth < 2; depth++) for (const n of g.nodes) if (n.parent && ids.has(n.parent)) ids.add(n.id);
+  return ids;
+}
+
+/** The box around a node's branch, with room for labels, at least MIN_VIEW in size (centred on the branch). */
+export function branchView(g: AgentGraph, id: string): View {
+  const branch = g.nodes.filter((n) => branchOf(g, id).has(n.id));
+  if (branch.length === 0) return wholeView(g);
+  const half = (n: GraphNode) => (n.kind === "leaf" ? SIZE.leaf : SIZE.agent) / 2;
+  const left = Math.min(...branch.map((n) => n.x - half(n))) - 16;
+  const right = Math.max(...branch.map((n) => n.x + half(n))) + 16;
+  const top = Math.min(...branch.map((n) => n.y)) - SIZE.top;
+  const bottom = Math.max(...branch.map((n) => n.y + (n.kind === "leaf" ? 14 : LABEL_DEPTH))) + 12;
+  const w = Math.max(right - left, MIN_VIEW.w);
+  const h = Math.max(bottom - top, MIN_VIEW.h);
+  return { x: (left + right) / 2 - w / 2, y: top, w, h };
+}
+
+/** The way down from the main agent to a node, for the breadcrumb: its ancestors, then it. */
+export function trailTo(g: AgentGraph, id: string): GraphNode[] {
+  const byId = new Map(g.nodes.map((n) => [n.id, n]));
+  const out: GraphNode[] = [];
+  for (let n = byId.get(id); n; n = n.parent ? byId.get(n.parent) : undefined) out.unshift(n);
+  return out;
+}
+
+export type Direction = "up" | "down" | "left" | "right";
+
+/**
+ * The node an arrow key moves to: up to the parent, down to the child nearest below, left or right to the nearest
+ * node on the same row (across branches, so the agents can be swept through). Null when there's none that way.
+ */
+export function neighbor(g: AgentGraph, id: string, dir: Direction): string | null {
+  const n = g.nodes.find((x) => x.id === id);
+  if (!n) return null;
+  if (dir === "up") return n.parent ?? (n.kind === "advisor" ? "main" : null);
+  const nearest = (list: GraphNode[]) => list.sort((a, b) => Math.abs(a.x - n.x) - Math.abs(b.x - n.x))[0]?.id ?? null;
+  if (dir === "down") return nearest(g.nodes.filter((x) => x.parent === id));
+  const row = g.nodes.filter((x) => x.id !== id && Math.abs(x.y - n.y) < 1 && (dir === "left" ? x.x < n.x : x.x > n.x));
+  return nearest(row);
+}
+
+/** Text cut to fit a box: about this many characters at the graph's font sizes, with "…" when cut. */
+export function fit(text: string, chars: number): string {
+  return text.length > chars ? `${text.slice(0, Math.max(1, chars - 1))}…` : text;
 }

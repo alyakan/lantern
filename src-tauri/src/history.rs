@@ -282,7 +282,19 @@ pub fn replay(path: &Path) -> Replay {
             Some("user") => json!({"type": "user", "message": r["message"], "tool_use_result": r["toolUseResult"], "parent_tool_use_id": null}),
             _ => continue,
         };
-        events.extend(parser.parse_line(&line.to_string()));
+        for ev in parser.parse_line(&line.to_string()) {
+            // Work that ran off the stream (a workflow's agents, a background subagent): read from its transcripts
+            // now, all of it, in its place.
+            if let UiEvent::Offstream { tool_use_id, dir } = ev {
+                let source = match dir {
+                    Some(d) => crate::offstream::Source::Workflow { tool_use_id, dir: d.into() },
+                    None => crate::offstream::Source::Agent { tool_use_id, subagents: path.with_extension("").join("subagents") },
+                };
+                events.extend(crate::offstream::read_once(source));
+            } else {
+                events.push(ev);
+            }
+        }
     }
     let last_prompt = events.iter().rposition(|e| matches!(e, UiEvent::UserText { .. })).unwrap_or(0);
     let edits_of = |events: &[UiEvent]| -> Vec<(String, Option<String>)> {
@@ -302,6 +314,18 @@ pub fn replay(path: &Path) -> Replay {
 
 #[cfg(test)]
 mod tests {
+    /// Against a real transcript: LANTERN_TRANSCRIPT=<…/session.jsonl> cargo test real_replay -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn real_replay() {
+        let path = std::path::PathBuf::from(std::env::var("LANTERN_TRANSCRIPT").expect("LANTERN_TRANSCRIPT"));
+        let r = replay(&path);
+        let offstream = r.events.iter().filter(|e| matches!(e, UiEvent::Offstream { .. })).count();
+        let agents: Vec<String> = r.events.iter().filter_map(|e| if let UiEvent::AgentStarted { description, .. } = e { Some(description.clone()) } else { None }).collect();
+        println!("events: {}\noffstream left: {offstream}\nagents: {agents:?}", r.events.len());
+        assert_eq!(offstream, 0);
+    }
+
     use super::*;
 
     const FOLDER: &str = "/Users/me/src/acme-api";

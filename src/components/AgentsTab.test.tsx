@@ -11,7 +11,8 @@ const tree: AgentTree = {
   live: true,
   main: { model: "claude-sonnet-5-5", effort: "high", now: "Waiting for 1 subagent", steps: 3 },
   advisor: { model: "opus", calls: [{ id: "a1", status: "reviewed", detail: null, moment: "before starting" }, { id: "a2", status: "advising", detail: null, moment: "after a failed step" }] },
-  subagents: [{ id: "w", type: "general-purpose", description: "Fix fixtures", model: "claude-sonnet-5-5", status: "running", now: "Running npm test", steps: 2, tokens: 14200, ms: 2600 }],
+  subagents: [{ id: "w", workflow: null, type: "general-purpose", description: "Fix fixtures", model: "claude-sonnet-5-5", status: "running", now: "Running npm test", steps: 2, tokens: 14200, ms: 2600 }],
+  workflows: [],
   log: [{ id: "a1", at: Date.UTC(2026, 9, 8, 12, 0, 0), agent: "advisor", model: "opus", text: "reviewed · before starting", status: "done" }],
   back: false,
 };

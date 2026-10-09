@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { LABEL_DEPTH, type AgentGraph as Graph, type GraphEdge, type GraphNode } from "../lib/agentGraph";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { LABEL_DEPTH, branchOf, branchView, fit, neighbor, trailTo, wholeView, zoomTarget, type Direction, type AgentGraph as Graph, type GraphEdge, type GraphNode, type View } from "../lib/agentGraph";
 
 /** A dot travelling along an edge: down (handing work over) or up (handing it back), red when it failed. */
 interface Pulse {
@@ -10,7 +10,16 @@ interface Pulse {
 }
 
 const PULSE_MS = 900;
+const ZOOM_MS = 380;
 const R = 19;
+/** A workflow's box: its name, its phase under it. */
+const WF_W = 124;
+const WF_H = 40;
+/** A tool leaf's box. */
+const LEAF_W = 76;
+/** How many characters fit across a box with 8px of room on each side, at an average character width. */
+const fits = (width: number, perChar: number) => Math.floor((width - 2 * 8) / perChar);
+const ARROWS: Record<string, Direction> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
 const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
@@ -19,9 +28,9 @@ function edgePath(e: GraphEdge, nodes: Map<string, GraphNode>): string {
   const a = nodes.get(e.from)!;
   const b = nodes.get(e.to)!;
   if (e.dashed) return `M ${a.x - R - 4} ${a.y} L ${b.x + R + 4} ${b.y}`;
-  // From under the label and model, so the line doesn't cross them.
-  const y1 = a.y + LABEL_DEPTH;
-  const y2 = b.y - (b.kind === "leaf" ? 14 : R + 6);
+  // From under the label and model, so the line doesn't cross them; a workflow's box holds its own.
+  const y1 = a.y + (a.kind === "workflow" ? WF_H / 2 + 4 : LABEL_DEPTH);
+  const y2 = b.y - (b.kind === "leaf" ? 14 : b.kind === "workflow" ? WF_H / 2 + 4 : R + 6);
   const mid = (y1 + y2) / 2;
   return `M ${a.x} ${y1} C ${a.x} ${mid}, ${b.x} ${mid}, ${b.x} ${y2}`;
 }
@@ -63,13 +72,93 @@ export function AgentGraph({ graph }: { graph: Graph }) {
     timers.current.push(setTimeout(() => setPulses((p) => p.filter((x) => !keys.has(x.key))), PULSE_MS + 100));
   }, [graph]);
 
+  // Zoomed into a node's branch (null: the whole graph). A node that's gone (a new turn) zooms back out.
+  const [focus, setFocus] = useState<string | null>(null);
+  const focused = focus && nodes.has(focus) ? focus : null;
+  const branch = focused ? branchOf(graph, focused) : null;
+  const target = focused ? branchView(graph, focused) : wholeView(graph);
+  // The view glides to its target; Reduce Motion jumps.
+  const [view, setView] = useState<View>(target);
+  const from = useRef<View>(target);
+  const frame = useRef(0);
+  const key = `${target.x},${target.y},${target.w},${target.h}`;
+  useEffect(() => {
+    cancelAnimationFrame(frame.current);
+    const start = from.current;
+    if (reducedMotion() || typeof requestAnimationFrame === "undefined") {
+      from.current = target;
+      setView(target);
+      return;
+    }
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const k = Math.min(1, (now - t0) / ZOOM_MS);
+      const ease = 1 - Math.pow(1 - k, 3);
+      const v = { x: start.x + (target.x - start.x) * ease, y: start.y + (target.y - start.y) * ease, w: start.w + (target.w - start.w) * ease, h: start.h + (target.h - start.h) * ease };
+      from.current = v;
+      setView(v);
+      if (k < 1) frame.current = requestAnimationFrame(step);
+    };
+    frame.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame.current);
+  }, [key]);
+
+  // A click zooms into the node's branch (a tool leaf's: its agent's), and shows it below; again zooms back out.
+  const choose = (id: string) => {
+    const to = zoomTarget(graph, id);
+    if (focused === to && pinned === id) {
+      setFocus(null);
+      setPinned(null);
+    } else {
+      setFocus(to === "main" ? null : to);
+      setPinned(id);
+    }
+  };
+  const zoomOut = () => {
+    setFocus(null);
+    setPinned(null);
+  };
+
+  // Arrow keys move between nodes (the panel follows, and a zoom follows out of its branch); Enter zooms, Esc out.
+  const svg = useRef<SVGSVGElement>(null);
+  const select = (id: string) => {
+    setPinned(id);
+    if (focused && !branchOf(graph, focused).has(id)) setFocus(zoomTarget(graph, id) === "main" ? null : zoomTarget(graph, id));
+    svg.current?.querySelector<SVGGElement>(`[data-node=${JSON.stringify(id)}]`)?.focus();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    const dir = ARROWS[e.key];
+    if (dir) {
+      e.preventDefault();
+      const from = pinned ?? hovered;
+      const to = from ? neighbor(graph, from, dir) : "main";
+      if (to) select(to);
+    } else if (e.key === "Escape" && focused) {
+      zoomOut();
+    }
+  };
+
   const shown = nodes.get(pinned ?? hovered ?? "") ?? null;
   const live = graph.nodes.some((n) => n.status === "running");
   return (
-    <div className="agent-graph">
-      <svg viewBox={`0 0 ${graph.width} ${graph.height}`} preserveAspectRatio="xMidYMin meet" role="img" aria-label="Agent graph">
+    <div className="agent-graph" onKeyDown={onKey}>
+      <nav className="graph-trail" aria-label="Zoom">
+        <button className={focused ? "" : "current"} onClick={zoomOut} disabled={!focused}>
+          Whole graph
+        </button>
+        {focused &&
+          trailTo(graph, focused).map((n) => (
+            <span key={n.id} className="graph-trail-step">
+              <span aria-hidden>›</span>
+              <button className={n.id === focused ? "current" : ""} onClick={() => (n.id === "main" ? zoomOut() : setFocus(n.id))}>
+                {n.label}
+              </button>
+            </span>
+          ))}
+      </nav>
+      <svg ref={svg} viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Agent graph" tabIndex={-1}>
         {graph.edges.map((e) => (
-          <path key={e.id} d={edgePath(e, nodes)} className={`graph-edge tone-${nodes.get(e.to)!.kind === "leaf" ? nodes.get(e.from)!.tone : nodes.get(e.to)!.tone}${e.active ? " active" : ""}${e.dashed ? " dashed" : ""}${live && !e.active ? " idle" : ""}`} />
+          <path key={e.id} d={edgePath(e, nodes)} className={`graph-edge tone-${nodes.get(e.to)!.kind === "leaf" ? nodes.get(e.from)!.tone : nodes.get(e.to)!.tone}${e.active ? " active" : ""}${e.dashed ? " dashed" : ""}${live && !e.active ? " idle" : ""}${branch && !branch.has(e.to) ? " out" : ""}`} />
         ))}
         {pulses.map((p) => {
           const e = graph.edges.find((x) => x.id === p.edge);
@@ -83,22 +172,37 @@ export function AgentGraph({ graph }: { graph: Graph }) {
         {graph.nodes.map((n) => (
           <g
             key={n.id}
-            className={`graph-node ${n.kind} ${n.status} tone-${n.tone}${shown?.id === n.id ? " selected" : ""}`}
+            className={`graph-node ${n.kind} ${n.status} tone-${n.tone}${shown?.id === n.id ? " selected" : ""}${branch && !branch.has(n.id) ? " out" : ""}`}
             style={{ transform: `translate(${n.x}px, ${n.y}px)` }}
             tabIndex={0}
+            data-node={n.id}
             role="button"
             aria-label={`${n.label} ${n.sub}: ${n.status}`}
             onMouseEnter={() => setHovered(n.id)}
             onMouseLeave={() => setHovered(null)}
             onFocus={() => setHovered(n.id)}
             onBlur={() => setHovered(null)}
-            onClick={() => setPinned(pinned === n.id ? null : n.id)}
+            onClick={() => choose(n.id)}
+            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), choose(n.id))}
           >
-            {n.kind === "leaf" ? (
+            {n.kind === "workflow" ? (
               <>
-                <rect x={-38} y={-13} width={76} height={26} rx={13} className="graph-leaf" />
+                <rect x={-WF_W / 2 - 4} y={-WF_H / 2 - 4} width={WF_W + 8} height={WF_H + 8} rx={14} className="graph-ring" />
+                <rect x={-WF_W / 2} y={-WF_H / 2} width={WF_W} height={WF_H} rx={10} className="graph-workflow" />
+                <title>{n.label}</title>
+                <text className="graph-workflow-name" y={-2}>
+                  {fit(n.label, fits(WF_W, 6.6))}
+                </text>
+                <text className="graph-workflow-phase" y={12}>
+                  {fit(n.sub, fits(WF_W, 6.4))}
+                </text>
+              </>
+            ) : n.kind === "leaf" ? (
+              <>
+                <title>{`${n.label} ${n.sub}`}</title>
+                <rect x={-LEAF_W / 2} y={-13} width={LEAF_W} height={26} rx={13} className="graph-leaf" />
                 <text className="graph-leaf-text" y={4}>
-                  {n.label} <tspan className="graph-count">{n.sub}</tspan>
+                  {fit(n.label, fits(LEAF_W, 5.6) - n.sub.length - 1)} <tspan className="graph-count">{n.sub}</tspan>
                 </text>
               </>
             ) : (
@@ -133,7 +237,7 @@ export function AgentGraph({ graph }: { graph: Graph }) {
             ))}
           </>
         ) : (
-          <div className="graph-panel-hint">Hover or click a node to see what it's doing.</div>
+          <div className="graph-panel-hint">Hover a node to see what it's doing; click it (or Enter) to zoom in. Arrow keys move between nodes.</div>
         )}
       </div>
     </div>

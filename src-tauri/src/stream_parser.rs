@@ -15,6 +15,8 @@ pub struct StreamParser {
     tools: HashMap<String, String>,
     /// tool_use_id → a Bash step's whole command (the summary is cut short)
     commands: HashMap<String, String>,
+    /// Agent calls made with run_in_background: their steps aren't in the stream (see offstream.rs).
+    background_agents: std::collections::HashSet<String>,
     /// Each agent's model as last reported ("" = the main thread), to say only when it changes.
     models: HashMap<String, String>,
     /// Advisor calls and results already reported (they arrive while streaming and again in the message).
@@ -186,6 +188,9 @@ impl StreamParser {
                     let id = block["id"].as_str().unwrap_or("").to_string();
                     let name = block["name"].as_str().unwrap_or("").to_string();
                     self.tools.insert(id.clone(), name.clone());
+                    if (name == "Agent" || name == "Task") && block["input"]["run_in_background"] == true {
+                        self.background_agents.insert(id.clone());
+                    }
                     if let Some(cmd) = block["input"]["command"].as_str().filter(|_| name == "Bash") {
                         self.commands.insert(id.clone(), cmd.to_string());
                     }
@@ -224,6 +229,15 @@ impl StreamParser {
                 if let Some(ev) = edit_applied(&v["tool_use_result"], parent.clone(), &id) {
                     out.push(ev);
                 }
+            }
+            // Work that runs off the stream: a workflow's agents, a background subagent. Its transcripts are on disk.
+            if !is_error && name == "Workflow" {
+                let text = result_text(&block["content"]);
+                if let Some(dir) = text.lines().find_map(|l| l.strip_prefix("Transcript dir: ")) {
+                    out.push(UiEvent::Offstream { tool_use_id: id.clone(), dir: Some(dir.trim().to_string()) });
+                }
+            } else if !is_error && self.background_agents.remove(&id) {
+                out.push(UiEvent::Offstream { tool_use_id: id.clone(), dir: None });
             }
             let test_run = self.commands.remove(&id).and_then(|command| {
                 let mut run = crate::test_runs::detect(&command, &full_output(&v["tool_use_result"], &block["content"]))?;
@@ -364,6 +378,14 @@ pub fn summarize(name: &str, input: &Value) -> String {
         "WebFetch" => s("url"),
         "WebSearch" => s("query"),
         "Task" | "Agent" => s("description"),
+        // A workflow's name, from its script's meta (or the saved one it runs).
+        "Workflow" => s("name").or_else(|| {
+            let script = s("script")?;
+            let at = script.find("name:")? + 5;
+            let rest = script[at..].trim_start();
+            let quote = rest.chars().next().filter(|c| "'\"`".contains(*c))?;
+            rest[1..].split(quote).next().map(String::from)
+        }),
         _ => None,
     };
     truncate(&text.unwrap_or_default(), 200)
@@ -450,6 +472,20 @@ mod tests {
         let usage = evs.iter().find_map(|e| if let UiEvent::ModelUsage { models } = e { Some(models.clone()) } else { None }).unwrap();
         assert_eq!(usage.iter().map(|m| (m.model.as_str(), m.output_tokens)).collect::<Vec<_>>(), vec![("claude-haiku-5-5", 4491), ("claude-sonnet-5-5", 1708)]);
         assert!(matches!(evs.last().unwrap(), UiEvent::TurnDone { .. }));
+    }
+
+    /// Shapes from a real Claude Code 2.1.293 session that ran a workflow.
+    #[test]
+    fn a_workflow_is_named_from_its_script_and_its_transcripts_are_flagged_to_follow() {
+        let mut p = StreamParser::default();
+        let started = p.parse_line(r#"{"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"toolu_wf","name":"Workflow","input":{"script":"export const meta = {\n  name: 'settings-redesign-design',\n  description: 'x'\n}"}}]},"parent_tool_use_id":null}"#);
+        assert!(started.iter().any(|e| matches!(e, UiEvent::ToolStarted { name, summary, .. } if name == "Workflow" && summary == "settings-redesign-design")));
+        let done = p.parse_line(r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_wf","content":"Workflow launched in background. Task ID: wofbggpeg\nSummary: x\nTranscript dir: /h/.claude/projects/p/s1/subagents/workflows/wf_ba0b\nScript file: /h/s.js"}]},"parent_tool_use_id":null}"#);
+        assert!(done.contains(&UiEvent::Offstream { tool_use_id: "toolu_wf".into(), dir: Some("/h/.claude/projects/p/s1/subagents/workflows/wf_ba0b".into()) }));
+        // A background subagent: flagged with no folder (the session finds it); a foreground one isn't.
+        p.parse_line(r#"{"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","id":"bg","name":"Agent","input":{"description":"d","subagent_type":"Explore","run_in_background":true}},{"type":"tool_use","id":"fg","name":"Agent","input":{"description":"d","subagent_type":"Explore"}}]},"parent_tool_use_id":null}"#);
+        let r = p.parse_line(r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"bg","content":"launched"},{"type":"tool_result","tool_use_id":"fg","content":"done"}]},"parent_tool_use_id":null}"#);
+        assert_eq!(r.iter().filter(|e| matches!(e, UiEvent::Offstream { .. })).collect::<Vec<_>>(), vec![&UiEvent::Offstream { tool_use_id: "bg".into(), dir: None }]);
     }
 
     #[test]

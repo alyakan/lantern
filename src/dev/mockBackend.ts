@@ -349,6 +349,49 @@ async function playTeamTurn(slot: string) {
   await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.85, duration_ms: 21000, auth_hint: false, denied: 0, context_window: 1_000_000 });
 }
 
+/**
+ * A workflow in the background (sent with "workflow" in the message): Claude launches it and its turn ends; three
+ * agents propose and a judge decides, read from their transcripts (as the backend does); then Claude replies on its
+ * own when the task ends.
+ */
+async function playWorkflowTurn(slot: string) {
+  const send = sendTo(slot);
+  const wf = "toolu_wf";
+  await send({ kind: "agent_model", parent: null, model: "claude-sonnet-5-5" });
+  await streamText(send, "wf:0", "Running a workflow: three redesign proposals, then a judge picks one.");
+  await send({ kind: "tool_started", parent: null, tool_use_id: wf, name: "Workflow", summary: "settings-screen-redesign-and-review" });
+  await send({ kind: "tool_finished", parent: null, tool_use_id: wf, is_error: false, output: "Workflow launched in background." });
+  await send({ kind: "task_started", task_id: "wofb", tool_use_id: wf });
+  await send({ kind: "background_tasks", tasks: [{ id: "wofb", task_type: "local_workflow", description: "settings-redesign" }] });
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.02, duration_ms: 4000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+  const agent = async (id: string, label: string, phase: string, model: string) => {
+    await send({ kind: "tool_started", parent: wf, tool_use_id: id, name: "Agent", summary: label });
+    await send({ kind: "agent_started", tool_use_id: id, subagent_type: phase, description: label, model: null });
+    await send({ kind: "agent_model", parent: id, model });
+  };
+  const step = async (parent: string, id: string, name: string, summary: string, ms: number) => {
+    await send({ kind: "tool_started", parent, tool_use_id: id, name, summary });
+    await sleep(ms);
+    await send({ kind: "tool_finished", parent, tool_use_id: id, is_error: false, output: "ok" });
+  };
+  for (const [id, label] of [["wfa-1", "propose:drilldown"], ["wfa-2", "propose:hub-split"], ["wfa-3", "propose:reduce"]]) await agent(id, label, "Propose", "claude-haiku-5-5");
+  await step("wfa-1", "p1", "Glob", "**/Settings*.swift", 500);
+  await step("wfa-2", "p2", "Read", `${FOLDER}/Settings/SettingsView.swift`, 500);
+  await step("wfa-3", "p3", "Grep", "NavigationLink", 500);
+  await step("wfa-1", "p4", "Read", `${FOLDER}/Settings/AccountView.swift`, 600);
+  for (const id of ["wfa-1", "wfa-2", "wfa-3"]) {
+    await sleep(300);
+    await send({ kind: "tool_finished", parent: wf, tool_use_id: id, is_error: false, output: "A proposal" });
+  }
+  await agent("wfa-4", "judge", "Judge", "claude-opus-5-5");
+  await step("wfa-4", "j1", "Read", `${FOLDER}/docs/settings-proposals.md`, 900);
+  await send({ kind: "tool_finished", parent: wf, tool_use_id: "wfa-4", is_error: false, output: "Hub-split wins" });
+  await send({ kind: "task_ended", task_id: "wofb", tool_use_id: wf, status: "completed", summary: "Workflow settings-redesign completed" });
+  await send({ kind: "background_tasks", tasks: [] });
+  await streamText(send, "wf:1", "The workflow finished: the judge picked the hub-split design.");
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.3, duration_ms: 9000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+}
+
 /** Claude asks before starting (sent with "ask me" in the message): AskUserQuestion, then a reply using the answers. */
 async function playQuestionTurn(slot: string) {
   const send = sendTo(slot);
@@ -722,7 +765,7 @@ export function installMockBackend() {
         case "send_message": {
           const slot = String(a.slot);
           const mode = slotMode[slot];
-          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : /\bask me\b/i.test(String(a.text)) ? playQuestionTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
+          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : /\bask me\b/i.test(String(a.text)) ? playQuestionTurn(slot) : /\bworkflow\b/i.test(String(a.text)) ? playWorkflowTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
           // Like the backend: the turn's number.
           turnCount[slot] = (turnCount[slot] ?? -1) + 1;
           return turnCount[slot];

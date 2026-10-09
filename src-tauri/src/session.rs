@@ -105,9 +105,14 @@ impl Session {
 
         {
             let (sid, stopping, tail, replies) = (session_id.clone(), stopping.clone(), tail.clone(), replies.clone());
+            let folder = cfg.folder.clone();
             tokio::spawn(async move {
                 let mut parser = StreamParser::default();
                 let mut lines = BufReader::new(stdout).lines();
+                // Work running off the stream (workflow agents, background subagents), followed from its transcripts
+                // until claude says it ended or this process does.
+                let watches = crate::offstream::Watches::default();
+                let gone = Arc::new(AtomicBool::new(false));
                 while let Ok(Some(line)) = lines.next_line().await {
                     if deliver(&replies, &line) {
                         continue;
@@ -118,11 +123,20 @@ impl Session {
                                 *sid.lock().unwrap() = Some(session_id.clone());
                             }
                             UiEvent::EditApplied { path, original, .. } => on_edit(path, original.clone()),
+                            UiEvent::Offstream { tool_use_id, dir } => {
+                                let session = sid.lock().unwrap().clone();
+                                if let Some(source) = offstream_source(tool_use_id, dir.as_deref(), &folder, session.as_deref()) {
+                                    watches.start(source, sink.clone(), gone.clone());
+                                }
+                                continue;
+                            }
+                            UiEvent::TaskEnded { tool_use_id, .. } => watches.ended(tool_use_id),
                             _ => {}
                         }
                         sink(ev);
                     }
                 }
+                gone.store(true, Ordering::SeqCst);
                 let status = child.wait().await.ok();
                 let _ = tokio::time::timeout(Duration::from_secs(1), stderr_task).await;
                 if !stopping.load(Ordering::SeqCst) {
@@ -217,6 +231,17 @@ impl Session {
             let _ = tokio::time::timeout(Duration::from_secs(1), self.exited.wait_for(|done| *done)).await;
         }
     }
+}
+
+/// Where off-stream work's transcripts are: a workflow's folder as claude gave it, or the session's subagents folder
+/// (`<projects>/<folder>/<session>/subagents`) for a background subagent.
+fn offstream_source(tool_use_id: &str, dir: Option<&str>, folder: &std::path::Path, session: Option<&str>) -> Option<crate::offstream::Source> {
+    if let Some(d) = dir {
+        return Some(crate::offstream::Source::Workflow { tool_use_id: tool_use_id.into(), dir: d.into() });
+    }
+    let projects = crate::skills::config_dir()?.join("projects");
+    let transcript = crate::history::transcript_path(&projects, folder, session?).ok()?;
+    Some(crate::offstream::Source::Agent { tool_use_id: tool_use_id.into(), subagents: transcript.with_extension("").join("subagents") })
 }
 
 fn push_tail(tail: &mut String, line: &str) {
