@@ -17,6 +17,9 @@ export interface BranchReview {
 export const api = {
   locateClaude: (pathOverride: string | null) => invoke<string>("locate_claude", { pathOverride }),
   startSession: (slot: string, claudePath: string, folder: string, settings: Settings) => invoke<void>("start_session", { slot, claudePath, folder, settings }),
+  /** Restarts the chat's claude on the same session with another harness (main model and effort, advisor, subagents). */
+  applyHarness: (slot: string, h: { model: string | null; effort: string | null; advisor: string | null; subagent_model: string | null }) =>
+    invoke<void>("apply_harness", { slot, model: h.model, effort: h.effort, advisor: h.advisor, subagentModel: h.subagent_model }),
   closeSession: (slot: string) => invoke<void>("close_session", { slot }),
   setModel: (slot: string, model: string | null) => invoke<void>("set_model", { slot, model }),
   /** Resolves to the turn's number (see the Changes pane's per-turn views). */

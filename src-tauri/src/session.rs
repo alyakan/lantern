@@ -1,4 +1,4 @@
-use crate::args::{build_args, HelperConfig, Mode};
+use crate::args::{build_args, harness_args, HelperConfig, Mode};
 use crate::stream_parser::StreamParser;
 use crate::ui_event::{Sink, UiEvent};
 use std::path::PathBuf;
@@ -27,6 +27,10 @@ pub struct SessionConfig {
     pub model: Option<String>,
     /// `--effort`; None uses Claude Code's default.
     pub effort: Option<String>,
+    /// `--advisor`: the model Claude consults at decision points; None leaves Claude Code's own setting.
+    pub advisor: Option<String>,
+    /// The model subagents run on (CLAUDE_CODE_SUBAGENT_MODEL); None leaves it to each subagent.
+    pub subagent_model: Option<String>,
     pub helper: HelperConfig,
     /// PATH for the child (the user's login-shell PATH); None inherits ours.
     pub path_env: Option<String>,
@@ -64,6 +68,10 @@ impl Session {
     pub fn spawn(cfg: &SessionConfig, sink: Sink, on_edit: EditHook) -> Result<Session, String> {
         let mut cmd = Command::new(&cfg.claude);
         cmd.args(build_args(cfg.mode, cfg.auto_approve, cfg.resume.as_deref(), cfg.model.as_deref(), cfg.effort.as_deref(), &cfg.helper)).current_dir(&cfg.folder);
+        cmd.args(harness_args(cfg.advisor.as_deref()));
+        if let Some(m) = &cfg.subagent_model {
+            cmd.env("CLAUDE_CODE_SUBAGENT_MODEL", m);
+        }
         if let Some(p) = &cfg.path_env {
             cmd.env("PATH", p);
         }
@@ -247,6 +255,8 @@ mod tests {
             resume: resume.map(String::from),
             model: None,
             effort: None,
+            advisor: None,
+            subagent_model: None,
             helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into() },
             path_env: None,
         }
@@ -425,6 +435,23 @@ done"#,
         let args = wait_for_file(&args_path).await;
         assert!(args.contains("--resume\nsess-42\n"));
         assert!(s.is_running());
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn the_harness_reaches_claude_as_its_advisor_flag_and_subagent_model() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().display();
+        let fake = script(dir.path(), &format!("printf '%s|%s' \"$*\" \"$CLAUDE_CODE_SUBAGENT_MODEL\" > {d}/seen.txt\ncat > /dev/null"));
+        let (sink, _rx) = channel_sink();
+        let mut cfg = config(fake, dir.path(), None);
+        cfg.advisor = Some("opus".into());
+        cfg.subagent_model = Some("haiku".into());
+        let s = Session::spawn(&cfg, sink, no_edits()).unwrap();
+        let seen = wait_for_file(&dir.path().join("seen.txt")).await;
+        let (args, sub) = seen.split_once('|').unwrap();
+        assert!(args.ends_with("--advisor opus"), "{args}");
+        assert_eq!(sub, "haiku");
         s.stop().await;
     }
 
