@@ -1152,3 +1152,12 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .graph-node.workflow.running .graph-ring { animation: none; stroke-dasharray: 10 6; stroke: color-mix(in srgb, var(--working) 60%, transparent); animation: graph-flow 0.8s linear infinite; }
 .graph-workflow-name { text-anchor: middle; font: 600 11.5px var(--ui); fill: var(--text); pointer-events: none; }
 .graph-workflow-phase { text-anchor: middle; font: 10.5px var(--mono); fill: var(--muted); pointer-events: none; }
+/* Zooming into a node's branch: a fixed height (the pane doesn't jump), the rest dimmed, a trail back out. */
+.agent-graph svg { height: clamp(260px, 46vh, 460px); max-height: none; overflow: hidden; border-radius: 8px; }
+.agent-graph .graph-node.out, .agent-graph .graph-edge.out { opacity: 0.22; }
+.graph-trail { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; min-height: 22px; font-size: 12px; color: var(--faint); }
+.graph-trail button { padding: 1px 6px; border: none; border-radius: var(--radius-chip); background: none; font-size: 12px; color: var(--text-2); }
+.graph-trail button:hover:not(:disabled) { background: var(--bg-hover); }
+.graph-trail button.current { color: var(--text); font-weight: 600; }
+.graph-trail button:disabled { opacity: 1; }
+.graph-trail-step { display: inline-flex; align-items: center; gap: 6px; }

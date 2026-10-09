@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, reducer, type State } from "../store";
 import type { UiEvent } from "../types";
-import { MAX_UNFOLDED, agentGraph } from "./agentGraph";
+import { MAX_UNFOLDED, MIN_VIEW, agentGraph, branchOf, branchView, trailTo, wholeView, zoomTarget } from "./agentGraph";
 
 const run = (events: UiEvent[]) => {
   let s: State = reducer({ ...initialState, status: "idle" }, { type: "user_sent", text: "fix it" });
@@ -96,6 +96,38 @@ describe("agentGraph and workflows", () => {
     expect(g.stepEdge["wfa-1"]).toMatchObject({ edge: "wf:wf->agent:wfa-1", via: "main->wf:wf" });
     // The Workflow call isn't a tool leaf of main.
     expect(g.nodes.some((x) => x.id.startsWith("main/"))).toBe(false);
+  });
+});
+
+describe("zooming into a branch", () => {
+  const s = run([
+    start(null, "wf", "Workflow", "settings-redesign"),
+    start("wf", "wfa-1", "Agent", "propose:reduce"),
+    { kind: "agent_started", tool_use_id: "wfa-1", subagent_type: "Propose", description: "propose:reduce", model: null },
+    start("wfa-1", "r", "Read", "a.swift"),
+    start("wf", "wfa-2", "Agent", "judge"),
+    { kind: "agent_started", tool_use_id: "wfa-2", subagent_type: "Judge", description: "judge", model: null },
+  ]);
+  const g = agentGraph(s.items, opts);
+
+  it("takes a node, its children and theirs, and zooms to a leaf's agent", () => {
+    expect([...branchOf(g, "wf:wf")].sort()).toEqual(["agent:wfa-1", "agent:wfa-1/files", "agent:wfa-2", "wf:wf"]);
+    expect(zoomTarget(g, "agent:wfa-1/files")).toBe("agent:wfa-1");
+    expect(zoomTarget(g, "agent:wfa-2")).toBe("agent:wfa-2");
+  });
+
+  it("frames the branch closer than the whole graph, never smaller than readable", () => {
+    const whole = wholeView(g);
+    const agent = branchView(g, "agent:wfa-1");
+    expect(agent.w).toBeLessThan(whole.w);
+    expect(agent.w).toBeGreaterThanOrEqual(MIN_VIEW.w);
+    const n = g.nodes.find((x) => x.id === "agent:wfa-1")!;
+    expect(n.x).toBeGreaterThan(agent.x);
+    expect(n.x).toBeLessThan(agent.x + agent.w);
+  });
+
+  it("gives the trail from main down to the node", () => {
+    expect(trailTo(g, "agent:wfa-1").map((x) => x.label)).toEqual(["main", "settings-redesign", "propose:reduce"]);
   });
 });
 

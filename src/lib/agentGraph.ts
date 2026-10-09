@@ -198,3 +198,55 @@ function layout(g: { nodes: GraphNode[]; edges: GraphEdge[]; stepEdge: AgentGrap
   const bottom = Math.max(...g.nodes.map((n) => n.y + (n.kind === "leaf" ? 14 : LABEL_DEPTH)));
   return { ...g, width: offset + treeWidth + SIZE.side, height: bottom + 8 };
 }
+
+/** The view the graph shows: a box in its coordinates. */
+export interface View {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Narrower than this and a zoomed branch of one or two nodes would be blown up to fill the pane. */
+export const MIN_VIEW = { w: 420, h: 260 };
+
+/** The whole graph, at least MIN_VIEW wide, centred. */
+export function wholeView(g: AgentGraph): View {
+  const w = Math.max(g.width, 560);
+  return { x: -(w - g.width) / 2, y: 0, w, h: g.height };
+}
+
+/** The node to zoom to for a click: a tool leaf's agent, otherwise the node itself. */
+export function zoomTarget(g: AgentGraph, id: string): string {
+  const n = g.nodes.find((x) => x.id === id);
+  return n?.kind === "leaf" && n.parent ? n.parent : id;
+}
+
+/** A node's branch: it, its children and their children. */
+export function branchOf(g: AgentGraph, id: string): Set<string> {
+  const ids = new Set([id]);
+  for (let depth = 0; depth < 2; depth++) for (const n of g.nodes) if (n.parent && ids.has(n.parent)) ids.add(n.id);
+  return ids;
+}
+
+/** The box around a node's branch, with room for labels, at least MIN_VIEW in size (centred on the branch). */
+export function branchView(g: AgentGraph, id: string): View {
+  const branch = g.nodes.filter((n) => branchOf(g, id).has(n.id));
+  if (branch.length === 0) return wholeView(g);
+  const half = (n: GraphNode) => (n.kind === "leaf" ? SIZE.leaf : SIZE.agent) / 2;
+  const left = Math.min(...branch.map((n) => n.x - half(n))) - 16;
+  const right = Math.max(...branch.map((n) => n.x + half(n))) + 16;
+  const top = Math.min(...branch.map((n) => n.y)) - SIZE.top;
+  const bottom = Math.max(...branch.map((n) => n.y + (n.kind === "leaf" ? 14 : LABEL_DEPTH))) + 12;
+  const w = Math.max(right - left, MIN_VIEW.w);
+  const h = Math.max(bottom - top, MIN_VIEW.h);
+  return { x: (left + right) / 2 - w / 2, y: top, w, h };
+}
+
+/** The way down from the main agent to a node, for the breadcrumb: its ancestors, then it. */
+export function trailTo(g: AgentGraph, id: string): GraphNode[] {
+  const byId = new Map(g.nodes.map((n) => [n.id, n]));
+  const out: GraphNode[] = [];
+  for (let n = byId.get(id); n; n = n.parent ? byId.get(n.parent) : undefined) out.unshift(n);
+  return out;
+}

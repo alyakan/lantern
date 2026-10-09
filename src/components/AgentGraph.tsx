@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { LABEL_DEPTH, type AgentGraph as Graph, type GraphEdge, type GraphNode } from "../lib/agentGraph";
+import { LABEL_DEPTH, branchOf, branchView, trailTo, wholeView, zoomTarget, type AgentGraph as Graph, type GraphEdge, type GraphNode, type View } from "../lib/agentGraph";
 
 /** A dot travelling along an edge: down (handing work over) or up (handing it back), red when it failed. */
 interface Pulse {
@@ -10,7 +10,7 @@ interface Pulse {
 }
 
 const PULSE_MS = 900;
-const MIN_VIEW_WIDTH = 560;
+const ZOOM_MS = 380;
 const R = 19;
 /** A workflow's box: wide enough for its name, its phase under it. */
 const WF_W = 124;
@@ -67,15 +67,74 @@ export function AgentGraph({ graph }: { graph: Graph }) {
     timers.current.push(setTimeout(() => setPulses((p) => p.filter((x) => !keys.has(x.key))), PULSE_MS + 100));
   }, [graph]);
 
+  // Zoomed into a node's branch (null: the whole graph). A node that's gone (a new turn) zooms back out.
+  const [focus, setFocus] = useState<string | null>(null);
+  const focused = focus && nodes.has(focus) ? focus : null;
+  const branch = focused ? branchOf(graph, focused) : null;
+  const target = focused ? branchView(graph, focused) : wholeView(graph);
+  // The view glides to its target; Reduce Motion jumps.
+  const [view, setView] = useState<View>(target);
+  const from = useRef<View>(target);
+  const frame = useRef(0);
+  const key = `${target.x},${target.y},${target.w},${target.h}`;
+  useEffect(() => {
+    cancelAnimationFrame(frame.current);
+    const start = from.current;
+    if (reducedMotion() || typeof requestAnimationFrame === "undefined") {
+      from.current = target;
+      setView(target);
+      return;
+    }
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const k = Math.min(1, (now - t0) / ZOOM_MS);
+      const ease = 1 - Math.pow(1 - k, 3);
+      const v = { x: start.x + (target.x - start.x) * ease, y: start.y + (target.y - start.y) * ease, w: start.w + (target.w - start.w) * ease, h: start.h + (target.h - start.h) * ease };
+      from.current = v;
+      setView(v);
+      if (k < 1) frame.current = requestAnimationFrame(step);
+    };
+    frame.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame.current);
+  }, [key]);
+
+  // A click zooms into the node's branch (a tool leaf's: its agent's), and shows it below; again zooms back out.
+  const choose = (id: string) => {
+    const to = zoomTarget(graph, id);
+    if (focused === to && pinned === id) {
+      setFocus(null);
+      setPinned(null);
+    } else {
+      setFocus(to === "main" ? null : to);
+      setPinned(id);
+    }
+  };
+  const zoomOut = () => {
+    setFocus(null);
+    setPinned(null);
+  };
+
   const shown = nodes.get(pinned ?? hovered ?? "") ?? null;
-  const viewWidth = Math.max(graph.width, MIN_VIEW_WIDTH);
   const live = graph.nodes.some((n) => n.status === "running");
   return (
-    <div className="agent-graph">
-      {/* At least this wide, so a graph of one or two nodes isn't blown up to fill the pane. */}
-      <svg viewBox={`${-(viewWidth - graph.width) / 2} 0 ${viewWidth} ${graph.height}`} preserveAspectRatio="xMidYMin meet" role="img" aria-label="Agent graph">
+    <div className="agent-graph" onKeyDown={(e) => e.key === "Escape" && focused && zoomOut()}>
+      <nav className="graph-trail" aria-label="Zoom">
+        <button className={focused ? "" : "current"} onClick={zoomOut} disabled={!focused}>
+          Whole graph
+        </button>
+        {focused &&
+          trailTo(graph, focused).map((n) => (
+            <span key={n.id} className="graph-trail-step">
+              <span aria-hidden>›</span>
+              <button className={n.id === focused ? "current" : ""} onClick={() => (n.id === "main" ? zoomOut() : setFocus(n.id))}>
+                {n.label}
+              </button>
+            </span>
+          ))}
+      </nav>
+      <svg viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Agent graph">
         {graph.edges.map((e) => (
-          <path key={e.id} d={edgePath(e, nodes)} className={`graph-edge tone-${nodes.get(e.to)!.kind === "leaf" ? nodes.get(e.from)!.tone : nodes.get(e.to)!.tone}${e.active ? " active" : ""}${e.dashed ? " dashed" : ""}${live && !e.active ? " idle" : ""}`} />
+          <path key={e.id} d={edgePath(e, nodes)} className={`graph-edge tone-${nodes.get(e.to)!.kind === "leaf" ? nodes.get(e.from)!.tone : nodes.get(e.to)!.tone}${e.active ? " active" : ""}${e.dashed ? " dashed" : ""}${live && !e.active ? " idle" : ""}${branch && !branch.has(e.to) ? " out" : ""}`} />
         ))}
         {pulses.map((p) => {
           const e = graph.edges.find((x) => x.id === p.edge);
@@ -89,7 +148,7 @@ export function AgentGraph({ graph }: { graph: Graph }) {
         {graph.nodes.map((n) => (
           <g
             key={n.id}
-            className={`graph-node ${n.kind} ${n.status} tone-${n.tone}${shown?.id === n.id ? " selected" : ""}`}
+            className={`graph-node ${n.kind} ${n.status} tone-${n.tone}${shown?.id === n.id ? " selected" : ""}${branch && !branch.has(n.id) ? " out" : ""}`}
             style={{ transform: `translate(${n.x}px, ${n.y}px)` }}
             tabIndex={0}
             role="button"
@@ -98,7 +157,8 @@ export function AgentGraph({ graph }: { graph: Graph }) {
             onMouseLeave={() => setHovered(null)}
             onFocus={() => setHovered(n.id)}
             onBlur={() => setHovered(null)}
-            onClick={() => setPinned(pinned === n.id ? null : n.id)}
+            onClick={() => choose(n.id)}
+            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), choose(n.id))}
           >
             {n.kind === "workflow" ? (
               <>
@@ -150,7 +210,7 @@ export function AgentGraph({ graph }: { graph: Graph }) {
             ))}
           </>
         ) : (
-          <div className="graph-panel-hint">Hover or click a node to see what it's doing.</div>
+          <div className="graph-panel-hint">Hover a node to see what it's doing; click it to zoom in on its branch.</div>
         )}
       </div>
     </div>
