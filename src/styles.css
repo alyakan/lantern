@@ -1075,34 +1075,7 @@ button.harness-restore { align-self: flex-start; border: none; background: none;
 .agents-state { flex: none; padding: 1px 8px; border-radius: 999px; background: var(--bg-subtle); font-size: 11px; font-weight: 600; color: var(--muted); }
 .agents-state.live { background: color-mix(in srgb, var(--working) 16%, transparent); color: var(--working); }
 .agents-prompt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--text-2); }
-.agents-board { display: flex; gap: 14px; align-items: flex-start; }
-.agents-flow { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; }
-.agents-card { position: relative; width: 100%; padding: 10px 12px; border: 1px dashed color-mix(in srgb, var(--tone) 55%, var(--line-strong)); border-radius: 8px; background: color-mix(in srgb, var(--tone) 5%, var(--field)); transition: border-color 0.2s, box-shadow 0.2s; }
-.agents-card.active { border-style: solid; border-color: var(--tone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 14%, transparent); }
-.agents-card-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--text); }
 .agents-model { font-family: var(--mono); font-size: 11.5px; font-weight: 500; color: var(--tone); }
-.agents-effort { font-size: 11px; font-weight: 500; color: var(--muted); }
-.agents-card-sub { margin-top: 2px; font-size: 11.5px; line-height: 1.45; color: var(--muted); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.agents-now { margin-top: 6px; font-family: var(--mono); font-size: 11.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agents-card.active .agents-now::before { content: "▸ "; color: var(--tone); }
-.agents-card.advisor { flex: 0 0 34%; max-width: 230px; }
-.agents-quiet { margin-top: 8px; font-size: 11.5px; color: var(--faint); }
-.agents-calls { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
-.agents-call { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11.5px; color: var(--text-2); }
-.agents-call-moment { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agents-chip { flex: none; padding: 0 7px; border-radius: 999px; background: var(--bg-subtle); font-size: 10.5px; line-height: 17px; color: var(--muted); }
-.agents-call.advising .agents-chip, .agents-card.running .agents-chip { background: color-mix(in srgb, var(--tone) 18%, transparent); color: var(--text); }
-.agents-call.reviewed .agents-chip, .agents-card.done .agents-chip { background: color-mix(in srgb, var(--add) 16%, transparent); color: var(--text-2); }
-.agents-call.unavailable .agents-chip, .agents-call.declined .agents-chip, .agents-card.error .agents-chip { background: color-mix(in srgb, var(--del) 16%, transparent); color: var(--del); }
-.agents-subs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; width: 100%; }
-.agents-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 8px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
-/* The line work travels along: dots moving down to the subagents, and back up when they're done. */
-.agents-link { width: 2px; height: 22px; background: repeating-linear-gradient(to bottom, var(--line-strong) 0 3px, transparent 3px 7px); }
-.agents-link.flowing { background: repeating-linear-gradient(to bottom, var(--working) 0 3px, transparent 3px 7px); background-size: 2px 14px; animation: agents-flow 0.7s linear infinite; }
-.agents-link.flowing.up { animation-direction: reverse; }
-@keyframes agents-flow { to { background-position: 0 14px; } }
-.agents-card.back { opacity: 0.55; }
-.agents-card.back.reached { opacity: 1; border-style: solid; }
 .agents-log { flex: 1 1 120px; min-height: 90px; margin: 0; padding: 6px 0; list-style: none; overflow-y: auto; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 11px; }
 .agents-log li { display: grid; grid-template-columns: 64px 92px 1fr auto; gap: 8px; padding: 2px 0; color: var(--text-2); }
 .agents-log li.error .agents-log-text { color: var(--del); }
@@ -1113,7 +1086,7 @@ button.harness-restore { align-self: flex-start; border: none; background: none;
 .agents-usage { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
 .agents-usage > span { display: inline-flex; align-items: center; gap: 6px; }
 .agents-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tone); }
-@media (prefers-reduced-motion: reduce) { .agents-link.flowing, .tab-live { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .tab-live { animation: none; } }
 
 /* Claude's question (AskUserQuestion): options as buttons, or your own words. */
 .question-card { display: flex; flex-direction: column; gap: 12px; }
@@ -1134,3 +1107,42 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .question-desc { font-size: 12px; line-height: 1.45; color: var(--muted); }
 .question-other { height: 30px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: 12.5px var(--ui); outline: none; }
 .question-other:focus { border-color: var(--faint); }
+
+/* Agent graph: agents as nodes in their model's colour, their kinds of tools as leaves, work travelling the edges. */
+.agent-graph { display: flex; flex-direction: column; gap: 8px; }
+.agent-graph svg { width: 100%; height: auto; max-height: 460px; overflow: visible; }
+.graph-edge { fill: none; stroke: color-mix(in srgb, var(--tone, var(--faint)) 45%, var(--line-strong)); stroke-width: 1.6; transition: opacity 0.3s, stroke 0.3s; }
+.graph-edge.idle { opacity: 0.45; }
+.graph-edge.dashed { stroke-dasharray: 4 5; }
+.graph-edge.active { stroke: var(--tone, var(--working)); stroke-width: 2; stroke-dasharray: 2 7; stroke-linecap: round; animation: graph-flow 0.6s linear infinite; }
+.graph-edge.active.dashed { animation-duration: 0.9s; }
+@keyframes graph-flow { to { stroke-dashoffset: -9; } }
+.graph-pulse { fill: var(--tone, var(--working)); filter: drop-shadow(0 0 4px var(--tone, var(--working))); }
+.graph-pulse.failed { fill: var(--del); filter: drop-shadow(0 0 4px var(--del)); }
+.graph-node { cursor: pointer; transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s; outline: none; }
+.graph-node.done:not(.main) { opacity: 0.8; }
+.graph-dot { fill: color-mix(in srgb, var(--tone, var(--faint)) 16%, var(--field)); stroke: var(--tone, var(--faint)); stroke-width: 1.6; }
+.graph-node.main .graph-dot { stroke-width: 2.2; }
+.graph-ring { fill: none; stroke: transparent; stroke-width: 2; }
+.graph-node.running .graph-ring { stroke: var(--tone, var(--working)); stroke-dasharray: 22 10; transform-box: fill-box; transform-origin: center; animation: graph-spin 1.4s linear infinite; }
+.graph-node.done .graph-ring { stroke: color-mix(in srgb, var(--add) 70%, transparent); }
+.graph-node.error .graph-ring { stroke: var(--del); }
+@keyframes graph-spin { to { transform: rotate(360deg); } }
+.graph-initial { text-anchor: middle; font: 600 13px var(--ui); fill: var(--tone, var(--text-2)); pointer-events: none; }
+.graph-label { text-anchor: middle; font: 600 11.5px var(--ui); fill: var(--text); }
+.graph-model { text-anchor: middle; font: 10.5px var(--mono); fill: var(--tone, var(--muted)); }
+.graph-leaf { fill: var(--field); stroke: var(--line-strong); stroke-width: 1.2; transition: stroke 0.2s, fill 0.2s; }
+.graph-node.leaf.running .graph-leaf { stroke: var(--working); fill: color-mix(in srgb, var(--working) 12%, var(--field)); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--working) 60%, transparent)); }
+.graph-node.leaf.error .graph-leaf { stroke: var(--del); }
+.graph-leaf-text { text-anchor: middle; font: 11px var(--ui); fill: var(--text-2); pointer-events: none; }
+.graph-count { font-family: var(--mono); fill: var(--muted); }
+.graph-node.selected .graph-dot, .graph-node.selected .graph-leaf, .graph-node:focus-visible .graph-dot, .graph-node:focus-visible .graph-leaf { stroke-width: 2.6; }
+.graph-panel { min-height: 54px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-subtle); font-size: 12px; }
+.graph-panel-title { display: flex; align-items: baseline; gap: 6px; margin-bottom: 3px; font-size: 12px; color: var(--muted); }
+.graph-panel-title .agents-model { font-weight: 600; }
+.graph-panel-status { margin-left: auto; padding: 0 7px; border-radius: 999px; background: var(--bg-active); font-size: 10.5px; line-height: 17px; }
+.graph-panel-status.running { background: color-mix(in srgb, var(--working) 18%, transparent); }
+.graph-panel-status.error { background: color-mix(in srgb, var(--del) 16%, transparent); color: var(--del); }
+.graph-panel-line { color: var(--text-2); line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.graph-panel-hint { color: var(--faint); line-height: 36px; text-align: center; }
+@media (prefers-reduced-motion: reduce) { .graph-edge.active, .graph-node.running .graph-ring { animation: none; } .graph-node { transition: none; } }

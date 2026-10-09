@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { AgentsTab } from "./AgentsTab";
 import type { AgentTree } from "../lib/agents";
+import type { AgentGraph } from "../lib/agentGraph";
+
+const graph: AgentGraph = { nodes: [{ id: "main", kind: "main", label: "main", sub: "Sonnet 5.5", tone: "sonnet", status: "running", parent: null, x: 100, y: 40, detail: [] }], edges: [], width: 200, height: 120, stepEdge: {} };
 
 const tree: AgentTree = {
   prompt: "fix the auth tests",
@@ -14,25 +17,18 @@ const tree: AgentTree = {
 };
 
 describe("AgentsTab", () => {
-  it("draws the advisor, the main session and each subagent with its model", () => {
-    render(<AgentsTab tree={tree} usage={[]} />);
+  it("shows the graph and the session log for the turn", () => {
+    render(<AgentsTab tree={tree} graph={graph} usage={[]} />);
     expect(screen.getByText("Live")).toBeInTheDocument();
-    const advisor = screen.getByRole("complementary", { name: "Advisor" });
-    expect(within(advisor).getByText("Opus")).toBeInTheDocument();
-    expect(within(advisor).getByText("Advising…")).toBeInTheDocument();
-    expect(within(advisor).getByText("after a failed step")).toBeInTheDocument();
-    expect(screen.getByLabelText("Main session")).toHaveTextContent("Sonnet 5.5");
-    const worker = screen.getByLabelText("general-purpose: Fix fixtures");
-    expect(worker).toHaveTextContent("Running npm test");
-    expect(worker).toHaveTextContent("14k tokens");
-    expect(screen.getByText("Waiting for the subagents")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Agent graph" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "main Sonnet 5.5: running" })).toBeInTheDocument();
     expect(within(screen.getByRole("list", { name: "Session log" })).getByText("reviewed · before starting")).toBeInTheDocument();
   });
 
   it("shows the cost per model once the turn is done, and says what to do before any", () => {
-    const { rerender } = render(<AgentsTab tree={{ ...tree, live: false }} usage={[{ model: "claude-opus-5-5", cost_usd: 0.38, input_tokens: 1, output_tokens: 2400 }]} />);
+    const { rerender } = render(<AgentsTab tree={{ ...tree, live: false }} graph={graph} usage={[{ model: "claude-opus-5-5", cost_usd: 0.38, input_tokens: 1, output_tokens: 2400 }]} />);
     expect(screen.getByLabelText("Cost by model")).toHaveTextContent("Opus 5.5 $0.38 · 2.4k out");
-    rerender(<AgentsTab tree={{ ...tree, prompt: null }} usage={[]} />);
+    rerender(<AgentsTab tree={{ ...tree, prompt: null }} graph={graph} usage={[]} />);
     expect(screen.getByText(/Send a task to see which agent and model does what/)).toBeInTheDocument();
   });
 });
