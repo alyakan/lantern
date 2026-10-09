@@ -68,6 +68,7 @@ pub fn ask_bridge(socket: Option<&str>, req: &BridgeRequest) -> BridgeResponse {
     attempt().unwrap_or_else(|e| BridgeResponse {
         allow: false,
         message: Some(format!("Lantern could not show the permission prompt ({e}), so the action was denied.")),
+        updated_input: None,
     })
 }
 
@@ -91,7 +92,7 @@ mod tests {
     use serde_json::json;
 
     fn allow_all(_: BridgeRequest) -> BridgeResponse {
-        BridgeResponse { allow: true, message: None }
+        BridgeResponse { allow: true, message: None, updated_input: None }
     }
 
     fn call(tool: &str, input: Value) -> Value {
@@ -128,7 +129,7 @@ mod tests {
         let seen = std::cell::RefCell::new(None);
         let r = handle_message(&call("Bash", json!({"command": "npm test"})), &|req| {
             *seen.borrow_mut() = Some(req);
-            BridgeResponse { allow: true, message: None }
+            BridgeResponse { allow: true, message: None, updated_input: None }
         })
         .unwrap();
         assert_eq!(decision(&r), json!({"behavior": "allow", "updatedInput": {"command": "npm test"}}));
@@ -139,7 +140,7 @@ mod tests {
 
     #[test]
     fn deny_has_default_message() {
-        let r = handle_message(&call("Bash", json!({"command": "rm -rf x"})), &|_| BridgeResponse { allow: false, message: None }).unwrap();
+        let r = handle_message(&call("Bash", json!({"command": "rm -rf x"})), &|_| BridgeResponse { allow: false, message: None, updated_input: None }).unwrap();
         assert_eq!(decision(&r), json!({"behavior": "deny", "message": "The user denied this action."}));
     }
 
@@ -149,13 +150,13 @@ mod tests {
         let msg = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "reproduce", "arguments": {"steps": "1. Open settings"}}});
         let r = handle_message(&msg, &|req| {
             *seen.borrow_mut() = Some(req);
-            BridgeResponse { allow: true, message: Some("[lantern-debug] token=null".into()) }
+            BridgeResponse { allow: true, message: Some("[lantern-debug] token=null".into()), updated_input: None }
         })
         .unwrap();
         assert_eq!(r["result"]["content"][0]["text"], "The user reproduced the problem. Their note: [lantern-debug] token=null");
         let req = seen.borrow().clone().unwrap();
         assert_eq!((req.tool_name.as_str(), req.input["steps"].as_str()), (REPRODUCE, Some("1. Open settings")));
-        let r = handle_message(&msg, &|_| BridgeResponse { allow: false, message: None }).unwrap();
+        let r = handle_message(&msg, &|_| BridgeResponse { allow: false, message: None, updated_input: None }).unwrap();
         assert_eq!(r["result"]["content"][0]["text"], "The user could not reproduce the problem.");
         let tools = handle_message(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &allow_all).unwrap();
         assert_eq!(tools["result"]["tools"][1]["name"], "reproduce");

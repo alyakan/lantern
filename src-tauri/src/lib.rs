@@ -11,6 +11,7 @@ pub mod session;
 pub mod shell;
 pub mod skills;
 pub mod slots;
+pub mod offstream;
 pub mod outside;
 pub mod stream_parser;
 pub mod test_runs;
@@ -485,8 +486,8 @@ async fn change_summary(
 }
 
 #[tauri::command]
-fn respond_permission(state: State<'_, AppState>, slot: String, request_id: String, allow: bool, message: Option<String>) -> Result<(), String> {
-    if state.slots.get(&slot)?.bridge.respond(&request_id, allow, message) {
+fn respond_permission(state: State<'_, AppState>, slot: String, request_id: String, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>) -> Result<(), String> {
+    if state.slots.get(&slot)?.bridge.respond(&request_id, allow, message, updated_input) {
         Ok(())
     } else {
         Err("That permission request is no longer pending.".into())

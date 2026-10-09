@@ -15,6 +15,12 @@ pub struct StreamParser {
     tools: HashMap<String, String>,
     /// tool_use_id → a Bash step's whole command (the summary is cut short)
     commands: HashMap<String, String>,
+    /// Agent calls made with run_in_background: their steps aren't in the stream (see offstream.rs).
+    background_agents: std::collections::HashSet<String>,
+    /// Each agent's model as last reported ("" = the main thread), to say only when it changes.
+    models: HashMap<String, String>,
+    /// Advisor calls and results already reported (they arrive while streaming and again in the message).
+    advisor_seen: std::collections::HashSet<String>,
 }
 
 impl StreamParser {
@@ -34,7 +40,7 @@ impl StreamParser {
             "stream_event" => self.stream_event(&v, parent),
             "assistant" => self.assistant(&v, parent),
             "user" => self.user(&v, parent),
-            "result" => vec![result_event(&v)],
+            "result" => vec![model_usage(&v), result_event(&v)],
             // Replies to our control requests; only `initialize`'s (the slash commands) carries anything to show.
             "control_response" => initialize_events(&v),
             // `/clear` started a fresh conversation in the same process.
@@ -74,6 +80,13 @@ impl StreamParser {
                     })
                     .unwrap_or_default(),
             }],
+            "task_progress" => vec![UiEvent::AgentProgress {
+                tool_use_id: str_of(v, "tool_use_id"),
+                description: str_of(v, "description"),
+                tokens: v["usage"]["total_tokens"].as_u64().unwrap_or(0),
+                tool_uses: v["usage"]["tool_uses"].as_u64().unwrap_or(0),
+                duration_ms: v["usage"]["duration_ms"].as_u64().unwrap_or(0),
+            }],
             "task_started" => vec![UiEvent::TaskStarted { task_id: str_of(v, "task_id"), tool_use_id: str_of(v, "tool_use_id") }],
             "task_notification" => vec![UiEvent::TaskEnded { task_id: str_of(v, "task_id"), tool_use_id: str_of(v, "tool_use_id"), status: str_of(v, "status"), summary: str_of(v, "summary") }],
             // hooks, task updates, status, …: session bookkeeping, never conversation content
@@ -94,10 +107,11 @@ impl StreamParser {
                 if let Some(entry) = self.current_message.get_mut(&parent) {
                     entry.1 = idx;
                 }
-                if ev["content_block"]["type"] == "thinking" {
-                    vec![UiEvent::Thinking { parent }]
-                } else {
-                    vec![]
+                match ev["content_block"]["type"].as_str() {
+                    Some("thinking") => vec![UiEvent::Thinking { parent }],
+                    // The advisor shows while it's consulted, before the message is complete.
+                    Some("server_tool_use" | "advisor_tool_result") => self.advisor_block(&ev["content_block"], parent),
+                    _ => vec![],
                 }
             }
             "content_block_delta" if ev["delta"]["type"] == "text_delta" => {
@@ -113,9 +127,47 @@ impl StreamParser {
         }
     }
 
+    /// An advisor call or its result, once each (they come while streaming and again in the complete message).
+    fn advisor_block(&mut self, block: &Value, parent: Option<String>) -> Vec<UiEvent> {
+        match block["type"].as_str().unwrap_or("") {
+            "server_tool_use" if block["name"] == "advisor" => {
+                let id = str_of(block, "id");
+                if !self.advisor_seen.insert(format!("start:{id}")) {
+                    return vec![];
+                }
+                vec![UiEvent::AdvisorStarted { parent, id }]
+            }
+            "advisor_tool_result" => {
+                let id = str_of(block, "tool_use_id");
+                if !self.advisor_seen.insert(format!("done:{id}")) {
+                    return vec![];
+                }
+                let content = &block["content"];
+                let kind = content["type"].as_str().unwrap_or("");
+                let (outcome, error_code) = if kind.contains("error") {
+                    ("unavailable", content["error_code"].as_str().map(String::from))
+                } else if kind.contains("declin") || content["stop_reason"] == "refusal" {
+                    ("declined", None)
+                } else {
+                    ("reviewed", None)
+                };
+                vec![UiEvent::AdvisorDone { parent, id, outcome: outcome.into(), error_code }]
+            }
+            _ => vec![],
+        }
+    }
+
     fn assistant(&mut self, v: &Value, parent: Option<String>) -> Vec<UiEvent> {
         let msg_id = v["message"]["id"].as_str().unwrap_or("").to_string();
         let mut out = vec![];
+        // Which model this agent (the main thread or a subagent) runs on, when it's new or changed.
+        if let Some(model) = v["message"]["model"].as_str().filter(|m| !m.is_empty() && !m.starts_with('<')) {
+            let key = parent.clone().unwrap_or_default();
+            if self.models.get(&key).map(String::as_str) != Some(model) {
+                self.models.insert(key, model.to_string());
+                out.push(UiEvent::AgentModel { parent: parent.clone(), model: model.to_string() });
+            }
+        }
         // Subagents have their own context; only the main thread's usage says how full the conversation is.
         if parent.is_none() {
             if let Some(tokens) = context_tokens(&v["message"]["usage"]) {
@@ -136,16 +188,28 @@ impl StreamParser {
                     let id = block["id"].as_str().unwrap_or("").to_string();
                     let name = block["name"].as_str().unwrap_or("").to_string();
                     self.tools.insert(id.clone(), name.clone());
+                    if (name == "Agent" || name == "Task") && block["input"]["run_in_background"] == true {
+                        self.background_agents.insert(id.clone());
+                    }
                     if let Some(cmd) = block["input"]["command"].as_str().filter(|_| name == "Bash") {
                         self.commands.insert(id.clone(), cmd.to_string());
                     }
+                    let input = &block["input"];
+                    let agent = (name == "Agent" || name == "Task").then(|| UiEvent::AgentStarted {
+                        tool_use_id: id.clone(),
+                        subagent_type: input["subagent_type"].as_str().unwrap_or("general-purpose").to_string(),
+                        description: str_of(input, "description"),
+                        model: input["model"].as_str().map(String::from),
+                    });
                     out.push(UiEvent::ToolStarted {
                         parent: parent.clone(),
                         tool_use_id: id,
-                        summary: summarize(&name, &block["input"]),
+                        summary: summarize(&name, input),
                         name,
                     });
+                    out.extend(agent);
                 }
+                "server_tool_use" | "advisor_tool_result" => out.extend(self.advisor_block(block, parent.clone())),
                 _ => {}
             }
         }
@@ -165,6 +229,15 @@ impl StreamParser {
                 if let Some(ev) = edit_applied(&v["tool_use_result"], parent.clone(), &id) {
                     out.push(ev);
                 }
+            }
+            // Work that runs off the stream: a workflow's agents, a background subagent. Its transcripts are on disk.
+            if !is_error && name == "Workflow" {
+                let text = result_text(&block["content"]);
+                if let Some(dir) = text.lines().find_map(|l| l.strip_prefix("Transcript dir: ")) {
+                    out.push(UiEvent::Offstream { tool_use_id: id.clone(), dir: Some(dir.trim().to_string()) });
+                }
+            } else if !is_error && self.background_agents.remove(&id) {
+                out.push(UiEvent::Offstream { tool_use_id: id.clone(), dir: None });
             }
             let test_run = self.commands.remove(&id).and_then(|command| {
                 let mut run = crate::test_runs::detect(&command, &full_output(&v["tool_use_result"], &block["content"]))?;
@@ -213,6 +286,24 @@ fn edit_applied(r: &Value, parent: Option<String>, id: &str) -> Option<UiEvent> 
         hunks.push(Hunk { old_start: 0, old_lines: 0, new_start: 1, new_lines: lines.len() as u64, lines });
     }
     Some(UiEvent::EditApplied { parent, tool_use_id: id.to_string(), path, created, hunks, original })
+}
+
+/// What the turn cost per model, from the result's modelUsage (the advisor's model shows up here too).
+fn model_usage(v: &Value) -> UiEvent {
+    let models = v["modelUsage"]
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(model, u)| crate::ui_event::ModelCost {
+                    model: model.clone(),
+                    cost_usd: u["costUSD"].as_f64().unwrap_or(0.0),
+                    input_tokens: u["inputTokens"].as_u64().unwrap_or(0) + u["cacheReadInputTokens"].as_u64().unwrap_or(0) + u["cacheCreationInputTokens"].as_u64().unwrap_or(0),
+                    output_tokens: u["outputTokens"].as_u64().unwrap_or(0),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    UiEvent::ModelUsage { models }
 }
 
 fn result_event(v: &Value) -> UiEvent {
@@ -287,6 +378,14 @@ pub fn summarize(name: &str, input: &Value) -> String {
         "WebFetch" => s("url"),
         "WebSearch" => s("query"),
         "Task" | "Agent" => s("description"),
+        // A workflow's name, from its script's meta (or the saved one it runs).
+        "Workflow" => s("name").or_else(|| {
+            let script = s("script")?;
+            let at = script.find("name:")? + 5;
+            let rest = script[at..].trim_start();
+            let quote = rest.chars().next().filter(|c| "'\"`".contains(*c))?;
+            rest[1..].split(quote).next().map(String::from)
+        }),
         _ => None,
     };
     truncate(&text.unwrap_or_default(), 200)
@@ -344,6 +443,49 @@ mod tests {
     fn parse_all(text: &str) -> Vec<UiEvent> {
         let mut p = StreamParser::default();
         text.lines().flat_map(|l| p.parse_line(l)).collect()
+    }
+
+    /// Shapes from a real CLI 2.1.293 run with --advisor and an Explore subagent (trimmed, paths changed).
+    const ADVISOR_FIXTURE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/stream/advisor_subagents.jsonl"));
+
+    #[test]
+    fn says_who_runs_on_which_model_and_when_the_advisor_is_consulted() {
+        let evs = parse_all(ADVISOR_FIXTURE);
+        let picked: Vec<&UiEvent> = evs
+            .iter()
+            .filter(|e| matches!(e, UiEvent::AgentModel { .. } | UiEvent::AgentStarted { .. } | UiEvent::AgentProgress { .. } | UiEvent::AdvisorStarted { .. } | UiEvent::AdvisorDone { .. }))
+            .collect();
+        assert_eq!(
+            picked,
+            vec![
+                // Streamed first, then again in the message: each once.
+                &UiEvent::AdvisorStarted { parent: None, id: "srvtoolu_adv1".into() },
+                &UiEvent::AdvisorDone { parent: None, id: "srvtoolu_adv1".into(), outcome: "reviewed".into(), error_code: None },
+                &UiEvent::AgentModel { parent: None, model: "claude-haiku-5-5".into() },
+                &UiEvent::AgentStarted { tool_use_id: "toolu_agent".into(), subagent_type: "Explore".into(), description: "List .ts files in src/lib".into(), model: None },
+                &UiEvent::AgentProgress { tool_use_id: "toolu_agent".into(), description: "Finding **/*.ts".into(), tokens: 27572, tool_uses: 2, duration_ms: 5461 },
+                &UiEvent::AgentModel { parent: Some("toolu_agent".into()), model: "claude-sonnet-5-5".into() },
+                &UiEvent::AdvisorStarted { parent: None, id: "srvtoolu_adv2".into() },
+                &UiEvent::AdvisorDone { parent: None, id: "srvtoolu_adv2".into(), outcome: "unavailable".into(), error_code: Some("overloaded".into()) },
+            ]
+        );
+        let usage = evs.iter().find_map(|e| if let UiEvent::ModelUsage { models } = e { Some(models.clone()) } else { None }).unwrap();
+        assert_eq!(usage.iter().map(|m| (m.model.as_str(), m.output_tokens)).collect::<Vec<_>>(), vec![("claude-haiku-5-5", 4491), ("claude-sonnet-5-5", 1708)]);
+        assert!(matches!(evs.last().unwrap(), UiEvent::TurnDone { .. }));
+    }
+
+    /// Shapes from a real Claude Code 2.1.293 session that ran a workflow.
+    #[test]
+    fn a_workflow_is_named_from_its_script_and_its_transcripts_are_flagged_to_follow() {
+        let mut p = StreamParser::default();
+        let started = p.parse_line(r#"{"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"toolu_wf","name":"Workflow","input":{"script":"export const meta = {\n  name: 'settings-redesign-design',\n  description: 'x'\n}"}}]},"parent_tool_use_id":null}"#);
+        assert!(started.iter().any(|e| matches!(e, UiEvent::ToolStarted { name, summary, .. } if name == "Workflow" && summary == "settings-redesign-design")));
+        let done = p.parse_line(r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_wf","content":"Workflow launched in background. Task ID: wofbggpeg\nSummary: x\nTranscript dir: /h/.claude/projects/p/s1/subagents/workflows/wf_ba0b\nScript file: /h/s.js"}]},"parent_tool_use_id":null}"#);
+        assert!(done.contains(&UiEvent::Offstream { tool_use_id: "toolu_wf".into(), dir: Some("/h/.claude/projects/p/s1/subagents/workflows/wf_ba0b".into()) }));
+        // A background subagent: flagged with no folder (the session finds it); a foreground one isn't.
+        p.parse_line(r#"{"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","id":"bg","name":"Agent","input":{"description":"d","subagent_type":"Explore","run_in_background":true}},{"type":"tool_use","id":"fg","name":"Agent","input":{"description":"d","subagent_type":"Explore"}}]},"parent_tool_use_id":null}"#);
+        let r = p.parse_line(r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"bg","content":"launched"},{"type":"tool_result","tool_use_id":"fg","content":"done"}]},"parent_tool_use_id":null}"#);
+        assert_eq!(r.iter().filter(|e| matches!(e, UiEvent::Offstream { .. })).collect::<Vec<_>>(), vec![&UiEvent::Offstream { tool_use_id: "bg".into(), dir: None }]);
     }
 
     #[test]
@@ -501,7 +643,7 @@ mod tests {
         let sub = p.parse_line(&format!(r#"{{"type":"assistant","parent_tool_use_id":"task1","message":{{"id":"m2","content":[],"usage":{usage}}}}}"#));
         assert!(sub.is_empty(), "a subagent's usage is its own context");
         let done = p.parse_line(r#"{"type":"result","is_error":false,"duration_ms":2000,"modelUsage":{"claude-opus-5-5[1m]":{"contextWindow":1000000},"claude-haiku-4-5-20251001":{"contextWindow":200000}}}"#);
-        assert!(matches!(done[0], UiEvent::TurnDone { context_window: Some(1_000_000), .. }));
+        assert!(matches!(done.last().unwrap(), UiEvent::TurnDone { context_window: Some(1_000_000), .. }));
     }
 
     #[test]

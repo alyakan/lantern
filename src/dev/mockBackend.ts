@@ -57,6 +57,8 @@ async function streamText(send: Send, blockId: string, text: string) {
 }
 
 const pendingPermission: Record<string, (allow: boolean) => void> = {};
+/** The answers sent with the last allowed AskUserQuestion, per chat. */
+const lastAnswers: Record<string, Record<string, string> | undefined> = {};
 
 // A few of what the real `initialize` reply lists: built-ins, and user skills with their "(user)" tag.
 const COMMANDS = [
@@ -291,6 +293,125 @@ async function playCommand(slot: string, text: string) {
   await sleep(200);
   await send({ kind: "assistant_text", parent: null, block_id: `cmd-${Date.now()}:0`, text: "## Context Usage\n\n**Tokens:** 61k / 200k (31%)\n\n| Category | Tokens | Percentage |\n|---|---|---|\n| System prompt | 3.1k | 1.6% |\n| Tools | 14.2k | 7.1% |\n| Messages | 43.9k | 22.0% |" });
   done();
+}
+
+/**
+ * A turn with a team (sent with "team" in the message): Sonnet main, the advisor consulted before starting, three
+ * subagents in parallel (one runs tests that fail), the advisor after the failure, a passing rerun, the advisor before
+ * finishing. For the Agents tab.
+ */
+async function playTeamTurn(slot: string) {
+  const send = sendTo(slot);
+  const step = async (parent: string | null, id: string, name: string, summary: string, ms: number, error = false) => {
+    await send({ kind: "tool_started", parent, tool_use_id: id, name, summary });
+    await sleep(ms);
+    await send({ kind: "tool_finished", parent, tool_use_id: id, is_error: error, output: error ? "1 failed" : "ok" });
+  };
+  const advise = async (id: string, outcome: "reviewed" | "unavailable" = "reviewed") => {
+    await send({ kind: "advisor_started", parent: null, id });
+    await sleep(1400);
+    await send({ kind: "advisor_done", parent: null, id, outcome, error_code: outcome === "unavailable" ? "overloaded" : null });
+  };
+  await send({ kind: "agent_model", parent: null, model: "claude-sonnet-5-5" });
+  await send({ kind: "thinking", parent: null });
+  await sleep(500);
+  await advise("adv1");
+  await streamText(send, "tm:0", "Splitting this up: an explorer maps the auth code, a researcher checks the OAuth spec, and a worker updates the fixtures and runs the tests.");
+  const agents: [string, string, string, string][] = [
+    ["ag-w", "general-purpose", "Update JWT fixtures and run auth tests", "claude-sonnet-5-5"],
+    ["ag-e", "Explore", "Map the auth module and its callers", "claude-haiku-5-5"],
+    ["ag-r", "researcher", "Check OAuth2 token rules in RFC 6749", "claude-haiku-5-5"],
+  ];
+  for (const [id, type, description] of agents) {
+    await send({ kind: "tool_started", parent: null, tool_use_id: id, name: "Agent", summary: description });
+    await send({ kind: "agent_started", tool_use_id: id, subagent_type: type, description, model: null });
+  }
+  for (const [id, , , model] of agents) await send({ kind: "agent_model", parent: id, model });
+  const progress = (id: string, description: string, tokens: number, uses: number, ms: number) => send({ kind: "agent_progress", tool_use_id: id, description, tokens, tool_uses: uses, duration_ms: ms });
+  await progress("ag-e", "Scanning src/auth for callers", 8400, 1, 900);
+  await step("ag-e", "e1", "Grep", "verifyToken", 500);
+  await progress("ag-r", "Reading RFC 6749 §5.1", 6100, 1, 1200);
+  await step("ag-w", "w1", "Edit", `${FOLDER}/test/fixtures/jwt.ts`, 600);
+  await progress("ag-w", "Running npm test -- auth", 14200, 2, 2600);
+  await step("ag-w", "w2", "Bash", "npm test -- auth", 900, true);
+  await step("ag-e", "e2", "Read", `${FOLDER}/src/auth/session.ts`, 500);
+  await send({ kind: "tool_finished", parent: null, tool_use_id: "ag-e", is_error: false, output: "3 callers" });
+  await step("ag-r", "r1", "WebFetch", "https://www.rfc-editor.org/rfc/rfc6749", 700);
+  await send({ kind: "tool_finished", parent: null, tool_use_id: "ag-r", is_error: false, output: "expires_in is seconds" });
+  await advise("adv2");
+  await progress("ag-w", "Mocking the system clock in the fixture", 19800, 3, 6200);
+  await step("ag-w", "w3", "Edit", `${FOLDER}/test/fixtures/clock.ts`, 600);
+  await step("ag-w", "w4", "Bash", "npm test -- auth", 800);
+  await send({ kind: "tool_finished", parent: null, tool_use_id: "ag-w", is_error: false, output: "14/14 pass" });
+  await advise("adv3");
+  await streamText(send, "tm:1", "Done: the fixtures mock the clock, and all 14 auth tests pass.");
+  await send({ kind: "model_usage", models: [{ model: "claude-sonnet-5-5", cost_usd: 0.41, input_tokens: 182000, output_tokens: 6900 }, { model: "claude-haiku-5-5", cost_usd: 0.06, input_tokens: 96000, output_tokens: 3100 }, { model: "claude-opus-5-5", cost_usd: 0.38, input_tokens: 151000, output_tokens: 2400 }] });
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.85, duration_ms: 21000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+}
+
+/**
+ * A workflow in the background (sent with "workflow" in the message): Claude launches it and its turn ends; three
+ * agents propose and a judge decides, read from their transcripts (as the backend does); then Claude replies on its
+ * own when the task ends.
+ */
+async function playWorkflowTurn(slot: string) {
+  const send = sendTo(slot);
+  const wf = "toolu_wf";
+  await send({ kind: "agent_model", parent: null, model: "claude-sonnet-5-5" });
+  await streamText(send, "wf:0", "Running a workflow: three redesign proposals, then a judge picks one.");
+  await send({ kind: "tool_started", parent: null, tool_use_id: wf, name: "Workflow", summary: "settings-screen-redesign-and-review" });
+  await send({ kind: "tool_finished", parent: null, tool_use_id: wf, is_error: false, output: "Workflow launched in background." });
+  await send({ kind: "task_started", task_id: "wofb", tool_use_id: wf });
+  await send({ kind: "background_tasks", tasks: [{ id: "wofb", task_type: "local_workflow", description: "settings-redesign" }] });
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.02, duration_ms: 4000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+  const agent = async (id: string, label: string, phase: string, model: string) => {
+    await send({ kind: "tool_started", parent: wf, tool_use_id: id, name: "Agent", summary: label });
+    await send({ kind: "agent_started", tool_use_id: id, subagent_type: phase, description: label, model: null });
+    await send({ kind: "agent_model", parent: id, model });
+  };
+  const step = async (parent: string, id: string, name: string, summary: string, ms: number) => {
+    await send({ kind: "tool_started", parent, tool_use_id: id, name, summary });
+    await sleep(ms);
+    await send({ kind: "tool_finished", parent, tool_use_id: id, is_error: false, output: "ok" });
+  };
+  for (const [id, label] of [["wfa-1", "propose:drilldown"], ["wfa-2", "propose:hub-split"], ["wfa-3", "propose:reduce"]]) await agent(id, label, "Propose", "claude-haiku-5-5");
+  await step("wfa-1", "p1", "Glob", "**/Settings*.swift", 500);
+  await step("wfa-2", "p2", "Read", `${FOLDER}/Settings/SettingsView.swift`, 500);
+  await step("wfa-3", "p3", "Grep", "NavigationLink", 500);
+  await step("wfa-1", "p4", "Read", `${FOLDER}/Settings/AccountView.swift`, 600);
+  for (const id of ["wfa-1", "wfa-2", "wfa-3"]) {
+    await sleep(300);
+    await send({ kind: "tool_finished", parent: wf, tool_use_id: id, is_error: false, output: "A proposal" });
+  }
+  await agent("wfa-4", "judge", "Judge", "claude-opus-5-5");
+  await step("wfa-4", "j1", "Read", `${FOLDER}/docs/settings-proposals.md`, 900);
+  await send({ kind: "tool_finished", parent: wf, tool_use_id: "wfa-4", is_error: false, output: "Hub-split wins" });
+  await send({ kind: "task_ended", task_id: "wofb", tool_use_id: wf, status: "completed", summary: "Workflow settings-redesign completed" });
+  await send({ kind: "background_tasks", tasks: [] });
+  await streamText(send, "wf:1", "The workflow finished: the judge picked the hub-split design.");
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.3, duration_ms: 9000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+}
+
+/** Claude asks before starting (sent with "ask me" in the message): AskUserQuestion, then a reply using the answers. */
+async function playQuestionTurn(slot: string) {
+  const send = sendTo(slot);
+  await send({ kind: "thinking", parent: null });
+  await sleep(500);
+  await send({
+    kind: "permission_requested",
+    request_id: "q1",
+    tool_name: "AskUserQuestion",
+    input: {
+      questions: [
+        { question: "Where should retries live?", header: "Retries", multiSelect: false, options: [{ label: "In fetchJson (Recommended)", description: "Every caller gets them, with one place to tune backoff" }, { label: "In each caller", description: "Only the calls that need them, at the cost of repetition" }] },
+        { question: "Which status codes should be retried?", header: "Codes", multiSelect: true, options: [{ label: "429", description: "Rate limited" }, { label: "502", description: "Bad gateway" }, { label: "503", description: "Unavailable" }, { label: "504", description: "Gateway timeout" }] },
+      ],
+    },
+  });
+  const allowed = await new Promise<boolean>((resolve) => (pendingPermission[slot] = resolve));
+  const answers = lastAnswers[slot];
+  await streamText(send, "q:0", allowed && answers ? `Going with: ${Object.values(answers).join("; ")}.` : "No answer, so I'll put retries in fetchJson for 429 and 503.");
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.01, duration_ms: 3000, auth_hint: false, denied: 0, context_window: 1_000_000 });
 }
 
 async function playTurn(slot: string) {
@@ -644,12 +765,13 @@ export function installMockBackend() {
         case "send_message": {
           const slot = String(a.slot);
           const mode = slotMode[slot];
-          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
+          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : /\bask me\b/i.test(String(a.text)) ? playQuestionTurn(slot) : /\bworkflow\b/i.test(String(a.text)) ? playWorkflowTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
           // Like the backend: the turn's number.
           turnCount[slot] = (turnCount[slot] ?? -1) + 1;
           return turnCount[slot];
         }
         case "respond_permission":
+          lastAnswers[String(a.slot)] = (a.updatedInput as { answers?: Record<string, string> } | null)?.answers;
           pendingPermission[String(a.slot)]?.(Boolean(a.allow));
           delete pendingPermission[String(a.slot)];
           return null;

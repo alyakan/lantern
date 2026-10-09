@@ -9,6 +9,10 @@ import { usePersistentState } from "../lib/layout";
 import { Counts } from "./EditLine";
 import { DocIcon } from "./icons";
 import { FilesTab } from "./FilesTab";
+import { AgentsTab } from "./AgentsTab";
+import type { AgentTree } from "../lib/agents";
+import type { AgentGraph } from "../lib/agentGraph";
+import type { ModelCost } from "../types";
 import type { DiffLayout, Reveal } from "./FullDiff";
 
 const FullDiff = lazy(() => import("./FullDiff"));
@@ -39,6 +43,8 @@ interface Props {
   searchKey?: { mode: "files" | "text"; key: number } | null;
   /** Show this run in the Tests tab (from the chat); `key` changes for every request. */
   focusRun?: { id: string; key: number } | null;
+  /** The Agents tab: the latest turn's agent tree, cost per model, and `openKey`, changed to bring the tab up. */
+  agents?: { tree: AgentTree; graph: AgentGraph; usage: ModelCost[]; openKey: number };
   selected: string | null;
   follow: boolean;
   refreshKey: number;
@@ -49,7 +55,7 @@ interface Props {
 const LAYOUT_LABEL: Record<DiffLayout, string> = { inline: "Unified", split: "Split" };
 const NEXT_LAYOUT: Record<DiffLayout, DiffLayout> = { inline: "split", split: "inline" };
 
-type Tab = "changes" | "files" | "tests";
+type Tab = "changes" | "files" | "tests" | "agents";
 
 export function ReviewPanel(props: Props) {
   const [savedTab, setTab] = usePersistentState<Tab>("review.tab", "changes");
@@ -72,6 +78,9 @@ export function ReviewPanel(props: Props) {
   useEffect(() => {
     if (props.searchKey) setTab("files");
   }, [props.searchKey?.key]);
+  useEffect(() => {
+    if (props.agents?.openKey) setTab("agents");
+  }, [props.agents?.openKey]);
   useEffect(() => {
     const req = props.openRequest;
     if (!req) return;
@@ -100,6 +109,12 @@ export function ReviewPanel(props: Props) {
           <button role="tab" aria-selected={tab === "files"} className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}>
             Files
           </button>
+          {props.agents && (
+            <button role="tab" aria-selected={tab === "agents"} className={tab === "agents" ? "active" : ""} onClick={() => setTab("agents")}>
+              Agents
+              {props.agents.tree.live && <span className="tab-live" aria-label="working" />}
+            </button>
+          )}
           {runs.length > 0 && (
             <button role="tab" aria-selected={tab === "tests"} className={tab === "tests" ? "active" : ""} onClick={() => setTab("tests")}>
               Tests
@@ -110,6 +125,11 @@ export function ReviewPanel(props: Props) {
         {tab === "changes" && props.onScope && <ScopeMenu {...props} onScope={props.onScope} />}
       </div>
       {tab === "changes" && <ChangesTab {...props} diffLine={diffLine} />}
+      {tab === "agents" && props.agents && (
+        <div className="tab-body">
+          <AgentsTab tree={props.agents.tree} graph={props.agents.graph} usage={props.agents.usage} />
+        </div>
+      )}
       {tab === "tests" && <TestsTab runs={runs} selected={shownRun} onSelect={setShownRun} onOpenLocation={openLocation} />}
       {/* Kept mounted while hidden so the tree keeps its expanded folders across tab switches. */}
       <div className="tab-body" hidden={tab !== "files"}>

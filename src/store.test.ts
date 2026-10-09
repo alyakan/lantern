@@ -7,6 +7,12 @@ const running: State = { ...initialState, status: "running", folder: "/p", claud
 const tool = (id: string, name = "Bash", parent: string | null = null): UiEvent => ({ kind: "tool_started", parent, tool_use_id: id, name, summary: "x" });
 
 describe("reducer", () => {
+  it("leaves the chat as it is for an event it doesn't know, instead of losing it", () => {
+    const s = { ...initialState, status: "idle" as const };
+    expect(reducer(s, { type: "ui_event", event: { kind: "offstream", tool_use_id: "x" } as unknown as UiEvent })).toBe(s);
+  });
+
+
   it("user_sent adds a user item, stamped with when, and marks running", () => {
     const before = Date.now();
     const s = reducer({ ...initialState, status: "idle" }, { type: "user_sent", text: "hi" });

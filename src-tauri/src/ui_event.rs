@@ -33,6 +33,14 @@ pub struct Hunk {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ModelCost {
+    pub model: String,
+    pub cost_usd: f64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BackgroundTask {
     pub id: String,
     /// claude's task type: "local_bash", "local_agent", …
@@ -82,6 +90,24 @@ pub enum UiEvent {
     TaskEnded { task_id: String, tool_use_id: String, status: String, summary: String },
     /// The slash commands this claude offers (reply to `initialize`).
     Commands { commands: Vec<SlashCommand> },
+    /// The model an agent's messages come from (`parent`: the subagent's Agent call; None: the main thread), when it
+    /// changes.
+    AgentModel { parent: Option<String>, model: String },
+    /// A subagent started: the Agent (or Task) call, its type ("Explore", a custom agent) and description, and the
+    /// model it asked for, if any.
+    AgentStarted { tool_use_id: String, subagent_type: String, description: String, model: Option<String> },
+    /// What a running subagent is doing, as claude reports it.
+    AgentProgress { tool_use_id: String, description: String, tokens: u64, tool_uses: u64, duration_ms: u64 },
+    /// Claude consulted the advisor (Claude Code's advisor tool, a server tool).
+    AdvisorStarted { parent: Option<String>, id: String },
+    /// The advisor answered: "reviewed", "declined" or "unavailable" (with its error code).
+    AdvisorDone { parent: Option<String>, id: String, outcome: String, error_code: Option<String> },
+    /// Work that runs off the stream, whose transcripts are on disk: a Workflow's agents (`dir`: its transcript
+    /// folder) or a background subagent (`dir` None: found by its Agent call). The session follows it (offstream.rs)
+    /// and doesn't pass this on.
+    Offstream { tool_use_id: String, dir: Option<String> },
+    /// What the turn cost per model (the main model, subagents', the advisor's), from the result.
+    ModelUsage { models: Vec<ModelCost> },
     /// The MCP tools claude can use this session ("mcp__server__tool"), from its init message.
     McpTools { tools: Vec<String> },
     /// The models it offers, in its own order: the recommended picks first, then older versions.

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Md } from "./Md";
 import type { ChatItem } from "../store";
+import { QuestionCard } from "./QuestionCard";
+import { QUESTION_TOOL } from "../lib/questions";
 
 type PermissionItem = Extract<ChatItem, { type: "permission" }>;
 
@@ -9,11 +11,12 @@ export const PLAN_TOOL = "ExitPlanMode";
 /** Debug mode's request to reproduce the bug (from Lantern's own MCP tool). */
 export const REPRODUCE_TOOL = "Reproduce";
 
-type Decide = (id: string, allow: boolean, note?: string) => void;
+type Decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>) => void;
 
 export function PermissionCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }) {
   if (item.toolName === PLAN_TOOL) return <PlanCard item={item} onDecide={onDecide} />;
   if (item.toolName === REPRODUCE_TOOL) return <ReproduceCard item={item} onDecide={onDecide} />;
+  if (item.toolName === QUESTION_TOOL) return <QuestionCard item={item} onDecide={onDecide} />;
   const detail = describeInput(item.input);
   if (item.decision !== null) {
     const allowed = item.decision === "allowed";

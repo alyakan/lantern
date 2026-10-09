@@ -53,9 +53,10 @@ impl PermissionBridge {
 
     /// Returns false if the request is unknown or already answered. `message` goes back to Claude (a deny reason,
     /// or the user's note on a reproduce request).
-    pub fn respond(&self, request_id: &str, allow: bool, message: Option<String>) -> bool {
+    /// `updated_input`: on allow, the tool's input as it should run (AskUserQuestion's, with the user's answers).
+    pub fn respond(&self, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>) -> bool {
         match self.pending.lock().unwrap().remove(request_id) {
-            Some(tx) => tx.send(BridgeResponse { allow, message }).is_ok(),
+            Some(tx) => tx.send(BridgeResponse { allow, message, updated_input }).is_ok(),
             None => false,
         }
     }
@@ -106,8 +107,8 @@ mod tests {
         let (bridge, mut rx, _dir) = setup();
         let helper = ask_in_background(&bridge);
         let id = next_request_id(&mut rx).await;
-        assert!(bridge.respond(&id, true, None));
-        assert_eq!(helper.await.unwrap(), BridgeResponse { allow: true, message: None });
+        assert!(bridge.respond(&id, true, None, None));
+        assert_eq!(helper.await.unwrap(), BridgeResponse { allow: true, message: None, updated_input: None });
     }
 
     #[tokio::test]
@@ -115,7 +116,7 @@ mod tests {
         let (bridge, mut rx, _dir) = setup();
         let helper = ask_in_background(&bridge);
         let id = next_request_id(&mut rx).await;
-        assert!(bridge.respond(&id, false, None));
+        assert!(bridge.respond(&id, false, None, None));
         assert!(!helper.await.unwrap().allow);
     }
 
@@ -128,6 +129,6 @@ mod tests {
         let r = helper.await.unwrap();
         assert!(!r.allow);
         assert!(r.message.unwrap().contains("denied"));
-        assert!(!bridge.respond(&id, true, None), "a cancelled request can't be answered");
+        assert!(!bridge.respond(&id, true, None, None), "a cancelled request can't be answered");
     }
 }

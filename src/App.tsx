@@ -1,5 +1,5 @@
-import { useEffect, useReducer, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope } from "./api";
 import { prNumberOf, reviewHints } from "./lib/review";
 import { openFind } from "./lib/editorFind";
@@ -12,6 +12,8 @@ import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
 import { withShellContext } from "./lib/shell";
 import { withSkillNote } from "./lib/skillNote";
+import { agentTree, usesAgents } from "./lib/agents";
+import { agentGraph } from "./lib/agentGraph";
 import { BUILT_IN, CUSTOM_HARNESS, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
@@ -435,11 +437,31 @@ export default function App() {
     }
   }, [chats.slots]);
 
-  const changeMode = (mode: Mode) => {
-    if (mode !== "steps") dispatch({ type: "flavour_picked", flavour: null });
-    dispatch({ type: "mode_changed", mode });
-    if (state.folder) restart(active, mode);
+  /**
+   * Restarting a chat's claude (a new mode, effort or preset) stops what it runs in the background: workflows,
+   * background subagents and commands. With any running, ask first; `go` runs only if the answer is yes.
+   */
+  const unlessBackground = async (slot: string, go: () => void) => {
+    const n = chats.slots[slot]?.backgroundTasks.length ?? 0;
+    if (n > 0) {
+      const them = n === 1 ? "it" : "them";
+      const sure = await ask(`${n === 1 ? "A background task is" : `${n} background tasks are`} running in this chat (a workflow, a subagent or a command). Changing this restarts Claude, which stops ${them}.`, {
+        title: "Restart Claude?",
+        kind: "warning",
+        okLabel: "Restart anyway",
+        cancelLabel: "Keep running",
+      });
+      if (!sure) return;
+    }
+    go();
   };
+
+  const changeMode = (mode: Mode) =>
+    unlessBackground(active, () => {
+      if (mode !== "steps") dispatch({ type: "flavour_picked", flavour: null });
+      dispatch({ type: "mode_changed", mode });
+      if (state.folder) restart(active, mode);
+    });
 
   // Step by step's flavour as you see it: one you picked and haven't sent yet, or the conversation's.
   const chatFlavour = (s: typeof state) => (s.mode === "steps" ? (s.flavourPick ?? flavourOf(s.items, s.flavourStart)) : null);
@@ -447,18 +469,22 @@ export default function App() {
   // Picking the flavour the chat is already in takes back a pick; one from outside Step by step switches to it.
   const pickFlavour = (next: Flavour | null) => {
     const inChat = state.mode === "steps" ? flavourOf(state.items, state.flavourStart) : null;
-    dispatch({ type: "flavour_picked", flavour: next === inChat ? null : next });
     if (state.mode !== "steps") {
-      dispatch({ type: "mode_changed", mode: "steps" });
-      if (state.folder) restart(active, "steps");
+      return unlessBackground(active, () => {
+        dispatch({ type: "flavour_picked", flavour: next === inChat ? null : next });
+        dispatch({ type: "mode_changed", mode: "steps" });
+        if (state.folder) restart(active, "steps");
+      });
     }
+    dispatch({ type: "flavour_picked", flavour: next === inChat ? null : next });
   };
 
   /**
    * Switches a chat to a preset (and makes it its folder's): its claude restarts on the same session with the
    * preset's models, as for a new mode.
    */
-  const switchHarness = (h: Harness, slot = active) => {
+  const switchHarness = (h: Harness, slot = active) => unlessBackground(slot, () => applyHarness(h, slot));
+  const applyHarness = (h: Harness, slot: string) => {
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     const folder = chats.slots[slot]?.folder;
     if (!folder) return;
@@ -477,8 +503,10 @@ export default function App() {
   // Effort is a launch flag, so the chat's claude restarts on the same session to pick it up (like the mode).
   const changeEffort = (next: string | null) => {
     if (presetOn) return customize({ effort: next });
-    setEffort(next);
-    if (state.folder) restart(active, state.mode, next);
+    unlessBackground(active, () => {
+      setEffort(next);
+      if (state.folder) restart(active, state.mode, next);
+    });
   };
 
   // App-wide: applies in-band from each open chat's next message, and to new chats and restarts. Chats on a preset
@@ -497,10 +525,11 @@ export default function App() {
   };
 
   // `note`: what the user wrote on a reproduce card; it goes back to Claude with the answer.
-  const decide = (id: string, allow: boolean, note?: string) => {
+  // `answered`: the tool's input with what the user chose in it (AskUserQuestion's answers).
+  const decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>) => {
     const slot = active;
     to(slot)({ type: "permission_decided", id, allow, note });
-    api.respondPermission(slot, id, allow, note ?? null).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+    api.respondPermission(slot, id, allow, note ?? null, answered ?? null).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
   };
 
   // From the title bar's failure count: bring the latest failed step's activity into view, opened.
@@ -728,6 +757,20 @@ export default function App() {
     },
   };
   const hero = state.items.length === 0 && !state.thinking;
+  // The Agents tab: the latest turn's tree. It comes up by itself the first time a chat's turn uses a subagent or the
+  // advisor; after that it's left where you put it.
+  // Live while Claude works, and while anything it started runs on in the background (a workflow, a subagent).
+  const treeOpts = { live: state.status === "running" || state.backgroundTasks.length > 0, folder: state.folder, mainModel: state.model, effort: settingsFor(active).effort, advisor: settingsFor(active).advisor, background: state.backgroundRuns };
+  const tree = agentTree(state.items, treeOpts);
+  const graph = useMemo(() => agentGraph(state.items, treeOpts), [state.items, state.backgroundRuns, treeOpts.live, treeOpts.mainModel, treeOpts.advisor]);
+  const [agentsOpenKey, setAgentsOpenKey] = useState(0);
+  const agentsShown = useRef<Set<string>>(new Set());
+  const treeInUse = tree.live && usesAgents(tree);
+  useEffect(() => {
+    if (!treeInUse || agentsShown.current.has(active)) return;
+    agentsShown.current.add(active);
+    setAgentsOpenKey(Date.now());
+  }, [treeInUse, active]);
   // "How the modes work", open on a mode's page.
   const [guideAt, setGuideAt] = useState<GuideKey | null>(null);
   const [settingsAt, setSettingsAt] = useState<SettingsTab | null>(null);
@@ -841,12 +884,14 @@ export default function App() {
                   <FileLinksProvider slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention}>
                     {stepsView ? (
                       <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} onPickFlavour={pickFlavour} autoApprove={autoFor(state.folder)}
-                        onAutoApprove={(on) => {
-                          if (!state.folder) return;
-                          setAutoBy({ ...autoBy, [state.folder]: on });
-                          to(active)({ type: "restarting" });
-                          api.restartSession(active, state.mode, effort, on).then(() => to(active)({ type: "session_ready" })).catch((e) => to(active)({ type: "failed", text: errText(e) }));
-                        }} onPage={setPageRange} onReviewFile={setReviewFile} />
+                        onAutoApprove={(on) =>
+                          unlessBackground(active, () => {
+                            if (!state.folder) return;
+                            setAutoBy({ ...autoBy, [state.folder]: on });
+                            to(active)({ type: "restarting" });
+                            api.restartSession(active, state.mode, settingsFor(active).effort, on).then(() => to(active)({ type: "session_ready" })).catch((e) => to(active)({ type: "failed", text: errText(e) }));
+                          })
+                        } onPage={setPageRange} onReviewFile={setReviewFile} />
                     ) : (
                       <ChatView key={`chat-${active}`} state={state} {...streamHandlers} />
                     )}
@@ -858,6 +903,7 @@ export default function App() {
           }
           right={
             <ReviewPanel
+              agents={state.folder ? { tree, graph, usage: state.modelUsage, openKey: agentsOpenKey } : undefined}
               folder={state.folder}
               ready={state.status !== "starting"}
               files={shownFiles}
