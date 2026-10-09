@@ -55,5 +55,22 @@ describe("AgentGraph", () => {
     expect(screen.getByRole("navigation", { name: "Zoom" })).toHaveTextContent(/^Whole graph$/);
     expect(svg.getAttribute("viewBox")).toBe(whole);
   });
-});
 
+  it("moves between nodes with the arrow keys, the panel following", () => {
+    let s = base();
+    s = step(s, { kind: "tool_started", parent: "e", tool_use_id: "g", name: "Grep", summary: "verifyToken" });
+    const { container } = render(<AgentGraph graph={agentGraph(s.items, opts)} />);
+    const graph = container.querySelector(".agent-graph")!;
+    const selected = () => container.querySelector(".graph-node.selected")?.getAttribute("aria-label");
+    // Nothing chosen yet: the first arrow picks the main agent.
+    fireEvent.keyDown(graph, { key: "ArrowDown" });
+    expect(selected()).toBe("main Sonnet 5.5: running");
+    fireEvent.keyDown(graph, { key: "ArrowDown" });
+    expect(selected()).toBe("Explore Haiku 5.5: running");
+    expect(screen.getByText("Map auth")).toBeInTheDocument();
+    fireEvent.keyDown(graph, { key: "ArrowDown" });
+    expect(selected()).toBe("search ×1: running");
+    fireEvent.keyDown(graph, { key: "ArrowUp" });
+    expect(selected()).toBe("Explore Haiku 5.5: running");
+  });
+});

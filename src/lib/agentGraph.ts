@@ -147,7 +147,7 @@ export function agentGraph(items: ChatItem[], opts: Parameters<typeof agentTree>
       const id = `wf:${w.id}`;
       const status = nodeStatus(w.status);
       const mine = tree.subagents.filter((x) => x.workflow === w.id);
-      out.nodes.push({ id, kind: "workflow", label: w.name.length > 22 ? `${w.name.slice(0, 21)}…` : w.name, sub: w.phase ?? "workflow", tone: "none", status, parent: "main", x: 0, y: 0, detail: [`Workflow: ${w.name}`, `${mine.length} agents${w.phase ? ` · now: ${w.phase}` : ""}`] });
+      out.nodes.push({ id, kind: "workflow", label: w.name, sub: w.phase ?? "workflow", tone: "none", status, parent: "main", x: 0, y: 0, detail: [`Workflow: ${w.name}`, `${mine.length} agents${w.phase ? ` · now: ${w.phase}` : ""}`] });
       out.edges.push({ id: `main->${id}`, from: "main", to: id, active: status === "running", dashed: false });
       out.stepEdge[w.id] = { edge: `main->${id}`, status: w.status };
       for (const s of mine) addAgent(s, id, `main->${id}`);
@@ -249,4 +249,25 @@ export function trailTo(g: AgentGraph, id: string): GraphNode[] {
   const out: GraphNode[] = [];
   for (let n = byId.get(id); n; n = n.parent ? byId.get(n.parent) : undefined) out.unshift(n);
   return out;
+}
+
+export type Direction = "up" | "down" | "left" | "right";
+
+/**
+ * The node an arrow key moves to: up to the parent, down to the child nearest below, left or right to the nearest
+ * node on the same row (across branches, so the agents can be swept through). Null when there's none that way.
+ */
+export function neighbor(g: AgentGraph, id: string, dir: Direction): string | null {
+  const n = g.nodes.find((x) => x.id === id);
+  if (!n) return null;
+  if (dir === "up") return n.parent ?? (n.kind === "advisor" ? "main" : null);
+  const nearest = (list: GraphNode[]) => list.sort((a, b) => Math.abs(a.x - n.x) - Math.abs(b.x - n.x))[0]?.id ?? null;
+  if (dir === "down") return nearest(g.nodes.filter((x) => x.parent === id));
+  const row = g.nodes.filter((x) => x.id !== id && Math.abs(x.y - n.y) < 1 && (dir === "left" ? x.x < n.x : x.x > n.x));
+  return nearest(row);
+}
+
+/** Text cut to fit a box: about this many characters at the graph's font sizes, with "…" when cut. */
+export function fit(text: string, chars: number): string {
+  return text.length > chars ? `${text.slice(0, Math.max(1, chars - 1))}…` : text;
 }

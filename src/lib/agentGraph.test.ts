@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, reducer, type State } from "../store";
 import type { UiEvent } from "../types";
-import { MAX_UNFOLDED, MIN_VIEW, agentGraph, branchOf, branchView, trailTo, wholeView, zoomTarget } from "./agentGraph";
+import { MAX_UNFOLDED, MIN_VIEW, agentGraph, fit, neighbor, branchOf, branchView, trailTo, wholeView, zoomTarget } from "./agentGraph";
 
 const run = (events: UiEvent[]) => {
   let s: State = reducer({ ...initialState, status: "idle" }, { type: "user_sent", text: "fix it" });
@@ -128,6 +128,37 @@ describe("zooming into a branch", () => {
 
   it("gives the trail from main down to the node", () => {
     expect(trailTo(g, "agent:wfa-1").map((x) => x.label)).toEqual(["main", "settings-redesign", "propose:reduce"]);
+  });
+});
+
+describe("moving between nodes with the arrow keys", () => {
+  const s = run([
+    { kind: "advisor_started", parent: null, id: "adv" },
+    ...agent("a", "Explore", "claude-haiku-5-5"),
+    start("a", "a1", "Grep"),
+    start("a", "a2", "Read"),
+    ...agent("b", "Explore", "claude-haiku-5-5"),
+    start("b", "b1", "Bash"),
+  ]);
+  const g = agentGraph(s.items, opts);
+
+  it("goes up to the parent, down to the nearest child, and along a row", () => {
+    expect(neighbor(g, "agent:a/search", "up")).toBe("agent:a");
+    expect(neighbor(g, "agent:a", "up")).toBe("main");
+    expect(neighbor(g, "main", "up")).toBeNull();
+    expect(neighbor(g, "advisor", "up")).toBe("main");
+    expect(["agent:a", "agent:b"]).toContain(neighbor(g, "main", "down"));
+    expect(neighbor(g, "agent:a", "right")).toBe("agent:b");
+    expect(neighbor(g, "agent:b", "left")).toBe("agent:a");
+    expect(neighbor(g, "main", "left")).toBe("advisor");
+    // Along the leaves' row, across agents.
+    expect(neighbor(g, "agent:a/files", "right")).toBe("agent:b/shell");
+    expect(neighbor(g, "agent:b/shell", "down")).toBeNull();
+  });
+
+  it("cuts text to fit, with an ellipsis", () => {
+    expect(fit("settings-redesign-design", 15)).toBe("settings-redes…");
+    expect(fit("short", 15)).toBe("short");
   });
 });
 

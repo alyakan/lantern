@@ -359,7 +359,7 @@ async function playWorkflowTurn(slot: string) {
   const wf = "toolu_wf";
   await send({ kind: "agent_model", parent: null, model: "claude-sonnet-5-5" });
   await streamText(send, "wf:0", "Running a workflow: three redesign proposals, then a judge picks one.");
-  await send({ kind: "tool_started", parent: null, tool_use_id: wf, name: "Workflow", summary: "settings-redesign" });
+  await send({ kind: "tool_started", parent: null, tool_use_id: wf, name: "Workflow", summary: "settings-screen-redesign-and-review" });
   await send({ kind: "tool_finished", parent: null, tool_use_id: wf, is_error: false, output: "Workflow launched in background." });
   await send({ kind: "task_started", task_id: "wofb", tool_use_id: wf });
   await send({ kind: "background_tasks", tasks: [{ id: "wofb", task_type: "local_workflow", description: "settings-redesign" }] });
