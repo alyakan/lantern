@@ -11,6 +11,7 @@ import { DocIcon } from "./icons";
 import { FilesTab } from "./FilesTab";
 import { AgentsTab } from "./AgentsTab";
 import type { AgentTree } from "../lib/agents";
+import type { AgentGraph } from "../lib/agentGraph";
 import type { ModelCost } from "../types";
 import type { DiffLayout, Reveal } from "./FullDiff";
 
@@ -43,7 +44,7 @@ interface Props {
   /** Show this run in the Tests tab (from the chat); `key` changes for every request. */
   focusRun?: { id: string; key: number } | null;
   /** The Agents tab: the latest turn's agent tree, cost per model, and `openKey`, changed to bring the tab up. */
-  agents?: { tree: AgentTree; usage: ModelCost[]; openKey: number };
+  agents?: { tree: AgentTree; graph: AgentGraph; usage: ModelCost[]; openKey: number };
   selected: string | null;
   follow: boolean;
   refreshKey: number;
@@ -126,7 +127,7 @@ export function ReviewPanel(props: Props) {
       {tab === "changes" && <ChangesTab {...props} diffLine={diffLine} />}
       {tab === "agents" && props.agents && (
         <div className="tab-body">
-          <AgentsTab tree={props.agents.tree} usage={props.agents.usage} />
+          <AgentsTab tree={props.agents.tree} graph={props.agents.graph} usage={props.agents.usage} />
         </div>
       )}
       {tab === "tests" && <TestsTab runs={runs} selected={shownRun} onSelect={setShownRun} onOpenLocation={openLocation} />}

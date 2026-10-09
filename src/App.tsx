@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope } from "./api";
 import { prNumberOf, reviewHints } from "./lib/review";
@@ -13,6 +13,7 @@ import { basename } from "./lib/diff";
 import { withShellContext } from "./lib/shell";
 import { withSkillNote } from "./lib/skillNote";
 import { agentTree, usesAgents } from "./lib/agents";
+import { agentGraph } from "./lib/agentGraph";
 import { BUILT_IN, CUSTOM_HARNESS, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
@@ -732,7 +733,9 @@ export default function App() {
   const hero = state.items.length === 0 && !state.thinking;
   // The Agents tab: the latest turn's tree. It comes up by itself the first time a chat's turn uses a subagent or the
   // advisor; after that it's left where you put it.
-  const tree = agentTree(state.items, { live: state.status === "running", folder: state.folder, mainModel: state.model, effort: settingsFor(active).effort, advisor: settingsFor(active).advisor });
+  const treeOpts = { live: state.status === "running", folder: state.folder, mainModel: state.model, effort: settingsFor(active).effort, advisor: settingsFor(active).advisor };
+  const tree = agentTree(state.items, treeOpts);
+  const graph = useMemo(() => agentGraph(state.items, treeOpts), [state.items, treeOpts.live, treeOpts.mainModel, treeOpts.advisor]);
   const [agentsOpenKey, setAgentsOpenKey] = useState(0);
   const agentsShown = useRef<Set<string>>(new Set());
   const treeInUse = tree.live && usesAgents(tree);
@@ -871,7 +874,7 @@ export default function App() {
           }
           right={
             <ReviewPanel
-              agents={state.folder ? { tree, usage: state.modelUsage, openKey: agentsOpenKey } : undefined}
+              agents={state.folder ? { tree, graph, usage: state.modelUsage, openKey: agentsOpenKey } : undefined}
               folder={state.folder}
               ready={state.status !== "starting"}
               files={shownFiles}

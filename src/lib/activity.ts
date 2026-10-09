@@ -60,7 +60,7 @@ function foldTurn(items: ChatItem[], live: boolean): Row[] {
   return [...before, block, ...rest.slice(before.length)];
 }
 
-type Category = "read" | "search" | "run" | "skill" | "agent" | "advisor" | "web" | "edit" | "plan" | "reproduce" | "mcp" | "other";
+export type Category = "read" | "search" | "run" | "skill" | "agent" | "advisor" | "web" | "edit" | "plan" | "reproduce" | "mcp" | "other";
 
 const CATEGORY_OF: Record<string, Category> = {
   Read: "read", NotebookRead: "read",
@@ -100,7 +100,7 @@ export function mcpTool(name: string): { server: string; tool: string } | null {
   return { server: serverLabel(m[1]), tool: m[2].replace(/_/g, " ") };
 }
 
-const categoryOf = (step: Step): Category => CATEGORY_OF[step.name] ?? (mcpTool(step.name) ? "mcp" : "other");
+export const categoryOf = (step: Step): Category => CATEGORY_OF[step.name] ?? (mcpTool(step.name) ? "mcp" : "other");
 
 /** A step's tool, for its line: an MCP tool by its server and name ("Linear · create issue"). */
 export function stepLabel(step: Step): string {
