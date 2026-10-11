@@ -698,7 +698,11 @@ const mockFileText = (path: string) =>
       ? 'import * as retry from "./retry";\n\nexport const load = (url: string) => retry.\n'
       : path === `${FOLDER}/README.md`
         ? "# acme-api\n\nfetchJson retries transient errors.\n\n"
-        : `// ${path.slice(FOLDER.length + 1)}\nexport {};\n`);
+        : path === `${FOLDER}/tsconfig.json`
+          ? '{\n  // strict on purpose\n  "compilerOptions": {\n    "strict": true,\n    "target": "ES2022",\n  },\n}\n'
+          : path === `${FOLDER}/package.json`
+            ? '{\n  "name": "acme-api",\n  "version": "1.0.0",\n  "scripts": { "test": "vitest" }\n}\n'
+            : `// ${path.slice(FOLDER.length + 1)}\nexport {};\n`);
 
 export function installMockBackend() {
   // In the browser console: `claudeEdits("/path", "text")` simulates a change to a file behind the editor's back.

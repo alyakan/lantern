@@ -1,4 +1,8 @@
 import * as monaco from "monaco-editor/editor/editor.api";
+// The language services load this anyway the first time a TypeScript, JSON, CSS or HTML file opens: every editor feature,
+// with the services some of them need. Editors made before that point would have no such services, and one made after
+// it fails to set up (no suggestions, console errors). So it loads first, and every editor gets the same set.
+import "monaco-editor/internal/common/workers";
 import "monaco-editor/basic-languages/monaco.contribution"; // Monarch syntax highlighting for every language
 // The find bar (⌘F), which the bare editor API leaves out.
 import "monaco-editor/editor/contrib/find/browser/findController";
@@ -26,7 +30,7 @@ import "monaco-editor/editor/contrib/gotoError/browser/gotoError";
 // Real language services, each in its own worker: TypeScript and JavaScript (also what .tsx and .jsx use), JSON, CSS
 // (and SCSS, Less) and HTML. Everything else gets highlighting and word suggestions.
 import { javascriptDefaults, typescriptDefaults, JsxEmit, ModuleKind, ModuleResolutionKind, ScriptTarget } from "monaco-editor/language/typescript/monaco.contribution";
-import "monaco-editor/language/json/monaco.contribution";
+import { jsonDefaults } from "monaco-editor/language/json/monaco.contribution";
 import "monaco-editor/language/css/monaco.contribution";
 import "monaco-editor/language/html/monaco.contribution";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
@@ -80,6 +84,10 @@ for (const defaults of [typescriptDefaults, javascriptDefaults]) {
   defaults.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: false, noSuggestionDiagnostics: true });
   defaults.setEagerModelSync(true);
 }
+
+// tsconfig.json, .eslintrc and VS Code's settings are JSON with comments and trailing commas; flagging those would put
+// errors on files that are fine, so only real syntax mistakes are reported.
+jsonDefaults.setDiagnosticsOptions({ validate: true, allowComments: true, comments: "ignore", trailingCommas: "ignore" });
 
 /**
  * Gives the language service for `language` the project files the open file imports (see collectLibs), so imported
