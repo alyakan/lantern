@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Editor, type OnMount } from "@monaco-editor/react";
-import { DARK_THEME, LIGHT_THEME } from "../monaco";
+import { DARK_THEME, LIGHT_THEME, addProjectLibs } from "../monaco";
 import { api } from "../api";
 import { useSlot } from "../lib/slot";
 import { languageFor } from "../lib/diff";
 import { usePrefersDark } from "../lib/theme";
 import { registerFindable } from "../lib/editorFind";
 import { stash, stashKey, unstash } from "../lib/editStash";
+import { collectLibs } from "../lib/projectLibs";
 
 interface Props {
   path: string;
@@ -84,6 +85,23 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
       live = false;
     };
   }, [slot, path, refreshKey]);
+
+  // Completions across files: the project files this one imports go to the language service (TypeScript and JavaScript).
+  // Read again when the file on disk changes (a save, Claude's edit) or other files may have.
+  const language = languageFor(path);
+  const loaded = saved !== null;
+  useEffect(() => {
+    if (!loaded || (language !== "typescript" && language !== "javascript")) return;
+    let live = true;
+    let remove = () => {};
+    collectLibs({ path, text: savedRef.current ?? "" }, (p) => api.readFile(slot, p)).then((libs) => {
+      if (live) remove = addProjectLibs(language, libs);
+    });
+    return () => {
+      live = false;
+      remove();
+    };
+  }, [loaded, saved, path, slot, language, refreshKey]);
 
   useEffect(() => {
     onDirty?.(dirty);
@@ -206,6 +224,13 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
             renderLineHighlight: "line",
             scrollBeyondLastLine: false,
             automaticLayout: true,
+            // Suggestions, hover and parameter hints can reach outside the pane's edges.
+            fixedOverflowWidgets: true,
+            quickSuggestions: { other: true, comments: false, strings: true },
+            suggestOnTriggerCharacters: true,
+            tabCompletion: "on",
+            wordBasedSuggestions: "currentDocument",
+            parameterHints: { enabled: true },
             glyphMargin: false,
             folding: false,
             lineNumbersMinChars: 3,

@@ -690,7 +690,15 @@ function playShell(slot: string, id: string, command: string) {
 /** Files the user saved in the mock (and ones "Claude" changed since), over the built-in ones. */
 const mockFiles: Record<string, string> = {};
 const mockFileExists = (path: string) => path.startsWith(FOLDER);
-const mockFileText = (path: string) => mockFiles[path] ?? (path === FILE ? CURRENT : `// ${path.slice(FOLDER.length + 1)}\nexport {};\n`);
+const mockFileText = (path: string) =>
+  mockFiles[path] ??
+  (path === FILE
+    ? CURRENT
+    : path === `${FOLDER}/src/client/index.ts`
+      ? 'import * as retry from "./retry";\n\nexport const load = (url: string) => retry.\n'
+      : path === `${FOLDER}/README.md`
+        ? "# acme-api\n\nfetchJson retries transient errors.\n\n"
+        : `// ${path.slice(FOLDER.length + 1)}\nexport {};\n`);
 
 export function installMockBackend() {
   // In the browser console: `claudeEdits("/path", "text")` simulates a change to a file behind the editor's back.

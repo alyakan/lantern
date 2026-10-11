@@ -24,7 +24,8 @@ vi.mock("@monaco-editor/react", () => ({
     );
   },
 }));
-vi.mock("../monaco", () => ({ LIGHT_THEME: "l", DARK_THEME: "d" }));
+const addProjectLibs = vi.fn();
+vi.mock("../monaco", () => ({ LIGHT_THEME: "l", DARK_THEME: "d", addProjectLibs: (...a: unknown[]) => addProjectLibs(...a) }));
 vi.mock("../lib/editorFind", () => ({ registerFindable: () => {} }));
 vi.mock("../api", () => ({ api: { readFile: vi.fn(), writeFile: vi.fn() } }));
 
@@ -39,6 +40,7 @@ describe("FilePreview as an editor", () => {
     write.mockReset().mockResolvedValue({ status: "saved", changed: true });
     for (const k of Object.keys(commands)) delete commands[Number(k)];
     clearStash();
+    addProjectLibs.mockReset().mockReturnValue(() => {});
   });
 
   it("shows the file, marks edits as unsaved, and saves them with what the file was when opened", async () => {
@@ -170,6 +172,25 @@ describe("FilePreview as an editor", () => {
     render(<FilePreview path="/p/b.ts" />);
     await waitFor(() => expect(editor().value).toBe("one\n"));
     expect(screen.queryByText("Your unsaved edits are back")).toBeNull();
+  });
+
+  it("gives the TypeScript service the files a script imports, and takes them back when it closes", async () => {
+    const dispose = vi.fn();
+    addProjectLibs.mockReturnValue(dispose);
+    const files: Record<string, string> = { "/p/a.ts": 'import { b } from "./b";\n', "/p/b.ts": "export const b = 1;\n" };
+    read.mockImplementation(async (_slot, path) => files[path] ?? Promise.reject("missing"));
+    const view = render(<FilePreview path="/p/a.ts" />);
+    await waitFor(() => expect(addProjectLibs).toHaveBeenCalledWith("typescript", [{ path: "/p/b.ts", text: "export const b = 1;\n" }]));
+    expect(dispose).not.toHaveBeenCalled();
+    view.unmount();
+    expect(dispose).toHaveBeenCalled();
+  });
+
+  it("doesn't go looking for imports in a file the language service doesn't cover", async () => {
+    render(<FilePreview path="/p/notes.md" />);
+    await waitFor(() => expect(editor().value).toBe("one\n"));
+    expect(addProjectLibs).not.toHaveBeenCalled();
+    expect(read).toHaveBeenCalledTimes(1);
   });
 
   it("shows the error for a file that can't be opened", async () => {

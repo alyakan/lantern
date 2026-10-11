@@ -1,5 +1,5 @@
 import * as monaco from "monaco-editor/editor/editor.api";
-import "monaco-editor/basic-languages/monaco.contribution"; // Monarch syntax highlighting only; language services (completions, diagnostics) are intentionally off
+import "monaco-editor/basic-languages/monaco.contribution"; // Monarch syntax highlighting for every language
 // The find bar (⌘F), which the bare editor API leaves out.
 import "monaco-editor/editor/contrib/find/browser/findController";
 // What editing a file takes beyond typing: copy and paste, comment toggling, line moves and deletes, word jumps, and
@@ -13,13 +13,84 @@ import "monaco-editor/editor/contrib/indentation/browser/indentation";
 import "monaco-editor/editor/contrib/multicursor/browser/multicursor";
 // Its buttons are codicons; the bare API doesn't load their font. (By path: the package exports no .css.)
 import "../node_modules/monaco-editor/esm/vs/base/browser/ui/codicons/codicon/codicon.css";
+// Completions: the suggestion list (Monaco also suggests words from the file in any language), docs on hover,
+// parameter hints while typing a call, quick fixes, formatting, and stepping through problems.
+import "monaco-editor/editor/contrib/suggest/browser/suggestController";
+import "monaco-editor/editor/contrib/hover/browser/hoverContribution";
+import "monaco-editor/editor/contrib/parameterHints/browser/parameterHints";
+import "monaco-editor/editor/contrib/snippet/browser/snippetController2";
+import "monaco-editor/editor/contrib/wordHighlighter/browser/wordHighlighter";
+import "monaco-editor/editor/contrib/codeAction/browser/codeActionContributions";
+import "monaco-editor/editor/contrib/format/browser/formatActions";
+import "monaco-editor/editor/contrib/gotoError/browser/gotoError";
+// Real language services, each in its own worker: TypeScript and JavaScript (also what .tsx and .jsx use), JSON, CSS
+// (and SCSS, Less) and HTML. Everything else gets highlighting and word suggestions.
+import { javascriptDefaults, typescriptDefaults, JsxEmit, ModuleKind, ModuleResolutionKind, ScriptTarget } from "monaco-editor/language/typescript/monaco.contribution";
+import "monaco-editor/language/json/monaco.contribution";
+import "monaco-editor/language/css/monaco.contribution";
+import "monaco-editor/language/html/monaco.contribution";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";
+import TypeScriptWorker from "monaco-editor/language/typescript/ts.worker?worker";
+import JsonWorker from "monaco-editor/language/json/json.worker?worker";
+import CssWorker from "monaco-editor/language/css/css.worker?worker";
+import HtmlWorker from "monaco-editor/language/html/html.worker?worker";
 import { loader } from "@monaco-editor/react";
 
-(globalThis as unknown as { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
-  getWorker: () => new EditorWorker(),
+// A worker per language service, made when a file of that language first opens.
+(globalThis as unknown as { MonacoEnvironment: { getWorker: (id: string, label: string) => Worker } }).MonacoEnvironment = {
+  getWorker: (_id, label) => {
+    switch (label) {
+      case "typescript":
+      case "javascript":
+        return new TypeScriptWorker();
+      case "json":
+        return new JsonWorker();
+      case "css":
+      case "scss":
+      case "less":
+        return new CssWorker();
+      case "html":
+      case "handlebars":
+      case "razor":
+        return new HtmlWorker();
+      default:
+        return new EditorWorker();
+    }
+  },
 };
 loader.config({ monaco });
+
+// How TypeScript reads the files: modern syntax, JSX in .tsx and .jsx, and plain JavaScript checked the same way.
+// Problems are limited to syntax errors: with only the files an open file imports to go on (see lib/projectLibs.ts), the
+// type checker would report every package import as missing, and a wall of false errors helps nobody. Completions, hover
+// and signature help use the full type information regardless.
+for (const defaults of [typescriptDefaults, javascriptDefaults]) {
+  defaults.setCompilerOptions({
+    target: ScriptTarget.ESNext,
+    module: ModuleKind.ESNext,
+    moduleResolution: ModuleResolutionKind.NodeJs,
+    jsx: JsxEmit.ReactJSX,
+    allowJs: true,
+    allowNonTsExtensions: true,
+    esModuleInterop: true,
+    allowSyntheticDefaultImports: true,
+    noEmit: true,
+    skipLibCheck: true,
+  });
+  defaults.setDiagnosticsOptions({ noSemanticValidation: true, noSyntaxValidation: false, noSuggestionDiagnostics: true });
+  defaults.setEagerModelSync(true);
+}
+
+/**
+ * Gives the language service for `language` the project files the open file imports (see collectLibs), so imported
+ * names complete and show their docs. Returns what removes them again.
+ */
+export function addProjectLibs(language: string, libs: { path: string; text: string }[]): () => void {
+  const defaults = language === "typescript" ? typescriptDefaults : language === "javascript" ? javascriptDefaults : null;
+  if (!defaults) return () => {};
+  const handles = libs.map((l) => defaults.addExtraLib(l.text, monaco.Uri.file(l.path).toString()));
+  return () => handles.forEach((h) => h.dispose());
+}
 
 export const LIGHT_THEME = "lantern-light";
 export const DARK_THEME = "lantern-dark";
@@ -95,6 +166,21 @@ monaco.editor.defineTheme(LIGHT_THEME, {
     "editor.findMatchHighlightBackground": "#b5890026",
     "editor.findMatchBorder": "#b58900",
     "editor.rangeHighlightBackground": "#0000000a",
+    // The suggestion list, hover and parameter hints: the app's neutral greys, not Monaco's blue selection.
+    "editorWidget.background": "#ffffff",
+    "editorWidget.border": "#d9dbdf",
+    "editorSuggestWidget.background": "#ffffff",
+    "editorSuggestWidget.border": "#d9dbdf",
+    "editorSuggestWidget.selectedBackground": "#0000001a",
+    "editorSuggestWidget.highlightForeground": "#1d1d1f",
+    "editorSuggestWidget.focusHighlightForeground": "#1d1d1f",
+    "editorHoverWidget.background": "#ffffff",
+    "editorHoverWidget.border": "#d9dbdf",
+    "list.hoverBackground": "#0000000d",
+    "list.activeSelectionBackground": "#0000001a",
+    "list.activeSelectionForeground": "#1d1d1f",
+    "list.focusBackground": "#0000001a",
+    "list.highlightForeground": "#1d1d1f",
   },
 });
 
@@ -137,6 +223,20 @@ monaco.editor.defineTheme(DARK_THEME, {
     "editor.findMatchHighlightBackground": "#e3b3412e",
     "editor.findMatchBorder": "#e3b341",
     "editor.rangeHighlightBackground": "#ffffff0a",
+    "editorWidget.background": "#29292e",
+    "editorWidget.border": "#3a3a40",
+    "editorSuggestWidget.background": "#29292e",
+    "editorSuggestWidget.border": "#3a3a40",
+    "editorSuggestWidget.selectedBackground": "#ffffff1f",
+    "editorSuggestWidget.highlightForeground": "#ffffff",
+    "editorSuggestWidget.focusHighlightForeground": "#ffffff",
+    "editorHoverWidget.background": "#29292e",
+    "editorHoverWidget.border": "#3a3a40",
+    "list.hoverBackground": "#ffffff14",
+    "list.activeSelectionBackground": "#ffffff1f",
+    "list.activeSelectionForeground": "#ffffff",
+    "list.focusBackground": "#ffffff1f",
+    "list.highlightForeground": "#ffffff",
   },
 });
 

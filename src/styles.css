@@ -84,6 +84,8 @@
 
 /* Base */
 * { box-sizing: border-box; }
+/* Monaco sizes its completion list in content-box terms; under the reset above the last row is cut off. */
+.monaco-editor .suggest-widget, .monaco-editor .suggest-widget * { box-sizing: content-box; }
 /* The app fills the window and scrolls inside its panes; the page around it never scrolls. */
 html, body, #root { height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--bg); color: var(--text); font: 13px/1.5 var(--ui); -webkit-font-smoothing: antialiased; user-select: none; cursor: default; }
