@@ -1,7 +1,16 @@
 import * as monaco from "monaco-editor/editor/editor.api";
-import "monaco-editor/basic-languages/monaco.contribution"; // Monarch syntax highlighting only; language services are intentionally off for this read-only diff
+import "monaco-editor/basic-languages/monaco.contribution"; // Monarch syntax highlighting only; language services (completions, diagnostics) are intentionally off
 // The find bar (⌘F), which the bare editor API leaves out.
 import "monaco-editor/editor/contrib/find/browser/findController";
+// What editing a file takes beyond typing: copy and paste, comment toggling, line moves and deletes, word jumps, and
+// matching brackets, indentation and multiple cursors.
+import "monaco-editor/editor/contrib/clipboard/browser/clipboard";
+import "monaco-editor/editor/contrib/comment/browser/comment";
+import "monaco-editor/editor/contrib/linesOperations/browser/linesOperations";
+import "monaco-editor/editor/contrib/wordOperations/browser/wordOperations";
+import "monaco-editor/editor/contrib/bracketMatching/browser/bracketMatching";
+import "monaco-editor/editor/contrib/indentation/browser/indentation";
+import "monaco-editor/editor/contrib/multicursor/browser/multicursor";
 // Its buttons are codicons; the bare API doesn't load their font. (By path: the package exports no .css.)
 import "../node_modules/monaco-editor/esm/vs/base/browser/ui/codicons/codicon/codicon.css";
 import EditorWorker from "monaco-editor/editor/editor.worker?worker";

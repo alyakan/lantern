@@ -687,7 +687,16 @@ function playShell(slot: string, id: string, command: string) {
   mockShells[`${slot}:${id}`] = () => finish(true);
 }
 
+/** Files the user saved in the mock (and ones "Claude" changed since), over the built-in ones. */
+const mockFiles: Record<string, string> = {};
+const mockFileExists = (path: string) => path.startsWith(FOLDER);
+const mockFileText = (path: string) => mockFiles[path] ?? (path === FILE ? CURRENT : `// ${path.slice(FOLDER.length + 1)}\nexport {};\n`);
+
 export function installMockBackend() {
+  // In the browser console: `claudeEdits("/path", "text")` simulates a change to a file behind the editor's back.
+  (globalThis as unknown as { claudeEdits: (path: string, text: string) => void }).claudeEdits = (path, text) => {
+    mockFiles[path] = text;
+  };
   const mode = new URLSearchParams(location.search).get("mock");
   // ?mock = UI with no folder; ?mock=ready = folder open, empty chat; ?mock=demo = a scripted turn.
   if (mode === "demo" || mode === "ready" || mode === "history") autoplay(new URLSearchParams(location.search).has("allow"), mode === "ready", mode === "history");
@@ -863,7 +872,16 @@ export function installMockBackend() {
             .sort((x, y) => x!.rel.length - y!.rel.length);
         }
         case "read_file":
-          return a.path === FILE ? CURRENT : `// ${String(a.path).slice(FOLDER.length + 1)}\nexport {};\n`;
+          return mockFileText(String(a.path));
+        case "write_file": {
+          // Like the backend: refused (a conflict) unless the file is still what the editor opened.
+          const path = String(a.path);
+          const disk = mockFiles[path] ?? (mockFileExists(path) ? mockFileText(path) : null);
+          if (disk !== (a.expected ?? null)) return { status: "conflict", current: disk };
+          if (disk === String(a.text)) return { status: "saved", changed: false };
+          mockFiles[path] = String(a.text);
+          return { status: "saved", changed: true };
+        }
         // &update: a newer Lantern is downloaded and waiting.
         case "update_status":
           return new URLSearchParams(location.search).has("update") ? { version: "0.1.2" } : null;

@@ -41,6 +41,8 @@ interface Props {
   openRequest?: { path: string; line: number | null; key: number } | null;
   /** Open the Files tab's search, for names or text; `key` changes for every request. */
   searchKey?: { mode: "files" | "text"; key: number } | null;
+  /** A file was saved from the editor in the Files tab: the chat's changes should be looked at again. */
+  onSaved?: () => void;
   /** Show this run in the Tests tab (from the chat); `key` changes for every request. */
   focusRun?: { id: string; key: number } | null;
   /** The Agents tab: the latest turn's agent tree, cost per model, and `openKey`, changed to bring the tab up. */
@@ -124,7 +126,16 @@ export function ReviewPanel(props: Props) {
         </div>
         {tab === "changes" && props.onScope && <ScopeMenu {...props} onScope={props.onScope} />}
       </div>
-      {tab === "changes" && <ChangesTab {...props} diffLine={diffLine} />}
+      {tab === "changes" && (
+        <ChangesTab
+          {...props}
+          diffLine={diffLine}
+          onEdit={(path) => {
+            setReveal({ path, line: null, key: Date.now() });
+            setTab("files");
+          }}
+        />
+      )}
       {tab === "agents" && props.agents && (
         <div className="tab-body">
           <AgentsTab tree={props.agents.tree} graph={props.agents.graph} usage={props.agents.usage} />
@@ -140,6 +151,7 @@ export function ReviewPanel(props: Props) {
           refreshKey={props.refreshKey}
           reveal={reveal}
           focusSearch={props.searchKey ?? null}
+          onSaved={props.onSaved}
           onOpenChange={(path) => {
             props.onSelect(path);
             setTab("changes");
@@ -150,7 +162,7 @@ export function ReviewPanel(props: Props) {
   );
 }
 
-function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr, branch, selected, follow, refreshKey, onSelect, onFollow, diffLine }: Props & { diffLine: { path: string; line: number; key: number } | null }) {
+function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr, branch, selected, follow, refreshKey, onSelect, onFollow, onEdit, diffLine }: Props & { diffLine: { path: string; line: number; key: number } | null; onEdit: (path: string) => void }) {
   const [layout, setLayout] = usePersistentState<DiffLayout>("review.diffLayout", "inline");
   const found = files.findIndex((f) => f.path === selected);
   const index = found === -1 ? files.length - 1 : found;
@@ -186,6 +198,11 @@ function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr,
         <button className="icon" aria-label="Next file" title="Next file (J)" disabled={index === files.length - 1} onClick={() => onSelect(files[index + 1].path)}>
           ›
         </button>
+        {!current.deleted && scope !== "pr" && scope !== "branch" && (
+          <button className="ghost" title="Edit this file" onClick={() => onEdit(current.path)}>
+            Edit
+          </button>
+        )}
         <button className="ghost layout" title={layout === "inline" ? "Showing removals and additions together. Click for side by side." : "Showing old and new side by side. Click to show them together."} onClick={() => setLayout(NEXT_LAYOUT[layout])}>
           {LAYOUT_LABEL[layout]}
         </button>

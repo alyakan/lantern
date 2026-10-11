@@ -1,9 +1,11 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
+import { ask } from "@tauri-apps/plugin-dialog";
 import type { ChangedFile } from "../store";
 import type { DirEntry, FoundFile, TextResults } from "../types";
 import { api } from "../api";
 import { useSlot } from "../lib/slot";
 import { relativeTo } from "../lib/diff";
+import { discard, stashKey } from "../lib/editStash";
 import { Counts } from "./EditLine";
 import { DocIcon, FolderIcon, FolderOpenIcon } from "./icons";
 
@@ -19,26 +21,47 @@ interface Props {
   reveal?: { path: string; line: number | null; key: number } | null;
   /** Focus the search box, for file names (⌘P) or text (⌘⇧F); `key` changes for every request. */
   focusSearch?: { mode: SearchMode; key: number } | null;
+  /** A file was saved from the editor. */
+  onSaved?: () => void;
 }
 
 type SearchMode = "files" | "text";
 
-/** The open folder as a lazily loaded tree. Changed files open in the Changes tab; others open a read-only preview. */
-export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, reveal = null, focusSearch = null }: Props) {
+/** The open folder as a lazily loaded tree. A file opens in the editor; one that's changed has a button for its diff. */
+export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, reveal = null, focusSearch = null, onSaved }: Props) {
   const slot = useSlot();
   const [children, setChildren] = useState<Record<string, DirEntry[]>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [previewLine, setPreviewLine] = useState<number | null>(null);
+  // Unsaved edits in the open file: leaving it (another file, back to the tree, the search) asks first.
+  const [unsaved, setUnsaved] = useState(false);
+  const unsavedRef = useRef(false);
+  unsavedRef.current = unsaved;
+  const previewRef = useRef(preview);
+  previewRef.current = preview;
+  const leave = (go: () => void) => {
+    const open = previewRef.current;
+    if (!open || !unsavedRef.current) return go();
+    void ask(`Discard your unsaved changes to ${relativeTo(open, folder)}?`, { title: "Unsaved changes", kind: "warning", okLabel: "Discard", cancelLabel: "Keep editing" }).then((sure) => {
+      if (!sure) return;
+      discard(stashKey(slot, open));
+      go();
+    });
+  };
   useEffect(() => {
     if (!reveal) return;
-    setPreview(reveal.path);
-    setPreviewLine(reveal.line);
+    // The file that's open, at another line: no need to leave it.
+    if (reveal.path === previewRef.current) return setPreviewLine(reveal.line);
+    leave(() => {
+      setPreview(reveal.path);
+      setPreviewLine(reveal.line);
+    });
   }, [reveal?.key]);
 
   const byPath = useMemo(() => new Map(changed.map((f) => [f.path, f])), [changed]);
-  const open = (path: string) => (byPath.has(path) ? onOpenChange(path) : (setPreview(path), setPreviewLine(null)));
+  const open = (path: string) => (setPreview(path), setPreviewLine(null));
 
   // Search: file names, or text inside the files. While it has text, results replace the tree.
   const [mode, setMode] = useState<SearchMode>("files");
@@ -52,21 +75,28 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
   const box = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (focusSearch === null) return;
-    setPreview(null);
-    setMode(focusSearch.mode);
-    // The tab may still be hidden for a frame or two (switching to Files happens after this); keep trying until the
-    // box can take focus.
-    let tries = 0;
     let frame = 0;
-    const focus = () => {
-      const el = box.current;
-      if (el && el.offsetParent !== null) {
-        el.focus();
-        el.select();
-      } else if (tries++ < 20) frame = requestAnimationFrame(focus);
+    let gone = false;
+    leave(() => {
+      if (gone) return;
+      setPreview(null);
+      setMode(focusSearch.mode);
+      // The tab may still be hidden for a frame or two (switching to Files happens after this); keep trying until the
+      // box can take focus.
+      let tries = 0;
+      const focus = () => {
+        const el = box.current;
+        if (el && el.offsetParent !== null) {
+          el.focus();
+          el.select();
+        } else if (tries++ < 20) frame = requestAnimationFrame(focus);
+      };
+      frame = requestAnimationFrame(focus);
+    });
+    return () => {
+      gone = true;
+      cancelAnimationFrame(frame);
     };
-    frame = requestAnimationFrame(focus);
-    return () => cancelAnimationFrame(frame);
   }, [focusSearch?.key]);
   useEffect(() => {
     const q = query.trim();
@@ -145,16 +175,22 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
     return (
       <>
         <div className="review-bar">
-          <button className="icon" aria-label="Back to files" title="Back to files" onClick={() => setPreview(null)}>
+          <button className="icon" aria-label="Back to files" title="Back to files" onClick={() => leave(() => setPreview(null))}>
             ‹
           </button>
           <span className="picker-path preview-path" title={preview}>
             {relativeTo(preview, folder)}
           </span>
-          <span className="tag">read-only</span>
+          {unsaved && <span className="tag unsaved">● unsaved</span>}
+          <div className="spacer" />
+          {byPath.has(preview) && (
+            <button className="ghost" title="See what changed in this file" onClick={() => onOpenChange(preview)}>
+              View diff
+            </button>
+          )}
         </div>
         <Suspense fallback={<div className="empty">Loading…</div>}>
-          <FilePreview key={`${preview}:${previewLine}`} path={preview} line={previewLine} />
+          <FilePreview key={`${slot}:${preview}`} path={preview} line={previewLine} refreshKey={refreshKey} onDirty={setUnsaved} onSaved={onSaved} />
         </Suspense>
       </>
     );

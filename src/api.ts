@@ -13,6 +13,8 @@ export interface BranchReview {
   commits: { sha: string; subject: string; author: string; at: number }[];
 }
 
+export type WriteResult = { status: "saved"; changed: boolean } | { status: "conflict"; current: string | null };
+
 /** Every chat-specific call names its slot: the chat (and claude process) it's about. */
 export const api = {
   locateClaude: (pathOverride: string | null) => invoke<string>("locate_claude", { pathOverride }),
@@ -65,6 +67,12 @@ export const api = {
     invoke<UiEvent[]>("open_session", { slot, claudePath, folder, settings, sessionId }),
   listDir: (slot: string, path: string) => invoke<DirEntry[]>("list_dir", { slot, path }),
   readFile: (slot: string, path: string) => invoke<string>("read_file", { slot, path }),
+  /**
+   * Saves the user's edit of a file in the chat's folder. `expected` is the text the editor was based on (null: the
+   * file shouldn't exist): if the file isn't that any more nothing is written and the answer is a conflict, with what's
+   * there now (null: gone).
+   */
+  writeFile: (slot: string, path: string, text: string, expected: string | null) => invoke<WriteResult>("write_file", { slot, path, text, expected }),
   /** Files in the chat's folder whose paths fuzzy-match `query`, best first. */
   findFiles: (slot: string, query: string) => invoke<FoundFile[]>("find_files", { slot, query }),
   /** Lines matching `query` across the chat folder's files. A newer search cancels an older one (it rejects). */

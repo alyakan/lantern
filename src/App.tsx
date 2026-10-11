@@ -10,6 +10,7 @@ import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, 
 import type { Mode } from "./types";
 import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
+import { isTyping } from "./lib/typing";
 import { withShellContext } from "./lib/shell";
 import { withSkillNote } from "./lib/skillNote";
 import { agentTree, usesAgents } from "./lib/agents";
@@ -65,10 +66,6 @@ const HERO_PLACEHOLDER: Record<Flavour | "none", string> = {
 };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
-
-// J/K should navigate files unless the user is typing. Monaco's read-only diff uses a textarea too, so allow that one.
-const isTyping = (el: Element | null) =>
-  !!el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el as HTMLElement).isContentEditable) && !el.closest(".monaco-editor");
 
 export default function App() {
   // Remembered across launches: the permission mode and the last project opened.
@@ -921,6 +918,7 @@ export default function App() {
               selected={state.selectedFile}
               follow={state.follow}
               refreshKey={state.editCount}
+              onSaved={() => syncChanges(active)}
               onSelect={selectFile}
               onFollow={() => dispatch({ type: "follow_latest" })}
             />

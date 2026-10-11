@@ -559,6 +559,26 @@ async fn read_file(state: State<'_, AppState>, slot: String, path: String) -> Re
     tauri::async_runtime::spawn_blocking(move || files::read_file(&root, std::path::Path::new(&path))).await.map_err(|e| e.to_string())?
 }
 
+/// Saves a file the user edited, and tells the chat's change tracker about it as Claude's own edits are: under the path
+/// as the UI has it (not the resolved one, which can differ for a symlinked folder), with the text from before, so it
+/// shows in Changes with a diff. A file already tracked keeps its first original.
+fn save_tracked(root: &std::path::Path, tracker: &std::sync::Mutex<changes::ChangeTracker>, path: &str, text: &str, expected: Option<&str>) -> Result<files::Written, String> {
+    let written = files::write_file(root, std::path::Path::new(path), text, expected)?;
+    if let files::Written::Saved { previous, changed: true } = &written {
+        tracker.lock().unwrap().record(path, previous.clone());
+    }
+    Ok(written)
+}
+
+/// Saves the user's edit of a file in the chat's folder, unless it changed on disk since the editor opened it.
+#[tauri::command]
+async fn write_file(state: State<'_, AppState>, slot: String, path: String, text: String, expected: Option<String>) -> Result<files::Written, String> {
+    let s = state.slots.get(&slot)?;
+    let root = s.folder()?;
+    let changes = s.changes.clone();
+    tauri::async_runtime::spawn_blocking(move || save_tracked(&root, &changes, &path, &text, expected.as_deref())).await.map_err(|e| e.to_string())?
+}
+
 /// Where Claude Code keeps transcripts (it honours CLAUDE_CONFIG_DIR, so we do too).
 fn projects_root() -> Result<std::path::PathBuf, String> {
     let base = match std::env::var_os("CLAUDE_CONFIG_DIR") {
@@ -689,6 +709,7 @@ pub fn run() {
             git_branch,
             list_dir,
             read_file,
+            write_file,
             find_files,
             resolve_files,
             search_text,
@@ -720,3 +741,34 @@ pub fn run() {
             }
         });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_saved_edit_is_tracked_under_the_ui_path_with_its_original_even_in_a_symlinked_folder() {
+        let real = tempfile::tempdir().unwrap();
+        let link = real.path().join("via-link");
+        std::os::unix::fs::symlink(real.path(), &link).unwrap();
+        std::fs::write(real.path().join("a.txt"), "before\n").unwrap();
+        let tracker = std::sync::Mutex::new(changes::ChangeTracker::default());
+        // The UI knows the folder by the symlink's path.
+        let ui_path = link.join("a.txt").display().to_string();
+        let r = save_tracked(&link, &tracker, &ui_path, "after\n", Some("before\n")).unwrap();
+        assert!(matches!(r, files::Written::Saved { changed: true, .. }));
+        let diff = tracker.lock().unwrap().diff(&ui_path, changes::Scope::Session, None, None).unwrap();
+        assert_eq!((diff.original.as_str(), diff.current.as_str()), ("before\n", "after\n"));
+        // A second save keeps the first original; an unchanged one and a conflict track nothing new.
+        save_tracked(&link, &tracker, &ui_path, "again\n", Some("after\n")).unwrap();
+        let diff = tracker.lock().unwrap().diff(&ui_path, changes::Scope::Session, None, None).unwrap();
+        assert_eq!(diff.original, "before\n");
+        let other = link.join("b.txt").display().to_string();
+        std::fs::write(real.path().join("b.txt"), "x\n").unwrap();
+        assert!(matches!(save_tracked(&link, &tracker, &other, "y\n", Some("stale\n")).unwrap(), files::Written::Conflict { .. }));
+        assert!(matches!(save_tracked(&link, &tracker, &other, "x\n", Some("x\n")).unwrap(), files::Written::Saved { changed: false, .. }));
+        let tracked: Vec<String> = tracker.lock().unwrap().summary(changes::Scope::Session, None, None).into_iter().map(|c| c.path).collect();
+        assert_eq!(tracked, vec![ui_path]);
+    }
+}
+
