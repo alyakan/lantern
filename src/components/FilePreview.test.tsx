@@ -73,6 +73,26 @@ describe("FilePreview as an editor", () => {
     expect(editor().value).toBe("changed\n");
   });
 
+  it("sends one save for a double ⌘S, and doesn't take its own save for a conflict", async () => {
+    let finish: (r: { status: "saved"; changed: boolean }) => void = () => {};
+    write.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    render(<FilePreview path="/p/a.ts" />);
+    await waitFor(() => expect(editor().value).toBe("one\n"));
+    type("two\n");
+    await act(async () => {
+      commands[2048 | 49]();
+      commands[2048 | 49]();
+    });
+    expect(write).toHaveBeenCalledTimes(1);
+    await act(async () => finish({ status: "saved", changed: true }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
+    // After it, saving works again.
+    type("three\n");
+    await act(async () => commands[2048 | 49]());
+    expect(write).toHaveBeenCalledTimes(2);
+  });
+
   it("offers your version or the one on disk when a save finds the file changed", async () => {
     write.mockResolvedValueOnce({ status: "conflict", current: "claude's\n" });
     render(<FilePreview path="/p/a.ts" />);

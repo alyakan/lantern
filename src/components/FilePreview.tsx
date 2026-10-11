@@ -97,8 +97,12 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
     [key],
   );
 
+  // One save at a time: a second ⌘S while one is on its way would be sent with the text from before it, and so
+  // come back as a conflict with the file's own save.
+  const inFlight = useRef(false);
   const save = async (expected: string | null | undefined = savedRef.current) => {
-    if (savedRef.current === null || expected === undefined) return;
+    if (savedRef.current === null || expected === undefined || inFlight.current) return;
+    inFlight.current = true;
     const text = draftRef.current;
     setSaving(true);
     setSaveError(null);
@@ -113,6 +117,7 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
     } catch (e) {
       setSaveError(String(e));
     } finally {
+      inFlight.current = false;
       setSaving(false);
     }
   };
