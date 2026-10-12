@@ -70,6 +70,9 @@ const HERO_PLACEHOLDER: Record<Flavour | "none", string> = {
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
+// A stable empty list, so a chat with no skills loaded yet doesn't hand the composer a new one each render.
+const NO_SKILLS: SkillEntry[] = [];
+
 export default function App() {
   // Remembered across launches: the permission mode and the last project opened.
   // Each project remembers its own mode (a project in Step by step stays there; another stays a chat).
@@ -104,6 +107,8 @@ export default function App() {
   const slotSeq = useRef(1);
   // Each chat's unsent text, so switching away and back doesn't lose it. A ref: typing needn't re-render the app.
   const drafts = useRef<Record<string, string>>({});
+  // How to start a chat again when its start failed: claude never got far enough to be restarted (see the banner).
+  const relaunch = useRef<Record<string, () => void>>({});
   // Whether the right pane is hidden, per project like the mode. The old app-wide setting is the default.
   const [collapsedDefault, setCollapsedDefault] = usePersistentState("review.collapsed", false);
   const [collapsedBy, setCollapsedBy] = usePersistentState<Record<string, boolean>>("review.collapsedByFolder", {});
@@ -202,6 +207,15 @@ export default function App() {
     for (const [slot, s] of Object.entries(chats.slots)) if (s.status === "ended" && s.stopRequested) restart(slot, s.mode);
   }, [chats.slots]);
 
+  // Removes a chat and closes its claude. The reducer never removes the chat on screen, so after a switch this is
+  // safe for the chat left behind, even though `active` here still names it.
+  const forget = (slot: string) => {
+    dispatchChats({ type: "remove", slot });
+    delete drafts.current[slot];
+    delete relaunch.current[slot];
+    api.closeSession(slot).catch(() => {});
+  };
+
   /**
    * Leaving a chat keeps it open (running or not) so switching back is instant; only an empty chat with nothing typed
    * is closed. Open chats are closed from the history menu.
@@ -209,14 +223,12 @@ export default function App() {
   const leave = (slot: string) => {
     const s = chats.slots[slot];
     if (!s || s.items.length > 0 || isBusy(s) || drafts.current[slot]?.trim()) return;
-    closeChat(slot);
+    forget(slot);
   };
 
   const closeChat = (slot: string) => {
     if (slot === active || !chats.slots[slot]) return;
-    dispatchChats({ type: "remove", slot });
-    delete drafts.current[slot];
-    api.closeSession(slot).catch(() => {});
+    forget(slot);
   };
 
   const switchTo = (slot: string) => {
@@ -229,10 +241,11 @@ export default function App() {
 
   /**
    * The chat to start something new in: the one on screen if it's still empty, otherwise a new one (and the current
-   * chat is left: kept in the background if busy, closed if not).
+   * chat is left: kept in the background if busy, closed if not). A chat that is still starting isn't reused: its start
+   * is on its way, and a second one would race it.
    */
   const takeSlot = (): string => {
-    if (state.items.length === 0 && !isBusy(state)) return active;
+    if (state.items.length === 0 && !isBusy(state) && state.status !== "starting") return active;
     const slot = `s${++slotSeq.current}`;
     dispatchChats({ type: "add", slot });
     dispatchChats({ type: "activate", slot });
@@ -253,8 +266,10 @@ export default function App() {
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode });
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder);
     api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder) }).then(
       () => {
+        delete relaunch.current[slot];
         setLastFolder(folder);
         to(slot)({ type: "session_ready" });
       },
@@ -306,6 +321,8 @@ export default function App() {
     const { claudePath, folder } = state;
     if (!claudePath || !folder) return;
     const reuse = state.items.length === 0 && !isBusy(state);
+    // A second open into the chat that's still loading would load another session into it: ignored.
+    if (reuse && state.status === "starting") return;
     resumeIn(takeSlot(), folder, sessionId, reuse);
   };
 
@@ -320,9 +337,11 @@ export default function App() {
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)(reuse ? { type: "restarting" } : { type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode, flavourStart });
+    relaunch.current[slot] = () => resumeIn(slot, folder, sessionId, reuse);
     api
       .openSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder) }, sessionId)
       .then((events) => {
+        delete relaunch.current[slot];
         to(slot)({ type: "history_loaded", sessionId, events });
         to(slot)({ type: "session_ready" });
       })
@@ -386,11 +405,18 @@ export default function App() {
   }, [active, state.folder]);
 
   // The skills and commands on disk, which tell claude's command list apart (refreshed when claude lists them again).
-  const [skillIndex, setSkillIndex] = useState<SkillEntry[]>([]);
+  // Kept per chat: a background chat's sends use its own skills, and a result that lands after the chat moved on is dropped.
+  const [skillIndexBy, setSkillIndexBy] = useState<Record<string, SkillEntry[]>>({});
   useEffect(() => {
-    if (state.folder && state.commands.length) api.skillIndex(active).then(setSkillIndex, () => {});
-  }, [active, state.commands]);
-  const skillNames = (slot: string) => new Set(describeCommands(chats.slots[slot]?.commands ?? [], skillIndex).filter((c) => c.kind === "skill").map((c) => c.name));
+    if (!state.folder || !state.commands.length) return;
+    let live = true;
+    api.skillIndex(active).then((index) => live && setSkillIndexBy((all) => ({ ...all, [active]: index })), () => {});
+    return () => {
+      live = false;
+    };
+  }, [active, state.folder, state.commands]);
+  const skillIndex = skillIndexBy[active] ?? NO_SKILLS;
+  const skillNames = (slot: string) => new Set(describeCommands(chats.slots[slot]?.commands ?? [], skillIndexBy[slot] ?? NO_SKILLS).filter((c) => c.kind === "skill").map((c) => c.name));
 
   // MCP servers that need something, for the "/" menu: checked when a chat is ready and after its turns (not more
   // than once every 30s). claude.ai connectors you never set up aren't listed: they're optional.
@@ -421,7 +447,7 @@ export default function App() {
     const noted = withSkillNote(text, skillNames(slot));
     api.sendMessage(slot, withShellContext(items, pick ? withFlavourNote(pick, noted) : noted)).then(
       (turn) => typeof turn === "number" && to(slot)({ type: "turn_numbered", turn }),
-      (e) => to(slot)({ type: "failed", text: errText(e) }),
+      (e) => to(slot)({ type: "turn_failed", text: errText(e) }),
     );
   };
 
@@ -535,8 +561,9 @@ export default function App() {
   };
 
   const stop = () => {
+    const slot = active;
     dispatch({ type: "stop_requested" });
-    api.interrupt(active).catch(() => {});
+    api.interrupt(slot).catch((e) => to(slot)({ type: "stop_failed", text: errText(e) }));
   };
 
   // `note`: what the user wrote on a reproduce card; it goes back to Claude with the answer.
@@ -544,7 +571,7 @@ export default function App() {
   const decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>) => {
     const slot = active;
     to(slot)({ type: "permission_decided", id, allow, note });
-    api.respondPermission(slot, id, allow, note ?? null, answered ?? null).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+    api.respondPermission(slot, id, allow, note ?? null, answered ?? null).catch((e) => to(slot)({ type: "turn_failed", text: errText(e) }));
   };
 
   // From the title bar's failure count: bring the latest failed step's activity into view, opened.
@@ -621,20 +648,22 @@ export default function App() {
     };
   }, [scope, active, state.folder, hintKey, state.seq]);
   const shownBranch = branchFiles?.key.startsWith(`${active}:`) ? branchFiles : null;
-  const [prFiles, setPrFiles] = useState<{ pr: number; files: ChangedFile[]; error: string | null } | null>(null);
+  // Keyed by chat and folder as well as the PR number: another chat reviewing the same PR has its own files.
+  const prKey = `${active}:${state.folder}:${reviewPr}`;
+  const [prFiles, setPrFiles] = useState<{ key: string; files: ChangedFile[]; error: string | null } | null>(null);
   useEffect(() => {
     if (scope !== "pr" || reviewPr === null || !state.folder) return;
     let live = true;
-    if (prFiles?.pr !== reviewPr) setPrFiles(null);
+    if (prFiles?.key !== prKey) setPrFiles(null);
     api.changeSummary(active, "pr", null, null, reviewPr, hints).then(
-      (files) => live && setPrFiles({ pr: reviewPr, files, error: null }),
-      (e) => live && setPrFiles({ pr: reviewPr, files: [], error: errText(e) }),
+      (files) => live && setPrFiles({ key: prKey, files, error: null }),
+      (e) => live && setPrFiles({ key: prKey, files: [], error: errText(e) }),
     );
     return () => {
       live = false;
     };
   }, [scope, active, state.folder, reviewPr]);
-  const shownPr = prFiles?.pr === reviewPr ? prFiles : null;
+  const shownPr = prFiles?.key === prKey ? prFiles : null;
   const shownFiles = scope === "pr" ? (shownPr?.files ?? []) : scope === "branch" ? (shownBranch?.files ?? []) : scope === "git" ? (gitFiles?.files ?? []) : scope === "turn" ? turnFiles : state.changedFiles;
   // A review page's file, shown in the PR's changes once they're in.
   const [reviewFile, setReviewFile] = useState<string | null>(null);
@@ -889,7 +918,7 @@ export default function App() {
           onShowFailure={showFailure}
         />
         <Hud event={hud} onOpenChat={switchTo} />
-        {state.banner && <BannerView banner={state.banner} onRestart={() => restart(active, state.mode)} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
+        {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
         <SplitPane
           ratio={splitRatio}
           collapsed={reviewCollapsed}
