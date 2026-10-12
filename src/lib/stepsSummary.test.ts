@@ -15,8 +15,8 @@ const summaryOf = (...replies: string[]) => summarize(pagesOf(chat(...replies)))
 const PLAN = (n: number, title: string, change: string) => `# Plan step ${n} — ${title}\n\n\`\`\`\nFile:   src/x.ts\nChange: ${change}\nVerify: a test.\n\`\`\``;
 
 describe("gistOf", () => {
-  it("takes the first line of prose, without its markup", () => {
-    expect(gistOf("- `src/client/retry.ts:1`: added **RETRYABLE**.\n\nMore.")).toBe("src/client/retry.ts:1: added RETRYABLE.");
+  it("takes the first line of prose, without its markup but keeping its code marked", () => {
+    expect(gistOf("- `src/client/retry.ts:1`: added **RETRYABLE**.\n\nMore.")).toBe("`src/client/retry.ts:1`: added RETRYABLE.");
     expect(gistOf("1. Do [the thing](http://x) first")).toBe("Do the thing first");
   });
 
@@ -46,7 +46,7 @@ describe("summarize a Build chat", () => {
     expect(s.headline).toBe("Plan: 2 steps · 1 built");
     // Built: what the step page says, and both pages to open. Planned: what the plan says it will change.
     const [, one, two] = s.rows;
-    expect(one.gist).toBe("retry.ts:1: added RETRYABLE.");
+    expect(one.gist).toBe("`retry.ts:1`: added RETRYABLE.");
     expect([one.page, one.planPage]).toEqual(["u4", "u1"]);
     expect(one.range).toEqual({ from: 4, to: 4 });
     expect(one.changes).toBe(true);

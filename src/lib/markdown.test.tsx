@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
-import { filePaths, languageName, monacoLanguage, parsePlanStep } from "./markdown";
+import { blockLanguage, filePaths, inferLanguage, languageHint, languageName, monacoLanguage, parsePlanStep } from "./markdown";
 import { Md } from "../components/Md";
 
 describe("parsePlanStep", () => {
@@ -42,6 +42,51 @@ describe("parsePlanStep", () => {
   });
 });
 
+describe("untagged code blocks", () => {
+  it("takes the language of the files a message names, the most mentioned winning", () => {
+    expect(languageHint("Changed `src/client/retry.ts:3-10` and src/client/index.ts, and the config in package.json.")).toBe("typescript");
+    expect(languageHint("In `app.py` and `util.py`, plus lib/a.ts.")).toBe("python");
+    expect(languageHint("First `a.rs`, then `b.go`.")).toBe("rust");
+    // Not files: abbreviations, versions, a sentence ending in a period.
+    expect(languageHint("e.g. v1.2 of it, i.e. fine. See README.md.")).toBeNull();
+    expect(languageHint("nothing here")).toBeNull();
+  });
+
+  it("recognises a diff, JSON and a shell command by their shape", () => {
+    expect(inferLanguage("@@ -1,2 +1,3 @@\n a\n+b", null)).toBe("diff");
+    expect(inferLanguage("--- a/x.ts\n+++ b/x.ts\n-old\n+new", null)).toBe("diff");
+    expect(inferLanguage("-old\n+new\n same", null)).toBe("diff");
+    // A list of dashes alone is a list, not a diff.
+    expect(inferLanguage("- one\n- two", null)).toBeNull();
+    expect(inferLanguage('{ "a": [1, 2] }', null)).toBe("json");
+    expect(inferLanguage("{ not json }", null)).toBeNull();
+    expect(inferLanguage("$ npm test", null)).toBe("shell");
+    expect(inferLanguage("git status --short", null)).toBe("shell");
+  });
+
+  it("uses the message's language only for what looks like code, so plain output stays plain", () => {
+    expect(inferLanguage("const RETRYABLE = new Set([429]);", "typescript")).toBe("typescript");
+    expect(inferLanguage("def retry(n):\n    return n", "python")).toBe("python");
+    expect(inferLanguage("✓ 3 passed\n✗ 1 failed", "typescript")).toBeNull();
+    expect(inferLanguage("src/\n  client/\n    retry.ts", "typescript")).toBeNull();
+    expect(inferLanguage("const a = 1;", null)).toBeNull();
+    expect(inferLanguage("  \n", "typescript")).toBeNull();
+  });
+
+  it("keeps a language a block names, colours diff blocks itself, and leaves a plain-text tag alone", () => {
+    expect(blockLanguage("language-ts", "x", "python")).toEqual({ id: "typescript", label: "TypeScript" });
+    expect(blockLanguage("language-diff", "+a", null)).toEqual({ id: "diff", label: "Diff" });
+    expect(blockLanguage("language-text", "const a = 1;", "typescript")).toEqual({ id: null, label: "text" });
+    expect(blockLanguage(undefined, "const a = 1;", "typescript")).toEqual({ id: "typescript", label: "TypeScript" });
+    expect(blockLanguage(undefined, "@@ -1 +1 @@\n-a\n+b", null)).toEqual({ id: "diff", label: "Diff" });
+    expect(blockLanguage(undefined, "just words", "typescript")).toEqual({ id: null, label: null });
+  });
+
+  it("knows more languages by name", () => {
+    for (const tag of ["php", "cs", "csharp", "dockerfile", "jsonc", "powershell", "c++", "scala", "dart"]) expect(monacoLanguage(`language-${tag}`), tag).not.toBeNull();
+  });
+});
+
 describe("Md", () => {
   it("renders a plan step as a card, and other code with a header", () => {
     const { container } = render(<Md>{"```\nFile:   a.ts\nChange: add it\nVerify: a test\n```\n\n```ts\nconst a = 1;\n```"}</Md>);
@@ -57,5 +102,20 @@ describe("Md", () => {
     expect(callout).toHaveTextContent("This drops the table.");
     expect(callout).not.toHaveTextContent("[!WARNING]");
     expect(container.querySelector("blockquote")).toHaveTextContent("Just a quote.");
+  });
+
+  it("tints a diff's lines, whether it's tagged or not, and labels a block whose language it worked out", () => {
+    const { container, rerender } = render(<Md>{"```diff\n--- a/x.ts\n+++ b/x.ts\n@@ -1 +1 @@\n-old\n+new\n same\n```"}</Md>);
+    const kinds = () => [...container.querySelectorAll(".diff-line")].map((l) => l.className.replace("diff-line ", ""));
+    expect(kinds()).toEqual(["meta", "meta", "meta", "del", "add", "ctx"]);
+    expect(container.querySelector(".code-block-lang")).toHaveTextContent("Diff");
+    rerender(<Md>{"```\n-old\n+new\n```"}</Md>);
+    expect(kinds()).toEqual(["del", "add"]);
+    // No tag, in a message about a .ts file: it's labelled TypeScript.
+    rerender(<Md>{"Changed `src/a.ts`:\n\n```\nconst a = 1;\n```"}</Md>);
+    expect(container.querySelector(".code-block-lang")).toHaveTextContent("TypeScript");
+    // Plain output keeps the generic header and no colouring.
+    rerender(<Md>{"```\n✓ 3 passed\n```"}</Md>);
+    expect(container.querySelector(".code-block-lang")).toHaveTextContent("Code");
   });
 });

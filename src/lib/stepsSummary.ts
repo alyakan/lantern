@@ -38,7 +38,10 @@ export interface StepsSummary {
 
 const GIST_MAX = 140;
 
-/** The first line of prose in some markdown, with its markup taken out and cut to a readable length. */
+/**
+ * The first line of prose in some markdown, with its markup taken out and cut to a readable length. Backticks stay, so
+ * the Summary tab can show code as code; a cut that lands inside one leaves it open, which that tab drops.
+ */
 export function gistOf(text: string): string | null {
   let fenced = false;
   for (const raw of text.split("\n")) {
@@ -52,7 +55,7 @@ export function gistOf(text: string): string | null {
       .replace(/^#{1,6}\s*/, "")
       .replace(/^(?:[-*+]|\d+[.)])\s+/, "")
       .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-      .replace(/\*\*|__|`/g, "")
+      .replace(/\*\*|__/g, "")
       .trim();
     if (!plain) continue;
     return plain.length > GIST_MAX ? `${plain.slice(0, GIST_MAX - 1).trimEnd()}…` : plain;
