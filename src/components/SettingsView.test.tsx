@@ -103,4 +103,18 @@ describe("SettingsView", () => {
     fireEvent.change(screen.getByLabelText("Filter skills and commands"), { target: { value: "explore" } });
     expect(screen.queryByText("Yours")).not.toBeInTheDocument();
   });
+
+  it("has an Updates page when it's given one, and opens straight on it", async () => {
+    const updates = { version: "0.1.9", state: { kind: "up_to_date" } as const, onCheck: vi.fn(), ready: null };
+    const { rerender } = render(<SettingsView open="mcp" {...props} />);
+    expect(screen.queryByRole("button", { name: "Updates" })).toBeNull();
+    rerender(<SettingsView open="updates" {...props} updates={updates} />);
+    expect(await screen.findByRole("heading", { name: "Updates" })).toBeInTheDocument();
+    expect(screen.getByText("You're up to date.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+    expect(updates.onCheck).toHaveBeenCalled();
+    // The other pages are still one click away.
+    fireEvent.click(screen.getByRole("button", { name: "Skills" }));
+    expect(await screen.findByLabelText("Filter skills and commands")).toBeInTheDocument();
+  });
 });

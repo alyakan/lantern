@@ -649,16 +649,52 @@ async fn open_session(
 }
 
 /// A newer Lantern already downloaded and verified, for a window that started listening after it was found.
+/// The menu item's id: "Lantern ▸ Check for Updates…".
+const CHECK_FOR_UPDATES: &str = "check-for-updates";
+
 #[tauri::command]
 fn update_status(updates: State<'_, updates::Updates>) -> Option<updates::UpdateInfo> {
     updates.ready()
 }
 
-/// Installs the downloaded update, stops every chat's claude, and relaunches into the new version. A failed install
-/// leaves the chats running.
+/// Where updating has got to, for a window that opens after it started (the rest arrive as `update-state` events).
+#[tauri::command]
+fn update_state(updates: State<'_, updates::Updates>) -> updates::UpdateState {
+    updates.state()
+}
+
+/// Looks for a newer Lantern now and downloads it, telling the window as it goes. If a check is already running (the
+/// background one), this returns where that one has got to. Development builds don't check.
+#[tauri::command]
+async fn check_for_updates(app: AppHandle) -> Result<updates::UpdateState, String> {
+    if !updates::checks_enabled() {
+        return Err("This is a development build: updates are only checked in the released app.".into());
+    }
+    updates::check(&app, true).await
+}
+
+/// The version of Lantern that's running.
+#[tauri::command]
+fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+/// Installs the downloaded update, stops every chat's claude, and relaunches into the new version, telling the window
+/// each step so it can show them. A failed install leaves the chats running.
 #[tauri::command]
 async fn restart_to_update(app: AppHandle, state: State<'_, AppState>, updates: State<'_, updates::Updates>) -> Result<(), String> {
-    updates.install()?;
+    let version = updates.ready().map(|u| u.version).ok_or("No update has been downloaded.")?;
+    updates::publish(&app, updates::UpdateState::Installing { version });
+    // Unpacking and replacing the app takes a moment: off this thread, so the window gets to show it.
+    let installer = app.clone();
+    let installed = tauri::async_runtime::spawn_blocking(move || installer.state::<updates::Updates>().install()).await.map_err(|e| e.to_string())?;
+    if let Err(e) = installed {
+        // The download was used up by the attempt: another check fetches it again.
+        let error = format!("{e} Check for updates to try again.");
+        updates::publish(&app, updates::UpdateState::Failed { error: error.clone() });
+        return Err(error);
+    }
+    updates::publish(&app, updates::UpdateState::Restarting);
     for s in state.slots.drain() {
         s.shut_down().await;
     }
@@ -680,7 +716,30 @@ pub fn run() {
             if updates::checks_enabled() {
                 tauri::async_runtime::spawn(updates::watch(app.handle().clone()));
             }
+            // The standard menu, with "Check for Updates…" under About: Mac users look for it there. (It's the standard
+            // menu, not a new one, so the Edit menu's copy and paste keep working.)
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
+                let handle = app.handle();
+                let menu = Menu::default(handle)?;
+                if let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next() {
+                    app_menu.insert(&MenuItem::with_id(handle, CHECK_FOR_UPDATES, "Check for Updates…", true, None::<&str>)?, 1)?;
+                    app_menu.insert(&PredefinedMenuItem::separator(handle)?, 2)?;
+                }
+                app.set_menu(menu)?;
+            }
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            if event.id() == CHECK_FOR_UPDATES {
+                // The window opens Settings on its Updates page and starts a check.
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+                let _ = app.emit("check-for-updates", ());
+            }
         })
         .invoke_handler(tauri::generate_handler![
             locate_claude,
@@ -717,6 +776,9 @@ pub fn run() {
             title_session,
             open_session,
             update_status,
+            update_state,
+            check_for_updates,
+            app_version,
             restart_to_update
         ])
         .build(tauri::generate_context!())
