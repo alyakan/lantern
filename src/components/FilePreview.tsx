@@ -16,6 +16,8 @@ interface Props {
   path: string;
   /** Scroll to this line and mark it (e.g. where a test failed). */
   line?: number | null;
+  /** Counts each request for a line: asking for the line already shown is a request too. */
+  jump?: number;
   /** Changes whenever the files may have (Claude edited something): the file is read again. */
   refreshKey?: number;
   /** Whether there are unsaved edits. */
@@ -33,7 +35,7 @@ interface Conflict {
  * A file in the editor. Edits are kept apart from the file on disk (`saved`), ⌘S writes them, and the write is refused
  * if the file changed on disk meanwhile (Claude's edit, git): then you choose between your version and the one there.
  */
-export default function FilePreview({ path, line = null, refreshKey = 0, onDirty, onSaved }: Props) {
+export default function FilePreview({ path, line = null, jump = 0, refreshKey = 0, onDirty, onSaved }: Props) {
   const slot = useSlot();
   const key = stashKey(slot, path);
   const [saved, setSaved] = useState<string | null>(null);
@@ -47,9 +49,10 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
   // A markdown file is read as a document unless you chose to edit it; a line to show (a mention, a failed test) needs the editor.
   const markdown = isMarkdownPath(path);
   const [markdownView, setMarkdownView] = usePersistentState<"preview" | "edit">("files.markdownView", "preview");
-  // A line to show opens the editor there, until the Preview tab is picked for that line.
-  const [previewPicked, setPreviewPicked] = useState<{ line: number | null } | null>(null);
-  const preview = markdown && markdownView === "preview" && (!line || previewPicked?.line === line);
+  // A line to show opens the editor there, until the Preview tab is picked for that line. The jump tells one request for
+  // a line from the next, so asking for the same line again opens the editor again.
+  const [previewPicked, setPreviewPicked] = useState<{ jump: number } | null>(null);
+  const preview = markdown && markdownView === "preview" && (!line || previewPicked?.jump === jump);
   // The editor is made the first time it's shown, then kept (hidden while the preview shows): hiding keeps its undo
   // history and scroll place, where unmounting would throw the model away.
   const [editorShown, setEditorShown] = useState(!preview);
@@ -175,10 +178,11 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
     e.revealLineInCenter(line);
     marks.current = e.createDecorationsCollection([{ range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 }, options: { isWholeLine: true, className: "whole-removed", marginClassName: "whole-removed-margin" } }]);
   };
-  // Another line of the same open file (a mention, a failed test): scroll there without losing edits.
+  // Another line of the same open file (a mention, a failed test): scroll there without losing edits. The same line asked
+  // for again scrolls again too.
   useEffect(() => {
     if (editor.current) revealLine(editor.current);
-  }, [line]);
+  }, [line, jump]);
 
   if (error) return <div className="empty">{error}</div>;
   if (saved === null) return <div className="empty">Loading…</div>;
@@ -234,7 +238,7 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
               className={preview ? "active" : ""}
               onClick={() => {
                 setMarkdownView("preview");
-                setPreviewPicked({ line });
+                setPreviewPicked({ jump });
               }}
             >
               Preview

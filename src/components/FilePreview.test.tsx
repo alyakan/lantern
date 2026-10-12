@@ -293,6 +293,18 @@ describe("FilePreview as an editor", () => {
       expect(editor().value).toBe("# Two\n");
     });
 
+    it("goes back to the editor when the same line is asked for again after the preview was picked", async () => {
+      read.mockResolvedValue("# One\n");
+      const { rerender } = render(<FilePreview path="/p/notes.md" line={1} jump={1} />);
+      expect(await screen.findByLabelText("editor")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Preview" }));
+      expect(await screen.findByRole("heading", { name: "One" })).toBeInTheDocument();
+      // Another request for line 1 (a mention, a failed test): the same line, so only the jump changes.
+      rerender(<FilePreview path="/p/notes.md" line={1} jump={2} />);
+      expect(screen.queryByLabelText("Markdown preview")).not.toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Edit" })).toHaveAttribute("aria-selected", "true");
+    });
+
     it("shows the editor for a line to show, and has no switch on other files", async () => {
       read.mockResolvedValue("# One\n");
       const view = render(<FilePreview path="/p/notes.md" line={1} />);
