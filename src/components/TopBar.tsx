@@ -45,6 +45,9 @@ interface Props {
   onClearFailures?: () => void;
 }
 
+/** How long a stopped task may stay listed before its Stop comes back. */
+const STOP_AGAIN_MS = 8000;
+
 /** "local_bash" → "Command", "local_agent" → "Agent". */
 function taskKind(type: string): string {
   if (/bash|shell|command/i.test(type)) return "Command";
@@ -88,20 +91,23 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
   useEffect(() => {
     if (menu === "background" && background.length === 0) close();
   }, [background.length]);
-  // Tasks asked to stop (until claude drops them), and why one couldn't be.
+  // Tasks asked to stop, and why one couldn't be. A task stays "Stopping…" until claude drops it; if it's still listed
+  // after a while, Stop comes back so it can be asked again.
   const [stopping, setStopping] = useState<Set<string>>(new Set());
   const [stopError, setStopError] = useState<string | null>(null);
   const stopTask = (id: string) => {
     if (!onStopTask) return;
-    setStopError(null);
-    setStopping((s) => new Set(s).add(id));
-    onStopTask(id).catch((e) => {
-      setStopError(`Couldn't stop it: ${String(e)}`);
+    const settle = () =>
       setStopping((s) => {
         const next = new Set(s);
         next.delete(id);
         return next;
       });
+    setStopError(null);
+    setStopping((s) => new Set(s).add(id));
+    onStopTask(id).then(() => setTimeout(settle, STOP_AGAIN_MS), (e) => {
+      setStopError(`Couldn't stop it: ${String(e)}`);
+      settle();
     });
   };
   // The list's "running for" times, kept current while it's open.
