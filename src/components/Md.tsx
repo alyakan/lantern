@@ -1,8 +1,9 @@
-import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { markdownComponents, splitMention, useFileLinks } from "../lib/fileLinks";
-import { CALLOUT_LABEL, filePaths, languageName, monacoLanguage, parsePlanStep, rehypeCallouts, type CalloutKind, type PlanStep } from "../lib/markdown";
+import { blockLanguage, CALLOUT_LABEL, filePaths, languageHint, languageName, parsePlanStep, rehypeCallouts, type CalloutKind, type PlanStep } from "../lib/markdown";
+import { lineKind } from "../lib/diff";
 import { usePrefersDark } from "../lib/theme";
 import { DocIcon } from "./icons";
 
@@ -67,9 +68,12 @@ function Pre({ node, children, ...rest }: ComponentProps<"pre"> & { node?: HNode
   const cls = code?.properties?.className;
   const className = Array.isArray(cls) ? cls.join(" ") : cls;
   const text = textOf(code);
-  const lang = languageName(className);
-  const step = !lang || lang === "text" ? parsePlanStep(text) : null;
-  const highlighted = useHighlight(step ? "" : text, monacoLanguage(className));
+  const named = languageName(className);
+  const step = !named || named === "text" ? parsePlanStep(text) : null;
+  // A block with no language is coloured as what it looks like (a diff, JSON, shell, the message's own language).
+  const hint = useContext(LanguageHint);
+  const { id, label: lang } = blockLanguage(className, text, hint);
+  const highlighted = useHighlight(step || id === "diff" ? "" : text, id);
   if (step) return <PlanStepCard step={step} />;
   const copy = () =>
     navigator.clipboard?.writeText(text.replace(/\n$/, "")).then(() => {
@@ -84,7 +88,22 @@ function Pre({ node, children, ...rest }: ComponentProps<"pre"> & { node?: HNode
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      {highlighted ? (
+      {id === "diff" ? (
+        // Monaco has no diff colouring: each line is tinted by what it does, as in the diff view.
+        <pre {...rest} className="code-block-colored code-block-diff">
+          <code>
+            {text
+              .replace(/\n$/, "")
+              .split("\n")
+              .map((line, i) => (
+                <span key={i} className={`diff-line ${/^(@@|diff |index |--- |\+\+\+ )/.test(line) ? "meta" : lineKind(line)}`}>
+                  {line || " "}
+                  {"\n"}
+                </span>
+              ))}
+          </code>
+        </pre>
+      ) : highlighted ? (
         // Monaco's colorize escapes the code; the HTML is only its coloured spans.
         <pre {...rest} className="code-block-colored">
           <code dangerouslySetInnerHTML={{ __html: highlighted }} />
@@ -144,11 +163,17 @@ const inlineComponents = { ...components, p: ({ children }: { children?: ReactNo
 const remarkPlugins = [remarkGfm];
 const rehypePlugins = [rehypeCallouts];
 
+/** The language of the files the message being drawn names: what an untagged code block in it is most likely in. */
+const LanguageHint = createContext<string | null>(null);
+
 /** Claude's markdown: GFM, file links, code block headers, plan step cards and callouts. */
 export function Md({ children, inline = false }: { children: string; inline?: boolean }) {
+  const hint = useMemo(() => languageHint(children), [children]);
   return (
-    <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={inline ? inlineComponents : components}>
-      {children}
-    </Markdown>
+    <LanguageHint.Provider value={hint}>
+      <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={inline ? inlineComponents : components}>
+        {children}
+      </Markdown>
+    </LanguageHint.Provider>
   );
 }

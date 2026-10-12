@@ -35,6 +35,13 @@ describe("SummaryTab", () => {
     expect(within(items[1]).getByRole("button")).toHaveAttribute("aria-current", "step");
   });
 
+  it("shows a step's code as code, and drops a backtick a cut left open", () => {
+    show({ headline: null, rows: [row({ title: "Rename `fetchJson`", gist: "`src/client/retry.ts:1`: added RETRYABLE and `wait" })] });
+    expect(screen.getByText("fetchJson").tagName).toBe("CODE");
+    expect(screen.getByText("src/client/retry.ts:1").tagName).toBe("CODE");
+    expect(screen.getByText(/added RETRYABLE and wait/)).toBeInTheDocument();
+  });
+
   it("opens a step's page from its row, and its plan from the Plan link", () => {
     const open = vi.fn();
     show({ headline: null, rows: [row({ page: "step-page", planPage: "plan-page", title: "Name the statuses" }), row({ id: "y", page: "only-plan", title: "Later", built: false })] }, open);

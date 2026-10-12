@@ -7,6 +7,15 @@ const FILES_SHOWN = 3;
 const rangeKey = (r: { from: number; to: number }) => `${r.from}-${r.to}`;
 const baseName = (path: string) => path.split("/").pop() ?? path;
 
+/** A line of a step's text with its `code` shown as code. A backtick left open by a cut is dropped. */
+function Inline({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/`([^`]+)`/).map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part.replace(/`/g, "")))}
+    </>
+  );
+}
+
 /**
  * The right pane's Summary tab, in Step by step: the plan so far, a row per step (or reviewed file, evidence round,
  * fix), each with what its page says and the files it changed. A row opens its page in the chat.
@@ -50,8 +59,16 @@ function Row({ row, files, onOpenPage }: { row: SummaryRow; files: ChangedFile[]
             {row.label}
             <span className="sr-only"> ({row.current ? "now" : row.built ? "done" : "planned, not built yet"})</span>
           </span>
-          {row.title && <span className="summary-title">{row.title}</span>}
-          {row.gist && <span className="summary-gist">{row.gist}</span>}
+          {row.title && (
+            <span className="summary-title">
+              <Inline text={row.title} />
+            </span>
+          )}
+          {row.gist && (
+            <span className="summary-gist">
+              <Inline text={row.gist} />
+            </span>
+          )}
           <Meta row={row} files={files} />
         </span>
       </button>
