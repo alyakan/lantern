@@ -26,49 +26,59 @@ interface FileLinks {
 
 const Ctx = createContext<FileLinks | null>(null);
 
+/**
+ * What's known about one chat's folder. A switch to another chat or folder makes a new one, so a lookup still in flight
+ * for the old one (or its pending batch) writes into a map nothing reads any more.
+ */
+interface Lookups {
+  known: Map<string, string | null>;
+  queued: Set<string>;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
 /** `epoch`: bump it when files may have appeared (a turn ended), so mentions that weren't files are asked again. */
 export function FileLinksProvider({ slot, folder, epoch, onOpen, children }: { slot: string; folder: string | null; epoch: number; onOpen: (path: string, line: number | null) => void; children: ReactNode }) {
-  const known = useRef(new Map<string, string | null>());
-  const queued = useRef(new Set<string>());
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lookups = useMemo<Lookups>(() => ({ known: new Map(), queued: new Set(), timer: null }), [slot, folder]);
+  // The lookups on screen now: results for any other set are dropped.
+  const shown = useRef(lookups);
+  shown.current = lookups;
   const [version, setVersion] = useState(0);
   const latestOpen = useRef(onOpen);
   latestOpen.current = onOpen;
 
   useEffect(() => {
-    known.current = new Map();
+    for (const [m, p] of lookups.known) if (p === null) lookups.known.delete(m);
     setVersion((v) => v + 1);
-  }, [slot, folder]);
-  useEffect(() => {
-    for (const [m, p] of known.current) if (p === null) known.current.delete(m);
-    setVersion((v) => v + 1);
-  }, [epoch]);
+  }, [epoch, lookups]);
 
   const value = useMemo<FileLinks>(() => {
     const flush = () => {
-      timer.current = null;
-      const batch = [...queued.current];
-      queued.current.clear();
-      if (!batch.length || !folder) return;
+      lookups.timer = null;
+      const batch = [...lookups.queued];
+      lookups.queued.clear();
+      if (!batch.length || !folder || shown.current !== lookups) return;
       api.resolveFiles(slot, batch).then(
         (paths) => {
-          batch.forEach((m, i) => known.current.set(m, paths[i] ?? null));
+          if (shown.current !== lookups) return;
+          batch.forEach((m, i) => lookups.known.set(m, paths[i] ?? null));
           setVersion((v) => v + 1);
         },
-        () => batch.forEach((m) => known.current.set(m, null)),
+        () => {
+          if (shown.current === lookups) batch.forEach((m) => lookups.known.set(m, null));
+        },
       );
     };
     return {
       resolve: (mention) => {
-        if (known.current.has(mention)) return known.current.get(mention);
+        if (lookups.known.has(mention)) return lookups.known.get(mention);
         if (!folder) return null;
-        queued.current.add(mention);
-        timer.current ??= setTimeout(flush, 40);
+        lookups.queued.add(mention);
+        lookups.timer ??= setTimeout(flush, 40);
         return undefined;
       },
       open: (path, line) => latestOpen.current(path, line),
     };
-  }, [slot, folder, version]);
+  }, [lookups, slot, folder, version]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -104,11 +114,20 @@ export function FileCode({ className, children, node: _node, ...rest }: Componen
   );
 }
 
+/** A link's address decoded for a path; a bad escape (`a%E9.md`) is left as it is, so drawing the message doesn't throw. */
+function decodedPath(href: string): string {
+  try {
+    return decodeURI(href);
+  } catch {
+    return href;
+  }
+}
+
 /** A markdown link to a file in the folder opens it; web links open in the browser. */
 export function FileAwareLink(props: ComponentProps<"a"> & { node?: unknown }) {
   const links = useContext(Ctx);
   const href = props.href ?? "";
-  const mention = links && !/^[a-z][\w+.-]*:/i.test(href) ? splitMention(decodeURI(href.replace(/#L?(\d+).*$/, ":$1"))) : null;
+  const mention = links && !/^[a-z][\w+.-]*:/i.test(href) ? splitMention(decodedPath(href.replace(/#L?(\d+).*$/, ":$1"))) : null;
   const path = mention ? links!.resolve(mention.path) : null;
   if (!mention || !path) return <ExternalLink {...props} />;
   return (
