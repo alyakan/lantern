@@ -8,6 +8,9 @@ import { usePrefersDark } from "../lib/theme";
 import { registerFindable } from "../lib/editorFind";
 import { stash, stashKey, unstash } from "../lib/editStash";
 import { collectLibs } from "../lib/projectLibs";
+import { usePersistentState } from "../lib/layout";
+import { isMarkdownPath } from "../lib/markdown";
+import MarkdownPreview from "./MarkdownPreview";
 
 interface Props {
   path: string;
@@ -41,6 +44,10 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
   const [restored, setRestored] = useState(false);
   const [saving, setSaving] = useState(false);
   const dark = usePrefersDark();
+  // A markdown file is read as a document unless you chose to edit it; a line to show (a mention, a failed test) needs the editor.
+  const markdown = isMarkdownPath(path);
+  const [markdownView, setMarkdownView] = usePersistentState<"preview" | "edit">("files.markdownView", "preview");
+  const preview = markdown && markdownView === "preview" && !line;
 
   // Latest values for the callbacks Monaco and the reads below hold on to.
   const savedRef = useRef(saved);
@@ -162,6 +169,12 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
   useEffect(() => {
     if (editor.current) revealLine(editor.current);
   }, [line]);
+  // The editor is gone while the preview is showing: its next mount reveals the line.
+  useEffect(() => {
+    if (!preview) return;
+    editor.current = null;
+    marks.current = null;
+  }, [preview]);
 
   if (error) return <div className="empty">{error}</div>;
   if (saved === null) return <div className="empty">Loading…</div>;
@@ -208,40 +221,56 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
           )}
         </div>
       ) : null}
-      <div className="diff-body editable-editor">
-        <Editor
-          height="100%"
-          path={path}
-          value={draft}
-          onChange={(v) => setDraft(v ?? "")}
-          language={languageFor(path)}
-          theme={dark ? DARK_THEME : LIGHT_THEME}
-          onMount={onMount}
-          options={{
-            minimap: { enabled: false },
-            overviewRulerLanes: 0,
-            hideCursorInOverviewRuler: true,
-            renderLineHighlight: "line",
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-            // Suggestions, hover and parameter hints can reach outside the pane's edges.
-            fixedOverflowWidgets: true,
-            quickSuggestions: { other: true, comments: false, strings: true },
-            suggestOnTriggerCharacters: true,
-            tabCompletion: "on",
-            wordBasedSuggestions: "currentDocument",
-            parameterHints: { enabled: true },
-            glyphMargin: false,
-            folding: false,
-            lineNumbersMinChars: 3,
-            fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
-            fontSize: 12,
-            lineHeight: 19,
-            padding: { top: 10, bottom: 10 },
-            scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10, useShadows: false },
-          }}
-        />
-      </div>
+      {markdown && (
+        <div className="md-bar">
+          <div className="pane-tabs-track" role="tablist" aria-label="Markdown view">
+            <button role="tab" aria-selected={preview} className={preview ? "active" : ""} onClick={() => setMarkdownView("preview")}>
+              Preview
+            </button>
+            <button role="tab" aria-selected={!preview} className={preview ? "" : "active"} onClick={() => setMarkdownView("edit")}>
+              Edit
+            </button>
+          </div>
+        </div>
+      )}
+      {preview ? (
+        <MarkdownPreview text={draft} />
+      ) : (
+        <div className="diff-body editable-editor">
+          <Editor
+            height="100%"
+            path={path}
+            value={draft}
+            onChange={(v) => setDraft(v ?? "")}
+            language={languageFor(path)}
+            theme={dark ? DARK_THEME : LIGHT_THEME}
+            onMount={onMount}
+            options={{
+              minimap: { enabled: false },
+              overviewRulerLanes: 0,
+              hideCursorInOverviewRuler: true,
+              renderLineHighlight: "line",
+              scrollBeyondLastLine: false,
+              automaticLayout: true,
+              // Suggestions, hover and parameter hints can reach outside the pane's edges.
+              fixedOverflowWidgets: true,
+              quickSuggestions: { other: true, comments: false, strings: true },
+              suggestOnTriggerCharacters: true,
+              tabCompletion: "on",
+              wordBasedSuggestions: "currentDocument",
+              parameterHints: { enabled: true },
+              glyphMargin: false,
+              folding: false,
+              lineNumbersMinChars: 3,
+              fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
+              fontSize: 12,
+              lineHeight: 19,
+              padding: { top: 10, bottom: 10 },
+              scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10, useShadows: false },
+            }}
+          />
+        </div>
+      )}
     </>
   );
 }

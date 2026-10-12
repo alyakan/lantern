@@ -1,7 +1,32 @@
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
-import { blockLanguage, filePaths, inferLanguage, languageHint, languageName, monacoLanguage, parsePlanStep } from "./markdown";
+import { blockLanguage, filePaths, inferLanguage, isMarkdownPath, languageHint, languageName, monacoLanguage, parsePlanStep, withFrontMatterAsCode } from "./markdown";
 import { Md } from "../components/Md";
+
+describe("isMarkdownPath", () => {
+  it("is true for markdown files, whatever the case, and false for the rest", () => {
+    expect(isMarkdownPath("/p/README.md")).toBe(true);
+    expect(isMarkdownPath("/p/Notes.MD")).toBe(true);
+    expect(isMarkdownPath("/p/a.ts")).toBe(false);
+    expect(isMarkdownPath("/p/md")).toBe(false);
+  });
+});
+
+describe("withFrontMatterAsCode", () => {
+  it("turns a leading front matter block into a yaml code block", () => {
+    expect(withFrontMatterAsCode("---\nname: a\ndescription: b\n---\n# Hi\n")).toBe("```yaml\nname: a\ndescription: b\n```\n# Hi\n");
+  });
+
+  it("leaves text without front matter, and rules further down, alone", () => {
+    expect(withFrontMatterAsCode("# Hi\n\n---\n\nmore\n")).toBe("# Hi\n\n---\n\nmore\n");
+    expect(withFrontMatterAsCode("text\n---\nx\n---\n")).toBe("text\n---\nx\n---\n");
+  });
+
+  it("handles an empty block and Windows line endings", () => {
+    expect(withFrontMatterAsCode("---\n---\nBody")).toBe("```yaml\n\n```\nBody");
+    expect(withFrontMatterAsCode("---\r\na: 1\r\n---\r\nBody")).toBe("```yaml\na: 1\n```\nBody");
+  });
+});
 
 describe("parsePlanStep", () => {
   it("reads incremental-dev's File / Change / Verify block, with values running onto indented lines", () => {
