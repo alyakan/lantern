@@ -54,7 +54,7 @@ describe("FullDiff of a file that was created", () => {
     vi.mocked(api.getFileDiff).mockResolvedValueOnce(diff("a\nb\nc\n"));
     rerender(<FullDiff path="/p/new.ts" refreshKey={1} layout="inline" />);
     await waitFor(() => expect(screen.getByTestId("whole")).toHaveAttribute("data-value", "a\nb\nc\n"));
-    // The same editor, and the same marks moved: nothing is made again, so its scroll place and undo history stay.
+    // The same editor, and the same marks moved: the editor isn't remounted on each refresh.
     expect(screen.getByTestId("whole")).toBe(node);
     expect(marks).toHaveLength(1);
     const set = marks[0].set;

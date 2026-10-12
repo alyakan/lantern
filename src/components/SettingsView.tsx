@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import type { McpServer, McpServerSpec, SkillEntry, SlashCommand } from "../types";
@@ -99,26 +99,28 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
   const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState<{ text: string; restart: boolean } | null>(null);
 
-  // Each chat's answers are for that chat: a reply that comes back after the chat changed is dropped.
-  const chatGen = useRef(0);
+  // Each chat's answers are for that chat: this identity changes with the chat, and a reply from another is dropped. A
+  // reply comes back through the closure it was asked from, so one that lands after a switch is checked too.
+  const chat = useMemo(() => ({}), [slot, live]);
+  const current = useRef(chat);
   const load = () => {
     if (!slot || !live) return Promise.resolve();
-    const gen = chatGen.current;
+    const asked = chat;
     return api.claudeRequest<{ mcpServers?: McpServer[] }>(slot, { subtype: "mcp_status" }).then(
       (r) => {
-        if (gen !== chatGen.current) return;
+        if (asked !== current.current) return;
         setServers(r.mcpServers ?? []);
         setError(null);
       },
-      (e) => gen === chatGen.current && setError(errText(e)),
+      (e) => asked === current.current && setError(errText(e)),
     );
   };
   useEffect(() => {
+    current.current = chat;
     // The last chat's servers don't show under this one while it's asked.
-    chatGen.current++;
     setServers(null);
     void load();
-  }, [slot, live]);
+  }, [chat]);
 
   // Keep looking while a server connects or a login is under way.
   const waiting = (servers ?? []).some((s) => s.status === "pending") || Object.keys(loggingIn).length > 0;
@@ -179,6 +181,7 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
     // Plugins reload re-reads MCP settings in newer Claude Code; otherwise it takes a restart.
     await api.claudeRequest(slot, { subtype: "reload_plugins" }).catch(() => {});
     const r = await api.claudeRequest<{ mcpServers?: McpServer[] }>(slot, { subtype: "mcp_status" }).catch(() => null);
+    if (chat !== current.current) return;
     const list = r?.mcpServers ?? servers ?? [];
     setServers(list);
     setNotice(list.some((s) => s.name === name) ? { text: `Added ${name}.`, restart: false } : { text: `Added ${name}. Restart the chat to connect to it.`, restart: true });

@@ -116,6 +116,27 @@ describe("SettingsView", () => {
     expect(screen.getByText("other-chat")).toBeInTheDocument();
   });
 
+  it("doesn't put a reconnect's servers into the chat it was started in, once the chat has changed", async () => {
+    let finishReconnect: (v: unknown) => void = () => {};
+    claudeRequest.mockImplementation((slot: string, r: { subtype: string }) => {
+      if (r.subtype === "mcp_reconnect") return new Promise((resolve) => (finishReconnect = resolve));
+      const mcpServers = slot === "s2" ? [{ name: "other-chat", status: "connected", config: { type: "stdio", command: "x" }, scope: "local" }] : SERVERS.map((s) => ({ ...s }));
+      return Promise.resolve(r.subtype === "mcp_status" ? { mcpServers } : {});
+    });
+    const { rerender } = render(<SettingsView open="mcp" {...props} />);
+    const list = await screen.findByRole("list", { name: "MCP servers" });
+    fireEvent.click(within(within(list).getAllByRole("listitem")[1]).getByRole("button", { name: "Reconnect" }));
+    await waitFor(() => expect(claudeRequest).toHaveBeenCalledWith("s1", { subtype: "mcp_reconnect", serverName: "postgres" }));
+    rerender(<SettingsView open="mcp" {...props} slot="s2" />);
+    expect(await screen.findByText("other-chat")).toBeInTheDocument();
+    await act(async () => finishReconnect({}));
+    // Asked for the old chat again once the reconnect is done (its first ask was at the start).
+    await waitFor(() => expect(claudeRequest.mock.calls.filter(([s, r]) => s === "s1" && r.subtype === "mcp_status")).toHaveLength(2));
+    await act(async () => {});
+    expect(screen.queryByText("sentry")).toBeNull();
+    expect(screen.getByText("other-chat")).toBeInTheDocument();
+  });
+
   it("starts one claude.ai login for a double click on Connect", async () => {
     claudeRequest.mockImplementation((_slot: string, r: { subtype: string }) =>
       r.subtype === "mcp_status" ? Promise.resolve({ mcpServers: [{ name: "claude.ai Notion", status: "needs-auth", config: { type: "claudeai-proxy" }, scope: "claudeai", source: "claudeai" }] }) : new Promise(() => {}),
