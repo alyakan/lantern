@@ -16,7 +16,7 @@ export interface Heading {
 
 type UserItem = Extract<ChatItem, { type: "user" }>;
 
-const HEADING = /^#{1,3}\s*(Frame|Plan step\s+(\d+)|Plan complete|Plan update|Step\s+(\d+)\s+of\s+(\d+)|File\s+(\d+)\s+of\s+(\d+)|Summary|Done|Evidence(?:\s+(\d+))?|Fix|Switch to\s+(Build|Learn|Review|Debug))\b\s*(?:[—–-]+\s*(.*))?$/i;
+const HEADING = /^#{1,3}\s*(Frame|Plan step\s+(\d+)|Plan complete|Plan update|Step\s+(\d+)\s+of\s+(\d+)|File\s+(\d+)\s+of\s+(\d+)|Summary|Done|Evidence(?:\s+(\d+))?|Fix|Switch to\s+(Build|Learn|Review|Debug))\b\s*(?:[—–:-]+\s*(.*))?$/i;
 
 /**
  * incremental-pr-review's own file line, when Claude writes the skill's format rather than a "# File N of M" heading:
@@ -232,13 +232,16 @@ function planShaped(text: string): boolean {
   return false;
 }
 
+// "Can you also handle the empty list?" ends with "?" but asks for a change: a modal or "you" with an action verb.
+const CHANGE_ASK = /^(?:(?:please|also|and|ok|okay|so|then)[,]?\s+)*(?:(?:can|could|would|will)\s+)?you\s+(?:(?:also|just|now|please|first|still)\s+)*(?:add|change|fix|handle|rename|update|make|remove|delete|use|move|include|drop|split|merge|replace|rewrite|reword|implement|support|skip|keep)\b/i;
+
 /**
  * A prompt that asks about the step rather than asking to change it: it ends with "?", or opens like a question or a
  * request to explain ("why…", "what is…", "can you explain…", "tell me more…").
  */
 export const isQuestion = (text: string) => {
   const t = promptText(text).trim();
-  if (movesOn(text)) return false;
+  if (movesOn(text) || CHANGE_ASK.test(t)) return false;
   return /\?\s*$/.test(t) || /^(why|what|what's|whats|how|when|where|which|who|whose|is|are|was|were|does|do|did|should|would|could|can|will|explain|elaborate|clarify|tell me|walk me through|help me understand|i don'?t (get|understand)|remind me)\b/i.test(t);
 };
 
