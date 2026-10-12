@@ -117,6 +117,14 @@ impl ChangeTracker {
         self.turns.len() - 1
     }
 
+    /// Forgets the turn `start_turn` just returned, when its message never reached Claude (so "Last turn" doesn't compare
+    /// against an empty turn).
+    pub fn cancel_turn(&mut self, turn: usize) {
+        if self.turns.len() == turn + 1 {
+            self.turns.pop();
+        }
+    }
+
     /// For a range of turns, each file as it was at the first of them that knew it.
     fn baseline(&self, scope: Scope, turn: Option<usize>, to_turn: Option<usize>) -> Option<std::borrow::Cow<'_, HashMap<String, Option<String>>>> {
         use std::borrow::Cow;
@@ -217,6 +225,22 @@ mod tests {
         t.record(p, Some("v1".into()));
         t.record(p, Some("v2".into()));
         assert_eq!(t.diff(p, Scope::Session, None, None).unwrap(), FileDiff { path: p.into(), original: "v1".into(), current: "v3".into(), created: false, deleted: false });
+    }
+
+    #[test]
+    fn cancelled_turn_is_forgotten() {
+        let mut t = ChangeTracker::default();
+        t.record("/a.txt", Some("old".into()));
+        let turn = t.start_turn();
+        t.cancel_turn(turn);
+        assert_eq!(t.turns.len(), 0);
+        // Only the latest turn is popped: an earlier one's number is never the one a failed send is about.
+        let first = t.start_turn();
+        let second = t.start_turn();
+        t.cancel_turn(first);
+        assert_eq!(t.turns.len(), 2);
+        t.cancel_turn(second);
+        assert_eq!(t.turns.len(), 1);
     }
 
     #[test]

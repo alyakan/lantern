@@ -235,11 +235,15 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
 async fn send_message(state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
     let s = state.slots.get(&slot)?;
-    // What "Last turn" in the Changes pane compares against.
+    let mut session = s.session.lock().await;
+    let claude = session.as_mut().ok_or("No Claude session is running")?;
+    // What "Last turn" in the Changes pane compares against. It's taken before the send, so Claude's edits come after it.
     let changes = s.changes.clone();
     let turn = tauri::async_runtime::spawn_blocking(move || changes.lock().unwrap().start_turn()).await.map_err(|e| e.to_string())?;
-    let mut session = s.session.lock().await;
-    session.as_mut().ok_or("No Claude session is running")?.send(&text).await?;
+    if let Err(e) = claude.send(&text).await {
+        s.changes.lock().unwrap().cancel_turn(turn);
+        return Err(e);
+    }
     Ok(turn)
 }
 
