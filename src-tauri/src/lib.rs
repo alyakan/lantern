@@ -317,7 +317,8 @@ async fn claude_mcp(state: &AppState, slot: &str, args: Vec<String>) -> Result<S
         (cfg.claude.clone(), cfg.folder.clone())
     };
     let mut cmd = tokio::process::Command::new(claude);
-    cmd.args(&args).current_dir(folder).stdin(std::process::Stdio::null());
+    // A timeout drops the wait below; kill_on_drop stops the process rather than leaving it running.
+    cmd.args(&args).current_dir(folder).stdin(std::process::Stdio::null()).kill_on_drop(true);
     if let Some(p) = login_path(state).await {
         cmd.env("PATH", p);
     }
@@ -331,8 +332,9 @@ async fn claude_mcp(state: &AppState, slot: &str, args: Vec<String>) -> Result<S
     }
 }
 
-#[tauri::command]
-async fn mcp_add(state: State<'_, AppState>, slot: String, spec: McpServerSpec) -> Result<String, String> {
+/// The arguments for `claude mcp add`, after checking the spec. `--` before the name and URL keeps a value that starts
+/// with `-` from being read as an option.
+fn mcp_add_args(spec: &McpServerSpec) -> Result<Vec<String>, String> {
     let name = spec.name.trim();
     if name.is_empty() || name.starts_with('-') || !MCP_SCOPES.contains(&spec.scope.as_str()) || !["stdio", "http", "sse"].contains(&spec.transport.as_str()) {
         return Err("Give the server a name, a type and where it applies.".into());
@@ -358,6 +360,60 @@ async fn mcp_add(state: State<'_, AppState>, slot: String, spec: McpServerSpec) 
         }
         args.extend(["--".into(), name.into(), url.into()]);
     }
+    Ok(args)
+}
+
+#[cfg(test)]
+mod mcp_add_tests {
+    use super::*;
+
+    fn spec(name: &str, transport: &str, target: &str, scope: &str) -> McpServerSpec {
+        McpServerSpec { name: name.into(), transport: transport.into(), target: target.into(), scope: scope.into(), env: vec![], headers: vec![] }
+    }
+
+    #[test]
+    fn stdio_puts_env_first_then_the_name_and_the_command_words() {
+        let mut s = spec(" fs ", "stdio", "npx -y server /tmp/a", "local");
+        s.env = vec!["A=1".into(), "  ".into(), " B=2 ".into()];
+        s.headers = vec!["X: ignored".into()];
+        assert_eq!(
+            mcp_add_args(&s).unwrap(),
+            ["mcp", "add", "-s", "local", "-t", "stdio", "-e", "A=1", "-e", "B=2", "--", "fs", "npx", "-y", "server", "/tmp/a"]
+        );
+    }
+
+    #[test]
+    fn http_takes_the_trimmed_url_and_non_empty_headers() {
+        let mut s = spec("api", "http", " https://x.dev/mcp ", "user");
+        s.headers = vec!["Authorization: Bearer t".into(), " ".into()];
+        s.env = vec!["A=1".into()];
+        assert_eq!(mcp_add_args(&s).unwrap(), ["mcp", "add", "-s", "user", "-t", "http", "-H", "Authorization: Bearer t", "--", "api", "https://x.dev/mcp"]);
+    }
+
+    #[test]
+    fn a_name_or_url_that_looks_like_an_option_stays_a_value() {
+        assert!(mcp_add_args(&spec("-rf", "stdio", "server", "local")).is_err());
+        let args = mcp_add_args(&spec("api", "sse", "https://x.dev/sse", "project")).unwrap();
+        assert_eq!(&args[args.len() - 3..], ["--", "api", "https://x.dev/sse"]);
+    }
+
+    #[test]
+    fn refuses_a_missing_name_scope_or_type() {
+        assert!(mcp_add_args(&spec("  ", "stdio", "server", "local")).is_err());
+        assert!(mcp_add_args(&spec("api", "stdio", "server", "global")).is_err());
+        assert!(mcp_add_args(&spec("api", "ws", "wss://x", "local")).is_err());
+    }
+
+    #[test]
+    fn refuses_an_empty_command_or_a_non_web_address() {
+        assert_eq!(mcp_add_args(&spec("fs", "stdio", "   ", "local")).unwrap_err(), "Which command starts the server?");
+        assert!(mcp_add_args(&spec("api", "http", "ftp://x.dev", "local")).is_err());
+    }
+}
+
+#[tauri::command]
+async fn mcp_add(state: State<'_, AppState>, slot: String, spec: McpServerSpec) -> Result<String, String> {
+    let args = mcp_add_args(&spec)?;
     claude_mcp(&state, &slot, args).await
 }
 
