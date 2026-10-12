@@ -156,7 +156,8 @@ export function AgentGraph({ graph }: { graph: Graph }) {
             </span>
           ))}
       </nav>
-      <svg ref={svg} viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} preserveAspectRatio="xMidYMid meet" role="img" aria-label="Agent graph" tabIndex={-1}>
+      {/* A group, not an image: an image hides the nodes (buttons) inside it from screen readers. */}
+      <svg ref={svg} viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} preserveAspectRatio="xMidYMid meet" role="group" aria-label="Agent graph" tabIndex={-1}>
         {graph.edges.map((e) => (
           <path key={e.id} d={edgePath(e, nodes)} className={`graph-edge tone-${nodes.get(e.to)!.kind === "leaf" ? nodes.get(e.from)!.tone : nodes.get(e.to)!.tone}${e.active ? " active" : ""}${e.dashed ? " dashed" : ""}${live && !e.active ? " idle" : ""}${branch && !branch.has(e.to) ? " out" : ""}`} />
         ))}

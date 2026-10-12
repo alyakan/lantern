@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { AgentGraph } from "./AgentGraph";
 import { initialState, reducer, type State } from "../store";
 import type { UiEvent } from "../types";
@@ -72,5 +72,14 @@ describe("AgentGraph", () => {
     expect(selected()).toBe("search ×1: running");
     fireEvent.keyDown(graph, { key: "ArrowUp" });
     expect(selected()).toBe("Explore Haiku 5.5: running");
+  });
+
+  it("is a group of buttons, not an image: the nodes stay in the accessibility tree", () => {
+    let s = base();
+    s = step(s, { kind: "tool_started", parent: "e", tool_use_id: "g", name: "Grep", summary: "verifyToken" });
+    render(<AgentGraph graph={agentGraph(s.items, opts)} />);
+    expect(screen.queryByRole("img", { name: "Agent graph" })).toBeNull();
+    const group = screen.getByRole("group", { name: "Agent graph" });
+    expect(within(group).getByRole("button", { name: "Explore Haiku 5.5: running" })).toBeInTheDocument();
   });
 });
