@@ -109,6 +109,8 @@ export default function App() {
   const drafts = useRef<Record<string, string>>({});
   // How to start a chat again when its start failed: claude never got far enough to be restarted (see the banner).
   const relaunch = useRef<Record<string, () => void>>({});
+  // Counts each chat's starts, so one that was cancelled can tell its late answer is stale.
+  const startGen = useRef<Record<string, number>>({});
   // Whether the right pane is hidden, per project like the mode. The old app-wide setting is the default.
   const [collapsedDefault, setCollapsedDefault] = usePersistentState("review.collapsed", false);
   const [collapsedBy, setCollapsedBy] = usePersistentState<Record<string, boolean>>("review.collapsedByFolder", {});
@@ -226,6 +228,13 @@ export default function App() {
     forget(slot);
   };
 
+  // Gives up on a start that never answers: whatever it says later is ignored, and the banner offers another go.
+  const cancelStart = (slot: string) => {
+    startGen.current[slot] = (startGen.current[slot] ?? 0) + 1;
+    api.closeSession(slot).catch(() => {});
+    to(slot)({ type: "failed", text: "Claude didn't start." });
+  };
+
   const closeChat = (slot: string) => {
     if (slot === active || !chats.slots[slot]) return;
     forget(slot);
@@ -267,13 +276,16 @@ export default function App() {
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode });
     if (!quiet) relaunch.current[slot] = () => startIn(slot, folder);
+    const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
     api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder) }).then(
       () => {
+        if (startGen.current[slot] !== gen) return;
         delete relaunch.current[slot];
         setLastFolder(folder);
         to(slot)({ type: "session_ready" });
       },
       (e) => {
+        if (startGen.current[slot] !== gen) return;
         if (!quiet) return to(slot)({ type: "failed", text: errText(e) });
         setLastFolder(null);
         to(slot)({ type: "folder_cleared" });
@@ -338,14 +350,16 @@ export default function App() {
     to(slot)(reuse ? { type: "restarting" } : { type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode, flavourStart });
     relaunch.current[slot] = () => resumeIn(slot, folder, sessionId, reuse);
+    const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
     api
       .openSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder) }, sessionId)
       .then((events) => {
+        if (startGen.current[slot] !== gen) return;
         delete relaunch.current[slot];
         to(slot)({ type: "history_loaded", sessionId, events });
         to(slot)({ type: "session_ready" });
       })
-      .catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+      .catch((e) => startGen.current[slot] === gen && to(slot)({ type: "failed", text: errText(e) }));
   };
 
   // The chats that were open when Lantern last closed, offered back at launch until restored, dismissed, or a message
@@ -850,6 +864,7 @@ export default function App() {
         sendIn(active, text);
       }}
       onStop={stop}
+      onCancelStart={() => cancelStart(active)}
       onRun={(command) => {
         if (hero) setOffer([]);
         runShell(active, command);
