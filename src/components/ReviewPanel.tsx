@@ -10,7 +10,7 @@ import { Counts } from "./EditLine";
 import { DocIcon } from "./icons";
 import { FilesTab } from "./FilesTab";
 import { AgentsTab } from "./AgentsTab";
-import { SummaryTab } from "./SummaryTab";
+import { SummaryTab, type ExportDoc } from "./SummaryTab";
 import type { StepsSummary } from "../lib/stepsSummary";
 import type { AgentTree } from "../lib/agents";
 import type { AgentGraph } from "../lib/agentGraph";
@@ -50,7 +50,7 @@ interface Props {
   /** The Agents tab: the latest turn's agent tree, cost per model, and `openKey`, changed to bring the tab up. */
   agents?: { tree: AgentTree; graph: AgentGraph; usage: ModelCost[]; openKey: number };
   /** The Summary tab, in a Step-by-step chat that has a step to show: the plan so far, and how to open a row's page. */
-  summary?: { slot: string; data: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void };
+  summary?: { slot: string; data: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void; doc?: ExportDoc };
   selected: string | null;
   follow: boolean;
   refreshKey: number;
@@ -148,7 +148,7 @@ export function ReviewPanel(props: Props) {
       )}
       {tab === "summary" && props.summary && (
         <div className="tab-body">
-          <SummaryTab slot={props.summary.slot} summary={props.summary.data} changed={props.summary.changed} running={props.summary.running} onOpenPage={props.summary.onOpenPage} />
+          <SummaryTab slot={props.summary.slot} summary={props.summary.data} changed={props.summary.changed} running={props.summary.running} onOpenPage={props.summary.onOpenPage} doc={props.summary.doc} />
         </div>
       )}
       {tab === "agents" && props.agents && (

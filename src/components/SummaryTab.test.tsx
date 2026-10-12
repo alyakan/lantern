@@ -35,6 +35,27 @@ describe("SummaryTab", () => {
     expect(within(items[1]).getByRole("button")).toHaveAttribute("aria-current", "step");
   });
 
+  it("offers Export only when it has the pages to export from, and exports the plan with the files each step changed", async () => {
+    const rows = [row({ id: "a", label: "Step 1", title: "Name the statuses", built: true, range: { from: 4, to: 4 }, changes: true, page: "p1" })];
+    const view = show({ headline: "Plan: 1 step · all built", rows });
+    expect(screen.queryByRole("button", { name: /Export/ })).not.toBeInTheDocument();
+    view.unmount();
+
+    changeSummary.mockResolvedValue([{ path: "/work/acme/src/a.ts", created: false, added: 3, removed: 1 }]);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(<SummaryTab slot="s1" summary={{ headline: "Plan: 1 step · all built", rows }} changed={[]} running={false} onOpenPage={vi.fn()} doc={{ pages: [], title: "My chat", folder: "/work/acme" }} />);
+    await screen.findByText("a.ts");
+    fireEvent.click(screen.getByRole("button", { name: /Export/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy as Markdown" }));
+    await screen.findByText("Copied");
+    const text = writeText.mock.calls[0][0] as string;
+    expect(text).toContain("# My chat");
+    expect(text).toContain("**Plan: 1 step · all built**");
+    expect(text).toContain("| Step 1 | Name the statuses |");
+    expect(text).toContain("**Files:** `src/a.ts` +3 −1");
+  });
+
   it("shows a step's code as code, and drops a backtick a cut left open", () => {
     show({ headline: null, rows: [row({ title: "Rename `fetchJson`", gist: "`src/client/retry.ts:1`: added RETRYABLE and `wait" })] });
     expect(screen.getByText("fetchJson").tagName).toBe("CODE");

@@ -410,6 +410,35 @@ pub fn write_file(root: &Path, path: &Path, text: &str, expected: Option<&str>) 
     Ok(Written::Saved { previous: disk, changed: true })
 }
 
+/// Saves an exported document at `path`, a place the user picked in the save dialog: not inside the chat's folder, so
+/// not for `write_file`. Only a markdown file, so this can't be pointed at anything else (a dotfile, a script), and it
+/// replaces what is there whole, through a temporary file beside it so a crash can't leave half a document.
+pub fn write_export(path: &Path, text: &str) -> Result<(), String> {
+    if !path.is_absolute() {
+        return Err("That isn't a full path.".into());
+    }
+    if !path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown")) {
+        return Err("An export is saved as a .md file.".into());
+    }
+    if std::fs::metadata(path).is_ok_and(|m| !m.is_file()) {
+        return Err("That isn't a regular file.".into());
+    }
+    let (tmp, mut file) = create_temp(path).map_err(|e| format!("Couldn't save: {e}"))?;
+    let mut write = || -> std::io::Result<()> {
+        use std::io::Write;
+        file.write_all(text.as_bytes())?;
+        file.flush()?;
+        if let Ok(meta) = std::fs::metadata(path) {
+            std::fs::set_permissions(&tmp, meta.permissions())?;
+        }
+        std::fs::rename(&tmp, path)
+    };
+    write().map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("Couldn't save: {e}")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -681,5 +710,30 @@ mod tests {
         assert!(["from a\n", "from b\n"].contains(&fs::read_to_string(&f).unwrap().as_str()));
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1, "no temporary file left behind");
     }
-}
 
+    #[test]
+    fn export_writes_a_markdown_file_anywhere_the_user_picked_and_replaces_an_old_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("plan.md");
+        write_export(&f, "# One\n").unwrap();
+        assert_eq!(fs::read_to_string(&f).unwrap(), "# One\n");
+        write_export(&f, "# Two\n").unwrap();
+        assert_eq!(fs::read_to_string(&f).unwrap(), "# Two\n");
+        write_export(&dir.path().join("Notes.MARKDOWN"), "x").unwrap();
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2, "no temporary file left behind");
+    }
+
+    #[test]
+    fn export_refuses_other_kinds_of_file_relative_paths_and_missing_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(write_export(&dir.path().join(".zshrc"), "x").is_err());
+        assert!(write_export(&dir.path().join("run.sh"), "x").is_err());
+        assert!(write_export(&dir.path().join("noext"), "x").is_err());
+        assert!(write_export(Path::new("plan.md"), "x").is_err());
+        assert!(write_export(&dir.path().join("missing").join("plan.md"), "x").is_err());
+        let folder = dir.path().join("plan.md");
+        fs::create_dir(&folder).unwrap();
+        assert!(write_export(&folder, "x").is_err());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+}

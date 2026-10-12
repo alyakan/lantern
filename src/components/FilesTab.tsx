@@ -5,6 +5,7 @@ import type { DirEntry, FoundFile, TextResults } from "../types";
 import { api } from "../api";
 import { useSlot } from "../lib/slot";
 import { relativeTo } from "../lib/diff";
+import { pathBreaks } from "../lib/fileLinks";
 import { discard, stashKey } from "../lib/editStash";
 import { Counts } from "./EditLine";
 import { DocIcon, FolderIcon, FolderOpenIcon } from "./icons";
@@ -174,12 +175,12 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
   if (preview) {
     return (
       <>
-        <div className="review-bar">
+        <div className="review-bar files-bar">
           <button className="icon" aria-label="Back to files" title="Back to files" onClick={() => leave(() => setPreview(null))}>
             ‹
           </button>
-          <span className="picker-path preview-path" title={preview}>
-            {relativeTo(preview, folder)}
+          <span className="preview-path" title={preview}>
+            {pathBreaks(relativeTo(preview, folder))}
           </span>
           {unsaved && <span className="tag unsaved">● unsaved</span>}
           <div className="spacer" />

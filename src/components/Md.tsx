@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { markdownComponents, splitMention, useFileLinks } from "../lib/fileLinks";
+import { markdownComponents, pathBreaks, splitMention, useFileLinks } from "../lib/fileLinks";
 import { blockLanguage, CALLOUT_LABEL, filePaths, languageHint, languageName, parsePlanStep, rehypeCallouts, type CalloutKind, type PlanStep } from "../lib/markdown";
 import { lineKind } from "../lib/diff";
 import { usePrefersDark } from "../lib/theme";
@@ -22,7 +22,7 @@ function FilePath({ path }: { path: string }) {
   const links = useFileLinks();
   const mention = splitMention(path);
   const file = mention && links ? links.resolve(mention.path) : null;
-  const code = <code>{path}</code>;
+  const code = <code>{pathBreaks(path)}</code>;
   if (!file || !links) return code;
   return (
     <button className="file-link" title={`Open ${path}`} onClick={() => links.open(file, mention!.line)}>

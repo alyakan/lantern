@@ -780,10 +780,11 @@ export default function App() {
   const graph = useMemo(() => agentGraph(state.items, treeOpts), [state.items, state.backgroundRuns, treeOpts.live, treeOpts.mainModel, treeOpts.advisor]);
   // The Summary tab: the plan so far, from the same pages the Step-by-step view shows. A row asks the view to open its
   // page; the chat it was for is kept so a request can't land in another one.
+  const stepPages = useMemo(() => (stepsView ? pagesOf(state.items) : null), [stepsView, state.items]);
   const stepsSummary = useMemo(() => {
-    const summary = stepsView ? summarize(pagesOf(state.items)) : null;
+    const summary = stepPages ? summarize(stepPages) : null;
     return summary && summary.rows.length > 0 ? summary : null;
-  }, [stepsView, state.items]);
+  }, [stepPages]);
   const [pageJump, setPageJump] = useState<{ slot: string; page: string; key: number } | null>(null);
   const [agentsOpenKey, setAgentsOpenKey] = useState(0);
   const agentsShown = useRef<Set<string>>(new Set());
@@ -930,7 +931,7 @@ export default function App() {
           right={
             <ReviewPanel
               agents={state.folder ? { tree, graph, usage: state.modelUsage, openKey: agentsOpenKey } : undefined}
-              summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: (page) => setPageJump((j) => ({ slot: active, page, key: (j?.key ?? 0) + 1 })) } : undefined}
+              summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: (page) => setPageJump((j) => ({ slot: active, page, key: (j?.key ?? 0) + 1 })), doc: { pages: stepPages ?? [], title: chatTitle(state, titles), folder: state.folder } } : undefined}
               folder={state.folder}
               ready={state.status !== "starting"}
               files={shownFiles}
