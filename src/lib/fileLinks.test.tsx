@@ -2,10 +2,19 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import Markdown from "react-markdown";
 import { api } from "../api";
-import { FileLinksProvider, markdownComponents, splitMention } from "./fileLinks";
+import { FileLinksProvider, markdownComponents, pathBreaks, splitMention } from "./fileLinks";
 
 vi.mock("../api", () => ({ api: { resolveFiles: vi.fn() } }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(() => Promise.resolve()) }));
+
+describe("pathBreaks", () => {
+  it("keeps the path's text whole and lets it break after each folder", () => {
+    const { container } = render(<code>{pathBreaks("src/server/app.ts")}</code>);
+    expect(container.textContent).toBe("src/server/app.ts");
+    expect(container.querySelectorAll("wbr")).toHaveLength(3);
+    expect(container.querySelector("code")!.innerHTML).toBe("src/<wbr>server/<wbr>app.ts<wbr>");
+  });
+});
 
 describe("splitMention", () => {
   it("takes paths with an extension, and a line", () => {

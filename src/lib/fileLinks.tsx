@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { api } from "../api";
 import { ExternalLink } from "../components/ExternalLink";
 
@@ -117,6 +117,16 @@ export function FileAwareLink(props: ComponentProps<"a"> & { node?: unknown }) {
     </FileButton>
   );
 }
+
+/** A path that may break after each folder, so a long one wraps at a slash instead of running out of its box. */
+export const pathBreaks = (path: string) =>
+  path.split("/").map((part, i, all) => (
+    <Fragment key={i}>
+      {part}
+      {i < all.length - 1 && "/"}
+      <wbr />
+    </Fragment>
+  ));
 
 /** The markdown components for Claude's text. */
 export const markdownComponents = { a: FileAwareLink, code: FileCode };
