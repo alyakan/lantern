@@ -443,11 +443,9 @@ fn jest(lines: &[&str]) -> Option<Parsed> {
                 Some((s, n)) => (Some(s.to_string()), n.to_string()),
                 None => (file.clone(), title.clone()),
             };
-            let at = match p.cases.iter().rposition(|x| x.name == name) {
-                Some(at) => {
-                    p.cases[at].status = CaseStatus::Failed;
-                    at
-                }
+            // Its own ✕ line, in this file: a passing test of the same name elsewhere (or earlier here) isn't it.
+            let at = match p.cases.iter().rposition(|x| x.name == name && x.suite == file && x.status == CaseStatus::Failed && x.message.is_none()) {
+                Some(at) => at,
                 None => p.case(&name, suite, CaseStatus::Failed, None),
             };
             p.cases[at].location = js_location(&body);
@@ -505,11 +503,10 @@ fn vitest(lines: &[&str]) -> Option<Parsed> {
                 None => (c[1].to_string(), c[2].to_string()),
             };
             let body = block(lines, i + 1, |l| VITEST_FAIL.is_match(l) || l.trim_start().starts_with("⎯"));
-            let at = match p.cases.iter().rposition(|x| x.name == name) {
-                Some(at) => {
-                    p.cases[at].status = CaseStatus::Failed;
-                    at
-                }
+            // The ✕ line carries the describe path without the file: match on that, and on a failure not yet given one.
+            let describe = c[2].rsplit_once(" > ").map(|(s, _)| s.to_string());
+            let at = match p.cases.iter().rposition(|x| x.name == name && x.suite == describe && x.status == CaseStatus::Failed && x.message.is_none()) {
+                Some(at) => at,
                 None => p.case(&name, Some(suite), CaseStatus::Failed, None),
             };
             p.cases[at].location = body.iter().find_map(|l| VITEST_LOC.captures(l)).map(|m| format!("{}:{}", &m[1], &m[2]));
@@ -560,8 +557,13 @@ fn playwright(lines: &[&str]) -> Option<Parsed> {
             }
         } else if let Some(c) = PW_FAILURE.captures(line) {
             let body = block(lines, i + 1, |l| PW_FAILURE.is_match(l) || PW_SUMMARY.is_match(l));
+            // The ✘ line of this test has the same file:line; a nested test's name there is "Suite › name", not this one.
             let name = c[2].rsplit(" › ").next().unwrap_or(&c[2]).to_string();
-            let at = p.failed_case(&name, None);
+            let file = c[1].rsplit_once(':').map_or(c[1].to_string(), |x| x.0.to_string());
+            let at = match p.cases.iter().rposition(|x| x.location.as_deref() == Some(&c[1])) {
+                Some(at) => at,
+                None => p.failed_case(&name, Some(file)),
+            };
             p.cases[at].location = Some(c[1].to_string());
             let message: Vec<&str> = body.iter().map(|l| l.trim()).filter(|l| !l.is_empty()).take(40).collect();
             p.cases[at].message = Some(message.join("\n"));
@@ -832,6 +834,29 @@ mod tests {
         assert_eq!(f[0].name, "rejectsEmpty()");
         assert_eq!(f[0].location.as_deref(), Some("ParserTests.swift:21"));
         assert!(f[0].message.as_deref().unwrap().starts_with("Expectation failed"));
+    }
+
+    #[test]
+    fn a_failure_lands_on_its_own_test_not_a_same_named_one_elsewhere() {
+        let passed = |r: &TestRun, suite: &str| r.cases.iter().any(|c| c.name == "works" && c.suite.as_deref() == Some(suite) && c.status == CaseStatus::Passed && c.message.is_none());
+        // Jest, one file passes "works" and another fails it, its failure reported after the pass.
+        let r = run("npx jest", "PASS src/b.test.ts\n  ✓ works (2 ms)\nFAIL src/a.test.ts\n  ● Suite › works\n\n    boom\n\n      at Object.<anonymous> (src/a.test.ts:9:5)\n\nTest Suites: 1 failed, 1 passed, 2 total\nTests:       1 failed, 1 passed, 2 total\nTime:        1 s\n");
+        assert!(passed(&r, "src/b.test.ts"));
+        assert!(failed(&r).iter().any(|c| c.message.as_deref().is_some_and(|m| m.contains("boom")) && c.location.as_deref() == Some("src/a.test.ts:9")));
+        // Jest, one file: the failing "works" is under the first describe and the passing one under the second.
+        let r = run("npx jest", "FAIL src/c.test.ts\n  A\n    ✕ works (1 ms)\n  B\n    ✓ works (1 ms)\n\n  ● A › works\n\n    boom\n\n      at Object.<anonymous> (src/c.test.ts:4:5)\n\nTest Suites: 1 failed, 1 total\nTests:       1 failed, 1 passed, 2 total\n");
+        assert!(passed(&r, "src/c.test.ts"));
+        assert_eq!(failed(&r).iter().filter(|c| c.message.as_deref().is_some_and(|m| m.contains("boom"))).count(), 1);
+        // Vitest: the failure's describe path picks its own ×, not the passing "store > works" listed after it.
+        let r = run("npx vitest run", " ❯ src/a.test.ts (1 test | 1 failed) 5ms\n   × other > works 4ms\n ✓ src/b.test.ts (1 test) 3ms\n   ✓ store > works 3ms\n\n FAIL  src/a.test.ts > other > works\nAssertionError: nope\n ❯ src/a.test.ts:12:4\n\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯ [1/1]⎯\n\n Test Files  1 failed | 1 passed (2)\n      Tests  1 failed | 1 passed (2)\n   Duration  1.00s\n");
+        let f = failed(&r);
+        assert_eq!((f.len(), f[0].suite.as_deref(), f[0].message.as_deref()), (1, Some("other"), Some("AssertionError: nope")));
+        assert!(r.cases.iter().any(|c| c.suite.as_deref() == Some("store") && c.status == CaseStatus::Passed));
+        // Playwright: the same test name in two specs; the failure's file:line picks its own ✘.
+        let r = run("npx playwright test", "Running 2 tests using 1 worker\n\n  ✘  1 [chromium] › tests/a.spec.ts:5:3 › Suite › logs in (1s)\n  ✓  2 [chromium] › tests/b.spec.ts:7:3 › logs in (2s)\n\n  1) [chromium] › tests/a.spec.ts:5:3 › Suite › logs in ──────────\n\n    Error: boom\n\n  1 failed\n  1 passed (3s)\n");
+        let f = failed(&r);
+        assert_eq!((f.len(), f[0].suite.as_deref(), f[0].location.as_deref(), f[0].message.as_deref()), (1, Some("tests/a.spec.ts"), Some("tests/a.spec.ts:5"), Some("Error: boom")));
+        assert!(r.cases.iter().any(|c| c.suite.as_deref() == Some("tests/b.spec.ts") && c.status == CaseStatus::Passed && c.message.is_none()));
     }
 
     /// Opt-in check against the real transcripts on this machine: every Bash step whose command mentions tests, what
