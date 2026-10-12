@@ -15,6 +15,12 @@ describe("ShellBlock", () => {
     expect(onStop).toHaveBeenCalledWith("s1");
   });
 
+  it("announces that it's running, and its output can be scrolled from the keyboard", () => {
+    render(<ShellBlock item={item({ output: "ready\n" })} />);
+    expect(screen.getByRole("img", { name: "Running" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Command output" })).toHaveAttribute("tabindex", "0");
+  });
+
   it("says how it ended", () => {
     const { rerender, container } = render(<ShellBlock item={item({ status: "failed", code: 1, endedAt: 3_000 })} />);
     expect(screen.getByText("exit 1")).toBeInTheDocument();

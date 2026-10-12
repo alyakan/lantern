@@ -255,6 +255,11 @@ describe("MessageInput", () => {
     expect(onStop).toHaveBeenCalledOnce();
   });
 
+  it("names the message box for screen readers", () => {
+    render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} />);
+    expect(screen.getByRole("textbox", { name: "Message to Claude" })).toBeInTheDocument();
+  });
+
   it("is disabled while starting, with a way out if the chat gives one", () => {
     const { rerender } = render(<MessageInput status="starting" onSend={() => {}} onStop={() => {}} />);
     expect(screen.getByPlaceholderText("Starting Claude…")).toBeDisabled();

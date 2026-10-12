@@ -128,7 +128,11 @@ function StepRow({ step, folder, ...handlers }: { step: Step; folder: string | n
           <ChatStream items={step.children} folder={folder} live={step.status === "running"} {...handlers} />
         </div>
       )}
-      {open && !hasChildren && step.output && <pre className="step-output">{step.output}</pre>}
+      {open && !hasChildren && step.output && (
+        <pre className="step-output" role="region" aria-label="Step output" tabIndex={0}>
+          {step.output}
+        </pre>
+      )}
     </div>
   );
 }

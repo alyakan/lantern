@@ -627,13 +627,17 @@ function StepCommand({ command, run }: { command: ToolItem; run?: BackgroundRun 
   return (
     <div className={`step-command ${status}${run ? " background" : ""}`}>
       <button className="step-command-line" aria-expanded={open} disabled={!command.output} onClick={() => setOpen(!open)} title={run?.summary}>
-        <span className="step-command-status" aria-label={status === "error" ? "failed" : status === "running" ? "running" : "done"}>
+        <span className="step-command-status" role="img" aria-label={status === "error" ? "failed" : status === "running" ? "running" : "done"}>
           {status === "running" ? <span className="spinner" aria-hidden /> : status === "error" ? "✕" : "✓"}
         </span>
         <code className="step-command-text">{command.summary}</code>
         {run && <span className="step-command-note">{run.status === "running" ? "in background" : run.status === "completed" ? "finished in background" : `${run.status} in background`}</span>}
       </button>
-      {open && command.output && <pre className="step-output step-command-output">{command.output}</pre>}
+      {open && command.output && (
+        <pre className="step-output step-command-output" role="region" aria-label="Command output" tabIndex={0}>
+          {command.output}
+        </pre>
+      )}
     </div>
   );
 }

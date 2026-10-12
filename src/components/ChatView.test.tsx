@@ -45,6 +45,11 @@ describe("ChatView", () => {
     expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
+  it("announces that Claude is thinking while it runs", () => {
+    render(<ChatView state={{ ...initialState, status: "running", folder: "/p", items }} onDecide={() => {}} onOpenFile={() => {}} />);
+    expect(screen.getByRole("status", { name: "Claude is thinking" })).toBeInTheDocument();
+  });
+
   it("goes to the end when you send, even if you'd scrolled up from it", () => {
     const props = { onDecide: () => {}, onOpenFile: () => {} };
     const { container, rerender } = render(<ChatView state={{ ...initialState, status: "idle", folder: "/p", items }} {...props} />);

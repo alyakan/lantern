@@ -63,7 +63,7 @@ export function ChatView({ state, ...handlers }: { state: State } & StreamHandle
         {state.items.length === 0 && !state.thinking && <div className="empty">What should Claude work on?</div>}
         <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} {...handlers} />
         {thinkingLine && (
-          <div className="activity live thinking-line" aria-label="Claude is thinking">
+          <div className="activity live thinking-line" role="status" aria-label="Claude is thinking">
             <span className="activity-line">
               <span className="spinner" aria-hidden />
               <span className="activity-text">{workingVerb(prompt?.id ?? "start")}</span>

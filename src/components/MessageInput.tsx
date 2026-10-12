@@ -361,7 +361,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           )}
           <textarea
             ref={area}
-            aria-label={terminal ? "Shell command" : undefined}
+            aria-label={terminal ? "Shell command" : "Message to Claude"}
             spellCheck={!terminal}
             // WebKit otherwise applies macOS's "Capitalize words automatically" and autocorrect to what you type.
             autoCapitalize="off"
