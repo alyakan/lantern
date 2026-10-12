@@ -62,7 +62,8 @@ export function Hud({ event, onOpenChat }: { event: HudEvent | null; onOpenChat?
     setShown(null);
     if (slot) onOpenChat?.(slot);
   };
-  const onKey = (e: KeyboardEvent) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), open());
+  // Only the toast's own keys: Enter or Space on its × or sound button is theirs.
+  const onKey = (e: KeyboardEvent) => e.target === e.currentTarget && (e.key === "Enter" || e.key === " ") && (e.preventDefault(), open());
   return (
     <div
       key={shown.key}
