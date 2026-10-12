@@ -22,9 +22,22 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: |
-          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          if [ "$TAG" != "v$version" ]; then
-            echo "::error::Tag $TAG doesn't match the app version $version in src-tauri/tauri.conf.json"
+          # Every file that carries the version has to agree with the tag, or the build ships under the wrong number.
+          version=${TAG#v}
+          mismatches=()
+          check() {
+            if [ "$2" != "$version" ]; then
+              mismatches+=("$1 says $2")
+            fi
+          }
+          check src-tauri/tauri.conf.json "$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          check package.json "$(node -p "require('./package.json').version")"
+          check src-tauri/Cargo.toml "$(awk '/^\[package\]/{p = 1; next} /^\[/{p = 0} p && /^version = /{gsub(/"/, ""); print $3; exit}' src-tauri/Cargo.toml)"
+          check src-tauri/Cargo.lock "$(awk '/^name = "lantern"$/{getline; gsub(/"/, ""); print $3; exit}' src-tauri/Cargo.lock)"
+          if [ ${#mismatches[@]} -gt 0 ]; then
+            for m in "${mismatches[@]}"; do
+              echo "::error::$m; the tag $TAG needs version $version"
+            done
             exit 1
           fi
 
