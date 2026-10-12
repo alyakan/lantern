@@ -1,5 +1,6 @@
 import type { ChatItem } from "../store";
 import { basename } from "./diff";
+import { QUESTION_TOOL, readQuestions } from "./questions";
 
 export interface Attention {
   /** Changes whenever there is something new to tell the user; the same key is never announced twice. */
@@ -30,6 +31,12 @@ export function attentionFor(items: ChatItem[], folder: string | null, describe:
     const input = (last.input ?? {}) as { plan?: string; steps?: string };
     if (last.toolName === "ExitPlanMode") return { key: last.id, kind: "waiting", title, body: `Plan ready for review: ${firstLine(input.plan ?? "")}` };
     if (last.toolName === "Reproduce") return { key: last.id, kind: "waiting", title, body: `Reproduce the bug: ${firstLine(input.steps ?? "")}` };
+    if (last.toolName === QUESTION_TOOL) {
+      // Claude's question: the question itself, not the tool it asks with.
+      const [first, ...more] = readQuestions(last.input);
+      if (first) return { key: last.id, kind: "waiting", title, body: `Question: ${firstLine(first.question)}${more.length ? ` (+${more.length} more)` : ""}` };
+      return { key: last.id, kind: "waiting", title, body: "Has a question for you" };
+    }
     return { key: last.id, kind: "waiting", title, body: `Wants to use ${last.toolName}: ${firstLine(describe(last.input))}` };
   }
   if (last?.type !== "turn") return null;

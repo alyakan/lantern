@@ -272,4 +272,78 @@ describe("MessageInput", () => {
       expect(onSend).toHaveBeenCalledWith("!important");
     });
   });
+
+  describe("big pastes", () => {
+    const lines = (n: number) => Array.from({ length: n }, (_, i) => `line ${i + 1}`).join("\n");
+    // fireEvent returns false when the page cancelled the event: the paste isn't left to the browser.
+    const paste = (box: HTMLElement, text: string) => !fireEvent.paste(box, { clipboardData: { getData: () => text } });
+    const box = () => screen.getByPlaceholderText("Ask Claude…") as HTMLTextAreaElement;
+
+    it("goes in as a placeholder and is sent in full, while a small paste is left to the browser", () => {
+      const onSend = vi.fn();
+      render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} />);
+      expect(paste(box(), lines(5))).toBe(false);
+      expect(paste(box(), lines(40))).toBe(true);
+      expect(box()).toHaveValue("[Pasted text #1 · 40 lines]");
+      fireEvent.keyDown(box(), { key: "Enter" });
+      expect(onSend).toHaveBeenCalledWith(lines(40));
+      expect(box()).toHaveValue("");
+    });
+
+    it("goes where the caret is, between what you typed, and each paste has its own number", () => {
+      const onSend = vi.fn();
+      render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} />);
+      fireEvent.change(box(), { target: { value: "why does\nfail?" } });
+      box().setSelectionRange(8, 8);
+      paste(box(), lines(8));
+      expect(box()).toHaveValue("why does[Pasted text #1 · 8 lines]\nfail?");
+      box().setSelectionRange(box().value.length, box().value.length);
+      paste(box(), `${lines(7)}\r\nwindows`);
+      expect(box().value.endsWith("fail?[Pasted text #2 · 8 lines]")).toBe(true);
+      fireEvent.keyDown(box(), { key: "Enter" });
+      expect(onSend).toHaveBeenCalledWith(`why does${lines(8)}\nfail?${lines(7)}\nwindows`);
+    });
+
+    it("is taken away whole by Backspace right after it, and then isn't sent", () => {
+      const onSend = vi.fn();
+      render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} />);
+      fireEvent.change(box(), { target: { value: "see " } });
+      box().setSelectionRange(4, 4);
+      paste(box(), lines(9));
+      fireEvent.keyDown(box(), { key: "Backspace" });
+      expect(box()).toHaveValue("see ");
+      fireEvent.keyDown(box(), { key: "Enter" });
+      expect(onSend).toHaveBeenCalledWith("see");
+    });
+
+    it("is kept with the draft, so a box opened again has the placeholder and still sends the text", () => {
+      const save = vi.fn();
+      const first = render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} draft={{ initial: "", save }} />);
+      paste(box(), lines(12));
+      const saved = save.mock.calls[save.mock.calls.length - 1][0] as string;
+      expect(saved).toContain("[Pasted text #1 · 12 lines]");
+      first.unmount();
+      const onSend = vi.fn();
+      render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} draft={{ initial: saved, save }} />);
+      expect(box()).toHaveValue("[Pasted text #1 · 12 lines]");
+      fireEvent.keyDown(box(), { key: "Enter" });
+      expect(onSend).toHaveBeenCalledWith(lines(12));
+    });
+
+    it("is queued in full while Claude works", () => {
+      const set = vi.fn();
+      render(<MessageInput status="running" onSend={() => {}} onStop={() => {}} queue={{ items: [], set }} />);
+      const queueBox = screen.getByPlaceholderText("Queue a message…");
+      paste(queueBox, lines(10));
+      fireEvent.keyDown(queueBox, { key: "Enter" });
+      expect(set).toHaveBeenCalledWith([lines(10)]);
+    });
+
+    it("is not made in a shell command", () => {
+      render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} onRun={() => {}} />);
+      fireEvent.change(box(), { target: { value: "!echo " } });
+      const command = screen.getByLabelText("Shell command");
+      expect(paste(command, lines(20))).toBe(false);
+    });
+  });
 });

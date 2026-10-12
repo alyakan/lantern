@@ -22,6 +22,7 @@ The terminal is a fine place to talk to Claude Code, but a hard place to follow 
 - **/ and @ anywhere.** Type `/` anywhere in a message for skills, commands and MCP prompts (sorted into sections, with where each comes from), and `@` to point Claude at a file. MCP tool calls in the chat name their server ("Linear · create issue").
 - **Edit files.** The Files tab is an editor with code completion (types and members, hover docs, syntax errors for TypeScript, JavaScript, JSON, CSS and HTML; words from the file elsewhere): change a file, ⌘S to save. The change shows up in the Changes tab like Claude's, and if Claude (or git) changes the file while you have unsaved edits, you choose between your version and the one on disk before anything is overwritten.
 - **Read markdown.** A `.md` file opens as a styled document (tables, code, callouts, task lists); **Edit** switches to the editor, and the preview shows your unsaved edits too.
+- **Long pastes.** Pasting more than a few lines into the box shows `[Pasted text #1 · 120 lines]` instead of the text; the whole text is sent. Your sent messages show at most three lines, with **Show more** for the rest.
 - **Search.** ⌘P finds files, ⌘⇧F searches text (regex, case, whole word), ⌘F searches inside an open file or diff.
 - **History and sessions.** Pick up any earlier Claude Code session for a folder, including ones started in the terminal. Several chats can run side by side, with a notice when one finishes or needs you. The chats open when Lantern closes are offered back the next time it opens.
 

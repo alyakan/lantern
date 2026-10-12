@@ -23,6 +23,16 @@ describe("attentionFor", () => {
     expect(attentionFor([user, ask("allowed")], "/p", describeInput)).toBeNull();
   });
 
+  it("announces Claude's question as the question, not as a tool it wants to use", () => {
+    const ask = (input: unknown): ChatItem => ({ type: "permission", id: "q1", toolName: "AskUserQuestion", input, decision: null });
+    const one = { questions: [{ question: "Which database should it use?", header: "Database", options: [{ label: "SQLite", description: "" }], multiSelect: false }] };
+    expect(attentionFor([user, ask(one)], "/p", describeInput)).toEqual({ key: "q1", kind: "waiting", title: "Claude · p", body: "Question: Which database should it use?" });
+    const many = { questions: [...one.questions, { question: "Add tests?", header: "Tests", options: [], multiSelect: false }, { question: "Docs?", header: "Docs", options: [], multiSelect: false }] };
+    expect(attentionFor([user, ask(many)], "/p", describeInput)?.body).toBe("Question: Which database should it use? (+2 more)");
+    // Input that has no readable question still isn't "wants to use AskUserQuestion".
+    expect(attentionFor([user, ask({})], "/p", describeInput)?.body).toBe("Has a question for you");
+  });
+
   it("stays quiet mid-turn", () => {
     expect(attentionFor([user, { type: "assistant", id: "m1", text: "working" }], "/p", describeInput)).toBeNull();
     expect(attentionFor([], "/p", describeInput)).toBeNull();
