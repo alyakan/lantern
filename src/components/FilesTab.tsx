@@ -103,7 +103,8 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
     const q = query.trim();
     if (mode !== "text" || !q || !ready) return setText({ results: null, error: null });
     let live = true;
-    setText((t) => ({ ...t, error: null }));
+    // The last query's matches don't stand for this one: they go until these come back.
+    setText({ results: null, error: null });
     // Reading every file takes a moment, so wait for a pause in typing; a newer search cancels this one.
     const wait = setTimeout(() => {
       api.searchText(slot, { pattern: query, case_sensitive: caseSensitive, whole_word: wholeWord, regex }).then(
@@ -120,6 +121,7 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
     const q = query.trim();
     if (mode !== "files" || !q || !ready) return setFound(null);
     let live = true;
+    setFound(null);
     // A short pause between keystrokes before asking; the backend keeps the file list, so each search is quick.
     const wait = setTimeout(() => {
       api.findFiles(slot, q).then(
@@ -141,23 +143,36 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
 
   const load = (dir: string) =>
     api.listDir(slot, dir).then(
-      (entries) => setChildren((c) => ({ ...c, [dir]: entries })),
-      (e) => dir === folder && setError(String(e)),
+      (entries) => {
+        setChildren((c) => ({ ...c, [dir]: entries }));
+        if (dir === folder) setError(null);
+      },
+      (e) => {
+        if (dir === folder) setError(String(e));
+        // A folder that has gone (removed outside Lantern) drops out, rather than keeping its old contents.
+        else setChildren(({ [dir]: _gone, ...rest }) => rest);
+      },
     );
 
-  // A new folder starts from a collapsed tree.
+  // A new folder starts from a collapsed tree. Leaving the open file for it asks about its unsaved edits; a new chat
+  // keeps them (editStash), as switching chats always has.
+  const chat = useRef(slot);
   useEffect(() => {
+    const sameChat = chat.current === slot;
+    chat.current = slot;
     setChildren({});
     setExpanded(new Set());
-    setPreview(null);
     setError(null);
+    if (sameChat) leave(() => setPreview(null));
+    else setPreview(null);
   }, [folder, slot]);
 
-  // Reload whatever is visible after each edit so files Claude creates show up.
+  // Reload after each edit so files Claude creates show up: every folder read so far, open or not, since a collapsed
+  // one's contents are shown again as soon as it's expanded.
   useEffect(() => {
     if (!folder || !ready) return;
     load(folder);
-    expanded.forEach((dir) => dir.startsWith(folder + "/") && load(dir));
+    Object.keys(children).forEach((dir) => dir !== folder && dir.startsWith(folder + "/") && load(dir));
   }, [folder, ready, refreshKey, slot]);
 
   const toggle = (dir: string) => {

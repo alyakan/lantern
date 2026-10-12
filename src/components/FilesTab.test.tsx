@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { FilesTab } from "./FilesTab";
 import { api } from "../api";
+import type { FoundFile } from "../types";
+import { SlotContext } from "../lib/slot";
 
 // The editor, reduced to what FilesTab hears from it: a button that says there are unsaved edits.
 vi.mock("./FilePreview", () => ({
@@ -31,6 +33,8 @@ const base = { folder: "/p", ready: true, changed, refreshKey: 0, onOpenChange: 
 describe("FilesTab", () => {
   beforeEach(() => {
     vi.mocked(api.listDir).mockReset().mockImplementation(async (_slot: string, dir: string) => TREE[dir] ?? []);
+    vi.mocked(api.findFiles).mockReset();
+    vi.mocked(api.searchText).mockReset();
     ask.mockReset();
   });
 
@@ -137,5 +141,73 @@ describe("FilesTab", () => {
     expect(screen.getByText("2 more in this file")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /class User/ }));
     expect(await screen.findByText("preview of /p/src/a.ts at 7")).toBeInTheDocument();
+  });
+
+  it("shows a file Claude made in a collapsed folder once the folder is expanded again", async () => {
+    const { rerender } = render(<FilesTab {...base} />);
+    fireEvent.click(await screen.findByRole("button", { name: /src/ }));
+    expect(await screen.findByText("a.ts")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /src/ }));
+    TREE["/p/src"] = [...TREE["/p/src"], { name: "new.ts", path: "/p/src/new.ts", dir: false }];
+    try {
+      rerender(<FilesTab {...base} refreshKey={1} />);
+      // The folder and the expanded-then-collapsed one are both read again.
+      await waitFor(() => expect(api.listDir).toHaveBeenCalledTimes(4));
+      fireEvent.click(screen.getByRole("button", { name: /src/ }));
+      expect(await screen.findByText("new.ts")).toBeInTheDocument();
+    } finally {
+      TREE["/p/src"] = [{ name: "a.ts", path: "/p/src/a.ts", dir: false }];
+    }
+  });
+
+  it("shows the folder again once a reload that failed succeeds", async () => {
+    vi.mocked(api.listDir).mockRejectedValueOnce("Permission denied");
+    const { rerender } = render(<FilesTab {...base} />);
+    expect(await screen.findByText("Permission denied")).toBeInTheDocument();
+    rerender(<FilesTab {...base} refreshKey={1} />);
+    expect(await screen.findByRole("tree")).toBeInTheDocument();
+    expect(screen.queryByText("Permission denied")).toBeNull();
+  });
+
+  it("doesn't keep the last file search's matches under a new query while it's still searching", async () => {
+    vi.mocked(api.findFiles).mockResolvedValueOnce([{ path: "/p/src/a.ts", rel: "src/a.ts", hits: [4] }]);
+    render(<FilesTab {...base} />);
+    const box = await screen.findByRole("searchbox", { name: "Search files" });
+    fireEvent.change(box, { target: { value: "a" } });
+    await screen.findByRole("listbox", { name: "Matching files" });
+    let finish: (f: FoundFile[]) => void = () => {};
+    vi.mocked(api.findFiles).mockImplementationOnce(() => new Promise<FoundFile[]>((resolve) => (finish = resolve)));
+    fireEvent.change(box, { target: { value: "ab" } });
+    expect(await screen.findByText("Searching…")).toBeInTheDocument();
+    expect(screen.queryByRole("listbox")).toBeNull();
+    // The new query is asked after a short pause; its answer then ends the wait.
+    await waitFor(() => expect(api.findFiles).toHaveBeenCalledTimes(2));
+    await act(async () => finish([]));
+    expect(await screen.findByText("No files match “ab”")).toBeInTheDocument();
+  });
+
+  it("asks before a new folder takes the open file away, and keeps the file if you keep editing", async () => {
+    const { rerender } = render(<FilesTab {...base} />);
+    fireEvent.click(await screen.findByText("README.md"));
+    fireEvent.click(await screen.findByRole("button", { name: "edit" }));
+    ask.mockResolvedValueOnce(false);
+    rerender(<FilesTab {...base} folder="/q" />);
+    await waitFor(() => expect(ask).toHaveBeenCalledWith("Discard your unsaved changes to /p/README.md?", expect.anything()));
+    expect(screen.getByText("preview of /p/README.md")).toBeInTheDocument();
+    expect(screen.getByText("● unsaved")).toBeInTheDocument();
+  });
+
+  it("keeps the open file's edits when switching chats, without asking", async () => {
+    const chat = (slot: string) => (
+      <SlotContext.Provider value={slot}>
+        <FilesTab {...base} />
+      </SlotContext.Provider>
+    );
+    const { rerender } = render(chat("s1"));
+    fireEvent.click(await screen.findByText("README.md"));
+    fireEvent.click(await screen.findByRole("button", { name: "edit" }));
+    rerender(chat("s2"));
+    expect(await screen.findByRole("tree")).toBeInTheDocument();
+    expect(ask).not.toHaveBeenCalled();
   });
 });
