@@ -2053,7 +2053,7 @@ dependencies = [
 
 [[package]]
 name = "lantern"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "ignore",
  "libc",
