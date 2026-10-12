@@ -354,6 +354,24 @@ describe("MessageInput", () => {
       expect(set).toHaveBeenCalledWith([lines(10)]);
     });
 
+    it("is queued as its placeholder, and Stop puts the placeholder back, still sent in full", () => {
+      const onSend = vi.fn();
+      const onStop = vi.fn();
+      const { rerender } = render(<MessageInput status="running" onSend={onSend} onStop={onStop} />);
+      const queueBox = screen.getByPlaceholderText("Queue a message…") as HTMLTextAreaElement;
+      paste(queueBox, lines(10));
+      fireEvent.keyDown(queueBox, { key: "Enter" });
+      expect(screen.getByText("[Pasted text #1 · 10 lines]")).toBeInTheDocument();
+      // A paste while the first waits gets a number of its own.
+      paste(queueBox, lines(8));
+      fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+      expect(onStop).toHaveBeenCalled();
+      expect(queueBox).toHaveValue("[Pasted text #1 · 10 lines]\n\n[Pasted text #2 · 8 lines]");
+      rerender(<MessageInput status="idle" onSend={onSend} onStop={onStop} />);
+      fireEvent.keyDown(box(), { key: "Enter" });
+      expect(onSend).toHaveBeenCalledWith(`${lines(10)}\n\n${lines(8)}`);
+    });
+
     it("is not made in a shell command", () => {
       render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} onRun={() => {}} />);
       fireEvent.change(box(), { target: { value: "!echo " } });

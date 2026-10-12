@@ -108,10 +108,24 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
             ? "Queue a message…"
             : (idlePlaceholder ?? "Ask Claude…");
 
+  // A queued message goes out in full (the queue holds the text), but it's remembered as it was in the box: its
+  // placeholders, with their pastes kept here so the numbers aren't reused meanwhile. The queue shows and Stop restores that.
+  const queuedBox = useRef(new Map<string, { box: string; pastes: Pastes }>());
+  const queuedPastes = (): Pastes => Object.assign({}, ...[...queuedBox.current.values()].map((q) => q.pastes));
+  useEffect(() => {
+    for (const full of queuedBox.current.keys()) if (!queued.includes(full)) queuedBox.current.delete(full);
+  }, [queued]);
+
   // Stop means "not like that": queued messages go back into the box instead of being sent.
   const stop = () => {
     if (queued.length > 0) {
-      setText([...queued, text].filter((t) => t.trim()).join("\n\n"));
+      const back = queued.map((full) => {
+        const kept = queuedBox.current.get(full);
+        if (!kept) return full;
+        pastes.current = { ...pastes.current, ...kept.pastes };
+        return kept.box;
+      });
+      setText([...back, text].filter((t) => t.trim()).join("\n\n"));
       setQueued([]);
     }
     onStop();
@@ -148,8 +162,10 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   // While Claude works, a message waits in the queue instead of going out.
   const sendText = (t: string) => {
     const full = expand(t);
-    if (running) setQueued([...queued, full]);
-    else onSend(full);
+    if (running) {
+      queuedBox.current.set(full, { box: t, pastes: inUse(t, pastes.current) });
+      setQueued([...queued, full]);
+    } else onSend(full);
   };
 
   const submit = () => {
@@ -293,7 +309,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
             <li key={i} className="queue-item">
               <span className="queue-label">Queued</span>
               <span className="queue-text" title={q}>
-                {q}
+                {queuedBox.current.get(q)?.box ?? q}
               </span>
               <button className="icon queue-remove" aria-label="Remove queued message" title="Remove" onClick={() => setQueued(queued.filter((_, j) => j !== i))}>
                 ×
@@ -346,7 +362,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               if (!isBigPaste(pasted)) return;
               e.preventDefault();
               const { selectionStart: from, selectionEnd: to } = e.currentTarget;
-              const n = nextNumber(text, pastes.current);
+              const n = nextNumber(text, { ...queuedPastes(), ...pastes.current });
               const token = pasteToken(n, pasted);
               pastes.current = { ...pastes.current, [n]: pasted };
               caretTo.current = from + token.length;
