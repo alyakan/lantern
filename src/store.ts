@@ -45,7 +45,8 @@ export interface ShellItem {
   command: string;
   /** What it printed, stdout and stderr together; only the end of it once it's long (see KEEP_CHARS). */
   output: string;
-  status: "running" | "done" | "failed" | "stopped";
+  /** "unknown": replayed from a message sent while it still ran; how it ended was never recorded. */
+  status: "running" | "done" | "failed" | "stopped" | "unknown";
   code: number | null;
   startedAt: number;
   endedAt?: number;
@@ -321,7 +322,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       const { flavour } = read;
       const text = readSkillNote(read.text);
       const at = ev.at ?? 0;
-      const shells = sent.shells.map((s, i): ShellItem => ({ type: "shell", id: `sh-u${seq}-${i}`, command: s.command, output: s.output, status: s.stopped ? "stopped" : s.code ? "failed" : "done", code: s.code, startedAt: at, endedAt: at, shared: true }));
+      const shells = sent.shells.map((s, i): ShellItem => ({ type: "shell", id: `sh-u${seq}-${i}`, command: s.command, output: s.output, status: s.stopped ? "stopped" : s.running ? "unknown" : s.code ? "failed" : "done", code: s.code, startedAt: at, endedAt: at, shared: true }));
       // Commands alone (Claude Code's own `!` mode writes them so): no prompt to show after them.
       if (shells.length > 0 && !text.trim()) return { ...state, seq, items: [...state.items, ...shells] };
       return { ...state, seq, items: [...state.items, ...shells, { type: "user", id: `u${seq}`, text, at: ev.at, ...(flavour ? { switchedTo: flavour } : {}) }] };

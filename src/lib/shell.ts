@@ -61,10 +61,12 @@ export interface SentShell {
   output: string;
   code: number | null;
   stopped: boolean;
+  /** Sent while it was still running: how it ended is not known. */
+  running: boolean;
 }
 
 const BLOCK = /^<bash-input>([\s\S]*?)<\/bash-input>\s*<bash-stdout>([\s\S]*?)<\/bash-stdout>(?:<bash-stderr>([\s\S]*?)<\/bash-stderr>)?\s*/;
-const ENDING = /\n?\[(?:exit code (\d+)|(stopped)|still running)\]$/;
+const ENDING = /\n?\[(?:exit code (\d+)|(stopped)|(still running))\]$/;
 
 /** A prompt as you wrote it, and the commands that went before it (see shellContext). */
 export function readShellContext(text: string): { text: string; shells: SentShell[] } {
@@ -73,7 +75,8 @@ export function readShellContext(text: string): { text: string; shells: SentShel
   for (let m = BLOCK.exec(rest); m; m = BLOCK.exec(rest)) {
     const end = ENDING.exec(m[2]);
     const output = [end ? m[2].slice(0, end.index) : m[2], m[3] ?? ""].filter(Boolean).join("\n");
-    shells.push({ command: m[1], output, code: end?.[1] ? Number(end[1]) : end?.[2] ? null : 0, stopped: !!end?.[2] });
+    // No marker at all is a command that finished cleanly; "still running" has no exit code to read.
+    shells.push({ command: m[1], output, code: end?.[1] ? Number(end[1]) : end ? null : 0, stopped: !!end?.[2], running: !!end?.[3] });
     rest = rest.slice(m[0].length);
   }
   return { text: rest, shells };

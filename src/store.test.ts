@@ -166,6 +166,12 @@ describe("reducer", () => {
     expect(s.stopRequested).toBe(false);
   });
 
+  it("a command replayed as still running is unknown, not done", () => {
+    const sent = "<bash-input>tail -f app.log</bash-input>\n<bash-stdout>ready\n[still running]</bash-stdout><bash-stderr></bash-stderr>\n\nwhat happened?";
+    const s = ev(initialState, { kind: "user_text", text: sent });
+    expect(s.items[0]).toMatchObject({ type: "shell", command: "tail -f app.log", status: "unknown", code: null });
+  });
+
   it("turn_done clears a retry banner", () => {
     let s = ev(running, { kind: "retrying", attempt: 1, max_retries: 10, error: "overloaded" });
     expect(s.banner?.kind).toBe("info");
