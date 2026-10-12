@@ -44,4 +44,18 @@ describe("ChatView", () => {
     expect(chat.scrollTop).toBe(2000);
     expect(scrollIntoView).not.toHaveBeenCalled();
   });
+
+  it("goes to the end when you send, even if you'd scrolled up from it", () => {
+    const props = { onDecide: () => {}, onOpenFile: () => {} };
+    const { container, rerender } = render(<ChatView state={{ ...initialState, status: "idle", folder: "/p", items }} {...props} />);
+    const chat = container.querySelector(".chat") as HTMLElement;
+    Object.defineProperty(chat, "scrollHeight", { value: 2000, configurable: true });
+    Object.defineProperty(chat, "clientHeight", { value: 500, configurable: true });
+    let top = 0;
+    Object.defineProperty(chat, "scrollTop", { get: () => top, set: (v: number) => (top = v), configurable: true });
+    top = 600;
+    fireEvent.scroll(chat);
+    rerender(<ChatView state={{ ...initialState, status: "running", folder: "/p", items: [...items, { type: "user", id: "u2", text: "Also this" }] }} {...props} />);
+    expect(top).toBe(2000);
+  });
 });
