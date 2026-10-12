@@ -140,12 +140,27 @@ describe("MessageInput", () => {
       expect(names).toEqual(["/grill-me", "/mcp__github__review"]);
     });
 
+    it("mid-sentence, Enter sends a / that's just text, unless the user has arrowed into the menu", () => {
+      const onSend = vi.fn();
+      render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} commands={withSkills} skillIndex={index} />);
+      const box = screen.getByPlaceholderText("Ask Claude…") as HTMLTextAreaElement;
+      type(box, "re-run the checks on /gri");
+      expect(screen.getByRole("listbox", { name: "Commands" })).toBeInTheDocument();
+      fireEvent.keyDown(box, { key: "Enter" });
+      expect(onSend).toHaveBeenCalledWith("re-run the checks on /gri");
+      type(box, "re-run the checks on /gri");
+      fireEvent.keyDown(box, { key: "ArrowDown" });
+      fireEvent.keyDown(box, { key: "Enter" });
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(box).toHaveValue("re-run the checks on /grill-me ");
+    });
+
     it("puts a picked skill where the / was, and the caret after it", () => {
       const onSend = vi.fn();
       render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} commands={withSkills} skillIndex={index} />);
       const box = screen.getByPlaceholderText("Ask Claude…") as HTMLTextAreaElement;
       type(box, "design the cache, /gri");
-      fireEvent.keyDown(box, { key: "Enter" });
+      fireEvent.keyDown(box, { key: "Tab" });
       expect(onSend).not.toHaveBeenCalled();
       expect(box).toHaveValue("design the cache, /grill-me ");
       expect(box.selectionStart).toBe("design the cache, /grill-me ".length);

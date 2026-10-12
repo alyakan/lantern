@@ -212,7 +212,12 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   const issues = open?.kind === "/" ? (mcpIssues ?? []) : [];
   const menuShown = !!open && (count > 0 || issues.length > 0 || (open.kind === "@" && !!findFiles && !open.query.includes(":")));
   const [pick, setPick] = useState(0);
-  useEffect(() => setPick(0), [open?.kind, open?.query]);
+  // Whether the user has arrowed into the list: mid-message, a "/" menu takes Enter only then.
+  const [arrowed, setArrowed] = useState(false);
+  useEffect(() => {
+    setPick(0);
+    setArrowed(false);
+  }, [open?.kind, open?.query]);
 
   // After the menu puts something in the box, the caret goes after it.
   const caretTo = useRef<number | null>(null);
@@ -280,10 +285,15 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
     const move = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
     if (e.key === "Escape") setDismissedAt(open.start);
     else if (count === 0) return false;
-    else if (move) setPick((pick + move + count) % count);
-    else if (e.key === "Tab") choose(pick, true);
-    else if (e.key === "Enter" && !e.shiftKey && !composingKey(e)) choose(pick);
-    else return false;
+    else if (move) {
+      setPick((pick + move + count) % count);
+      setArrowed(true);
+    } else if (e.key === "Tab") choose(pick, true);
+    else if (e.key === "Enter" && !e.shiftKey && !composingKey(e)) {
+      // A "/" in the middle of a sentence ("re-run the checks on /test") is just text: Enter sends it.
+      if (open.kind === "/" && !open.atStart && !arrowed) return false;
+      choose(pick);
+    } else return false;
     e.preventDefault();
     return true;
   };
