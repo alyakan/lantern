@@ -42,6 +42,21 @@ describe("SummaryTab", () => {
     expect(screen.getByText(/added RETRYABLE and wait/)).toBeInTheDocument();
   });
 
+  it("shows steps that have no page as a plain line with nothing to open", () => {
+    const open = vi.fn();
+    show({ headline: "Plan: 5 steps · 0 built", rows: [row({ id: "g", kind: "gap", label: "Steps 2–4", title: "No pages for these steps", gist: "Not written as a page in this chat, so there's nothing to open.", built: false, page: "" }), row({ id: "s5", label: "Step 5", title: "Five", built: false })] }, open);
+    const gap = screen.getAllByRole("listitem")[0];
+    expect(gap).toHaveClass("gap");
+    expect(gap).toHaveTextContent("Steps 2–4");
+    expect(gap).toHaveTextContent("No pages for these steps");
+    expect(within(gap).queryByRole("button")).toBeNull();
+    fireEvent.click(gap);
+    expect(open).not.toHaveBeenCalled();
+    // The real step next to it still opens.
+    fireEvent.click(screen.getByRole("button", { name: /Five/ }));
+    expect(open).toHaveBeenCalledWith("x");
+  });
+
   it("opens a step's page from its row, and its plan from the Plan link", () => {
     const open = vi.fn();
     show({ headline: null, rows: [row({ page: "step-page", planPage: "plan-page", title: "Name the statuses" }), row({ id: "y", page: "only-plan", title: "Later", built: false })] }, open);

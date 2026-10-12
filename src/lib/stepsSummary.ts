@@ -6,7 +6,7 @@ import { pageLabel, pageTitle, type StepPage } from "./steps";
 export interface SummaryRow {
   /** The page it was built from (a step's own page when it has one), so it's stable while the chat goes on. */
   id: string;
-  kind: "frame" | "step" | "file" | "evidence" | "fix" | "done" | "review-summary";
+  kind: "frame" | "step" | "gap" | "file" | "evidence" | "fix" | "done" | "review-summary";
   /** "Step 2", "File 3 of 7", "Evidence 1", "Frame", … */
   label: string;
   title: string;
@@ -82,7 +82,34 @@ function plannedChange(text: string): string | null {
 
 /** A planned step with its plan page and, once built, its step page; or any other page on its own. */
 type StepEntry = { n: number; plan?: StepPage; step?: StepPage };
-type Entry = StepEntry | { n: null; page: StepPage };
+/** `gap`: steps with no page of their own: numbered steps the plan has before and after, but never wrote as a page. */
+type Entry = StepEntry | { n: null; page: StepPage } | { n: null; gap: { from: number; to: number } };
+
+/**
+ * A plan's steps in step order, however they came: a step revised long after the ones that followed it comes first
+ * again, and a number that was never written as a page (the chat only began using pages partway through the plan) gets
+ * a marker rather than silently going missing. Runs of steps are ordered separately, so a Build plan and a later one
+ * (a different run, with something between) stay apart.
+ */
+function inStepOrder(entries: Entry[]): Entry[] {
+  const out: Entry[] = [];
+  for (let i = 0; i < entries.length; ) {
+    if (entries[i].n === null) {
+      out.push(entries[i++]);
+      continue;
+    }
+    const run: StepEntry[] = [];
+    while (i < entries.length && entries[i].n !== null) run.push(entries[i++] as StepEntry);
+    run.sort((a, b) => a.n - b.n);
+    let expected = 1;
+    for (const e of run) {
+      if (e.n > expected) out.push({ n: null, gap: { from: expected, to: e.n - 1 } });
+      out.push(e);
+      expected = e.n + 1;
+    }
+  }
+  return out;
+}
 
 /**
  * The plan so far, from the pages: Frame, each planned step with what was done for it, the files reviewed or evidence
@@ -118,11 +145,36 @@ export function summarize(pages: StepPage[]): StepsSummary {
       }
     } else {
       if (h.kind === "file") filesTotal = Math.max(filesTotal ?? 0, h.total ?? 0) || filesTotal;
+      // A new plan starts with its Frame: its Step 1 is not the last plan's, which stays as it was.
+      if (h.kind === "frame") stepEntry.clear();
       entries.push({ n: null, page });
     }
   }
 
-  const rows: SummaryRow[] = entries.map((e): SummaryRow => {
+  // The first Frame leads, even when it was written after other pages (the chat began using pages partway through); a
+  // later one, a new plan's, stays where it came.
+  const firstFrame = entries.findIndex((e) => "page" in e && e.page.heading?.kind === "frame");
+  if (firstFrame > 0) entries.unshift(...entries.splice(firstFrame, 1));
+
+  const rows: SummaryRow[] = inStepOrder(entries).map((e): SummaryRow => {
+    if ("gap" in e) {
+      const { from, to } = e.gap;
+      return {
+        id: `gap-${from}-${to}`,
+        kind: "gap",
+        label: from === to ? `Step ${from}` : `Steps ${from}–${to}`,
+        title: from === to ? "No page for this step" : "No pages for these steps",
+        built: false,
+        current: false,
+        gist: "Not written as a page in this chat, so there's nothing to open.",
+        page: "",
+        planPage: null,
+        range: null,
+        changes: false,
+        findings: null,
+        stats: null,
+      };
+    }
     if (e.n !== null) {
       const main = (e.step ?? e.plan)!;
       const built = !!e.step;
@@ -145,7 +197,7 @@ export function summarize(pages: StepPage[]): StepsSummary {
     }
     const page = e.page;
     const h = page.heading!;
-    const kind = h.kind === "summary" ? "review-summary" : (h.kind as Exclude<SummaryRow["kind"], "step" | "review-summary">);
+    const kind = h.kind === "summary" ? "review-summary" : (h.kind as Exclude<SummaryRow["kind"], "step" | "gap" | "review-summary">);
     const base = { id: page.key, kind, label: h.kind === "summary" ? "Review summary" : pageLabel(h), title: pageTitle(page) ?? "", built: true, current: page.key === lastKey, page: page.key, planPage: null, findings: null, stats: null } as const;
     if (h.kind === "file") {
       const file = splitFileTitle(h.title);

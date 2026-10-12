@@ -49,6 +49,21 @@ export function SummaryTab({ slot, summary, changed, running, onOpenPage }: { sl
 }
 
 function Row({ row, files, onOpenPage }: { row: SummaryRow; files: ChangedFile[] | null; onOpenPage: (page: string) => void }) {
+  // Steps the plan has no page for: shown so the numbers add up, but with nothing to open.
+  if (row.kind === "gap") {
+    return (
+      <li className="summary-row gap" data-kind="gap">
+        <div className="summary-main">
+          <span className="summary-mark" aria-hidden />
+          <span className="summary-text">
+            <span className="summary-label">{row.label}</span>
+            <span className="summary-title">{row.title}</span>
+            {row.gist && <span className="summary-gist">{row.gist}</span>}
+          </span>
+        </div>
+      </li>
+    );
+  }
   const state = row.current ? "current" : row.built ? "built" : "planned";
   return (
     <li className={`summary-row ${state}`} data-kind={row.kind}>
