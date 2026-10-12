@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { McpServer, SkillEntry } from "../types";
 
 const claudeRequest = vi.fn();
@@ -102,6 +102,71 @@ describe("SettingsView", () => {
     expect(revealItemInDir).toHaveBeenCalledWith("/h/.claude/skills/grill-me/SKILL.md");
     fireEvent.change(screen.getByLabelText("Filter skills and commands"), { target: { value: "explore" } });
     expect(screen.queryByText("Yours")).not.toBeInTheDocument();
+  });
+
+  it("doesn't show the last chat's servers in a new one, and drops a late answer from the chat before", async () => {
+    let answerOld: (r: unknown) => void = () => {};
+    claudeRequest.mockImplementationOnce(() => new Promise((resolve) => (answerOld = resolve)));
+    const { rerender } = render(<SettingsView open="mcp" {...props} />);
+    claudeRequest.mockImplementation(() => Promise.resolve({ mcpServers: [{ name: "other-chat", status: "connected", config: { type: "stdio", command: "x" }, scope: "local" }] }));
+    rerender(<SettingsView open="mcp" {...props} slot="s2" />);
+    expect(await screen.findByText("other-chat")).toBeInTheDocument();
+    await act(async () => answerOld({ mcpServers: SERVERS.map((s) => ({ ...s })) }));
+    expect(screen.queryByText("sentry")).toBeNull();
+    expect(screen.getByText("other-chat")).toBeInTheDocument();
+  });
+
+  it("doesn't put a reconnect's servers into the chat it was started in, once the chat has changed", async () => {
+    let finishReconnect: (v: unknown) => void = () => {};
+    claudeRequest.mockImplementation((slot: string, r: { subtype: string }) => {
+      if (r.subtype === "mcp_reconnect") return new Promise((resolve) => (finishReconnect = resolve));
+      const mcpServers = slot === "s2" ? [{ name: "other-chat", status: "connected", config: { type: "stdio", command: "x" }, scope: "local" }] : SERVERS.map((s) => ({ ...s }));
+      return Promise.resolve(r.subtype === "mcp_status" ? { mcpServers } : {});
+    });
+    const { rerender } = render(<SettingsView open="mcp" {...props} />);
+    const list = await screen.findByRole("list", { name: "MCP servers" });
+    fireEvent.click(within(within(list).getAllByRole("listitem")[1]).getByRole("button", { name: "Reconnect" }));
+    await waitFor(() => expect(claudeRequest).toHaveBeenCalledWith("s1", { subtype: "mcp_reconnect", serverName: "postgres" }));
+    rerender(<SettingsView open="mcp" {...props} slot="s2" />);
+    expect(await screen.findByText("other-chat")).toBeInTheDocument();
+    await act(async () => finishReconnect({}));
+    // Asked for the old chat again once the reconnect is done (its first ask was at the start).
+    await waitFor(() => expect(claudeRequest.mock.calls.filter(([s, r]) => s === "s1" && r.subtype === "mcp_status")).toHaveLength(2));
+    await act(async () => {});
+    expect(screen.queryByText("sentry")).toBeNull();
+    expect(screen.getByText("other-chat")).toBeInTheDocument();
+  });
+
+  it("starts one claude.ai login for a double click on Connect", async () => {
+    claudeRequest.mockImplementation((_slot: string, r: { subtype: string }) =>
+      r.subtype === "mcp_status" ? Promise.resolve({ mcpServers: [{ name: "claude.ai Notion", status: "needs-auth", config: { type: "claudeai-proxy" }, scope: "claudeai", source: "claudeai" }] }) : new Promise(() => {}),
+    );
+    render(<SettingsView open="mcp" {...props} />);
+    const connect = await screen.findByRole("button", { name: "Connect" });
+    fireEvent.click(connect);
+    fireEvent.click(connect);
+    expect(claudeRequest.mock.calls.filter(([, r]) => (r as { subtype: string }).subtype === "mcp_authenticate")).toHaveLength(1);
+  });
+
+  it("shows a skill's pictures as the text they describe, not loaded", async () => {
+    readSkill.mockResolvedValue("# Skill\n\n![build status](https://tracker.example/pixel.png)\n");
+    const { container } = render(<SettingsView open="skills" {...props} />);
+    fireEvent.click(await screen.findByText("/grill-me"));
+    expect(await screen.findByText("[Image: build status]")).toBeInTheDocument();
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("shows the skill picked last, even when an earlier one's text arrives after it", async () => {
+    let landFirst: (t: string) => void = () => {};
+    readSkill.mockImplementationOnce(() => new Promise<string>((resolve) => (landFirst = resolve)));
+    readSkill.mockResolvedValueOnce("# Second\n\nSecond body\n");
+    render(<SettingsView open="skills" {...props} />);
+    fireEvent.click(await screen.findByText("/grill-me"));
+    fireEvent.click(await screen.findByText("/superpowers:brainstorming"));
+    expect(await screen.findByText("Second body")).toBeInTheDocument();
+    await act(async () => landFirst("# First\n\nFirst body\n"));
+    expect(screen.queryByText("First body")).toBeNull();
+    expect(screen.getByText("Second body")).toBeInTheDocument();
   });
 
   it("has an Updates page when it's given one, and opens straight on it", async () => {

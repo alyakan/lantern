@@ -8,6 +8,8 @@ import { SummaryExport } from "./SummaryExport";
 
 const FILES_SHOWN = 3;
 const rangeKey = (r: { from: number; to: number }) => `${r.from}-${r.to}`;
+/** What a step's range came to: its files, or that they couldn't be read. */
+type Lookup = { files: ChangedFile[] } | { error: true };
 const baseName = (path: string) => path.split("/").pop() ?? path;
 
 /** A line of a step's text with its `code` shown as code. A backtick left open by a cut is dropped. */
@@ -32,27 +34,40 @@ export interface ExportDoc {
  * can be exported as markdown.
  */
 export function SummaryTab({ slot, summary, changed, running, onOpenPage, doc }: { slot: string; summary: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void; doc?: ExportDoc }) {
-  // The files each row changed, from the backend's per-turn changes: asked again as edits land or a turn ends.
-  const [files, setFiles] = useState<Record<string, ChangedFile[]>>({});
+  // The files each row changed, from the backend's per-turn changes: asked again as edits land or a turn ends, and
+  // again when the user tries again after a failure.
+  const [files, setFiles] = useState<Record<string, Lookup>>({});
+  const [attempt, setAttempt] = useState(0);
   const ranges = summary.rows.flatMap((r) => (r.range ? [r.range] : []));
   const wanted = ranges.map(rangeKey).join(",");
   useEffect(() => {
     let live = true;
-    // A range that can't be read has no files, rather than failing the rest.
-    Promise.all(ranges.map((r) => api.changeSummary(slot, "turn", r.from, r.to).catch((): ChangedFile[] => []))).then((results) => {
+    // A range that can't be read is marked as such, rather than failing the rest or passing for no changes.
+    Promise.all(ranges.map((r) => api.changeSummary(slot, "turn", r.from, r.to).then((found): Lookup => ({ files: found }), (): Lookup => ({ error: true })))).then((results) => {
       if (live) setFiles(Object.fromEntries(ranges.map((r, i) => [rangeKey(r), results[i]])));
     });
     return () => {
       live = false;
     };
-  }, [slot, wanted, changed, running]);
+  }, [slot, wanted, changed, running, attempt]);
+  const failed = Object.values(files).some((l) => "error" in l);
+  // The files a row changed, once read: undefined while they're being read, or when they couldn't be.
+  const filesOf = (row: SummaryRow): ChangedFile[] | undefined => {
+    const lookup = row.range ? files[rangeKey(row.range)] : undefined;
+    return lookup && "files" in lookup ? lookup.files : undefined;
+  };
 
   // The document is made when it's asked for, from what the tab knows then.
   const markdown = (results: boolean) =>
     planMarkdown({
       pages: doc!.pages,
       summary,
-      files: Object.fromEntries(summary.rows.flatMap((r) => (r.range && files[rangeKey(r.range)] ? [[r.id, files[rangeKey(r.range)]]] : []))),
+      files: Object.fromEntries(
+        summary.rows.flatMap((r) => {
+          const f = filesOf(r);
+          return f ? [[r.id, f] as const] : [];
+        }),
+      ),
       title: doc!.title,
       folder: doc!.folder,
       date: new Date(),
@@ -65,16 +80,24 @@ export function SummaryTab({ slot, summary, changed, running, onOpenPage, doc }:
         {summary.headline && <div className="summary-headline">{summary.headline}</div>}
         {doc && <SummaryExport markdown={markdown} fileName={exportFileName(doc.folder, new Date())} />}
       </div>
+      {failed && (
+        <div className="summary-retry" role="alert">
+          Couldn't read the files some steps changed.{" "}
+          <button className="link-button" onClick={() => setAttempt((a) => a + 1)}>
+            Try again
+          </button>
+        </div>
+      )}
       <ol className="summary-rows">
         {summary.rows.map((row) => (
-          <Row key={row.id} row={row} files={row.range ? (files[rangeKey(row.range)] ?? null) : null} onOpenPage={onOpenPage} />
+          <Row key={row.id} row={row} lookup={row.range ? files[rangeKey(row.range)] : undefined} onOpenPage={onOpenPage} />
         ))}
       </ol>
     </div>
   );
 }
 
-function Row({ row, files, onOpenPage }: { row: SummaryRow; files: ChangedFile[] | null; onOpenPage: (page: string) => void }) {
+function Row({ row, lookup, onOpenPage }: { row: SummaryRow; lookup: Lookup | undefined; onOpenPage: (page: string) => void }) {
   // Steps the plan has no page for: shown so the numbers add up, but with nothing to open.
   if (row.kind === "gap") {
     return (
@@ -110,7 +133,7 @@ function Row({ row, files, onOpenPage }: { row: SummaryRow; files: ChangedFile[]
               <Inline text={row.gist} />
             </span>
           )}
-          <Meta row={row} files={files} />
+          <Meta row={row} lookup={lookup} />
         </span>
       </button>
       {row.planPage && (
@@ -123,7 +146,7 @@ function Row({ row, files, onOpenPage }: { row: SummaryRow; files: ChangedFile[]
 }
 
 /** What a row adds under its text: a reviewed file's findings and size, or the files a step changed. */
-function Meta({ row, files }: { row: SummaryRow; files: ChangedFile[] | null }) {
+function Meta({ row, lookup }: { row: SummaryRow; lookup: Lookup | undefined }) {
   if (row.kind === "file") {
     return (
       <span className="summary-meta">
@@ -139,7 +162,10 @@ function Meta({ row, files }: { row: SummaryRow; files: ChangedFile[] | null }) 
   if (!row.changes) return null;
   // Earlier turns of a reopened chat have no per-turn changes to read, and a step still being built has none yet.
   if (!row.range) return row.built ? <span className="summary-meta muted">Changes not available for this step</span> : null;
-  if (files === null || files.length === 0) return files ? <span className="summary-meta muted">No files changed</span> : null;
+  if (!lookup) return null;
+  if ("error" in lookup) return <span className="summary-meta muted">Couldn't read this step's changes</span>;
+  const { files } = lookup;
+  if (files.length === 0) return <span className="summary-meta muted">No files changed</span>;
   return (
     <span className="summary-meta">
       {files.slice(0, FILES_SHOWN).map((f) => (
