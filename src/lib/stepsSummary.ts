@@ -151,6 +151,11 @@ export function summarize(pages: StepPage[]): StepsSummary {
     }
   }
 
+  // The first Frame leads, even when it was written after other pages (the chat began using pages partway through); a
+  // later one, a new plan's, stays where it came.
+  const firstFrame = entries.findIndex((e) => "page" in e && e.page.heading?.kind === "frame");
+  if (firstFrame > 0) entries.unshift(...entries.splice(firstFrame, 1));
+
   const rows: SummaryRow[] = inStepOrder(entries).map((e): SummaryRow => {
     if ("gap" in e) {
       const { from, to } = e.gap;

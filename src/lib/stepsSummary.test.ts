@@ -118,6 +118,12 @@ describe("summarize a Build chat", () => {
     expect(s.rows.map((r) => `${r.kind}:${r.label}:${r.title}`)).toEqual(["frame:Frame:one", "step:Step 1:A", "step:Step 2:B", "done:Done:one built", "frame:Frame:two", "step:Step 1:A2", "step:Step 2:B2"]);
   });
 
+  it("puts the first Frame at the top even when it was written after other pages", () => {
+    const s = summaryOf(PLAN(5, "E", "e"), PLAN(6, "F", "f"), PLAN(1, "A", "a"), frame, PLAN(2, "B", "b"));
+    expect(s.rows.map((r) => r.label)).toEqual(["Frame", "Step 1", "Step 2", "Steps 3–4", "Step 5", "Step 6"]);
+    expect(s.rows.find((r) => r.current)?.label).toBe("Step 2");
+  });
+
   it("leaves out suggestions, the plan-complete pause and replies with no heading", () => {
     const s = summaryOf("# Switch to Build — a feature\n\nShall I?", frame, "no heading here, just chat", "# Plan complete — 1 step");
     expect(s.rows.map((r) => r.kind)).toEqual(["frame"]);
