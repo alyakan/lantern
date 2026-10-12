@@ -579,6 +579,12 @@ async fn write_file(state: State<'_, AppState>, slot: String, path: String, text
     tauri::async_runtime::spawn_blocking(move || save_tracked(&root, &changes, &path, &text, expected.as_deref())).await.map_err(|e| e.to_string())?
 }
 
+/// Saves an exported document (a plan as markdown) where the user chose in the save dialog.
+#[tauri::command]
+async fn export_text(path: String, text: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || files::write_export(std::path::Path::new(&path), &text)).await.map_err(|e| e.to_string())?
+}
+
 /// Where Claude Code keeps transcripts (it honours CLAUDE_CONFIG_DIR, so we do too).
 fn projects_root() -> Result<std::path::PathBuf, String> {
     let base = match std::env::var_os("CLAUDE_CONFIG_DIR") {
@@ -769,6 +775,7 @@ pub fn run() {
             list_dir,
             read_file,
             write_file,
+            export_text,
             find_files,
             resolve_files,
             search_text,

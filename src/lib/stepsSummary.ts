@@ -64,7 +64,7 @@ export function gistOf(text: string): string | null {
 }
 
 /** The message a page's main turn wrote, its heading line already taken out. */
-function messageOf(page: StepPage): string {
+export function messageOf(page: StepPage): string {
   const turn = page.turns[page.main];
   const own = turn.items.find((it) => it.type === "assistant" && it.id === turn.messageId);
   const msg = own ?? turn.items.find((it) => it.type === "assistant" && it.text.trim());

@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { ChangedFile } from "../store";
 import type { StepsSummary, SummaryRow } from "../lib/stepsSummary";
+import { exportFileName, planMarkdown } from "../lib/planExport";
+import type { StepPage } from "../lib/steps";
+import { SummaryExport } from "./SummaryExport";
 
 const FILES_SHOWN = 3;
 const rangeKey = (r: { from: number; to: number }) => `${r.from}-${r.to}`;
@@ -16,11 +19,19 @@ function Inline({ text }: { text: string }) {
   );
 }
 
+/** What the plan is exported from, besides the summary: the pages in full, the chat's title and its folder. */
+export interface ExportDoc {
+  pages: StepPage[];
+  title: string;
+  folder: string | null;
+}
+
 /**
  * The right pane's Summary tab, in Step by step: the plan so far, a row per step (or reviewed file, evidence round,
- * fix), each with what its page says and the files it changed. A row opens its page in the chat.
+ * fix), each with what its page says and the files it changed. A row opens its page in the chat. With `doc`, the plan
+ * can be exported as markdown.
  */
-export function SummaryTab({ slot, summary, changed, running, onOpenPage }: { slot: string; summary: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void }) {
+export function SummaryTab({ slot, summary, changed, running, onOpenPage, doc }: { slot: string; summary: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void; doc?: ExportDoc }) {
   // The files each row changed, from the backend's per-turn changes: asked again as edits land or a turn ends.
   const [files, setFiles] = useState<Record<string, ChangedFile[]>>({});
   const ranges = summary.rows.flatMap((r) => (r.range ? [r.range] : []));
@@ -36,9 +47,24 @@ export function SummaryTab({ slot, summary, changed, running, onOpenPage }: { sl
     };
   }, [slot, wanted, changed, running]);
 
+  // The document is made when it's asked for, from what the tab knows then.
+  const markdown = (results: boolean) =>
+    planMarkdown({
+      pages: doc!.pages,
+      summary,
+      files: Object.fromEntries(summary.rows.flatMap((r) => (r.range && files[rangeKey(r.range)] ? [[r.id, files[rangeKey(r.range)]]] : []))),
+      title: doc!.title,
+      folder: doc!.folder,
+      date: new Date(),
+      results,
+    });
+
   return (
     <div className="summary">
-      {summary.headline && <div className="summary-headline">{summary.headline}</div>}
+      <div className="summary-head">
+        {summary.headline && <div className="summary-headline">{summary.headline}</div>}
+        {doc && <SummaryExport markdown={markdown} fileName={exportFileName(doc.folder, new Date())} />}
+      </div>
       <ol className="summary-rows">
         {summary.rows.map((row) => (
           <Row key={row.id} row={row} files={row.range ? (files[rangeKey(row.range)] ?? null) : null} onOpenPage={onOpenPage} />

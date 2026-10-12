@@ -687,6 +687,10 @@ function playShell(slot: string, id: string, command: string) {
   mockShells[`${slot}:${id}`] = () => finish(true);
 }
 
+/** Documents exported in the mock, by the path "chosen" for them. */
+const mockExports: Record<string, string> = {};
+(globalThis as unknown as { claudeExports: () => Record<string, string> }).claudeExports = () => ({ ...mockExports });
+
 /** Files the user saved in the mock (and ones "Claude" changed since), over the built-in ones. */
 const mockFiles: Record<string, string> = {};
 const mockFileExists = (path: string) => path.startsWith(FOLDER);
@@ -750,6 +754,14 @@ export function installMockBackend() {
         }
         case "plugin:dialog|open":
           return FOLDER;
+        // The save dialog "picks" the Desktop; what was exported is in `claudeExports()` in the browser console.
+        case "plugin:dialog|save":
+          return `/Users/you/Desktop/${String(((a.options ?? a) as { defaultPath?: string }).defaultPath ?? "export.md").split("/").pop()}`;
+        case "export_text":
+          mockExports[String(a.path)] = String(a.text);
+          return null;
+        case "plugin:opener|reveal_item_in_dir":
+          return null;
         case "start_session":
           // A second project opens too, for switching between projects; the rest are gone.
           if (a.folder !== FOLDER && a.folder !== "/Users/you/projects/web-dashboard") return Promise.reject(`${String(a.folder)} no longer exists.`);
