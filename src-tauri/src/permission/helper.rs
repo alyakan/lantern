@@ -50,7 +50,10 @@ pub fn handle_message(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeResponse
             let resp = ask(req.clone());
             json!({"content": [{"type": "text", "text": decision_json(&req.input, &resp).to_string()}]})
         }
-        _ => json!({}),
+        // MCP's keep-alive: answered with nothing.
+        "ping" => json!({}),
+        // A request this server doesn't have: the client is told so, rather than given an empty result.
+        _ => return Some(json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "Method not found"}})),
     };
     Some(json!({"jsonrpc": "2.0", "id": id, "result": result}))
 }
@@ -73,17 +76,21 @@ pub fn ask_bridge(socket: Option<&str>, req: &BridgeRequest) -> BridgeResponse {
 }
 
 /// The `--permission-helper` main loop: newline-delimited JSON-RPC on stdin/stdout.
-pub fn run_helper(input: impl BufRead, mut output: impl Write, socket: Option<&str>) -> io::Result<()> {
+pub fn run_helper(mut input: impl BufRead, mut output: impl Write, socket: Option<&str>) -> io::Result<()> {
     let ask = |req: BridgeRequest| ask_bridge(socket, &req);
-    for line in input.lines() {
-        let line = line?;
-        let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        if input.read_until(b'\n', &mut buf)? == 0 {
+            return Ok(());
+        }
+        // Bytes that aren't a JSON message are skipped: a bad line must not end the helper, or every later prompt is denied.
+        let Ok(msg) = serde_json::from_slice::<Value>(&buf) else { continue };
         if let Some(reply) = handle_message(&msg, &ask) {
             writeln!(output, "{reply}")?;
             output.flush()?;
         }
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -163,8 +170,11 @@ mod tests {
     }
 
     #[test]
-    fn unknown_requests_get_empty_result() {
+    fn unknown_requests_are_refused_and_ping_is_answered() {
         let r = handle_message(&json!({"jsonrpc": "2.0", "id": "x", "method": "server/discover"}), &allow_all).unwrap();
+        assert_eq!((r["id"].clone(), r["error"]["code"].clone()), (json!("x"), json!(-32601)));
+        assert!(r.get("result").is_none());
+        let r = handle_message(&json!({"jsonrpc": "2.0", "id": 4, "method": "ping"}), &allow_all).unwrap();
         assert_eq!(r["result"], json!({}));
     }
 
@@ -190,5 +200,15 @@ mod tests {
         let replies: Vec<Value> = String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
         assert_eq!(replies.len(), 2);
         assert_eq!(replies[1]["id"], 1);
+    }
+
+    #[test]
+    fn a_line_that_is_not_utf8_does_not_end_the_helper() {
+        let input = b"\xff\xfe junk\n{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n";
+        let mut out = Vec::new();
+        run_helper(&input[..], &mut out, None).unwrap();
+        let replies: Vec<Value> = String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0]["id"], 1);
     }
 }
