@@ -5,9 +5,10 @@ import type { McpServer, McpServerSpec, SkillEntry, SlashCommand } from "../type
 import { describeConfig, displayName, groupSkills, iconOf, removable, sourceOf, statusOf, toolsOf, withoutFrontmatter } from "../lib/mcp";
 import { Md } from "./Md";
 import { HarnessSettings, type HarnessSettingsProps } from "./HarnessSettings";
+import { UpdatesPage, type UpdatesPageProps } from "./UpdatesPage";
 
-export type SettingsTab = "mcp" | "skills" | "harness";
-const TAB_LABEL: Record<SettingsTab, string> = { mcp: "MCP servers", skills: "Skills", harness: "Harness" };
+export type SettingsTab = "mcp" | "skills" | "harness" | "updates";
+const TAB_LABEL: Record<SettingsTab, string> = { mcp: "MCP servers", skills: "Skills", harness: "Harness", updates: "Updates" };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -29,10 +30,12 @@ interface Props {
   onRestartChat?: () => void;
   /** The harness presets, for the Harness page. */
   harness?: HarnessSettingsProps;
+  /** The running version and how updating is going, for the Updates page. */
+  updates?: UpdatesPageProps;
 }
 
 /** Settings: MCP servers (status, log in, add, remove) and skills (yours, the project's, plugins'). */
-export function SettingsView({ open, onClose, harness, ...page }: Props) {
+export function SettingsView({ open, onClose, harness, updates, ...page }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<SettingsTab>(open ?? "mcp");
   useEffect(() => {
@@ -57,8 +60,8 @@ export function SettingsView({ open, onClose, harness, ...page }: Props) {
           <nav className="mode-guide-nav" aria-label="Settings">
             <div className="mode-guide-group">
               <div className="mode-guide-group-title">Settings</div>
-              {(["harness", "mcp", "skills"] as const)
-                .filter((t) => t !== "harness" || harness)
+              {(["harness", "mcp", "skills", "updates"] as const)
+                .filter((t) => (t !== "harness" || harness) && (t !== "updates" || updates))
                 .map((t) => (
                   <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} onClick={() => setTab(t)}>
                     {TAB_LABEL[t]}
@@ -67,7 +70,7 @@ export function SettingsView({ open, onClose, harness, ...page }: Props) {
             </div>
           </nav>
           <article className="mode-guide-page settings-page">
-            {tab === "harness" && harness ? <HarnessSettings {...harness} /> : tab === "skills" ? <SkillsPage {...page} /> : <McpPage {...page} />}
+            {tab === "harness" && harness ? <HarnessSettings {...harness} /> : tab === "updates" && updates ? <UpdatesPage {...updates} /> : tab === "skills" ? <SkillsPage {...page} /> : <McpPage {...page} />}
             <div className="mode-guide-actions">
               <button onClick={onClose}>Close</button>
             </div>

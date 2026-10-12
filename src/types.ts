@@ -189,3 +189,14 @@ export interface TestCase {
   /** `path:line` */
   location: string | null;
 }
+
+/** Where updating Lantern has got to (the backend's `UpdateState`). */
+export type UpdateState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "up_to_date" }
+  | { kind: "downloading"; version: string; downloaded: number; total: number | null }
+  | { kind: "ready"; version: string }
+  | { kind: "installing"; version: string }
+  | { kind: "restarting" }
+  | { kind: "failed"; error: string };

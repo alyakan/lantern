@@ -30,6 +30,8 @@ import { SlotContext } from "./lib/slot";
 import { ModeGuideContext } from "./lib/modeGuide";
 import { ModeGuide, type GuideKey } from "./components/ModeGuide";
 import { SettingsView, type SettingsTab } from "./components/SettingsView";
+import { UpdatingOverlay } from "./components/UpdatingOverlay";
+import { isInstalling, useUpdateState } from "./lib/updates";
 import { BannerView } from "./components/BannerView";
 import { ChatView } from "./components/ChatView";
 import { StepsView } from "./components/StepsView";
@@ -143,6 +145,11 @@ export default function App() {
   // A newer Lantern, downloaded and ready; `updateLater`: the user chose to take it when they quit.
   const [update, setUpdate] = useState<{ version: string } | null>(null);
   const [updateLater, setUpdateLater] = useState(false);
+  // Where updating has got to (looking, downloading, installing), and the version that's running. `installStarted`
+  // bridges the moment between clicking Update and the backend saying it has begun.
+  const updates = useUpdateState();
+  const [installStarted, setInstallStarted] = useState(false);
+  const installing = installStarted || isInstalling(updates.state);
 
   // Actions for one chat. Async results always go to the chat that asked, even if another is on screen by then.
   const to = (slot: string) => (action: Action) => dispatchChats({ type: "in", slot, action });
@@ -166,6 +173,16 @@ export default function App() {
   useEffect(() => {
     const unlisten = api.onUpdateReady(setUpdate);
     api.updateStatus().then((u) => u && setUpdate(u), () => {});
+    return () => {
+      unlisten.then((stop) => stop());
+    };
+  }, []);
+  // "Lantern ▸ Check for Updates…": open the Updates page and look.
+  useEffect(() => {
+    const unlisten = api.onCheckForUpdates(() => {
+      setSettingsAt("updates");
+      updates.check();
+    });
     return () => {
       unlisten.then((stop) => stop());
     };
@@ -780,6 +797,19 @@ export default function App() {
   const [guideAt, setGuideAt] = useState<GuideKey | null>(null);
   const [settingsAt, setSettingsAt] = useState<SettingsTab | null>(null);
   useShortcut(",", () => setSettingsAt(settingsAt ?? "mcp"));
+  // Installs the downloaded update and relaunches. The window says so (the overlay) until it does: closing every chat
+  // and reopening is otherwise just a window that vanishes. Started from Settings, that closes first.
+  const restartToUpdate = () => {
+    setInstallStarted(true);
+    setSettingsAt(null);
+    api.restartToUpdate().catch((e) => {
+      setInstallStarted(false);
+      // The attempt used the download up: it has to be fetched again.
+      setUpdate(null);
+      dispatch({ type: "failed", text: errText(e) });
+    });
+  };
+  const updateOffer = update && !updateLater ? { version: update.version, busy: Object.values(chats.slots).filter(isBusy).length, onRestart: restartToUpdate, onLater: () => setUpdateLater(true) } : undefined;
   const composer = (
     <MessageInput
       key={`input-${active}-${composerEpoch}`}
@@ -822,16 +852,7 @@ export default function App() {
           saveOpen();
         },
       }}
-      update={
-        update && !updateLater
-          ? {
-              version: update.version,
-              busy: Object.values(chats.slots).filter(isBusy).length,
-              onRestart: () => api.restartToUpdate().catch((e) => dispatch({ type: "failed", text: errText(e) })),
-              onLater: () => setUpdateLater(true),
-            }
-          : undefined
-      }
+      update={updateOffer}
     />
   );
 
@@ -942,6 +963,7 @@ export default function App() {
           commands={state.commands}
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
+          updates={{ version: updates.version, state: updates.state, onCheck: updates.check, ready: updateOffer ?? null }}
           harness={{
             saved: presets.slice(1),
             onSave: (next) => {
@@ -956,6 +978,7 @@ export default function App() {
             fallbackModel: defaultModel,
           }}
         />
+        {installing && <UpdatingOverlay state={updates.state} version={update?.version ?? null} />}
         <ModeGuide
           open={guideAt}
           mode={state.mode}

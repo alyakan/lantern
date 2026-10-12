@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
-import type { DirEntry, FileDiff, FoundFile, McpServerSpec, Mode, RecentFolder, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent } from "./types";
+import type { DirEntry, FileDiff, FoundFile, McpServerSpec, Mode, RecentFolder, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -84,6 +84,16 @@ export const api = {
   /** Installs the downloaded update and relaunches Lantern (stopping every chat's claude). */
   restartToUpdate: () => invoke<void>("restart_to_update"),
   onUpdateReady: (cb: (update: { version: string }) => void): Promise<UnlistenFn> => listen<{ version: string }>("update-ready", (e) => cb(e.payload)),
+  /** Where updating has got to, for a window that opened after it began. */
+  updateState: () => invoke<UpdateState>("update_state"),
+  /** Looks for a newer Lantern now and downloads it. If a check is already running, where that one has got to. */
+  checkForUpdates: () => invoke<UpdateState>("check_for_updates"),
+  /** The version of Lantern that's running. */
+  appVersion: () => invoke<string>("app_version"),
+  /** Every step of looking for, downloading and installing an update, as it happens. */
+  onUpdateState: (cb: (state: UpdateState) => void): Promise<UnlistenFn> => listen<UpdateState>("update-state", (e) => cb(e.payload)),
+  /** "Lantern ▸ Check for Updates…" was chosen in the app menu. */
+  onCheckForUpdates: (cb: () => void): Promise<UnlistenFn> => listen("check-for-updates", () => cb()),
   onUiEvent: (cb: (slot: string, event: UiEvent) => void): Promise<UnlistenFn> =>
     listen<{ slot: string; event: UiEvent }>("ui-event", (e) => cb(e.payload.slot, e.payload.event)),
 };

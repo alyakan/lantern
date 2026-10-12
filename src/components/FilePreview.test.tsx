@@ -55,8 +55,8 @@ describe("FilePreview as an editor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(onSaved).toHaveBeenCalled());
     expect(write).toHaveBeenCalledWith("s1", "/p/a.ts", "one\ntwo\n", "one\n");
-    expect(screen.queryByText("Unsaved changes")).toBeNull();
-    expect(onDirty).toHaveBeenLastCalledWith(false);
+    await waitFor(() => expect(screen.queryByText("Unsaved changes")).toBeNull());
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(false));
     // Edited again, it saves on top of what it just saved.
     type("three\n");
     fireEvent.click(screen.getByRole("button", { name: "Save" }));

@@ -704,7 +704,17 @@ const mockFileText = (path: string) =>
             ? '{\n  "name": "acme-api",\n  "version": "1.0.0",\n  "scripts": { "test": "vitest" }\n}\n'
             : `// ${path.slice(FOLDER.length + 1)}\nexport {};\n`);
 
+/** The mock's updating state, told to the window like the backend's `update-state` events. */
+const mockUpdate = { state: { kind: "idle" } as Record<string, unknown> };
+async function setMockUpdate(state: Record<string, unknown>) {
+  mockUpdate.state = state;
+  await emit("update-state", state);
+  return state;
+}
+
 export function installMockBackend() {
+  // In the browser console: `mockEmit("check-for-updates")` fires a backend event, as the app menu's item does.
+  (globalThis as unknown as { mockEmit: (event: string, payload?: unknown) => Promise<void> }).mockEmit = (event, payload) => emit(event, payload);
   // In the browser console: `claudeEdits("/path", "text")` simulates a change to a file behind the editor's back.
   (globalThis as unknown as { claudeEdits: (path: string, text: string) => void }).claudeEdits = (path, text) => {
     mockFiles[path] = text;
@@ -897,6 +907,38 @@ export function installMockBackend() {
         // &update: a newer Lantern is downloaded and waiting.
         case "update_status":
           return new URLSearchParams(location.search).has("update") ? { version: "0.1.2" } : null;
+        case "app_version":
+          return "0.1.9";
+        case "update_state":
+          return mockUpdate.state;
+        // ?check=new (the default) finds 0.1.10 and downloads it; =uptodate, =fail and =dev end the other ways.
+        case "check_for_updates": {
+          const how = new URLSearchParams(location.search).get("check") ?? "new";
+          if (how === "dev") return Promise.reject("This is a development build: updates are only checked in the released app.");
+          return (async () => {
+            await setMockUpdate({ kind: "checking" });
+            await sleep(900);
+            if (how === "fail") {
+              await setMockUpdate({ kind: "failed", error: "Couldn't reach GitHub to look for an update." });
+              throw "Couldn't reach GitHub to look for an update.";
+            }
+            if (how === "uptodate") return setMockUpdate({ kind: "up_to_date" });
+            for (let pct = 0; pct <= 100; pct += 5) {
+              await setMockUpdate({ kind: "downloading", version: "0.1.10", downloaded: pct * 400_000, total: 40_000_000 });
+              await sleep(160);
+            }
+            await emit("update-ready", { version: "0.1.10" });
+            return setMockUpdate({ kind: "ready", version: "0.1.10" });
+          })();
+        }
+        // Installing shows, then restarting, and then nothing: the real app has quit and reopened by then.
+        case "restart_to_update":
+          return (async () => {
+            await setMockUpdate({ kind: "installing", version: "0.1.10" });
+            await sleep(2500);
+            await setMockUpdate({ kind: "restarting" });
+            await new Promise(() => {});
+          })();
         default:
           return null;
       }

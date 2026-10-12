@@ -1218,3 +1218,26 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .summary-findings.some { color: var(--text); font-weight: 500; }
 .summary-plan-link { flex: none; align-self: flex-start; margin: 9px 8px 0 0; padding: 0 8px; height: 20px; border: 0.5px solid var(--line-strong); border-radius: 999px; background: none; color: var(--muted); font-size: 11px; }
 .summary-plan-link:hover { background: var(--bg-hover); color: var(--text); }
+
+/* Settings ▸ Updates: the running version, and how looking for and downloading a newer one is going. */
+.updates-body { display: flex; flex-direction: column; gap: 14px; padding-top: 6px; }
+.updates-version { font-size: 13px; color: var(--text-2); }
+.updates-status { min-height: 40px; display: flex; flex-direction: column; gap: 10px; }
+.updates-line { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); }
+.updates-download { display: flex; flex-direction: column; gap: 8px; }
+.updates-bar { height: 6px; border-radius: 999px; background: var(--bg-subtle); overflow: hidden; }
+.updates-bar-fill { height: 100%; border-radius: inherit; background: var(--text); transition: width 0.2s ease-out; }
+.updates-bar-fill.unknown { width: 35%; animation: updates-slide 1.2s ease-in-out infinite alternate; }
+@keyframes updates-slide { from { margin-left: 0; } to { margin-left: 65%; } }
+@media (prefers-reduced-motion: reduce) { .updates-bar-fill { transition: none; } .updates-bar-fill.unknown { animation: none; } }
+.updates-ready { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.updates-ready .update-menu { bottom: auto; top: calc(100% + 6px); left: 0; right: auto; }
+
+/* The window while Lantern replaces itself: over everything (a modal dialog), until it reopens. */
+.updating { padding: 0; border: none; outline: none; background: transparent; color: var(--text); max-width: none; }
+.updating::backdrop { background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: blur(6px); }
+.updating-body { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 340px; padding: 28px 28px 24px; border: 1px solid var(--line-strong); border-radius: 14px; background: var(--pane); box-shadow: var(--shadow); text-align: center; }
+.updating-spinner { width: 22px; height: 22px; border-width: 2.5px; margin-bottom: 6px; }
+.updating-title { font-size: 15px; font-weight: 600; }
+.updating-step { font-size: 12.5px; color: var(--text-2); }
+.updating-note { margin-top: 6px; font-size: 12px; line-height: 1.45; color: var(--muted); }

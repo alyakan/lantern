@@ -13,18 +13,52 @@ pub struct UpdateInfo {
     pub version: String,
 }
 
+/// Where updating has got to, told to the window as it happens (the `update-state` event) so it can show it.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UpdateState {
+    /// Nothing has been looked for yet, or a background look found nothing worth mentioning.
+    #[default]
+    Idle,
+    Checking,
+    UpToDate,
+    /// `total` is None when the server doesn't say how big it is.
+    Downloading { version: String, downloaded: u64, total: Option<u64> },
+    Ready { version: String },
+    Installing { version: String },
+    Restarting,
+    Failed { error: String },
+}
+
 struct Ready {
     version: String,
     install: Install,
 }
 
-/// The update waiting to be installed, if any.
+/// The update waiting to be installed, if any, and how updating is going.
 #[derive(Default)]
 pub struct Updates {
     ready: Mutex<Option<Ready>>,
+    state: Mutex<UpdateState>,
+    /// Held for as long as a check, and the download it leads to, takes: only one at a time.
+    checking: tokio::sync::Mutex<()>,
 }
 
 impl Updates {
+    pub fn state(&self) -> UpdateState {
+        self.state.lock().unwrap().clone()
+    }
+
+    fn remember(&self, state: UpdateState) {
+        *self.state.lock().unwrap() = state;
+    }
+
+    /// Starts a check, unless one is already under way (the background one, partway through a download): then it's
+    /// the state that check has reached, so a second ask shows its progress instead of waiting for it.
+    fn begin_check(&self) -> Result<tokio::sync::MutexGuard<'_, ()>, UpdateState> {
+        self.checking.try_lock().map_err(|_| self.state())
+    }
+
     /// A downloaded, verified update and how to install it. A newer one found later replaces it.
     pub fn offer(&self, version: String, install: Install) {
         *self.ready.lock().unwrap() = Some(Ready { version, install });
@@ -47,6 +81,13 @@ pub fn checks_enabled() -> bool {
     !cfg!(debug_assertions)
 }
 
+/// Tells the window where updating has got to, and remembers it for a window that asks later.
+pub fn publish(app: &tauri::AppHandle, state: UpdateState) {
+    use tauri::{Emitter, Manager};
+    app.state::<Updates>().remember(state.clone());
+    let _ = app.emit("update-state", state);
+}
+
 /// Looks for a newer release a little after launch, then every few hours, until one is downloaded.
 pub async fn watch(app: tauri::AppHandle) {
     use tauri::Manager;
@@ -54,7 +95,7 @@ pub async fn watch(app: tauri::AppHandle) {
     loop {
         if app.state::<Updates>().ready().is_none() {
             // Offline, GitHub down, a bad signature: nothing to tell the user; the next check tries again.
-            if let Err(e) = check(&app).await {
+            if let Err(e) = check(&app, false).await {
                 eprintln!("Lantern update check failed: {e}");
             }
         }
@@ -63,16 +104,77 @@ pub async fn watch(app: tauri::AppHandle) {
 }
 
 /// Downloads a newer release if there is one (the plugin checks its signature against the app's public key), keeps
-/// it ready, and tells the window.
-async fn check(app: &tauri::AppHandle) -> Result<(), String> {
+/// it ready, and tells the window each step. `manual`: the user asked, so a failure stays on screen; otherwise it's
+/// forgotten, since nobody was waiting. If a check is already under way, this returns where it has got to.
+pub async fn check(app: &tauri::AppHandle, manual: bool) -> Result<UpdateState, String> {
+    use tauri::Manager;
+    let updates = app.state::<Updates>();
+    let _running = match updates.begin_check() {
+        Ok(guard) => guard,
+        Err(state) => return Ok(state),
+    };
+    if let Some(info) = updates.ready() {
+        return Ok(UpdateState::Ready { version: info.version });
+    }
+    publish(app, UpdateState::Checking);
+    match download_newer(app).await {
+        Ok(state) => {
+            publish(app, state.clone());
+            Ok(state)
+        }
+        Err(error) => {
+            publish(app, if manual { UpdateState::Failed { error: error.clone() } } else { UpdateState::Idle });
+            Err(error)
+        }
+    }
+}
+
+async fn download_newer(app: &tauri::AppHandle) -> Result<UpdateState, String> {
     use tauri::{Emitter, Manager};
     use tauri_plugin_updater::UpdaterExt;
-    let Some(update) = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())? else { return Ok(()) };
-    let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    let Some(update) = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())? else { return Ok(UpdateState::UpToDate) };
     let version = update.version.clone();
+    publish(app, UpdateState::Downloading { version: version.clone(), downloaded: 0, total: None });
+    let mut progress = Progress::default();
+    let bytes = update
+        .download(
+            |chunk, total| {
+                if let Some((downloaded, total)) = progress.advance(chunk, total) {
+                    publish(app, UpdateState::Downloading { version: version.clone(), downloaded, total });
+                }
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())?;
     app.state::<Updates>().offer(version.clone(), Box::new(move || update.install(bytes).map_err(|e| e.to_string())));
-    let _ = app.emit("update-ready", UpdateInfo { version });
-    Ok(())
+    let _ = app.emit("update-ready", UpdateInfo { version: version.clone() });
+    Ok(UpdateState::Ready { version })
+}
+
+/// Turns the downloader's call per chunk into a few updates for the window: one per percent when the size is known,
+/// otherwise one per 256 KiB, and always one when the download is complete.
+#[derive(Default)]
+pub struct Progress {
+    downloaded: u64,
+    reported: u64,
+}
+
+impl Progress {
+    /// What to tell the window after another `chunk` bytes, if it's worth a message: the bytes so far and the total.
+    pub fn advance(&mut self, chunk: usize, total: Option<u64>) -> Option<(u64, Option<u64>)> {
+        self.downloaded += chunk as u64;
+        let step = match total {
+            Some(t) if t >= 100 => t / 100,
+            _ => 256 * 1024,
+        };
+        let finished = total.is_some_and(|t| self.downloaded >= t);
+        if self.downloaded - self.reported >= step || (finished && self.downloaded > self.reported) {
+            self.reported = self.downloaded;
+            return Some((self.downloaded, total));
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -132,5 +234,58 @@ mod tests {
     #[cfg(debug_assertions)]
     fn development_builds_never_check() {
         assert!(!checks_enabled());
+    }
+
+    #[test]
+    fn the_state_reaches_the_window_tagged_by_kind() {
+        let json = |s: UpdateState| serde_json::to_string(&s).unwrap();
+        assert_eq!(json(UpdateState::Checking), r#"{"kind":"checking"}"#);
+        assert_eq!(json(UpdateState::UpToDate), r#"{"kind":"up_to_date"}"#);
+        assert_eq!(json(UpdateState::Downloading { version: "0.1.3".into(), downloaded: 5, total: Some(10) }), r#"{"kind":"downloading","version":"0.1.3","downloaded":5,"total":10}"#);
+        assert_eq!(json(UpdateState::Downloading { version: "0.1.3".into(), downloaded: 5, total: None }), r#"{"kind":"downloading","version":"0.1.3","downloaded":5,"total":null}"#);
+        assert_eq!(json(UpdateState::Installing { version: "0.1.3".into() }), r#"{"kind":"installing","version":"0.1.3"}"#);
+        assert_eq!(json(UpdateState::Failed { error: "offline".into() }), r#"{"kind":"failed","error":"offline"}"#);
+        assert_eq!(UpdateState::default(), UpdateState::Idle);
+    }
+
+    #[test]
+    fn a_second_check_while_one_runs_gets_where_it_has_got_to() {
+        let updates = Updates::default();
+        let first = updates.begin_check();
+        assert!(first.is_ok());
+        updates.remember(UpdateState::Downloading { version: "0.1.3".into(), downloaded: 40, total: Some(100) });
+        assert_eq!(updates.begin_check().err(), Some(UpdateState::Downloading { version: "0.1.3".into(), downloaded: 40, total: Some(100) }));
+        // Once the first is over, the next one starts.
+        drop(first);
+        assert!(updates.begin_check().is_ok());
+    }
+
+    #[test]
+    fn progress_is_reported_about_once_per_percent_and_when_it_completes() {
+        let mut progress = Progress::default();
+        let total = Some(10_000u64);
+        let mut told = vec![];
+        for _ in 0..1000 {
+            if let Some((downloaded, _)) = progress.advance(10, total) {
+                told.push(downloaded);
+            }
+        }
+        // 100 bytes is a percent of 10 000: a hundred messages for a thousand chunks, ending at the total.
+        assert_eq!(told.len(), 100);
+        assert_eq!(told.first(), Some(&100));
+        assert_eq!(told.last(), Some(&10_000));
+    }
+
+    #[test]
+    fn progress_without_a_known_size_is_reported_every_256_kib_and_a_short_download_still_finishes() {
+        let mut progress = Progress::default();
+        assert_eq!(progress.advance(100 * 1024, None), None);
+        assert_eq!(progress.advance(100 * 1024, None), None);
+        assert_eq!(progress.advance(100 * 1024, None), Some((300 * 1024, None)));
+        // A tiny file: a total below a hundred bytes isn't split into percents, and still ends with a message.
+        let mut small = Progress::default();
+        assert_eq!(small.advance(10, Some(40)), None);
+        assert_eq!(small.advance(30, Some(40)), Some((40, Some(40))));
+        assert_eq!(small.advance(0, Some(40)), None);
     }
 }
