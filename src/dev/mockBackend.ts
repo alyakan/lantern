@@ -3,6 +3,10 @@
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import type { McpServer, SkillEntry, UiEvent } from "../types";
+import { version as APP_VERSION } from "../../package.json";
+
+// The next patch release, which the update checks find.
+const NEXT_VERSION = APP_VERSION.replace(/\d+$/, (patch) => String(Number(patch) + 1));
 
 const FOLDER = "/Users/you/projects/acme-api";
 const FILE = `${FOLDER}/src/client/retry.ts`;
@@ -602,6 +606,10 @@ const MOCK_SKILLS: SkillEntry[] = [
 function mockClaudeRequest(request: { subtype: string; serverName?: string; enabled?: boolean }): unknown {
   const server = mockServers.find((s) => s.name === request.serverName);
   switch (request.subtype) {
+    case "mcp_oauth_callback_url":
+      // The URL the user pasted after logging in: the login completes.
+      if (server) setTimeout(() => (server.status = "connected"), 500);
+      return {};
     case "mcp_status":
       // Figma finishes connecting after a moment.
       for (const s of mockServers) if (s.status === "pending") setTimeout(() => (s.status = "connected"), 2000);
@@ -776,9 +784,13 @@ export function installMockBackend() {
             sendTo(String(a.slot))({ kind: "mcp_tools", tools: MCP_TOOLS });
           }, 50);
           return null;
-          return null;
         case "restart_session":
           slotMode[String(a.slot)] = String(a.mode);
+          return null;
+        case "apply_harness":
+          return null;
+        case "close_session":
+          delete slotMode[String(a.slot)];
           return null;
         case "interrupt":
           return null;
@@ -922,12 +934,12 @@ export function installMockBackend() {
         }
         // &update: a newer Lantern is downloaded and waiting.
         case "update_status":
-          return new URLSearchParams(location.search).has("update") ? { version: "0.1.2" } : null;
+          return new URLSearchParams(location.search).has("update") ? { version: NEXT_VERSION } : null;
         case "app_version":
-          return "0.1.9";
+          return APP_VERSION;
         case "update_state":
           return mockUpdate.state;
-        // ?check=new (the default) finds 0.1.10 and downloads it; =uptodate, =fail and =dev end the other ways.
+        // ?check=new (the default) finds NEXT_VERSION and downloads it; =uptodate, =fail and =dev end the other ways.
         case "check_for_updates": {
           const how = new URLSearchParams(location.search).get("check") ?? "new";
           if (how === "dev") return Promise.reject("This is a development build: updates are only checked in the released app.");
@@ -940,23 +952,25 @@ export function installMockBackend() {
             }
             if (how === "uptodate") return setMockUpdate({ kind: "up_to_date" });
             for (let pct = 0; pct <= 100; pct += 5) {
-              await setMockUpdate({ kind: "downloading", version: "0.1.10", downloaded: pct * 400_000, total: 40_000_000 });
+              await setMockUpdate({ kind: "downloading", version: NEXT_VERSION, downloaded: pct * 400_000, total: 40_000_000 });
               await sleep(160);
             }
-            await emit("update-ready", { version: "0.1.10" });
-            return setMockUpdate({ kind: "ready", version: "0.1.10" });
+            await emit("update-ready", { version: NEXT_VERSION });
+            return setMockUpdate({ kind: "ready", version: NEXT_VERSION });
           })();
         }
         // Installing shows, then restarting, and then nothing: the real app has quit and reopened by then.
         case "restart_to_update":
           return (async () => {
-            await setMockUpdate({ kind: "installing", version: "0.1.10" });
+            await setMockUpdate({ kind: "installing", version: NEXT_VERSION });
             await sleep(2500);
             await setMockUpdate({ kind: "restarting" });
             await new Promise(() => {});
           })();
         default:
-          return null;
+          // Plugins (dialogs, opener, notifications) answer nothing here; an app command with no case is a gap in the mock.
+          if (cmd.startsWith("plugin:")) return null;
+          return Promise.reject(`${cmd} isn't in the mock`);
       }
     },
     { shouldMockEvents: true },
