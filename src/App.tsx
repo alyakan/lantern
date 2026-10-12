@@ -39,6 +39,7 @@ import { andNext, pagesOf } from "./lib/steps";
 import { summarize } from "./lib/stepsSummary";
 import { flavourOf, savedMode, withFlavourNote, type Flavour } from "./lib/flavour";
 import { FileLinksProvider } from "./lib/fileLinks";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Hud, type HudEvent } from "./components/Hud";
 import type { OpenChat } from "./components/HistoryMenu";
 import { MessageInput } from "./components/MessageInput";
@@ -908,51 +909,56 @@ export default function App() {
                 </div>
               ) : (
                 <>
-                  <FileLinksProvider slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention}>
-                    {stepsView ? (
-                      <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} onPickFlavour={pickFlavour} autoApprove={autoFor(state.folder)}
-                        onAutoApprove={(on) =>
-                          unlessBackground(active, () => {
-                            if (!state.folder) return;
-                            setAutoBy({ ...autoBy, [state.folder]: on });
-                            to(active)({ type: "restarting" });
-                            api.restartSession(active, state.mode, settingsFor(active).effort, on).then(() => to(active)({ type: "session_ready" })).catch((e) => to(active)({ type: "failed", text: errText(e) }));
-                          })
-                        } onPage={setPageRange} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} />
-                    ) : (
-                      <ChatView key={`chat-${active}`} state={state} {...streamHandlers} />
-                    )}
-                  </FileLinksProvider>
+                  {/* Keyed by chat: a crash in one chat's stream doesn't stay on screen when another chat is shown. */}
+                  <ErrorBoundary key={active} name="chat">
+                    <FileLinksProvider key={active} slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention}>
+                      {stepsView ? (
+                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} onPickFlavour={pickFlavour} autoApprove={autoFor(state.folder)}
+                          onAutoApprove={(on) =>
+                            unlessBackground(active, () => {
+                              if (!state.folder) return;
+                              setAutoBy({ ...autoBy, [state.folder]: on });
+                              to(active)({ type: "restarting" });
+                              api.restartSession(active, state.mode, settingsFor(active).effort, on).then(() => to(active)({ type: "session_ready" })).catch((e) => to(active)({ type: "failed", text: errText(e) }));
+                            })
+                          } onPage={setPageRange} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} />
+                      ) : (
+                        <ChatView key={`chat-${active}`} state={state} {...streamHandlers} />
+                      )}
+                    </FileLinksProvider>
+                  </ErrorBoundary>
                   {composer}
                 </>
               )}
             </section>
           }
           right={
-            <ReviewPanel
-              agents={state.folder ? { tree, graph, usage: state.modelUsage, openKey: agentsOpenKey } : undefined}
-              summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: (page) => setPageJump((j) => ({ slot: active, page, key: (j?.key ?? 0) + 1 })), doc: { pages: stepPages ?? [], title: chatTitle(state, titles), folder: state.folder } } : undefined}
-              folder={state.folder}
-              ready={state.status !== "starting"}
-              files={shownFiles}
-              scope={scope}
-              onScope={setChangeScope}
-              scopeCounts={{ turn: turnFiles.length, session: state.changedFiles.length, git: gitFiles?.error ? null : (gitFiles?.files.length ?? null), pr: shownPr?.error ? null : (shownPr?.files.length ?? null), branch: shownBranch?.error ? null : (shownBranch?.files.length ?? null) }}
-              gitError={scope === "git" ? (gitFiles?.error ?? null) : scope === "pr" ? (shownPr?.error ?? null) : scope === "branch" ? (shownBranch?.error ?? null) : null}
-              pr={reviewPr}
-              branch={reviewBranch ? (shownBranch?.review ?? null) : undefined}
-              stepRange={stepsView ? pageRange : undefined}
-              testRuns={state.testRuns}
-              searchKey={searchKey}
-              openRequest={openRequest}
-              focusRun={focusRun}
-              selected={state.selectedFile}
-              follow={state.follow}
-              refreshKey={state.editCount}
-              onSaved={() => syncChanges(active)}
-              onSelect={selectFile}
-              onFollow={() => dispatch({ type: "follow_latest" })}
-            />
+            <ErrorBoundary name="review pane">
+              <ReviewPanel
+                agents={state.folder ? { tree, graph, usage: state.modelUsage, openKey: agentsOpenKey } : undefined}
+                summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: (page) => setPageJump((j) => ({ slot: active, page, key: (j?.key ?? 0) + 1 })), doc: { pages: stepPages ?? [], title: chatTitle(state, titles), folder: state.folder } } : undefined}
+                folder={state.folder}
+                ready={state.status !== "starting"}
+                files={shownFiles}
+                scope={scope}
+                onScope={setChangeScope}
+                scopeCounts={{ turn: turnFiles.length, session: state.changedFiles.length, git: gitFiles?.error ? null : (gitFiles?.files.length ?? null), pr: shownPr?.error ? null : (shownPr?.files.length ?? null), branch: shownBranch?.error ? null : (shownBranch?.files.length ?? null) }}
+                gitError={scope === "git" ? (gitFiles?.error ?? null) : scope === "pr" ? (shownPr?.error ?? null) : scope === "branch" ? (shownBranch?.error ?? null) : null}
+                pr={reviewPr}
+                branch={reviewBranch ? (shownBranch?.review ?? null) : undefined}
+                stepRange={stepsView ? pageRange : undefined}
+                testRuns={state.testRuns}
+                searchKey={searchKey}
+                openRequest={openRequest}
+                focusRun={focusRun}
+                selected={state.selectedFile}
+                follow={state.follow}
+                refreshKey={state.editCount}
+                onSaved={() => syncChanges(active)}
+                onSelect={selectFile}
+                onFollow={() => dispatch({ type: "follow_latest" })}
+              />
+            </ErrorBoundary>
           }
         />
         <SettingsView
