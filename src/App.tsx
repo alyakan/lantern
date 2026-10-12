@@ -33,7 +33,8 @@ import { SettingsView, type SettingsTab } from "./components/SettingsView";
 import { BannerView } from "./components/BannerView";
 import { ChatView } from "./components/ChatView";
 import { StepsView } from "./components/StepsView";
-import { andNext } from "./lib/steps";
+import { andNext, pagesOf } from "./lib/steps";
+import { summarize } from "./lib/stepsSummary";
 import { flavourOf, savedMode, withFlavourNote, type Flavour } from "./lib/flavour";
 import { FileLinksProvider } from "./lib/fileLinks";
 import { Hud, type HudEvent } from "./components/Hud";
@@ -760,6 +761,13 @@ export default function App() {
   const treeOpts = { live: state.status === "running" || state.backgroundTasks.length > 0, folder: state.folder, mainModel: state.model, effort: settingsFor(active).effort, advisor: settingsFor(active).advisor, background: state.backgroundRuns };
   const tree = agentTree(state.items, treeOpts);
   const graph = useMemo(() => agentGraph(state.items, treeOpts), [state.items, state.backgroundRuns, treeOpts.live, treeOpts.mainModel, treeOpts.advisor]);
+  // The Summary tab: the plan so far, from the same pages the Step-by-step view shows. A row asks the view to open its
+  // page; the chat it was for is kept so a request can't land in another one.
+  const stepsSummary = useMemo(() => {
+    const summary = stepsView ? summarize(pagesOf(state.items)) : null;
+    return summary && summary.rows.length > 0 ? summary : null;
+  }, [stepsView, state.items]);
+  const [pageJump, setPageJump] = useState<{ slot: string; page: string; key: number } | null>(null);
   const [agentsOpenKey, setAgentsOpenKey] = useState(0);
   const agentsShown = useRef<Set<string>>(new Set());
   const treeInUse = tree.live && usesAgents(tree);
@@ -888,7 +896,7 @@ export default function App() {
                             to(active)({ type: "restarting" });
                             api.restartSession(active, state.mode, settingsFor(active).effort, on).then(() => to(active)({ type: "session_ready" })).catch((e) => to(active)({ type: "failed", text: errText(e) }));
                           })
-                        } onPage={setPageRange} onReviewFile={setReviewFile} />
+                        } onPage={setPageRange} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} />
                     ) : (
                       <ChatView key={`chat-${active}`} state={state} {...streamHandlers} />
                     )}
@@ -901,6 +909,7 @@ export default function App() {
           right={
             <ReviewPanel
               agents={state.folder ? { tree, graph, usage: state.modelUsage, openKey: agentsOpenKey } : undefined}
+              summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: (page) => setPageJump((j) => ({ slot: active, page, key: (j?.key ?? 0) + 1 })) } : undefined}
               folder={state.folder}
               ready={state.status !== "starting"}
               files={shownFiles}

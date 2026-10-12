@@ -10,6 +10,8 @@ import { Counts } from "./EditLine";
 import { DocIcon } from "./icons";
 import { FilesTab } from "./FilesTab";
 import { AgentsTab } from "./AgentsTab";
+import { SummaryTab } from "./SummaryTab";
+import type { StepsSummary } from "../lib/stepsSummary";
 import type { AgentTree } from "../lib/agents";
 import type { AgentGraph } from "../lib/agentGraph";
 import type { ModelCost } from "../types";
@@ -47,6 +49,8 @@ interface Props {
   focusRun?: { id: string; key: number } | null;
   /** The Agents tab: the latest turn's agent tree, cost per model, and `openKey`, changed to bring the tab up. */
   agents?: { tree: AgentTree; graph: AgentGraph; usage: ModelCost[]; openKey: number };
+  /** The Summary tab, in a Step-by-step chat that has a step to show: the plan so far, and how to open a row's page. */
+  summary?: { slot: string; data: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void };
   selected: string | null;
   follow: boolean;
   refreshKey: number;
@@ -57,13 +61,14 @@ interface Props {
 const LAYOUT_LABEL: Record<DiffLayout, string> = { inline: "Unified", split: "Split" };
 const NEXT_LAYOUT: Record<DiffLayout, DiffLayout> = { inline: "split", split: "inline" };
 
-type Tab = "changes" | "files" | "tests" | "agents";
+type Tab = "changes" | "files" | "tests" | "agents" | "summary";
 
 export function ReviewPanel(props: Props) {
   const [savedTab, setTab] = usePersistentState<Tab>("review.tab", "changes");
   const count = props.files.length;
   const runs = props.testRuns ?? [];
-  const tab: Tab = savedTab === "tests" && runs.length === 0 ? "changes" : savedTab;
+  // The saved tab is shared by every chat: one that has no tests, or no steps, opens on Changes instead.
+  const tab: Tab = (savedTab === "tests" && runs.length === 0) || (savedTab === "summary" && !props.summary) ? "changes" : savedTab;
   const [shownRun, setShownRun] = useState<string | null>(null);
   const [reveal, setReveal] = useState<{ path: string; line: number | null; key: number } | null>(null);
   // A mention of a changed file at a line (a review finding): its diff scrolls there.
@@ -111,6 +116,11 @@ export function ReviewPanel(props: Props) {
           <button role="tab" aria-selected={tab === "files"} className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}>
             Files
           </button>
+          {props.summary && (
+            <button role="tab" aria-selected={tab === "summary"} className={tab === "summary" ? "active" : ""} onClick={() => setTab("summary")}>
+              Summary
+            </button>
+          )}
           {props.agents && (
             <button role="tab" aria-selected={tab === "agents"} className={tab === "agents" ? "active" : ""} onClick={() => setTab("agents")}>
               Agents
@@ -135,6 +145,11 @@ export function ReviewPanel(props: Props) {
             setTab("files");
           }}
         />
+      )}
+      {tab === "summary" && props.summary && (
+        <div className="tab-body">
+          <SummaryTab slot={props.summary.slot} summary={props.summary.data} changed={props.summary.changed} running={props.summary.running} onOpenPage={props.summary.onOpenPage} />
+        </div>
       )}
       {tab === "agents" && props.agents && (
         <div className="tab-body">
@@ -252,7 +267,7 @@ function ScopeMenu({ scope = "session", onScope, pr, branch, stepRange, scopeCou
   return (
     <div className="scope-anchor" ref={root}>
       <button className={`scope-button${open ? " pressed" : ""}`} aria-haspopup="menu" aria-expanded={open} aria-label={`Show changes from: ${label(scope)}`} title={about(scope)} onClick={() => setOpen(!open)}>
-        {label(scope)}
+        <span className="scope-label">{label(scope)}</span>
         {count(scope) != null && <span className="tab-count">{count(scope)}</span>}
         <span className="scope-chevron" aria-hidden />
       </button>

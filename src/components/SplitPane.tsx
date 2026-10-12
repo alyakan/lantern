@@ -4,7 +4,8 @@ import { clampRatio } from "../lib/layout";
 // The chat pane: Step by step's header (the flavour badge, the auto-approve switch and three page dots) has to fit. Keep
 // in sync with .split-left in styles.css.
 const MIN_LEFT = 384;
-const MIN_RIGHT = 360;
+// The side pane: its tabs (Changes, Files, Summary, Agents, Tests) and the Changes filter have to fit on one row.
+const MIN_RIGHT = 420;
 const DURATION = 220; // keep in sync with .split-side.animating in styles.css
 
 interface Props {

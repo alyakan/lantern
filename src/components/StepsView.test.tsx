@@ -60,6 +60,25 @@ describe("StepsView", () => {
     expect(task.querySelector(".user-note-tag")).toHaveTextContent("Task");
   });
 
+  it("opens the page the Summary tab asks for, again when asked again, and ignores a request from before it was drawn", () => {
+    const h = handlers();
+    const view = <T extends { page: string; key: number } | null>(jump: T) => <StepsView state={state()} {...h} jump={jump} />;
+    // A request left over from before this view was drawn (switching back to the chat) doesn't move it.
+    const { rerender } = render(view({ page: "u1", key: 1 }));
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    rerender(view({ page: "u1", key: 2 }));
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    // Moved on by hand, asking for the same page again brings it back.
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    rerender(view({ page: "u1", key: 3 }));
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    // A page that isn't there (the chat changed under it) is ignored.
+    fireEvent.keyDown(window, { key: "ArrowRight" });
+    rerender(view({ page: "gone", key: 4 }));
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+  });
+
   it("keeps a question about the step on its page, with the answer underneath", () => {
     const asked: ChatItem[] = [
       ...items,

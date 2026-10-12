@@ -162,12 +162,12 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 .split.dragging { cursor: col-resize; user-select: none; }
 .split-left { flex: 0 1 50%; min-width: 384px; display: flex; padding-bottom: var(--edge); }
 .split-left.fill { flex: 1 1 0; padding-right: var(--edge); }
-.split-side { flex: 1 1 0; min-width: calc(360px + var(--gutter)); display: flex; }
+.split-side { flex: 1 1 0; min-width: calc(420px + var(--gutter)); display: flex; }
 /* While collapsing/expanding the wrapper animates its width and clips; the pane inside keeps a fixed width. */
 .split-side.animating { flex: none; min-width: 0; overflow: hidden; transition: width 220ms cubic-bezier(0.32, 0.72, 0, 1); }
 .split-side-inner { flex: 1 1 0; min-width: 0; display: flex; }
 .split-side.animating .split-side-inner { flex: none; }
-.split-right { flex: 1 1 0; min-width: 360px; display: flex; }
+.split-right { flex: 1 1 0; min-width: 420px; display: flex; }
 /* A thin grab strip over the pane's left edge; a line only appears while hovering or dragging. */
 .split-handle { flex: none; width: var(--gutter); position: relative; z-index: 2; cursor: col-resize; touch-action: none; }
 /* The visible gap is thin; keep a comfortable invisible grab area around it. */
@@ -422,18 +422,24 @@ button.icon.queue-remove { flex: none; width: 20px; height: 20px; font-size: 14p
 /* No overflow: hidden on the pane itself so the file picker menu can extend past it; the diff clips its own corner. */
 .review { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--pane); }
 /* Changes | Files as a macOS segmented control. */
-.pane-tabs { display: flex; align-items: center; height: 44px; flex: none; padding: 0 10px; }
+.pane-tabs { container-type: inline-size; display: flex; align-items: center; gap: 8px; height: 44px; flex: none; padding: 0 10px; }
+/* In the narrowest the pane gets, with every tab there is, the tabs tighten and the filter keeps a few letters. */
+@container (max-width: 440px) { .pane-tabs .pane-tabs-track button { padding: 0 7px; } }
 /* Changes | Files | Tests: the same size as the pane's other pills (the Changes filter, Build | Learn | Review), not the
    title bar's larger capsules. */
 .pane-tabs-track { display: inline-flex; gap: 2px; height: 26px; align-items: center; padding: 0 2px; border-radius: 999px; background: var(--glass); border: 0.5px solid var(--glass-line); }
-.pane-tabs-track button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 64px; height: 22px; padding: 0 10px; border: none; border-radius: 999px; background: none; color: var(--muted); font-size: 11.5px; }
+.pane-tabs-track button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 0 1 64px; height: 22px; padding: 0 10px; border: none; border-radius: 999px; background: none; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
 .pane-tabs-track button:hover:not(.active) { background: var(--bg-hover); color: var(--text-2); }
 .pane-tabs-track button.active { background: var(--seg-thumb); color: var(--text); box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.18), 0 0 0 0.5px rgba(0, 0, 0, 0.06); }
 /* Last turn | Session: a smaller capsule at the row's far end, only on the Changes tab. */
 /* The Changes filter: a pill that opens a menu of what to show, each with what it means. */
-.scope-anchor { position: relative; margin-left: auto; }
-.scope-button { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 12px; border: 0.5px solid var(--glass-line); border-radius: 999px; background: var(--glass); color: var(--text); font-size: 11.5px; }
+/* Both give way when the row is tight (five tabs and the filter in a narrow pane): the tabs down to their labels, the
+   filter's name to an ellipsis, leaving its count. */
+.scope-anchor { position: relative; margin-left: auto; min-width: 0; }
+.scope-button { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 26px; padding: 0 10px 0 12px; border: 0.5px solid var(--glass-line); border-radius: 999px; background: var(--glass); color: var(--text); font-size: 11.5px; }
 .scope-button:hover:not(:disabled), .scope-button.pressed { background: var(--bg-hover); }
+.scope-label { min-width: 26px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scope-button .tab-count, .scope-chevron { flex: none; }
 .scope-chevron { width: 6px; height: 6px; margin: -3px 0 0 1px; border-right: 1.3px solid var(--muted); border-bottom: 1.3px solid var(--muted); transform: rotate(45deg); }
 .scope-menu { top: calc(100% + 6px); right: 0; width: 300px; }
 .scope-option { align-items: flex-start; gap: 8px; padding: 7px 8px; }
@@ -1177,3 +1183,31 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .edit-bar.failed { background: var(--error-bg); }
 .edit-bar.failed .edit-bar-text { color: var(--del); }
 .tag.unsaved { color: var(--working); }
+
+/* The Summary tab: Step by step's plan so far, a row per step; a row opens its page in the chat. */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.summary { height: 100%; min-height: 0; padding: 6px 10px 16px; overflow-y: auto; }
+.summary-headline { padding: 6px 10px 10px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.summary-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.summary-row { display: flex; align-items: flex-start; gap: 4px; border-radius: 8px; }
+.summary-row:hover { background: var(--bg-hover); }
+.summary-row.current { background: var(--bg-subtle); }
+.summary-main { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; padding: 9px 6px 9px 10px; border: none; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; }
+.summary-mark { flex: none; position: relative; width: 14px; height: 14px; margin-top: 2px; border: 1.5px solid var(--faint); border-radius: 50%; }
+.summary-row.built .summary-mark { border-color: var(--muted); background: var(--muted); }
+.summary-row.built .summary-mark::after { content: ""; position: absolute; left: 3.5px; top: 1.5px; width: 3px; height: 6px; border: solid var(--pane); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.summary-row.current .summary-mark { border-color: var(--text); background: none; }
+.summary-row.current .summary-mark::after { content: ""; position: absolute; inset: 2.5px; border-radius: 50%; background: var(--text); }
+.summary-text { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.summary-label { font-size: 11px; font-weight: 500; letter-spacing: 0.02em; color: var(--muted); }
+.summary-title { font-size: 13px; font-weight: 600; line-height: 1.35; color: var(--text); overflow-wrap: anywhere; }
+.summary-row.planned .summary-title { font-weight: 500; color: var(--text-2); }
+.summary-gist { font-size: 12px; line-height: 1.45; color: var(--text-2); overflow-wrap: anywhere; }
+.summary-meta { display: flex; flex-wrap: wrap; gap: 2px 12px; font-size: 11.5px; color: var(--muted); }
+.summary-meta.muted, .summary-file.muted { color: var(--faint); }
+.summary-file { font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+.summary-file .add, .summary-stats .add { color: var(--add); }
+.summary-file .del, .summary-stats .del { color: var(--del); }
+.summary-findings.some { color: var(--text); font-weight: 500; }
+.summary-plan-link { flex: none; align-self: flex-start; margin: 9px 8px 0 0; padding: 0 8px; height: 20px; border: 0.5px solid var(--line-strong); border-radius: 999px; background: none; color: var(--muted); font-size: 11px; }
+.summary-plan-link:hover { background: var(--bg-hover); color: var(--text); }

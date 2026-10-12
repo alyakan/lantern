@@ -48,6 +48,8 @@ interface Props extends StreamHandlers {
   onPage: (range: { from: number; to: number } | null) => void;
   /** Review: the file of the page that's on screen, so the Changes pane can show it. */
   onReviewFile?: (path: string) => void;
+  /** The Summary tab asked for this page; `key` changes with every request, so asking again for the same page works. */
+  jump?: { page: string; key: number } | null;
 }
 
 const isTyping = (el: Element | null) => !!el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el as HTMLElement).isContentEditable);
@@ -55,7 +57,7 @@ const isTyping = (el: Element | null) => !!el && (el instanceof HTMLInputElement
 // Step-by-step mode's view of the conversation: a page per step, side by side, one on screen. Questions about a step
 // and changes to it stay on its page; Previous and Next (or ← →) slide between pages, and on the newest page Next
 // approves the step and Claude carries on.
-export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPage, onReviewFile, autoApprove = false, onAutoApprove, ...handlers }: Props) {
+export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPage, onReviewFile, autoApprove = false, onAutoApprove, jump = null, ...handlers }: Props) {
   // A revision you undid: the page shows the version you went back to, until Claude revises the step again.
   const [kept, setKept] = useState<Record<string, { turn: number; over: number }>>({});
   const claudes = pagesOf(state.items);
@@ -111,6 +113,14 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
   }, [restingFile]);
 
   const go = (i: number) => setIndex(Math.max(0, Math.min(last, i)));
+  // A page the Summary tab asked for. Not one asked for before this view was drawn (switching back to this chat).
+  const askedFor = useRef(jump?.key);
+  useEffect(() => {
+    if (!jump || jump.key === askedFor.current) return;
+    askedFor.current = jump.key;
+    const i = pages.findIndex((p) => p.key === jump.page);
+    if (i >= 0) go(i);
+  }, [jump?.key]);
   // The dots can be squeezed to three in a narrow pane, so keep the current page's pill in the middle of what shows.
   const rail = useRef<HTMLDivElement>(null);
   useEffect(() => {

@@ -103,3 +103,32 @@ describe("ReviewPanel", () => {
     expect(onFollow).toHaveBeenCalled();
   });
 });
+
+vi.mock("./SummaryTab", () => ({ SummaryTab: ({ summary, onOpenPage }: { summary: { headline: string | null; rows: { page: string }[] }; onOpenPage: (page: string) => void }) => <button onClick={() => onOpenPage(summary.rows[0].page)}>summary: {summary.headline}</button> }));
+
+describe("ReviewPanel's Summary tab", () => {
+  const summary = (onOpenPage = vi.fn()) => ({ slot: "s1", data: { headline: "Plan: 2 steps · 1 built", rows: [{ page: "p1" }] } as never, changed: [], running: false, onOpenPage });
+  const tabs = () => screen.getAllByRole("tab").map((t) => t.textContent);
+
+  it("is a tab only when the chat has a plan to show, and opens a row's page", () => {
+    localStorage.clear();
+    const onOpenPage = vi.fn();
+    const { rerender } = render(<ReviewPanel {...base} selected={null} follow />);
+    expect(tabs()).toEqual(["Changes2", "Files"]);
+    rerender(<ReviewPanel {...base} selected={null} follow summary={summary(onOpenPage)} />);
+    expect(tabs()).toEqual(["Changes2", "Files", "Summary"]);
+    // Showing it takes a click: it doesn't take the pane over when it first appears.
+    expect(screen.queryByText(/Plan: 2 steps/)).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Summary" }));
+    fireEvent.click(screen.getByText(/Plan: 2 steps/));
+    expect(onOpenPage).toHaveBeenCalledWith("p1");
+  });
+
+  it("falls back to Changes when the saved tab is Summary and this chat has none", () => {
+    localStorage.setItem("review.tab", JSON.stringify("summary"));
+    render(<ReviewPanel {...base} files={[]} selected={null} follow />);
+    expect(screen.getByRole("tab", { name: "Changes" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("No changes yet")).toBeInTheDocument();
+    localStorage.clear();
+  });
+});
