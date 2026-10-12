@@ -287,8 +287,8 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
             // The suggestion's card has the answers.
             <span className="steps-hint">Start it, or pick another</span>
           ) : (
-            <button className="primary" disabled={waiting || heading?.kind === "done" || heading?.kind === "summary"} title={review ? "Send your verdicts and go on to the next file" : "Approve this page and go on to the next"} onClick={next}>
-              {heading?.kind === "done" || heading?.kind === "summary" ? "Done" : review ? (heading?.kind === "file" && heading.n === heading.total ? "Summary →" : filesSoFar ? "Next file →" : "First file →") : flavour === "debug" ? "Next →" : "Next step →"}
+            <button className="primary" disabled={waiting || heading?.kind === "done" || heading?.kind === "summary"} title={review ? "Send your verdicts and go on to the next file" : heading?.kind === "plan-complete" ? "Lock the plan: Claude builds exactly these steps, and asks before changing them" : heading?.kind === "plan-update" ? "Approve this change to the locked plan" : "Approve this page and go on to the next"} onClick={next}>
+              {heading?.kind === "done" || heading?.kind === "summary" ? "Done" : heading?.kind === "plan-complete" ? "Lock plan →" : heading?.kind === "plan-update" ? "Approve update →" : review ? (heading?.kind === "file" && heading.n === heading.total ? "Summary →" : filesSoFar ? "Next file →" : "First file →") : flavour === "debug" ? "Next →" : "Next step →"}
             </button>
           )
         ) : (

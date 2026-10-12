@@ -5,7 +5,7 @@ import { parsePlanStep } from "./markdown";
 
 /** What a Step-by-step message says it is, from the heading it starts with (see STEPS_PROMPT in args.rs). */
 export interface Heading {
-  kind: "frame" | "plan" | "plan-complete" | "step" | "done" | "file" | "summary" | "evidence" | "fix" | "switch";
+  kind: "frame" | "plan" | "plan-complete" | "plan-update" | "step" | "done" | "file" | "summary" | "evidence" | "fix" | "switch";
   /** The step's number, and for implementation steps the plan's length. */
   n: number | null;
   total: number | null;
@@ -16,7 +16,7 @@ export interface Heading {
 
 type UserItem = Extract<ChatItem, { type: "user" }>;
 
-const HEADING = /^#{1,3}\s*(Frame|Plan step\s+(\d+)|Plan complete|Step\s+(\d+)\s+of\s+(\d+)|File\s+(\d+)\s+of\s+(\d+)|Summary|Done|Evidence(?:\s+(\d+))?|Fix|Switch to\s+(Build|Learn|Review|Debug))\b\s*(?:[—–-]+\s*(.*))?$/i;
+const HEADING = /^#{1,3}\s*(Frame|Plan step\s+(\d+)|Plan complete|Plan update|Step\s+(\d+)\s+of\s+(\d+)|File\s+(\d+)\s+of\s+(\d+)|Summary|Done|Evidence(?:\s+(\d+))?|Fix|Switch to\s+(Build|Learn|Review|Debug))\b\s*(?:[—–-]+\s*(.*))?$/i;
 
 /**
  * incremental-pr-review's own file line, when Claude writes the skill's format rather than a "# File N of M" heading:
@@ -47,6 +47,7 @@ export function parseHeading(text: string): Heading | null {
   if (word === "summary") return { kind: "summary", n: null, total: null, title };
   if (word === "frame") return { kind: "frame", n: null, total: null, title };
   if (word.startsWith("plan step")) return { kind: "plan", n: Number(m[2]), total: null, title };
+  if (word === "plan update") return { kind: "plan-update", n: null, total: null, title };
   if (word === "plan complete") return { kind: "plan-complete", n: null, total: Number(/(\d+)/.exec(title)?.[1] ?? NaN) || null, title };
   if (word.startsWith("step")) {
     // A review written under Build's headings (the chat was switched to Review and Claude kept the old format): a
@@ -100,7 +101,7 @@ const withoutHeading = (text: string) => {
 };
 
 // Files the skill's way (and Evidence pages without a number) are told apart by title; suggestions by flavour.
-const headingKey = (h: Heading | null) => (h ? `${h.kind}:${h.n ?? (h.kind === "file" || h.kind === "evidence" ? h.title : (h.flavour ?? ""))}` : null);
+const headingKey = (h: Heading | null) => (h ? `${h.kind}:${h.n ?? (h.kind === "file" || h.kind === "evidence" || h.kind === "plan-update" ? h.title : (h.flavour ?? ""))}` : null);
 
 /** Added to a message sent with ⌘Enter on a Step-by-step page: do this, and count the step as approved. */
 export const NEXT_SUFFIX = "Once that's done, this step is approved: go on to the next step.";
@@ -199,6 +200,8 @@ export function pageLabel(h: Heading | null): string {
       return `Plan step ${h.n}`;
     case "plan-complete":
       return "Plan complete";
+    case "plan-update":
+      return "Plan update";
     case "step":
       return `Step ${h.n} of ${h.total}`;
     case "done":

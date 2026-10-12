@@ -7,6 +7,8 @@ describe("parseHeading", () => {
     expect(parseHeading("# Frame — Add slugify(s) to utils.js\n\nTask: …")).toEqual({ kind: "frame", n: null, total: null, title: "Add slugify(s) to utils.js" });
     expect(parseHeading("# Plan step 2 — Add tests for slugify")).toMatchObject({ kind: "plan", n: 2, title: "Add tests for slugify" });
     expect(parseHeading("# Plan complete — 3 steps")).toMatchObject({ kind: "plan-complete", total: 3 });
+    expect(parseHeading("# Plan update — the 404 case needs its own step")).toEqual({ kind: "plan-update", n: null, total: null, title: "the 404 case needs its own step" });
+    expect(pageLabel(parseHeading("# Plan update — x"))).toBe("Plan update");
     expect(parseHeading("## Step 1 of 3 - Add slugify")).toMatchObject({ kind: "step", n: 1, total: 3, title: "Add slugify" });
     expect(parseHeading("\n# Done — slugify with tests")).toMatchObject({ kind: "done", title: "slugify with tests" });
   });

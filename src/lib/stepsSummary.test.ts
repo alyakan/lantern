@@ -43,7 +43,7 @@ describe("summarize a Build chat", () => {
       ["step", "Step 1", "Name the statuses", true, true],
       ["step", "Step 2", "Retry with backoff", false, false],
     ]);
-    expect(s.headline).toBe("Plan: 2 steps · 1 built");
+    expect(s.headline).toBe("Plan: 2 steps · locked · 1 built");
     // Built: what the step page says, and both pages to open. Planned: what the plan says it will change.
     const [, one, two] = s.rows;
     expect(one.gist).toBe("`retry.ts:1`: added RETRYABLE.");
@@ -63,7 +63,7 @@ describe("summarize a Build chat", () => {
       ["step", true, false],
       ["done", true, true],
     ]);
-    expect(built.headline).toBe("Plan: 1 step · all built");
+    expect(built.headline).toBe("Plan: 1 step · locked · all built");
   });
 
   it("counts the steps from the plan-complete page, then from the step pages, then from what it has", () => {
@@ -176,5 +176,56 @@ describe("summarize Review and Debug chats", () => {
     const items: ChatItem[] = [{ type: "user", id: "u0", text: "Next" }, a("a0", "# Step 1 of 1 — A\n\nbuilt")];
     const [row] = summarize(pagesOf(items)).rows;
     expect([row.changes, row.range]).toEqual([true, null]);
+  });
+
+  describe("the plan's lock", () => {
+    const frame = "# Frame — feature\n\nx";
+
+    it("says locked once the Plan complete page was approved, and not before", () => {
+      expect(summaryOf(frame, PLAN(1, "A", "a"), "# Plan complete — 1 step").headline).toBe("Plan: 1 step · 0 built");
+      expect(summaryOf(frame, PLAN(1, "A", "a"), "# Plan complete — 1 step", "# Step 1 of 1 — A\n\nbuilt").headline).toBe("Plan: 1 step · locked · all built");
+    });
+
+    it("isn't locked by a question about the page, or a change to a plan step, which don't approve it", () => {
+      const base: ChatItem[] = [u("u0", "Do the thing", 0), a("a0", frame), u("u1", "Next", 1), a("a1", PLAN(1, "A", "a")), u("u2", "Next", 2), a("a2", "# Plan complete — 1 step")];
+      const asked = summarize(pagesOf([...base, u("u3", "Why one step?", 3), a("a3", "Because it's small.")]));
+      expect(asked.headline).toBe("Plan: 1 step · 0 built");
+      const changed = summarize(pagesOf([...base, u("u3", "Make step 1 smaller", 3), a("a3", PLAN(1, "A smaller", "a"))]));
+      expect(changed.headline).toBe("Plan: 1 step · 0 built");
+    });
+
+    it("has nothing to lock when the chat built without a plan", () => {
+      expect(summaryOf("# Step 1 of 2 — A\n\nbuilt", "# Step 2 of 2 — B\n\nbuilt").headline).toBe("Plan: 2 steps · all built");
+    });
+
+    it("unlocks while a plan update waits for you, shows it as a row, and locks again when the revised plan is approved", () => {
+      const locked = [frame, PLAN(1, "A", "a"), "# Plan complete — 1 step", "# Step 1 of 1 — A\n\nbuilt"];
+      const update = "# Plan update — the 404 case needs its own step\n\nAdd a step for 404s.";
+      const pending = summaryOf(...locked, update);
+      expect(pending.headline).toBe("Plan: 1 step · all built");
+      const row = pending.rows.find((r) => r.kind === "plan-update")!;
+      expect([row.label, row.title, row.gist, row.built, row.current, row.changes]).toEqual(["Plan update", "the 404 case needs its own step", "Add a step for 404s.", true, true, false]);
+      // Posted again but not yet approved: still not locked. Approved by going on: locked, with the new step counted.
+      const revised = [...locked, update, PLAN(2, "404s", "b"), "# Plan complete — 2 steps"];
+      expect(summaryOf(...revised).headline).toBe("Plan: 2 steps · 1 built");
+      expect(summaryOf(...revised, "# Step 2 of 2 — 404s\n\nbuilt").headline).toBe("Plan: 2 steps · locked · all built");
+    });
+
+    it("lists a plan update right after the step that was built before it, in the order they were written", () => {
+      const head = [frame, PLAN(1, "A", "a"), PLAN(2, "B", "b"), "# Plan complete — 2 steps", "# Step 1 of 2 — A\n\nbuilt"];
+      const s = summaryOf(...head, "# Plan update — first\n\nx", "# Plan update — second\n\ny", "# Step 2 of 2 — B\n\nbuilt", "# Done — all\n\nz");
+      expect(s.rows.map((r) => r.label)).toEqual(["Frame", "Step 1", "Plan update", "Plan update", "Step 2", "Done"]);
+      expect(s.rows.filter((r) => r.kind === "plan-update").map((r) => r.title)).toEqual(["first", "second"]);
+    });
+
+    it("leaves a plan update that came before any step was built where it is", () => {
+      const s = summaryOf(frame, PLAN(1, "A", "a"), "# Plan complete — 1 step", "# Plan update — early\n\nx");
+      expect(s.rows.map((r) => r.label)).toEqual(["Frame", "Step 1", "Plan update"]);
+    });
+
+    it("stays locked when work went on after an update (it was declined)", () => {
+      const s = summaryOf(frame, PLAN(1, "A", "a"), PLAN(2, "B", "b"), "# Plan complete — 2 steps", "# Step 1 of 2 — A\n\nbuilt", "# Plan update — maybe split\n\nSplit step 2?", "# Step 2 of 2 — B\n\nbuilt");
+      expect(s.headline).toBe("Plan: 2 steps · locked · all built");
+    });
   });
 });

@@ -48,6 +48,18 @@ describe("StepsView", () => {
     expect(h.onNext).toHaveBeenCalled();
   });
 
+  it("offers to lock the plan on the Plan complete page, and to approve a change on a Plan update page", () => {
+    const withPage = (text: string): ChatItem[] => [...items, { type: "user", id: "u3", text: "Next", turn: 2 }, { type: "assistant", id: "a3", text }, { type: "turn", id: "t3", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 }];
+    const h = handlers();
+    const view = render(<StepsView state={state({ items: withPage("# Plan complete — 1 step\n\nLock this plan?") })} {...h} />);
+    fireEvent.click(screen.getByRole("button", { name: "Lock plan →" }));
+    expect(h.onNext).toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Next step →" })).toBeNull();
+    view.unmount();
+    render(<StepsView state={state({ items: withPage("# Plan update — a 404 step\n\nAdd one?") })} {...handlers()} />);
+    expect(screen.getByRole("button", { name: "Approve update →" })).toBeInTheDocument();
+  });
+
   it("shows your messages with your name and when you sent them", async () => {
     const at = new Date("2026-09-30T14:02:00").getTime();
     const sent: ChatItem[] = [{ ...(items[0] as Extract<ChatItem, { type: "user" }>), at }, ...items.slice(1)];

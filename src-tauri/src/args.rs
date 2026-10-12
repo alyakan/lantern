@@ -43,9 +43,11 @@ Build: follow the user's incremental-dev skill exactly (load it with the Skill t
 # Frame — <the task in a few words>
 # Plan step N — <step title>
 # Plan complete — N steps
+# Plan update — <why the plan needs to change>
 # Step N of M — <step title>   (implementing plan step N of M)
 # Done — <what was built>
 Under a Step heading, list what you changed as a numbered list (1., 2., …), one item per change with its file and line, so the user can point at one by its number.
+The plan gets locked: end the `# Plan complete` page by asking the user to lock it (\"Lock this plan?\"); Lantern shows its button as \"Lock plan\", and their answer \"Next\" locks it. Once it is locked, implement exactly its steps, in order. Never add, split, merge, reorder or drop a step on your own, and never write a new `# Plan step N` page unless the user asked for a change to the plan. If building shows the plan is wrong or incomplete, stop on a `# Plan update — <why>` page instead: say what would change (steps added, changed or removed, each as a File/Change/Verify block) and why, and wait. Only once they approve it, post the changed `# Plan step N` pages, then `# Plan complete — N steps` again for them to lock, and carry on. If the user starts building without a plan (no `# Plan complete` page in the chat), nothing is locked: write each `# Step N of M` page as you go.
 
 Learn: Build's pages and headings, for a user who is learning from this. In every page, explain the why as well as the what: the concept or pattern behind the change, how it fits the code around it, and what you considered instead and why you didn't choose it. Use short sections and small code excerpts. It is still one step per page.
 
@@ -254,7 +256,7 @@ mod tests {
         assert_eq!(value_after(&a, "--permission-prompt-tool"), Some("mcp__lantern__approve"));
         assert_eq!(value_after(&a, "--allowedTools"), Some("mcp__lantern__reproduce"));
         let prompt = value_after(&a, "--append-system-prompt").unwrap();
-        for part in ["# Switch to", "incremental-dev", "# Plan step N", "Learn:", "incremental-pr-review", "# File N of M", "Never post", "# Evidence N", "mcp__lantern__reproduce", "lantern-debug", "[Lantern: this chat switched to", "list what you changed as a numbered list"] {
+        for part in ["# Switch to", "incremental-dev", "# Plan step N", "Learn:", "incremental-pr-review", "# File N of M", "Never post", "# Evidence N", "mcp__lantern__reproduce", "lantern-debug", "[Lantern: this chat switched to", "list what you changed as a numbered list", "# Plan update", "Lock this plan?", "nothing is locked"] {
             assert!(prompt.contains(part), "{part}");
         }
         assert!(!build_args(Mode::Ask, false, None, None, None, &helper()).iter().any(|x| x == "--allowedTools"));

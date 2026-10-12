@@ -203,11 +203,15 @@ async function playSteps(slot: string, text: string, teach: boolean) {
     `# Frame — Retry transient errors in fetchJson\n\n**Task:** make \`fetchJson\` retry 429 and gateway errors with exponential backoff. Done when a 503 twice then 200 resolves, and a 404 throws at once.\n\n**Tech spec:** none covers this (I checked \`README.md\` and \`docs/\`).\n\n> [!WARNING]\n> Retrying a POST can repeat its side effect. This change only retries GETs.\n\n**Question:** should the number of attempts be configurable? I'd default it to 3 with an optional argument.`,
     `# Plan step 1 — Name the retryable statuses\n\n\`\`\`\nFile:   src/client/retry.ts, src/server/middleware/validation/schemas/updateUserProfileRequest.ts\nChange: Add RETRYABLE = new Set([429, 502, 503, 504]) above fetchJson.\nVerify: a unit test that 404 isn't in it and 503 is.\n\`\`\`${why}`,
     `# Plan step 2 — Retry with backoff\n\n\`\`\`\nFile:   src/client/retry.ts\nChange: Loop up to \`attempts\` (default 3), return on res.ok, wait 250·2^i ms between tries.\nVerify: 503, 503, 200 resolves; 404 throws on the first try; the last failure is rethrown.\n\`\`\``,
-    `# Plan complete — 2 steps\n\n1. Name the retryable statuses\n2. Retry with backoff\n\nPlan complete, 2 steps. Starting step 1?`,
+    `# Plan complete — 2 steps\n\n1. Name the retryable statuses\n2. Retry with backoff\n\nPlan complete, 2 steps. Lock this plan?`,
     `# Step 1 of 2 — Name the retryable statuses\n\n- \`src/client/retry.ts:1\`: added \`RETRYABLE\`.\n- \`src/server/middleware/validation/schemas/updateUserProfileRequest.ts:12-48\`: the new status check.\n\n\`\`\`\nconst RETRYABLE = new Set([429, 502, 503, 504]);\n\`\`\`\n\n> [!NOTE]\n> 500 and 501 are left out on purpose: they usually aren't transient.${why}`,
     `# Step 2 of 2 — Retry with backoff\n\n- \`src/client/retry.ts:3-10\`: the retry loop.\n\n\`\`\`diff\n@@ -1,3 +1,8 @@\n-export async function fetchJson(url: string) {\n+export async function fetchJson(url: string, attempts = 3) {\n+  for (let i = 1; ; i++) {\n   const res = await fetch(url);\n\`\`\`\n\nThe retry tests pass.`,
     `# Done — fetchJson retries transient errors\n\nBoth steps are in and the retry tests pass.`,
   ];
+  // ?update: after step 1, the build finds the locked plan needs a change, and asks before changing it.
+  if (new URLSearchParams(location.search).has("update")) {
+    pages.splice(5, 0, `# Plan update — 404s need their own step\n\nWhile building step 1 I found a 404 would be retried by the loop in step 2 unless it checks first. I'd add a step before it:\n\n\`\`\`\nFile:   src/client/retry.ts\nChange: Throw at once on a 404, before any retry.\nVerify: a 404 throws on the first try.\n\`\`\`\n\nUpdate the plan?`);
+  }
   const page = pages[Math.min(n, pages.length - 1)];
   if (n === 4 || n === 5) {
     const id = `se${n}`;
