@@ -6,7 +6,7 @@ import { useSlot } from "../lib/slot";
 import { languageFor } from "../lib/diff";
 import { usePrefersDark } from "../lib/theme";
 import { registerFindable } from "../lib/editorFind";
-import { stash, stashKey, unstash } from "../lib/editStash";
+import { setDirty, stash, stashKey, unstash } from "../lib/editStash";
 import { collectLibs } from "../lib/projectLibs";
 import { usePersistentState } from "../lib/layout";
 import { isMarkdownPath } from "../lib/markdown";
@@ -47,7 +47,13 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
   // A markdown file is read as a document unless you chose to edit it; a line to show (a mention, a failed test) needs the editor.
   const markdown = isMarkdownPath(path);
   const [markdownView, setMarkdownView] = usePersistentState<"preview" | "edit">("files.markdownView", "preview");
-  const preview = markdown && markdownView === "preview" && !line;
+  // A line to show opens the editor there, until the Preview tab is picked for that line.
+  const [previewPicked, setPreviewPicked] = useState<{ line: number | null } | null>(null);
+  const preview = markdown && markdownView === "preview" && (!line || previewPicked?.line === line);
+  // The editor is made the first time it's shown, then kept (hidden while the preview shows): hiding keeps its undo
+  // history and scroll place, where unmounting would throw the model away.
+  const [editorShown, setEditorShown] = useState(!preview);
+  if (!preview && !editorShown) setEditorShown(true);
 
   // Latest values for the callbacks Monaco and the reads below hold on to.
   const savedRef = useRef(saved);
@@ -63,6 +69,8 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
     api.readFile(slot, path).then(
       (disk) => {
         if (!live) return;
+        // Back on disk (a file Claude removed and wrote again): the error from when it was gone goes.
+        setError(null);
         const before = savedRef.current;
         if (before === null) {
           const kept = unstash(key);
@@ -112,11 +120,13 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
 
   useEffect(() => {
     onDirty?.(dirty);
+    setDirty(key, dirty);
   }, [dirty]);
   // Closing the editor with edits keeps them (see editStash), and says there are none.
   useEffect(
     () => () => {
       onDirty?.(false);
+      setDirty(key, false);
       if (savedRef.current !== null) stash(key, savedRef.current, draftRef.current);
     },
     [key],
@@ -169,12 +179,6 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
   useEffect(() => {
     if (editor.current) revealLine(editor.current);
   }, [line]);
-  // The editor is gone while the preview is showing: its next mount reveals the line.
-  useEffect(() => {
-    if (!preview) return;
-    editor.current = null;
-    marks.current = null;
-  }, [preview]);
 
   if (error) return <div className="empty">{error}</div>;
   if (saved === null) return <div className="empty">Loading…</div>;
@@ -197,9 +201,9 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
           ) : (
             <button
               onClick={() => {
+                // The text on screen becomes the file's last saved text, so the next read that finds it back takes the disk.
                 setDraft(saved);
                 setConflict(null);
-                setError("This file was deleted.");
               }}
             >
               Discard my edits
@@ -224,7 +228,15 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
       {markdown && (
         <div className="md-bar">
           <div className="pane-tabs-track" role="tablist" aria-label="Markdown view">
-            <button role="tab" aria-selected={preview} className={preview ? "active" : ""} onClick={() => setMarkdownView("preview")}>
+            <button
+              role="tab"
+              aria-selected={preview}
+              className={preview ? "active" : ""}
+              onClick={() => {
+                setMarkdownView("preview");
+                setPreviewPicked({ line });
+              }}
+            >
               Preview
             </button>
             <button role="tab" aria-selected={!preview} className={preview ? "" : "active"} onClick={() => setMarkdownView("edit")}>
@@ -233,10 +245,9 @@ export default function FilePreview({ path, line = null, refreshKey = 0, onDirty
           </div>
         </div>
       )}
-      {preview ? (
-        <MarkdownPreview text={draft} />
-      ) : (
-        <div className="diff-body editable-editor">
+      {preview && <MarkdownPreview text={draft} />}
+      {editorShown && (
+        <div className="diff-body editable-editor" hidden={preview}>
           <Editor
             height="100%"
             path={path}
