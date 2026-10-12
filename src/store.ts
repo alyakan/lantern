@@ -45,7 +45,8 @@ export interface ShellItem {
   command: string;
   /** What it printed, stdout and stderr together; only the end of it once it's long (see KEEP_CHARS). */
   output: string;
-  status: "running" | "done" | "failed" | "stopped";
+  /** "unknown": replayed from a message sent while it still ran; how it ended was never recorded. */
+  status: "running" | "done" | "failed" | "stopped" | "unknown";
   code: number | null;
   startedAt: number;
   endedAt?: number;
@@ -215,6 +216,8 @@ export type Action =
   | { type: "select_file"; path: string }
   | { type: "follow_latest" }
   | { type: "failed"; text: string }
+  | { type: "turn_failed"; text: string }
+  | { type: "stop_failed"; text: string }
   | { type: "dismiss_banner" }
   | { type: "queue_set"; items: string[] }
   | { type: "shell_started"; id: string; command: string }
@@ -263,6 +266,11 @@ function failRunning(items: ChatItem[]): ChatItem[] {
   );
 }
 
+// A permission nobody answered can't be answered once claude is gone or stopping: denied, so the chat isn't left waiting.
+function denyPending(items: ChatItem[]): ChatItem[] {
+  return items.map((it): ChatItem => (it.type === "permission" && it.decision === null ? { ...it, decision: "denied" } : it));
+}
+
 function addChange(files: ChangedFile[], path: string, created: boolean, hunks: Hunk[]): ChangedFile[] {
   const { added, removed } = countChanges(hunks);
   if (!files.some((f) => f.path === path)) return [...files, { path, created, added, removed }];
@@ -283,7 +291,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [] };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], lastEndedTask: null, stopRequested: false, cleared: false };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -316,7 +324,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       const { flavour } = read;
       const text = readSkillNote(read.text);
       const at = ev.at ?? 0;
-      const shells = sent.shells.map((s, i): ShellItem => ({ type: "shell", id: `sh-u${seq}-${i}`, command: s.command, output: s.output, status: s.stopped ? "stopped" : s.code ? "failed" : "done", code: s.code, startedAt: at, endedAt: at, shared: true }));
+      const shells = sent.shells.map((s, i): ShellItem => ({ type: "shell", id: `sh-u${seq}-${i}`, command: s.command, output: s.output, status: s.stopped ? "stopped" : s.running ? "unknown" : s.code ? "failed" : "done", code: s.code, startedAt: at, endedAt: at, shared: true }));
       // Commands alone (Claude Code's own `!` mode writes them so): no prompt to show after them.
       if (shells.length > 0 && !text.trim()) return { ...state, seq, items: [...state.items, ...shells] };
       return { ...state, seq, items: [...state.items, ...shells, { type: "user", id: `u${seq}`, text, at: ev.at, ...(flavour ? { switchedTo: flavour } : {}) }] };
@@ -439,7 +447,7 @@ function applyEvent(state: State, ev: UiEvent): State {
         status: "ended",
         thinking: false,
         backgroundTasks: [],
-        items: failRunning(state.items),
+        items: denyPending(failRunning(state.items)),
         banner: state.stopRequested ? state.banner : { kind: "error", text, action: "restart" },
       };
     }
@@ -500,7 +508,7 @@ export function reducer(state: State, action: Action): State {
       return {
         ...state,
         stopRequested: true,
-        items: state.items.map((it): ChatItem => (it.type === "permission" && it.decision === null ? { ...it, decision: "denied" } : it)),
+        items: denyPending(state.items),
       };
     case "restarting":
       return {
@@ -508,19 +516,23 @@ export function reducer(state: State, action: Action): State {
         status: "starting",
         banner: null,
         stopRequested: false,
-        items: state.items.map((it): ChatItem => (it.type === "permission" && it.decision === null ? { ...it, decision: "denied" } : it)),
+        items: denyPending(state.items),
       };
     case "select_file":
       return { ...state, selectedFile: action.path, follow: false };
     case "follow_latest":
       return { ...state, follow: true, selectedFile: state.lastEdited ?? state.selectedFile };
+    // A failed call (a model change, an update) leaves the chat's status as it was: a turn may well be going on.
+    // A start that failed has nothing running, so it's ended, with a restart to try again.
     case "failed":
-      return {
-        ...state,
-        status: state.status === "starting" ? "ended" : state.status === "running" ? "idle" : state.status,
-        thinking: false,
-        banner: { kind: "error", text: action.text, action: null },
-      };
+      if (state.status === "starting") return { ...state, status: "ended", thinking: false, banner: { kind: "error", text: action.text, action: "restart" } };
+      return { ...state, banner: { kind: "error", text: action.text, action: null } };
+    // A message or an answer that didn't reach claude: the turn can't go on from here, so the chat ends and a restart resumes it.
+    case "turn_failed":
+      return { ...state, status: "ended", thinking: false, items: denyPending(failRunning(state.items)), banner: { kind: "error", text: action.text, action: "restart" } };
+    // Stop didn't reach claude: the turn runs on, so it isn't recorded as stopped.
+    case "stop_failed":
+      return { ...state, stopRequested: false, banner: { kind: "error", text: action.text, action: null } };
     case "dismiss_banner":
       return { ...state, banner: null };
     case "queue_set":

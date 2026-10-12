@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { initialState, reducer, type State, type ToolItem } from "./store";
+import { chatState, isBusy } from "./sessions";
 import type { UiEvent } from "./types";
 
 const ev = (state: State, event: UiEvent) => reducer(state, { type: "ui_event", event });
@@ -155,6 +156,11 @@ describe("reducer", () => {
     expect(s).toMatchObject({ contextUsed: null, contextWindow: 200_000 });
   });
 
+  it("a new folder forgets the last background task, a Stop and a /clear from the one before", () => {
+    const s = reducer({ ...running, lastEndedTask: "npm run dev", stopRequested: true, cleared: true }, { type: "folder_opened", folder: "/q" });
+    expect(s).toMatchObject({ lastEndedTask: null, stopRequested: false, cleared: false });
+  });
+
   it("an interrupted turn after Stop reads as stopped, not as an error, and the session stays usable", () => {
     let s = reducer(running, { type: "stop_requested" });
     s = ev(s, { kind: "turn_done", is_error: true, result: null, cost_usd: null, duration_ms: 5, auth_hint: false, denied: 0, context_window: null });
@@ -163,6 +169,12 @@ describe("reducer", () => {
     expect(s.items[s.items.length - 1]).toMatchObject({ type: "turn", isError: false, stopped: true });
     s = reducer(s, { type: "user_sent", text: "next" });
     expect(s.stopRequested).toBe(false);
+  });
+
+  it("a command replayed as still running is unknown, not done", () => {
+    const sent = "<bash-input>tail -f app.log</bash-input>\n<bash-stdout>ready\n[still running]</bash-stdout><bash-stderr></bash-stderr>\n\nwhat happened?";
+    const s = ev(initialState, { kind: "user_text", text: sent });
+    expect(s.items[0]).toMatchObject({ type: "shell", command: "tail -f app.log", status: "unknown", code: null });
   });
 
   it("turn_done clears a retry banner", () => {
@@ -178,6 +190,33 @@ describe("reducer", () => {
     expect(s.status).toBe("ended");
     expect(s.banner).toEqual({ kind: "error", text: "Claude stopped unexpectedly (exit code 1). fatal: boom", action: "restart" });
     expect((s.items[0] as ToolItem).status).toBe("error");
+  });
+
+  it("session_ended denies the permission still waiting, so the chat isn't left waiting or busy", () => {
+    let s = ev(running, { kind: "permission_requested", request_id: "perm-1", tool_name: "Bash", input: { command: "ls" } });
+    s = ev(s, { kind: "session_ended", code: 1, stderr_tail: "" });
+    expect(s.items[0]).toMatchObject({ type: "permission", decision: "denied" });
+    expect(isBusy(s)).toBe(false);
+    expect(chatState(s)).toBe("done");
+  });
+
+  it("a failed call keeps the status of the chat; a start that failed ends with a restart to try again", () => {
+    expect(reducer(running, { type: "failed", text: "model change refused" })).toMatchObject({ status: "running", banner: { kind: "error", action: null } });
+    const starting = { ...initialState, status: "starting" as const };
+    expect(reducer(starting, { type: "failed", text: "no claude" })).toMatchObject({ status: "ended", banner: { kind: "error", text: "no claude", action: "restart" } });
+  });
+
+  it("a message or answer that didn't reach claude ends the chat, and denies what was waiting", () => {
+    let s = ev(running, { kind: "permission_requested", request_id: "perm-1", tool_name: "Bash", input: { command: "ls" } });
+    s = reducer(s, { type: "turn_failed", text: "broken pipe" });
+    expect(s).toMatchObject({ status: "ended", banner: { kind: "error", action: "restart" } });
+    expect(s.items[0]).toMatchObject({ type: "permission", decision: "denied" });
+  });
+
+  it("a Stop that didn't reach claude isn't recorded as stopped", () => {
+    let s = reducer(running, { type: "stop_requested" });
+    s = reducer(s, { type: "stop_failed", text: "interrupt failed" });
+    expect(s).toMatchObject({ status: "running", stopRequested: false, banner: { kind: "error", text: "interrupt failed" } });
   });
 
   it("session_ended after Stop shows no banner", () => {

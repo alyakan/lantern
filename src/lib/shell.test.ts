@@ -43,12 +43,17 @@ describe("shell context", () => {
     expect(readShellContext(sent)).toEqual({
       text: "help",
       shells: [
-        { command: "git status", output: "On branch main", code: 0, stopped: false },
-        { command: "make", output: "boom", code: 2, stopped: false },
-        { command: "sleep 9", output: "", code: null, stopped: true },
+        { command: "git status", output: "On branch main", code: 0, stopped: false, running: false },
+        { command: "make", output: "boom", code: 2, stopped: false, running: false },
+        { command: "sleep 9", output: "", code: null, stopped: true, running: false },
       ],
     });
     expect(readShellContext("plain")).toEqual({ text: "plain", shells: [] });
+  });
+
+  it("reads a command still running when the message was sent as running, not as finished", () => {
+    const sent = withShellContext([shell({ id: "s4", command: "tail -f app.log", output: "ready", status: "running", code: null })], "what happened?");
+    expect(readShellContext(sent).shells).toEqual([{ command: "tail -f app.log", output: "ready", code: null, stopped: false, running: true }]);
   });
 });
 

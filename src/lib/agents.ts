@@ -187,8 +187,16 @@ export function agentTree(
     for (const c of allSteps(t.children)) log.push({ id: c.id, at: c.startedAt ?? null, agent: who, model: node.model, text: `${stepLabel(c)} ${c.summary}`.trim(), status: c.status });
     if (node.status !== "running") log.push({ id: `${t.id}:end`, at: t.endedAt ?? null, agent: who, model: node.model, text: node.status === "error" ? node.now : call ? "Handed back to main" : "Handed back to the workflow", status: node.status });
   }
-  // Steps keep their order within each agent; across agents, the clock does when it's known.
-  log.sort((a, b) => (a.at !== null && b.at !== null ? a.at - b.at : 0));
+  // Steps keep their order within each agent; across agents, the clock does when it's known. A step with no time takes
+  // the time of the one before it, so every pair compares consistently (a comparator that says "equal" for untimed
+  // steps isn't a sort order, and engines disagree on the result).
+  let clock = -Infinity;
+  const keyed = log.map((entry, i) => {
+    clock = entry.at ?? clock;
+    return { entry, i, clock };
+  });
+  keyed.sort((a, b) => (a.clock === b.clock ? a.i - b.i : a.clock - b.clock));
+  log.splice(0, log.length, ...keyed.map((k) => k.entry));
 
   return {
     prompt,

@@ -10,6 +10,7 @@ describe("parseHeading", () => {
     expect(parseHeading("# Plan update — the 404 case needs its own step")).toEqual({ kind: "plan-update", n: null, total: null, title: "the 404 case needs its own step" });
     expect(pageLabel(parseHeading("# Plan update — x"))).toBe("Plan update");
     expect(parseHeading("## Step 1 of 3 - Add slugify")).toMatchObject({ kind: "step", n: 1, total: 3, title: "Add slugify" });
+    expect(parseHeading("# Step 2 of 5: Add slugify")).toMatchObject({ kind: "step", n: 2, total: 5, title: "Add slugify" });
     expect(parseHeading("\n# Done — slugify with tests")).toMatchObject({ kind: "done", title: "slugify with tests" });
   });
 
@@ -124,6 +125,12 @@ describe("questions about a step", () => {
   it("tells a question from a change request (prompts from a real session)", () => {
     for (const q of ["what is the twelve-factor app rules", "can you explain more the first point in Why these choices", "why a Set instead of a range check?", "Explain the backoff"]) expect(isQuestion(q), q).toBe(true);
     for (const c of ["yeah sure we can remove the trailing slash.", "also include 500", "use a regex instead", "Next", "continue please"]) expect(isQuestion(c), c).toBe(false);
+  });
+
+  it("reads a request phrased as a question as a change, not an answer", () => {
+    for (const c of ["Can you also handle the empty list?", "could you rename it to Config?", "Will you update the test?"]) expect(isQuestion(c), c).toBe(false);
+    expect(isQuestion("Can you explain the retry logic?")).toBe(true);
+    expect(isQuestion("Do you want me to change it?")).toBe(true);
   });
 
   it("keeps the step when a reply to a suggestion discusses it instead of rewriting its plan", () => {

@@ -37,6 +37,12 @@ describe("test runs", () => {
     expect([...fixed]).toEqual(["s::b"]);
   });
 
+  it("doesn't count a failure as fixed when a passing run names other tests and not that one", () => {
+    // One file rerun: its passing tests are named, the failure in another file isn't run.
+    const { fixed } = compareRuns(run([tc("b", "failed")]), run([tc("a", "passed")], { outcome: "passed" }));
+    expect([...fixed]).toEqual([]);
+  });
+
   it("summarises counts, or how it ended", () => {
     expect(runSummary(run([tc("a", "failed"), tc("b", "passed")]))).toBe("1 failed · 1 passed");
     expect(runSummary(run([], { outcome: "failed" }))).toBe("Failed");

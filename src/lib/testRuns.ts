@@ -26,8 +26,9 @@ export function compareRuns(prev: TestRun | null, cur: TestRun): { newlyFailing:
     if (c.status === "failed" && was === "passed") newlyFailing.add(caseKey(c));
     if (c.status === "passed" && was === "failed") fixed.add(caseKey(c));
   }
-  // A rerun that only lists failures: a test that failed before and isn't failing now, in a run that passed.
-  if (cur.outcome === "passed") {
+  // A rerun that only lists failures: a test that failed before and isn't failing now, in a run that passed. A run that
+  // names passing tests is narrower than the last one, so a test it doesn't name wasn't run, not fixed.
+  if (cur.outcome === "passed" && !cur.cases.some((c) => c.status === "passed")) {
     for (const c of prev.cases) if (c.status === "failed" && !cur.cases.some((x) => caseKey(x) === caseKey(c))) fixed.add(caseKey(c));
   }
   return { newlyFailing, fixed };
