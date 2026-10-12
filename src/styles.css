@@ -1234,11 +1234,14 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .summary-row.gap .summary-title { font-weight: 500; color: var(--muted); }
 .summary-row.gap .summary-gist { color: var(--muted); }
 .summary-main { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; padding: 9px 6px 9px 10px; border: none; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; }
-.summary-mark { flex: none; position: relative; width: 14px; height: 14px; margin-top: 2px; border: 1.5px solid var(--faint); border-radius: 50%; }
+/* The glyph inside a step's circle is a grid item, centred by the grid rather than by hand-set offsets, in a box of
+   even size so it lands on whole pixels at 1x and 2x alike (an odd size puts it half a pixel off at 1x). The tick is a
+   mask whose path is centred on its own weight, not its bounding box: its long arm would otherwise pull it low. */
+.summary-mark { flex: none; position: relative; width: 14px; height: 14px; margin-top: 2px; border: 1.5px solid var(--faint); border-radius: 50%; display: grid; place-items: center; }
 .summary-row.built .summary-mark { border-color: var(--muted); background: var(--muted); }
-.summary-row.built .summary-mark::after { content: ""; position: absolute; left: 3.5px; top: 1.5px; width: 3px; height: 6px; border: solid var(--pane); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); }
+.summary-row.built .summary-mark::after { content: ""; width: 8px; height: 8px; background: var(--pane); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Cpath d='M1.32 3.89 3.22 5.79 6.62 1.69' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Cpath d='M1.32 3.89 3.22 5.79 6.62 1.69' fill='none' stroke='black' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; }
 .summary-row.current .summary-mark { border-color: var(--text); background: none; }
-.summary-row.current .summary-mark::after { content: ""; position: absolute; inset: 2.5px; border-radius: 50%; background: var(--text); }
+.summary-row.current .summary-mark::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text); }
 .summary-text { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .summary-label { font-size: 11px; font-weight: 500; letter-spacing: 0.02em; color: var(--muted); }
 .summary-title { font-size: 13px; font-weight: 600; line-height: 1.35; color: var(--text); overflow-wrap: anywhere; }
