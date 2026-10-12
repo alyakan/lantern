@@ -31,6 +31,8 @@ interface Props {
   sendAndNext?: (text: string) => void;
   onSend: (text: string) => void;
   onStop: () => void;
+  /** While Claude starts, a way out: Cancel stops the start. */
+  onCancelStart?: () => void;
   /** "!" at the start of the box turns it into a terminal: Enter runs the rest as a shell command in the folder. */
   onRun?: (command: string) => void;
   mode?: Mode;
@@ -72,7 +74,7 @@ interface Props {
   update?: { version: string; busy: number; onRestart: () => void; onLater: () => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onRun, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, harness, update }: Props) {
+export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, harness, update }: Props) {
   // A draft with big pastes in it comes back as the box had it: their placeholders, and the text they stand for.
   const [restored] = useState(() => decodeDraft(draft?.initial ?? ""));
   const [text, setTextState] = useState(restored.text);
@@ -102,11 +104,13 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
       ? "Open a folder to start"
       : status === "starting"
         ? "Starting Claude…"
-        : terminal
-          ? `Run a command in ${folder ? basename(folder) : "the folder"}…`
-          : running
-            ? "Queue a message…"
-            : (idlePlaceholder ?? "Ask Claude…");
+        : status === "ended"
+          ? "Claude stopped — restart to continue"
+          : terminal
+            ? `Run a command in ${folder ? basename(folder) : "the folder"}…`
+            : running
+              ? "Queue a message…"
+              : (idlePlaceholder ?? "Ask Claude…");
 
   // A queued message goes out in full (the queue holds the text), but it's remembered as it was in the box: its
   // placeholders, with their pastes kept here so the numbers aren't reused meanwhile. The queue shows and Stop restores that.
@@ -457,6 +461,11 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
             </button>
           ) : (
             <>
+              {status === "starting" && onCancelStart && (
+                <button className="ghost" title="Stop starting Claude" onClick={onCancelStart}>
+                  Cancel
+                </button>
+              )}
               {sendAndNext && (
                 <button className="ghost send-next" title="Send, then approve this step and go on (⌘Enter)" disabled={!canSend} onClick={submitAndNext}>
                   Send &amp; next

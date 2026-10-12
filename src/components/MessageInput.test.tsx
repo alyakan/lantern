@@ -255,9 +255,19 @@ describe("MessageInput", () => {
     expect(onStop).toHaveBeenCalledOnce();
   });
 
-  it("is disabled while starting", () => {
-    render(<MessageInput status="starting" onSend={() => {}} onStop={() => {}} />);
+  it("is disabled while starting, with a way out if the chat gives one", () => {
+    const { rerender } = render(<MessageInput status="starting" onSend={() => {}} onStop={() => {}} />);
     expect(screen.getByPlaceholderText("Starting Claude…")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    const onCancelStart = vi.fn();
+    rerender(<MessageInput status="starting" onSend={() => {}} onStop={() => {}} onCancelStart={onCancelStart} />);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancelStart).toHaveBeenCalledOnce();
+  });
+
+  it("says why the box is off once Claude has stopped", () => {
+    render(<MessageInput status="ended" onSend={() => {}} onStop={() => {}} />);
+    expect(screen.getByPlaceholderText("Claude stopped — restart to continue")).toBeDisabled();
   });
 
   it("on a Step-by-step page, Enter stays on the step and ⌘Enter sends and moves on", () => {
