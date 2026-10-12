@@ -58,17 +58,18 @@ export function HistoryMenu({ sessions, currentId, onOpen, onClose, open = [], o
       {(current || shownOpen.length > 0) && (
         <>
           <div className="menu-heading">Open</div>
-          <ul className="menu-list open-chats-list" role="listbox" aria-label="Open chats">
+          {/* Lists of buttons, not listboxes: a button can't sit inside an option, and these are Tab-through. */}
+          <ul className="menu-list open-chats-list" aria-label="Open chats">
             {current && (
-              <li role="option" aria-selected>
-                <button className="menu-row current" title={current.title} onClick={onClose}>
+              <li>
+                <button className="menu-row current" aria-current="true" title={current.title} onClick={onClose}>
                   <span className="menu-row-title">{current.title}</span>
                   <span className="menu-row-meta">Current</span>
                 </button>
               </li>
             )}
             {shownOpen.map((c) => (
-              <li key={c.slot} role="option" aria-selected={false} className={`open-chat${onCloseChat && (c.state === "done" || c.state === "draft") ? " closable" : ""}`}>
+              <li key={c.slot} className={`open-chat${onCloseChat && (c.state === "done" || c.state === "draft") ? " closable" : ""}`}>
                 <button className="menu-row" title={c.elsewhere ? `${c.title}\nIn ${c.elsewhere}` : c.title} onClick={() => onSwitch?.(c.slot)}>
                   <span className={`open-chat-unread${c.unread && c.state === "done" ? " on" : ""}`} aria-label={c.unread && c.state === "done" ? "Unread" : undefined} />
                   <span className="menu-row-title">{c.title}</span>
@@ -100,9 +101,9 @@ export function HistoryMenu({ sessions, currentId, onOpen, onClose, open = [], o
       ) : shown.length === 0 ? (
         <div className="menu-empty">{q ? "No matching sessions" : "No past sessions in this folder"}</div>
       ) : (
-        <ul className="menu-list" role="listbox" aria-label="Past sessions">
+        <ul className="menu-list" aria-label="Past sessions">
           {shown.map((s) => (
-            <li key={s.id} role="option" aria-selected={false}>
+            <li key={s.id}>
               <button className="menu-row" title={s.title} onClick={() => onOpen(s.id)}>
                 <span className="menu-row-title">{s.title}</span>
                 <span className="menu-row-meta">{relativeTime(s.updated_ms)}</span>

@@ -72,6 +72,14 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
   const [recent, setRecent] = useState<RecentFolder[] | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const close = () => setMenu(null);
+  // The button that opened the menu: closing it (Escape, a pick) puts focus back there, not on the page.
+  const opener = useRef<HTMLButtonElement | null>(null);
+  const folderButton = useRef<HTMLButtonElement>(null);
+  const historyButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const active = document.activeElement;
+    if (!menu && (!active || active === document.body)) opener.current?.focus();
+  }, [menu]);
 
   useEffect(() => {
     if (!menu) return;
@@ -120,6 +128,7 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
 
   const toggleHistory = () => {
     if (menu === "history") return close();
+    opener.current = historyButton.current;
     setSessions(null);
     setMenu("history");
     loadSessions?.().then(setSessions, () => setSessions([]));
@@ -135,6 +144,7 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
   const toggleFolders = () => {
     if (!loadRecent || !onPickFolder) return onOpenFolder();
     if (menu === "folders") return close();
+    opener.current = folderButton.current;
     setRecent(null);
     setMenu("folders");
     loadRecent().then(setRecent, () => setRecent([]));
@@ -145,7 +155,7 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
       <div className="topbar-side" data-tauri-drag-region />
       <div className="title-center" ref={root}>
         <div className={`viewer${activity?.working ? " working" : ""}`}>
-          <button className={`viewer-scheme${menu === "folders" ? " pressed" : ""}`} aria-haspopup="menu" aria-expanded={menu === "folders"} onClick={toggleFolders} disabled={busy} title={folder ? `${folder}\nClick to switch folders (⌘O opens one)` : "Open a folder for Claude to work in (⌘O)"}>
+          <button ref={folderButton} className={`viewer-scheme${menu === "folders" ? " pressed" : ""}`} aria-haspopup="menu" aria-expanded={menu === "folders"} onClick={toggleFolders} disabled={busy} title={folder ? `${folder}\nClick to switch folders (⌘O opens one)` : "Open a folder for Claude to work in (⌘O)"}>
             <FolderIcon />
             <span className="viewer-name">{folder ? basename(folder) : "Open folder…"}</span>
             {folder && branch && (
@@ -163,7 +173,10 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
               aria-expanded={menu === "background"}
               aria-label={`${background.length} running in the background`}
               title={`Still running in the background:\n${background.map((t) => t.description).join("\n")}`}
-              onClick={() => setMenu(menu === "background" ? null : "background")}
+              onClick={(e) => {
+                opener.current = e.currentTarget;
+                setMenu(menu === "background" ? null : "background");
+              }}
             >
               <span className="spinner" aria-hidden />
               {background.length}
@@ -203,7 +216,7 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
             </button>
           )}
           {loadSessions && onOpenSession && (
-            <button className={`icon${menu === "history" ? " pressed" : ""}`} aria-label="Session history" aria-expanded={menu === "history"} title="Session history (⌘K)" disabled={!canUseSessions} onClick={toggleHistory}>
+            <button ref={historyButton} className={`icon${menu === "history" ? " pressed" : ""}`} aria-label="Session history" aria-expanded={menu === "history"} title="Session history (⌘K)" disabled={!canUseSessions} onClick={toggleHistory}>
               <ClockIcon />
               {(backgroundUnread || backgroundRunning) && <span className={`dot${backgroundUnread ? " unread" : ""}`} aria-hidden="true" />}
             </button>
