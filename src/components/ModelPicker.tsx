@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ModelOption } from "../types";
 import { choiceName, MODEL_CHOICES, modelLabel } from "../lib/models";
+import { useMenuShift } from "../lib/menuShift";
 import { SparkIcon } from "./icons";
 
 /** claude lists its recommended picks first; everything after these is an older version. */
@@ -33,6 +34,7 @@ export function ModelPicker({ running, chosen, defaultModel = null, ids = {}, op
   const [open, setOpen] = useState(false);
   const [showOlder, setShowOlder] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const { ref: menu, style: menuStyle } = useMenuShift(open);
 
   useEffect(() => {
     if (!open) return;
@@ -87,7 +89,7 @@ export function ModelPicker({ running, chosen, defaultModel = null, ids = {}, op
         <span className="chev down" aria-hidden />
       </button>
       {open && (
-        <div className="menu model-menu" role="menu" aria-label="Model">
+        <div className="menu model-menu" ref={menu} style={menuStyle} role="menu" aria-label="Model">
           {rows.slice(0, PRIMARY).map(row)}
           {older.length > 0 && (
             <>

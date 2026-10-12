@@ -1064,7 +1064,7 @@ label.mcp-scope-option { flex-direction: row; align-items: flex-start; gap: 8px;
 
 /* Harness: the chip under the chat box and Settings → Harness. */
 .model-button.harness-on { color: var(--text-2); }
-.harness-menu { width: 380px; max-width: calc(100vw - 48px); left: auto; right: -6px; }
+.harness-menu { width: 380px; max-width: calc(100vw - 48px); }
 .harness-row .settings-row-main { width: 100%; }
 .harness-menu .menu-row { align-items: baseline; }
 .harness-menu .menu-row-title { flex: none; }
