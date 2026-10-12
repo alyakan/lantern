@@ -1,12 +1,12 @@
 import { parsePlanStep } from "./markdown";
 import { parseReviewFile, splitFileTitle } from "./review";
-import { pageLabel, pageTitle, type StepPage } from "./steps";
+import { movesOn, pageLabel, pageTitle, type StepPage } from "./steps";
 
 /** One line of the Summary tab: a step of the plan, a reviewed file, an evidence round, a fix, or a bookend. */
 export interface SummaryRow {
   /** The page it was built from (a step's own page when it has one), so it's stable while the chat goes on. */
   id: string;
-  kind: "frame" | "step" | "gap" | "file" | "evidence" | "fix" | "done" | "review-summary";
+  kind: "frame" | "step" | "plan-update" | "gap" | "file" | "evidence" | "fix" | "done" | "review-summary";
   /** "Step 2", "File 3 of 7", "Evidence 1", "Frame", … */
   label: string;
   title: string;
@@ -80,6 +80,25 @@ function plannedChange(text: string): string | null {
   return null;
 }
 
+/**
+ * Whether the plan is locked: the newest "Plan complete" page was approved (the page after it is one a prompt that moves
+ * on started), and no "Plan update" is waiting. An update that was answered by going on with the steps (you declined
+ * it, or it was a small one) doesn't unlock. A chat that never planned has nothing to lock.
+ */
+function planLocked(pages: StepPage[]): boolean {
+  let worked = false;
+  for (let i = pages.length - 1; i >= 0; i--) {
+    const kind = pages[i].heading?.kind;
+    if (kind === "step") worked = true;
+    else if (kind === "plan-update" && !worked) return false;
+    else if (kind === "plan-complete") {
+      const next = pages[i + 1];
+      return !!next && movesOn(next.turns[0].prompt.text);
+    }
+  }
+  return false;
+}
+
 /** A planned step with its plan page and, once built, its step page; or any other page on its own. */
 type StepEntry = { n: number; plan?: StepPage; step?: StepPage };
 /** `gap`: steps with no page of their own: numbered steps the plan has before and after, but never wrote as a page. */
@@ -107,6 +126,35 @@ function inStepOrder(entries: Entry[]): Entry[] {
       out.push(e);
       expected = e.n + 1;
     }
+  }
+  return out;
+}
+
+/**
+ * A plan update right after the step that was built last before it was written: that's where the build found the plan
+ * needed changing. An update with no built step before it stays where it is.
+ */
+function updatesAfterTheirStep(entries: Entry[], pages: StepPage[]): Entry[] {
+  const at = (p: StepPage) => pages.indexOf(p);
+  const builtAt = (e: Entry) => (e.n !== null && e.step ? at(e.step) : -1);
+  const moves = entries.flatMap((u) => {
+    if (!("page" in u) || u.page.heading?.kind !== "plan-update") return [];
+    const when = at(u.page);
+    let anchor: Entry | null = null;
+    let latest = -1;
+    for (const e of entries) {
+      const k = builtAt(e);
+      if (k >= 0 && k < when && k > latest) [anchor, latest] = [e, k];
+    }
+    return anchor ? [{ u, anchor }] : [];
+  });
+  const out = entries.filter((e) => !moves.some((m) => m.u === e));
+  const placed = new Set<Entry>();
+  for (const { u, anchor } of moves) {
+    let i = out.indexOf(anchor) + 1;
+    while (placed.has(out[i])) i++;
+    out.splice(i, 0, u);
+    placed.add(u);
   }
   return out;
 }
@@ -156,7 +204,7 @@ export function summarize(pages: StepPage[]): StepsSummary {
   const firstFrame = entries.findIndex((e) => "page" in e && e.page.heading?.kind === "frame");
   if (firstFrame > 0) entries.unshift(...entries.splice(firstFrame, 1));
 
-  const rows: SummaryRow[] = inStepOrder(entries).map((e): SummaryRow => {
+  const rows: SummaryRow[] = updatesAfterTheirStep(inStepOrder(entries), pages).map((e): SummaryRow => {
     if ("gap" in e) {
       const { from, to } = e.gap;
       return {
@@ -216,12 +264,13 @@ export function summarize(pages: StepPage[]): StepsSummary {
     return { ...base, gist: gistOf(messageOf(page)), range: changes ? (page.range ?? null) : null, changes };
   });
 
+  const locked = planLocked(pages);
   const parts: string[] = [];
   const steps = rows.filter((r) => r.kind === "step");
   if (steps.length) {
     const total = Math.max(planTotal ?? stepTotal ?? 0, steps.length, ...steps.map((r) => Number(/\d+/.exec(r.label)?.[0] ?? 0)));
     const built = steps.filter((r) => r.built).length;
-    parts.push(`Plan: ${total} step${total === 1 ? "" : "s"} · ${built === total ? "all built" : `${built} built`}`);
+    parts.push(`Plan: ${total} step${total === 1 ? "" : "s"}${locked ? " · locked" : ""} · ${built === total ? "all built" : `${built} built`}`);
   }
   const files = rows.filter((r) => r.kind === "file").length;
   if (files) parts.push(filesTotal && filesTotal > files ? `${files} of ${filesTotal} files reviewed` : `${files} file${files === 1 ? "" : "s"} reviewed`);

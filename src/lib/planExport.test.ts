@@ -23,7 +23,7 @@ describe("planMarkdown for a Build chat", () => {
 
   it("opens with the title, project and date, the plan's progress, and the Frame", () => {
     const md = exported(replies);
-    expect(md.split("\n").slice(0, 6)).toEqual(["# Retry fetchJson", "", "acme-api · 2026-10-12", "", "**Plan: 2 steps · 1 built**", ""]);
+    expect(md.split("\n").slice(0, 6)).toEqual(["# Retry fetchJson", "", "acme-api · 2026-10-12", "", "**Plan: 2 steps · locked · 1 built**", ""]);
     expect(md).toContain("> [!NOTE]\n> Draft: the plan isn't fully built yet.");
     // The Frame's own headings sit under the document's.
     expect(md).toContain("## Frame\n\n**Task:** retry transient errors.\n\n### Out of scope\n\nPOST requests.");
