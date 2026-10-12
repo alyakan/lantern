@@ -5,6 +5,7 @@ import type { RecentFolder, SessionSummary } from "../types";
 import { basename } from "../lib/diff";
 import { useShortcut } from "../lib/shortcuts";
 import { FolderMenu } from "./FolderPill";
+import { useMenuKeys } from "./useMenuKeys";
 import { HistoryMenu, type OpenChat } from "./HistoryMenu";
 import type { ActivityStatus } from "../lib/status";
 import { BranchIcon, ClockIcon, FailIcon, FolderIcon, GearIcon, PaneIcon, PlusIcon, WaitIcon } from "./icons";
@@ -76,6 +77,8 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
   const opener = useRef<HTMLButtonElement | null>(null);
   const folderButton = useRef<HTMLButtonElement>(null);
   const historyButton = useRef<HTMLButtonElement>(null);
+  // The folder menu's arrow keys, once its list has loaded; the first button with a menu in the title is the folder one.
+  const folderKeys = useMenuKeys(menu === "folders" && recent !== null, root);
   useEffect(() => {
     const active = document.activeElement;
     if (!menu && (!active || active === document.body)) opener.current?.focus();
@@ -263,7 +266,7 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
             onCloseChat={onCloseChat}
           />
         )}
-        {menu === "folders" && onPickFolder && <FolderMenu folder={folder} recent={recent} onPick={onPickFolder} onBrowse={onOpenFolder} onClose={close} />}
+        {menu === "folders" && onPickFolder && <FolderMenu folder={folder} recent={recent} onPick={onPickFolder} onBrowse={onOpenFolder} onClose={close} onKeyDown={folderKeys.onKeyDown} />}
       </div>
       <div className="topbar-side end" data-tauri-drag-region>
         <div className="toolbar-group">

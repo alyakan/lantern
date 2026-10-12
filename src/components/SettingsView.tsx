@@ -94,8 +94,10 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState<string | null>(null);
-  // Servers waiting for a login in the browser, and whether claude wants the address the browser ends on.
-  const [loggingIn, setLoggingIn] = useState<Record<string, { callback: boolean }>>({});
+  // Servers waiting for a login in the browser, per chat (a login stays with the chat it's for), and whether claude
+  // wants the address the browser ends on.
+  const [logins, setLogins] = useState<Record<string, Record<string, { callback: boolean }>>>({});
+  const loggingIn = slot ? logins[slot] ?? {} : {};
   const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState<{ text: string; restart: boolean } | null>(null);
 
@@ -117,8 +119,12 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
   };
   useEffect(() => {
     current.current = chat;
-    // The last chat's servers don't show under this one while it's asked.
+    // The last chat's servers, busy marks, notices, errors and open form don't show under this one.
     setServers(null);
+    setBusy({});
+    setNotice(null);
+    setError(null);
+    setAdding(false);
     void load();
   }, [chat]);
 
@@ -129,50 +135,56 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
     const t = setInterval(() => void load(), 2500);
     return () => clearInterval(t);
   }, [waiting, slot]);
-  // A login is done once the server stops needing one.
+  // A login is done once the server stops needing one. The list is this chat's only once it has arrived.
   useEffect(() => {
-    const done = Object.keys(loggingIn).filter((n) => servers?.find((s) => s.name === n)?.status !== "needs-auth");
-    if (done.length) setLoggingIn(Object.fromEntries(Object.entries(loggingIn).filter(([n]) => !done.includes(n))));
+    if (!slot || !servers) return;
+    const done = Object.keys(loggingIn).filter((n) => servers.find((s) => s.name === n)?.status !== "needs-auth");
+    if (done.length) setLogins((all) => ({ ...all, [slot]: Object.fromEntries(Object.entries(loggingIn).filter(([n]) => !done.includes(n))) }));
   }, [servers]);
 
   if (!slot) return <Empty title="MCP servers" text="Open a folder to see its MCP servers. Claude Code connects to them when a chat starts." />;
   if (!live) return <Empty title="MCP servers" text="Waiting for Claude to start in this chat…" />;
 
+  // What an ask changes is shown only while its chat is the one open: a reply that lands after a switch is dropped.
   const act = async (s: McpServer, label: string, request: { subtype: string; [k: string]: unknown }) => {
+    const asked = chat;
     setBusy((b) => ({ ...b, [s.name]: label }));
     try {
       await api.claudeRequest(slot, { ...request, serverName: s.name });
       await load();
     } catch (e) {
-      setError(`${displayName(s)}: ${errText(e)}`);
+      if (asked === current.current) setError(`${displayName(s)}: ${errText(e)}`);
     } finally {
-      setBusy(({ [s.name]: _, ...rest }) => rest);
+      if (asked === current.current) setBusy(({ [s.name]: _, ...rest }) => rest);
     }
   };
 
   const logIn = async (s: McpServer) => {
+    const asked = chat;
     setBusy((b) => ({ ...b, [s.name]: "Opening the login page…" }));
     try {
       const r = await api.claudeRequest<AuthReply>(slot, { subtype: "mcp_authenticate", serverName: s.name });
+      // The login is in the browser whichever chat is open: it's kept for the chat it was started in.
       if (r?.authUrl) await openUrl(r.authUrl);
-      setLoggingIn((l) => ({ ...l, [s.name]: { callback: !!r?.callbackExpected } }));
+      setLogins((all) => ({ ...all, [slot]: { ...all[slot], [s.name]: { callback: !!r?.callbackExpected } } }));
       await load();
     } catch (e) {
-      setError(`${displayName(s)}: ${errText(e)}`);
+      if (asked === current.current) setError(`${displayName(s)}: ${errText(e)}`);
     } finally {
-      setBusy(({ [s.name]: _, ...rest }) => rest);
+      if (asked === current.current) setBusy(({ [s.name]: _, ...rest }) => rest);
     }
   };
 
   const remove = async (s: McpServer) => {
+    const asked = chat;
     setBusy((b) => ({ ...b, [s.name]: "Removing…" }));
     try {
       await api.mcpRemove(slot, s.name, s.scope ?? null);
-      setNotice({ text: `Removed ${displayName(s)}. Claude stops using it when the chat restarts.`, restart: true });
+      if (asked === current.current) setNotice({ text: `Removed ${displayName(s)}. Claude stops using it when the chat restarts.`, restart: true });
     } catch (e) {
-      setError(`${displayName(s)}: ${errText(e)}`);
+      if (asked === current.current) setError(`${displayName(s)}: ${errText(e)}`);
     } finally {
-      setBusy(({ [s.name]: _, ...rest }) => rest);
+      if (asked === current.current) setBusy(({ [s.name]: _, ...rest }) => rest);
     }
   };
 
@@ -234,7 +246,7 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
           return (
             <li key={s.name} className={`settings-row mcp-row ${st.tone}`}>
               <button className="settings-row-main" aria-expanded={open} onClick={() => setExpanded(open ? null : s.name)}>
-                {icon ? <img className="mcp-icon" src={icon} alt="" /> : <span className="mcp-icon letter">{displayName(s).charAt(0).toUpperCase()}</span>}
+                <McpIcon src={icon} name={displayName(s)} />
                 <span className="settings-row-text">
                   <span className="settings-row-name">{displayName(s)}</span>
                   <span className="settings-row-sub">{sourceOf(s)}</span>
@@ -323,6 +335,16 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
       </ul>
     </>
   );
+}
+
+/**
+ * A server's icon, or its initial. The window's CSP lets only local images load, so a remote icon that won't load shows
+ * the initial instead of an empty box. A failure is kept for that address only: a different icon is tried.
+ */
+function McpIcon({ src, name }: { src: string | null; name: string }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  if (!src || failed === src) return <span className="mcp-icon letter">{name.charAt(0).toUpperCase()}</span>;
+  return <img className="mcp-icon" src={src} alt="" onError={() => setFailed(src)} />;
 }
 
 /** When claude can't catch the login's redirect itself: the address the browser ended on, pasted back. */

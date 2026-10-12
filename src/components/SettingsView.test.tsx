@@ -137,6 +137,35 @@ describe("SettingsView", () => {
     expect(screen.getByText("other-chat")).toBeInTheDocument();
   });
 
+  it("keeps a login started in one chat out of another, and finishes it for the chat it's for", async () => {
+    let answerLogin: (r: unknown) => void = () => {};
+    // Both chats have a server called sentry, so a login or busy mark from one would show on the other's row.
+    claudeRequest.mockImplementation((_slot: string, r: { subtype: string }) => {
+      if (r.subtype === "mcp_authenticate") return new Promise((resolve) => (answerLogin = resolve));
+      return Promise.resolve(r.subtype === "mcp_status" ? { mcpServers: [{ name: "sentry", status: "needs-auth", config: { type: "http", url: "https://mcp.sentry.dev/mcp" }, scope: "user" }] } : {});
+    });
+    const { rerender } = render(<SettingsView open="mcp" {...props} />);
+    const list = await screen.findByRole("list", { name: "MCP servers" });
+    fireEvent.click(within(list).getByRole("button", { name: "Log in" }));
+    expect(await screen.findByText("Opening the login page…")).toBeInTheDocument();
+
+    rerender(<SettingsView open="mcp" {...props} slot="s2" />);
+    const other = await within(screen.getByRole("list", { name: "MCP servers" })).findByRole("button", { name: "Log in" });
+    expect(other).toBeEnabled();
+    expect(screen.queryByText("Opening the login page…")).toBeNull();
+    expect(screen.queryByText("Waiting for your login…")).toBeNull();
+
+    // The login page opens and claude waits for the address the browser ends on, all for chat s1.
+    await act(async () => answerLogin({ authUrl: "https://auth.example/x", callbackExpected: true }));
+    await waitFor(() => expect(openUrl).toHaveBeenCalledWith("https://auth.example/x"));
+    expect(claudeRequest).toHaveBeenCalledWith("s1", { subtype: "mcp_authenticate", serverName: "sentry" });
+    expect(screen.queryByText("Waiting for your login…")).toBeNull();
+
+    rerender(<SettingsView open="mcp" {...props} />);
+    expect(await screen.findByText("Waiting for your login…")).toBeInTheDocument();
+    expect(screen.getByText(/paste the address your browser ended on/)).toBeInTheDocument();
+  });
+
   it("starts one claude.ai login for a double click on Connect", async () => {
     claudeRequest.mockImplementation((_slot: string, r: { subtype: string }) =>
       r.subtype === "mcp_status" ? Promise.resolve({ mcpServers: [{ name: "claude.ai Notion", status: "needs-auth", config: { type: "claudeai-proxy" }, scope: "claudeai", source: "claudeai" }] }) : new Promise(() => {}),
@@ -146,6 +175,18 @@ describe("SettingsView", () => {
     fireEvent.click(connect);
     fireEvent.click(connect);
     expect(claudeRequest.mock.calls.filter(([, r]) => (r as { subtype: string }).subtype === "mcp_authenticate")).toHaveLength(1);
+  });
+
+  it("shows a server's initial in place of an icon that won't load", async () => {
+    claudeRequest.mockImplementation((_slot: string, r: { subtype: string }) =>
+      r.subtype === "mcp_status" ? Promise.resolve({ mcpServers: [{ name: "figma", status: "connected", serverInfo: { title: "Figma", icons: [{ src: "https://static.example/figma.png" }] }, config: { type: "http", url: "https://mcp.figma.com/mcp" }, scope: "user" }] }) : Promise.resolve({}),
+    );
+    const { container } = render(<SettingsView open="mcp" {...props} />);
+    await screen.findByRole("list", { name: "MCP servers" });
+    // The remote picture is blocked by the window's CSP: the browser reports it failed.
+    fireEvent.error(container.querySelector("img.mcp-icon")!);
+    expect(container.querySelector("img.mcp-icon")).toBeNull();
+    expect(container.querySelector(".mcp-icon.letter")?.textContent).toBe("F");
   });
 
   it("shows a skill's pictures as the text they describe, not loaded", async () => {

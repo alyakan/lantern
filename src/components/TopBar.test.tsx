@@ -71,6 +71,20 @@ describe("TopBar", () => {
     expect(onOpenFolder).toHaveBeenCalled();
   });
 
+  it("moves through the recent folders with the arrow keys, and gives focus back to the folder pill", async () => {
+    const loadRecent = async () => [{ path: "/p", updated_ms: 2 }, { path: "/work/web", updated_ms: 1 }];
+    render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadRecent={loadRecent} onPickFolder={() => {}} />);
+    const pill = screen.getByRole("button", { name: /^p$/ });
+    fireEvent.click(pill);
+    const first = await screen.findByRole("menuitem", { name: /^p/ });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    expect(screen.getByRole("menuitem", { name: /web/ })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: /web/ }), { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Folders" })).toBeNull();
+    expect(pill).toHaveFocus();
+  });
+
   it("has ⌘N, ⌘K and ⌘O, which are off while a chat is starting", async () => {
     const cmd = (key: string) => fireEvent.keyDown(window, { key, metaKey: true });
     const onNewSession = vi.fn();

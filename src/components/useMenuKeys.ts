@@ -1,7 +1,7 @@
 import { useEffect, type KeyboardEvent, type RefObject } from "react";
 
 /** The items a menu, listbox or tab list offers: what the arrow keys move between. */
-const ITEMS = '[role="menuitem"], [role="menuitemradio"], [role="option"], [role="tab"]';
+const ITEMS = '[role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [role="tab"]';
 
 /**
  * Arrow keys (and Home/End) move focus through `items`, wrapping. Returns the index it moved to, or null for any
@@ -28,7 +28,9 @@ export function useMenuKeys(open: boolean, root: RefObject<HTMLElement | null>) 
   useEffect(() => {
     if (!open) return;
     const items = [...(root.current?.querySelectorAll<HTMLElement>(ITEMS) ?? [])];
-    (items.find((el) => el.getAttribute("aria-checked") === "true" || el.getAttribute("aria-selected") === "true") ?? items[0])?.focus();
+    // The chosen radio or option, not a checkbox that happens to be on: a menu opens on its first item unless one is chosen.
+    const chosen = items.find((el) => (el.getAttribute("role") !== "menuitemcheckbox" && el.getAttribute("aria-checked") === "true") || el.getAttribute("aria-selected") === "true");
+    (chosen ?? items[0])?.focus();
     return () => {
       const active = document.activeElement;
       if (!active || active === document.body) root.current?.querySelector<HTMLElement>("[aria-haspopup]")?.focus();

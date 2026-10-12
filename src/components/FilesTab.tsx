@@ -36,6 +36,12 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [previewLine, setPreviewLine] = useState<number | null>(null);
+  // Counts the requests for a line, so the same line asked for again is still a request (see FilePreview).
+  const [jump, setJump] = useState(0);
+  const showLine = (line: number | null) => {
+    setPreviewLine(line);
+    setJump((n) => n + 1);
+  };
   // Unsaved edits in the open file: leaving it (another file, back to the tree, the search) asks first.
   const [unsaved, setUnsaved] = useState(false);
   const unsavedRef = useRef(false);
@@ -54,10 +60,10 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
   useEffect(() => {
     if (!reveal) return;
     // The file that's open, at another line: no need to leave it.
-    if (reveal.path === previewRef.current) return setPreviewLine(reveal.line);
+    if (reveal.path === previewRef.current) return showLine(reveal.line);
     leave(() => {
       setPreview(reveal.path);
-      setPreviewLine(reveal.line);
+      showLine(reveal.line);
     });
   }, [reveal?.key]);
 
@@ -206,7 +212,7 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
           )}
         </div>
         <Suspense fallback={<div className="empty">Loading…</div>}>
-          <FilePreview key={`${slot}:${preview}`} path={preview} line={previewLine} refreshKey={refreshKey} onDirty={setUnsaved} onSaved={onSaved} />
+          <FilePreview key={`${slot}:${preview}`} path={preview} line={previewLine} jump={jump} refreshKey={refreshKey} onDirty={setUnsaved} onSaved={onSaved} />
         </Suspense>
       </>
     );
@@ -278,7 +284,7 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
               {r.truncated && " (stopped there; narrow the search to see the rest)"}
             </div>
             {r.files.map((f) => (
-              <TextFile key={f.path} file={f} changed={byPath.has(f.path)} onOpen={(line) => (setPreview(f.path), setPreviewLine(line))} />
+              <TextFile key={f.path} file={f} changed={byPath.has(f.path)} onOpen={(line) => (setPreview(f.path), showLine(line))} />
             ))}
           </div>
         )}

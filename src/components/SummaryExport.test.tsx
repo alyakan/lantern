@@ -68,6 +68,23 @@ describe("SummaryExport", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("An export is saved as a .md file.");
   });
 
+  it("moves between its items with the arrow keys, and gives focus back to Export when it closes", () => {
+    show();
+    const exportButton = screen.getByRole("button", { name: /Export/ });
+    menu();
+    const copy = screen.getByRole("menuitem", { name: "Copy as Markdown" });
+    // The first item, though the checkbox below is on: only a chosen radio or option takes focus on open.
+    expect(copy).toHaveFocus();
+    fireEvent.keyDown(copy, { key: "ArrowDown" });
+    expect(screen.getByRole("menuitem", { name: "Save as Markdown…" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Save as Markdown…" }), { key: "End" });
+    const include = screen.getByRole("menuitemcheckbox", { name: /Include what each step did/ });
+    expect(include).toHaveFocus();
+    fireEvent.keyDown(include, { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(exportButton).toHaveFocus();
+  });
+
   it("closes the menu on Escape", () => {
     show();
     menu();

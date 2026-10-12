@@ -3,6 +3,7 @@ import type { ModelOption } from "../types";
 import { choiceName, MODEL_CHOICES, modelLabel } from "../lib/models";
 import { useMenuShift } from "../lib/menuShift";
 import { SparkIcon } from "./icons";
+import { useMenuKeys } from "./useMenuKeys";
 
 /** claude lists its recommended picks first; everything after these is an older version. */
 const PRIMARY = 5;
@@ -35,6 +36,7 @@ export function ModelPicker({ running, chosen, defaultModel = null, ids = {}, op
   const [showOlder, setShowOlder] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const { ref: menu, style: menuStyle } = useMenuShift(open);
+  const keys = useMenuKeys(open, root);
 
   useEffect(() => {
     if (!open) return;
@@ -89,11 +91,11 @@ export function ModelPicker({ running, chosen, defaultModel = null, ids = {}, op
         <span className="chev down" aria-hidden />
       </button>
       {open && (
-        <div className="menu model-menu" ref={menu} style={menuStyle} role="menu" aria-label="Model">
+        <div className="menu model-menu" ref={menu} style={menuStyle} role="menu" aria-label="Model" onKeyDown={keys.onKeyDown}>
           {rows.slice(0, PRIMARY).map(row)}
           {older.length > 0 && (
             <>
-              <button className="menu-heading menu-toggle" aria-expanded={olderOpen} onClick={() => setShowOlder(!olderOpen)}>
+              <button role="menuitem" className="menu-heading menu-toggle" aria-expanded={olderOpen} onClick={() => setShowOlder(!olderOpen)}>
                 <span className="chev" aria-hidden />
                 Older models
               </button>
