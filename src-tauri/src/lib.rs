@@ -729,6 +729,7 @@ async fn open_session(
 /// A newer Lantern already downloaded and verified, for a window that started listening after it was found.
 /// The menu item's id: "Lantern ▸ Check for Updates…".
 const CHECK_FOR_UPDATES: &str = "check-for-updates";
+const QUIT: &str = "quit";
 
 #[tauri::command]
 fn update_status(updates: State<'_, updates::Updates>) -> Option<updates::UpdateInfo> {
@@ -804,6 +805,12 @@ pub fn run() {
                 if let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next() {
                     app_menu.insert(&MenuItem::with_id(handle, CHECK_FOR_UPDATES, "Check for Updates…", true, None::<&str>)?, 1)?;
                     app_menu.insert(&PredefinedMenuItem::separator(handle)?, 2)?;
+                    // The standard Quit ends the app without a close request, so the window's guard for unsaved edits
+                    // never hears of it. This one closes the window instead, which does.
+                    if let Some(quit) = app_menu.items()?.into_iter().last() {
+                        app_menu.remove(&quit)?;
+                    }
+                    app_menu.append(&MenuItem::with_id(handle, QUIT, "Quit Lantern", true, Some("CmdOrCtrl+Q"))?)?;
                 }
                 app.set_menu(menu)?;
             }
@@ -817,6 +824,13 @@ pub fn run() {
                     let _ = window.set_focus();
                 }
                 let _ = app.emit("check-for-updates", ());
+            } else if event.id() == QUIT {
+                match app.get_webview_window("main") {
+                    Some(window) => {
+                        let _ = window.close();
+                    }
+                    None => app.exit(0),
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
