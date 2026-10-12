@@ -85,7 +85,7 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ["listDir", () => api.listDir("s1", "/repo/src"), ["list_dir", { slot: "s1", path: "/repo/src" }]],
   ["readFile", () => api.readFile("s1", "a.ts"), ["read_file", { slot: "s1", path: "a.ts" }]],
   ["writeFile", () => api.writeFile("s1", "a.ts", "x", null), ["write_file", { slot: "s1", path: "a.ts", text: "x", expected: null }]],
-  ["exportText", () => api.exportText("/Users/me/out.md", "# Doc"), ["export_text", { path: "/Users/me/out.md", text: "# Doc" }]],
+  ["exportText", () => api.exportText("out.md", "# Doc"), ["export_text", { fileName: "out.md", text: "# Doc" }]],
   ["findFiles", () => api.findFiles("s1", "retry"), ["find_files", { slot: "s1", query: "retry" }]],
   ["searchText", () => api.searchText("s1", query), ["search_text", { slot: "s1", query }]],
   ["resolveFiles", () => api.resolveFiles("s1", ["retry.ts"]), ["resolve_files", { slot: "s1", mentions: ["retry.ts"] }]],
