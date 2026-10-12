@@ -196,13 +196,17 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   const sections =
     open?.kind === "/" ? menuSections(matchCommands(described, open.query, 60), open.atStart).map((s) => ({ ...s, items: s.items.slice(0, s.kind === "command" ? 8 : 6) })) : [];
   const commandItems = sections.flatMap((s) => s.items);
-  const [files, setFiles] = useState<FoundFile[]>([]);
+  // The last search that came back, and for what: until the search for the query on screen has, there's nothing to
+  // list and no "No files match" to say so.
+  const [found, setFound] = useState<{ query: string; files: FoundFile[] } | null>(null);
   const fileQuery = open?.kind === "@" && !open.query.includes(":") ? open.query : null;
+  const searching = !!findFiles && fileQuery !== null && found?.query !== fileQuery;
+  const files = fileQuery !== null && found?.query === fileQuery ? found.files : [];
   useEffect(() => {
-    setFiles([]);
     if (!fileQuery || !findFiles) return;
     let live = true;
-    const t = setTimeout(() => findFiles(fileQuery).then((f) => live && setFiles(f.slice(0, 8)), () => {}), 80);
+    const done = (f: FoundFile[]) => live && setFound({ query: fileQuery, files: f.slice(0, 8) });
+    const t = setTimeout(() => findFiles(fileQuery).then(done, () => done([])), 80);
     return () => {
       live = false;
       clearTimeout(t);
@@ -284,8 +288,10 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
     if (!menuShown || !open) return false;
     const move = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
     if (e.key === "Escape") setDismissedAt(open.start);
-    else if (count === 0) return false;
-    else if (move) {
+    // Nothing to pick yet: Enter waits for the search rather than sending "@query" as it is.
+    else if (count === 0) {
+      if (!searching || e.key !== "Enter") return false;
+    } else if (move) {
       setPick((pick + move + count) % count);
       setArrowed(true);
     } else if (e.key === "Tab") choose(pick, true);
@@ -338,7 +344,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
             onPickCommand={accept}
             onPickFile={(f) => put(`@${f.rel}`)}
             onHover={setPick}
-            hint={open.kind === "@" && count === 0 ? (open.query ? "No files match" : "Type to find a file in this folder") : undefined}
+            hint={open.kind === "@" && count === 0 && !searching ? (open.query ? "No files match" : "Type to find a file in this folder") : undefined}
             issues={issues}
             onOpenSettings={onOpenSettings}
           />

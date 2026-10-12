@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MessageInput } from "./MessageInput";
 
 describe("MessageInput", () => {
@@ -174,6 +174,23 @@ describe("MessageInput", () => {
       expect(screen.queryByRole("listbox")).toBeNull();
       type(box, "/Users/c");
       expect(screen.queryByRole("listbox")).toBeNull();
+    });
+
+    it("says No files match only once the search is back, and Enter waits for it", async () => {
+      let answer: (files: { path: string; rel: string; hits: [] }[]) => void = () => {};
+      const findFiles = vi.fn(() => new Promise<{ path: string; rel: string; hits: [] }[]>((resolve) => (answer = resolve)));
+      const onSend = vi.fn();
+      render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} findFiles={findFiles} />);
+      const box = screen.getByPlaceholderText("Ask Claude…");
+      type(box, "see @zzz");
+      await waitFor(() => expect(findFiles).toHaveBeenCalledWith("zzz"));
+      expect(screen.queryByText("No files match")).toBeNull();
+      fireEvent.keyDown(box, { key: "Enter" });
+      expect(onSend).not.toHaveBeenCalled();
+      await act(async () => answer([]));
+      expect(screen.getByText("No files match")).toBeInTheDocument();
+      fireEvent.keyDown(box, { key: "Enter" });
+      expect(onSend).toHaveBeenCalledWith("see @zzz");
     });
 
     it("warns about MCP servers that need you, linking to Settings", () => {
