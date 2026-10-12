@@ -1,6 +1,8 @@
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 /// Where Claude Code is usually installed. GUI apps don't inherit the shell PATH on macOS.
@@ -45,12 +47,20 @@ fn extract_marked(stdout: &str) -> Option<String> {
 /// Evaluates `expr` in an interactive login shell (`-ilc`), so both ~/.zprofile and ~/.zshrc are read.
 /// nvm and similar tools usually set PATH in ~/.zshrc, which a plain login shell (`-lc`) skips.
 fn shell_value(shell: &str, expr: &str, timeout: Duration) -> Option<String> {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
     let script = format!("printf '%s%s%s' '{BEGIN}' {expr} '{END}'");
+    // The output goes to a file, not a pipe: a background job from an rc file can hold a pipe open forever, and
+    // reading it would block past the timeout. The file is unlinked at once; only this handle reads it.
+    let path = std::env::temp_dir().join(format!("lantern-shell-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
+    let mut out = std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(&path).ok()?;
+    let _ = std::fs::remove_file(&path);
     let mut child = Command::new(shell)
         .args(["-ilc", &script])
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
+        .stdout(Stdio::from(out.try_clone().ok()?))
         .stderr(Stdio::null())
+        // Its own group, so a timeout stops what the rc files started too.
+        .process_group(0)
         .spawn()
         .ok()?;
     let deadline = Instant::now() + timeout;
@@ -59,15 +69,17 @@ fn shell_value(shell: &str, expr: &str, timeout: Duration) -> Option<String> {
             Ok(Some(_)) => break,
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
             _ => {
+                unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
                 let _ = child.kill();
                 let _ = child.wait();
                 return None;
             }
         }
     }
-    let mut out = String::new();
-    child.stdout.take()?.read_to_string(&mut out).ok()?;
-    extract_marked(&out)
+    let mut bytes = Vec::new();
+    out.seek(SeekFrom::Start(0)).ok()?;
+    out.read_to_end(&mut bytes).ok()?;
+    extract_marked(&String::from_utf8_lossy(&bytes))
 }
 
 fn from_login_shell() -> Option<PathBuf> {
@@ -145,6 +157,14 @@ mod tests {
         let started = std::time::Instant::now();
         assert_eq!(shell_value(slow.to_str().unwrap(), "\"$PATH\"", std::time::Duration::from_millis(300)), None);
         assert!(started.elapsed() < std::time::Duration::from_secs(3));
+
+        // A job the rc files started keeps the shell's output open after the shell has answered.
+        let bg = dir.path().join("bgshell");
+        std::fs::write(&bg, "#!/bin/sh\nsleep 5 &\nshift\nexec /bin/sh -c \"$1\"\n").unwrap();
+        std::fs::set_permissions(&bg, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let started = std::time::Instant::now();
+        assert!(shell_value(bg.to_str().unwrap(), "\"$PATH\"", std::time::Duration::from_secs(5)).is_some());
+        assert!(started.elapsed() < std::time::Duration::from_secs(3), "waited on the background job");
     }
 
     #[test]

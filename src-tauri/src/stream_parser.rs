@@ -11,6 +11,9 @@ const EDIT_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit"];
 pub struct StreamParser {
     /// parent_tool_use_id → (current message id, index of the latest content block)
     current_message: HashMap<Option<String>, (String, u64)>,
+    /// parent_tool_use_id → (message id, blocks of it seen so far), across lines: a transcript has no stream
+    /// events, and writes each block of a message on a line of its own.
+    block_positions: HashMap<Option<String>, (String, u64)>,
     /// tool_use_id → tool name
     tools: HashMap<String, String>,
     /// tool_use_id → a Bash step's whole command (the summary is cut short)
@@ -175,9 +178,10 @@ impl StreamParser {
             }
         }
         for block in v["message"]["content"].as_array().into_iter().flatten() {
+            let position = self.next_position(&parent, &msg_id);
             match block["type"].as_str().unwrap_or("") {
                 "text" => {
-                    let idx = self.block_index_for(&parent, &msg_id);
+                    let idx = self.text_block_index(&parent, &msg_id, position);
                     out.push(UiEvent::AssistantText {
                         parent: parent.clone(),
                         block_id: format!("{msg_id}:{idx}"),
@@ -258,10 +262,22 @@ impl StreamParser {
         out
     }
 
-    fn block_index_for(&self, parent: &Option<String>, message_id: &str) -> u64 {
+    /// The position of the next block of `message_id` under `parent`, counting the blocks of earlier lines too.
+    fn next_position(&mut self, parent: &Option<String>, message_id: &str) -> u64 {
+        let entry = self.block_positions.entry(parent.clone()).or_insert_with(|| (message_id.to_string(), 0));
+        if entry.0 != message_id {
+            *entry = (message_id.to_string(), 0);
+        }
+        entry.1 += 1;
+        entry.1 - 1
+    }
+
+    /// A text block's index in its message, as its deltas were keyed when the message was streamed. Without
+    /// stream events, its position among the message's blocks: every block of a message needs its own id.
+    fn text_block_index(&self, parent: &Option<String>, message_id: &str, position: u64) -> u64 {
         match self.current_message.get(parent) {
             Some((id, idx)) if id == message_id => *idx,
-            _ => 0,
+            _ => position,
         }
     }
 }
@@ -593,6 +609,28 @@ mod tests {
             block_id: block.into(),
             text: "I need to read hello.txt first before overwriting it.".into(),
         }));
+    }
+
+    /// Without stream events (a transcript), each text block of a message gets its own id, whether the blocks share
+    /// a line or come on lines of their own.
+    #[test]
+    fn unstreamed_text_blocks_of_one_message_get_their_own_ids() {
+        let mut p = StreamParser::default();
+        let text = |id: &str, body: &str| format!(r#"{{"type":"assistant","parent_tool_use_id":null,"message":{{"id":"{id}","content":[{body}]}}}}"#);
+        let block = |t: &str| format!(r#"{{"type":"text","text":"{t}"}}"#);
+        let one_line = p.parse_line(&text("m1", &format!("{},{}", block("a"), block("b"))));
+        assert_eq!(
+            one_line,
+            vec![
+                UiEvent::AssistantText { parent: None, block_id: "m1:0".into(), text: "a".into() },
+                UiEvent::AssistantText { parent: None, block_id: "m1:1".into(), text: "b".into() },
+            ]
+        );
+        let tool = r#"{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}"#;
+        p.parse_line(&text("m2", tool));
+        assert_eq!(p.parse_line(&text("m2", &block("c"))), vec![UiEvent::AssistantText { parent: None, block_id: "m2:1".into(), text: "c".into() }]);
+        // The next message starts counting again.
+        assert_eq!(p.parse_line(&text("m3", &block("d")))[0], UiEvent::AssistantText { parent: None, block_id: "m3:0".into(), text: "d".into() });
     }
 
     /// Shapes from a real CLI 2.1.284 run.

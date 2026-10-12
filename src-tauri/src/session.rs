@@ -6,9 +6,9 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
-use tokio::sync::watch;
+use tokio::sync::{watch, Mutex as AsyncMutex};
 
 const STDERR_TAIL_BYTES: usize = 4000;
 
@@ -38,7 +38,8 @@ pub struct SessionConfig {
 
 /// One running `claude` process.
 pub struct Session {
-    stdin: Option<ChildStdin>,
+    /// Shared with the reader task, which answers the control requests it refuses. None once closed.
+    stdin: Arc<AsyncMutex<Option<ChildStdin>>>,
     pid: u32,
     stopping: Arc<AtomicBool>,
     exited: watch::Receiver<bool>,
@@ -75,15 +76,17 @@ impl Session {
         if let Some(p) = &cfg.path_env {
             cmd.env("PATH", p);
         }
+        // Its own group: stopping claude signals the group, so the background tasks it started go with it.
         let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .process_group(0)
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| format!("Failed to start {}: {e}", cfg.claude.display()))?;
         let pid = child.id().ok_or("claude exited before it started")?;
-        let stdin = child.stdin.take();
+        let stdin = Arc::new(AsyncMutex::new(child.stdin.take()));
         let stdout = child.stdout.take().ok_or("claude has no stdout pipe")?;
         let stderr = child.stderr.take().ok_or("claude has no stderr pipe")?;
 
@@ -96,26 +99,33 @@ impl Session {
         let stderr_task = {
             let tail = tail.clone();
             tokio::spawn(async move {
-                let mut lines = BufReader::new(stderr).lines();
-                while let Ok(Some(line)) = lines.next_line().await {
+                let mut reader = BufReader::new(stderr);
+                let mut buf = Vec::new();
+                while let Some(line) = next_line(&mut reader, &mut buf).await {
                     push_tail(&mut tail.lock().unwrap(), &line);
                 }
             })
         };
 
         {
-            let (sid, stopping, tail, replies) = (session_id.clone(), stopping.clone(), tail.clone(), replies.clone());
+            let (sid, stopping, tail, replies, stdin) = (session_id.clone(), stopping.clone(), tail.clone(), replies.clone(), stdin.clone());
             let folder = cfg.folder.clone();
             tokio::spawn(async move {
                 let mut parser = StreamParser::default();
-                let mut lines = BufReader::new(stdout).lines();
+                let mut reader = BufReader::new(stdout);
+                let mut buf = Vec::new();
                 // Work running off the stream (workflow agents, background subagents), followed from its transcripts
                 // until claude says it ended or this process does.
                 let watches = crate::offstream::Watches::default();
                 let gone = Arc::new(AtomicBool::new(false));
-                while let Ok(Some(line)) = lines.next_line().await {
+                while let Some(line) = next_line(&mut reader, &mut buf).await {
                     if deliver(&replies, &line) {
                         continue;
+                    }
+                    if let Some(reply) = refusal(&line) {
+                        // Written apart: waiting for stdin here could hold up the stdout claude is waiting to empty.
+                        let stdin = stdin.clone();
+                        tokio::spawn(async move { write_line(&stdin, &reply).await });
                     }
                     for ev in parser.parse_line(&line) {
                         match &ev {
@@ -138,12 +148,17 @@ impl Session {
                 }
                 gone.store(true, Ordering::SeqCst);
                 let status = child.wait().await.ok();
+                // Gone: no reply is coming, so whoever waits for one hears now rather than at their timeout. The pid
+                // is reaped, so the session counts as stopped before anything else waits on it.
+                for (_, tx) in replies.lock().unwrap().drain() {
+                    let _ = tx.send(Err("Claude stopped before it answered.".into()));
+                }
+                let _ = exit_tx.send(true);
                 let _ = tokio::time::timeout(Duration::from_secs(1), stderr_task).await;
                 if !stopping.load(Ordering::SeqCst) {
                     let stderr_tail = tail.lock().unwrap().clone();
                     sink(UiEvent::SessionEnded { code: status.and_then(|s| s.code()), stderr_tail });
                 }
-                let _ = exit_tx.send(true);
             });
         }
 
@@ -160,7 +175,8 @@ impl Session {
 
     pub async fn send(&mut self, text: &str) -> Result<(), String> {
         let msg = serde_json::json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}});
-        let stdin = self.stdin.as_mut().ok_or("The Claude session is not running")?;
+        let mut guard = self.stdin.lock().await;
+        let stdin = guard.as_mut().ok_or("The Claude session is not running")?;
         stdin.write_all(format!("{msg}\n").as_bytes()).await.map_err(|e| format!("Could not send to claude: {e}"))?;
         stdin.flush().await.map_err(|e| format!("Could not send to claude: {e}"))
     }
@@ -170,6 +186,7 @@ impl Session {
     /// Falls back to SIGINT if the request can't be written. Never SIGTERM: that leaves the turn unfinished.
     pub async fn interrupt(&mut self) {
         if self.is_running() && !self.control(serde_json::json!({"subtype": "interrupt"})).await {
+            // Claude alone, not its group: the background tasks keep running, as they do after an in-band interrupt.
             unsafe { libc::kill(self.pid as libc::pid_t, libc::SIGINT) };
         }
     }
@@ -212,25 +229,64 @@ impl Session {
     async fn control(&mut self, request: serde_json::Value) -> bool {
         self.requests += 1;
         let msg = serde_json::json!({"type": "control_request", "request_id": format!("lantern-{}", self.requests), "request": request});
-        match self.stdin.as_mut() {
-            Some(stdin) => stdin.write_all(format!("{msg}\n").as_bytes()).await.is_ok() && stdin.flush().await.is_ok(),
-            None => false,
-        }
+        write_line(&self.stdin, &msg.to_string()).await
     }
 
-    /// Shuts the process down on purpose; no SessionEnded event follows.
+    /// Shuts the process down on purpose; no SessionEnded event follows. Its group gets the signals, so background
+    /// tasks it started stop with it.
     pub async fn stop(mut self) {
         self.stopping.store(true, Ordering::SeqCst);
-        drop(self.stdin.take());
+        drop(self.stdin.lock().await.take());
         if self.is_running() {
-            unsafe { libc::kill(self.pid as libc::pid_t, libc::SIGTERM) };
+            signal_group(self.pid, libc::SIGTERM);
         }
         let timed_out = tokio::time::timeout(Duration::from_secs(5), self.exited.wait_for(|done| *done)).await.is_err();
         if timed_out && self.is_running() {
-            unsafe { libc::kill(self.pid as libc::pid_t, libc::SIGKILL) };
+            signal_group(self.pid, libc::SIGKILL);
             let _ = tokio::time::timeout(Duration::from_secs(1), self.exited.wait_for(|done| *done)).await;
         }
     }
+}
+
+/// Signals claude's process group (its pid is the group id, see `process_group` in spawn).
+fn signal_group(pid: u32, sig: libc::c_int) {
+    unsafe { libc::kill(-(pid as libc::pid_t), sig) };
+}
+
+/// Writes one line to claude's stdin. False if it's closed or the write fails.
+async fn write_line(stdin: &AsyncMutex<Option<ChildStdin>>, line: &str) -> bool {
+    let mut guard = stdin.lock().await;
+    match guard.as_mut() {
+        Some(s) => s.write_all(format!("{line}\n").as_bytes()).await.is_ok() && s.flush().await.is_ok(),
+        None => false,
+    }
+}
+
+/// The next line of a pipe, or None once it's closed. Bytes that aren't UTF-8 are replaced rather than ending the
+/// read: a pipe that stops being drained blocks claude, and the chat would sit "running" forever.
+async fn next_line<R: AsyncBufRead + Unpin>(reader: &mut R, buf: &mut Vec<u8>) -> Option<String> {
+    loop {
+        buf.clear();
+        match reader.read_until(b'\n', buf).await {
+            Ok(0) => return None,
+            Ok(_) => return Some(String::from_utf8_lossy(buf).trim_end_matches(['\n', '\r']).to_string()),
+            Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+        }
+    }
+}
+
+/// The error reply to an inbound control_request Lantern doesn't handle: claude waits for a reply to each one, so
+/// silence would hang it. Permissions don't come this way (the helper answers them), so `can_use_tool` is left alone.
+fn refusal(line: &str) -> Option<String> {
+    if !line.contains("\"control_request\"") {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    let subtype = v["request"]["subtype"].as_str()?;
+    if v["type"] != "control_request" || subtype == "can_use_tool" {
+        return None;
+    }
+    Some(serde_json::json!({"type": "control_response", "response": {"subtype": "error", "request_id": v["request_id"], "error": format!("Lantern doesn't handle {subtype} requests.")}}).to_string())
 }
 
 /// Where off-stream work's transcripts are: a workflow's folder as claude gave it, or the session's subagents folder
@@ -512,5 +568,70 @@ done"#,
         let (sink, _rx) = channel_sink();
         let err = Session::spawn(&config(dir.path().join("nope"), dir.path(), None), sink, no_edits()).err().unwrap();
         assert!(err.contains("Failed to start"));
+    }
+
+    #[tokio::test]
+    async fn a_line_that_is_not_utf8_does_not_stop_the_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = script(
+            dir.path(),
+            r#"printf '\377\376 junk\n'
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"after-junk","model":"m","cwd":"/p"}'
+cat > /dev/null"#,
+        );
+        let (sink, mut rx) = channel_sink();
+        let _s = Session::spawn(&config(fake, dir.path(), None), sink, no_edits()).unwrap();
+        match next_matching(&mut rx, |e| matches!(e, UiEvent::SessionStarted { .. })).await {
+            UiEvent::SessionStarted { session_id, .. } => assert_eq!(session_id, "after-junk"),
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_request_claude_never_answers_hears_that_it_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        // Takes one line (the request), then exits without a reply.
+        let fake = script(dir.path(), "read line");
+        let (sink, _rx) = channel_sink();
+        let mut s = Session::spawn(&config(fake, dir.path(), None), sink, no_edits()).unwrap();
+        let reply = s.request(serde_json::json!({"subtype": "mcp_status"})).await.unwrap();
+        let answer = tokio::time::timeout(Duration::from_secs(10), reply).await.expect("waited out the timeout");
+        assert!(answer.unwrap().is_err());
+    }
+
+    #[tokio::test]
+    async fn an_unhandled_control_request_from_claude_gets_an_error_reply() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = r#"printf '%s\n' '{"type":"control_request","request_id":"c9","request":{"subtype":"hook_callback"}}'
+while IFS= read -r line; do printf '%s\n' "$line" >> DIR/stdin.txt; done"#
+            .replace("DIR", &dir.path().display().to_string());
+        let fake = script(dir.path(), &body);
+        let (sink, _rx) = channel_sink();
+        let s = Session::spawn(&config(fake, dir.path(), None), sink, no_edits()).unwrap();
+        let sent = wait_for_file(&dir.path().join("stdin.txt")).await;
+        let reply: serde_json::Value = serde_json::from_str(sent.trim()).unwrap();
+        assert_eq!(reply["type"], "control_response");
+        assert_eq!(reply["response"]["subtype"], "error");
+        assert_eq!(reply["response"]["request_id"], "c9");
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn stopping_claude_stops_the_background_tasks_it_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().display();
+        // Starts a background task, records its pid, then runs until it's signalled.
+        let fake = script(dir.path(), &format!("sleep 30 &\necho $! > {d}/child.txt\nwhile true; do sleep 1; done"));
+        let (sink, _rx) = channel_sink();
+        let s = Session::spawn(&config(fake, dir.path(), None), sink, no_edits()).unwrap();
+        let child: libc::pid_t = wait_for_file(&dir.path().join("child.txt")).await.trim().parse().unwrap();
+        s.stop().await;
+        let gone = tokio::time::timeout(Duration::from_secs(5), async {
+            while unsafe { libc::kill(child, 0) } == 0 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        assert!(gone.is_ok(), "the background task outlived claude");
     }
 }

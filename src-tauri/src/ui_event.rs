@@ -115,6 +115,8 @@ pub enum UiEvent {
     /// `/clear` ran: the conversation starts over in the same process.
     ConversationReset,
     PermissionRequested { request_id: String, tool_name: String, input: Value },
+    /// A prompt that can no longer be answered: the helper asking for it went away.
+    PermissionWithdrawn { request_id: String },
     SessionEnded { code: Option<i32>, stderr_tail: String },
     /// Output from a command the user ran from the chat box (see shell.rs).
     ShellOutput { id: String, text: String },
