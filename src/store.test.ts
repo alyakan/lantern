@@ -205,6 +205,13 @@ describe("reducer", () => {
     expect(s).toMatchObject({ folder: "/q", status: "starting", items: [], changedFiles: [], selectedFile: null, lastEdited: null, follow: true });
   });
 
+  it("a withdrawn prompt is denied, and only the one that was withdrawn", () => {
+    let s = ev(running, { kind: "permission_requested", request_id: "perm-1", tool_name: "Bash", input: {} });
+    s = ev(s, { kind: "permission_requested", request_id: "perm-2", tool_name: "Bash", input: {} });
+    s = ev(s, { kind: "permission_withdrawn", request_id: "perm-1" });
+    expect(s.items.map((it) => (it.type === "permission" ? it.decision : null))).toEqual(["denied", null]);
+  });
+
   it("stop_requested denies undecided permission cards", () => {
     let s = ev(running, { kind: "permission_requested", request_id: "perm-1", tool_name: "Bash", input: {} });
     s = reducer(s, { type: "stop_requested" });

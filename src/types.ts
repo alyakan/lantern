@@ -39,6 +39,7 @@ export type UiEvent =
   | { kind: "model_usage"; models: ModelCost[] }
   | { kind: "conversation_reset" }
   | { kind: "permission_requested"; request_id: string; tool_name: string; input: unknown }
+  | { kind: "permission_withdrawn"; request_id: string }
   | { kind: "session_ended"; code: number | null; stderr_tail: string }
   | { kind: "shell_output"; id: string; text: string }
   | { kind: "shell_done"; id: string; code: number | null; stopped: boolean }

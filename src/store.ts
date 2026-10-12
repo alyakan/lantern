@@ -431,6 +431,11 @@ function applyEvent(state: State, ev: UiEvent): State {
     }
     case "permission_requested":
       return { ...state, items: [...state.items, { type: "permission", id: ev.request_id, toolName: ev.tool_name, input: ev.input, decision: null }] };
+    case "permission_withdrawn":
+      return {
+        ...state,
+        items: state.items.map((it): ChatItem => (it.type === "permission" && it.id === ev.request_id && it.decision === null ? { ...it, decision: "denied" } : it)),
+      };
     case "session_ended": {
       const detail = lastLine(ev.stderr_tail);
       const text = `Claude stopped unexpectedly${ev.code === null ? "" : ` (exit code ${ev.code})`}.${detail ? ` ${detail}` : ""}`;
