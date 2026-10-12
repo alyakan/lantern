@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { TopBar } from "./TopBar";
 
 const base = { folder: null, status: "idle" as const, changeCount: 0, onOpenFolder: () => {} };
@@ -119,10 +119,10 @@ describe("TopBar", () => {
     const history = screen.getByRole("button", { name: "Session history" });
     expect(history.querySelector(".dot")).not.toBeNull();
     fireEvent.click(history);
-    const open = await screen.findByRole("listbox", { name: "Open chats" });
+    const open = await screen.findByRole("list", { name: "Open chats" });
     expect(open).toHaveTextContent("Add retriesRunning");
     // The same session isn't listed again under past sessions.
-    expect(await screen.findByRole("listbox", { name: "Past sessions" })).not.toHaveTextContent("Add retries");
+    expect(await screen.findByRole("list", { name: "Past sessions" })).not.toHaveTextContent("Add retries");
     fireEvent.click(screen.getByRole("button", { name: /Add retries/ }));
     expect(onSwitchChat).toHaveBeenCalledWith("s2");
     expect(onOpenSession).not.toHaveBeenCalled();
@@ -171,6 +171,36 @@ describe("TopBar", () => {
     expect(await screen.findByText("Couldn't stop it: Claude isn't running.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Stop npm run dev" }));
     expect(screen.getByRole("button", { name: "Stop npm run dev" })).toHaveTextContent("Stopping…");
+  });
+
+  it("gives focus back to the History button when its menu closes", async () => {
+    render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadSessions={() => Promise.resolve([])} onOpenSession={() => {}} />);
+    const history = screen.getByRole("button", { name: "Session history" });
+    fireEvent.click(history);
+    await screen.findByRole("dialog", { name: "Session history" });
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Session history" })).toBeNull();
+    expect(history).toHaveFocus();
+  });
+
+  it("brings Stop back for a task that's still listed a while after it was asked to stop", async () => {
+    vi.useFakeTimers();
+    try {
+      const background = [{ id: "b1", taskType: "local_bash", description: "npm run dev", since: Date.now() }];
+      const onStopTask = vi.fn().mockResolvedValue(undefined);
+      render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} background={background} onStopTask={onStopTask} />);
+      fireEvent.click(screen.getByRole("button", { name: "1 running in the background" }));
+      fireEvent.click(screen.getByRole("button", { name: "Stop npm run dev" }));
+      await act(async () => {});
+      expect(screen.getByRole("button", { name: "Stop npm run dev" })).toBeDisabled();
+      act(() => {
+        vi.advanceTimersByTime(8000);
+      });
+      expect(screen.getByRole("button", { name: "Stop npm run dev" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Stop npm run dev" })).toHaveTextContent("Stop");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("hides an open review panel", () => {

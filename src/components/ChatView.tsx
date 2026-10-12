@@ -15,9 +15,17 @@ export function ChatView({ state, ...handlers }: { state: State } & StreamHandle
   useLayoutEffect(() => {
     if (left !== undefined && left >= 0 && scroller.current) scroller.current.scrollTop = left;
   }, []);
+  // Your own message goes to the end, even if you'd scrolled up to read: you're following what you just sent.
+  const lastSent = (items: State["items"]) => [...items].reverse().find((it) => it.type === "user" && !it.auto)?.id;
+  const sent = useRef(lastSent(state.items));
   // Only the chat scrolls: scrollIntoView would scroll the page around it too, and slide the whole app out of the window.
   useEffect(() => {
     const el = scroller.current;
+    const id = lastSent(state.items);
+    if (id !== sent.current) {
+      sent.current = id;
+      nearBottom.current = true;
+    }
     if (nearBottom.current && el) el.scrollTop = el.scrollHeight;
   }, [state.items, state.thinking]);
   // The chat box grows as you type, which makes this area shorter without scrolling it: stay at the end if you were
@@ -55,7 +63,7 @@ export function ChatView({ state, ...handlers }: { state: State } & StreamHandle
         {state.items.length === 0 && !state.thinking && <div className="empty">What should Claude work on?</div>}
         <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} {...handlers} />
         {thinkingLine && (
-          <div className="activity live thinking-line" aria-label="Claude is thinking">
+          <div className="activity live thinking-line" role="status" aria-label="Claude is thinking">
             <span className="activity-line">
               <span className="spinner" aria-hidden />
               <span className="activity-text">{workingVerb(prompt?.id ?? "start")}</span>

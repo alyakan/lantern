@@ -54,7 +54,7 @@ export function ShellBlock({ item, onStop, onInput }: { item: ShellItem; onStop?
         <span className="shell-command">{item.command}</span>
         {running ? (
           <>
-            <span className="spinner" aria-label="Running" />
+            <span className="spinner" role="img" aria-label="Running" />
             {onInput && !open && (
               <button className="shell-stop" onClick={() => setOpened(true)} title="Type something to this command">
                 Reply
@@ -79,7 +79,8 @@ export function ShellBlock({ item, onStop, onInput }: { item: ShellItem; onStop?
         </button>
       )}
       {shown.text && (
-        <pre className="shell-output" ref={pre} onScroll={onScroll}>
+        // Scrollable, so focusable (for the keyboard) and named.
+        <pre className="shell-output" ref={pre} onScroll={onScroll} role="region" aria-label="Command output" tabIndex={0}>
           {shown.text}
         </pre>
       )}

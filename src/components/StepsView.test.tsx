@@ -269,6 +269,18 @@ describe("StepsView", () => {
     expect(screen.getByRole("button", { name: "Next file →" })).toBeEnabled();
   });
 
+  it("doesn't turn pages under an open dialog or menu", () => {
+    render(<StepsView state={state()} {...handlers()} />);
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("open", "");
+    document.body.appendChild(dialog);
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    dialog.remove();
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+  });
+
   it("shows Claude working instead of Next while a step runs, and picks a flavour from the header's badge", () => {
     const h = handlers();
     render(<StepsView state={state({ status: "running" })} {...h} />);

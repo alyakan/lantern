@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { DEFAULT_HARNESS, summary, type Harness } from "../lib/harness";
 import { useMenuShift } from "../lib/menuShift";
+import { useMenuKeys } from "./useMenuKeys";
 
 /** Three nodes, one above two: an agent and who it works with. */
 function HarnessIcon() {
@@ -40,6 +41,7 @@ export function HarnessPicker({ presets, chosen, onChoose, onEdit, disabled }: P
     };
   }, [open]);
   const { ref: menu, style: menuStyle } = useMenuShift(open);
+  const keys = useMenuKeys(open, root);
   const current = presets.find((h) => h.id === chosen) ?? presets[0];
   return (
     <div className="model-picker" ref={root} onClick={(e) => e.stopPropagation()}>
@@ -49,7 +51,7 @@ export function HarnessPicker({ presets, chosen, onChoose, onEdit, disabled }: P
         <span className="chev down" aria-hidden />
       </button>
       {open && (
-        <div className="menu model-menu harness-menu" ref={menu} style={menuStyle} role="menu" aria-label="Harness">
+        <div className="menu model-menu harness-menu" ref={menu} style={menuStyle} role="menu" aria-label="Harness" onKeyDown={keys.onKeyDown}>
           <div className="menu-heading">Harness: who does what</div>
           {presets.map((h) => (
             <button

@@ -91,9 +91,9 @@ describe("ReviewPanel", () => {
     const onSelect = vi.fn();
     render(<ReviewPanel {...base} selected="/p/src/a.ts" follow={false} onSelect={onSelect} />);
     fireEvent.click(screen.getByRole("button", { name: /src\/a\.ts/ }));
-    fireEvent.click(screen.getByRole("option", { name: /b\.ts/ }).querySelector("button")!);
+    fireEvent.click(screen.getByRole("option", { name: /b\.ts/ }));
     expect(onSelect).toHaveBeenCalledWith("/p/src/b.ts");
-    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.queryByRole("listbox", { name: "Changed files" })).toBeNull();
   });
 
   it("offers to follow again after a manual selection", () => {
@@ -122,6 +122,23 @@ describe("ReviewPanel's Summary tab", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Summary" }));
     fireEvent.click(screen.getByText(/Plan: 2 steps/));
     expect(onOpenPage).toHaveBeenCalledWith("p1");
+  });
+
+  it("moves between the tabs with the arrow keys, and each tab's panel is labelled by it", () => {
+    localStorage.clear();
+    render(<ReviewPanel {...base} selected={null} follow summary={summary()} />);
+    const [changes, files, summaryTab] = screen.getAllByRole("tab");
+    expect(changes).toHaveAttribute("tabindex", "0");
+    expect(files).toHaveAttribute("tabindex", "-1");
+    changes.focus();
+    fireEvent.keyDown(changes, { key: "ArrowRight" });
+    expect(files).toHaveFocus();
+    expect(files).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Files" })).toBeInTheDocument();
+    fireEvent.keyDown(files, { key: "End" });
+    expect(summaryTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Summary" })).toBeInTheDocument();
+    localStorage.clear();
   });
 
   it("falls back to Changes when the saved tab is Summary and this chat has none", () => {

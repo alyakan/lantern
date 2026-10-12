@@ -12,7 +12,7 @@ describe("HistoryMenu", () => {
     const onOpen = vi.fn();
     render(<HistoryMenu sessions={sessions} currentId="b" onOpen={onOpen} onClose={() => {}} />);
     expect(screen.getByText("5m ago")).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /Fix the login redirect/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("button", { name: /Fix the login redirect/ })).toHaveAttribute("aria-current", "true");
     fireEvent.click(screen.getByText("Add retries to fetchJson"));
     expect(onOpen).toHaveBeenCalledWith("a");
   });
@@ -20,11 +20,11 @@ describe("HistoryMenu", () => {
   it("lists the chat on screen under Open, not among past sessions", () => {
     const open = [{ slot: "s2", title: "Other project chat", state: "done" as const, sessionId: "x", elsewhere: "web" }];
     render(<HistoryMenu sessions={sessions} currentId="b" onOpen={() => {}} onClose={() => {}} open={open} />);
-    const openList = screen.getByRole("listbox", { name: "Open chats" });
+    const openList = screen.getByRole("list", { name: "Open chats" });
     expect([...openList.querySelectorAll(".menu-row-title")].map((t) => t.textContent)).toEqual(["Fix the login redirect", "Other project chat"]);
     // A chat from another project says which, beside its title rather than in it.
     expect(screen.getByLabelText("in web")).toHaveTextContent("web");
-    const past = screen.getByRole("listbox", { name: "Past sessions" });
+    const past = screen.getByRole("list", { name: "Past sessions" });
     expect(past).not.toHaveTextContent("Fix the login redirect");
     expect(past).toHaveTextContent("Add retries to fetchJson");
   });
@@ -32,7 +32,7 @@ describe("HistoryMenu", () => {
   it("says when a finished chat still runs something in the background", () => {
     const open = [{ slot: "s2", title: "Start the dev server", state: "done" as const, background: 1, sessionId: "x", elsewhere: null }];
     render(<HistoryMenu sessions={[]} currentId={null} onOpen={() => {}} onClose={() => {}} open={open} />);
-    expect(screen.getByRole("listbox", { name: "Open chats" })).toHaveTextContent("Start the dev server1 in background");
+    expect(screen.getByRole("list", { name: "Open chats" })).toHaveTextContent("Start the dev server1 in background");
   });
 
   it("filters by search text", () => {

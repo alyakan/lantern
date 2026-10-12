@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMenuShift } from "../lib/menuShift";
+import { useMenuKeys } from "./useMenuKeys";
 
 /** Every level `--effort` takes, lowest first; a model may support only some. */
 export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -41,6 +42,7 @@ export function EffortPicker({ chosen, levels, onChoose, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const { ref: menu, style: menuStyle } = useMenuShift(open);
+  const keys = useMenuKeys(open, root);
 
   useEffect(() => {
     if (!open) return;
@@ -71,7 +73,7 @@ export function EffortPicker({ chosen, levels, onChoose, disabled }: Props) {
         <span className="chev down" aria-hidden />
       </button>
       {open && (
-        <div className="menu model-menu effort-menu" ref={menu} style={menuStyle} role="menu" aria-label="Thinking effort">
+        <div className="menu model-menu effort-menu" ref={menu} style={menuStyle} role="menu" aria-label="Thinking effort" onKeyDown={keys.onKeyDown}>
           <div className="menu-heading">Thinking effort</div>
           {rows.map((level) => (
             <button

@@ -43,6 +43,23 @@ describe("QuestionCard", () => {
     });
   });
 
+  it("moves between the options with the arrow keys, and a radio group picks as it moves", () => {
+    render(<QuestionCard item={item({ input: { questions: [input.questions[0]] } })} onDecide={() => {}} />);
+    const first = screen.getByRole("radio", { name: /In fetchJson/ });
+    const second = screen.getByRole("radio", { name: /In each caller/ });
+    // One radio is in the tab order.
+    expect(second).toHaveAttribute("tabindex", "-1");
+    first.focus();
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    expect(second).toHaveFocus();
+    expect(second).toHaveAttribute("aria-checked", "true");
+    expect(second).not.toHaveAttribute("tabindex");
+    expect(first).toHaveAttribute("tabindex", "-1");
+    fireEvent.keyDown(second, { key: "ArrowDown" });
+    expect(first).toHaveFocus();
+    expect(first).toHaveAttribute("aria-checked", "true");
+  });
+
   it("takes an answer in your own words instead", () => {
     const onDecide = vi.fn();
     render(<QuestionCard item={item({ input: { questions: [input.questions[0]] } })} onDecide={onDecide} />);
