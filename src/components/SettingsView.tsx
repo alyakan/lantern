@@ -99,17 +99,24 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
   const [adding, setAdding] = useState(false);
   const [notice, setNotice] = useState<{ text: string; restart: boolean } | null>(null);
 
+  // Each chat's answers are for that chat: a reply that comes back after the chat changed is dropped.
+  const chatGen = useRef(0);
   const load = () => {
     if (!slot || !live) return Promise.resolve();
+    const gen = chatGen.current;
     return api.claudeRequest<{ mcpServers?: McpServer[] }>(slot, { subtype: "mcp_status" }).then(
       (r) => {
+        if (gen !== chatGen.current) return;
         setServers(r.mcpServers ?? []);
         setError(null);
       },
-      (e) => setError(errText(e)),
+      (e) => gen === chatGen.current && setError(errText(e)),
     );
   };
   useEffect(() => {
+    // The last chat's servers don't show under this one while it's asked.
+    chatGen.current++;
+    setServers(null);
     void load();
   }, [slot, live]);
 
@@ -237,7 +244,9 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
               <div className="mcp-actions">
                 {s.status === "needs-auth" &&
                   (claudeai ? (
-                    <button onClick={() => void logIn(s)}>Connect</button>
+                    <button onClick={() => void logIn(s)} disabled={!!busy[s.name]}>
+                      Connect
+                    </button>
                   ) : (
                     <button className="primary" onClick={() => void logIn(s)} disabled={!!busy[s.name]}>
                       Log in
@@ -425,7 +434,17 @@ function SkillsPage({ slot, live, commands, onCommands }: PageProps) {
   }, [slot]);
   useEffect(() => {
     setPreview(null);
-    if (picked) api.readSkill(slot, picked.path).then((t) => setPreview(withoutFrontmatter(t)), (e) => setPreview(`Couldn't read it: ${errText(e)}`));
+    // A read of the skill picked before this one lands in its own time: it's dropped rather than shown under this skill.
+    let current = true;
+    if (picked) {
+      api.readSkill(slot, picked.path).then(
+        (t) => current && setPreview(withoutFrontmatter(t)),
+        (e) => current && setPreview(`Couldn't read it: ${errText(e)}`),
+      );
+    }
+    return () => {
+      current = false;
+    };
   }, [picked?.path]);
 
   const reload = async () => {
@@ -490,7 +509,8 @@ function SkillsPage({ slot, live, commands, onCommands }: PageProps) {
               <span className="skill-name">/{picked.name}</span>
               <button onClick={() => void revealItemInDir(picked.path)}>Show in Finder</button>
             </div>
-            <div className="skill-preview-body msg assistant">{preview === null ? <span className="settings-muted">Loading…</span> : <Md>{preview}</Md>}</div>
+            {/* A skill's text is someone else's, not Claude's: its pictures aren't loaded. */}
+            <div className="skill-preview-body msg assistant">{preview === null ? <span className="settings-muted">Loading…</span> : <Md images={false}>{preview}</Md>}</div>
           </aside>
         )}
       </div>
