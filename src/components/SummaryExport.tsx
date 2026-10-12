@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import { usePersistentState } from "../lib/layout";
@@ -48,10 +47,9 @@ export function SummaryExport({ markdown, fileName }: { markdown: (results: bool
   const saveAs = async () => {
     setOpen(false);
     try {
-      const path = await save({ defaultPath: fileName, filters: [{ name: "Markdown", extensions: ["md"] }] });
-      if (!path) return;
-      await api.exportText(path, markdown(results));
-      setStatus({ kind: "saved", path });
+      // The backend opens the save dialog and writes only where it's picked.
+      const path = await api.exportText(fileName, markdown(results));
+      if (path) setStatus({ kind: "saved", path });
     } catch (e) {
       setStatus({ kind: "failed", message: String(e) });
     }

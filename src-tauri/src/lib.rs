@@ -25,6 +25,7 @@ use session::{EditHook, Session, SessionConfig};
 use slots::{Slot, SlotEvent, Slots};
 use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 pub struct AppState {
     slots: Slots,
@@ -639,10 +640,16 @@ async fn write_file(state: State<'_, AppState>, slot: String, path: String, text
     tauri::async_runtime::spawn_blocking(move || save_tracked(&root, &changes, &path, &text, expected.as_deref())).await.map_err(|e| e.to_string())?
 }
 
-/// Saves an exported document (a plan as markdown) where the user chose in the save dialog.
+/// Saves an exported document (a plan as markdown). The save dialog is opened here rather than by the webview, and only
+/// the path it returns is written, so a file can't be written anywhere the user didn't pick. None: the dialog was cancelled.
 #[tauri::command]
-async fn export_text(path: String, text: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || files::write_export(std::path::Path::new(&path), &text)).await.map_err(|e| e.to_string())?
+async fn export_text(app: AppHandle, file_name: String, text: String) -> Result<Option<String>, String> {
+    let picked = tauri::async_runtime::spawn_blocking(move || app.dialog().file().add_filter("Markdown", &["md"]).set_file_name(file_name).blocking_save_file())
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(picked) = picked else { return Ok(None) };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || files::write_export(&path, &text).map(|()| Some(path.display().to_string()))).await.map_err(|e| e.to_string())?
 }
 
 /// Where Claude Code keeps transcripts (it honours CLAUDE_CONFIG_DIR, so we do too).
