@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 async function boot() {
   // `npm run dev` then open /?mock to design the UI in a browser against a fake backend (dev builds only).
@@ -9,7 +10,9 @@ async function boot() {
   }
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
-      <App />
+      <ErrorBoundary name="window" reloadWindow>
+        <App />
+      </ErrorBoundary>
     </React.StrictMode>,
   );
 }

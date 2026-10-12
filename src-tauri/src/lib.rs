@@ -25,6 +25,7 @@ use session::{EditHook, Session, SessionConfig};
 use slots::{Slot, SlotEvent, Slots};
 use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 pub struct AppState {
     slots: Slots,
@@ -235,11 +236,15 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
 async fn send_message(state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
     let s = state.slots.get(&slot)?;
-    // What "Last turn" in the Changes pane compares against.
+    let mut session = s.session.lock().await;
+    let claude = session.as_mut().ok_or("No Claude session is running")?;
+    // What "Last turn" in the Changes pane compares against. It's taken before the send, so Claude's edits come after it.
     let changes = s.changes.clone();
     let turn = tauri::async_runtime::spawn_blocking(move || changes.lock().unwrap().start_turn()).await.map_err(|e| e.to_string())?;
-    let mut session = s.session.lock().await;
-    session.as_mut().ok_or("No Claude session is running")?.send(&text).await?;
+    if let Err(e) = claude.send(&text).await {
+        s.changes.lock().unwrap().cancel_turn(turn);
+        return Err(e);
+    }
     Ok(turn)
 }
 
@@ -313,7 +318,8 @@ async fn claude_mcp(state: &AppState, slot: &str, args: Vec<String>) -> Result<S
         (cfg.claude.clone(), cfg.folder.clone())
     };
     let mut cmd = tokio::process::Command::new(claude);
-    cmd.args(&args).current_dir(folder).stdin(std::process::Stdio::null());
+    // A timeout drops the wait below; kill_on_drop stops the process rather than leaving it running.
+    cmd.args(&args).current_dir(folder).stdin(std::process::Stdio::null()).kill_on_drop(true);
     if let Some(p) = login_path(state).await {
         cmd.env("PATH", p);
     }
@@ -327,8 +333,9 @@ async fn claude_mcp(state: &AppState, slot: &str, args: Vec<String>) -> Result<S
     }
 }
 
-#[tauri::command]
-async fn mcp_add(state: State<'_, AppState>, slot: String, spec: McpServerSpec) -> Result<String, String> {
+/// The arguments for `claude mcp add`, after checking the spec. `--` before the name and URL keeps a value that starts
+/// with `-` from being read as an option.
+fn mcp_add_args(spec: &McpServerSpec) -> Result<Vec<String>, String> {
     let name = spec.name.trim();
     if name.is_empty() || name.starts_with('-') || !MCP_SCOPES.contains(&spec.scope.as_str()) || !["stdio", "http", "sse"].contains(&spec.transport.as_str()) {
         return Err("Give the server a name, a type and where it applies.".into());
@@ -354,6 +361,60 @@ async fn mcp_add(state: State<'_, AppState>, slot: String, spec: McpServerSpec) 
         }
         args.extend(["--".into(), name.into(), url.into()]);
     }
+    Ok(args)
+}
+
+#[cfg(test)]
+mod mcp_add_tests {
+    use super::*;
+
+    fn spec(name: &str, transport: &str, target: &str, scope: &str) -> McpServerSpec {
+        McpServerSpec { name: name.into(), transport: transport.into(), target: target.into(), scope: scope.into(), env: vec![], headers: vec![] }
+    }
+
+    #[test]
+    fn stdio_puts_env_first_then_the_name_and_the_command_words() {
+        let mut s = spec(" fs ", "stdio", "npx -y server /tmp/a", "local");
+        s.env = vec!["A=1".into(), "  ".into(), " B=2 ".into()];
+        s.headers = vec!["X: ignored".into()];
+        assert_eq!(
+            mcp_add_args(&s).unwrap(),
+            ["mcp", "add", "-s", "local", "-t", "stdio", "-e", "A=1", "-e", "B=2", "--", "fs", "npx", "-y", "server", "/tmp/a"]
+        );
+    }
+
+    #[test]
+    fn http_takes_the_trimmed_url_and_non_empty_headers() {
+        let mut s = spec("api", "http", " https://x.dev/mcp ", "user");
+        s.headers = vec!["Authorization: Bearer t".into(), " ".into()];
+        s.env = vec!["A=1".into()];
+        assert_eq!(mcp_add_args(&s).unwrap(), ["mcp", "add", "-s", "user", "-t", "http", "-H", "Authorization: Bearer t", "--", "api", "https://x.dev/mcp"]);
+    }
+
+    #[test]
+    fn a_name_or_url_that_looks_like_an_option_stays_a_value() {
+        assert!(mcp_add_args(&spec("-rf", "stdio", "server", "local")).is_err());
+        let args = mcp_add_args(&spec("api", "sse", "https://x.dev/sse", "project")).unwrap();
+        assert_eq!(&args[args.len() - 3..], ["--", "api", "https://x.dev/sse"]);
+    }
+
+    #[test]
+    fn refuses_a_missing_name_scope_or_type() {
+        assert!(mcp_add_args(&spec("  ", "stdio", "server", "local")).is_err());
+        assert!(mcp_add_args(&spec("api", "stdio", "server", "global")).is_err());
+        assert!(mcp_add_args(&spec("api", "ws", "wss://x", "local")).is_err());
+    }
+
+    #[test]
+    fn refuses_an_empty_command_or_a_non_web_address() {
+        assert_eq!(mcp_add_args(&spec("fs", "stdio", "   ", "local")).unwrap_err(), "Which command starts the server?");
+        assert!(mcp_add_args(&spec("api", "http", "ftp://x.dev", "local")).is_err());
+    }
+}
+
+#[tauri::command]
+async fn mcp_add(state: State<'_, AppState>, slot: String, spec: McpServerSpec) -> Result<String, String> {
+    let args = mcp_add_args(&spec)?;
     claude_mcp(&state, &slot, args).await
 }
 
@@ -429,8 +490,8 @@ async fn get_file_diff(state: State<'_, AppState>, slot: String, path: String, s
     }
     if scope == Some(changes::Scope::Git) {
         let folder = s.folder()?;
-        let original = outside::committed(&folder, std::path::Path::new(&path))?;
-        let current = std::fs::read(&path).ok().map(|b| String::from_utf8_lossy(&b).into_owned());
+        let read = path.clone();
+        let (original, current) = tauri::async_runtime::spawn_blocking(move || outside::diff_sides(&folder, std::path::Path::new(&read))).await.map_err(|e| e.to_string())??;
         return Ok(FileDiff { path, created: original.is_none(), deleted: current.is_none(), original: original.unwrap_or_default(), current: current.unwrap_or_default() });
     }
     let diff = s.changes.lock().unwrap().diff(&path, scope.unwrap_or_default(), turn, to_turn);
@@ -579,10 +640,16 @@ async fn write_file(state: State<'_, AppState>, slot: String, path: String, text
     tauri::async_runtime::spawn_blocking(move || save_tracked(&root, &changes, &path, &text, expected.as_deref())).await.map_err(|e| e.to_string())?
 }
 
-/// Saves an exported document (a plan as markdown) where the user chose in the save dialog.
+/// Saves an exported document (a plan as markdown). The save dialog is opened here rather than by the webview, and only
+/// the path it returns is written, so a file can't be written anywhere the user didn't pick. None: the dialog was cancelled.
 #[tauri::command]
-async fn export_text(path: String, text: String) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || files::write_export(std::path::Path::new(&path), &text)).await.map_err(|e| e.to_string())?
+async fn export_text(app: AppHandle, file_name: String, text: String) -> Result<Option<String>, String> {
+    let picked = tauri::async_runtime::spawn_blocking(move || app.dialog().file().add_filter("Markdown", &["md"]).set_file_name(file_name).blocking_save_file())
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(picked) = picked else { return Ok(None) };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || files::write_export(&path, &text).map(|()| Some(path.display().to_string()))).await.map_err(|e| e.to_string())?
 }
 
 /// Where Claude Code keeps transcripts (it honours CLAUDE_CONFIG_DIR, so we do too).

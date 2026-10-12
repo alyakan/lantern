@@ -767,11 +767,11 @@ export function installMockBackend() {
         case "plugin:dialog|open":
           return FOLDER;
         // The save dialog "picks" the Desktop; what was exported is in `claudeExports()` in the browser console.
-        case "plugin:dialog|save":
-          return `/Users/you/Desktop/${String(((a.options ?? a) as { defaultPath?: string }).defaultPath ?? "export.md").split("/").pop()}`;
-        case "export_text":
-          mockExports[String(a.path)] = String(a.text);
-          return null;
+        case "export_text": {
+          const path = `/Users/you/Desktop/${String(a.fileName).split("/").pop()}`;
+          mockExports[path] = String(a.text);
+          return path;
+        }
         case "plugin:opener|reveal_item_in_dir":
           return null;
         case "start_session":
