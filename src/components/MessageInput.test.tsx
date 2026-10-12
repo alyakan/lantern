@@ -41,6 +41,21 @@ describe("MessageInput", () => {
     expect(onSend).toHaveBeenLastCalledWith("にほん");
   });
 
+  it("doesn't send on the Enter that WebKit delivers after compositionend, still composing (keyCode 229)", () => {
+    const onSend = vi.fn();
+    render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} />);
+    const box = screen.getByPlaceholderText("Ask Claude…");
+    fireEvent.keyDown(box, { key: "Process", keyCode: 229 });
+    fireEvent.compositionStart(box);
+    fireEvent.change(box, { target: { value: "にほん" } });
+    fireEvent.compositionEnd(box);
+    fireEvent.keyDown(box, { key: "Enter", keyCode: 229 });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(box).toHaveValue("にほん");
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("にほん");
+  });
+
   const type = (box: HTMLElement, value: string) => {
     fireEvent.change(box, { target: { value } });
     fireEvent.keyDown(box, { key: "Enter" });

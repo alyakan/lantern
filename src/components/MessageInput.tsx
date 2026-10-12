@@ -232,6 +232,9 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   const composing = useRef(false);
   const imeKey = useRef(false);
   const predicting = useRef(false);
+  // WebKit can deliver the Enter that commits a composition after compositionend, still with keyCode 229: that one
+  // confirms the input method, it doesn't send.
+  const composingKey = (e: KeyboardEvent<HTMLTextAreaElement>) => composing.current || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229;
   // What you typed, without a prediction that's showing: what Enter sends while one is.
   const typed = useRef("");
   // A prediction Enter declined: if WebKit still commits it, it's taken back out.
@@ -263,7 +266,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
     else if (count === 0) return false;
     else if (move) setPick((pick + move + count) % count);
     else if (e.key === "Tab") choose(pick, true);
-    else if (e.key === "Enter" && !e.shiftKey && !composing.current) choose(pick);
+    else if (e.key === "Enter" && !e.shiftKey && !composingKey(e)) choose(pick);
     else return false;
     e.preventDefault();
     return true;
@@ -386,7 +389,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               }
               // Enter sends, unless an input method (Japanese, Chinese…) is composing: then it confirms that. macOS's
               // grey inline predictions also mark the key as composing; Enter doesn't take them (Tab or → does).
-              if (e.key === "Enter" && !e.shiftKey && !composing.current) {
+              if (e.key === "Enter" && !e.shiftKey && !composingKey(e)) {
                 e.preventDefault();
                 if ((e.metaKey || e.ctrlKey) && sendAndNext && !terminal) submitAndNext();
                 else submit();
