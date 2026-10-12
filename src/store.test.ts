@@ -200,6 +200,25 @@ describe("reducer", () => {
     expect(chatState(s)).toBe("done");
   });
 
+  it("a failed call keeps the status of the chat; a start that failed ends with a restart to try again", () => {
+    expect(reducer(running, { type: "failed", text: "model change refused" })).toMatchObject({ status: "running", banner: { kind: "error", action: null } });
+    const starting = { ...initialState, status: "starting" as const };
+    expect(reducer(starting, { type: "failed", text: "no claude" })).toMatchObject({ status: "ended", banner: { kind: "error", text: "no claude", action: "restart" } });
+  });
+
+  it("a message or answer that didn't reach claude ends the chat, and denies what was waiting", () => {
+    let s = ev(running, { kind: "permission_requested", request_id: "perm-1", tool_name: "Bash", input: { command: "ls" } });
+    s = reducer(s, { type: "turn_failed", text: "broken pipe" });
+    expect(s).toMatchObject({ status: "ended", banner: { kind: "error", action: "restart" } });
+    expect(s.items[0]).toMatchObject({ type: "permission", decision: "denied" });
+  });
+
+  it("a Stop that didn't reach claude isn't recorded as stopped", () => {
+    let s = reducer(running, { type: "stop_requested" });
+    s = reducer(s, { type: "stop_failed", text: "interrupt failed" });
+    expect(s).toMatchObject({ status: "running", stopRequested: false, banner: { kind: "error", text: "interrupt failed" } });
+  });
+
   it("session_ended after Stop shows no banner", () => {
     let s = reducer(running, { type: "stop_requested" });
     s = ev(s, { kind: "session_ended", code: null, stderr_tail: "" });

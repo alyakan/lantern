@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialState, type State } from "./store";
+import { initialState, reducer, type State } from "./store";
 import { chatsReducer, chatTitle, initialChats, isBusy, queuesToSend, type Chats } from "./sessions";
 
 const ready: State = { ...initialState, status: "idle", claudePath: "/bin/claude", mode: "auto", folder: "/p", contextWindow: 200_000 };
@@ -43,6 +43,11 @@ describe("queuesToSend", () => {
   it("keeps the queue when claude ended unexpectedly or restarted", () => {
     expect(queuesToSend({ s1: "ended" }, { s1: { ...ready, queued: ["next"] } })).toEqual([]);
     expect(queuesToSend({ s1: "starting" }, { s1: { ...ready, queued: ["next"] } })).toEqual([]);
+  });
+
+  it("keeps the queue when a message or answer failed, since the turn didn't end normally", () => {
+    const failed = reducer({ ...ready, status: "running", queued: ["next"] }, { type: "turn_failed", text: "broken pipe" });
+    expect(queuesToSend({ s1: "running" }, { s1: failed })).toEqual([]);
   });
 });
 

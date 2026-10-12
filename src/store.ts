@@ -216,6 +216,8 @@ export type Action =
   | { type: "select_file"; path: string }
   | { type: "follow_latest" }
   | { type: "failed"; text: string }
+  | { type: "turn_failed"; text: string }
+  | { type: "stop_failed"; text: string }
   | { type: "dismiss_banner" }
   | { type: "queue_set"; items: string[] }
   | { type: "shell_started"; id: string; command: string }
@@ -520,13 +522,17 @@ export function reducer(state: State, action: Action): State {
       return { ...state, selectedFile: action.path, follow: false };
     case "follow_latest":
       return { ...state, follow: true, selectedFile: state.lastEdited ?? state.selectedFile };
+    // A failed call (a model change, an update) leaves the chat's status as it was: a turn may well be going on.
+    // A start that failed has nothing running, so it's ended, with a restart to try again.
     case "failed":
-      return {
-        ...state,
-        status: state.status === "starting" ? "ended" : state.status === "running" ? "idle" : state.status,
-        thinking: false,
-        banner: { kind: "error", text: action.text, action: null },
-      };
+      if (state.status === "starting") return { ...state, status: "ended", thinking: false, banner: { kind: "error", text: action.text, action: "restart" } };
+      return { ...state, banner: { kind: "error", text: action.text, action: null } };
+    // A message or an answer that didn't reach claude: the turn can't go on from here, so the chat ends and a restart resumes it.
+    case "turn_failed":
+      return { ...state, status: "ended", thinking: false, items: denyPending(failRunning(state.items)), banner: { kind: "error", text: action.text, action: "restart" } };
+    // Stop didn't reach claude: the turn runs on, so it isn't recorded as stopped.
+    case "stop_failed":
+      return { ...state, stopRequested: false, banner: { kind: "error", text: action.text, action: null } };
     case "dismiss_banner":
       return { ...state, banner: null };
     case "queue_set":
