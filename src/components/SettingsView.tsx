@@ -234,7 +234,7 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
           return (
             <li key={s.name} className={`settings-row mcp-row ${st.tone}`}>
               <button className="settings-row-main" aria-expanded={open} onClick={() => setExpanded(open ? null : s.name)}>
-                {icon ? <img className="mcp-icon" src={icon} alt="" /> : <span className="mcp-icon letter">{displayName(s).charAt(0).toUpperCase()}</span>}
+                <McpIcon src={icon} name={displayName(s)} />
                 <span className="settings-row-text">
                   <span className="settings-row-name">{displayName(s)}</span>
                   <span className="settings-row-sub">{sourceOf(s)}</span>
@@ -323,6 +323,16 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
       </ul>
     </>
   );
+}
+
+/**
+ * A server's icon, or its initial. The window's CSP lets only local images load, so a remote icon that won't load shows
+ * the initial instead of an empty box. A failure is kept for that address only: a different icon is tried.
+ */
+function McpIcon({ src, name }: { src: string | null; name: string }) {
+  const [failed, setFailed] = useState<string | null>(null);
+  if (!src || failed === src) return <span className="mcp-icon letter">{name.charAt(0).toUpperCase()}</span>;
+  return <img className="mcp-icon" src={src} alt="" onError={() => setFailed(src)} />;
 }
 
 /** When claude can't catch the login's redirect itself: the address the browser ended on, pasted back. */

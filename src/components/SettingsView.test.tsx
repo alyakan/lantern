@@ -148,6 +148,18 @@ describe("SettingsView", () => {
     expect(claudeRequest.mock.calls.filter(([, r]) => (r as { subtype: string }).subtype === "mcp_authenticate")).toHaveLength(1);
   });
 
+  it("shows a server's initial in place of an icon that won't load", async () => {
+    claudeRequest.mockImplementation((_slot: string, r: { subtype: string }) =>
+      r.subtype === "mcp_status" ? Promise.resolve({ mcpServers: [{ name: "figma", status: "connected", serverInfo: { title: "Figma", icons: [{ src: "https://static.example/figma.png" }] }, config: { type: "http", url: "https://mcp.figma.com/mcp" }, scope: "user" }] }) : Promise.resolve({}),
+    );
+    const { container } = render(<SettingsView open="mcp" {...props} />);
+    await screen.findByRole("list", { name: "MCP servers" });
+    // The remote picture is blocked by the window's CSP: the browser reports it failed.
+    fireEvent.error(container.querySelector("img.mcp-icon")!);
+    expect(container.querySelector("img.mcp-icon")).toBeNull();
+    expect(container.querySelector(".mcp-icon.letter")?.textContent).toBe("F");
+  });
+
   it("shows a skill's pictures as the text they describe, not loaded", async () => {
     readSkill.mockResolvedValue("# Skill\n\n![build status](https://tracker.example/pixel.png)\n");
     const { container } = render(<SettingsView open="skills" {...props} />);
