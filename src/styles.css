@@ -728,6 +728,9 @@ button.background-task-stop:hover:not(:disabled) { background: var(--bg-hover); 
 /* The page's own message reads larger than chat text; Learn pages are longer, so a touch more air. */
 .step-content .msg.assistant { font-size: 14px; line-height: 1.65; }
 .step-page-body.teach .msg.assistant { line-height: 1.75; }
+/* A built step lists what it changed: numbered, so one change can be pointed at ("change 2"). Lists inside stay bullets. */
+.step-page-body.built-step .msg.assistant ul { list-style: decimal; }
+.step-page-body.built-step .msg.assistant ul ul { list-style: disc; }
 .step-content .msg.assistant pre { font-size: 12px; }
 .steps-nav { display: flex; align-items: center; gap: 10px; flex: none; max-width: calc(var(--col) + 80px); width: 100%; margin: 0 auto; padding: 8px 20px 2px; }
 .steps-nav .primary, .steps-nav .ghost { height: 28px; padding: 0 14px; border-radius: 999px; font-size: 12.5px; }

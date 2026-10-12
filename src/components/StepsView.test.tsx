@@ -60,6 +60,20 @@ describe("StepsView", () => {
     expect(task.querySelector(".user-note-tag")).toHaveTextContent("Task");
   });
 
+  it("marks a built step's page, whose list of changes is numbered, and no other", () => {
+    const built: ChatItem[] = [
+      ...items,
+      { type: "user", id: "u3", text: "Next", turn: 2 },
+      { type: "assistant", id: "a3", text: "# Step 1 of 1 — Add the function\n\n- `utils.js:1`: added slugify.\n- `utils.js:9`: exported it." },
+      { type: "turn", id: "t3", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
+    ];
+    render(<StepsView state={state({ items: built })} {...handlers()} />);
+    expect(current().querySelector(".step-page-body")).toHaveClass("built-step");
+    fireEvent.click(screen.getByRole("button", { name: "← Previous" }));
+    expect(current().querySelector(".step-eyebrow")).toHaveTextContent("Plan step 1");
+    expect(current().querySelector(".step-page-body")).not.toHaveClass("built-step");
+  });
+
   it("opens the page the Summary tab asks for, again when asked again, and ignores a request from before it was drawn", () => {
     const h = handlers();
     const view = <T extends { page: string; key: number } | null>(jump: T) => <StepsView state={state()} {...h} jump={jump} />;
