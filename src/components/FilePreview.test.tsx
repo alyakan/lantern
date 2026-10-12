@@ -248,6 +248,14 @@ describe("FilePreview as an editor", () => {
       expect(preview()).toHaveTextContent("[Image]");
     });
 
+    it("doesn't load an image written inside a plan step's fields either", async () => {
+      read.mockResolvedValue("# Doc\n\n```\nFile: a.ts\nChange: ![x](https://tracker.example/p.png) edit\nVerify: ok\n```\n");
+      render(<FilePreview path="/p/notes.md" />);
+      await screen.findByRole("heading", { name: "Doc" });
+      expect(preview()).toHaveTextContent("[Image: x]");
+      expect(preview().querySelector("img")).toBeNull();
+    });
+
     it("shows front matter as code instead of a rule and a heading", async () => {
       read.mockResolvedValue("---\nname: demo\n---\n\nBody\n");
       render(<FilePreview path="/p/SKILL.md" />);

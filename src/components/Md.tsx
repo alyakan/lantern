@@ -174,18 +174,24 @@ const rehypePlugins = [rehypeCallouts];
 
 /** The language of the files the message being drawn names: what an untagged code block in it is most likely in. */
 const LanguageHint = createContext<string | null>(null);
+/** Whether pictures are loaded. Markdown drawn inside markdown (a plan step's fields) follows the text around it. */
+const ImagesAllowed = createContext(true);
 
 /**
  * Claude's markdown: GFM, file links, code block headers, plan step cards and callouts. `images={false}` is for text
  * that isn't Claude's (a file of the project): its pictures aren't loaded.
  */
-export function Md({ children, inline = false, images = true }: { children: string; inline?: boolean; images?: boolean }) {
+export function Md({ children, inline = false, images }: { children: string; inline?: boolean; images?: boolean }) {
   const hint = useMemo(() => languageHint(children), [children]);
+  const inherited = useContext(ImagesAllowed);
+  const loadImages = images ?? inherited;
   return (
-    <LanguageHint.Provider value={hint}>
-      <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={images ? (inline ? inlineComponents : components) : inline ? inlineComponentsWithoutImages : componentsWithoutImages}>
-        {children}
-      </Markdown>
-    </LanguageHint.Provider>
+    <ImagesAllowed.Provider value={loadImages}>
+      <LanguageHint.Provider value={hint}>
+        <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={loadImages ? (inline ? inlineComponents : components) : inline ? inlineComponentsWithoutImages : componentsWithoutImages}>
+          {children}
+        </Markdown>
+      </LanguageHint.Provider>
+    </ImagesAllowed.Provider>
   );
 }
