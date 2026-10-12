@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { initialState, reducer, type State, type ToolItem } from "./store";
+import { chatState, isBusy } from "./sessions";
 import type { UiEvent } from "./types";
 
 const ev = (state: State, event: UiEvent) => reducer(state, { type: "ui_event", event });
@@ -178,6 +179,14 @@ describe("reducer", () => {
     expect(s.status).toBe("ended");
     expect(s.banner).toEqual({ kind: "error", text: "Claude stopped unexpectedly (exit code 1). fatal: boom", action: "restart" });
     expect((s.items[0] as ToolItem).status).toBe("error");
+  });
+
+  it("session_ended denies the permission still waiting, so the chat isn't left waiting or busy", () => {
+    let s = ev(running, { kind: "permission_requested", request_id: "perm-1", tool_name: "Bash", input: { command: "ls" } });
+    s = ev(s, { kind: "session_ended", code: 1, stderr_tail: "" });
+    expect(s.items[0]).toMatchObject({ type: "permission", decision: "denied" });
+    expect(isBusy(s)).toBe(false);
+    expect(chatState(s)).toBe("done");
   });
 
   it("session_ended after Stop shows no banner", () => {

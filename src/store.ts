@@ -263,6 +263,11 @@ function failRunning(items: ChatItem[]): ChatItem[] {
   );
 }
 
+// A permission nobody answered can't be answered once claude is gone or stopping: denied, so the chat isn't left waiting.
+function denyPending(items: ChatItem[]): ChatItem[] {
+  return items.map((it): ChatItem => (it.type === "permission" && it.decision === null ? { ...it, decision: "denied" } : it));
+}
+
 function addChange(files: ChangedFile[], path: string, created: boolean, hunks: Hunk[]): ChangedFile[] {
   const { added, removed } = countChanges(hunks);
   if (!files.some((f) => f.path === path)) return [...files, { path, created, added, removed }];
@@ -439,7 +444,7 @@ function applyEvent(state: State, ev: UiEvent): State {
         status: "ended",
         thinking: false,
         backgroundTasks: [],
-        items: failRunning(state.items),
+        items: denyPending(failRunning(state.items)),
         banner: state.stopRequested ? state.banner : { kind: "error", text, action: "restart" },
       };
     }
@@ -500,7 +505,7 @@ export function reducer(state: State, action: Action): State {
       return {
         ...state,
         stopRequested: true,
-        items: state.items.map((it): ChatItem => (it.type === "permission" && it.decision === null ? { ...it, decision: "denied" } : it)),
+        items: denyPending(state.items),
       };
     case "restarting":
       return {
@@ -508,7 +513,7 @@ export function reducer(state: State, action: Action): State {
         status: "starting",
         banner: null,
         stopRequested: false,
-        items: state.items.map((it): ChatItem => (it.type === "permission" && it.decision === null ? { ...it, decision: "denied" } : it)),
+        items: denyPending(state.items),
       };
     case "select_file":
       return { ...state, selectedFile: action.path, follow: false };
