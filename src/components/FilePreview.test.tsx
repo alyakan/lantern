@@ -239,6 +239,15 @@ describe("FilePreview as an editor", () => {
       expect(screen.queryByRole("tab", { name: "Preview" })).not.toBeInTheDocument();
     });
 
+    it("doesn't load the file's images: it shows what they describe, so opening a file doesn't contact its server", async () => {
+      read.mockResolvedValue("# Doc\n\n![build status](https://tracker.example/pixel.png)\n\n![](./local.png)\n");
+      render(<FilePreview path="/p/notes.md" />);
+      await screen.findByRole("heading", { name: "Doc" });
+      expect(preview().querySelector("img")).toBeNull();
+      expect(preview()).toHaveTextContent("[Image: build status]");
+      expect(preview()).toHaveTextContent("[Image]");
+    });
+
     it("shows front matter as code instead of a rule and a heading", async () => {
       read.mockResolvedValue("---\nname: demo\n---\n\nBody\n");
       render(<FilePreview path="/p/SKILL.md" />);

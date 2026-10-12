@@ -1067,10 +1067,9 @@ label.mcp-scope-option { flex-direction: row; align-items: flex-start; gap: 8px;
 .md-preview-page.msg.assistant h3 { font-size: 15.5px; }
 .md-preview-page.msg.assistant h4 { font-size: 14px; }
 .md-preview-page.msg.assistant hr { margin: 18px 0; border: none; border-top: 1px solid var(--line); }
-.md-preview-page.msg.assistant img { max-width: 100%; }
 .md-preview-page.msg.assistant table { display: block; max-width: 100%; overflow-x: auto; }
 .md-preview-page.msg.assistant li > p { margin: 0 0 4px; }
-.md-preview-empty { color: var(--muted); }
+.md-preview-empty, .md-image-blocked { color: var(--muted); }
 .skill-preview { flex: 0 0 46%; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .skill-preview-head { display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 10px; border-bottom: 1px solid var(--line); background: var(--bg-subtle); }
 .skill-preview-head button { margin-left: auto; font-size: 12px; white-space: nowrap; flex: none; }

@@ -160,18 +160,30 @@ function Blockquote({ node: _node, children, ...rest }: ComponentProps<"blockquo
 const components = { ...markdownComponents, pre: Pre, blockquote: Blockquote };
 // For a line of text inside other text (a table cell, a card row): no paragraph around it.
 const inlineComponents = { ...components, p: ({ children }: { children?: ReactNode }) => <>{children}</> };
+/**
+ * An image shown as its description. A file in someone else's project can point at any server, and loading its
+ * pictures would tell that server you opened it.
+ */
+function BlockedImage({ alt }: ComponentProps<"img">) {
+  return <span className="md-image-blocked">{alt ? `[Image: ${alt}]` : "[Image]"}</span>;
+}
+const componentsWithoutImages = { ...components, img: BlockedImage };
+const inlineComponentsWithoutImages = { ...inlineComponents, img: BlockedImage };
 const remarkPlugins = [remarkGfm];
 const rehypePlugins = [rehypeCallouts];
 
 /** The language of the files the message being drawn names: what an untagged code block in it is most likely in. */
 const LanguageHint = createContext<string | null>(null);
 
-/** Claude's markdown: GFM, file links, code block headers, plan step cards and callouts. */
-export function Md({ children, inline = false }: { children: string; inline?: boolean }) {
+/**
+ * Claude's markdown: GFM, file links, code block headers, plan step cards and callouts. `images={false}` is for text
+ * that isn't Claude's (a file of the project): its pictures aren't loaded.
+ */
+export function Md({ children, inline = false, images = true }: { children: string; inline?: boolean; images?: boolean }) {
   const hint = useMemo(() => languageHint(children), [children]);
   return (
     <LanguageHint.Provider value={hint}>
-      <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={inline ? inlineComponents : components}>
+      <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={images ? (inline ? inlineComponents : components) : inline ? inlineComponentsWithoutImages : componentsWithoutImages}>
         {children}
       </Markdown>
     </LanguageHint.Provider>
