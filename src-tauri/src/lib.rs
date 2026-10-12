@@ -30,7 +30,7 @@ pub struct AppState {
     slots: Slots,
     login_path: Arc<OnceLock<Option<String>>>,
     titles: Arc<titles::TitleStore>,
-    /// PRs looked up for the Changes pane, by folder and number, with when: fetching them takes a moment.
+    /// PRs looked up for the Changes pane, by repository and number, with when: fetching them takes a moment.
     prs: std::sync::Mutex<std::collections::HashMap<(std::path::PathBuf, u32), (std::time::Instant, pr::PrRange)>>,
 }
 
@@ -39,14 +39,16 @@ const PR_FRESH: std::time::Duration = std::time::Duration::from_secs(120);
 
 async fn pr_range(state: &AppState, folder: std::path::PathBuf, number: Option<u32>, hints: Vec<String>) -> Result<pr::PrRange, String> {
     let number = number.ok_or("Which pull request? None is being reviewed.")?;
-    let key = (folder.clone(), number);
+    // Keyed by the repository the hints pick, not the folder: two repositories in one folder can both have a PR #N.
+    let repo = tauri::async_runtime::spawn_blocking(move || pr::repo_for(&folder, &hints)).await.map_err(|e| e.to_string())??;
+    let key = (repo.clone(), number);
     if let Some((at, range)) = state.prs.lock().unwrap().get(&key) {
         if at.elapsed() < PR_FRESH {
             return Ok(range.clone());
         }
     }
     let path_env = login_path(state).await;
-    let range = tauri::async_runtime::spawn_blocking(move || pr::repo_for(&folder, &hints).and_then(|repo| pr::resolve(&repo, number, path_env.as_deref()))).await.map_err(|e| e.to_string())??;
+    let range = tauri::async_runtime::spawn_blocking(move || pr::resolve(&repo, number, path_env.as_deref())).await.map_err(|e| e.to_string())??;
     state.prs.lock().unwrap().insert(key, (std::time::Instant::now(), range.clone()));
     Ok(range)
 }
@@ -419,7 +421,8 @@ async fn interrupt(state: State<'_, AppState>, slot: String) -> Result<(), Strin
 async fn get_file_diff(state: State<'_, AppState>, slot: String, path: String, scope: Option<changes::Scope>, turn: Option<usize>, to_turn: Option<usize>, pr: Option<u32>) -> Result<FileDiff, String> {
     let s = state.slots.get(&slot)?;
     if scope == Some(changes::Scope::Pr) {
-        let range = pr_range(&state, s.folder()?, pr, vec![]).await?;
+        // The file's path picks its repository, as it did for change_summary's list.
+        let range = pr_range(&state, s.folder()?, pr, vec![path.clone()]).await?;
         return tauri::async_runtime::spawn_blocking(move || pr::file(&range, &path)).await.map_err(|e| e.to_string())?;
     }
     if scope == Some(changes::Scope::Branch) {
