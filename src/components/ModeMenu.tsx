@@ -4,6 +4,7 @@ import type { Flavour } from "../lib/flavour";
 import { useModeGuide } from "../lib/modeGuide";
 import { BoltIcon, InfoIcon, ShieldIcon, StepsIcon } from "./icons";
 import { modeName } from "./ModeGuide";
+import { useMenuKeys } from "./useMenuKeys";
 
 const MODES: { value: Mode; label: string; hint: string; icon: ReactNode }[] = [
   { value: "ask", label: "Ask before actions", hint: "Edits apply; commands and other actions ask you first", icon: <ShieldIcon /> },
@@ -16,6 +17,7 @@ export function ModeMenu({ mode, flavour = null, onChange, disabled }: { mode: M
   const [open, setOpen] = useState(false);
   const guide = useModeGuide();
   const root = useRef<HTMLDivElement>(null);
+  const keys = useMenuKeys(open, root);
 
   useEffect(() => {
     if (!open) return;
@@ -38,7 +40,7 @@ export function ModeMenu({ mode, flavour = null, onChange, disabled }: { mode: M
         <span className="chev down" aria-hidden />
       </button>
       {open && (
-        <div className="menu model-menu mode-menu" role="menu" aria-label="Permission mode">
+        <div className="menu model-menu mode-menu" role="menu" aria-label="Permission mode" onKeyDown={keys.onKeyDown}>
           {MODES.map((m) => (
             <button
               key={m.value}
