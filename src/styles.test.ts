@@ -27,3 +27,34 @@ describe("text you can select and copy", () => {
     }
   });
 });
+
+describe("colours", () => {
+  // The dark theme's own values, from its block of the stylesheet.
+  const dark = css.match(/@media \(prefers-color-scheme: dark\) \{\s*:root \{([^}]*)\}/)?.[1] ?? "";
+  const token = (name: string) => dark.match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})\\b`, "i"))?.[1] ?? "";
+  const luminance = (hex: string) => {
+    const [r, g, b] = [1, 3, 5].map((i) => {
+      const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrast = (a: string, b: string) => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+
+  it("gives a dark code block a background of its own, readable, on the pane and the chat card", () => {
+    const code = token("code-bg");
+    expect(code).not.toBe("");
+    expect(code).not.toBe(token("pane"));
+    expect(code).not.toBe(token("sidebar"));
+    expect(contrast(token("text"), code)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("keeps a selected item's fill when the pointer is over it", () => {
+    for (const sel of [".mode-guide-tab.active:hover", ".skill-row.active:hover", ".menu-row.current:hover", ".search-toggle.on:hover"]) {
+      expect(css).toContain(sel);
+    }
+  });
+});

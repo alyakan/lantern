@@ -21,7 +21,7 @@ describe("AgentsTab", () => {
   it("shows the graph and the session log for the turn", () => {
     render(<AgentsTab tree={tree} graph={graph} usage={[]} />);
     expect(screen.getByText("Live")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Agent graph" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Agent graph" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "main Sonnet 5.5: running" })).toBeInTheDocument();
     expect(within(screen.getByRole("list", { name: "Session log" })).getByText("reviewed · before starting")).toBeInTheDocument();
   });

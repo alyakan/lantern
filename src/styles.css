@@ -76,7 +76,7 @@
     --info-bg: #2a2a30;
     --error-bg: #3a1f22;
     --auth-bg: #37301a;
-    --code-bg: #1f1f24;
+    --code-bg: #17171b;      /* darker than the pane and the chat card, so a code block shows on either */
     --shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.35);
     --card-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.6), inset 0 0.5px 0 rgba(255, 255, 255, 0.07), 0 4px 16px rgba(0, 0, 0, 0.3);
   }
@@ -91,6 +91,8 @@ html, body, #root { height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--bg); color: var(--text); font: 13px/1.5 var(--ui); -webkit-font-smoothing: antialiased; user-select: none; cursor: default; }
 button { font: inherit; color: inherit; background: var(--field); border: 1px solid var(--line-strong); border-radius: var(--radius-inner); padding: 3px 10px; cursor: default; }
 button:hover:not(:disabled) { background: var(--bg-hover); }
+/* A selected item keeps its fill under the pointer: the hover fills, which are as specific, would paint over it. */
+.mode-guide-tab.active:hover:not(:disabled), .skill-row.active:hover:not(:disabled), .menu-row.current:hover:not(:disabled), .search-toggle.on:hover:not(:disabled), .viewer-issue.pressed:hover:not(:disabled), button.question-option.on:hover:not(:disabled) { background: var(--bg-active); }
 button:disabled { opacity: 0.45; }
 button:focus-visible, [tabindex]:focus-visible { outline: 1.5px solid var(--muted); outline-offset: 1px; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 500; }
