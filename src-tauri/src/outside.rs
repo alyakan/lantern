@@ -162,6 +162,23 @@ pub fn committed(folder: &Path, path: &Path) -> Result<Option<String>, String> {
     Ok(git(folder, &["show", &spec]).map(|b| String::from_utf8_lossy(&b).into_owned()))
 }
 
+/// Both sides of a file's diff in the Git view: as the last commit has it, and as it is on disk (None if it's gone).
+/// `path` has to lie inside `folder` once `..` and symlinks are resolved, or the diff would show any file the user can read.
+pub fn diff_sides(folder: &Path, path: &Path) -> Result<(Option<String>, Option<String>), String> {
+    const OUTSIDE: &str = "That path is outside the open folder.";
+    let root = folder.canonicalize().map_err(|e| e.to_string())?;
+    match path.canonicalize() {
+        Ok(real) if real.starts_with(&root) => {
+            let current = std::fs::read(&real).ok().map(|b| String::from_utf8_lossy(&b).into_owned());
+            Ok((committed(&root, &real)?, current))
+        }
+        Ok(_) => Err(OUTSIDE.into()),
+        // A deleted file: nothing on disk to read, and only its name is looked up in git, so `..` is refused.
+        Err(_) if path.starts_with(folder) && !path.components().any(|c| c == std::path::Component::ParentDir) => Ok((committed(folder, path)?, None)),
+        Err(_) => Err(OUTSIDE.into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,16 +187,20 @@ mod tests {
         assert!(Command::new("git").arg("-C").arg(dir).args(args).output().unwrap().status.success(), "git {args:?}");
     }
 
+    fn init(dir: &Path) {
+        sh(dir, &["init", "-q"]);
+        sh(dir, &["config", "user.email", "t@t"]);
+        sh(dir, &["config", "user.name", "t"]);
+        std::fs::write(dir.join("kept.txt"), "kept\n").unwrap();
+        std::fs::write(dir.join("edited.txt"), "before\n").unwrap();
+        std::fs::write(dir.join("gone.txt"), "gone\n").unwrap();
+        sh(dir, &["add", "."]);
+        sh(dir, &["commit", "-qm", "init"]);
+    }
+
     fn repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
-        sh(dir.path(), &["init", "-q"]);
-        sh(dir.path(), &["config", "user.email", "t@t"]);
-        sh(dir.path(), &["config", "user.name", "t"]);
-        std::fs::write(dir.path().join("kept.txt"), "kept\n").unwrap();
-        std::fs::write(dir.path().join("edited.txt"), "before\n").unwrap();
-        std::fs::write(dir.path().join("gone.txt"), "gone\n").unwrap();
-        sh(dir.path(), &["add", "."]);
-        sh(dir.path(), &["commit", "-qm", "init"]);
+        init(dir.path());
         dir
     }
 
@@ -243,5 +264,26 @@ mod tests {
         let plain = tempfile::tempdir().unwrap();
         assert!(uncommitted(plain.path()).is_none());
         assert!(committed(plain.path(), &plain.path().join("x")).is_err());
+    }
+
+    #[test]
+    fn git_diff_refuses_paths_that_leave_the_folder() {
+        let outer = tempfile::tempdir().unwrap();
+        let root = outer.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        init(&root);
+        std::fs::write(outer.path().join("secret.txt"), "secret\n").unwrap();
+        std::fs::write(root.join("edited.txt"), "after\n").unwrap();
+        std::fs::remove_file(root.join("gone.txt")).unwrap();
+
+        assert!(diff_sides(&root, &root.join("../secret.txt")).is_err());
+        assert!(diff_sides(&root, &root.join("../gone.txt")).is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(outer.path().join("secret.txt"), root.join("link.txt")).unwrap();
+            assert!(diff_sides(&root, &root.join("link.txt")).is_err());
+        }
+        assert_eq!(diff_sides(&root, &root.join("edited.txt")).unwrap(), (Some("before\n".into()), Some("after\n".into())));
+        assert_eq!(diff_sides(&root, &root.join("gone.txt")).unwrap(), (Some("gone\n".into()), None));
     }
 }

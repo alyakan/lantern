@@ -433,8 +433,8 @@ async fn get_file_diff(state: State<'_, AppState>, slot: String, path: String, s
     }
     if scope == Some(changes::Scope::Git) {
         let folder = s.folder()?;
-        let original = outside::committed(&folder, std::path::Path::new(&path))?;
-        let current = std::fs::read(&path).ok().map(|b| String::from_utf8_lossy(&b).into_owned());
+        let read = path.clone();
+        let (original, current) = tauri::async_runtime::spawn_blocking(move || outside::diff_sides(&folder, std::path::Path::new(&read))).await.map_err(|e| e.to_string())??;
         return Ok(FileDiff { path, created: original.is_none(), deleted: current.is_none(), original: original.unwrap_or_default(), current: current.unwrap_or_default() });
     }
     let diff = s.changes.lock().unwrap().diff(&path, scope.unwrap_or_default(), turn, to_turn);
