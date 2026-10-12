@@ -58,16 +58,33 @@ pub fn repo_for(folder: &Path, hints: &[String]) -> Result<PathBuf, String> {
     Ok(repos.iter().find(|r| ahead(r)).unwrap_or(&repos[0]).clone())
 }
 
-/// Looks the PR up with `gh` and fetches it and its base from `origin`.
+/// Looks the PR up with `gh` and fetches it and its base from the remote of the repository `gh` resolved it in: a
+/// fork's `refs/pull/N/head` is in the base repository, not in the fork's origin.
 pub fn resolve(folder: &Path, number: u32, path_env: Option<&str>) -> Result<PrRange, String> {
-    let view = run(folder, "gh", &["pr", "view", &number.to_string(), "--json", "baseRefName,headRefOid"], path_env)?;
+    let view = run(folder, "gh", &["pr", "view", &number.to_string(), "--json", "baseRefName,headRefOid,url"], path_env)?;
     let view: serde_json::Value = serde_json::from_slice(&view).map_err(|e| format!("gh pr view: {e}"))?;
     let base_branch = view["baseRefName"].as_str().ok_or("gh didn't name the PR's base branch.")?;
-    git(folder, &["fetch", "--quiet", "--no-tags", "origin", &format!("refs/heads/{base_branch}")])?;
+    let remote = remote_for(folder, view["url"].as_str());
+    git(folder, &["fetch", "--quiet", "--no-tags", &remote, &format!("refs/heads/{base_branch}")])?;
     let base_tip = git(folder, &["rev-parse", "FETCH_HEAD"])?;
-    git(folder, &["fetch", "--quiet", "--no-tags", "origin", &format!("refs/pull/{number}/head")])?;
+    git(folder, &["fetch", "--quiet", "--no-tags", &remote, &format!("refs/pull/{number}/head")])?;
     let head = git(folder, &["rev-parse", "FETCH_HEAD"])?;
     between(folder, &base_tip, &head)
+}
+
+/// "owner/repo" (lowercase) from a GitHub URL, https or ssh: `https://github.com/o/r/pull/3`, `git@github.com:o/r.git`.
+fn github_repo(url: &str) -> Option<String> {
+    let rest = url.trim().split_once("github.com")?.1.trim_start_matches(['/', ':']);
+    let mut parts = rest.split('/');
+    let (owner, repo) = (parts.next()?, parts.next()?.trim_end_matches(".git"));
+    (!owner.is_empty() && !repo.is_empty()).then(|| format!("{owner}/{repo}").to_lowercase())
+}
+
+/// The remote that points at the repository `pr_url` is in, else origin.
+fn remote_for(folder: &Path, pr_url: Option<&str>) -> String {
+    let Some(repo) = pr_url.and_then(github_repo) else { return "origin".into() };
+    let names = git(folder, &["remote"]).unwrap_or_default();
+    names.lines().find(|name| git(folder, &["remote", "get-url", name]).ok().and_then(|u| github_repo(&u)).as_deref() == Some(repo.as_str())).unwrap_or("origin").to_string()
 }
 
 /// The range from where `head` branched off `base_tip` to `head`.
@@ -227,6 +244,22 @@ mod tests {
         assert_eq!((a.original.as_str(), a.current.as_str()), ("one\n", "one\ntwo\n"));
         assert!(file(&range, &root.join("new.txt").display().to_string()).unwrap().created);
         assert!(file(&range, "/elsewhere/x.txt").is_err());
+    }
+
+    #[test]
+    fn fetches_from_the_remote_of_the_repository_gh_resolved_the_pr_in() {
+        assert_eq!(github_repo("https://github.com/Acme/App/pull/3").as_deref(), Some("acme/app"));
+        assert_eq!(github_repo("git@github.com:me/app.git\n").as_deref(), Some("me/app"));
+        assert_eq!(github_repo("https://gitlab.com/me/app"), None);
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        sh(d, &["init", "-q", "-b", "main"]);
+        sh(d, &["remote", "add", "origin", "https://github.com/me/app.git"]);
+        sh(d, &["remote", "add", "upstream", "git@github.com:acme/app.git"]);
+        assert_eq!(remote_for(d, Some("https://github.com/acme/app/pull/3")), "upstream");
+        assert_eq!(remote_for(d, Some("https://github.com/me/app/pull/3")), "origin");
+        assert_eq!(remote_for(d, Some("https://github.com/other/app/pull/3")), "origin", "no remote for it: origin");
+        assert_eq!(remote_for(d, None), "origin");
     }
 
     /// LANTERN_PR="folder:number" cargo test real_pr -- --ignored --nocapture

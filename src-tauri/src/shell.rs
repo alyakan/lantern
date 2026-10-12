@@ -177,9 +177,13 @@ impl Shells {
 
     /// Types `text` into a running command's terminal: a reply ending in "\r" (Enter), or "\u{4}" (⌃D, end of input).
     pub fn input(&self, id: &str, text: &str) -> Result<(), String> {
-        let mut running = self.running.lock().unwrap();
-        let r = running.get_mut(id).ok_or("That command has ended.")?;
-        r.tty.write_all(text.as_bytes()).map_err(|e| format!("Could not type into the command: {e}"))
+        // Written through a copy of the terminal, outside the lock: a command that isn't reading can fill its terminal,
+        // and the write waits, but stopping that command must still get in.
+        let mut tty = {
+            let running = self.running.lock().unwrap();
+            running.get(id).ok_or("That command has ended.")?.tty.try_clone().map_err(|e| e.to_string())?
+        };
+        tty.write_all(text.as_bytes()).map_err(|e| format!("Could not type into the command: {e}"))
     }
 
     /// Stops a running command and everything it started: SIGTERM to its group, SIGKILL if it's still there soon after.
@@ -361,6 +365,47 @@ mod tests {
         assert_eq!(text, "y\ngot y\n");
         assert_eq!(code, Some(0));
         assert!(shells.input("r", "late\r").is_err(), "it has ended");
+    }
+
+    #[tokio::test]
+    async fn a_command_that_isnt_reading_doesnt_hold_up_stopping_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let shells = Arc::new(Shells::default());
+        let (sink, mut rx) = collect();
+        // Raw mode keeps what is typed for the command to read: once the terminal's buffer is full, a write waits.
+        shells.run("w", "stty raw -echo; echo ready; sleep 30", dir.path(), None, sink).unwrap();
+        until_output(&mut rx, "ready").await;
+        let typing = shells.clone();
+        let (typed, typed_done) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = typed.send(typing.input("w", &"x".repeat(1 << 20)));
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        let stopping = shells.clone();
+        let (stopped, stop_done) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            stopping.stop("w");
+            let _ = stopped.send(());
+        });
+        assert!(stop_done.recv_timeout(Duration::from_secs(5)).is_ok(), "stop waited on the write");
+        let _ = typed_done.recv_timeout(Duration::from_secs(5));
+        let (_, _, stopped) = finish(&mut rx).await;
+        assert!(stopped);
+    }
+
+    #[tokio::test]
+    async fn a_background_job_doesnt_keep_the_command_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let shells = Arc::new(Shells::default());
+        let (sink, mut rx) = collect();
+        // The job ignores hangups, so it outlives the shell and keeps the terminal open.
+        shells.run("bg", "sleep 30 & echo started", dir.path(), None, sink).unwrap();
+        let (text, code, stopped) = finish(&mut rx).await;
+        assert_eq!(text, "started\n");
+        assert_eq!(code, Some(0));
+        assert!(!stopped);
+        // The job is still there until it's stopped.
+        shells.stop("bg");
     }
 
     #[tokio::test]

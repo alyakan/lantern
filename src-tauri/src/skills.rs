@@ -26,14 +26,34 @@ pub fn config_dir() -> Option<PathBuf> {
     }
 }
 
-/// A markdown file's frontmatter field (`name: …` between the leading `---` lines).
+/// A markdown file's frontmatter field (`name: …` between the leading `---` lines). A YAML block scalar (`>` or `|`,
+/// with chomping or indentation marks) is the indented lines under the key.
 fn front(text: &str, key: &str) -> Option<String> {
     let rest = text.strip_prefix("---")?;
     let end = rest.find("\n---")?;
-    rest[..end].lines().find_map(|l| {
-        let v = l.strip_prefix(key)?.strip_prefix(':')?.trim();
-        Some(v.trim_matches(|c| c == '"' || c == '\'').to_string())
-    })
+    let lines: Vec<&str> = rest[..end].lines().collect();
+    let at = lines.iter().position(|l| l.strip_prefix(key).and_then(|l| l.strip_prefix(':')).is_some())?;
+    let value = lines[at].strip_prefix(key)?.strip_prefix(':')?.trim();
+    let block = value.chars().next().filter(|c| matches!(*c, '>' | '|')).filter(|_| value[1..].chars().all(|c| matches!(c, '+' | '-') || c.is_ascii_digit()));
+    if let Some(style) = block {
+        let body: Vec<&str> = lines[at + 1..].iter().take_while(|l| l.trim().is_empty() || l.starts_with(' ')).copied().collect();
+        return Some(block_scalar(style, &body));
+    }
+    Some(value.trim_matches(|c| c == '"' || c == '\'').to_string())
+}
+
+/// The text of a block scalar: folded (`>`) joins each paragraph's lines with spaces and keeps the blank lines between
+/// paragraphs; literal (`|`) keeps the lines. The common indentation goes; chomping only changes trailing newlines,
+/// which are trimmed.
+fn block_scalar(style: char, lines: &[&str]) -> String {
+    let indent = lines.iter().filter(|l| !l.trim().is_empty()).map(|l| l.len() - l.trim_start_matches(' ').len()).min().unwrap_or(0);
+    let lines: Vec<&str> = lines.iter().map(|&l| if l.trim().is_empty() { "" } else { &l[indent..] }).collect();
+    let text = if style == '|' {
+        lines.join("\n")
+    } else {
+        lines.split(|l| l.is_empty()).map(|para| para.join(" ")).filter(|p| !p.is_empty()).collect::<Vec<_>>().join("\n")
+    };
+    text.trim().to_string()
 }
 
 fn head(path: &Path) -> String {
@@ -182,5 +202,18 @@ mod tests {
         assert!(read(home.path(), Some(project.path()), &project.path().join("secret.md")).is_err());
         assert!(read(home.path(), Some(project.path()), &home.path().join("settings.json")).is_err());
         assert!(read(home.path(), Some(project.path()), &home.path().join("skills/../skills/a/../../settings.json")).is_err());
+    }
+
+    #[test]
+    fn reads_a_frontmatter_value_written_as_a_yaml_block_scalar() {
+        let folded = "---\nname: review\ndescription: >-\n  Reviews a change\n  for security issues.\n\n  Second paragraph.\nallowed-tools: Read\n---\nbody";
+        assert_eq!(front(folded, "description").as_deref(), Some("Reviews a change for security issues.\nSecond paragraph."));
+        assert_eq!(front(folded, "allowed-tools").as_deref(), Some("Read"));
+        let literal = "---\ndescription: |\n    line one\n      indented\n    line two\n---\n";
+        assert_eq!(front(literal, "description").as_deref(), Some("line one\n  indented\nline two"));
+        let indicator = "---\ndescription: |2-\n   kept\n---\n";
+        assert_eq!(front(indicator, "description").as_deref(), Some("kept"));
+        assert_eq!(front("---\nname: \"quoted\"\n---\n", "name").as_deref(), Some("quoted"));
+        assert_eq!(front("---\ndescription: >\n---\n", "description").as_deref(), Some(""));
     }
 }
