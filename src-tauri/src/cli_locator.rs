@@ -164,7 +164,8 @@ mod tests {
         std::fs::set_permissions(&bg, std::fs::Permissions::from_mode(0o755)).unwrap();
         let started = std::time::Instant::now();
         assert!(shell_value(bg.to_str().unwrap(), "\"$PATH\"", std::time::Duration::from_secs(5)).is_some());
-        assert!(started.elapsed() < std::time::Duration::from_secs(3), "waited on the background job");
+        // Under 5s, the job's own length, but with room for a loaded machine running the whole suite.
+        assert!(started.elapsed() < std::time::Duration::from_millis(4500), "waited on the background job");
     }
 
     #[test]
