@@ -793,11 +793,7 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 if let Some(state) = app.try_state::<AppState>() {
-                    tauri::async_runtime::block_on(async {
-                        for s in state.slots.drain() {
-                            s.shut_down().await;
-                        }
-                    });
+                    tauri::async_runtime::block_on(slots::shut_down_all(state.slots.drain()));
                 }
                 // An update the user didn't restart for goes in now, for the next launch.
                 if let Some(updates) = app.try_state::<updates::Updates>() {
