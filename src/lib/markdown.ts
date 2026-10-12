@@ -10,6 +10,18 @@ export const CALLOUT_LABEL: Record<CalloutKind, string> = { note: "Note", tip: "
 
 const MARKER = /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*\n?/i;
 
+/** Whether a file is markdown, and so can be read as a styled document. */
+export function isMarkdownPath(path: string): boolean {
+  return languageFor(path) === "markdown";
+}
+
+/** A leading `---` front matter block (a skill's or a doc's metadata) as a yaml code block: left alone it reads as a rule and a heading. */
+export function withFrontMatterAsCode(text: string): string {
+  const m = /^---[ \t]*\r?\n([\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/.exec(text);
+  if (!m) return text;
+  return "```yaml\n" + (m[1] ?? "").replace(/\r?\n$/, "") + "\n```\n" + text.slice(m[0].length);
+}
+
 /** A hast node, as much of it as the plugin reads. */
 interface HNode {
   type: string;

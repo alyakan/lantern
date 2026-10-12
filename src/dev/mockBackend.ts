@@ -697,7 +697,7 @@ const mockFileText = (path: string) =>
     : path === `${FOLDER}/src/client/index.ts`
       ? 'import * as retry from "./retry";\n\nexport const load = (url: string) => retry.\n'
       : path === `${FOLDER}/README.md`
-        ? "# acme-api\n\nfetchJson retries transient errors.\n\n"
+        ? "# acme-api\n\nfetchJson retries transient errors.\n\n> [!NOTE]\n> Only `GET` requests are retried.\n\n## Usage\n\n```ts\nimport { fetchJson } from \"./client\";\n\nconst user = await fetchJson(\"/users/1\", { attempts: 3 });\n```\n\n## Options\n\n| Option | Default | Meaning |\n| --- | --- | --- |\n| `attempts` | 3 | Tries before giving up |\n| `backoff` | 250 | Milliseconds, doubled each try |\n\n## Roadmap\n\n- [x] Retry with backoff\n- [ ] Honour `Retry-After`\n- Read the [changelog](CHANGELOG.md)\n\n"
         : path === `${FOLDER}/tsconfig.json`
           ? '{\n  // strict on purpose\n  "compilerOptions": {\n    "strict": true,\n    "target": "ES2022",\n  },\n}\n'
           : path === `${FOLDER}/package.json`

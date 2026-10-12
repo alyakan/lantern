@@ -187,7 +187,7 @@ describe("FilePreview as an editor", () => {
   });
 
   it("doesn't go looking for imports in a file the language service doesn't cover", async () => {
-    render(<FilePreview path="/p/notes.md" />);
+    render(<FilePreview path="/p/notes.txt" />);
     await waitFor(() => expect(editor().value).toBe("one\n"));
     expect(addProjectLibs).not.toHaveBeenCalled();
     expect(read).toHaveBeenCalledTimes(1);
@@ -197,5 +197,54 @@ describe("FilePreview as an editor", () => {
     read.mockRejectedValue("This file is binary and can't be opened.");
     render(<FilePreview path="/p/a.png" />);
     expect(await screen.findByText("This file is binary and can't be opened.")).toBeInTheDocument();
+  });
+
+  describe("a markdown file", () => {
+    beforeEach(() => localStorage.clear());
+    const preview = () => screen.getByLabelText("Markdown preview");
+
+    it("opens as a styled document, and Edit switches to the editor with the same text", async () => {
+      read.mockResolvedValue("# Title\n\nSome **bold** text\n");
+      render(<FilePreview path="/p/notes.md" />);
+      expect(await screen.findByRole("heading", { name: "Title" })).toBeInTheDocument();
+      expect(preview()).toHaveTextContent("Some bold text");
+      expect(screen.queryByLabelText("editor")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Edit" }));
+      expect(editor().value).toBe("# Title\n\nSome **bold** text\n");
+      expect(screen.queryByLabelText("Markdown preview")).not.toBeInTheDocument();
+    });
+
+    it("shows unsaved edits in the preview, and remembers the view you chose", async () => {
+      read.mockResolvedValue("# One\n");
+      const first = render(<FilePreview path="/p/notes.md" />);
+      await screen.findByRole("heading", { name: "One" });
+      fireEvent.click(screen.getByRole("tab", { name: "Edit" }));
+      type("# Two\n");
+      fireEvent.click(screen.getByRole("tab", { name: "Preview" }));
+      expect(screen.getByRole("heading", { name: "Two" })).toBeInTheDocument();
+      expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Edit" }));
+      first.unmount();
+      render(<FilePreview path="/p/other.md" />);
+      expect(await screen.findByLabelText("editor")).toBeInTheDocument();
+    });
+
+    it("shows the editor for a line to show, and has no switch on other files", async () => {
+      read.mockResolvedValue("# One\n");
+      const view = render(<FilePreview path="/p/notes.md" line={1} />);
+      expect(await screen.findByLabelText("editor")).toBeInTheDocument();
+      view.unmount();
+      render(<FilePreview path="/p/a.ts" />);
+      await screen.findByLabelText("editor");
+      expect(screen.queryByRole("tab", { name: "Preview" })).not.toBeInTheDocument();
+    });
+
+    it("shows front matter as code instead of a rule and a heading", async () => {
+      read.mockResolvedValue("---\nname: demo\n---\n\nBody\n");
+      render(<FilePreview path="/p/SKILL.md" />);
+      await screen.findByText("Body");
+      expect(preview()).toHaveTextContent("name: demo");
+      expect(preview().querySelector("hr")).toBeNull();
+    });
   });
 });
