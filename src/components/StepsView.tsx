@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { CollapsibleText } from "./CollapsibleText";
 import { Md } from "./Md";
 import { AWAY_FROM_END, JumpToLatest } from "./JumpToLatest";
 import { useSlot } from "../lib/slot";
@@ -485,7 +486,9 @@ function UserMessage({ text, at, tag = null, className }: { text: string; at?: n
         {tag && <span className="user-note-tag">{tag}</span>}
       </div>
       <div className="user-note-body">
-        <Md>{text}</Md>
+        <CollapsibleText>
+          <Md>{text}</Md>
+        </CollapsibleText>
       </div>
     </div>
   );

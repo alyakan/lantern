@@ -201,6 +201,9 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 .chat > .turn-section:first-child .turn-head .msg.user { border-top-color: transparent; }
 .msg { font-size: 13.5px; line-height: 1.6; }
 .msg.user { background: var(--bg-user); border-radius: var(--radius-inner); padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* What you sent, at most three lines until Show more. */
+.collapsible.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--clamp-lines, 3); overflow: hidden; }
+.collapsible-toggle { display: block; margin-top: 4px; font-size: 12px; white-space: normal; }
 .msg.assistant { overflow-wrap: anywhere; }
 .msg.assistant > :first-child { margin-top: 0; }
 .msg.assistant > :last-child { margin-bottom: 0; }

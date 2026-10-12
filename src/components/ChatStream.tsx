@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { CollapsibleText } from "./CollapsibleText";
 import { Md } from "./Md";
 import type { ChatItem, TestRunItem } from "../store";
 import { groupItems, type Row } from "../lib/activity";
@@ -51,7 +52,7 @@ export function ChatStream({ items, folder, sections, live = false, ...handlers 
           );
         return (
           <div key={row.id} className="msg user">
-            {row.text}
+            <CollapsibleText>{row.text}</CollapsibleText>
           </div>
         );
       case "assistant":

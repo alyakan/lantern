@@ -4,6 +4,7 @@ import type { FoundFile, ModelOption, Mode, RecentFolder, SessionSummary, SkillE
 import { basename } from "../lib/diff";
 import { useShortcut } from "../lib/shortcuts";
 import { matchCommands } from "../lib/slash";
+import { decodeDraft, encodeDraft, expandPastes, inUse, isBigPaste, nextNumber, placeholder as pasteToken, tokenBefore, type Pastes } from "../lib/paste";
 import { describeCommands, replaceTrigger, sections as menuSections, triggerAt, type MenuCommand } from "../lib/complete";
 import { CompletionMenu, type McpIssue } from "./CompletionMenu";
 import { ArrowUpIcon, BranchIcon, FolderIcon, SparkIcon } from "./icons";
@@ -72,11 +73,17 @@ interface Props {
 }
 
 export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onRun, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, harness, update }: Props) {
-  const [text, setTextState] = useState(draft?.initial ?? "");
+  // A draft with big pastes in it comes back as the box had it: their placeholders, and the text they stand for.
+  const [restored] = useState(() => decodeDraft(draft?.initial ?? ""));
+  const [text, setTextState] = useState(restored.text);
+  const pastes = useRef<Pastes>(restored.pastes);
   const setText = (next: string) => {
+    pastes.current = inUse(next, pastes.current);
     setTextState(next);
-    draft?.save(next);
+    draft?.save(encodeDraft(next, pastes.current));
   };
+  // What goes out: each placeholder replaced by the text it stands for.
+  const expand = (t: string) => expandPastes(t, pastes.current);
   // Messages typed while Claude is working, sent together when the turn ends (like the CLI's queue).
   // The queue belongs to the chat (App sends it when the turn ends, even in the background); a local one otherwise.
   const [ownQueue, setOwnQueue] = useState<string[]>([]);
@@ -139,7 +146,11 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   const effortLevels = models?.options?.length ? (modelOption?.effort_levels ?? [...EFFORT_LEVELS]) : [...EFFORT_LEVELS];
 
   // While Claude works, a message waits in the queue instead of going out.
-  const sendText = (t: string) => (running ? setQueued([...queued, t]) : onSend(t));
+  const sendText = (t: string) => {
+    const full = expand(t);
+    if (running) setQueued([...queued, full]);
+    else onSend(full);
+  };
 
   const submit = () => {
     if (!canSend) return;
@@ -151,7 +162,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
 
   const submitAndNext = () => {
     if (!canSend || !sendAndNext || running || terminal) return;
-    sendAndNext(text.trim());
+    sendAndNext(expand(text.trim()));
     setText("");
   };
 
@@ -234,7 +245,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
     declined.current = Date.now();
     if (terminal) {
       if (value.slice(1).trim()) onRun!(value.slice(1).trim());
-    } else if (next && sendAndNext && !running) sendAndNext(value);
+    } else if (next && sendAndNext && !running) sendAndNext(expand(value));
     else sendText(value);
     setText("");
     typed.current = "";
@@ -325,6 +336,19 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               setCaret(e.target.selectionStart ?? e.target.value.length);
             }}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+            onPaste={(e) => {
+              // A big paste goes in as a placeholder (its text is kept for sending); a small one as usual.
+              if (terminal) return;
+              const pasted = e.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n");
+              if (!isBigPaste(pasted)) return;
+              e.preventDefault();
+              const { selectionStart: from, selectionEnd: to } = e.currentTarget;
+              const n = nextNumber(text, pastes.current);
+              const token = pasteToken(n, pasted);
+              pastes.current = { ...pastes.current, [n]: pasted };
+              caretTo.current = from + token.length;
+              setText(text.slice(0, from) + token + text.slice(to));
+            }}
             onCompositionStart={() => {
               composing.current = true;
               predicting.current = !imeKey.current;
@@ -344,6 +368,16 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
                 return;
               }
               if (onMenuKey(e)) return;
+              // Backspace right after a placeholder takes all of it away.
+              if (e.key === "Backspace" && !terminal && e.currentTarget.selectionStart === e.currentTarget.selectionEnd) {
+                const token = tokenBefore(text, e.currentTarget.selectionStart);
+                if (token) {
+                  e.preventDefault();
+                  caretTo.current = token.start;
+                  setText(text.slice(0, token.start) + text.slice(token.end));
+                  return;
+                }
+              }
               // Backspace in an empty terminal leaves it, taking the "!" away.
               if (terminal && e.key === "Backspace" && shown === "") {
                 e.preventDefault();
