@@ -378,10 +378,12 @@ async fn run_shell(app: AppHandle, state: State<'_, AppState>, slot: String, id:
     s.shells.run(&id, &command, &folder, path_env.as_deref(), slots::tagged(&slot, emitter(&app)))
 }
 
-/// Types into a running command: the user's reply to what it asked.
+/// Types into a running command: the user's reply to what it asked. Async and off the main thread: a write can wait for
+/// the command to read what's already in its terminal.
 #[tauri::command]
-fn shell_input(state: State<'_, AppState>, slot: String, id: String, text: String) -> Result<(), String> {
-    state.slots.get(&slot)?.shells.input(&id, &text)
+async fn shell_input(state: State<'_, AppState>, slot: String, id: String, text: String) -> Result<(), String> {
+    let shells = state.slots.get(&slot)?.shells.clone();
+    tauri::async_runtime::spawn_blocking(move || shells.input(&id, &text)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
