@@ -82,6 +82,42 @@ describe("summarize a Build chat", () => {
     expect(unplanned.rows.map((r) => [r.label, r.built, r.planPage])).toEqual([["Step 1", true, null]]);
   });
 
+  it("lists the steps in step order, however they were written: a step revised after the ones that follow it still comes first", () => {
+    // As a real chat went: pages from step 5, step 1 posted again after step 8, and step 6 posted again much later.
+    const s = summaryOf(PLAN(5, "E", "e"), PLAN(6, "F", "f"), PLAN(7, "G", "g"), PLAN(8, "H", "h"), PLAN(1, "A revised", "a2"), PLAN(9, "I", "i"), PLAN(6, "F revised", "f2"));
+    expect(s.rows.map((r) => [r.label, r.title])).toEqual([
+      ["Step 1", "A revised"],
+      ["Steps 2–4", "No pages for these steps"],
+      ["Step 5", "E"],
+      ["Step 6", "F revised"],
+      ["Step 7", "G"],
+      ["Step 8", "H"],
+      ["Step 9", "I"],
+    ]);
+    // The newest page is the revised step 6, so that's the current row.
+    expect(s.rows.map((r) => r.current)).toEqual([false, false, false, true, false, false, false]);
+  });
+
+  it("marks steps that were never written as pages, so the numbers add up and nothing is left to open", () => {
+    const s = summaryOf(PLAN(3, "C", "c"), PLAN(5, "E", "e"), PLAN(6, "F", "f"));
+    expect(s.rows.map((r) => [r.kind, r.label])).toEqual([["gap", "Steps 1–2"], ["step", "Step 3"], ["gap", "Step 4"], ["step", "Step 5"], ["step", "Step 6"]]);
+    const gap = s.rows[0];
+    expect([gap.page, gap.planPage, gap.range, gap.built, gap.current, gap.changes]).toEqual(["", null, null, false, false, false]);
+    expect(gap.gist).toMatch(/nothing to open/);
+    // They aren't counted as planned steps: the plan is as long as its highest number, built is the pages with a step.
+    expect(s.headline).toBe("Plan: 6 steps · 0 built");
+  });
+
+  it("has no gaps in a plan that starts at one and has every number", () => {
+    const s = summaryOf(PLAN(2, "B", "b"), PLAN(1, "A", "a"), PLAN(3, "C", "c"));
+    expect(s.rows.map((r) => [r.kind, r.label])).toEqual([["step", "Step 1"], ["step", "Step 2"], ["step", "Step 3"]]);
+  });
+
+  it("orders each run of steps by itself, so what comes between plans keeps them apart", () => {
+    const s = summaryOf("# Frame — one", PLAN(2, "B", "b"), PLAN(1, "A", "a"), "# Done — one built", "# Frame — two", PLAN(2, "B2", "b"), PLAN(1, "A2", "a"));
+    expect(s.rows.map((r) => `${r.kind}:${r.label}:${r.title}`)).toEqual(["frame:Frame:one", "step:Step 1:A", "step:Step 2:B", "done:Done:one built", "frame:Frame:two", "step:Step 1:A2", "step:Step 2:B2"]);
+  });
+
   it("leaves out suggestions, the plan-complete pause and replies with no heading", () => {
     const s = summaryOf("# Switch to Build — a feature\n\nShall I?", frame, "no heading here, just chat", "# Plan complete — 1 step");
     expect(s.rows.map((r) => r.kind)).toEqual(["frame"]);

@@ -1198,6 +1198,10 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .summary-row { display: flex; align-items: flex-start; gap: 4px; border-radius: 8px; }
 .summary-row:hover { background: var(--bg-hover); }
 .summary-row.current { background: var(--bg-subtle); }
+.summary-row.gap:hover { background: none; }
+.summary-row.gap .summary-mark { border-style: dashed; border-color: var(--faint); }
+.summary-row.gap .summary-title { font-weight: 500; color: var(--muted); }
+.summary-row.gap .summary-gist { color: var(--muted); }
 .summary-main { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; padding: 9px 6px 9px 10px; border: none; border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; }
 .summary-mark { flex: none; position: relative; width: 14px; height: 14px; margin-top: 2px; border: 1.5px solid var(--faint); border-radius: 50%; }
 .summary-row.built .summary-mark { border-color: var(--muted); background: var(--muted); }
