@@ -255,7 +255,7 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
                   suggestion={p.heading?.kind === "switch" ? { current: flavour, answer: pages[i + 1]?.turns[0].prompt.text ?? null, onAnswer: i === last && !running && onSend ? onSend : undefined } : null}
                   verdicts={verdicts[p.key]}
                   onVerdict={i === last && !running ? (index, v) => setVerdict(p.key, index, v) : undefined}
-                  summary={p.heading?.kind === "summary" && onSend ? { rows: reviewed, onAction: onSend } : null}
+                  summary={p.heading?.kind === "summary" && onSend ? { rows: reviewed, onAction: onSend, busy: running } : null}
                   folder={state.folder}
                   runs={state.backgroundRuns}
                   latest={latestOf.get(p.key) ?? p.main}
@@ -317,7 +317,7 @@ interface PageProps extends StreamHandlers {
   verdicts?: Record<number, Verdict>;
   onVerdict?: (index: number, v: Verdict | null) => void;
   /** Review's summary page: every finding with its verdict, and the actions after the review. */
-  summary?: { rows: ReviewedFinding[]; onAction: (text: string) => void } | null;
+  summary?: { rows: ReviewedFinding[]; onAction: (text: string) => void; busy: boolean } | null;
   folder: string | null;
   /** Which turn holds Claude's latest version of the step, whichever one the page shows. */
   latest: number;
@@ -394,7 +394,7 @@ function Page({ page, first, live, teach, review, suggestion, verdicts, onVerdic
         <ChatStream items={mainItems} folder={folder} live={live && page.main === page.turns.length - 1} {...handlers} />
         {reviewFile && <ReviewFileView file={reviewFile} verdicts={verdicts} onVerdict={onVerdict} />}
         {h?.kind === "switch" && h.flavour && suggestion && <SuggestionCard flavour={h.flavour} why={h.title} {...suggestion} />}
-        {summary && <ReviewSummaryTable rows={summary.rows} onAction={summary.onAction} />}
+        {summary && <ReviewSummaryTable rows={summary.rows} onAction={summary.onAction} busy={summary.busy} />}
       </div>
       <StepCommands page={page} runs={runs} />
       {page.turns.length > 1 && (
