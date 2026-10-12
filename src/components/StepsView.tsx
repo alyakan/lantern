@@ -385,7 +385,7 @@ function Page({ page, first, live, teach, review, suggestion, verdicts, onVerdic
   }, [turnCount]);
 
   return (
-    <div ref={root} className={`step-page-body${teach ? " teach" : ""}`}>
+    <div ref={root} className={`step-page-body${teach ? " teach" : ""}${h?.kind === "step" ? " built-step" : ""}`}>
       <div className="step-eyebrow">{pageLabel(h)}</div>
       <h1 className="step-title">{reviewFile?.path ? <ReviewFileHeader path={reviewFile.path} added={reviewFile.added} removed={reviewFile.removed} /> : h?.kind === "switch" && h.flavour ? `${FLAVOUR_LABEL[h.flavour]}?` : pageTitle(page) || (live ? "Working…" : "Untitled step")}</h1>
       {asked && <UserMessage className="step-asked" text={asked} at={opening.prompt.at} tag={first ? "Task" : movesOn(opening.prompt.text) ? "Then moved on" : null} />}

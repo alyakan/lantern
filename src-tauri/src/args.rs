@@ -45,6 +45,7 @@ Build: follow the user's incremental-dev skill exactly (load it with the Skill t
 # Plan complete — N steps
 # Step N of M — <step title>   (implementing plan step N of M)
 # Done — <what was built>
+Under a Step heading, list what you changed as a numbered list (1., 2., …), one item per change with its file and line, so the user can point at one by its number.
 
 Learn: Build's pages and headings, for a user who is learning from this. In every page, explain the why as well as the what: the concept or pattern behind the change, how it fits the code around it, and what you considered instead and why you didn't choose it. Use short sections and small code excerpts. It is still one step per page.
 
@@ -253,7 +254,7 @@ mod tests {
         assert_eq!(value_after(&a, "--permission-prompt-tool"), Some("mcp__lantern__approve"));
         assert_eq!(value_after(&a, "--allowedTools"), Some("mcp__lantern__reproduce"));
         let prompt = value_after(&a, "--append-system-prompt").unwrap();
-        for part in ["# Switch to", "incremental-dev", "# Plan step N", "Learn:", "incremental-pr-review", "# File N of M", "Never post", "# Evidence N", "mcp__lantern__reproduce", "lantern-debug", "[Lantern: this chat switched to"] {
+        for part in ["# Switch to", "incremental-dev", "# Plan step N", "Learn:", "incremental-pr-review", "# File N of M", "Never post", "# Evidence N", "mcp__lantern__reproduce", "lantern-debug", "[Lantern: this chat switched to", "list what you changed as a numbered list"] {
             assert!(prompt.contains(part), "{part}");
         }
         assert!(!build_args(Mode::Ask, false, None, None, None, &helper()).iter().any(|x| x == "--allowedTools"));
