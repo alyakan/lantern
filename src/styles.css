@@ -315,7 +315,7 @@ button.code-block-copy:hover:not(:disabled) { background: var(--bg-hover); color
 .plan-card.done .plan-body { margin: 4px 0 6px 5px; padding-left: 11px; border-left: 1px solid var(--line-strong); max-height: none; }
 .repro-input { resize: vertical; min-height: 56px; max-height: 240px; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: inherit; font: 12px var(--mono); outline: none; user-select: text; }
 .repro-input:focus { border-color: var(--faint); }
-.repro-input::placeholder { color: var(--faint); font-family: var(--ui); }
+.repro-input::placeholder { color: var(--muted-text); font-family: var(--ui); }
 .repro-note { margin: 4px 0 6px 16px; }
 .permission-done { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .permission-done.allowed .decision { color: var(--add); }
@@ -443,7 +443,7 @@ button.icon.queue-remove { flex: none; width: 20px; height: 20px; font-size: 14p
 /* Changes | Files | Tests: the same size as the pane's other pills (the Changes filter, Build | Learn | Review), not the
    title bar's larger capsules. */
 .pane-tabs-track { display: inline-flex; gap: 2px; height: 26px; align-items: center; padding: 0 2px; border-radius: 999px; background: var(--glass); border: 0.5px solid var(--glass-line); }
-.pane-tabs-track button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 0 1 64px; height: 22px; padding: 0 10px; border: none; border-radius: 999px; background: none; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.pane-tabs-track button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 0 1 64px; height: 22px; padding: 0 10px; border: none; border-radius: 999px; background: none; color: var(--muted-text); font-size: 11.5px; white-space: nowrap; }
 .pane-tabs-track button:hover:not(.active) { background: var(--bg-hover); color: var(--text-2); }
 .pane-tabs-track button.active { background: var(--seg-thumb); color: var(--text); box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.18), 0 0 0 0.5px rgba(0, 0, 0, 0.06); }
 /* Last turn | Session: a smaller capsule at the row's far end, only on the Changes tab. */
@@ -523,7 +523,7 @@ button.icon.open-chat-close { position: absolute; right: 4px; width: 22px; heigh
 .menu-row-path { margin-left: 8px; color: var(--faint); font-size: 11.5px; }
 .menu-sep { flex: none; height: 1px; margin: 4px 6px; background: var(--line); }
 .menu-search { flex: none; height: 28px; margin: 2px 2px 4px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: inherit; font: 12.5px var(--ui); outline: none; }
-.menu-search::placeholder { color: var(--faint); }
+.menu-search::placeholder { color: var(--muted-text); }
 .menu-search:focus { border-color: var(--muted); }
 .menu-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; }
 .menu-row { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 6px 8px; border: none; background: none; border-radius: var(--radius-chip); text-align: left; font-size: 12.5px; }

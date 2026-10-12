@@ -57,4 +57,31 @@ describe("colours", () => {
       expect(css).toContain(sel);
     }
   });
+
+  describe("small text that has to be read", () => {
+    // Each rule is on one line. The tab track sits on the glass capsule, which is see-through, so the test checks the
+    // opaque surfaces it's over (the pane and the chat card): the glass is a shade of them.
+    const body = (sel: string) => css.split("\n").find((l) => l.startsWith(`${sel} {`)) ?? "";
+    const light = css.match(/:root \{([^}]*)\}/)?.[1] ?? "";
+    const lightToken = (name: string) => light.match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})\\b`, "i"))?.[1] ?? "";
+
+    it("uses the readable muted text, not the faint or decorative grey, for placeholders and the tab track", () => {
+      for (const sel of [".pane-tabs-track button", ".menu-search::placeholder", ".repro-input::placeholder"]) {
+        expect(body(sel), sel).toMatch(/color:\s*var\(--muted-text\)/);
+      }
+    });
+
+    it("keeps the readable muted text at 4.5:1 or more on the pane and the chat card, in both themes", () => {
+      for (const [muted, surface] of [
+        [lightToken("muted-text"), lightToken("pane")],
+        [lightToken("muted-text"), lightToken("sidebar")],
+        [token("muted-text"), token("pane")],
+        [token("muted-text"), token("sidebar")],
+      ]) {
+        expect(muted).not.toBe("");
+        expect(surface).not.toBe("");
+        expect(contrast(muted, surface)).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+  });
 });
