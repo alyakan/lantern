@@ -15,6 +15,23 @@ pub enum Mode {
     Steps,
 }
 
+/// What Claude should know about the app it's running in, appended to Claude Code's system prompt in every mode: without
+/// it a chat started in another project has no idea Lantern, its modes or its `!` commands exist.
+fn lantern_prompt(mode: Mode) -> String {
+    let current = match mode {
+        Mode::Ask => "Ask",
+        Mode::Auto => "Auto",
+        Mode::Steps => "Step by step",
+    };
+    format!(
+        "You are running inside Lantern, a macOS desktop app for the user's `claude` CLI (github.com/alyakan/lantern). The user sees each turn as cards and diffs, with tabs for Changes (every file you touched, as diffs), Files (an editor: the user can change and save files themselves, so a file may differ from what you last read), Agents (you, your advisor and your subagents as a graph) and Tests. They pick the mode and the models (a harness preset sets which model you, your advisor and your subagents run on); you can't change either. Lantern has three modes:
+- Ask: edits apply as you make them; anything else that needs permission shows the user an Allow/Deny card.
+- Auto: Claude Code's auto-mode classifier decides what runs.
+- Step by step: one page per message, in a flavour (Build, Learn, Review or Debug), with Ask's permissions, or auto mode's if the user turned on auto-approve.
+This chat is in {current} mode. A message the user starts with `!` in Lantern's box is a shell command they ran themselves in this folder; its output reaches you with their next message as <bash-input> and <bash-stdout>. If they ask how Lantern works, its README lists what it does."
+    )
+}
+
 /// How Step-by-step mode works, appended to Claude Code's system prompt: the page loop, then each flavour.
 pub const STEPS_PROMPT: &str = "You are in Lantern's Step-by-step mode. You work one page at a time: every message you stop on is a page the user reads, and you stop after each one to wait for their answer. Never do two pages' work in one message.
 Step by step has four flavours: Build, Learn, Review and Debug. Before you start one, ask: stop on a message whose very first line is
@@ -103,9 +120,14 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
         a.push("--permission-prompt-tool".into());
         a.push("mcp__lantern__approve".into());
     }
+    let mut prompt = lantern_prompt(mode);
     if steps {
-        a.push("--append-system-prompt".into());
-        a.push(STEPS_PROMPT.into());
+        prompt.push_str("\n\n");
+        prompt.push_str(STEPS_PROMPT);
+    }
+    a.push("--append-system-prompt".into());
+    a.push(prompt);
+    if steps {
         // The reproduce card is its own confirmation; it shouldn't also need approving.
         a.push("--allowedTools".into());
         a.push("mcp__lantern__reproduce".into());
@@ -234,7 +256,33 @@ mod tests {
         for part in ["# Switch to", "incremental-dev", "# Plan step N", "Learn:", "incremental-pr-review", "# File N of M", "Never post", "# Evidence N", "mcp__lantern__reproduce", "lantern-debug", "[Lantern: this chat switched to"] {
             assert!(prompt.contains(part), "{part}");
         }
-        assert!(!build_args(Mode::Ask, false, None, None, None, &helper()).iter().any(|x| x == "--append-system-prompt" || x == "--allowedTools"));
+        assert!(!build_args(Mode::Ask, false, None, None, None, &helper()).iter().any(|x| x == "--allowedTools"));
+    }
+
+    #[test]
+    fn every_mode_tells_claude_it_is_in_lantern_and_which_mode_this_is() {
+        for (mode, name) in [(Mode::Ask, "Ask mode"), (Mode::Auto, "Auto mode"), (Mode::Steps, "Step by step mode")] {
+            let a = build_args(mode, false, None, None, None, &helper());
+            assert_eq!(a.iter().filter(|x| *x == "--append-system-prompt").count(), 1, "{name}: one prompt, not several");
+            let prompt = value_after(&a, "--append-system-prompt").unwrap();
+            for part in ["running inside Lantern", "Ask:", "Auto:", "Step by step:", "Build, Learn, Review or Debug", "<bash-input>", "This chat is in"] {
+                assert!(prompt.contains(part), "{name}: {part}");
+            }
+            assert!(prompt.contains(&format!("This chat is in {name}.")), "{name}");
+        }
+    }
+
+    #[test]
+    fn only_step_by_step_gets_the_page_loop() {
+        for mode in [Mode::Ask, Mode::Auto] {
+            let a = build_args(mode, false, None, None, None, &helper());
+            let prompt = value_after(&a, "--append-system-prompt").unwrap();
+            assert!(!prompt.contains("# Switch to") && !prompt.contains("You work one page at a time"), "{mode:?}");
+        }
+        let steps = build_args(Mode::Steps, false, None, None, None, &helper());
+        let prompt = value_after(&steps, "--append-system-prompt").unwrap();
+        assert!(prompt.starts_with("You are running inside Lantern"), "the app note comes first");
+        assert!(prompt.contains("You work one page at a time"));
     }
 
     #[test]
