@@ -275,6 +275,18 @@ describe("MessageInput", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send & next" }));
     expect(sendAndNext).toHaveBeenLastCalledWith("and this");
   });
+  it("⌘Enter while Claude works queues the message, as Enter does, instead of dropping it", () => {
+    const set = vi.fn();
+    const sendAndNext = vi.fn();
+    render(<MessageInput status="running" onSend={() => {}} onStop={() => {}} sendAndNext={sendAndNext} queue={{ items: [], set }} />);
+    const box = screen.getByPlaceholderText("Queue a message…");
+    fireEvent.change(box, { target: { value: "rename it" } });
+    fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+    expect(set).toHaveBeenCalledWith(["rename it"]);
+    expect(sendAndNext).not.toHaveBeenCalled();
+    expect(box).toHaveValue("");
+  });
+
   describe("terminal mode", () => {
     it("turns on with \"!\", runs the command on Enter (even while Claude works) and leaves on Backspace", () => {
       const onRun = vi.fn();

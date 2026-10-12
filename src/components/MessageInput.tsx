@@ -423,7 +423,8 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               // grey inline predictions also mark the key as composing; Enter doesn't take them (Tab or → does).
               if (e.key === "Enter" && !e.shiftKey && !composingKey(e)) {
                 e.preventDefault();
-                if ((e.metaKey || e.ctrlKey) && sendAndNext && !terminal) submitAndNext();
+                // While Claude works, ⌘Enter queues like Enter (the step can't be approved until it's done).
+                if ((e.metaKey || e.ctrlKey) && sendAndNext && !terminal && !running) submitAndNext();
                 else submit();
               }
             }}
