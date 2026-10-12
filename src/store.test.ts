@@ -156,6 +156,11 @@ describe("reducer", () => {
     expect(s).toMatchObject({ contextUsed: null, contextWindow: 200_000 });
   });
 
+  it("a new folder forgets the last background task, a Stop and a /clear from the one before", () => {
+    const s = reducer({ ...running, lastEndedTask: "npm run dev", stopRequested: true, cleared: true }, { type: "folder_opened", folder: "/q" });
+    expect(s).toMatchObject({ lastEndedTask: null, stopRequested: false, cleared: false });
+  });
+
   it("an interrupted turn after Stop reads as stopped, not as an error, and the session stays usable", () => {
     let s = reducer(running, { type: "stop_requested" });
     s = ev(s, { kind: "turn_done", is_error: true, result: null, cost_usd: null, duration_ms: 5, auth_hint: false, denied: 0, context_window: null });
