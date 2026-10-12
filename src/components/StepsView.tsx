@@ -111,6 +111,27 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
   }, [restingFile]);
 
   const go = (i: number) => setIndex(Math.max(0, Math.min(last, i)));
+  // The dots can be squeezed to three in a narrow pane, so keep the current page's pill in the middle of what shows.
+  const rail = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = rail.current;
+    if (!el) return;
+    const follow = () => {
+      const dot = el.querySelector<HTMLElement>(".steps-dot.current");
+      if (!dot) return;
+      const from = dot.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft;
+      el.scrollLeft = from - (el.clientWidth - dot.offsetWidth) / 2;
+    };
+    follow();
+    // The pill is still growing and the dot before it still shrinking for a moment, and the pane may be resized.
+    const later = setTimeout(follow, 250);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(follow);
+    observer?.observe(el);
+    return () => {
+      clearTimeout(later);
+      observer?.disconnect();
+    };
+  }, [at, pages.length]);
   // Moving to a page (Next, Previous, arrows, a new step coming in) starts at its top. Not when the view is drawn
   // (switching back to this chat): then each page is where you left it.
   const slot = useSlot();
@@ -177,7 +198,7 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
   return (
     <div className="steps">
       <div className="steps-head">
-        <div className="steps-rail" role="tablist" aria-label="Pages">
+        <div className="steps-rail" ref={rail} role="tablist" aria-label="Pages">
           {pages.map((p, i) => (
             <button key={p.key} role="tab" aria-selected={i === at} aria-label={`${pageLabel(p.heading)}${pageTitle(p) ? `: ${pageTitle(p)}` : ""}`} title={`${pageLabel(p.heading)}${pageTitle(p) ? ` — ${pageTitle(p)}` : ""}`} className={`steps-dot${i === at ? " current" : ""}${p.heading?.kind === "step" || p.heading?.kind === "done" || p.heading?.kind === "file" || p.heading?.kind === "fix" ? " build" : ""}${p.heading?.kind === "switch" ? " switch" : ""}`} onClick={() => go(i)} />
           ))}
