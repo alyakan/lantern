@@ -170,6 +170,8 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || isTyping(document.activeElement) || document.activeElement?.closest(".monaco-editor")) return;
+      // A dialog or menu that's open takes the arrows for itself.
+      if (document.querySelector("dialog[open], .menu, [role='dialog'], [role='menu']")) return;
       if (e.key === "ArrowLeft") go(at - 1);
       if (e.key === "ArrowRight") go(at + 1);
     };
