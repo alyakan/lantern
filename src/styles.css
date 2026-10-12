@@ -175,7 +175,8 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 /* Three vertical grip dots centred in the gutter, like VS Code; they brighten on hover and while dragging. */
 .split-handle::before { content: ""; position: absolute; left: 50%; top: 50%; width: 3px; height: 18px; transform: translate(-50%, -50%); background: radial-gradient(circle at center, var(--faint) 1.1px, transparent 1.5px) center top / 3px 6px repeat-y; transition: opacity 0.12s; opacity: 0.9; }
 .split-handle:hover::before, .split.dragging .split-handle::before, .split-handle:focus-visible::before { background-image: radial-gradient(circle at center, var(--text-2) 1.1px, transparent 1.5px); }
-.split-handle:focus-visible { outline: none; }
+/* Keyboard focus: the grip lights up and a ring shows where the focus is, as on the other controls. */
+.split-handle:focus-visible { outline: 1.5px solid var(--muted); outline-offset: 1px; }
 
 /* Chat */
 .chat-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--sidebar); border-radius: 10px; box-shadow: var(--card-shadow); }
