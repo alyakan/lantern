@@ -30,6 +30,21 @@ describe("FolderPill", () => {
     expect(onBrowse).toHaveBeenCalled();
   });
 
+  it("moves between the folders with the arrow keys, from the first once the list is in, and gives focus back to the pill", async () => {
+    render(<FolderPill folder="/Users/me/src/acme-api" loadRecent={async () => recent} onPick={() => {}} onBrowse={() => {}} />);
+    const pill = screen.getByRole("button", { name: /acme-api/ });
+    fireEvent.click(pill);
+    const current = await screen.findByRole("menuitem", { name: /acme-api.*Current/ });
+    expect(current).toHaveFocus();
+    fireEvent.keyDown(current, { key: "ArrowDown" });
+    expect(screen.getByRole("menuitem", { name: /web/ })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: /web/ }), { key: "End" });
+    expect(screen.getByRole("menuitem", { name: "Open folder…" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Open folder…" }), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(pill).toHaveFocus();
+  });
+
   it("says so when there are no recent folders", async () => {
     render(<FolderPill folder={null} loadRecent={async () => []} onPick={() => {}} onBrowse={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: /Open folder/ }));

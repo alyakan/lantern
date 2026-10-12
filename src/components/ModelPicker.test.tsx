@@ -13,6 +13,19 @@ describe("ModelPicker", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("moves between the models with the arrow keys, and gives focus back to its chip when it closes", () => {
+    render(<ModelPicker running="claude-opus-5-5" chosen={null} onChoose={() => {}} />);
+    const chip = screen.getByRole("button", { name: /Opus 5\.5/ });
+    fireEvent.click(chip);
+    const rows = screen.getAllByRole("menuitemradio");
+    expect(rows[0]).toHaveFocus();
+    fireEvent.keyDown(rows[0], { key: "ArrowDown" });
+    expect(rows[1]).toHaveFocus();
+    fireEvent.keyDown(rows[1], { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(chip).toHaveFocus();
+  });
+
   it("shows the choice until the running model confirms it", () => {
     const { rerender } = render(<ModelPicker running="claude-opus-5-5" chosen="haiku" onChoose={() => {}} />);
     expect(screen.getByRole("button", { name: /^Haiku 4\.5$/ })).toBeInTheDocument();
@@ -57,7 +70,7 @@ describe("ModelPicker", () => {
     const titles = () => screen.getAllByRole("menuitemradio").map((r) => r.querySelector(".menu-row-title")?.textContent);
     // Older versions start folded away.
     expect(titles()).toEqual(["Default (Opus 5.5)", "Opus 5.5", "Fable 5.1", "Sonnet 5.5", "Haiku 4.5"]);
-    const older = screen.getByRole("button", { name: "Older models" });
+    const older = screen.getByRole("menuitem", { name: "Older models" });
     expect(older).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(older);
     expect(titles()).toEqual(["Default (Opus 5.5)", "Opus 5.5", "Fable 5.1", "Sonnet 5.5", "Haiku 4.5", "Opus 4.8"]);
@@ -76,7 +89,7 @@ describe("ModelPicker", () => {
     ];
     render(<ModelPicker running={null} chosen="claude-opus-4-8" options={options} onChoose={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: /Opus 4\.8/ }));
-    expect(screen.getByRole("button", { name: "Older models" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menuitem", { name: "Older models" })).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("menuitemradio", { name: /Opus 4\.8/ })).toHaveAttribute("aria-checked", "true");
   });
 
