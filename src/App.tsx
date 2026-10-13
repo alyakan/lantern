@@ -13,6 +13,7 @@ import { basename } from "./lib/diff";
 import { isTyping } from "./lib/typing";
 import { withShellContext } from "./lib/shell";
 import { prependDraft } from "./lib/paste";
+import { withPrompt } from "./lib/promptHistory";
 import { latestTurnOf, sinceLabel, withRevertNote, type RevertRequest } from "./lib/revert";
 import { withSkillNote } from "./lib/skillNote";
 import { agentTree, usesAgents } from "./lib/agents";
@@ -90,6 +91,8 @@ export default function App() {
   const [autoBy, setAutoBy] = usePersistentState<Record<string, boolean>>("settings.autoApproveByFolder", {});
   const autoFor = (folder: string | null) => (folder ? (autoBy[folder] ?? false) : false);
   const [lastFolder, setLastFolder] = usePersistentState<string | null>("settings.lastFolder", null);
+  // Each folder's sent prompts, for ↑ in the box (see MessageInput). Kept per folder, newest last.
+  const [promptsBy, setPromptsBy] = usePersistentState<Record<string, string[]>>("settings.promptHistory", {});
   const [model, setModel] = usePersistentState<string | null>("settings.model", null);
   // Thinking effort (--effort); null = Claude Code's default. App-wide, like the model.
   const [effort, setEffort] = usePersistentState<string | null>("settings.effort", null);
@@ -933,6 +936,7 @@ export default function App() {
       harness={state.folder ? { presets, chosen: harnessOf(active).id, onChoose: (id) => switchHarness(findHarness(presets, id)), onEdit: () => setSettingsAt("harness") } : undefined}
       usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs }}
       queue={{ items: state.queued, set: (items) => dispatch({ type: "queue_set", items }) }}
+      history={state.folder ? { entries: promptsBy[state.folder] ?? [], remember: (entry) => setPromptsBy({ ...promptsBy, [state.folder!]: withPrompt(promptsBy[state.folder!] ?? [], entry) }) } : undefined}
       commands={state.commands}
       skillIndex={skillIndex}
       findFiles={state.folder ? (query) => api.findFiles(active, query) : undefined}

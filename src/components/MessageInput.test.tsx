@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MessageInput } from "./MessageInput";
+import { encodeDraft, placeholder } from "../lib/paste";
 
 describe("MessageInput", () => {
   it("shows a ready update under the box, even with no mode or branch to show", () => {
@@ -437,5 +438,111 @@ describe("MessageInput", () => {
       const command = screen.getByLabelText("Shell command");
       expect(paste(command, lines(20))).toBe(false);
     });
+  });
+});
+
+describe("recalling earlier prompts", () => {
+  const entries = ["first prompt", "second prompt"];
+  const field = () => screen.getByPlaceholderText("Ask Claude…") as HTMLTextAreaElement;
+
+  it("recalls the newest prompt with ↑ in an empty box, then older ones, and ↓ goes forward again", () => {
+    render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} history={{ entries, remember: () => {} }} />);
+    const box = field();
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    expect(box).toHaveValue("second prompt");
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    expect(box).toHaveValue("first prompt");
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    expect(box).toHaveValue("first prompt");
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+    expect(box).toHaveValue("second prompt");
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+    expect(box).toHaveValue("");
+  });
+
+  it("recalls with the caret at the start of the box, but not from the middle of the text", () => {
+    render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} history={{ entries, remember: () => {} }} />);
+    const box = field();
+    fireEvent.change(box, { target: { value: "half a sentence" } });
+    box.setSelectionRange(4, 4);
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    expect(box).toHaveValue("half a sentence");
+    box.setSelectionRange(0, 0);
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    expect(box).toHaveValue("second prompt");
+  });
+
+  it("gives back what was being typed on Escape, and ↓ past the newest", () => {
+    render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} history={{ entries, remember: () => {} }} />);
+    const box = field();
+    fireEvent.change(box, { target: { value: "draft" } });
+    box.setSelectionRange(0, 0);
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    expect(box).toHaveValue("second prompt");
+    fireEvent.keyDown(box, { key: "Escape" });
+    expect(box).toHaveValue("draft");
+    box.setSelectionRange(0, 0);
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+    expect(box).toHaveValue("draft");
+  });
+
+  it("ends the recall once the recalled text is changed", () => {
+    render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} history={{ entries, remember: () => {} }} />);
+    const box = field();
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    fireEvent.change(box, { target: { value: "second prompt, edited" } });
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+    expect(box).toHaveValue("second prompt, edited");
+  });
+
+  it("keeps a recalled prompt's paste placeholder, and sends its text in full", () => {
+    const big = Array.from({ length: 8 }, (_, i) => `line ${i + 1}`).join("\n");
+    const onSend = vi.fn();
+    const kept = encodeDraft(`see ${placeholder(1, big)}`, { 1: big });
+    render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} history={{ entries: [kept], remember: () => {} }} />);
+    const box = field();
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    expect(box).toHaveValue("see [Pasted text #1 · 8 lines]");
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith(`see ${big}`, expect.anything());
+  });
+
+  it("remembers a sent prompt, so ↑ brings it back", () => {
+    const remembered: string[] = [];
+    const onSend = vi.fn();
+    const { rerender } = render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} history={{ entries: [], remember: (e) => remembered.push(e) }} />);
+    fireEvent.change(field(), { target: { value: "ship it" } });
+    fireEvent.keyDown(field(), { key: "Enter" });
+    expect(remembered).toEqual(["ship it"]);
+    rerender(<MessageInput status="idle" onSend={onSend} onStop={() => {}} history={{ entries: remembered, remember: () => {} }} />);
+    fireEvent.keyDown(field(), { key: "ArrowUp" });
+    expect(field()).toHaveValue("ship it");
+  });
+
+  it("leaves ↑ to the slash menu while it's open", () => {
+    render(
+      <MessageInput
+        status="idle"
+        onSend={() => {}}
+        onStop={() => {}}
+        commands={[{ name: "context", description: "Show context", argument_hint: "" }, { name: "clear", description: "Clear", argument_hint: "" }]}
+        history={{ entries, remember: () => {} }}
+      />,
+    );
+    const box = field();
+    fireEvent.change(box, { target: { value: "/" } });
+    box.setSelectionRange(0, 0);
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    expect(box).toHaveValue("/");
+  });
+
+  it("doesn't recall into a shell command (a ! box)", () => {
+    render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} onRun={() => {}} history={{ entries, remember: () => {} }} />);
+    const box = field();
+    fireEvent.change(box, { target: { value: "!" } });
+    box.setSelectionRange(0, 0);
+    fireEvent.keyDown(box, { key: "ArrowUp" });
+    expect(box).toHaveValue("");
   });
 });
