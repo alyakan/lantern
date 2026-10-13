@@ -2,7 +2,7 @@
 //! versions, the model and the last error go in. The error is cut to its first line and its home folder is shown as
 //! ~; nothing else (no prompts, no files, no other paths) is read or sent.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 
 /// How much of the last error goes in: enough for the message, not a whole stack or a pasted file.
@@ -38,16 +38,33 @@ pub fn macos_version() -> Option<String> {
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|v| !v.is_empty())
 }
 
+/// How long `claude --version` may take before the report goes without it.
+const VERSION_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// The Claude Code version the CLI at `claude_path` reports, e.g. "2.1.284 (Claude Code)". `path_env` is the PATH a
-/// login shell gives, which the CLI's own launcher may need (it runs node).
+/// login shell gives, which the CLI's own launcher may need (it runs node). Gives up after VERSION_WAIT.
 pub fn claude_version(claude_path: &str, path_env: Option<&str>) -> Option<String> {
     let mut command = Command::new(claude_path);
-    command.arg("--version");
+    command.arg("--version").stdout(Stdio::piped()).stderr(Stdio::null());
     if let Some(path) = path_env {
         command.env("PATH", path);
     }
-    let out = command.output().ok()?;
-    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).lines().next().unwrap_or("").trim().to_string()).filter(|v| !v.is_empty())
+    let mut child = command.spawn().ok()?;
+    let started = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().ok()? {
+            break status;
+        }
+        if started.elapsed() > VERSION_WAIT {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    let mut stdout = String::new();
+    child.stdout.take()?.read_to_string(&mut stdout).ok()?;
+    status.success().then(|| stdout.lines().next().unwrap_or("").trim().to_string()).filter(|v| !v.is_empty())
 }
 
 /// Puts `text` on the clipboard, with macOS's own pbcopy.
@@ -110,6 +127,17 @@ mod tests {
     fn the_macos_version_is_read_from_sw_vers() {
         let version = macos_version().expect("sw_vers answers on a Mac");
         assert!(version.chars().next().is_some_and(|c| c.is_ascii_digit()), "{version}");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_first_line_of_what_claude_reports_is_its_version() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let fake = dir.path().join("claude");
+        std::fs::write(&fake, "#!/bin/sh\necho '2.9.9 (Claude Code)'\necho 'more'\n").unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(claude_version(fake.to_str().unwrap(), None), Some("2.9.9 (Claude Code)".into()));
     }
 
     #[test]
