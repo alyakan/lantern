@@ -12,6 +12,7 @@ import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
 import { isTyping } from "./lib/typing";
 import { withShellContext } from "./lib/shell";
+import { prependDraft } from "./lib/paste";
 import { latestTurnOf, sinceLabel, withRevertNote, type RevertRequest } from "./lib/revert";
 import { withSkillNote } from "./lib/skillNote";
 import { agentTree, usesAgents } from "./lib/agents";
@@ -376,6 +377,15 @@ export default function App() {
   const [offer, setOffer] = useState<SavedChat[]>(loadSaved);
   // Bumped to remount the chat box when a restore puts unsent text back into the chat on screen.
   const [composerEpoch, setComposerEpoch] = useState(0);
+  // After Edit (or a restore) the box has the text: focus it, so the user can go on typing.
+  useEffect(() => {
+    if (composerEpoch > 0) document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
+  }, [composerEpoch]);
+  // Edit: the message goes back in the box to send as a new one, in front of anything typed. Nothing is sent or removed.
+  const editInBox = (draft: string) => {
+    drafts.current[active] = prependDraft(drafts.current[active] ?? "", draft);
+    setComposerEpoch((e) => e + 1);
+  };
 
   // A chat from last time, into `slot`: its conversation continued, or (typed but never sent) a new one in its folder;
   // either way with its unsent text back in the box.
@@ -478,9 +488,10 @@ export default function App() {
   }, [active, state.status, state.folder]);
 
   // A flavour picked since the chat's last message goes with this one, in a note telling Claude.
-  const sendIn = (slot: string, text: string) => {
+  // `draft`: the box's text as sent, with its paste placeholders (kept on the message so Edit can bring them back).
+  const sendIn = (slot: string, text: string, draft?: string) => {
     const pick = chats.slots[slot]?.flavourPick ?? null;
-    to(slot)({ type: "user_sent", text, ...(pick ? { switchedTo: pick } : {}) });
+    to(slot)({ type: "user_sent", text, ...(pick ? { switchedTo: pick } : {}), ...(draft ? { draft } : {}) });
     // Commands run since the last message go first, so Claude sees what they printed; skills named mid-message get
     // a note so Claude uses them.
     const items = chats.slots[slot]?.items ?? [];
@@ -848,6 +859,9 @@ export default function App() {
       setReviewCollapsed(false);
     },
   };
+  // Edit, Retry and Regenerate: only in a chat that's idle (not mid-turn, not ended) and not Step by step, whose pages
+  // have their own flow.
+  const resendHandlers = state.status === "idle" && !stepsMode ? { onEdit: editInBox, onResend: (p: { text: string; draft?: string }) => sendIn(active, p.text, p.draft) } : undefined;
   const hero = state.items.length === 0 && !state.thinking;
   // The Agents tab: the latest turn's tree. It comes up by itself the first time a chat's turn uses a subagent or the
   // advisor; after that it's left where you put it.
@@ -892,10 +906,10 @@ export default function App() {
     <MessageInput
       key={`input-${active}-${composerEpoch}`}
       status={state.status}
-      onSend={(text) => {
+      onSend={(text, draft) => {
         // Starting something new instead: the chats from last time aren't offered any more.
         if (hero) setOffer([]);
-        sendIn(active, text);
+        sendIn(active, text, draft);
       }}
       onStop={stop}
       onCancelStart={() => cancelStart(active)}
@@ -1000,7 +1014,7 @@ export default function App() {
                             })
                           } onPage={setPageRange} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} />
                       ) : (
-                        <ChatView key={`chat-${active}`} state={state} {...streamHandlers} />
+                        <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} />
                       )}
                     </FileLinksProvider>
                   </ErrorBoundary>

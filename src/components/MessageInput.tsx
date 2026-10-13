@@ -29,7 +29,8 @@ interface Props {
   idlePlaceholder?: string;
   /** On a Step-by-step page: ⌘Enter (or the button) sends the message and approves the step, moving on. */
   sendAndNext?: (text: string) => void;
-  onSend: (text: string) => void;
+  /** `draft`: the box as typed, encoded (see lib/paste.ts), so the message keeps its paste placeholders. */
+  onSend: (text: string, draft?: string) => void;
   onStop: () => void;
   /** While Claude starts, a way out: Cancel stops the start. */
   onCancelStart?: () => void;
@@ -169,7 +170,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
     if (running) {
       queuedBox.current.set(full, { box: t, pastes: inUse(t, pastes.current) });
       setQueued([...queued, full]);
-    } else onSend(full);
+    } else onSend(full, encodeDraft(t, inUse(t, pastes.current)));
   };
 
   const submit = () => {

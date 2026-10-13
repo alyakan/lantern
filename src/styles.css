@@ -267,6 +267,12 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 button.code-block-copy { height: 20px; padding: 0 8px; border: none; border-radius: var(--radius-chip); background: none; color: var(--muted); font-size: calc(11px * var(--font-scale)); opacity: 0; transition: opacity 0.12s; }
 .code-block:hover .code-block-copy, .code-block-copy:focus-visible { opacity: 1; }
 button.code-block-copy:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+/* Under a message: Copy and the rest, there on hover or keyboard focus only. */
+.msg-actions { display: flex; gap: 2px; margin: 2px 0 8px; opacity: 0; transition: opacity 0.12s; }
+.msg-actions.end { justify-content: flex-end; }
+.msg:hover + .msg-actions, .msg-actions:hover, .msg-actions:focus-within { opacity: 1; }
+button.msg-action { height: 20px; padding: 0 8px; border: none; border-radius: var(--radius-chip); background: none; color: var(--muted-text); font-size: calc(11px * var(--font-scale)); }
+button.msg-action:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .msg.assistant .code-block pre { margin: 0; border-radius: 0; background: none; }
 .code-block-colored code { font-family: var(--mono); font-size: calc(12px * var(--font-scale)); line-height: 1.55; white-space: pre; }
 .code-block-colored code br:last-child { display: none; }

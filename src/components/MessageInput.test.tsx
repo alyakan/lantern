@@ -14,7 +14,7 @@ describe("MessageInput", () => {
     const box = screen.getByPlaceholderText("Ask Claude…");
     fireEvent.change(box, { target: { value: "  fix it  " } });
     fireEvent.keyDown(box, { key: "Enter" });
-    expect(onSend).toHaveBeenCalledWith("fix it");
+    expect(onSend).toHaveBeenCalledWith("fix it", expect.anything());
     expect(box).toHaveValue("");
   });
 
@@ -28,7 +28,7 @@ describe("MessageInput", () => {
     fireEvent.compositionStart(box);
     fireEvent.change(box, { target: { value: "add a retry loop" } });
     fireEvent.keyDown(box, { key: "Enter", isComposing: true });
-    expect(onSend).toHaveBeenCalledWith("add a retry");
+    expect(onSend).toHaveBeenCalledWith("add a retry", expect.anything());
     fireEvent.compositionEnd(box);
     // Japanese input: its keys arrive as 229, and Enter confirms the characters instead of sending.
     fireEvent.keyDown(box, { key: "Process", keyCode: 229 });
@@ -38,7 +38,7 @@ describe("MessageInput", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
     fireEvent.compositionEnd(box);
     fireEvent.keyDown(box, { key: "Enter" });
-    expect(onSend).toHaveBeenLastCalledWith("にほん");
+    expect(onSend).toHaveBeenLastCalledWith("にほん", expect.anything());
   });
 
   it("doesn't send on the Enter that WebKit delivers after compositionend, still composing (keyCode 229)", () => {
@@ -53,7 +53,7 @@ describe("MessageInput", () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(box).toHaveValue("にほん");
     fireEvent.keyDown(box, { key: "Enter" });
-    expect(onSend).toHaveBeenCalledWith("にほん");
+    expect(onSend).toHaveBeenCalledWith("にほん", expect.anything());
   });
 
   const type = (box: HTMLElement, value: string) => {
@@ -116,7 +116,7 @@ describe("MessageInput", () => {
     fireEvent.keyDown(box, { key: "ArrowDown" });
     expect(screen.getAllByRole("option")[2]).toHaveAttribute("aria-selected", "true");
     fireEvent.keyDown(box, { key: "Enter" });
-    expect(onSend).toHaveBeenCalledWith("/context");
+    expect(onSend).toHaveBeenCalledWith("/context", expect.anything());
     expect(box).toHaveValue("");
   });
 
@@ -147,7 +147,7 @@ describe("MessageInput", () => {
       type(box, "re-run the checks on /gri");
       expect(screen.getByRole("listbox", { name: "Commands" })).toBeInTheDocument();
       fireEvent.keyDown(box, { key: "Enter" });
-      expect(onSend).toHaveBeenCalledWith("re-run the checks on /gri");
+      expect(onSend).toHaveBeenCalledWith("re-run the checks on /gri", expect.anything());
       type(box, "re-run the checks on /gri");
       fireEvent.keyDown(box, { key: "ArrowDown" });
       fireEvent.keyDown(box, { key: "Enter" });
@@ -190,7 +190,7 @@ describe("MessageInput", () => {
       await act(async () => answer([]));
       expect(screen.getByText("No files match")).toBeInTheDocument();
       fireEvent.keyDown(box, { key: "Enter" });
-      expect(onSend).toHaveBeenCalledWith("see @zzz");
+      expect(onSend).toHaveBeenCalledWith("see @zzz", expect.anything());
     });
 
     it("warns about MCP servers that need you, linking to Settings", () => {
@@ -229,7 +229,7 @@ describe("MessageInput", () => {
     expect(screen.queryByRole("listbox", { name: "Commands" })).toBeNull();
     // With the menu hidden, Enter sends what's typed.
     fireEvent.keyDown(box, { key: "Enter" });
-    expect(onSend).toHaveBeenCalledWith("/");
+    expect(onSend).toHaveBeenCalledWith("/", expect.anything());
   });
 
   it("starts from the chat's unsent text and saves what's typed", () => {
@@ -282,7 +282,7 @@ describe("MessageInput", () => {
     const box = screen.getByRole("textbox");
     fireEvent.change(box, { target: { value: "why a Set?" } });
     fireEvent.keyDown(box, { key: "Enter" });
-    expect(onSend).toHaveBeenCalledWith("why a Set?");
+    expect(onSend).toHaveBeenCalledWith("why a Set?", expect.anything());
     fireEvent.change(box, { target: { value: "rename it" } });
     fireEvent.keyDown(box, { key: "Enter", metaKey: true });
     expect(sendAndNext).toHaveBeenCalledWith("rename it");
@@ -343,7 +343,7 @@ describe("MessageInput", () => {
       fireEvent.change(box, { target: { value: "!important" } });
       expect(container.querySelector(".composer-box")).not.toHaveClass("terminal");
       fireEvent.keyDown(box, { key: "Enter" });
-      expect(onSend).toHaveBeenCalledWith("!important");
+      expect(onSend).toHaveBeenCalledWith("!important", expect.anything());
     });
   });
 
@@ -360,7 +360,7 @@ describe("MessageInput", () => {
       expect(paste(box(), lines(40))).toBe(true);
       expect(box()).toHaveValue("[Pasted text #1 · 40 lines]");
       fireEvent.keyDown(box(), { key: "Enter" });
-      expect(onSend).toHaveBeenCalledWith(lines(40));
+      expect(onSend).toHaveBeenCalledWith(lines(40), expect.anything());
       expect(box()).toHaveValue("");
     });
 
@@ -375,7 +375,7 @@ describe("MessageInput", () => {
       paste(box(), `${lines(7)}\r\nwindows`);
       expect(box().value.endsWith("fail?[Pasted text #2 · 8 lines]")).toBe(true);
       fireEvent.keyDown(box(), { key: "Enter" });
-      expect(onSend).toHaveBeenCalledWith(`why does${lines(8)}\nfail?${lines(7)}\nwindows`);
+      expect(onSend).toHaveBeenCalledWith(`why does${lines(8)}\nfail?${lines(7)}\nwindows`, expect.anything());
     });
 
     it("is taken away whole by Backspace right after it, and then isn't sent", () => {
@@ -387,7 +387,7 @@ describe("MessageInput", () => {
       fireEvent.keyDown(box(), { key: "Backspace" });
       expect(box()).toHaveValue("see ");
       fireEvent.keyDown(box(), { key: "Enter" });
-      expect(onSend).toHaveBeenCalledWith("see");
+      expect(onSend).toHaveBeenCalledWith("see", expect.anything());
     });
 
     it("is kept with the draft, so a box opened again has the placeholder and still sends the text", () => {
@@ -401,7 +401,7 @@ describe("MessageInput", () => {
       render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} draft={{ initial: saved, save }} />);
       expect(box()).toHaveValue("[Pasted text #1 · 12 lines]");
       fireEvent.keyDown(box(), { key: "Enter" });
-      expect(onSend).toHaveBeenCalledWith(lines(12));
+      expect(onSend).toHaveBeenCalledWith(lines(12), expect.anything());
     });
 
     it("is queued in full while Claude works", () => {
@@ -428,7 +428,7 @@ describe("MessageInput", () => {
       expect(queueBox).toHaveValue("[Pasted text #1 · 10 lines]\n\n[Pasted text #2 · 8 lines]");
       rerender(<MessageInput status="idle" onSend={onSend} onStop={onStop} />);
       fireEvent.keyDown(box(), { key: "Enter" });
-      expect(onSend).toHaveBeenCalledWith(`${lines(10)}\n\n${lines(8)}`);
+      expect(onSend).toHaveBeenCalledWith(`${lines(10)}\n\n${lines(8)}`, expect.anything());
     });
 
     it("is not made in a shell command", () => {

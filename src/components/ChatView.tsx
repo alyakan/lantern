@@ -4,9 +4,9 @@ import { useSlot } from "../lib/slot";
 import { recallScroll, rememberScroll } from "../lib/scrollMemory";
 import type { State } from "../store";
 import { workingVerb } from "../lib/verbs";
-import { ChatStream, type StreamHandlers } from "./ChatStream";
+import { ChatStream, type ResendHandlers, type StreamHandlers } from "./ChatStream";
 
-export function ChatView({ state, ...handlers }: { state: State } & StreamHandlers) {
+export function ChatView({ state, resend, ...handlers }: { state: State; resend?: ResendHandlers } & StreamHandlers) {
   const scroller = useRef<HTMLDivElement>(null);
   // Back in this chat: where you left it; at the end if you were there (or it's new).
   const slot = useSlot();
@@ -61,7 +61,7 @@ export function ChatView({ state, ...handlers }: { state: State } & StreamHandle
     <div className="chat-wrap">
       <div className="chat" ref={scroller} onScroll={onScroll}>
         {state.items.length === 0 && !state.thinking && <div className="empty">What should Claude work on?</div>}
-        <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} {...handlers} />
+        <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} resend={resend} {...handlers} />
         {thinkingLine && (
           <div className="activity live thinking-line" role="status" aria-label="Claude is thinking">
             <span className="activity-line">

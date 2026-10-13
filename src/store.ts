@@ -71,6 +71,8 @@ export type ChatItem =
       auto?: boolean;
       /** Step by step: sent with the flavour the user had just picked (Claude was told in a note before the text). */
       switchedTo?: Flavour;
+      /** Sent from the box: the box's text as an encoded draft, so Edit brings its paste placeholders back (see lib/paste.ts). */
+      draft?: string;
     }
   | { type: "assistant"; id: string; text: string }
   | ToolItem
@@ -218,7 +220,7 @@ export type Action =
   | { type: "folder_cleared" }
   | { type: "history_loaded"; sessionId: string; events: UiEvent[] }
   | { type: "session_ready" }
-  | { type: "user_sent"; text: string; switchedTo?: Flavour }
+  | { type: "user_sent"; text: string; switchedTo?: Flavour; draft?: string }
   | { type: "mode_changed"; mode: Mode; flavourStart?: Flavour | null }
   | { type: "flavour_picked"; flavour: Flavour | null }
   | { type: "permission_decided"; id: string; allow: boolean; note?: string }
@@ -513,7 +515,7 @@ export function reducer(state: State, action: Action): State {
       return state.status === "starting" ? { ...state, status: "idle" } : state;
     case "user_sent": {
       const seq = state.seq + 1;
-      const item: ChatItem = { type: "user", id: `u${seq}`, text: action.text, at: Date.now(), ...(action.switchedTo ? { switchedTo: action.switchedTo } : {}) };
+      const item: ChatItem = { type: "user", id: `u${seq}`, text: action.text, at: Date.now(), ...(action.switchedTo ? { switchedTo: action.switchedTo } : {}), ...(action.draft ? { draft: action.draft } : {}) };
       // A picked flavour went with this message.
       // The commands run since the last message went with this one (unless it's a slash command).
       const sent = takesShellContext(action.text) ? state.items.map((it): ChatItem => (it.type === "shell" && !it.shared ? { ...it, shared: true } : it)) : state.items;

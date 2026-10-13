@@ -1,7 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { decodeDraft, encodeDraft, expandPastes, inUse, isBigPaste, lineCount, nextNumber, placeholder, tokenBefore } from "./paste";
+import { decodeDraft, draftOf, encodeDraft, expandPastes, inUse, isBigPaste, lineCount, nextNumber, placeholder, prependDraft, tokenBefore } from "./paste";
 
 const lines = (n: number) => Array.from({ length: n }, (_, i) => `line ${i + 1}`).join("\n");
+
+describe("draftOf", () => {
+  it("keeps a short message as it is, and a big one as a placeholder with its text", () => {
+    expect(draftOf("hello")).toBe("hello");
+    const big = draftOf(lines(8));
+    expect(decodeDraft(big)).toEqual({ text: placeholder(1, lines(8)), pastes: { 1: lines(8) } });
+  });
+});
+
+describe("prependDraft", () => {
+  it("puts the edit in an empty box as it is", () => {
+    expect(prependDraft("", "fix the test")).toBe("fix the test");
+  });
+
+  it("goes in front of what's typed, with a blank line between", () => {
+    expect(prependDraft("and the lint too", "fix the test")).toBe("fix the test\n\nand the lint too");
+  });
+
+  it("keeps the paste placeholders of both, with the edit's renumbered past the box's", () => {
+    const box = encodeDraft(`see ${placeholder(1, lines(7))}`, { 1: lines(7) });
+    const edit = encodeDraft(`${placeholder(1, lines(6))} then ${placeholder(2, lines(9))}`, { 1: lines(6), 2: lines(9) });
+    const out = decodeDraft(prependDraft(box, edit));
+    expect(out.text).toBe(`${placeholder(2, lines(6))} then ${placeholder(3, lines(9))}\n\nsee ${placeholder(1, lines(7))}`);
+    expect(out.pastes).toEqual({ 1: lines(7), 2: lines(6), 3: lines(9) });
+    expect(expandPastes(out.text, out.pastes)).toBe(`${lines(6)} then ${lines(9)}\n\nsee ${lines(7)}`);
+  });
+});
 
 describe("isBigPaste", () => {
   it("counts lines, not a trailing newline, and long text on one line", () => {
