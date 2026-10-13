@@ -104,6 +104,13 @@ function isPlainPath(path: string): boolean {
   return path.startsWith("/") && !path.split("/").includes("..") && !path.includes("\u0000");
 }
 
+/** Names no file-tool rule covers (see PROTECTED_NAMES in rules.rs): a path with one of them is never offered a rule. */
+export const PROTECTED_NAMES = [".git", ".claude", ".mcp.json", ".vscode", ".idea", ".husky", ".gitmodules", ".gitattributes", ".gitconfig", ".envrc"];
+
+function isProtectedPath(path: string): boolean {
+  return path.split("/").some((part) => PROTECTED_NAMES.includes(part));
+}
+
 /** The rules the card can offer for a tool call: none when the input isn't one a rule can read. Scope comes from the menu. */
 export function ruleChoices(tool: string, input: unknown): Rule[] {
   if (!input || typeof input !== "object" || NEVER_AUTO_TOOLS.includes(tool) || tool.startsWith("mcp__lantern__")) return [];
@@ -124,7 +131,7 @@ export function ruleChoices(tool: string, input: unknown): Rule[] {
   if (file) {
     if (Object.keys(o).some((k) => !file.keys.includes(k))) return [];
     const path = o[file.key];
-    if (typeof path !== "string" || !isPlainPath(path)) return [];
+    if (typeof path !== "string" || !isPlainPath(path) || isProtectedPath(path)) return [];
     const out: Rule[] = [{ tool, kind: "any" }];
     const dir = path.slice(0, path.lastIndexOf("/"));
     if (dir.length > 1) out.push({ tool, kind: "dir", path: dir });

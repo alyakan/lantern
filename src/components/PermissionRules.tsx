@@ -24,7 +24,7 @@ export function PermissionRules({ slot }: { slot: string | null }) {
             Rules that let Claude run a kind of call without asking. Make one with Always allow… on a permission card. This chat's rules end with the chat; a folder's apply to every chat in it. A rule only ever allows: Deny still asks.
           </p>
           <p className="settings-muted">
-            A rule checks a file's path when the request arrives. A rule can't see a link that's changed while the command is starting, so a folder rule covers the files you expect, not a sandbox. A command's own files and output aren't checked: a rule for a build or test trusts that command.
+            A rule checks a file's path when the request arrives. A rule can't see a link that's changed while the command is starting, so a folder rule covers the files you expect, not a sandbox. A build or test rule runs project code (test and build scripts), and rules never cover git, editor or Claude config files (.git, .claude, .vscode and the like).
           </p>
         </div>
       </div>

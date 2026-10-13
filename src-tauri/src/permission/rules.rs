@@ -210,6 +210,16 @@ fn bash_command<'a>(tool: &str, input: &'a Value) -> Option<&'a str> {
     obj.get("command")?.as_str()
 }
 
+/// Names that no file-tool rule covers: git's own config, hooks and attributes, and the config of Claude Code, editors and
+/// git helpers. A write to one of these can make a later command that's allowed run code (a git config's pager or
+/// fsmonitor, a hook), so a rule that reached one would compose into code execution. The check is on the resolved path.
+const PROTECTED_NAMES: &[&str] = &[".git", ".claude", ".mcp.json", ".vscode", ".idea", ".husky", ".gitmodules", ".gitattributes", ".gitconfig", ".envrc"];
+
+/// Whether a path has a component no file-tool rule covers (see PROTECTED_NAMES).
+fn protected(path: &str) -> bool {
+    Path::new(path).components().any(|c| matches!(c, Component::Normal(name) if name.to_str().is_some_and(|s| PROTECTED_NAMES.contains(&s))))
+}
+
 /// A path that is absolute and has no `..` in it.
 fn plain_path(path: &str) -> bool {
     let p = Path::new(path);
@@ -288,11 +298,11 @@ pub fn matches(rule: &Rule, tool: &str, input: &Value) -> bool {
     }
     match &rule.matcher {
         Matcher::Any if tool == "Bash" => false,
-        Matcher::Any if file_tool(tool).is_some() => file_path(tool, input).is_some(),
+        Matcher::Any if file_tool(tool).is_some() => file_path(tool, input).is_some_and(|p| !protected(p)),
         Matcher::Any => true,
         Matcher::Exact { text } => bash_command(tool, input).is_some_and(|c| c == text.as_str() && is_plain(text)),
         Matcher::Prefix { text } => bash_command(tool, input).is_some_and(|c| prefix_matches(text, c)),
-        Matcher::Dir { path } => file_path(tool, input).is_some_and(|p| Path::new(p).starts_with(path)),
+        Matcher::Dir { path } => file_path(tool, input).is_some_and(|p| Path::new(p).starts_with(path) && !protected(p)),
     }
 }
 
@@ -308,7 +318,11 @@ pub fn validate(rule: &Rule) -> Result<Rule, String> {
         Matcher::Exact { text } if tool == "Bash" && text.len() >= 2 && is_plain(text) => rule.matcher.clone(),
         Matcher::Prefix { text } if tool == "Bash" && prefix_words(text).is_some() => rule.matcher.clone(),
         Matcher::Dir { path } if file_tool(tool).is_some() && plain_path(path) && path != "/" && path.len() <= 4096 => {
-            Matcher::Dir { path: resolve(Path::new(path)).ok_or("That folder's path goes through a link that leads nowhere.")?.display().to_string() }
+            let real = resolve(Path::new(path)).ok_or("That folder's path goes through a link that leads nowhere.")?.display().to_string();
+            if protected(&real) {
+                return Err("Lantern doesn't make folder rules over git, editor or Claude config folders (.git, .claude, .vscode...).".into());
+            }
+            Matcher::Dir { path: real }
         }
         _ => return Err(format!("A rule for {tool} can't match that way.")),
     };
@@ -815,6 +829,60 @@ mod tests {
             assert!(validate(&exact(text)).is_ok(), "{text}");
             assert!(matches(&exact(text), "Bash", &cmd(text)), "{text}");
         }
+    }
+
+    #[test]
+    fn a_file_tool_rule_never_covers_git_or_config_files() {
+        let dir = Rule { tool: "Write".into(), matcher: Matcher::Dir { path: "/Users/a/proj".into() } };
+        let any = Rule { tool: "Write".into(), matcher: Matcher::Any };
+        for p in [
+            "/Users/a/proj/.git/config",
+            "/Users/a/proj/.git/hooks/pre-commit",
+            "/Users/a/proj/.claude/settings.json",
+            "/Users/a/proj/.mcp.json",
+            "/Users/a/proj/.vscode/tasks.json",
+            "/Users/a/proj/.gitconfig",
+            "/Users/a/proj/sub/.envrc",
+            "/Users/a/proj/.husky/pre-commit",
+            "/Users/a/proj/.gitmodules",
+            "/Users/a/proj/.idea/workspace.xml",
+        ] {
+            let input = json!({"file_path": p, "content": "x"});
+            assert!(!matches(&dir, "Write", &input), "{p}");
+            assert!(!matches(&any, "Write", &input), "{p}");
+        }
+        let ordinary = json!({"file_path": "/Users/a/proj/src/a.ts", "content": "x"});
+        assert!(matches(&dir, "Write", &ordinary));
+        assert!(matches(&any, "Write", &ordinary));
+    }
+
+    #[test]
+    fn a_link_into_git_or_config_is_not_a_file_in_the_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = std::fs::canonicalize(dir.path()).unwrap().join("proj");
+        std::fs::create_dir_all(folder.join(".git/hooks")).unwrap();
+        std::fs::create_dir_all(folder.join("src")).unwrap();
+        std::os::unix::fs::symlink(folder.join(".git"), folder.join("link")).unwrap();
+        std::os::unix::fs::symlink(folder.join(".git/hooks"), folder.join("src/hooks")).unwrap();
+        let dir_rule = Rule { tool: "Write".into(), matcher: Matcher::Dir { path: folder.display().to_string() } };
+        let any = Rule { tool: "Write".into(), matcher: Matcher::Any };
+        for p in [folder.join("link"), folder.join("link/config"), folder.join("src/hooks/pre-commit")] {
+            let asked = json!({"file_path": p.display().to_string(), "content": "x"});
+            assert!(!matches(&dir_rule, "Write", &for_matching("Write", &asked)), "{}", p.display());
+            assert!(!matches(&any, "Write", &for_matching("Write", &asked)), "{}", p.display());
+        }
+        let ordinary = json!({"file_path": folder.join("src/new.ts").display().to_string(), "content": "x"});
+        assert!(matches(&dir_rule, "Write", &for_matching("Write", &ordinary)));
+    }
+
+    #[test]
+    fn no_folder_rule_is_made_over_git_or_config_folders() {
+        for path in ["/p/.git", "/p/.git/hooks", "/p/.claude", "/p/.vscode/x", "/p/.idea", "/p/.husky"] {
+            let rule = Rule { tool: "Edit".into(), matcher: Matcher::Dir { path: path.into() } };
+            assert!(validate(&rule).is_err(), "{path}");
+        }
+        let ok = Rule { tool: "Edit".into(), matcher: Matcher::Dir { path: "/p/src".into() } };
+        assert!(validate(&ok).is_ok());
     }
 
     #[test]

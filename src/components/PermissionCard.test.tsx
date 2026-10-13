@@ -62,6 +62,12 @@ describe("PermissionCard", () => {
     expect(screen.queryByRole("button", { name: "Bash: python …" })).toBeNull();
   });
 
+  it("offers no Always allow… for a file in git or config folders: that one asks each time", () => {
+    render(<PermissionCard item={{ ...item, toolName: "Write", input: { file_path: "/p/.git/config", content: "x" } }} onDecide={() => {}} />);
+    expect(screen.getByRole("button", { name: "Allow" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Always allow…" })).toBeNull();
+  });
+
   it("says which rule answered a request, with no buttons to answer it", () => {
     const { container } = render(
       <PermissionCard item={{ ...item, decision: "allowed", autoRule: { scope: "folder", rule: { tool: "Bash", kind: "prefix", text: "npm test" } } }} onDecide={() => {}} />,

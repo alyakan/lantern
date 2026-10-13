@@ -34,6 +34,7 @@ describe("the lists mirror the backend's", () => {
     expect(mirror.WRAPPERS).toEqual(rustStrings("WRAPPERS"));
     expect(mirror.DENIED_FIRST).toEqual(rustStrings("DENIED_FIRST"));
     expect(mirror.BASH_KEYS).toEqual(rustStrings("BASH_KEYS"));
+    expect(mirror.PROTECTED_NAMES).toEqual(rustStrings("PROTECTED_NAMES"));
     expect(mirror.NEVER_AUTO_TOOLS).toEqual(rustStrings("NEVER_AUTO"));
     expect(mirror.VETTED).toEqual(rustVetted());
     expect(mirror.BENIGN_FLAGS).toEqual(rustBenign());
@@ -120,6 +121,14 @@ describe("ruleChoices", () => {
       { tool: "Edit", kind: "dir", path: "/p/src" },
     ]);
     expect(ruleChoices("Write", { file_path: "/a.txt", content: "x" })).toEqual([{ tool: "Write", kind: "any" }]);
+  });
+
+  it("offers nothing for a file inside git or config folders, so each one asks", () => {
+    for (const path of ["/p/.git/config", "/p/.git/hooks/pre-commit", "/p/.claude/settings.json", "/p/.mcp.json", "/p/.vscode/tasks.json", "/p/sub/.envrc"]) {
+      expect(ruleChoices("Write", { file_path: path, content: "x" }), path).toEqual([]);
+      expect(ruleChoices("Edit", { file_path: path, old_string: "a", new_string: "b" }), path).toEqual([]);
+    }
+    expect(ruleChoices("Write", { file_path: "/p/src/a.ts", content: "x" })).toHaveLength(2);
   });
 
   it("offers nothing for a relative path, a key a tool doesn't take, or the wrong path key", () => {
