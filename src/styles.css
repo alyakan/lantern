@@ -592,6 +592,19 @@ button.icon.open-chat-close { position: absolute; right: 4px; width: 22px; heigh
 .palette-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .palette-group { flex: none; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .palette-shortcut { flex: none; min-width: 2.4em; padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg-subtle); font-family: var(--ui); font-size: calc(11.5px * var(--font-scale)); color: var(--text-2); text-align: center; }
+/* ⌘/: the shortcuts the registry has, by group. A dimmed one can't be used right now. */
+.shortcuts { width: min(640px, calc(100vw - 48px)); max-height: min(560px, calc(100vh - 96px)); padding: 0; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--field); color: var(--text); box-shadow: var(--shadow); }
+.shortcuts::backdrop { background: rgba(0, 0, 0, 0.28); }
+.shortcuts[open] { animation: guide-in 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
+.shortcuts-body { display: flex; flex-direction: column; gap: 12px; max-height: inherit; padding: 20px 24px 16px; overflow-y: auto; }
+.shortcuts-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; }
+.shortcuts-group-title { margin: 0 0 4px; font-size: calc(11px * var(--font-scale)); font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.shortcuts-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.shortcuts-row { display: flex; align-items: center; gap: 10px; padding: 4px 8px; border-radius: var(--radius-chip); font-size: calc(12.5px * var(--font-scale)); color: var(--text); }
+.shortcuts-row.off { color: var(--muted-text); }
+.shortcuts-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shortcuts-key { flex: none; min-width: 2.4em; padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg-subtle); font-family: var(--ui); font-size: calc(11.5px * var(--font-scale)); color: var(--text-2); text-align: center; }
+.shortcuts-row.off .shortcuts-key { color: var(--muted-text); }
 /* The changed-file picker uses the shared dropdown (.menu); it opens under the button. */
 .file-menu { top: calc(100% + 4px); left: 0; width: 420px; max-width: calc(100vw - 48px); max-height: 360px; }
 .file-menu .menu-row { align-items: center; font-family: var(--mono); font-size: calc(12px * var(--font-scale)); }

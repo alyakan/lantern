@@ -27,6 +27,7 @@ import { notify } from "./lib/notify";
 import { availableActions, runAction, useAction } from "./lib/actions";
 import type { PaletteEntry } from "./lib/palette";
 import { CommandPalette } from "./components/CommandPalette";
+import { ShortcutSheet } from "./components/ShortcutSheet";
 import { activityStatus } from "./lib/status";
 import { failedCount } from "./lib/activity";
 import { scrollWithin } from "./lib/scrollWithin";
@@ -903,6 +904,9 @@ export default function App() {
   };
   // Pressed again while open, it closes.
   useAction("command-palette", () => setPalette((open) => (open ? null : paletteEntries())));
+  // ⌘/ and Help ▸ Keyboard Shortcuts: the sheet of shortcuts, toggled the same way.
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  useAction("keyboard-shortcuts", () => setShortcutsOpen((open) => !open));
   // Installs the downloaded update and relaunches. The window says so (the overlay) until it does: closing every chat
   // and reopening is otherwise just a window that vanishes. Started from Settings, that closes first.
   const restartToUpdate = () => {
@@ -1101,6 +1105,7 @@ export default function App() {
         />
         {installing && <UpdatingOverlay state={updates.state} version={update?.version ?? null} />}
         {palette && <CommandPalette entries={palette} onClose={() => setPalette(null)} />}
+        {shortcutsOpen && <ShortcutSheet available={availableActions().map((a) => a.id)} onClose={() => setShortcutsOpen(false)} />}
         <ModeGuide
           open={guideAt}
           mode={state.mode}
