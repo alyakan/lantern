@@ -57,11 +57,12 @@ fn orchestra_tool_list() -> Vec<Value> {
 
 /// Answers one MCP JSON-RPC message. Returns None for notifications (no `id`).
 pub fn handle_message(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeResponse) -> Option<Value> {
-    handle_message_as(msg, ask, false)
+    handle_message_as(msg, ask, None)
 }
 
-/// `orchestrator`: this is the main agent's helper, which also offers the orchestra tools.
-pub fn handle_message_as(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeResponse, orchestrator: bool) -> Option<Value> {
+/// `orchestrator`: the secret of the main agent's helper (`LANTERN_TOKEN`), which also offers the orchestra tools and
+/// proves it is the main agent's with that secret on each call.
+pub fn handle_message_as(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeResponse, orchestrator: Option<&str>) -> Option<Value> {
     let id = msg.get("id")?.clone();
     let result = match msg["method"].as_str().unwrap_or("") {
         "initialize" => json!({
@@ -71,7 +72,7 @@ pub fn handle_message_as(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeRespo
         }),
         "tools/list" => {
             let mut tools = base_tools();
-            if orchestrator {
+            if orchestrator.is_some() {
                 tools.extend(orchestra_tool_list());
             }
             json!({"tools": tools})
@@ -79,12 +80,12 @@ pub fn handle_message_as(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeRespo
         // Matched before the fallback below, which treats any other tool name as an `approve` call.
         "tools/call" if ORCHESTRA_TOOLS.contains(&msg["params"]["name"].as_str().unwrap_or("")) => {
             let tool = msg["params"]["name"].as_str().unwrap_or("");
-            if !orchestrator {
-                json!({"isError": true, "content": [{"type": "text", "text": format!("{tool} is only available to the main agent.")}]})
-            } else {
-                let resp = ask(BridgeRequest { tool_name: tool.into(), input: msg["params"]["arguments"].clone(), tool_use_id: None, orchestra: true });
+            if let Some(token) = orchestrator {
+                let resp = ask(BridgeRequest { tool_name: tool.into(), input: msg["params"]["arguments"].clone(), tool_use_id: None, orchestra: true, token: Some(token.to_string()) });
                 let text = resp.message.unwrap_or_else(|| if resp.allow { "Done.".into() } else { "That didn't work.".into() });
                 json!({"isError": !resp.allow, "content": [{"type": "text", "text": text}]})
+            } else {
+                json!({"isError": true, "content": [{"type": "text", "text": format!("{tool} is only available to the main agent.")}]})
             }
         }
         "tools/call" if msg["params"]["name"] == "reproduce" => {
@@ -155,11 +156,11 @@ pub fn ask_bridge(socket: Option<&str>, req: &BridgeRequest) -> BridgeResponse {
 
 /// The `--permission-helper` main loop: newline-delimited JSON-RPC on stdin/stdout.
 pub fn run_helper(input: impl BufRead, output: impl Write, socket: Option<&str>) -> io::Result<()> {
-    run_helper_as(input, output, socket, false)
+    run_helper_as(input, output, socket, None)
 }
 
-/// `orchestrator`: the main agent's helper (`LANTERN_ROLE=main`), which also serves the orchestra tools.
-pub fn run_helper_as(mut input: impl BufRead, mut output: impl Write, socket: Option<&str>, orchestrator: bool) -> io::Result<()> {
+/// `orchestrator`: the main agent's secret (`LANTERN_TOKEN`), which makes this its helper, serving the orchestra tools.
+pub fn run_helper_as(mut input: impl BufRead, mut output: impl Write, socket: Option<&str>, orchestrator: Option<&str>) -> io::Result<()> {
     let ask = |req: BridgeRequest| ask_bridge(socket, &req);
     let mut buf = Vec::new();
     loop {
@@ -259,8 +260,8 @@ mod tests {
     #[test]
     fn only_the_main_agents_helper_lists_the_orchestra_tools() {
         let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
-        assert_eq!(tool_names(&handle_message_as(&list, &allow_all, false).unwrap()), ["approve", "reproduce"]);
-        let names = tool_names(&handle_message_as(&list, &allow_all, true).unwrap());
+        assert_eq!(tool_names(&handle_message_as(&list, &allow_all, None).unwrap()), ["approve", "reproduce"]);
+        let names = tool_names(&handle_message_as(&list, &allow_all, Some("tok")).unwrap());
         assert_eq!(&names[..2], ["approve", "reproduce"]);
         assert_eq!(names[2..], *ORCHESTRA_TOOLS);
     }
@@ -272,15 +273,16 @@ mod tests {
         let r = handle_message_as(&msg, &|req| {
             *seen.borrow_mut() = Some(req);
             BridgeResponse { allow: true, message: Some("Started w1.".into()), updated_input: None }
-        }, true)
+        }, Some("tok"))
         .unwrap();
         assert_eq!(r["result"]["content"][0]["text"], "Started w1.");
         assert_eq!(r["result"]["isError"], false);
         let req = seen.borrow().clone().unwrap();
         assert!(req.orchestra);
+        assert_eq!(req.token.as_deref(), Some("tok"), "the call carries the helper's secret");
         assert_eq!((req.tool_name.as_str(), req.input["brief"].as_str()), ("spawn_agent", Some("Build it")));
         // A failure reaches the model as a tool error with the reason.
-        let r = handle_message_as(&msg, &|_| BridgeResponse { allow: false, message: Some("At most 6 workers.".into()), updated_input: None }, true).unwrap();
+        let r = handle_message_as(&msg, &|_| BridgeResponse { allow: false, message: Some("At most 6 workers.".into()), updated_input: None }, Some("tok")).unwrap();
         assert_eq!((r["result"]["isError"].clone(), r["result"]["content"][0]["text"].clone()), (json!(true), json!("At most 6 workers.")));
     }
 
@@ -291,7 +293,7 @@ mod tests {
         let r = handle_message_as(&msg, &|_| {
             called.set(true);
             BridgeResponse { allow: true, message: None, updated_input: None }
-        }, false)
+        }, None)
         .unwrap();
         assert!(!called.get());
         assert_eq!(r["result"]["isError"], true);
@@ -305,8 +307,9 @@ mod tests {
         handle_message_as(&msg, &|req| {
             *seen.borrow_mut() = Some(req);
             BridgeResponse { allow: true, message: None, updated_input: None }
-        }, true);
-        assert!(!seen.borrow().clone().unwrap().orchestra);
+        }, Some("tok"));
+        let req = seen.borrow().clone().unwrap();
+        assert!(!req.orchestra && req.token.is_none());
     }
 
     #[test]

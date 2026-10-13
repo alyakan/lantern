@@ -172,7 +172,9 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
 
 fn helper_config(slot: &Slot, role: Role) -> Result<HelperConfig, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role })
+    // The main agent's helper is started with the secret its bridge expects on orchestra calls; no one else has it.
+    let token = if role == Role::Main { Some(slot.bridge.orchestra_token()?) } else { None };
+    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role, token })
 }
 
 /// Stops the slot's running session (denying its pending prompts) and starts `cfg` in it.

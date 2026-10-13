@@ -12,11 +12,16 @@ pub struct BridgeRequest {
     /// whether the call worked and its `message` is the result the model reads.
     #[serde(default)]
     pub orchestra: bool,
+    /// The secret only the main agent's helper holds (`LANTERN_TOKEN`, set in its MCP config): an orchestra call without
+    /// it is refused. Without this, anything that can reach the chat's socket (a worker running a shell, say) could
+    /// pose as the main agent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
 }
 
 impl BridgeRequest {
     pub fn permission(tool_name: String, input: Value, tool_use_id: Option<String>) -> Self {
-        Self { tool_name, input, tool_use_id, orchestra: false }
+        Self { tool_name, input, tool_use_id, orchestra: false, token: None }
     }
 }
 
