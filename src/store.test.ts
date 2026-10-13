@@ -251,6 +251,14 @@ describe("reducer", () => {
     expect(s.items.map((it) => (it.type === "permission" ? it.decision : null))).toEqual(["denied", null]);
   });
 
+  it("a request a rule allowed is a decided card that says which rule, and is never waiting", () => {
+    const rule = { tool: "Bash", kind: "prefix" as const, text: "npm test" };
+    const s = ev(running, { kind: "permission_auto_allowed", request_id: "perm-1", tool_name: "Bash", input: { command: "npm test" }, scope: "chat", rule });
+    expect(s.items[0]).toMatchObject({ type: "permission", id: "perm-1", decision: "allowed", autoRule: { scope: "chat", rule } });
+    expect(s.status).not.toBe("waiting");
+    expect(s.items.some((it) => it.type === "permission" && it.decision === null)).toBe(false);
+  });
+
   it("stop_requested denies undecided permission cards", () => {
     let s = ev(running, { kind: "permission_requested", request_id: "perm-1", tool_name: "Bash", input: {} });
     s = reducer(s, { type: "stop_requested" });

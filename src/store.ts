@@ -1,5 +1,5 @@
 import type { RevertOutcome } from "./api";
-import type { Hunk, ModelCost, ModelOption, Mode, SlashCommand, UiEvent, TestRun } from "./types";
+import type { Hunk, ModelCost, ModelOption, Mode, Rule, RuleScope, SlashCommand, UiEvent, TestRun } from "./types";
 import { countChanges } from "./lib/diff";
 import { readFlavourNote, type Flavour } from "./lib/flavour";
 import { revertSummary, undoOf, undoSummary, type RevertNote, type RevertUndo } from "./lib/revert";
@@ -75,7 +75,8 @@ export type ChatItem =
   | { type: "assistant"; id: string; text: string }
   | ToolItem
   | ShellItem
-  | { type: "permission"; id: string; toolName: string; input: unknown; decision: "allowed" | "denied" | null; note?: string }
+  /** `autoRule`: a rule allowed it with no card (decision is then "allowed"); `scope` is where that rule applies. */
+  | { type: "permission"; id: string; toolName: string; input: unknown; decision: "allowed" | "denied" | null; note?: string; autoRule?: { scope: RuleScope; rule: Rule } }
   | { type: "turn"; id: string; isError: boolean; stopped: boolean; result: string | null; durationMs: number | null; denied: number };
 
 export interface ChangedFile {
@@ -452,6 +453,11 @@ function applyEvent(state: State, ev: UiEvent): State {
     }
     case "permission_requested":
       return { ...state, items: [...state.items, { type: "permission", id: ev.request_id, toolName: ev.tool_name, input: ev.input, decision: null }] };
+    case "permission_auto_allowed":
+      return {
+        ...state,
+        items: [...state.items, { type: "permission", id: ev.request_id, toolName: ev.tool_name, input: ev.input, decision: "allowed", autoRule: { scope: ev.scope, rule: ev.rule } }],
+      };
     case "permission_withdrawn":
       return {
         ...state,

@@ -304,6 +304,10 @@ button.code-block-copy:hover:not(:disabled) { background: var(--bg-hover); color
 .permission-detail { margin: 0; padding: 6px 8px; background: var(--code-bg); border-radius: var(--radius-chip); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
 .permission-actions { display: flex; gap: 6px; }
 .permission-actions button { height: 24px; padding: 0 12px; font-size: 12px; }
+.always-menu { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg-subtle); }
+.always-group { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.always-heading { font-size: 10.5px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.always-group button { height: 22px; padding: 0 8px; font-family: var(--mono); font-size: 11.5px; }
 /* Plan mode: the plan itself, readable, and scrollable when long. */
 .plan-body { max-height: 420px; overflow-y: auto; padding: 2px 2px 4px; font-size: 13px; line-height: 1.6; }
 .plan-body > :first-child { margin-top: 0; }

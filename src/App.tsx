@@ -19,7 +19,7 @@ import { agentGraph } from "./lib/agentGraph";
 import { BUILT_IN, CUSTOM_HARNESS, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
-import type { McpServer, SkillEntry } from "./types";
+import type { McpServer, NewRule, SkillEntry } from "./types";
 import { stepFile, usePersistentState } from "./lib/layout";
 import { notify } from "./lib/notify";
 import { useShortcut } from "./lib/shortcuts";
@@ -603,10 +603,14 @@ export default function App() {
 
   // `note`: what the user wrote on a reproduce card; it goes back to Claude with the answer.
   // `answered`: the tool's input with what the user chose in it (AskUserQuestion's answers).
-  const decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>) => {
+  // `remember`: an "Always allow…" rule. It's saved first, so the chat's next matching request is answered by it; if it
+  // can't be saved, this request is still answered and the error is shown.
+  const decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => {
     const slot = active;
     to(slot)({ type: "permission_decided", id, allow, note });
-    api.respondPermission(slot, id, allow, note ?? null, answered ?? null).catch((e) => to(slot)({ type: "turn_failed", text: errText(e) }));
+    const answer = () => api.respondPermission(slot, id, allow, note ?? null, answered ?? null).catch((e) => to(slot)({ type: "turn_failed", text: errText(e) }));
+    if (!remember) return answer();
+    api.addPermissionRule(slot, remember).catch((e) => to(slot)({ type: "turn_failed", text: errText(e) })).then(answer);
   };
 
   // From the title bar's failure count: bring the latest failed step's activity into view, opened.
