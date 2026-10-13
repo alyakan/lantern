@@ -546,3 +546,31 @@ describe("recalling earlier prompts", () => {
     expect(box).toHaveValue("");
   });
 });
+
+describe("the queue", () => {
+  it("takes a queued message back into the box to edit, out of the queue", () => {
+    const set = vi.fn();
+    render(<MessageInput status="running" onSend={() => {}} onStop={() => {}} queue={{ items: ["first", "second"], set }} />);
+    fireEvent.click(screen.getByRole("button", { name: "second" }));
+    expect(set).toHaveBeenCalledWith(["first"]);
+    expect(screen.getByRole("textbox", { name: "Message to Claude" })).toHaveValue("second");
+  });
+
+  it("sends a queued message now: it goes first, and the turn is stopped rather than the queue emptied", () => {
+    const set = vi.fn();
+    const onStop = vi.fn();
+    render(<MessageInput status="running" onSend={() => {}} onStop={onStop} queue={{ items: ["first", "second"], set }} />);
+    fireEvent.click(screen.getAllByRole("button", { name: "Send now" })[1]);
+    expect(set).toHaveBeenCalledWith(["second", "first"]);
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends it straight away when Claude isn't running", () => {
+    const set = vi.fn();
+    const onSend = vi.fn();
+    render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} queue={{ items: ["first"], set }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(set).toHaveBeenCalledWith([]);
+    expect(onSend).toHaveBeenCalledWith("first");
+  });
+});

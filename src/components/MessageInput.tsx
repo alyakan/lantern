@@ -123,6 +123,29 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
     for (const full of queuedBox.current.keys()) if (!queued.includes(full)) queuedBox.current.delete(full);
   }, [queued]);
 
+  // A queued message back in the box to edit: it leaves the queue, and goes in front of what's typed (as Stop does).
+  const editQueued = (i: number) => {
+    const full = queued[i];
+    const kept = queuedBox.current.get(full);
+    if (kept) pastes.current = { ...pastes.current, ...kept.pastes };
+    setText([kept?.box ?? full, text].filter((t) => t.trim()).join("\n\n"));
+    setQueued(queued.filter((_, j) => j !== i));
+    area.current?.focus();
+  };
+  // Send now: that message goes next. Claude's turn is stopped (App's stop, not the one below, which would empty the
+  // queue into the box); the queue goes out when the turn ends, with this message first.
+  const sendNow = (i: number) => {
+    const full = queued[i];
+    const rest = queued.filter((_, j) => j !== i);
+    if (running) {
+      setQueued([full, ...rest]);
+      onStop();
+    } else {
+      setQueued(rest);
+      onSend(full);
+    }
+  };
+
   // Stop means "not like that": queued messages go back into the box instead of being sent.
   const stop = () => {
     if (queued.length > 0) {
@@ -360,9 +383,12 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           {queued.map((q, i) => (
             <li key={i} className="queue-item">
               <span className="queue-label">Queued</span>
-              <span className="queue-text" title={q}>
+              <button className="queue-text" title="Edit: takes it back to the box" onClick={() => editQueued(i)}>
                 {queuedBox.current.get(q)?.box ?? q}
-              </span>
+              </button>
+              <button className="link-button queue-now" title="Stops Claude's turn and sends this next (anything queued after it goes with it)" onClick={() => sendNow(i)}>
+                Send now
+              </button>
               <button className="icon queue-remove" aria-label="Remove queued message" title="Remove" onClick={() => setQueued(queued.filter((_, j) => j !== i))}>
                 ×
               </button>

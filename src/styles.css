@@ -447,7 +447,8 @@ button.slash-issue:hover:not(:disabled) { background: color-mix(in srgb, var(--w
 .queue { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .queue-item { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 4px 3px 10px; border: 1px dashed var(--line-strong); border-radius: var(--radius-inner); font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); }
 .queue-label { flex: none; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
-.queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.queue-text { flex: 1; min-width: 0; padding: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+button.link-button.queue-now { flex: none; font-size: calc(11px * var(--font-scale)); }
 button.icon.queue-remove { flex: none; width: 20px; height: 20px; font-size: calc(14px * var(--font-scale)); }
 .composer textarea { resize: none; border: none; outline: none; background: none; color: inherit; font: calc(13.5px * var(--font-scale))/1.5 var(--ui); padding: 0 4px 0 0; max-height: 200px; }
 .composer textarea::placeholder { color: var(--muted-text); }
