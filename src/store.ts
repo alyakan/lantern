@@ -1,6 +1,8 @@
+import type { RevertOutcome } from "./api";
 import type { Hunk, ModelCost, ModelOption, Mode, SlashCommand, UiEvent, TestRun } from "./types";
 import { countChanges } from "./lib/diff";
 import { readFlavourNote, type Flavour } from "./lib/flavour";
+import { revertSummary, undoOf, undoSummary, type RevertNote, type RevertUndo } from "./lib/revert";
 import { KEEP_CHARS, readShellContext, takesShellContext } from "./lib/shell";
 import { readSkillNote } from "./lib/skillNote";
 
@@ -146,6 +148,11 @@ export interface State {
   lastEndedTask: string | null;
   /** Steps that started a background task, by tool call: still running, or how they ended. */
   backgroundRuns: Record<string, BackgroundRun>;
+  /** The last revert, which Undo can take back until the next message or quit. */
+  revertUndo: RevertUndo | null;
+  /** Files reverted since the last message, which Claude is told about with the next one. */
+  revertNotes: RevertNote[];
+  revertSeq: number;
 }
 
 export interface BackgroundRun {
@@ -197,6 +204,9 @@ export const initialState: State = {
   backgroundTasks: [],
   lastEndedTask: null,
   backgroundRuns: {},
+  revertUndo: null,
+  revertNotes: [],
+  revertSeq: 0,
 };
 
 export type Action =
@@ -223,6 +233,9 @@ export type Action =
   | { type: "shell_started"; id: string; command: string }
   /** The backend numbered the turn the latest prompt started. */
   | { type: "turn_numbered"; turn: number }
+  | { type: "revert_done"; since: string; outcomes: RevertOutcome[] }
+  | { type: "revert_undone"; id: number; outcomes: RevertOutcome[] }
+  | { type: "notice"; text: string }
   /** The changed files as they stand on disk (from the backend): true counts, and files back to their original gone. */
   | { type: "changes_synced"; files: ChangedFile[] };
 
@@ -291,7 +304,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], lastEndedTask: null, stopRequested: false, cleared: false };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [] };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -498,7 +511,9 @@ export function reducer(state: State, action: Action): State {
       // A picked flavour went with this message.
       // The commands run since the last message went with this one (unless it's a slash command).
       const sent = takesShellContext(action.text) ? state.items.map((it): ChatItem => (it.type === "shell" && !it.shared ? { ...it, shared: true } : it)) : state.items;
-      return { ...state, status: "running", thinking: true, stopRequested: false, seq, flavourPick: action.switchedTo ? null : state.flavourPick, items: [...sent, item] };
+      // The revert note went with this message (a slash command gets none, so the note waits for the next).
+      const noted = takesShellContext(action.text) ? [] : state.revertNotes;
+      return { ...state, status: "running", thinking: true, stopRequested: false, seq, flavourPick: action.switchedTo ? null : state.flavourPick, items: [...sent, item], revertUndo: null, revertNotes: noted };
     }
     case "mode_changed":
       return { ...state, mode: action.mode, ...(action.flavourStart !== undefined ? { flavourStart: action.flavourStart } : {}) };
@@ -544,6 +559,31 @@ export function reducer(state: State, action: Action): State {
       return { ...state, queued: action.items };
     case "shell_started":
       return { ...state, items: [...state.items, { type: "shell", id: action.id, command: action.command, output: "", status: "running", code: null, startedAt: Date.now(), shared: false }] };
+    case "revert_done": {
+      const id = state.revertSeq + 1;
+      const undo = undoOf(action.outcomes);
+      const summary = revertSummary(action.outcomes);
+      const notes = action.outcomes
+        .filter((o) => o.status === "reverted" || o.status === "trashed")
+        .map((o): RevertNote => ({ path: o.path, trashed: o.status === "trashed", since: action.since, revert: id }));
+      // Only a revert that changed something can be undone; one that only met conflicts says so in the banner instead.
+      return {
+        ...state,
+        revertSeq: id,
+        revertUndo: undo.length ? { id, files: undo, summary } : state.revertUndo,
+        revertNotes: [...state.revertNotes, ...notes],
+        banner: undo.length ? state.banner : { kind: "info", text: summary, action: null },
+      };
+    }
+    case "revert_undone":
+      return {
+        ...state,
+        revertUndo: state.revertUndo?.id === action.id ? null : state.revertUndo,
+        revertNotes: state.revertNotes.filter((n) => n.revert !== action.id),
+        banner: { kind: "info", text: undoSummary(action.outcomes), action: null },
+      };
+    case "notice":
+      return { ...state, banner: { kind: "info", text: action.text, action: null } };
     case "changes_synced": {
       const now = new Map(action.files.map((f) => [f.path, f]));
       // Keep the list's order (the order Claude touched things); anything the backend adds goes at the end.

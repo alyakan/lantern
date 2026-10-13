@@ -5,6 +5,8 @@ import type { StepsSummary, SummaryRow } from "../lib/stepsSummary";
 import { exportFileName, planMarkdown } from "../lib/planExport";
 import type { StepPage } from "../lib/steps";
 import { SummaryExport } from "./SummaryExport";
+import { RevertDialog } from "./RevertDialog";
+import type { RevertControls, RevertRequest } from "../lib/revert";
 
 const FILES_SHOWN = 3;
 const rangeKey = (r: { from: number; to: number }) => `${r.from}-${r.to}`;
@@ -33,11 +35,13 @@ export interface ExportDoc {
  * fix), each with what its page says and the files it changed. A row opens its page in the chat. With `doc`, the plan
  * can be exported as markdown.
  */
-export function SummaryTab({ slot, summary, changed, running, onOpenPage, doc }: { slot: string; summary: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void; doc?: ExportDoc }) {
+export function SummaryTab({ slot, summary, changed, running, onOpenPage, doc, revert }: { slot: string; summary: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void; doc?: ExportDoc; revert?: RevertControls }) {
   // The files each row changed, from the backend's per-turn changes: asked again as edits land or a turn ends, and
   // again when the user tries again after a failure.
   const [files, setFiles] = useState<Record<string, Lookup>>({});
   const [attempt, setAttempt] = useState(0);
+  // A step's revert waiting on its dialog.
+  const [reverting, setReverting] = useState<{ title: string; files: ChangedFile[]; request: RevertRequest } | null>(null);
   const ranges = summary.rows.flatMap((r) => (r.range ? [r.range] : []));
   const wanted = ranges.map(rangeKey).join(",");
   useEffect(() => {
@@ -55,6 +59,16 @@ export function SummaryTab({ slot, summary, changed, running, onOpenPage, doc }:
   const filesOf = (row: SummaryRow): ChangedFile[] | undefined => {
     const lookup = row.range ? files[rangeKey(row.range)] : undefined;
     return lookup && "files" in lookup ? lookup.files : undefined;
+  };
+
+  // A row's revert: the files its turns changed, put back to how they were before them. Off when its turns aren't known.
+  const revertOf = (row: SummaryRow) => {
+    if (!revert || !row.changes) return undefined;
+    const range = row.range;
+    if (!range) return { off: "This step's changes aren't known: the session was reopened after it.", onRevert: () => {} };
+    const found = filesOf(row);
+    if (!found || found.length === 0) return undefined;
+    return { off: revert.blocked, onRevert: () => setReverting({ title: `Revert ${row.label}?`, files: found, request: { scope: "turn", turn: range.from, toTurn: range.to } }) };
   };
 
   // The document is made when it's asked for, from what the tab knows then.
@@ -90,14 +104,30 @@ export function SummaryTab({ slot, summary, changed, running, onOpenPage, doc }:
       )}
       <ol className="summary-rows">
         {summary.rows.map((row) => (
-          <Row key={row.id} row={row} lookup={row.range ? files[rangeKey(row.range)] : undefined} onOpenPage={onOpenPage} />
+          <Row key={row.id} row={row} lookup={row.range ? files[rangeKey(row.range)] : undefined} onOpenPage={onOpenPage} revert={revertOf(row)} />
         ))}
       </ol>
+      {reverting && revert && (
+        <RevertDialog
+          slot={slot}
+          folder={doc?.folder ?? null}
+          title={reverting.title}
+          files={reverting.files}
+          request={reverting.request}
+          latestTurn={revert.latestTurn}
+          onCancel={() => setReverting(null)}
+          onDone={(outcomes) => {
+            const request = reverting.request;
+            setReverting(null);
+            revert.onReverted(request, outcomes);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function Row({ row, lookup, onOpenPage }: { row: SummaryRow; lookup: Lookup | undefined; onOpenPage: (page: string) => void }) {
+function Row({ row, lookup, onOpenPage, revert }: { row: SummaryRow; lookup: Lookup | undefined; onOpenPage: (page: string) => void; revert?: { off: string | null; onRevert: () => void } }) {
   // Steps the plan has no page for: shown so the numbers add up, but with nothing to open.
   if (row.kind === "gap") {
     return (
@@ -139,6 +169,11 @@ function Row({ row, lookup, onOpenPage }: { row: SummaryRow; lookup: Lookup | un
       {row.planPage && (
         <button className="summary-plan-link" onClick={() => onOpenPage(row.planPage!)} title={`Open ${row.label}'s plan in the chat`}>
           Plan
+        </button>
+      )}
+      {revert && (
+        <button className="summary-plan-link summary-revert" disabled={!!revert.off} title={revert.off ?? `Put the files ${row.label} changed back to how they were before it`} onClick={revert.onRevert}>
+          Revert
         </button>
       )}
     </li>

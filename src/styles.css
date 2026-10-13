@@ -1285,3 +1285,22 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .updating-title { font-size: 15px; font-weight: 600; }
 .updating-step { font-size: 12.5px; color: var(--text-2); }
 .updating-note { margin-top: 6px; font-size: 12px; line-height: 1.45; color: var(--muted); }
+
+/* Reverting Claude's edits: the confirm dialog, the Undo bar above the Changes and Summary tabs, and the buttons. */
+.revert-dialog { padding: 0; border: none; outline: none; background: transparent; color: var(--text); max-width: none; }
+.revert-dialog::backdrop { background: color-mix(in srgb, var(--bg) 60%, transparent); }
+.revert-body { display: flex; flex-direction: column; gap: 10px; width: min(480px, calc(100vw - 48px)); max-height: min(560px, calc(100vh - 80px)); padding: 20px 22px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--pane); box-shadow: var(--shadow); font-size: 13px; }
+.revert-title { font-size: 15px; font-weight: 600; }
+.revert-text { margin: 0; line-height: 1.45; color: var(--text-2); }
+.revert-warning { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--bg-subtle); border: 1px solid var(--line-strong); line-height: 1.45; }
+.revert-files { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 4px; list-style: none; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.revert-file { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 6px; font-size: 12.5px; }
+.revert-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.revert-file-error { flex-basis: 100%; font-size: 11.5px; color: var(--muted); }
+.revert-error { color: var(--del); }
+.revert-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.revert-undo { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.revert-undo-text { min-width: 0; }
+.revert-undo-note { flex: 1; color: var(--muted); font-size: 11.5px; }
+.revert-all { margin-left: 4px; }
+.summary-revert { margin-left: 4px; }

@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { api } from "../api";
 import type { StepsSummary, SummaryRow } from "../lib/stepsSummary";
+import type { RevertControls } from "../lib/revert";
 import { SummaryTab } from "./SummaryTab";
 
 vi.mock("../api", () => ({ api: { changeSummary: vi.fn() } }));
@@ -9,6 +10,39 @@ const changeSummary = vi.mocked(api.changeSummary);
 
 const row = (over: Partial<SummaryRow>): SummaryRow => ({ id: "x", kind: "step", label: "Step 1", title: "T", built: true, current: false, gist: null, page: "x", planPage: null, range: null, changes: false, findings: null, stats: null, ...over });
 const show = (summary: StepsSummary, onOpenPage = vi.fn()) => render(<SummaryTab slot="s1" summary={summary} changed={[]} running={false} onOpenPage={onOpenPage} />);
+
+describe("SummaryTab step reverts", () => {
+  const controls = (over: Partial<RevertControls> = {}): RevertControls => ({ slot: "s1", blocked: null, latestTurn: 2, undo: null, onUndo: vi.fn(), onReverted: vi.fn(), ...over });
+  const step = (over: Partial<SummaryRow>) => row({ id: "s1", kind: "step", label: "Step 1", title: "Add slugify", built: true, changes: true, page: "s1", range: { from: 0, to: 0 }, ...over });
+  const summary = (...rows: SummaryRow[]): StepsSummary => ({ headline: null, rows });
+  const fileAt = { path: "/p/src/slug.ts", created: true, deleted: false, added: 5, removed: 0 };
+
+  it("a built step's Revert puts back its files, as the turns it spans", async () => {
+    changeSummary.mockResolvedValue([fileAt]);
+    render(<SummaryTab slot="s1" summary={summary(step({ range: { from: 3, to: 4 } }))} changed={[]} running={false} onOpenPage={vi.fn()} revert={controls()} />);
+    const button = await screen.findByRole("button", { name: "Revert" });
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(changeSummary).toHaveBeenCalledWith("s1", "turn", 3, 4);
+    fireEvent.click(button);
+    expect(screen.getByRole("dialog", { name: "Revert Step 1?" })).toHaveTextContent("This file goes back to how it was before this step.");
+  });
+
+  it("is unavailable, with the reason, for a built step whose turns aren't known", () => {
+    render(<SummaryTab slot="s1" summary={summary(step({ range: null }))} changed={[]} running={false} onOpenPage={vi.fn()} revert={controls()} />);
+    const button = screen.getByRole("button", { name: "Revert" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("title", "This step's changes aren't known: the session was reopened after it.");
+  });
+
+  it("is off while Claude works, and absent without the controls", async () => {
+    changeSummary.mockResolvedValue([fileAt]);
+    const { unmount } = render(<SummaryTab slot="s1" summary={summary(step({}))} changed={[]} running={true} onOpenPage={vi.fn()} revert={controls({ blocked: "Wait for Claude to finish before reverting." })} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Revert" })).toBeDisabled());
+    unmount();
+    render(<SummaryTab slot="s1" summary={summary(step({}))} changed={[]} running={false} onOpenPage={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Revert" })).toBeNull();
+  });
+});
 
 describe("SummaryTab", () => {
   beforeEach(() => {

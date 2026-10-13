@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ReviewPanel } from "./ReviewPanel";
+import type { RevertControls } from "../lib/revert";
 
 vi.mock("./FullDiff", () => ({ default: ({ path }: { path: string }) => <div>diff of {path}</div> }));
 
@@ -9,6 +10,53 @@ const files = [
   { path: "/p/src/b.ts", created: true, added: 9, removed: 0 },
 ];
 const base = { folder: "/p", ready: false, files, refreshKey: 0, onSelect: () => {}, onFollow: () => {} };
+
+// Reverting: the controls the App hands the panel. The dialog reads files through the api, which fails outside Tauri;
+// these tests only look at what the panel offers.
+const controls = (over: Partial<RevertControls> = {}): RevertControls => ({ slot: "s1", blocked: null, latestTurn: null, undo: null, onUndo: vi.fn(), onReverted: vi.fn(), ...over });
+
+describe("ReviewPanel reverts", () => {
+  it("a file's Revert opens a dialog for that file", () => {
+    render(<ReviewPanel {...base} scope="session" selected="/p/src/a.ts" follow revert={controls()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Revert" }));
+    expect(screen.getByRole("dialog", { name: "Revert a.ts?" })).toBeInTheDocument();
+  });
+
+  it("Revert all is offered for the whole chat and for the last message, not for a step", () => {
+    const { rerender } = render(<ReviewPanel {...base} scope="session" selected="/p/src/a.ts" follow revert={controls()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Revert all" }));
+    expect(screen.getByRole("dialog", { name: "Revert all of this chat's changes?" })).toHaveTextContent("2 files go back to how they were before this chat began.");
+    rerender(<ReviewPanel {...base} scope="turn" selected="/p/src/a.ts" follow revert={controls()} />);
+    expect(screen.getByRole("button", { name: "Revert all" })).toBeEnabled();
+    rerender(<ReviewPanel {...base} scope="turn" stepRange={{ from: 1, to: 2 }} selected="/p/src/a.ts" follow revert={controls()} />);
+    expect(screen.queryByRole("button", { name: "Revert all" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Revert" })).toBeEnabled();
+  });
+
+  it("is off while Claude works, with the reason on the buttons", () => {
+    render(<ReviewPanel {...base} scope="session" selected="/p/src/a.ts" follow revert={controls({ blocked: "Wait for Claude to finish before reverting." })} />);
+    expect(screen.getByRole("button", { name: "Revert" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Revert" })).toHaveAttribute("title", "Wait for Claude to finish before reverting.");
+    expect(screen.getByRole("button", { name: "Revert all" })).toBeDisabled();
+  });
+
+  it("is off for a step whose turns aren't known, and absent for a git view", () => {
+    const { rerender } = render(<ReviewPanel {...base} scope="turn" stepRange={null} selected="/p/src/a.ts" follow revert={controls()} />);
+    expect(screen.getByRole("button", { name: "Revert" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Revert" })).toHaveAttribute("title", "This step's changes aren't known: the session was reopened after it.");
+    rerender(<ReviewPanel {...base} scope="git" selected="/p/src/a.ts" follow revert={controls()} />);
+    expect(screen.queryByRole("button", { name: "Revert" })).toBeNull();
+  });
+
+  it("shows what the last revert did, with Undo, on every tab", () => {
+    const onUndo = vi.fn();
+    render(<ReviewPanel {...base} scope="session" selected="/p/src/a.ts" follow revert={controls({ undo: { id: 1, files: [], summary: "Reverted 2 files." }, onUndo })} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Reverted 2 files.");
+    expect(screen.getByText(/Undo lasts until your next message/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(onUndo).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("ReviewPanel", () => {
   it("shows an empty state", () => {
