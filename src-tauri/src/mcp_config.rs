@@ -140,10 +140,67 @@ pub(crate) fn to_config(spec: &McpServerSpec, stored: &Value) -> Result<Value, S
     Ok(Value::Object(config))
 }
 
-/// Whether an entry carries a secret written out in the file, rather than a reference such as "${API_KEY}". Such an
-/// entry can't go into the project's .mcp.json, which is committed.
-pub fn has_literal_secret(config: &Value) -> bool {
-    ["env", "headers"].iter().filter_map(|s| config.get(*s)).filter_map(Value::as_object).flat_map(|o| o.values()).any(|v| v.as_str().is_some_and(|s| !s.contains("${")))
+/// One change to Claude Code's MCP settings: add an entry (its JSON), or remove one.
+#[derive(Debug, PartialEq)]
+pub(crate) enum Step {
+    Add { scope: String, name: String, json: String },
+    Remove { scope: String, name: String },
+}
+
+/// An edit as two steps, in order, and the step that takes back the first one when the second fails.
+#[derive(Debug, PartialEq)]
+pub(crate) struct Plan {
+    pub steps: [Step; 2],
+    pub undo: Step,
+}
+
+/// The plan for moving the server `from` (name, scope) to `to`. A name can't be added twice in one scope, so a server that
+/// keeps both is removed first, and its stored entry is put back if the new one can't be added. Otherwise the new entry is
+/// added first, so a failed removal leaves the server in place, with the new entry taken back out again.
+pub(crate) fn edit_plan(from: (&str, &str), to: (&str, &str), new_json: String, stored_json: String) -> Plan {
+    let (from_name, from_scope) = (from.0.to_string(), from.1.to_string());
+    let (to_name, to_scope) = (to.0.to_string(), to.1.to_string());
+    if from == to {
+        Plan {
+            steps: [Step::Remove { scope: from_scope.clone(), name: from_name.clone() }, Step::Add { scope: to_scope, name: to_name, json: new_json }],
+            undo: Step::Add { scope: from_scope, name: from_name, json: stored_json },
+        }
+    } else {
+        Plan {
+            steps: [Step::Add { scope: to_scope.clone(), name: to_name.clone(), json: new_json }, Step::Remove { scope: from_scope, name: from_name }],
+            undo: Step::Remove { scope: to_scope, name: to_name },
+        }
+    }
+}
+
+/// Refuses a config that would write a literal secret into the project's committed .mcp.json. A value is fine when it's
+/// a reference such as "${API_KEY}", or when it's already in the file unchanged: `stored_in_scope` is the entry the
+/// config replaces, when that entry is in the project file already. Names the keys, never the values.
+pub(crate) fn check_committed(config: &Value, to_scope: &str, stored_in_scope: Option<&Value>) -> Result<(), String> {
+    if to_scope != "project" {
+        return Ok(());
+    }
+    let mut keys = Vec::new();
+    for section in ["env", "headers"] {
+        for (key, value) in config.get(section).and_then(Value::as_object).into_iter().flatten() {
+            let Some(text) = value.as_str() else { continue };
+            if text.contains("${") {
+                continue;
+            }
+            let already = stored_in_scope.and_then(|s| s.get(section)?.get(key)).and_then(Value::as_str) == Some(text);
+            if !already {
+                keys.push(key.clone());
+            }
+        }
+    }
+    if keys.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "The project's .mcp.json is committed, so {} can't be written into it as a literal value. Use ${{NAME}} for a value Claude Code reads from your environment, or keep the server in your own settings.",
+            keys.join(", ")
+        ))
+    }
 }
 
 #[cfg(test)]
@@ -251,10 +308,82 @@ mod tests {
     }
 
     #[test]
-    fn a_literal_secret_is_told_from_a_variable_reference() {
-        assert!(has_literal_secret(&json!({"env": {"K": "s3cret"}})));
-        assert!(!has_literal_secret(&json!({"env": {"K": "${K}"}, "headers": {"Authorization": "Bearer ${TOKEN}"}})));
-        assert!(has_literal_secret(&json!({"headers": {"Authorization": "Bearer t0k"}})));
-        assert!(!has_literal_secret(&json!({"command": "npx"})));
+    fn a_literal_secret_cannot_go_into_the_project_file_but_a_reference_can() {
+        let literal = json!({"env": {"API_KEY": "s3cret"}});
+        assert_eq!(check_committed(&literal, "project", None).unwrap_err().matches("API_KEY").count(), 1);
+        assert!(!check_committed(&literal, "project", None).unwrap_err().contains("s3cret"));
+        assert!(check_committed(&json!({"env": {"API_KEY": "${API_KEY}"}, "headers": {"Authorization": "Bearer ${TOKEN}"}}), "project", None).is_ok());
+        assert!(check_committed(&json!({"command": "npx"}), "project", None).is_ok());
+    }
+
+    #[test]
+    fn an_edit_inside_the_project_file_may_keep_a_secret_already_there() {
+        let stored = json!({"env": {"API_KEY": "s3cret"}});
+        let masked_kept = json!({"env": {"API_KEY": "s3cret"}});
+        assert!(check_committed(&masked_kept, "project", Some(&stored)).is_ok());
+    }
+
+    #[test]
+    fn an_edit_in_the_project_file_adding_or_changing_a_secret_is_refused() {
+        let stored = json!({"env": {"API_KEY": "s3cret"}});
+        let new_key = json!({"env": {"API_KEY": "s3cret", "OTHER": "fresh"}});
+        assert_eq!(check_committed(&new_key, "project", Some(&stored)).unwrap_err().matches("OTHER").count(), 1);
+        let changed = json!({"env": {"API_KEY": "rotated"}});
+        assert!(check_committed(&changed, "project", Some(&stored)).unwrap_err().contains("API_KEY"));
+    }
+
+    #[test]
+    fn a_move_into_the_project_file_has_nothing_kept_so_every_literal_counts() {
+        // The stored entry is in the user's settings, not the project file, so it isn't passed in.
+        let headers = json!({"headers": {"Authorization": "Bearer t0k"}});
+        assert!(check_committed(&headers, "project", None).unwrap_err().contains("Authorization"));
+    }
+
+    #[test]
+    fn an_edit_that_keeps_name_and_scope_removes_first_and_restores_the_stored_entry_if_the_add_fails() {
+        let plan = edit_plan(("fs", "user"), ("fs", "user"), "NEW".into(), "OLD".into());
+        assert_eq!(
+            plan,
+            Plan {
+                steps: [Step::Remove { scope: "user".into(), name: "fs".into() }, Step::Add { scope: "user".into(), name: "fs".into(), json: "NEW".into() }],
+                undo: Step::Add { scope: "user".into(), name: "fs".into(), json: "OLD".into() },
+            }
+        );
+    }
+
+    #[test]
+    fn a_rename_or_a_scope_change_adds_first_and_takes_the_new_entry_back_if_the_remove_fails() {
+        let rename = edit_plan(("fs", "user"), ("files", "user"), "NEW".into(), "OLD".into());
+        assert_eq!(rename.steps[0], Step::Add { scope: "user".into(), name: "files".into(), json: "NEW".into() });
+        assert_eq!(rename.steps[1], Step::Remove { scope: "user".into(), name: "fs".into() });
+        assert_eq!(rename.undo, Step::Remove { scope: "user".into(), name: "files".into() });
+        let moved = edit_plan(("fs", "local"), ("fs", "user"), "NEW".into(), "OLD".into());
+        assert_eq!(moved.steps[0], Step::Add { scope: "user".into(), name: "fs".into(), json: "NEW".into() });
+        assert_eq!(moved.steps[1], Step::Remove { scope: "local".into(), name: "fs".into() });
+    }
+
+    #[test]
+    fn a_secret_kept_in_the_project_file_is_fine_and_a_new_one_is_refused() {
+        let stored = json!({"env": {"API_KEY": "s3cret"}});
+        // Project to project, the value left as it is.
+        assert!(check_committed(&stored, "project", Some(&stored)).is_ok());
+        // Local or user into the project: nothing is kept there, so the literal is refused.
+        assert!(check_committed(&stored, "project", None).is_err());
+    }
+
+    #[test]
+    fn user_and_local_scopes_are_never_refused() {
+        let literal = json!({"env": {"API_KEY": "s3cret"}, "headers": {"Authorization": "Bearer t0k"}});
+        assert!(check_committed(&literal, "user", None).is_ok());
+        assert!(check_committed(&literal, "local", None).is_ok());
+    }
+
+    #[test]
+    fn adding_to_the_project_with_a_literal_secret_is_refused_and_a_reference_accepted() {
+        let literal = spec("fs", "stdio", "npx server", "project", &["API_KEY=s3cret"], &[]);
+        let config = to_config(&literal, &Value::Null).unwrap();
+        assert!(check_committed(&config, "project", None).unwrap_err().contains("API_KEY"));
+        let referenced = spec("fs", "stdio", "npx server", "project", &["API_KEY=${API_KEY}"], &[]);
+        assert!(check_committed(&to_config(&referenced, &Value::Null).unwrap(), "project", None).is_ok());
     }
 }

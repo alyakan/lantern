@@ -443,6 +443,10 @@ mod mcp_add_tests {
 #[tauri::command]
 async fn mcp_add(state: State<'_, AppState>, slot: String, spec: McpServerSpec) -> Result<String, String> {
     let args = mcp_add_args(&spec)?;
+    // The project's .mcp.json is committed: a literal secret stays out of it (only ${NAME} references go in).
+    if spec.scope == "project" {
+        mcp_config::check_committed(&mcp_config::to_config(&spec, &serde_json::Value::Null)?, "project", None)?;
+    }
     claude_mcp(&state, &slot, args).await
 }
 
@@ -480,6 +484,15 @@ fn remove_args(scope: &str, name: &str) -> Vec<String> {
     ["mcp", "remove", "-s", scope, "--", name].map(String::from).to_vec()
 }
 
+/// Runs one step of an edit with `claude mcp`.
+async fn run_step(state: &AppState, slot: &str, step: mcp_config::Step) -> Result<String, String> {
+    let args = match step {
+        mcp_config::Step::Add { scope, name, json } => add_json_args(&scope, &name, &json),
+        mcp_config::Step::Remove { scope, name } => remove_args(&scope, &name),
+    };
+    claude_mcp(state, slot, args).await
+}
+
 /// Saves an edited server: `from_name` and `from_scope` are where it is now, `spec` where it should be. The new entry is
 /// added before the old one is removed, so a failure never loses the server. The exception is a server that keeps its
 /// name in its scope: that name can't be added twice, so the old entry is removed and put back if the new one fails.
@@ -491,25 +504,18 @@ async fn mcp_edit(state: State<'_, AppState>, slot: String, from_name: String, f
     let stored = mcp_config::read_entry(&claude_json_file()?, &folder, &from_name, &from_scope)?.ok_or_else(|| format!("{from_name} isn't there any more. Reload the list."))?;
     let config = mcp_config::to_config(&spec, &stored)?;
     let name = spec.name.trim().to_string();
-    if spec.scope == "project" && from_scope != "project" && mcp_config::has_literal_secret(&config) {
-        return Err("The project's .mcp.json is committed, so a secret can't go in it. Use ${NAME} for a value Claude Code reads from your environment, or keep the server in your own settings.".into());
-    }
-    let json = config.to_string();
-    if name == from_name && spec.scope == from_scope {
-        claude_mcp(&state, &slot, remove_args(&from_scope, &from_name)).await?;
-        if let Err(e) = claude_mcp(&state, &slot, add_json_args(&spec.scope, &name, &json)).await {
-            return Err(match claude_mcp(&state, &slot, add_json_args(&from_scope, &from_name, &stored.to_string())).await {
-                Ok(_) => format!("{e} {from_name} is back as it was."),
-                Err(again) => format!("{e} {from_name} couldn't be put back ({again}). Add it again with Add server."),
-            });
-        }
-    } else {
-        claude_mcp(&state, &slot, add_json_args(&spec.scope, &name, &json)).await?;
-        if let Err(e) = claude_mcp(&state, &slot, remove_args(&from_scope, &from_name)).await {
-            // The old entry is still there: take the new one back out.
-            let undone = claude_mcp(&state, &slot, remove_args(&spec.scope, &name)).await.is_ok();
-            return Err(if undone { format!("{e} Nothing changed.") } else { format!("{e} Both are there now: remove one with Remove.") });
-        }
+    // Only an entry already in the project's file may keep its secret values as they are there.
+    let kept = (from_scope == "project" && spec.scope == "project").then_some(&stored);
+    mcp_config::check_committed(&config, &spec.scope, kept)?;
+    let plan = mcp_config::edit_plan((&from_name, &from_scope), (&name, &spec.scope), config.to_string(), stored.to_string());
+    let mcp_config::Plan { steps: [first, second], undo } = plan;
+    // Nothing has changed yet when the first step fails.
+    run_step(&state, &slot, first).await?;
+    if let Err(e) = run_step(&state, &slot, second).await {
+        return Err(match run_step(&state, &slot, undo).await {
+            Ok(_) => format!("{e} Nothing changed."),
+            Err(again) => format!("{e} Taking the change back failed too ({again}): check the list of servers."),
+        });
     }
     Ok(format!("Saved {name}."))
 }
