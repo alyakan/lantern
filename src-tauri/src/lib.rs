@@ -1,6 +1,7 @@
 pub mod args;
 pub mod changes;
 pub mod cli_locator;
+pub mod diagnostics;
 pub mod files;
 pub mod git;
 pub mod history;
@@ -905,6 +906,23 @@ fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
+/// Help ▸ Report a Bug…: copies the diagnostics block (versions, model, last error) to the clipboard and returns it.
+/// The window then opens the new-issue page.
+#[tauri::command]
+async fn copy_diagnostics(app: AppHandle, state: State<'_, AppState>, claude_path: Option<String>, model: Option<String>, last_error: Option<String>) -> Result<String, String> {
+    let path_env = login_path(&state).await;
+    let (macos, claude) = tauri::async_runtime::spawn_blocking(move || {
+        (diagnostics::macos_version(), claude_path.and_then(|path| diagnostics::claude_version(&path, path_env.as_deref())))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let home = std::env::var("HOME").ok();
+    let block = diagnostics::report(&app.package_info().version.to_string(), macos.as_deref(), claude.as_deref(), model.as_deref(), last_error.as_deref(), home.as_deref());
+    let to_copy = block.clone();
+    tauri::async_runtime::spawn_blocking(move || diagnostics::copy(&to_copy)).await.map_err(|e| e.to_string())??;
+    Ok(block)
+}
+
 /// Installs the downloaded update, stops every chat's claude, and relaunches into the new version, telling the window
 /// each step so it can show them. A failed install leaves the chats running.
 #[tauri::command]
@@ -1030,7 +1048,8 @@ pub fn run() {
             update_state,
             check_for_updates,
             app_version,
-            restart_to_update
+            restart_to_update,
+            copy_diagnostics
         ])
         .build(tauri::generate_context!())
         .expect("error while building Lantern")

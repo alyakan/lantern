@@ -27,6 +27,8 @@ import { notify } from "./lib/notify";
 import { availableActions, runAction, useAction } from "./lib/actions";
 import type { PaletteEntry } from "./lib/palette";
 import { newVersionToShow, notesFor, rememberNotes, versionsWithNotes } from "./lib/whatsNew";
+import { NEW_ISSUE_URL } from "./lib/bugReport";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { WhatsNew } from "./components/WhatsNew";
 import { CommandPalette } from "./components/CommandPalette";
 import { ShortcutSheet } from "./components/ShortcutSheet";
@@ -173,7 +175,12 @@ export default function App() {
   const installing = installStarted || isInstalling(updates.state);
 
   // Actions for one chat. Async results always go to the chat that asked, even if another is on screen by then.
-  const to = (slot: string) => (action: Action) => dispatchChats({ type: "in", slot, action });
+  // The last error any chat showed is kept in memory for Help ▸ Report a Bug… (it's never saved).
+  const lastError = useRef<string | null>(null);
+  const to = (slot: string) => (action: Action) => {
+    if (action.type === "failed" || action.type === "turn_failed" || action.type === "stop_failed") lastError.current = action.text;
+    dispatchChats({ type: "in", slot, action });
+  };
   const dispatch = to(active);
 
   const locate = (pathOverride: string | null) =>
@@ -923,6 +930,18 @@ export default function App() {
   // ⌘/ and Help ▸ Keyboard Shortcuts: the sheet of shortcuts, toggled the same way.
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   useAction("keyboard-shortcuts", () => setShortcutsOpen((open) => !open));
+  // Help ▸ Report a Bug…: the diagnostics go to the clipboard and the new-issue page opens. The error shown is the chat's
+  // banner's if one is up, else the last one a chat showed.
+  useAction("report-bug", () => {
+    const error = state.banner?.kind === "error" ? state.banner.text : lastError.current;
+    api.copyDiagnostics(state.claudePath, state.model, error).then(
+      () => {
+        dispatch({ type: "notice", text: "Diagnostics copied. Paste them into the issue form that just opened." });
+        openUrl(NEW_ISSUE_URL).catch(() => {});
+      },
+      (e) => dispatch({ type: "failed", text: errText(e) }),
+    );
+  });
   // Installs the downloaded update and relaunches. The window says so (the overlay) until it does: closing every chat
   // and reopening is otherwise just a window that vanishes. Started from Settings, that closes first.
   const restartToUpdate = () => {

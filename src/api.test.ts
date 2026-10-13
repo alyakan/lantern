@@ -117,6 +117,11 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ["updateState", () => api.updateState(), ["update_state"]],
   ["checkForUpdates", () => api.checkForUpdates(), ["check_for_updates"]],
   ["appVersion", () => api.appVersion(), ["app_version"]],
+  [
+    "copyDiagnostics",
+    () => api.copyDiagnostics("/bin/claude", "claude-opus-5-5", "boom"),
+    ["copy_diagnostics", { claudePath: "/bin/claude", model: "claude-opus-5-5", lastError: "boom" }],
+  ],
 ];
 
 describe("api wrappers", () => {

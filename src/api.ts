@@ -126,6 +126,8 @@ export const api = {
   checkForUpdates: () => invoke<UpdateState>("check_for_updates"),
   /** The version of Lantern that's running. */
   appVersion: () => invoke<string>("app_version"),
+  /** Help ▸ Report a Bug…: copies the diagnostics block to the clipboard and returns it. */
+  copyDiagnostics: (claudePath: string | null, model: string | null, lastError: string | null) => invoke<string>("copy_diagnostics", { claudePath, model, lastError }),
   /** Every step of looking for, downloading and installing an update, as it happens. */
   onUpdateState: (cb: (state: UpdateState) => void): Promise<UnlistenFn> => listen<UpdateState>("update-state", (e) => cb(e.payload)),
   /** "Lantern ▸ Check for Updates…" was chosen in the app menu. */
