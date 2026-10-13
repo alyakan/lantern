@@ -750,6 +750,9 @@ async function setMockUpdate(state: Record<string, unknown>) {
   return state;
 }
 
+/** The chat started as the main agent of an orchestra, once there is one. */
+let mockMain: string | null = null;
+
 export function installMockBackend() {
   // In the browser console: `mockEmit("check-for-updates")` fires a backend event, as the app menu's item does.
   (globalThis as unknown as { mockEmit: (event: string, payload?: unknown) => Promise<void> }).mockEmit = (event, payload) => emit(event, payload);
@@ -800,6 +803,7 @@ export function installMockBackend() {
           // A second project opens too, for switching between projects; the rest are gone.
           if (a.folder !== FOLDER && a.folder !== "/Users/you/projects/web-dashboard") return Promise.reject(`${String(a.folder)} no longer exists.`);
           slotMode[String(a.slot)] = String((a.settings as { mode?: string } | undefined)?.mode ?? "ask");
+          if ((a.settings as { orchestrator?: boolean } | undefined)?.orchestrator) mockMain = String(a.slot);
           setTimeout(() => {
             sendTo(String(a.slot))({ kind: "commands", commands: COMMANDS });
             sendTo(String(a.slot))({ kind: "models", models: MODELS });
@@ -815,6 +819,15 @@ export function installMockBackend() {
           delete slotMode[String(a.slot)];
           return null;
         case "interrupt":
+          return null;
+        // The user's answers to a worker's merge proposal, which the main agent's chat hears of.
+        case "orchestra_approve_merge":
+          if (mockMain) void sendTo(mockMain)({ kind: "merge_resolved", worker: String(a.worker), outcome: "merged", detail: "main" });
+          return null;
+        case "orchestra_decline_merge":
+          if (mockMain) void sendTo(mockMain)({ kind: "merge_resolved", worker: String(a.worker), outcome: "declined", detail: "" });
+          return null;
+        case "orchestra_discard":
           return null;
         case "run_shell":
           playShell(String(a.slot), String(a.id), String(a.command));

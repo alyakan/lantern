@@ -140,6 +140,21 @@ pub enum UiEvent {
     ShellDone { id: String, code: Option<i32>, stopped: bool },
     /// That command turned echo off to read a secret (a password), or back on.
     ShellSecret { id: String, secret: bool },
+    /// On the main agent's slot: it started a worker, whose chat is the slot `worker`. Sent before the worker's claude
+    /// starts, so the UI has the chat open when its first event arrives.
+    AgentSpawned { worker: String, name: String, brief: String, folder: String, branch: Option<String>, base: Option<String>, isolation: String },
+    /// On the main agent's slot: a note from Lantern for it (a worker finished, crashed or waits on the user), to be sent
+    /// as a message when the main agent is idle. Several are joined into one.
+    AgentWake { text: String },
+    /// On a worker's slot: the main agent sent it this.
+    AgentMessage { from: String, text: String },
+    /// On a worker's slot: its claude was stopped on purpose (or never started: `reason` says why).
+    AgentStopped { reason: Option<String> },
+    /// On the main agent's slot: it asks the user to merge a worker's branch into `into`.
+    MergeProposed { worker: String, name: String, branch: String, into: String, summary: String, commits: u32, files: Vec<crate::git::FileStat>, uncommitted: usize },
+    /// On the main agent's slot: how the proposal ended: "merged", "conflicts", "declined" or "failed", with the detail
+    /// (the branch merged into, the conflicting files, or why it failed).
+    MergeResolved { worker: String, outcome: String, detail: String },
     Unknown { raw: Value },
     ParseError { line: String },
 }

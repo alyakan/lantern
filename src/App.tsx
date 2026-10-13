@@ -7,7 +7,7 @@ import { StepsIntro } from "./components/StepsIntro";
 import { windowFocused } from "./lib/windowFocus";
 import { initialState, reducer, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
-import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend } from "./sessions";
+import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend } from "./sessions";
 import type { Mode } from "./types";
 import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
@@ -317,11 +317,12 @@ export default function App() {
   };
 
   // `quiet`: reopening the remembered project at launch; if that fails (e.g. the folder is gone), just forget it.
-  const startFresh = (folder: string, quiet = false) => {
-    if (state.claudePath) startIn(takeSlot(), folder, quiet);
+  const startFresh = (folder: string, quiet = false, orchestrator = false) => {
+    if (state.claudePath) startIn(takeSlot(), folder, quiet, orchestrator);
   };
 
-  const startIn = (slot: string, folder: string, quiet = false) => {
+  /** `orchestrator`: the chat is the main agent of an orchestra, which can start worker agents. */
+  const startIn = (slot: string, folder: string, quiet = false, orchestrator = false) => {
     const { claudePath } = state;
     if (!claudePath) return;
     const mode = modeFor(folder);
@@ -329,9 +330,10 @@ export default function App() {
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode });
-    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder);
+    to(slot)({ type: "orchestrator_set", on: orchestrator });
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, orchestrator);
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
-    api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder) }).then(
+    api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder), ...(orchestrator ? { orchestrator } : {}) }).then(
       () => {
         if (startGen.current[slot] !== gen) return;
         delete relaunch.current[slot];
@@ -538,9 +540,10 @@ export default function App() {
 
   // A flavour picked since the chat's last message goes with this one, in a note telling Claude.
   // `draft`: the box's text as sent, with its paste placeholders (kept on the message so Edit can bring them back).
-  const sendIn = (slot: string, text: string, draft?: string) => {
+  // `auto`: sent by Lantern from agents' notes, not typed by the user.
+  const sendIn = (slot: string, text: string, draft?: string, auto = false) => {
     const pick = chats.slots[slot]?.flavourPick ?? null;
-    to(slot)({ type: "user_sent", text, ...(pick ? { switchedTo: pick } : {}), ...(draft ? { draft } : {}) });
+    to(slot)({ type: "user_sent", text, ...(auto ? { auto } : {}), ...(pick ? { switchedTo: pick } : {}), ...(draft ? { draft } : {}) });
     // Commands run since the last message go first, so Claude sees what they printed; skills named mid-message get
     // a note so Claude uses them.
     const items = chats.slots[slot]?.items ?? [];
@@ -579,6 +582,12 @@ export default function App() {
     for (const { slot, text } of due) {
       to(slot)({ type: "queue_set", items: [] });
       sendIn(slot, text);
+    }
+    // Notes from an orchestra's workers go to the main agent as soon as it is idle (not only when a turn ends: it is
+    // usually idle when a worker finishes), joined into one message.
+    for (const { slot, text } of wakesToSend(chats.slots)) {
+      to(slot)({ type: "wakes_taken" });
+      sendIn(slot, text, undefined, true);
     }
   }, [chats.slots]);
 

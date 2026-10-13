@@ -143,7 +143,7 @@ mod tests {
 
         // A permission request on s1's socket reaches the UI tagged with s1.
         let socket = a.bridge.socket_path.display().to_string();
-        let req = crate::permission::protocol::BridgeRequest { tool_name: "Bash".into(), input: serde_json::json!({}), tool_use_id: None };
+        let req = crate::permission::protocol::BridgeRequest::permission("Bash".into(), serde_json::json!({}), None);
         let helper = tokio::task::spawn_blocking(move || crate::permission::helper::ask_bridge(Some(&socket), &req));
         let ev = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await.unwrap().unwrap();
         assert_eq!(ev.slot, "s1");
@@ -177,7 +177,7 @@ mod tests {
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: crate::args::HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into() },
+            helper: crate::args::HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default() },
             path_env: None,
         };
         let slots = Slots::default();

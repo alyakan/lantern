@@ -17,6 +17,9 @@ const MAX_REQUEST: u64 = 32 << 20;
 /// How long a connection may take to send its request before it's dropped.
 const REQUEST_WAIT: Duration = Duration::from_secs(10);
 
+/// Serves the main agent's orchestra tool calls: (tool, arguments) in; whether it worked, and the text the model reads.
+pub type OrchestraHandler = Arc<dyn Fn(String, serde_json::Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = BridgeResponse> + Send>> + Send + Sync>;
+
 /// Unix-socket server that turns helper requests into UI permission cards, or answers them by a rule.
 pub struct PermissionBridge {
     pub socket_path: PathBuf,
@@ -30,6 +33,8 @@ pub struct PermissionBridge {
     folder: Mutex<Option<String>>,
     /// The rules for folders, shared by every chat.
     folder_rules: Arc<FolderRules>,
+    /// Set only on the main agent's chat: any other chat's orchestra calls are refused.
+    orchestra: Mutex<Option<OrchestraHandler>>,
 }
 
 impl PermissionBridge {
@@ -45,6 +50,7 @@ impl PermissionBridge {
             chat_rules: Mutex::new(Vec::new()),
             folder: Mutex::new(None),
             folder_rules,
+            orchestra: Mutex::new(None),
         });
         let b = bridge.clone();
         let accept = tauri::async_runtime::spawn(async move {
@@ -73,6 +79,18 @@ impl PermissionBridge {
             _ => return,
         }
         let Ok(req) = serde_json::from_str::<BridgeRequest>(&line) else { return };
+        // An orchestra call is no permission prompt: it never becomes a card, and it is answered here.
+        if req.orchestra {
+            let handler = self.orchestra.lock().unwrap().clone();
+            let resp = match handler {
+                Some(handle) => handle(req.tool_name, req.input).await,
+                None => BridgeResponse { allow: false, message: Some("This chat is not the main agent of an orchestra.".into()), updated_input: None },
+            };
+            if let Ok(json) = serde_json::to_string(&resp) {
+                let _ = write.write_all(format!("{json}\n").as_bytes()).await;
+            }
+            return;
+        }
         // The helper sends nothing after its request, so its read half only tells us when it has gone.
         let mut read = reader.into_inner().into_inner();
         let id = format!("perm-{}", self.counter.fetch_add(1, Ordering::SeqCst) + 1);
@@ -107,6 +125,11 @@ impl PermissionBridge {
                 sink(UiEvent::PermissionWithdrawn { request_id: id });
             }
         }
+    }
+
+    /// Makes this the main agent's bridge: its helper's orchestra tool calls go to `handler`.
+    pub fn set_orchestra(&self, handler: OrchestraHandler) {
+        *self.orchestra.lock().unwrap() = Some(handler);
     }
 
     /// Returns false if the request is unknown or already answered. `message` goes back to Claude (a deny reason,
@@ -209,7 +232,7 @@ mod tests {
     }
 
     fn request() -> BridgeRequest {
-        BridgeRequest { tool_name: "Bash".into(), input: json!({"command": "npm test"}), tool_use_id: Some("toolu_1".into()) }
+        BridgeRequest::permission("Bash".into(), json!({"command": "npm test"}), Some("toolu_1".into()))
     }
 
     fn ask_in_background(bridge: &PermissionBridge) -> tokio::task::JoinHandle<BridgeResponse> {
@@ -283,6 +306,54 @@ mod tests {
             other => panic!("unexpected {other:?}"),
         }
         assert!(!bridge.respond(&id, true, None, None), "a withdrawn prompt can't be answered");
+    }
+
+    fn orchestra_call() -> BridgeRequest {
+        BridgeRequest { tool_name: "list_agents".into(), input: json!({}), tool_use_id: None, orchestra: true }
+    }
+
+    #[tokio::test]
+    async fn an_orchestra_call_is_served_by_the_handler_and_never_shows_a_card() {
+        let (bridge, mut rx, _dir) = setup();
+        bridge.set_orchestra(Arc::new(|tool, input| {
+            Box::pin(async move { BridgeResponse { allow: true, message: Some(format!("{tool} {input}")), updated_input: None } })
+        }));
+        let socket = bridge.socket_path.display().to_string();
+        let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &orchestra_call())).await.unwrap();
+        assert_eq!(reply, BridgeResponse { allow: true, message: Some("list_agents {}".into()), updated_input: None });
+        assert!(tokio::time::timeout(Duration::from_millis(200), rx.recv()).await.is_err(), "a card was shown");
+    }
+
+    #[tokio::test]
+    async fn a_chat_that_is_not_the_main_agent_refuses_orchestra_calls() {
+        let (bridge, mut rx, _dir) = setup();
+        let socket = bridge.socket_path.display().to_string();
+        let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &orchestra_call())).await.unwrap();
+        assert!(!reply.allow);
+        assert!(reply.message.unwrap().contains("not the main agent"));
+        assert!(tokio::time::timeout(Duration::from_millis(200), rx.recv()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_slow_orchestra_call_does_not_hold_up_a_permission_prompt() {
+        let (bridge, mut rx, _dir) = setup();
+        bridge.set_orchestra(Arc::new(|_, _| {
+            Box::pin(async {
+                tokio::time::sleep(Duration::from_millis(600)).await;
+                BridgeResponse { allow: true, message: Some("late".into()), updated_input: None }
+            })
+        }));
+        let socket = bridge.socket_path.display().to_string();
+        let slow = tokio::task::spawn_blocking({
+            let socket = socket.clone();
+            move || ask_bridge(Some(&socket), &orchestra_call())
+        });
+        let helper = ask_in_background(&bridge);
+        let id = next_request_id(&mut rx).await;
+        assert!(bridge.respond(&id, true, None, None));
+        assert!(helper.await.unwrap().allow);
+        assert!(!slow.is_finished(), "the prompt was answered while the slow call was still running");
+        assert_eq!(slow.await.unwrap().message.as_deref(), Some("late"));
     }
 
     #[tokio::test]

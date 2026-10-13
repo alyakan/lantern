@@ -8,6 +8,7 @@ pub mod history;
 pub mod mcp_config;
 pub mod menu;
 pub mod navigation;
+pub mod orchestra;
 pub mod permission;
 pub mod pr;
 pub mod session;
@@ -25,7 +26,7 @@ pub mod revert;
 pub mod ui_event;
 pub mod updates;
 
-use args::{HelperConfig, Mode};
+use args::{HelperConfig, Mode, Role};
 use changes::FileDiff;
 use session::{EditHook, Session, SessionConfig};
 use slots::{Slot, SlotEvent, Slots};
@@ -35,6 +36,8 @@ use tauri_plugin_dialog::DialogExt;
 
 pub struct AppState {
     slots: Slots,
+    /// The main agents and workers of every orchestra (see orchestra.rs).
+    orchestra: Arc<orchestra::Orchestra>,
     login_path: Arc<OnceLock<Option<String>>>,
     titles: Arc<titles::TitleStore>,
     /// Names the user gave sessions in Lantern (Rename in the History menu): they beat every other title.
@@ -72,10 +75,93 @@ async fn login_path(state: &AppState) -> Option<String> {
     tauri::async_runtime::spawn_blocking(move || cell.get_or_init(cli_locator::login_shell_path).clone()).await.ok().flatten()
 }
 
+/// Sends a chat's events to the UI, and lets the orchestra see them too (a worker finishing a turn wakes its main agent).
 fn emitter(app: &AppHandle) -> impl Fn(SlotEvent) + Send + Sync + Clone + 'static {
     let app = app.clone();
     move |ev| {
-        let _ = app.emit("ui-event", ev);
+        let _ = app.emit("ui-event", &ev);
+        if let Some(state) = app.try_state::<AppState>() {
+            state.orchestra.observe(&ev.slot, &ev.event);
+        }
+    }
+}
+
+/// The app, as the orchestra needs it (see orchestra::Host).
+struct AppHost {
+    app: AppHandle,
+}
+
+impl orchestra::Host for AppHost {
+    fn emit(&self, slot: &str, event: ui_event::UiEvent) {
+        let _ = self.app.emit("ui-event", SlotEvent { slot: slot.to_string(), event });
+    }
+
+    fn main_folder(&self, main: &str) -> Result<std::path::PathBuf, String> {
+        self.app.state::<AppState>().slots.get(main)?.folder()
+    }
+
+    fn worktree_root(&self) -> std::path::PathBuf {
+        self.app.path().app_local_data_dir().unwrap_or_else(|_| std::env::temp_dir()).join("worktrees")
+    }
+
+    fn path_env(&self) -> orchestra::Fut<'_, Option<String>> {
+        Box::pin(async move { login_path(&self.app.state::<AppState>()).await })
+    }
+
+    fn spawn_worker(&self, req: orchestra::SpawnRequest) -> orchestra::Fut<'_, Result<(), String>> {
+        Box::pin(async move {
+            let state = self.app.state::<AppState>();
+            let parent = state.slots.get(&req.parent)?;
+            let mut cfg = parent.config.lock().unwrap().clone().ok_or("The main agent has no folder open.")?;
+            let s = slot_for(&self.app, &state, &req.slot)?;
+            // Workers run on Auto, so a prompt only reaches the user when Claude Code's own classifier can't decide.
+            cfg.folder = req.folder;
+            cfg.mode = Mode::Auto;
+            cfg.auto_approve = false;
+            cfg.resume = None;
+            if req.model.is_some() {
+                cfg.model = req.model;
+            }
+            cfg.helper = helper_config(&s, Role::Worker { name: req.name })?;
+            cfg.path_env = login_path(&state).await;
+            launch(&self.app, &req.slot, &s, cfg, true).await?;
+            send_text(&s, &req.brief).await.map(|_| ())
+        })
+    }
+
+    fn send_to<'a>(&'a self, slot: &'a str, text: String) -> orchestra::Fut<'a, Result<(), String>> {
+        Box::pin(async move {
+            let s = self.app.state::<AppState>().slots.get(slot)?;
+            send_text(&s, &text).await.map(|_| ())
+        })
+    }
+
+    fn stop<'a>(&'a self, slot: &'a str) -> orchestra::Fut<'a, ()> {
+        Box::pin(async move {
+            let Ok(s) = self.app.state::<AppState>().slots.get(slot) else { return };
+            s.bridge.cancel_all();
+            s.shells.stop_all();
+            // Taken out before stopping: the lock would otherwise be held while claude stops.
+            let session = s.session.lock().await.take();
+            if let Some(session) = session {
+                session.stop().await;
+            }
+        })
+    }
+
+    fn transcript(&self, folder: &std::path::Path, session_id: &str) -> Result<Vec<ui_event::UiEvent>, String> {
+        let path = history::transcript_path(&projects_root()?, folder, session_id)?;
+        Ok(history::replay(&path).events)
+    }
+}
+
+/// Makes `slot` the main agent of an orchestra (when its role says so): its bridge serves the orchestra tools.
+fn enroll(state: &AppState, id: &str, slot: &Slot, role: &Role) {
+    if *role == Role::Main {
+        state.orchestra.register_main(id);
+        slot.bridge.set_orchestra(state.orchestra.handler(id.to_string()));
+    } else {
+        state.orchestra.forget(id);
     }
 }
 
@@ -84,9 +170,9 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
     state.slots.get_or_create(slot, &std::env::temp_dir(), emitter(app), state.folder_rules.clone())
 }
 
-fn helper_config(slot: &Slot) -> Result<HelperConfig, String> {
+fn helper_config(slot: &Slot, role: Role) -> Result<HelperConfig, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string() })
+    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role })
 }
 
 /// Stops the slot's running session (denying its pending prompts) and starts `cfg` in it.
@@ -129,6 +215,9 @@ struct Settings {
     advisor: Option<String>,
     #[serde(default)]
     subagent_model: Option<String>,
+    /// Start the chat as the main agent of an orchestra: it can spawn workers (see orchestra.rs).
+    #[serde(default)]
+    orchestrator: bool,
 }
 
 fn checked_effort(effort: Option<String>) -> Result<Option<String>, String> {
@@ -152,7 +241,7 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
         effort: checked_effort(settings.effort)?,
         advisor: checked_model(settings.advisor)?,
         subagent_model: checked_model(settings.subagent_model)?,
-        helper: helper_config(slot)?,
+        helper: helper_config(slot, if settings.orchestrator { Role::Main } else { Role::Normal })?,
         path_env: login_path(state).await,
     })
 }
@@ -182,6 +271,7 @@ async fn locate_claude(path_override: Option<String>) -> Result<String, String> 
 async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String, claude_path: String, folder: String, settings: Settings) -> Result<(), String> {
     let s = slot_for(&app, &state, &slot)?;
     let cfg = new_config(&state, &s, claude_path, folder, settings, None).await?;
+    enroll(&state, &slot, &s, &cfg.helper.role);
     launch(&app, &slot, &s, cfg, true).await?;
     menu::refresh_recent(&app).await;
     Ok(())
@@ -199,7 +289,7 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
         cfg.auto_approve = auto;
     }
     cfg.resume = running_id.or(cfg.resume);
-    cfg.helper = helper_config(&s)?;
+    cfg.helper = helper_config(&s, cfg.helper.role.clone())?;
     cfg.path_env = login_path(&state).await;
     launch(&app, &slot, &s, cfg, false).await
 }
@@ -215,7 +305,7 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
     cfg.advisor = checked_model(advisor)?;
     cfg.subagent_model = checked_model(subagent_model)?;
     cfg.resume = running_id.or(cfg.resume);
-    cfg.helper = helper_config(&s)?;
+    cfg.helper = helper_config(&s, cfg.helper.role.clone())?;
     cfg.path_env = login_path(&state).await;
     launch(&app, &slot, &s, cfg, false).await
 }
@@ -223,6 +313,7 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
 /// Stops a chat and forgets it. Closing one that doesn't exist is fine.
 #[tauri::command]
 async fn close_session(state: State<'_, AppState>, slot: String) -> Result<(), String> {
+    state.orchestra.forget(&slot);
     if let Some(s) = state.slots.remove(&slot) {
         s.shut_down().await;
     }
@@ -255,12 +346,20 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
 async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
     let s = state.slots.get(&slot)?;
+    let turn = send_text(&s, &text).await?;
+    // Said to a worker by the user themselves: its main agent hears of it with its next wake-up.
+    state.orchestra.note_user_message(&slot, &text);
+    Ok(turn)
+}
+
+/// Sends `text` into the chat's claude as a new message and returns the turn's number.
+async fn send_text(s: &Slot, text: &str) -> Result<usize, String> {
     let mut session = s.session.lock().await;
     let claude = session.as_mut().ok_or("No Claude session is running")?;
     // What "Last turn" in the Changes pane compares against. It's taken before the send, so Claude's edits come after it.
     let changes = s.changes.clone();
     let turn = tauri::async_runtime::spawn_blocking(move || changes.lock().unwrap().start_turn()).await.map_err(|e| e.to_string())?;
-    if let Err(e) = claude.send(&text).await {
+    if let Err(e) = claude.send(text).await {
         s.changes.lock().unwrap().cancel_turn(turn);
         return Err(e);
     }
@@ -271,6 +370,24 @@ async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, 
         menu::refresh_recent(&app).await;
     }
     Ok(turn)
+}
+
+/// The user approved a worker's merge (the card's button): its branch goes into the main checkout.
+#[tauri::command]
+async fn orchestra_approve_merge(state: State<'_, AppState>, worker: String) -> Result<(), String> {
+    state.orchestra.approve_merge(&worker).await
+}
+
+#[tauri::command]
+fn orchestra_decline_merge(state: State<'_, AppState>, worker: String) -> Result<(), String> {
+    state.orchestra.decline_merge(&worker)
+}
+
+/// Removes a worker's worktree. Without `force`, a worktree with loose work is kept (an error says so) and a branch
+/// that isn't merged is kept either way.
+#[tauri::command]
+async fn orchestra_discard(state: State<'_, AppState>, worker: String, force: bool) -> Result<(), String> {
+    state.orchestra.discard(&worker, force).await
 }
 
 /// The control requests Settings may send to a chat's claude: MCP servers' status and actions, and reloading plugins
@@ -920,6 +1037,7 @@ async fn open_session(
 ) -> Result<OpenedSession, String> {
     let s = slot_for(&app, &state, &slot)?;
     let cfg = new_config(&state, &s, claude_path, folder, settings, Some(session_id.clone())).await?;
+    enroll(&state, &slot, &s, &cfg.helper.role);
     let root = projects_root()?;
     let folder = cfg.folder.clone();
     let aliases = aliases_for(&state, &folder.to_string_lossy());
@@ -1085,7 +1203,8 @@ pub fn run() {
             let renames = titles::TitleStore::load(app.path().app_data_dir().ok().map(|d| d.join("renames.json")));
             let folder_rules = permission::rules::FolderRules::load(app.path().app_data_dir().ok().map(|d| d.join("permission_rules.json")));
             let relocations = relocate::Relocations::load(app.path().app_data_dir().ok().map(|d| d.join("relocations.json")));
-            app.manage(AppState { slots: Slots::default(), login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default() });
+            let orchestra = orchestra::Orchestra::new(Arc::new(AppHost { app: app.handle().clone() }));
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default() });
             app.manage(updates::Updates::default());
             if updates::checks_enabled() {
                 tauri::async_runtime::spawn(updates::watch(app.handle().clone()));
@@ -1127,6 +1246,9 @@ pub fn run() {
             apply_harness,
             close_session,
             send_message,
+            orchestra_approve_merge,
+            orchestra_decline_merge,
+            orchestra_discard,
             run_shell,
             claude_request,
             skill_index,

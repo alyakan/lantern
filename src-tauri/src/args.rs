@@ -75,12 +75,43 @@ impl Mode {
     }
 }
 
+/// What a chat is in an orchestra (see orchestra.rs): an ordinary chat, the main agent that spawns workers, or one of them.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum Role {
+    #[default]
+    Normal,
+    Main,
+    Worker { name: String },
+}
+
+/// What the main agent is told, appended to Claude Code's system prompt after the app note: its tools, how the workers
+/// report back, and how to split work with them.
+pub const ORCHESTRATOR_PROMPT: &str = "You are the main agent of a Lantern orchestra: you work with the user, and you run a team of worker agents. The user may be a product owner or a lead who wants outcomes rather than code-level control, so report in plain language: what got done, what was decided, what needs them. Give detail when asked.
+Your tools, from the lantern MCP server:
+- spawn_agent(name, brief, isolation?, model?): starts a worker with a chat of its own. The brief is its whole task, so write it for someone who hasn't seen this conversation: the goal, the files or areas involved, constraints, how to verify, and what done looks like. isolation is \"worktree\" (the default: its own git worktree and branch, so it can't collide with you or other workers) or \"shared\" (your folder: only for work that writes nothing, like research or review). It returns at once and the worker runs on its own.
+- list_agents: every worker with its status, branch and latest message.
+- read_agent(id, cursor?, limit?): a worker's conversation: its latest entries, or the ones from `cursor` on. Use it when you need more than its summary.
+- message_agent(id, text): sends a worker an instruction or an answer. It shows in the worker's chat as from you.
+- stop_agent(id): stops a worker. Its worktree is kept.
+- propose_merge(id, summary): asks the user to merge a worker's branch into the main checkout. Only the user can approve it; you can't merge.
+How it runs: every tool returns at once, so there is nothing to poll or wait on. When a worker finishes a turn, stops, or has been waiting on the user for a while, Lantern sends you a message that starts with \"[Lantern: \" with a short summary; those are not from the user. The user also talks to workers directly in their own chats, so read a worker before assuming what it knows or did, and don't contradict what the user told it.
+Working with them: hand off what can run in parallel or needs focused effort, and do small or cross-cutting changes yourself; you can edit code and run commands like any agent. A worker in a worktree starts from the last commit and does not see your uncommitted edits, so commit before you tell it to build on your change, then message it. Never edit the same files as a worker in shared mode. Keep at most 6 workers going. When a worker's branch is ready, check it (read_agent, run its tests in its worktree) and call propose_merge. When you are waiting on workers, end your turn; a note arrives when one needs you.";
+
+/// What a worker is told: who it is, who may message it, and what to leave behind.
+pub fn worker_prompt(name: &str) -> String {
+    format!(
+        "You are a worker agent in a Lantern orchestra, named \"{name}\". Your first message is your task, from the main agent. The main agent may message you later (those messages start with \"[From the main agent]\"), and the user may talk to you directly in this chat: follow them both, and if they disagree the user wins. Stay inside your folder. If it is a git worktree, commit your work to its branch in clear steps as you finish each piece; the user reviews and merges it, so never merge, push or switch branches yourself. End every turn with a short plain summary: what you did, what is left, and anything you need decided. The main agent reads that summary."
+    )
+}
+
 #[derive(Debug, Clone)]
 pub struct HelperConfig {
     /// Path of this app's executable, run by claude with `--permission-helper`.
     pub exe: String,
     /// Unix socket the helper connects to.
     pub socket: String,
+    /// Only the main agent's helper offers the orchestra tools.
+    pub role: Role,
 }
 
 /// A model alias or id: letters, digits, '-', '.', and a bracketed suffix like "[1m]". Never starts with '-'.
@@ -112,11 +143,15 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
     // Code falls back to asking (repeated blocks, an ask rule) a -p run without a prompt tool just denies. In Step by
     // step the server also has Debug's reproduce card.
     {
+        let mut env = serde_json::json!({"LANTERN_SOCKET": helper.socket});
+        if helper.role == Role::Main {
+            env["LANTERN_ROLE"] = "main".into();
+        }
         let cfg = serde_json::json!({"mcpServers": {"lantern": {
             "type": "stdio",
             "command": helper.exe,
             "args": ["--permission-helper"],
-            "env": {"LANTERN_SOCKET": helper.socket}
+            "env": env
         }}});
         a.push("--mcp-config".into());
         a.push(cfg.to_string());
@@ -128,12 +163,31 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
         prompt.push_str("\n\n");
         prompt.push_str(STEPS_PROMPT);
     }
+    match &helper.role {
+        Role::Normal => {}
+        Role::Main => {
+            prompt.push_str("\n\n");
+            prompt.push_str(ORCHESTRATOR_PROMPT);
+        }
+        Role::Worker { name } => {
+            prompt.push_str("\n\n");
+            prompt.push_str(&worker_prompt(name));
+        }
+    }
     a.push("--append-system-prompt".into());
     a.push(prompt);
+    // Tools that are their own confirmation shouldn't also need approving: the reproduce card, and the main agent's
+    // orchestra tools (the user already chose to run an orchestra; a merge still waits for their approval).
+    let mut allowed: Vec<String> = Vec::new();
     if steps {
-        // The reproduce card is its own confirmation; it shouldn't also need approving.
+        allowed.push("mcp__lantern__reproduce".into());
+    }
+    if helper.role == Role::Main {
+        allowed.extend(crate::permission::helper::ORCHESTRA_TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
+    }
+    if !allowed.is_empty() {
         a.push("--allowedTools".into());
-        a.push("mcp__lantern__reproduce".into());
+        a.push(allowed.join(","));
     }
     if let Some(id) = resume {
         a.push("--resume".into());
@@ -167,7 +221,44 @@ mod tests {
     }
 
     fn helper() -> HelperConfig {
-        HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into() }
+        HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Normal }
+    }
+
+    #[test]
+    fn the_main_agent_gets_the_orchestra_tools_allowed_and_its_role_in_the_helper_env() {
+        let main = HelperConfig { role: Role::Main, ..helper() };
+        let a = build_args(Mode::Ask, false, None, None, None, &main);
+        let cfg: serde_json::Value = serde_json::from_str(value_after(&a, "--mcp-config").unwrap()).unwrap();
+        assert_eq!(cfg["mcpServers"]["lantern"]["env"]["LANTERN_ROLE"], "main");
+        let allowed = value_after(&a, "--allowedTools").unwrap();
+        for tool in ["spawn_agent", "list_agents", "read_agent", "message_agent", "stop_agent", "propose_merge"] {
+            assert!(allowed.split(',').any(|t| t == format!("mcp__lantern__{tool}")), "{tool}");
+        }
+        assert!(value_after(&a, "--append-system-prompt").unwrap().contains("main agent of a Lantern orchestra"));
+        // Step by step's reproduce card is allowed alongside them.
+        let steps = build_args(Mode::Steps, false, None, None, None, &main);
+        assert!(value_after(&steps, "--allowedTools").unwrap().starts_with("mcp__lantern__reproduce,"));
+        // The main agent is not held back from editing: nothing is disallowed.
+        assert!(!a.iter().any(|x| x == "--disallowedTools"));
+    }
+
+    #[test]
+    fn a_worker_is_named_in_its_prompt_and_cannot_spawn_agents() {
+        let worker = HelperConfig { role: Role::Worker { name: "login-form".into() }, ..helper() };
+        let a = build_args(Mode::Auto, false, None, None, None, &worker);
+        let cfg: serde_json::Value = serde_json::from_str(value_after(&a, "--mcp-config").unwrap()).unwrap();
+        assert!(cfg["mcpServers"]["lantern"]["env"].get("LANTERN_ROLE").is_none());
+        assert!(!a.iter().any(|x| x == "--allowedTools"));
+        let prompt = value_after(&a, "--append-system-prompt").unwrap();
+        assert!(prompt.contains("named \"login-form\"") && prompt.contains("never merge, push or switch branches"));
+        assert!(!prompt.contains("main agent of a Lantern orchestra"));
+    }
+
+    #[test]
+    fn an_ordinary_chat_hears_nothing_of_the_orchestra() {
+        let a = build_args(Mode::Ask, false, None, None, None, &helper());
+        let prompt = value_after(&a, "--append-system-prompt").unwrap();
+        assert!(!prompt.contains("orchestra") && !prompt.contains("worker agent"));
     }
 
     fn value_after<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
