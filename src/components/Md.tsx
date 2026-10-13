@@ -174,12 +174,15 @@ const rehypePlugins = [rehypeCallouts];
 
 /** The language of the files the message being drawn names: what an untagged code block in it is most likely in. */
 const LanguageHint = createContext<string | null>(null);
-/** Whether pictures are loaded. Markdown drawn inside markdown (a plan step's fields) follows the text around it. */
-const ImagesAllowed = createContext(true);
+/**
+ * Whether pictures are loaded. Off unless a caller opts in: Claude's text can carry a picture that a prompt injection
+ * points at a server it wants data sent to. Markdown drawn inside markdown (a plan step's fields) follows the text around it.
+ */
+const ImagesAllowed = createContext(false);
 
 /**
- * Claude's markdown: GFM, file links, code block headers, plan step cards and callouts. `images={false}` is for text
- * that isn't Claude's (a file of the project): its pictures aren't loaded.
+ * Claude's markdown: GFM, file links, code block headers, plan step cards and callouts. Pictures aren't loaded unless
+ * `images` is set, so a picture shows as its description, whatever text it's in.
  */
 export function Md({ children, inline = false, images }: { children: string; inline?: boolean; images?: boolean }) {
   const hint = useMemo(() => languageHint(children), [children]);

@@ -36,6 +36,12 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [previewLine, setPreviewLine] = useState<number | null>(null);
+  // Counts the requests for a line, so the same line asked for again is still a request (see FilePreview).
+  const [jump, setJump] = useState(0);
+  const showLine = (line: number | null) => {
+    setPreviewLine(line);
+    setJump((n) => n + 1);
+  };
   // Unsaved edits in the open file: leaving it (another file, back to the tree, the search) asks first.
   const [unsaved, setUnsaved] = useState(false);
   const unsavedRef = useRef(false);
@@ -54,10 +60,10 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
   useEffect(() => {
     if (!reveal) return;
     // The file that's open, at another line: no need to leave it.
-    if (reveal.path === previewRef.current) return setPreviewLine(reveal.line);
+    if (reveal.path === previewRef.current) return showLine(reveal.line);
     leave(() => {
       setPreview(reveal.path);
-      setPreviewLine(reveal.line);
+      showLine(reveal.line);
     });
   }, [reveal?.key]);
 
@@ -103,7 +109,8 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
     const q = query.trim();
     if (mode !== "text" || !q || !ready) return setText({ results: null, error: null });
     let live = true;
-    setText((t) => ({ ...t, error: null }));
+    // The last query's matches don't stand for this one: they go until these come back.
+    setText({ results: null, error: null });
     // Reading every file takes a moment, so wait for a pause in typing; a newer search cancels this one.
     const wait = setTimeout(() => {
       api.searchText(slot, { pattern: query, case_sensitive: caseSensitive, whole_word: wholeWord, regex }).then(
@@ -120,6 +127,7 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
     const q = query.trim();
     if (mode !== "files" || !q || !ready) return setFound(null);
     let live = true;
+    setFound(null);
     // A short pause between keystrokes before asking; the backend keeps the file list, so each search is quick.
     const wait = setTimeout(() => {
       api.findFiles(slot, q).then(
@@ -141,23 +149,36 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
 
   const load = (dir: string) =>
     api.listDir(slot, dir).then(
-      (entries) => setChildren((c) => ({ ...c, [dir]: entries })),
-      (e) => dir === folder && setError(String(e)),
+      (entries) => {
+        setChildren((c) => ({ ...c, [dir]: entries }));
+        if (dir === folder) setError(null);
+      },
+      (e) => {
+        if (dir === folder) setError(String(e));
+        // A folder that has gone (removed outside Lantern) drops out, rather than keeping its old contents.
+        else setChildren(({ [dir]: _gone, ...rest }) => rest);
+      },
     );
 
-  // A new folder starts from a collapsed tree.
+  // A new folder starts from a collapsed tree. Leaving the open file for it asks about its unsaved edits; a new chat
+  // keeps them (editStash), as switching chats always has.
+  const chat = useRef(slot);
   useEffect(() => {
+    const sameChat = chat.current === slot;
+    chat.current = slot;
     setChildren({});
     setExpanded(new Set());
-    setPreview(null);
     setError(null);
+    if (sameChat) leave(() => setPreview(null));
+    else setPreview(null);
   }, [folder, slot]);
 
-  // Reload whatever is visible after each edit so files Claude creates show up.
+  // Reload after each edit so files Claude creates show up: every folder read so far, open or not, since a collapsed
+  // one's contents are shown again as soon as it's expanded.
   useEffect(() => {
     if (!folder || !ready) return;
     load(folder);
-    expanded.forEach((dir) => dir.startsWith(folder + "/") && load(dir));
+    Object.keys(children).forEach((dir) => dir !== folder && dir.startsWith(folder + "/") && load(dir));
   }, [folder, ready, refreshKey, slot]);
 
   const toggle = (dir: string) => {
@@ -191,7 +212,7 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
           )}
         </div>
         <Suspense fallback={<div className="empty">Loading…</div>}>
-          <FilePreview key={`${slot}:${preview}`} path={preview} line={previewLine} refreshKey={refreshKey} onDirty={setUnsaved} onSaved={onSaved} />
+          <FilePreview key={`${slot}:${preview}`} path={preview} line={previewLine} jump={jump} refreshKey={refreshKey} onDirty={setUnsaved} onSaved={onSaved} />
         </Suspense>
       </>
     );
@@ -263,7 +284,7 @@ export function FilesTab({ folder, ready, changed, refreshKey, onOpenChange, rev
               {r.truncated && " (stopped there; narrow the search to see the rest)"}
             </div>
             {r.files.map((f) => (
-              <TextFile key={f.path} file={f} changed={byPath.has(f.path)} onOpen={(line) => (setPreview(f.path), setPreviewLine(line))} />
+              <TextFile key={f.path} file={f} changed={byPath.has(f.path)} onOpen={(line) => (setPreview(f.path), showLine(line))} />
             ))}
           </div>
         )}

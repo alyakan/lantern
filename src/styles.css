@@ -23,6 +23,7 @@
   --text-2: #48484a;
   --muted: #86868b;
   --faint: #aeaeb2;
+  --muted-text: #6e6e73;   /* small text in the muted grey: 4.7:1 on the sidebar, where --muted is 3.3:1 */
   --accent: #1d1d1f;       /* neutral: buttons are black/white, never blue */
   --accent-soft: #ececee;
   --accent-text: #ffffff;
@@ -66,6 +67,7 @@
     --text-2: #b9b9bd;
     --muted: #8e8e93;
     --faint: #5d5d63;
+    --muted-text: #98989d;   /* 5.0:1 on the sidebar, where --muted is 4.4:1 */
     --accent: #e6e6e7;
     --accent-soft: #2a2a2a;
     --accent-text: #1a1a1d;
@@ -76,7 +78,7 @@
     --info-bg: #2a2a30;
     --error-bg: #3a1f22;
     --auth-bg: #37301a;
-    --code-bg: #1f1f24;
+    --code-bg: #17171b;      /* darker than the pane and the chat card, so a code block shows on either */
     --shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.35);
     --card-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.6), inset 0 0.5px 0 rgba(255, 255, 255, 0.07), 0 4px 16px rgba(0, 0, 0, 0.3);
   }
@@ -91,6 +93,8 @@ html, body, #root { height: 100%; margin: 0; overflow: hidden; }
 body { background: var(--bg); color: var(--text); font: 13px/1.5 var(--ui); -webkit-font-smoothing: antialiased; user-select: none; cursor: default; }
 button { font: inherit; color: inherit; background: var(--field); border: 1px solid var(--line-strong); border-radius: var(--radius-inner); padding: 3px 10px; cursor: default; }
 button:hover:not(:disabled) { background: var(--bg-hover); }
+/* A selected item keeps its fill under the pointer: the hover fills, which are as specific, would paint over it. */
+.mode-guide-tab.active:hover:not(:disabled), .skill-row.active:hover:not(:disabled), .menu-row.current:hover:not(:disabled), .search-toggle.on:hover:not(:disabled), .viewer-issue.pressed:hover:not(:disabled), button.question-option.on:hover:not(:disabled) { background: var(--bg-active); }
 button:disabled { opacity: 0.45; }
 button:focus-visible, [tabindex]:focus-visible { outline: 1.5px solid var(--muted); outline-offset: 1px; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 500; }
@@ -175,7 +179,8 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 /* Three vertical grip dots centred in the gutter, like VS Code; they brighten on hover and while dragging. */
 .split-handle::before { content: ""; position: absolute; left: 50%; top: 50%; width: 3px; height: 18px; transform: translate(-50%, -50%); background: radial-gradient(circle at center, var(--faint) 1.1px, transparent 1.5px) center top / 3px 6px repeat-y; transition: opacity 0.12s; opacity: 0.9; }
 .split-handle:hover::before, .split.dragging .split-handle::before, .split-handle:focus-visible::before { background-image: radial-gradient(circle at center, var(--text-2) 1.1px, transparent 1.5px); }
-.split-handle:focus-visible { outline: none; }
+/* Keyboard focus: the grip lights up and a ring shows where the focus is, as on the other controls. */
+.split-handle:focus-visible { outline: 1.5px solid var(--muted); outline-offset: 1px; }
 
 /* Chat */
 .chat-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--sidebar); border-radius: 10px; box-shadow: var(--card-shadow); }
@@ -260,10 +265,10 @@ button.code-block-copy:hover:not(:disabled) { background: var(--bg-hover); color
 
 /* Activity */
 .activity { display: flex; flex-direction: column; gap: 1px; }
-.activity-line { display: flex; align-items: center; gap: 6px; border: none; background: none; padding: 2px 6px; margin-left: -6px; font-size: 12px; color: var(--muted); text-align: left; align-self: flex-start; max-width: 100%; border-radius: var(--radius-chip); }
+.activity-line { display: flex; align-items: center; gap: 6px; border: none; background: none; padding: 2px 6px; margin-left: -6px; font-size: 12px; color: var(--muted-text); text-align: left; align-self: flex-start; max-width: 100%; border-radius: var(--radius-chip); }
 .activity-line:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-2); }
 .activity-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.activity-count { flex: none; color: var(--faint); font-variant-numeric: tabular-nums; }
+.activity-count { flex: none; color: var(--muted-text); font-variant-numeric: tabular-nums; }
 /* While Claude works, a light sweep runs across the current step so it reads as live, not static. */
 .activity.live > .activity-line:first-child .activity-text {
   color: transparent;
@@ -310,7 +315,7 @@ button.code-block-copy:hover:not(:disabled) { background: var(--bg-hover); color
 .plan-card.done .plan-body { margin: 4px 0 6px 5px; padding-left: 11px; border-left: 1px solid var(--line-strong); max-height: none; }
 .repro-input { resize: vertical; min-height: 56px; max-height: 240px; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: inherit; font: 12px var(--mono); outline: none; user-select: text; }
 .repro-input:focus { border-color: var(--faint); }
-.repro-input::placeholder { color: var(--faint); font-family: var(--ui); }
+.repro-input::placeholder { color: var(--muted-text); font-family: var(--ui); }
 .repro-note { margin: 4px 0 6px 16px; }
 .permission-done { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .permission-done.allowed .decision { color: var(--add); }
@@ -392,7 +397,7 @@ button.slash-issue:hover:not(:disabled) { background: color-mix(in srgb, var(--w
 .queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.icon.queue-remove { flex: none; width: 20px; height: 20px; font-size: 14px; }
 .composer textarea { resize: none; border: none; outline: none; background: none; color: inherit; font: 13.5px/1.5 var(--ui); padding: 0 4px 0 0; max-height: 200px; }
-.composer textarea::placeholder { color: var(--faint); }
+.composer textarea::placeholder { color: var(--muted-text); }
 .composer textarea:disabled { cursor: default; }
 .composer-footer { display: flex; align-items: center; gap: 12px; min-height: 24px; cursor: default; }
 .composer-item { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
@@ -438,7 +443,7 @@ button.icon.queue-remove { flex: none; width: 20px; height: 20px; font-size: 14p
 /* Changes | Files | Tests: the same size as the pane's other pills (the Changes filter, Build | Learn | Review), not the
    title bar's larger capsules. */
 .pane-tabs-track { display: inline-flex; gap: 2px; height: 26px; align-items: center; padding: 0 2px; border-radius: 999px; background: var(--glass); border: 0.5px solid var(--glass-line); }
-.pane-tabs-track button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 0 1 64px; height: 22px; padding: 0 10px; border: none; border-radius: 999px; background: none; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.pane-tabs-track button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 0 1 64px; height: 22px; padding: 0 10px; border: none; border-radius: 999px; background: none; color: var(--muted-text); font-size: 11.5px; white-space: nowrap; }
 .pane-tabs-track button:hover:not(.active) { background: var(--bg-hover); color: var(--text-2); }
 .pane-tabs-track button.active { background: var(--seg-thumb); color: var(--text); box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.18), 0 0 0 0.5px rgba(0, 0, 0, 0.06); }
 /* Last turn | Session: a smaller capsule at the row's far end, only on the Changes tab. */
@@ -518,14 +523,14 @@ button.icon.open-chat-close { position: absolute; right: 4px; width: 22px; heigh
 .menu-row-path { margin-left: 8px; color: var(--faint); font-size: 11.5px; }
 .menu-sep { flex: none; height: 1px; margin: 4px 6px; background: var(--line); }
 .menu-search { flex: none; height: 28px; margin: 2px 2px 4px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: inherit; font: 12.5px var(--ui); outline: none; }
-.menu-search::placeholder { color: var(--faint); }
+.menu-search::placeholder { color: var(--muted-text); }
 .menu-search:focus { border-color: var(--muted); }
 .menu-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; }
 .menu-row { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 6px 8px; border: none; background: none; border-radius: var(--radius-chip); text-align: left; font-size: 12.5px; }
 .menu-row:hover:not(:disabled) { background: var(--bg-hover); }
 .menu-row.current { background: var(--bg-active); }
 .menu-row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
-.menu-row-meta { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.menu-row-meta { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted-text); font-variant-numeric: tabular-nums; }
 .menu-empty { padding: 14px 10px; font-size: 12.5px; color: var(--muted); text-align: center; }
 /* The changed-file picker uses the shared dropdown (.menu); it opens under the button. */
 .file-menu { top: calc(100% + 4px); left: 0; width: 420px; max-width: calc(100vw - 48px); max-height: 360px; }
@@ -1218,6 +1223,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .summary { height: 100%; min-height: 0; padding: 6px 10px 16px; overflow-y: auto; }
 .summary-head { display: flex; align-items: flex-start; gap: 8px; }
 .summary-headline { flex: 1; min-width: 0; padding: 6px 10px 10px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.summary-retry { padding: 0 10px 8px; font-size: 12px; color: var(--muted); }
 /* Export: a quiet button at the head of the tab, its outcome beside it, and a menu that opens downwards from its right edge. */
 .summary-export { position: relative; flex: none; margin-left: auto; display: flex; align-items: center; gap: 8px; max-width: 70%; }
 .summary-export-status { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--muted); }

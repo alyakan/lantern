@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { RecentFolder } from "../types";
 import { basename } from "../lib/diff";
 import { FolderIcon } from "./icons";
+import { useMenuKeys } from "./useMenuKeys";
 
 interface Props {
   folder: string | null;
@@ -22,6 +23,8 @@ export function FolderPill({ folder, loadRecent, onPick, onBrowse, disabled }: P
   const [open, setOpen] = useState(false);
   const [recent, setRecent] = useState<RecentFolder[] | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  // The keys wait for the list: focus goes to the first recent folder once it has loaded.
+  const keys = useMenuKeys(open && recent !== null, root);
 
   useEffect(() => {
     if (!open) return;
@@ -49,19 +52,22 @@ export function FolderPill({ folder, loadRecent, onPick, onBrowse, disabled }: P
         <span>{folder ? basename(folder) : "Open folder"}</span>
         <span className="chev down" aria-hidden />
       </button>
-      {open && <FolderMenu folder={folder} recent={recent} onPick={onPick} onBrowse={onBrowse} onClose={() => setOpen(false)} />}
+      {open && <FolderMenu folder={folder} recent={recent} onPick={onPick} onBrowse={onBrowse} onClose={() => setOpen(false)} onKeyDown={keys.onKeyDown} />}
     </div>
   );
 }
 
-/** The dropdown itself, shared by this capsule and the title bar's folder pill. `recent` is null while loading. */
-export function FolderMenu({ folder, recent, onPick, onBrowse, onClose }: { folder: string | null; recent: RecentFolder[] | null; onPick: (path: string) => void; onBrowse: () => void; onClose: () => void }) {
+/**
+ * The dropdown itself, shared by this capsule and the title bar's folder pill. `recent` is null while loading. The arrow
+ * keys are the caller's (`onKeyDown`), since focus goes back to whichever button opened the menu.
+ */
+export function FolderMenu({ folder, recent, onPick, onBrowse, onClose, onKeyDown }: { folder: string | null; recent: RecentFolder[] | null; onPick: (path: string) => void; onBrowse: () => void; onClose: () => void; onKeyDown?: (e: ReactKeyboardEvent<HTMLElement>) => void }) {
   const choose = (act: () => void) => {
     onClose();
     act();
   };
   return (
-    <div className="menu folder-menu" role="menu" aria-label="Folders">
+    <div className="menu folder-menu" role="menu" aria-label="Folders" onKeyDown={onKeyDown}>
       <div className="menu-heading">Recent</div>
       {recent === null ? (
         <div className="menu-empty">Loading…</div>

@@ -3,6 +3,7 @@ import { FLAVOUR_LABEL, FLAVOURS, type Flavour } from "../lib/flavour";
 import { useModeGuide } from "../lib/modeGuide";
 import { InfoIcon, StepsIcon } from "./icons";
 import { FLAVOUR_ICON } from "./ModeGuide";
+import { useMenuKeys } from "./useMenuKeys";
 
 const HINT: Record<Flavour, string> = {
   build: "Plan and build one step at a time",
@@ -19,6 +20,7 @@ export function FlavourBadge({ flavour, onPick, disabled }: { flavour: Flavour |
   const [open, setOpen] = useState(false);
   const guide = useModeGuide();
   const root = useRef<HTMLDivElement>(null);
+  const keys = useMenuKeys(open, root);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
@@ -40,7 +42,7 @@ export function FlavourBadge({ flavour, onPick, disabled }: { flavour: Flavour |
         <span className="chev down" aria-hidden />
       </button>
       {open && (
-        <div className="menu flavour-menu" role="menu" aria-label="Flavour">
+        <div className="menu flavour-menu" role="menu" aria-label="Flavour" onKeyDown={keys.onKeyDown}>
           {FLAVOURS.map((f) => (
             <button
               key={f}

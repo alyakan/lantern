@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { api } from "../api";
-import { clearStash, discard } from "../lib/editStash";
+import { clearStash, discard, unsavedCount } from "../lib/editStash";
 import FilePreview from "./FilePreview";
 
 // Monaco as a textarea, handing over the one thing the component asks of it: a command bound to ⌘S.
@@ -163,6 +163,16 @@ describe("FilePreview as an editor", () => {
     expect(editor().value).toBe("kept\nmore\n");
   });
 
+  it("counts its unsaved edits for the window's close check, until they're saved", async () => {
+    render(<FilePreview path="/p/a.ts" />);
+    await waitFor(() => expect(editor().value).toBe("one\n"));
+    expect(unsavedCount()).toBe(0);
+    type("two\n");
+    expect(unsavedCount()).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(unsavedCount()).toBe(0));
+  });
+
   it("forgets edits that were discarded", async () => {
     const first = render(<FilePreview path="/p/b.ts" />);
     await waitFor(() => expect(editor().value).toBe("one\n"));
@@ -199,6 +209,36 @@ describe("FilePreview as an editor", () => {
     expect(await screen.findByText("This file is binary and can't be opened.")).toBeInTheDocument();
   });
 
+  it("shows a file again once it's back on disk, after it was missing", async () => {
+    read.mockRejectedValueOnce("No such file");
+    const { rerender } = render(<FilePreview path="/p/a.ts" refreshKey={0} />);
+    expect(await screen.findByText("No such file")).toBeInTheDocument();
+    read.mockResolvedValue("back\n");
+    rerender(<FilePreview path="/p/a.ts" refreshKey={1} />);
+    await waitFor(() => expect(editor().value).toBe("back\n"));
+    expect(screen.queryByText("No such file")).toBeNull();
+  });
+
+  it("after discarding edits to a deleted file, takes it back when it reappears", async () => {
+    const { rerender } = render(<FilePreview path="/p/a.ts" refreshKey={0} />);
+    await waitFor(() => expect(editor().value).toBe("one\n"));
+    type("mine\n");
+    read.mockRejectedValue("No such file");
+    rerender(<FilePreview path="/p/a.ts" refreshKey={1} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("deleted");
+    fireEvent.click(screen.getByRole("button", { name: "Discard my edits" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    // Still gone: the file says so, and no longer claims it was deleted by the discard.
+    rerender(<FilePreview path="/p/a.ts" refreshKey={2} />);
+    expect(await screen.findByText("No such file")).toBeInTheDocument();
+    // Written again: its text comes back, not an error.
+    read.mockResolvedValue("written again\n");
+    rerender(<FilePreview path="/p/a.ts" refreshKey={3} />);
+    await waitFor(() => expect(editor().value).toBe("written again\n"));
+    expect(screen.queryByText("No such file")).toBeNull();
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
+  });
+
   describe("a markdown file", () => {
     beforeEach(() => localStorage.clear());
     const preview = () => screen.getByLabelText("Markdown preview");
@@ -227,6 +267,42 @@ describe("FilePreview as an editor", () => {
       first.unmount();
       render(<FilePreview path="/p/other.md" />);
       expect(await screen.findByLabelText("editor")).toBeInTheDocument();
+    });
+
+    it("switches to the preview when picked after a line was shown", async () => {
+      read.mockResolvedValue("# One\n");
+      render(<FilePreview path="/p/notes.md" line={1} />);
+      expect(await screen.findByLabelText("editor")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Preview" }));
+      expect(await screen.findByRole("heading", { name: "One" })).toBeInTheDocument();
+    });
+
+    it("keeps the editor, with its undo history, while the preview shows", async () => {
+      read.mockResolvedValue("# One\n");
+      render(<FilePreview path="/p/notes.md" />);
+      await screen.findByRole("heading", { name: "One" });
+      fireEvent.click(screen.getByRole("tab", { name: "Edit" }));
+      const first = editor();
+      type("# Two\n");
+      fireEvent.click(screen.getByRole("tab", { name: "Preview" }));
+      expect(first.closest(".editable-editor")).toHaveAttribute("hidden");
+      fireEvent.click(screen.getByRole("tab", { name: "Edit" }));
+      // The same editor, not a new one made from the text.
+      expect(editor()).toBe(first);
+      expect(editor().closest(".editable-editor")).not.toHaveAttribute("hidden");
+      expect(editor().value).toBe("# Two\n");
+    });
+
+    it("goes back to the editor when the same line is asked for again after the preview was picked", async () => {
+      read.mockResolvedValue("# One\n");
+      const { rerender } = render(<FilePreview path="/p/notes.md" line={1} jump={1} />);
+      expect(await screen.findByLabelText("editor")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("tab", { name: "Preview" }));
+      expect(await screen.findByRole("heading", { name: "One" })).toBeInTheDocument();
+      // Another request for line 1 (a mention, a failed test): the same line, so only the jump changes.
+      rerender(<FilePreview path="/p/notes.md" line={1} jump={2} />);
+      expect(screen.queryByLabelText("Markdown preview")).not.toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: "Edit" })).toHaveAttribute("aria-selected", "true");
     });
 
     it("shows the editor for a line to show, and has no switch on other files", async () => {

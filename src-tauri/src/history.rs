@@ -58,10 +58,25 @@ fn jsonl_files(dir: &Path) -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-/// Every parseable JSON line of a transcript; bad lines are skipped.
+/// Every parseable JSON line of a transcript; bad lines are skipped. Bytes are read per line, so a line that isn't UTF-8
+/// is just a bad line; a read error doesn't say where the next line starts, so reading stops there.
 fn records(path: &Path) -> impl Iterator<Item = Value> {
-    let lines = std::fs::File::open(path).map(|f| BufReader::new(f).lines()).ok();
-    lines.into_iter().flatten().map_while(Result::ok).filter_map(|l| serde_json::from_str::<Value>(&l).ok())
+    let mut reader = std::fs::File::open(path).map(BufReader::new).ok();
+    std::iter::from_fn(move || {
+        let reader = reader.as_mut()?;
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            match reader.read_until(b'\n', &mut line) {
+                Ok(0) | Err(_) => return None,
+                Ok(_) => {
+                    if let Ok(v) = serde_json::from_slice::<Value>(&line) {
+                        return Some(v);
+                    }
+                }
+            }
+        }
+    })
 }
 
 /// False for records that aren't part of the visible conversation: injected meta content, subagent turns, and the
@@ -89,11 +104,28 @@ fn prompt_text(r: &Value) -> Option<String> {
         _ => return None,
     };
     let trimmed = text.trim();
-    if trimmed.is_empty() || trimmed.starts_with('<') || trimmed.starts_with("[Request interrupted") {
+    if trimmed.is_empty() || INJECTED_TAGS.iter().any(|t| trimmed.starts_with(t)) || trimmed.starts_with("[Request interrupted") {
         return None;
     }
     Some(trimmed.to_string())
 }
+
+/// Tags Claude Code and Lantern wrap around what they put in a user record (a command the user ran and its output, a
+/// hook's or a reminder's text). A prompt the user typed that starts with another "<" is still a prompt.
+const INJECTED_TAGS: &[&str] = &[
+    "<command-name>",
+    "<command-message>",
+    "<command-args>",
+    "<local-command-stdout>",
+    "<local-command-stderr>",
+    "<local-command-caveat>",
+    "<bash-input>",
+    "<bash-stdout>",
+    "<bash-stderr>",
+    "<system-reminder>",
+    "<user-prompt-submit-hook>",
+    "<task-notification>",
+];
 
 fn title_of(prompt: &str) -> String {
     let line = prompt.lines().next().unwrap_or("").trim();
@@ -206,6 +238,13 @@ fn is_temp(path: &str) -> bool {
     ["/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/"].iter().any(|p| path.starts_with(p))
 }
 
+/// Of several entries for one folder (transcripts in different project directories can name the same one), keeps the
+/// first, which is the newest when sorted newest first.
+fn keep_newest_per_folder(found: &mut Vec<RecentFolder>) {
+    let mut seen = std::collections::HashSet::new();
+    found.retain(|r| seen.insert(r.path.clone()));
+}
+
 /// Folders the user has used Claude Code in, most recent first, that still exist. The directory name is a lossy
 /// encoding of the path, so the real path comes from the `cwd` recorded in its newest user session.
 pub fn recent_folders(projects_root: &Path, limit: usize) -> Vec<RecentFolder> {
@@ -223,7 +262,7 @@ pub fn recent_folders(projects_root: &Path, limit: usize) -> Vec<RecentFolder> {
         .filter(|r| !is_temp(&r.path) && Path::new(&r.path).is_dir())
         .collect();
     found.sort_by_key(|r| std::cmp::Reverse(r.updated_ms));
-    found.dedup_by(|a, b| a.path == b.path);
+    keep_newest_per_folder(&mut found);
     found.truncate(limit);
     found
 }
@@ -250,6 +289,14 @@ fn iso_ms(s: &str) -> Option<u64> {
     let (hms, frac) = time.split_once('.').unwrap_or((time, "0"));
     let mut t = hms.split(':').map(|p| p.parse::<i64>().ok());
     let (h, min, sec) = (t.next()??, t.next()??, t.next()??);
+    // Fields out of range (a corrupt line) are no time at all; the bounds keep the arithmetic below far from overflow.
+    if !(0..=9999).contains(&y) || !(1..=12).contains(&m) || !(1..=31).contains(&day) || !(0..=23).contains(&h) || !(0..=59).contains(&min) || !(0..=60).contains(&sec) {
+        return None;
+    }
+    // Only digits: anything else would make the slice below cut a character.
+    if !frac.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
     let ms: i64 = format!("{:0<3}", &frac[..frac.len().min(3)]).parse().ok()?;
     // Days from 1970-01-01 (Howard Hinnant's days_from_civil).
     let (y, m) = if m <= 2 { (y - 1, m + 9) } else { (y, m - 3) };
@@ -276,7 +323,10 @@ pub fn replay(path: &Path) -> Replay {
             // One transcript record per content block; give each its own message id so text blocks don't merge.
             Some("assistant") => {
                 let mut message = r["message"].clone();
-                message["id"] = r["uuid"].clone();
+                // A record whose message isn't an object (malformed) keeps it as it is.
+                if let Some(obj) = message.as_object_mut() {
+                    obj.insert("id".into(), r["uuid"].clone());
+                }
                 json!({"type": "assistant", "message": message, "parent_tool_use_id": null})
             }
             Some("user") => json!({"type": "user", "message": r["message"], "tool_use_result": r["toolUseResult"], "parent_tool_use_id": null}),
@@ -546,5 +596,52 @@ mod tests {
         let root = setup(&[("aaaa-1", terminal_session())]);
         assert!(transcript_path(root.path(), Path::new(FOLDER), "../x").is_err());
         assert!(transcript_path(root.path(), Path::new(FOLDER), "ffff").unwrap_err().contains("no longer exists"));
+    }
+
+    #[test]
+    fn a_damaged_transcript_loses_only_its_damaged_lines() {
+        let prompt = |text: &str| rec(json!({"type": "user", "cwd": FOLDER, "entrypoint": "cli", "message": {"role": "user", "content": text}}));
+        let mut body: Vec<u8> = prompt("first").into_bytes();
+        // Invalid UTF-8, a truncated record, and a valid JSON value that isn't a record, then a good prompt.
+        body.extend(b"\n{\"type\": \"user\", \"message\": \xff\xfe}\n{\"type\": \"user\", \"cwd\": \n\"just a string\"\n");
+        body.extend(prompt("second").as_bytes());
+        body.push(b'\n');
+        // An assistant record whose message isn't an object: replay mustn't panic on it.
+        body.extend(rec(json!({"type": "assistant", "uuid": "a1", "message": "oops"})).as_bytes());
+        body.push(b'\n');
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("s.jsonl");
+        std::fs::write(&path, body).unwrap();
+        let texts: Vec<String> = replay(&path).events.into_iter().filter_map(|e| if let UiEvent::UserText { text, .. } = e { Some(text) } else { None }).collect();
+        assert_eq!(texts, vec!["first", "second"]);
+    }
+
+    #[test]
+    fn a_timestamp_that_isnt_one_is_no_time_not_a_panic() {
+        assert_eq!(iso_ms("1970-01-01T00:00:01.5Z"), Some(1_500));
+        assert_eq!(iso_ms("1970-01-02T00:00:00Z"), Some(86_400_000));
+        assert_eq!(iso_ms("2026-09-28T18:40:24.309Z"), Some(1_790_620_824_309));
+        assert_eq!(iso_ms("2026-09-28T18:40:24.12é4Z"), None);
+        assert_eq!(iso_ms("999999999999999999-01-01T00:00:00Z"), None);
+        assert_eq!(iso_ms("2026-13-01T00:00:00Z"), None);
+        assert_eq!(iso_ms("2026-09-28T25:00:00Z"), None);
+    }
+
+    #[test]
+    fn only_tags_claude_code_and_lantern_inject_are_not_prompts() {
+        let typed = |text: &str| prompt_text(&json!({"type": "user", "message": {"role": "user", "content": text}}));
+        assert_eq!(typed("<div class=\"x\"> why is this blank?"), Some("<div class=\"x\"> why is this blank?".into()));
+        assert_eq!(typed("<bash-input>git status</bash-input>"), None);
+        assert_eq!(typed("<command-name>/clear</command-name>"), None);
+        assert_eq!(typed("<system-reminder>Plan mode is on</system-reminder>"), None);
+    }
+
+    #[test]
+    fn a_folder_is_listed_once_even_when_its_transcripts_are_in_several_directories() {
+        let entry = |path: &str, updated_ms: u64| RecentFolder { path: path.into(), updated_ms };
+        // Newest first: a, b, then a again from another project directory, which must not be listed twice.
+        let mut found = vec![entry("/w/a", 3), entry("/w/b", 2), entry("/w/a", 1)];
+        keep_newest_per_folder(&mut found);
+        assert_eq!(found, vec![entry("/w/a", 3), entry("/w/b", 2)]);
     }
 }

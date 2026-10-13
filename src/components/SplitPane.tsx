@@ -45,6 +45,8 @@ export function SplitPane({ left, right, ratio, collapsed, onRatio }: Props) {
   };
 
   useLayoutEffect(() => {
+    // Collapsing mid-drag takes the handle away, which would never hear the release: the drag ends here.
+    if (collapsed) endDrag();
     if (collapsed && (phase === "open" || phase === "opening")) {
       if (prefersReducedMotion() || !side.current) return setPhase("closed");
       const current = side.current.getBoundingClientRect().width;
@@ -85,12 +87,16 @@ export function SplitPane({ left, right, ratio, collapsed, onRatio }: Props) {
     setDragging(false);
   };
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    // Only the main button drags; a right-click is for a menu.
+    if (e.button !== 0) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     setDragging(true);
   };
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
     if (!dragging || !root.current) return;
+    // No button held any more (released where the handle couldn't hear it): the drag is over.
+    if (e.buttons === 0) return endDrag();
     const r = root.current.getBoundingClientRect();
     const next = clamped((e.clientX - r.left) / r.width);
     dragRatio.current = next;
@@ -121,6 +127,7 @@ export function SplitPane({ left, right, ratio, collapsed, onRatio }: Props) {
               onPointerMove={onPointerMove}
               onPointerUp={endDrag}
               onPointerCancel={endDrag}
+              onLostPointerCapture={endDrag}
               onDoubleClick={() => onRatio(0.5)}
               onKeyDown={onKeyDown}
             />

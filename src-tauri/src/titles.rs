@@ -21,7 +21,7 @@ pub struct TitleStore {
 
 impl TitleStore {
     pub fn load(path: Option<PathBuf>) -> Self {
-        let titles = path.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+        let titles = path.as_deref().map(read_titles).unwrap_or_default();
         Self { path, titles: Mutex::new(titles) }
     }
 
@@ -40,11 +40,25 @@ impl TitleStore {
             if let Some(dir) = path.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }
+            // Written beside the file and renamed over it, so a write cut short can't leave a truncated file.
+            let tmp = path.with_extension("json.tmp");
             if let Ok(json) = serde_json::to_string(&*titles) {
-                let _ = std::fs::write(path, json);
+                if std::fs::write(&tmp, json).is_ok() {
+                    let _ = std::fs::rename(&tmp, path);
+                }
             }
         }
     }
+}
+
+/// The titles saved at `path`. A file that doesn't parse is moved aside (titles.json.corrupt), not dropped: the next
+/// save would overwrite it and its titles would be gone.
+fn read_titles(path: &Path) -> HashMap<String, String> {
+    let Ok(bytes) = std::fs::read(path) else { return HashMap::new() };
+    serde_json::from_slice(&bytes).unwrap_or_else(|_| {
+        let _ = std::fs::rename(path, path.with_extension("json.corrupt"));
+        HashMap::new()
+    })
 }
 
 /// The model's reply as a title: its first line, without quotes, a "Title:" label or final punctuation; None if empty.
@@ -124,6 +138,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sub/titles.json");
         TitleStore::load(Some(path.clone())).set("abc", "Retry transient errors");
-        assert_eq!(TitleStore::load(Some(path)).get("abc").as_deref(), Some("Retry transient errors"));
+        assert_eq!(TitleStore::load(Some(path.clone())).get("abc").as_deref(), Some("Retry transient errors"));
+        assert!(!dir.path().join("sub/titles.json.tmp").exists(), "the temp file is renamed away");
+    }
+
+    #[test]
+    fn a_corrupt_file_is_kept_aside_not_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("titles.json");
+        std::fs::write(&path, r#"{"abc": "Retry"#).unwrap();
+        assert_eq!(TitleStore::load(Some(path.clone())).get("abc"), None);
+        assert_eq!(std::fs::read_to_string(dir.path().join("titles.json.corrupt")).unwrap(), r#"{"abc": "Retry"#);
+        assert!(!path.exists());
+        // Non-UTF-8 counts as corrupt too.
+        std::fs::write(&path, [0xff, 0xfe, b'{']).unwrap();
+        assert!(TitleStore::load(Some(path.clone())).all().is_empty());
+        assert!(dir.path().join("titles.json.corrupt").exists());
     }
 }

@@ -31,6 +31,8 @@ interface Props {
   sendAndNext?: (text: string) => void;
   onSend: (text: string) => void;
   onStop: () => void;
+  /** While Claude starts, a way out: Cancel stops the start. */
+  onCancelStart?: () => void;
   /** "!" at the start of the box turns it into a terminal: Enter runs the rest as a shell command in the folder. */
   onRun?: (command: string) => void;
   mode?: Mode;
@@ -72,7 +74,7 @@ interface Props {
   update?: { version: string; busy: number; onRestart: () => void; onLater: () => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onRun, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, harness, update }: Props) {
+export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, harness, update }: Props) {
   // A draft with big pastes in it comes back as the box had it: their placeholders, and the text they stand for.
   const [restored] = useState(() => decodeDraft(draft?.initial ?? ""));
   const [text, setTextState] = useState(restored.text);
@@ -102,16 +104,32 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
       ? "Open a folder to start"
       : status === "starting"
         ? "Starting Claude…"
-        : terminal
-          ? `Run a command in ${folder ? basename(folder) : "the folder"}…`
-          : running
-            ? "Queue a message…"
-            : (idlePlaceholder ?? "Ask Claude…");
+        : status === "ended"
+          ? "Claude stopped — restart to continue"
+          : terminal
+            ? `Run a command in ${folder ? basename(folder) : "the folder"}…`
+            : running
+              ? "Queue a message…"
+              : (idlePlaceholder ?? "Ask Claude…");
+
+  // A queued message goes out in full (the queue holds the text), but it's remembered as it was in the box: its
+  // placeholders, with their pastes kept here so the numbers aren't reused meanwhile. The queue shows and Stop restores that.
+  const queuedBox = useRef(new Map<string, { box: string; pastes: Pastes }>());
+  const queuedPastes = (): Pastes => Object.assign({}, ...[...queuedBox.current.values()].map((q) => q.pastes));
+  useEffect(() => {
+    for (const full of queuedBox.current.keys()) if (!queued.includes(full)) queuedBox.current.delete(full);
+  }, [queued]);
 
   // Stop means "not like that": queued messages go back into the box instead of being sent.
   const stop = () => {
     if (queued.length > 0) {
-      setText([...queued, text].filter((t) => t.trim()).join("\n\n"));
+      const back = queued.map((full) => {
+        const kept = queuedBox.current.get(full);
+        if (!kept) return full;
+        pastes.current = { ...pastes.current, ...kept.pastes };
+        return kept.box;
+      });
+      setText([...back, text].filter((t) => t.trim()).join("\n\n"));
       setQueued([]);
     }
     onStop();
@@ -148,8 +166,10 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   // While Claude works, a message waits in the queue instead of going out.
   const sendText = (t: string) => {
     const full = expand(t);
-    if (running) setQueued([...queued, full]);
-    else onSend(full);
+    if (running) {
+      queuedBox.current.set(full, { box: t, pastes: inUse(t, pastes.current) });
+      setQueued([...queued, full]);
+    } else onSend(full);
   };
 
   const submit = () => {
@@ -180,13 +200,17 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   const sections =
     open?.kind === "/" ? menuSections(matchCommands(described, open.query, 60), open.atStart).map((s) => ({ ...s, items: s.items.slice(0, s.kind === "command" ? 8 : 6) })) : [];
   const commandItems = sections.flatMap((s) => s.items);
-  const [files, setFiles] = useState<FoundFile[]>([]);
+  // The last search that came back, and for what: until the search for the query on screen has, there's nothing to
+  // list and no "No files match" to say so.
+  const [found, setFound] = useState<{ query: string; files: FoundFile[] } | null>(null);
   const fileQuery = open?.kind === "@" && !open.query.includes(":") ? open.query : null;
+  const searching = !!findFiles && fileQuery !== null && found?.query !== fileQuery;
+  const files = fileQuery !== null && found?.query === fileQuery ? found.files : [];
   useEffect(() => {
-    setFiles([]);
     if (!fileQuery || !findFiles) return;
     let live = true;
-    const t = setTimeout(() => findFiles(fileQuery).then((f) => live && setFiles(f.slice(0, 8)), () => {}), 80);
+    const done = (f: FoundFile[]) => live && setFound({ query: fileQuery, files: f.slice(0, 8) });
+    const t = setTimeout(() => findFiles(fileQuery).then(done, () => done([])), 80);
     return () => {
       live = false;
       clearTimeout(t);
@@ -196,7 +220,12 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   const issues = open?.kind === "/" ? (mcpIssues ?? []) : [];
   const menuShown = !!open && (count > 0 || issues.length > 0 || (open.kind === "@" && !!findFiles && !open.query.includes(":")));
   const [pick, setPick] = useState(0);
-  useEffect(() => setPick(0), [open?.kind, open?.query]);
+  // Whether the user has arrowed into the list: mid-message, a "/" menu takes Enter only then.
+  const [arrowed, setArrowed] = useState(false);
+  useEffect(() => {
+    setPick(0);
+    setArrowed(false);
+  }, [open?.kind, open?.query]);
 
   // After the menu puts something in the box, the caret goes after it.
   const caretTo = useRef<number | null>(null);
@@ -232,6 +261,9 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   const composing = useRef(false);
   const imeKey = useRef(false);
   const predicting = useRef(false);
+  // WebKit can deliver the Enter that commits a composition after compositionend, still with keyCode 229: that one
+  // confirms the input method, it doesn't send.
+  const composingKey = (e: KeyboardEvent<HTMLTextAreaElement>) => composing.current || e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229;
   // What you typed, without a prediction that's showing: what Enter sends while one is.
   const typed = useRef("");
   // A prediction Enter declined: if WebKit still commits it, it's taken back out.
@@ -260,11 +292,18 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
     if (!menuShown || !open) return false;
     const move = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
     if (e.key === "Escape") setDismissedAt(open.start);
-    else if (count === 0) return false;
-    else if (move) setPick((pick + move + count) % count);
-    else if (e.key === "Tab") choose(pick, true);
-    else if (e.key === "Enter" && !e.shiftKey && !composing.current) choose(pick);
-    else return false;
+    // Nothing to pick yet: Enter waits for the search rather than sending "@query" as it is.
+    else if (count === 0) {
+      if (!searching || e.key !== "Enter") return false;
+    } else if (move) {
+      setPick((pick + move + count) % count);
+      setArrowed(true);
+    } else if (e.key === "Tab") choose(pick, true);
+    else if (e.key === "Enter" && !e.shiftKey && !composingKey(e)) {
+      // A "/" in the middle of a sentence ("re-run the checks on /test") is just text: Enter sends it.
+      if (open.kind === "/" && !open.atStart && !arrowed) return false;
+      choose(pick);
+    } else return false;
     e.preventDefault();
     return true;
   };
@@ -290,7 +329,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
             <li key={i} className="queue-item">
               <span className="queue-label">Queued</span>
               <span className="queue-text" title={q}>
-                {q}
+                {queuedBox.current.get(q)?.box ?? q}
               </span>
               <button className="icon queue-remove" aria-label="Remove queued message" title="Remove" onClick={() => setQueued(queued.filter((_, j) => j !== i))}>
                 ×
@@ -309,7 +348,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
             onPickCommand={accept}
             onPickFile={(f) => put(`@${f.rel}`)}
             onHover={setPick}
-            hint={open.kind === "@" && count === 0 ? (open.query ? "No files match" : "Type to find a file in this folder") : undefined}
+            hint={open.kind === "@" && count === 0 && !searching ? (open.query ? "No files match" : "Type to find a file in this folder") : undefined}
             issues={issues}
             onOpenSettings={onOpenSettings}
           />
@@ -322,7 +361,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           )}
           <textarea
             ref={area}
-            aria-label={terminal ? "Shell command" : undefined}
+            aria-label={terminal ? "Shell command" : "Message to Claude"}
             spellCheck={!terminal}
             // WebKit otherwise applies macOS's "Capitalize words automatically" and autocorrect to what you type.
             autoCapitalize="off"
@@ -343,7 +382,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               if (!isBigPaste(pasted)) return;
               e.preventDefault();
               const { selectionStart: from, selectionEnd: to } = e.currentTarget;
-              const n = nextNumber(text, pastes.current);
+              const n = nextNumber(text, { ...queuedPastes(), ...pastes.current });
               const token = pasteToken(n, pasted);
               pastes.current = { ...pastes.current, [n]: pasted };
               caretTo.current = from + token.length;
@@ -386,9 +425,10 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               }
               // Enter sends, unless an input method (Japanese, Chinese…) is composing: then it confirms that. macOS's
               // grey inline predictions also mark the key as composing; Enter doesn't take them (Tab or → does).
-              if (e.key === "Enter" && !e.shiftKey && !composing.current) {
+              if (e.key === "Enter" && !e.shiftKey && !composingKey(e)) {
                 e.preventDefault();
-                if ((e.metaKey || e.ctrlKey) && sendAndNext && !terminal) submitAndNext();
+                // While Claude works, ⌘Enter queues like Enter (the step can't be approved until it's done).
+                if ((e.metaKey || e.ctrlKey) && sendAndNext && !terminal && !running) submitAndNext();
                 else submit();
               }
             }}
@@ -421,6 +461,11 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
             </button>
           ) : (
             <>
+              {status === "starting" && onCancelStart && (
+                <button className="ghost" title="Stop starting Claude" onClick={onCancelStart}>
+                  Cancel
+                </button>
+              )}
               {sendAndNext && (
                 <button className="ghost send-next" title="Send, then approve this step and go on (⌘Enter)" disabled={!canSend} onClick={submitAndNext}>
                   Send &amp; next

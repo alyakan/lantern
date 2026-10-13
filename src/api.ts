@@ -74,7 +74,8 @@ export const api = {
    */
   writeFile: (slot: string, path: string, text: string, expected: string | null) => invoke<WriteResult>("write_file", { slot, path, text, expected }),
   /** Saves an exported document at a path from the save dialog (a markdown file, anywhere). */
-  exportText: (path: string, text: string) => invoke<void>("export_text", { path, text }),
+  /** Opens the save dialog and writes the document where the user picks; the path picked, or null if they cancel. */
+  exportText: (fileName: string, text: string) => invoke<string | null>("export_text", { fileName, text }),
   /** Files in the chat's folder whose paths fuzzy-match `query`, best first. */
   findFiles: (slot: string, query: string) => invoke<FoundFile[]>("find_files", { slot, query }),
   /** Lines matching `query` across the chat folder's files. A newer search cancels an older one (it rejects). */

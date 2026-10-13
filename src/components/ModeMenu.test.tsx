@@ -12,6 +12,21 @@ describe("ModeMenu", () => {
     fireEvent.click(screen.getByRole("menuitemradio", { name: /Step by step/ }));
     expect(onChange).toHaveBeenCalledWith("steps");
   });
+
+  it("moves between the modes with the arrow keys, and gives focus back to its chip when it closes", () => {
+    render(<ModeMenu mode="ask" onChange={() => {}} />);
+    const chip = screen.getByRole("button", { name: /Ask before actions/ });
+    fireEvent.click(chip);
+    const [ask, auto, steps] = screen.getAllByRole("menuitemradio");
+    expect(ask).toHaveFocus();
+    fireEvent.keyDown(ask, { key: "ArrowDown" });
+    expect(auto).toHaveFocus();
+    fireEvent.keyDown(auto, { key: "End" });
+    expect(steps).toHaveFocus();
+    fireEvent.keyDown(steps, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(chip).toHaveFocus();
+  });
 });
 
 describe("plan card", () => {

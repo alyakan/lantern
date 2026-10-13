@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import Markdown from "react-markdown";
 import { api } from "../api";
-import { FileLinksProvider, markdownComponents, pathBreaks, splitMention } from "./fileLinks";
+import { FileLinksProvider, markdownComponents, pathBreaks, splitMention, useFileLinks } from "./fileLinks";
 
 vi.mock("../api", () => ({ api: { resolveFiles: vi.fn() } }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(() => Promise.resolve()) }));
@@ -53,4 +53,39 @@ describe("file links", () => {
     render(<Markdown components={markdownComponents}>{"`src/a.ts`"}</Markdown>);
     expect(screen.queryByRole("button")).toBeNull();
   });
+
+  it("draws a link whose address has a malformed escape, instead of throwing", async () => {
+    vi.mocked(api.resolveFiles).mockResolvedValue([null]);
+    render(
+      <FileLinksProvider slot="s1" folder="/p" epoch={0} onOpen={() => {}}>
+        <Markdown components={markdownComponents}>{"[notes](a%E9.md)"}</Markdown>
+      </FileLinksProvider>,
+    );
+    expect(screen.getByText("notes").closest("a")).toHaveAttribute("href", "a%E9.md");
+  });
+
+  it("drops a lookup that finishes after the chat switched, so the other chat doesn't get its answer", async () => {
+    let answerA: (paths: (string | null)[]) => void = () => {};
+    // Chat B's own lookup never answers, so B's view can only change through the answer meant for A.
+    vi.mocked(api.resolveFiles).mockImplementation((slot) => new Promise<(string | null)[]>((r) => { if (slot === "A") answerA = r; }));
+    const seen: (string | null | undefined)[] = [];
+    const chat = (slot: string, folder: string) => (
+      <FileLinksProvider slot={slot} folder={folder} epoch={0} onOpen={() => {}}>
+        <Probe mention="x.ts" seen={(v) => seen.push(v)} />
+      </FileLinksProvider>
+    );
+    const { rerender } = render(chat("A", "/a"));
+    await waitFor(() => expect(api.resolveFiles).toHaveBeenCalledWith("A", ["x.ts"]));
+    rerender(chat("B", "/b"));
+    await act(async () => answerA(["/a/x.ts"]));
+    expect(seen).not.toContain("/a/x.ts");
+    expect(seen[seen.length - 1]).toBeUndefined();
+    // B asks about its own files.
+    await waitFor(() => expect(api.resolveFiles).toHaveBeenCalledWith("B", ["x.ts"]));
+  });
 });
+
+function Probe({ mention, seen }: { mention: string; seen: (value: string | null | undefined) => void }) {
+  seen(useFileLinks()?.resolve(mention));
+  return null;
+}

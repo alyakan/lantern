@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ChatItem } from "../store";
 import { RECOMMENDED, answered, answersLine, readQuestions, withAnswers, type Answer } from "../lib/questions";
+import { moveFocus } from "./useMenuKeys";
 
 type PermissionItem = Extract<ChatItem, { type: "permission" }>;
 /** What Claude is told when you skip its question. */
@@ -36,6 +37,7 @@ export function QuestionCard({ item, onDecide }: { item: PermissionItem; onDecid
           const picked = q.multiSelect ? (a.picked.includes(label) ? a.picked.filter((l) => l !== label) : [...a.picked, label]) : [label];
           set(q.question, { picked, other: "" });
         };
+        const anyPicked = q.options.some((x) => a.picked.includes(x.label)) && !a.other.trim();
         return (
           <fieldset key={q.question} className="question">
             <legend>
@@ -43,11 +45,22 @@ export function QuestionCard({ item, onDecide }: { item: PermissionItem; onDecid
               <span className="question-text">{q.question}</span>
               {q.multiSelect && <span className="question-hint">Pick any</span>}
             </legend>
-            <div className="question-options" role={q.multiSelect ? "group" : "radiogroup"} aria-label={q.question}>
-              {q.options.map((o) => {
+            <div
+              className="question-options"
+              role={q.multiSelect ? "group" : "radiogroup"}
+              aria-label={q.question}
+              onKeyDown={(e) => {
+                // Arrows move between the options; with radio buttons, moving also picks, as a radio group does.
+                const to = moveFocus(e, [...e.currentTarget.querySelectorAll<HTMLElement>("button")]);
+                if (to !== null && !q.multiSelect) pick(q.options[to].label);
+              }}
+            >
+              {q.options.map((o, i) => {
                 const on = a.picked.includes(o.label) && !a.other.trim();
+                // One radio is in the tab order: the picked one, or the first while none is.
+                const tabbable = q.multiSelect || (anyPicked ? on : i === 0);
                 return (
-                  <button key={o.label} className={`question-option${on ? " on" : ""}`} role={q.multiSelect ? "checkbox" : "radio"} aria-checked={on} onClick={() => pick(o.label)}>
+                  <button key={o.label} className={`question-option${on ? " on" : ""}`} role={q.multiSelect ? "checkbox" : "radio"} aria-checked={on} tabIndex={tabbable ? undefined : -1} onClick={() => pick(o.label)}>
                     <span className="question-mark" aria-hidden>
                       {q.multiSelect ? (on ? "☑" : "☐") : on ? "●" : "○"}
                     </span>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialState, reducer, type State } from "../store";
+import { initialState, reducer, type ChatItem, type State } from "../store";
 import type { UiEvent } from "../types";
 import { agentTree, shortModel, usesAgents } from "./agents";
 
@@ -66,6 +66,13 @@ describe("agentTree", () => {
     expect(log).toContain("general-purpose|Bash npm test");
     expect(log).toContain("advisor|unavailable (overloaded) · after a failed step");
     expect(log.indexOf("Explore|Handed back to main")).toBeLessThan(log.indexOf("general-purpose|Handed back to main"));
+  });
+
+  it("keeps each agent's steps in order when none have a time (a reopened session)", () => {
+    const strip = (items: ChatItem[]): ChatItem[] => items.map((it) => (it.type === "tool" ? { ...it, startedAt: undefined, endedAt: undefined, children: strip(it.children) } : it));
+    const log = agentTree(strip(run(TEAM).items), opts).log.map((e) => `${e.agent}|${e.text}`);
+    expect(log.indexOf("Explore|Grep verifyToken")).toBeLessThan(log.indexOf("Explore|Handed back to main"));
+    expect(log.indexOf("general-purpose|Bash npm test")).toBeLessThan(log.lastIndexOf("general-purpose|Bash npm test"));
   });
 
   it("follows a turn as it runs: what each agent is doing, and the main session waiting", () => {

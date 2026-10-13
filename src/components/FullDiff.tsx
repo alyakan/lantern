@@ -49,7 +49,7 @@ export default function FullDiff({ path, refreshKey, layout, scope = "session", 
   return (
     <div className="diff-body">
       {diff.deleted && <div className="diff-note">This file was deleted.</div>}
-      {whole ? <WholeFile key={whole.text} text={whole.text} kind={whole.kind} language={language} theme={theme} reveal={whole.kind === "added" && current ? reveal : null} /> : <Diff original={diff.original} modified={diff.current} language={language} theme={theme} layout={layout} reveal={current ? reveal : null} />}
+      {whole ? <WholeFile text={whole.text} kind={whole.kind} language={language} theme={theme} reveal={whole.kind === "added" && current ? reveal : null} /> : <Diff original={diff.original} modified={diff.current} language={language} theme={theme} layout={layout} reveal={current ? reveal : null} />}
     </div>
   );
 }
@@ -142,7 +142,18 @@ function Diff({ original, modified, language, theme, layout, reveal }: { origina
 
 function WholeFile({ text, kind, language, theme, reveal }: { text: string; kind: "added" | "removed"; language: string; theme: string; reveal: Reveal }) {
   const editor = useRef<CodeEditor | null>(null);
+  const marks = useRef<ReturnType<CodeEditor["createDecorationsCollection"]> | null>(null);
   const toLine = useReveal(reveal);
+  // The whole file is marked as one range, which has to follow the text: Claude writing the file changes its length.
+  const shade = (t: string, k: "added" | "removed") => {
+    const lines = t.split("\n").length - (t.endsWith("\n") ? 1 : 0);
+    return [{ range: { startLineNumber: 1, startColumn: 1, endLineNumber: Math.max(lines, 1), endColumn: 1 }, options: { isWholeLine: true, className: `whole-${k}`, marginClassName: `whole-${k}-margin` } }] satisfies Parameters<CodeEditor["createDecorationsCollection"]>[0];
+  };
+  const shown = useRef({ text, kind });
+  shown.current = { text, kind };
+  useEffect(() => {
+    marks.current?.set(shade(text, kind));
+  }, [text, kind]);
   useEffect(() => {
     toLine.queue();
     toLine.apply(editor.current);
@@ -151,10 +162,7 @@ function WholeFile({ text, kind, language, theme, reveal }: { text: string; kind
     editor.current = e;
     registerFindable(e);
     toLine.apply(e);
-    const lines = text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
-    e.createDecorationsCollection([
-      { range: { startLineNumber: 1, startColumn: 1, endLineNumber: Math.max(lines, 1), endColumn: 1 }, options: { isWholeLine: true, className: `whole-${kind}`, marginClassName: `whole-${kind}-margin` } },
-    ]);
+    marks.current = e.createDecorationsCollection(shade(shown.current.text, shown.current.kind));
   };
   return <Editor height="100%" value={text} language={language} theme={theme} onMount={onMount} options={{ ...EDITOR_OPTIONS, renderLineHighlight: "none" }} />;
 }

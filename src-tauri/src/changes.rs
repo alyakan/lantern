@@ -31,7 +31,23 @@ pub enum Scope {
     Branch,
 }
 
+/// Bigger files aren't read into the tracker or diffed: what stands for one is a stamp of its size and time, which
+/// changes with the file, so turn snapshots of it cost a metadata call. (An original recorded as text, for a file that
+/// was small when Claude edited it, never equals a stamp, so such a file shows as changed.)
+const MAX_TRACKED_BYTES: u64 = 2 * 1024 * 1024;
+const STAMP: &str = "\0lantern-too-large:";
+const TOO_LARGE: &str = "This file is too large to show its changes.";
+
+fn is_stamp(text: Option<&str>) -> bool {
+    text.is_some_and(|t| t.starts_with(STAMP))
+}
+
 fn read_text(path: &str) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    if meta.len() > MAX_TRACKED_BYTES {
+        let modified = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos());
+        return Some(format!("{STAMP}{}:{modified}", meta.len()));
+    }
     std::fs::read(path).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
@@ -117,6 +133,14 @@ impl ChangeTracker {
         self.turns.len() - 1
     }
 
+    /// Forgets the turn `start_turn` just returned, when its message never reached Claude (so "Last turn" doesn't compare
+    /// against an empty turn).
+    pub fn cancel_turn(&mut self, turn: usize) {
+        if self.turns.len() == turn + 1 {
+            self.turns.pop();
+        }
+    }
+
     /// For a range of turns, each file as it was at the first of them that knew it.
     fn baseline(&self, scope: Scope, turn: Option<usize>, to_turn: Option<usize>) -> Option<std::borrow::Cow<'_, HashMap<String, Option<String>>>> {
         use std::borrow::Cow;
@@ -166,11 +190,14 @@ impl ChangeTracker {
                 }
                 let (old, new) = (original.as_deref().unwrap_or(""), current.as_deref().unwrap_or(""));
                 let (mut added, mut removed) = (0, 0);
-                for change in similar::TextDiff::from_lines(old, new).iter_all_changes() {
-                    match change.tag() {
-                        similar::ChangeTag::Insert => added += 1,
-                        similar::ChangeTag::Delete => removed += 1,
-                        similar::ChangeTag::Equal => {}
+                // A file too large to read has no lines to count: it's listed as changed, without counts.
+                if !is_stamp(original.as_deref()) && !is_stamp(current.as_deref()) {
+                    for change in similar::TextDiff::from_lines(old, new).iter_all_changes() {
+                        match change.tag() {
+                            similar::ChangeTag::Insert => added += 1,
+                            similar::ChangeTag::Delete => removed += 1,
+                            similar::ChangeTag::Equal => {}
+                        }
                     }
                 }
                 Some(ChangeSummary { path: path.clone(), created: original.is_none(), deleted: current.is_none(), added, removed })
@@ -187,12 +214,22 @@ impl ChangeTracker {
         let earlier_turn = end.filter(|n| scope == Scope::Turn && n + 1 < self.turns.len());
         let current = match earlier_turn {
             Some(_) => self.after(path, earlier_turn),
-            None => match std::fs::read(path) {
-                Ok(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
-                Err(e) if e.kind() == ErrorKind::NotFound => None,
-                Err(e) => return Err(format!("Could not read {path}: {e}")),
-            },
+            None => {
+                // Checked before reading: a huge file isn't read just to be refused.
+                if std::fs::metadata(path).is_ok_and(|m| m.len() > MAX_TRACKED_BYTES) {
+                    return Err(TOO_LARGE.into());
+                }
+                match std::fs::read(path) {
+                    Ok(bytes) if bytes.contains(&0) => return Err("This file is binary, so its changes aren't shown.".into()),
+                    Ok(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
+                    Err(e) if e.kind() == ErrorKind::NotFound => None,
+                    Err(e) => return Err(format!("Could not read {path}: {e}")),
+                }
+            }
         };
+        if is_stamp(original.as_deref()) || is_stamp(current.as_deref()) {
+            return Err(TOO_LARGE.into());
+        }
         Ok(FileDiff {
             path: path.to_string(),
             original: original.clone().unwrap_or_default(),
@@ -217,6 +254,22 @@ mod tests {
         t.record(p, Some("v1".into()));
         t.record(p, Some("v2".into()));
         assert_eq!(t.diff(p, Scope::Session, None, None).unwrap(), FileDiff { path: p.into(), original: "v1".into(), current: "v3".into(), created: false, deleted: false });
+    }
+
+    #[test]
+    fn cancelled_turn_is_forgotten() {
+        let mut t = ChangeTracker::default();
+        t.record("/a.txt", Some("old".into()));
+        let turn = t.start_turn();
+        t.cancel_turn(turn);
+        assert_eq!(t.turns.len(), 0);
+        // Only the latest turn is popped: an earlier one's number is never the one a failed send is about.
+        let first = t.start_turn();
+        let second = t.start_turn();
+        t.cancel_turn(first);
+        assert_eq!(t.turns.len(), 2);
+        t.cancel_turn(second);
+        assert_eq!(t.turns.len(), 1);
     }
 
     #[test]
@@ -360,5 +413,31 @@ mod tests {
         assert_eq!(names(t.summary(Scope::Turn, None, None)), vec!["a.txt", "b.txt"]);
         assert_eq!(t.diff(&p("a.txt"), Scope::Turn, None, None).unwrap().original, "one\ntwo\n");
         assert_eq!(t.diff(&p("a.txt"), Scope::Session, None, None).unwrap().original, "one\n");
+    }
+
+    #[test]
+    fn a_file_too_large_to_read_is_listed_without_counts_and_its_diff_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.log");
+        std::fs::write(&path, vec![b'x'; MAX_TRACKED_BYTES as usize + 1]).unwrap();
+        let p = path.to_str().unwrap();
+        let mut t = ChangeTracker::default();
+        t.record(p, Some("small\n".into()));
+        // A turn starting now snapshots it by its stamp, and it's unchanged in that turn.
+        t.start_turn();
+        assert!(t.summary(Scope::Turn, None, None).is_empty());
+        assert_eq!(t.summary(Scope::Session, None, None), vec![ChangeSummary { path: p.into(), created: false, deleted: false, added: 0, removed: 0 }]);
+        assert_eq!(t.diff(p, Scope::Session, None, None).unwrap_err(), TOO_LARGE);
+    }
+
+    #[test]
+    fn a_binary_file_has_no_diff_to_show() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("blob.bin");
+        std::fs::write(&path, [0u8, 1, 2, 3]).unwrap();
+        let p = path.to_str().unwrap();
+        let mut t = ChangeTracker::default();
+        t.record(p, Some("text\n".into()));
+        assert!(t.diff(p, Scope::Session, None, None).unwrap_err().contains("binary"));
     }
 }

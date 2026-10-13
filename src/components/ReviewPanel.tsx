@@ -8,6 +8,7 @@ import { basename, dirOf, relativeTo } from "../lib/diff";
 import { usePersistentState } from "../lib/layout";
 import { Counts } from "./EditLine";
 import { DocIcon } from "./icons";
+import { moveFocus, useMenuKeys } from "./useMenuKeys";
 import { FilesTab } from "./FilesTab";
 import { AgentsTab } from "./AgentsTab";
 import { SummaryTab, type ExportDoc } from "./SummaryTab";
@@ -62,6 +63,8 @@ const LAYOUT_LABEL: Record<DiffLayout, string> = { inline: "Unified", split: "Sp
 const NEXT_LAYOUT: Record<DiffLayout, DiffLayout> = { inline: "split", split: "inline" };
 
 type Tab = "changes" | "files" | "tests" | "agents" | "summary";
+/** Each tab's button, which its panel is labelled by. */
+const tabId = (t: Tab) => `review-${t}-tab`;
 
 export function ReviewPanel(props: Props) {
   const [savedTab, setTab] = usePersistentState<Tab>("review.tab", "changes");
@@ -108,27 +111,37 @@ export function ReviewPanel(props: Props) {
   return (
     <aside className="review">
       <div className="pane-tabs">
-        <div className="pane-tabs-track" role="tablist" aria-label="Side panel">
-          <button role="tab" aria-selected={tab === "changes"} className={tab === "changes" ? "active" : ""} onClick={() => setTab("changes")}>
+        {/* Arrow keys move between the tabs and open the one reached, as the ARIA tabs pattern has it. */}
+        <div
+          className="pane-tabs-track"
+          role="tablist"
+          aria-label="Side panel"
+          onKeyDown={(e) => {
+            const tabs = [...e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')];
+            const to = moveFocus(e, tabs);
+            if (to !== null) tabs[to].click();
+          }}
+        >
+          <button id={tabId("changes")} role="tab" tabIndex={tab === "changes" ? 0 : -1} aria-selected={tab === "changes"} className={tab === "changes" ? "active" : ""} onClick={() => setTab("changes")}>
             Changes
             {count > 0 && <span className="tab-count">{count}</span>}
           </button>
-          <button role="tab" aria-selected={tab === "files"} className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}>
+          <button id={tabId("files")} role="tab" tabIndex={tab === "files" ? 0 : -1} aria-selected={tab === "files"} className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}>
             Files
           </button>
           {props.summary && (
-            <button role="tab" aria-selected={tab === "summary"} className={tab === "summary" ? "active" : ""} onClick={() => setTab("summary")}>
+            <button id={tabId("summary")} role="tab" tabIndex={tab === "summary" ? 0 : -1} aria-selected={tab === "summary"} className={tab === "summary" ? "active" : ""} onClick={() => setTab("summary")}>
               Summary
             </button>
           )}
           {props.agents && (
-            <button role="tab" aria-selected={tab === "agents"} className={tab === "agents" ? "active" : ""} onClick={() => setTab("agents")}>
+            <button id={tabId("agents")} role="tab" tabIndex={tab === "agents" ? 0 : -1} aria-selected={tab === "agents"} className={tab === "agents" ? "active" : ""} onClick={() => setTab("agents")}>
               Agents
               {props.agents.tree.live && <span className="tab-live" aria-label="working" />}
             </button>
           )}
           {runs.length > 0 && (
-            <button role="tab" aria-selected={tab === "tests"} className={tab === "tests" ? "active" : ""} onClick={() => setTab("tests")}>
+            <button id={tabId("tests")} role="tab" tabIndex={tab === "tests" ? 0 : -1} aria-selected={tab === "tests"} className={tab === "tests" ? "active" : ""} onClick={() => setTab("tests")}>
               Tests
               {latestRun?.outcome === "failed" && <span className="tab-count failed">{latestRun.failed || "!"}</span>}
             </button>
@@ -137,28 +150,34 @@ export function ReviewPanel(props: Props) {
         {tab === "changes" && props.onScope && <ScopeMenu {...props} onScope={props.onScope} />}
       </div>
       {tab === "changes" && (
-        <ChangesTab
-          {...props}
-          diffLine={diffLine}
-          onEdit={(path) => {
-            setReveal({ path, line: null, key: Date.now() });
-            setTab("files");
-          }}
-        />
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("changes")}>
+          <ChangesTab
+            {...props}
+            diffLine={diffLine}
+            onEdit={(path) => {
+              setReveal({ path, line: null, key: Date.now() });
+              setTab("files");
+            }}
+          />
+        </div>
       )}
       {tab === "summary" && props.summary && (
-        <div className="tab-body">
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("summary")}>
           <SummaryTab slot={props.summary.slot} summary={props.summary.data} changed={props.summary.changed} running={props.summary.running} onOpenPage={props.summary.onOpenPage} doc={props.summary.doc} />
         </div>
       )}
       {tab === "agents" && props.agents && (
-        <div className="tab-body">
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("agents")}>
           <AgentsTab tree={props.agents.tree} graph={props.agents.graph} usage={props.agents.usage} />
         </div>
       )}
-      {tab === "tests" && <TestsTab runs={runs} selected={shownRun} onSelect={setShownRun} onOpenLocation={openLocation} />}
+      {tab === "tests" && (
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("tests")}>
+          <TestsTab runs={runs} selected={shownRun} onSelect={setShownRun} onOpenLocation={openLocation} />
+        </div>
+      )}
       {/* Kept mounted while hidden so the tree keeps its expanded folders across tab switches. */}
-      <div className="tab-body" hidden={tab !== "files"}>
+      <div className="tab-body" role="tabpanel" aria-labelledby={tabId("files")} hidden={tab !== "files"}>
         <FilesTab
           folder={props.folder}
           ready={props.ready}
@@ -235,6 +254,7 @@ const SCOPE_LABEL: Record<Exclude<ChangeScope, "pr" | "turn">, string> = { branc
 function ScopeMenu({ scope = "session", onScope, pr, branch, stepRange, scopeCounts }: Props & { onScope: (scope: ChangeScope) => void }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const keys = useMenuKeys(open, root);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
@@ -272,7 +292,7 @@ function ScopeMenu({ scope = "session", onScope, pr, branch, stepRange, scopeCou
         <span className="scope-chevron" aria-hidden />
       </button>
       {open && (
-        <div className="menu scope-menu" role="menu" aria-label="Show changes from">
+        <div className="menu scope-menu" role="menu" aria-label="Show changes from" onKeyDown={keys.onKeyDown}>
           {options.map((s) => (
             <button
               key={s}
@@ -332,6 +352,7 @@ function BranchCommits({ review }: { review: BranchReview }) {
 function FilePicker({ files, current, folder, onSelect }: { files: ChangedFile[]; current: ChangedFile; folder: string | null; onSelect: (path: string) => void }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const keys = useMenuKeys(open, root);
 
   useEffect(() => {
     if (!open) return;
@@ -358,32 +379,34 @@ function FilePicker({ files, current, folder, onSelect }: { files: ChangedFile[]
       {open && (
         // The same dropdown as the folder, session and model menus.
         <div className="menu file-menu">
-          <ul className="menu-list" role="listbox" aria-label="Changed files">
+          {/* The options are the buttons themselves: a button can't sit inside an option. */}
+          <div className="menu-list" role="listbox" aria-label="Changed files" onKeyDown={keys.onKeyDown}>
             {files.map((f) => {
               const rel = relativeTo(f.path, folder);
               const isCurrent = f.path === current.path;
               return (
-                <li key={f.path} role="option" aria-selected={isCurrent}>
-                  <button
-                    className={`menu-row${isCurrent ? " current" : ""}`}
-                    title={f.path}
-                    onClick={() => {
-                      onSelect(f.path);
-                      setOpen(false);
-                    }}
-                  >
-                    <span className="menu-row-title">
-                      {basename(rel)}
-                      <span className="menu-row-path">{dirOf(rel)}</span>
-                    </span>
-                    {f.created && <span className="tag">new</span>}
-                    {f.deleted && <span className="tag">deleted</span>}
-                    <Counts added={f.added} removed={f.removed} />
-                  </button>
-                </li>
+                <button
+                  key={f.path}
+                  role="option"
+                  aria-selected={isCurrent}
+                  className={`menu-row${isCurrent ? " current" : ""}`}
+                  title={f.path}
+                  onClick={() => {
+                    onSelect(f.path);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="menu-row-title">
+                    {basename(rel)}
+                    <span className="menu-row-path">{dirOf(rel)}</span>
+                  </span>
+                  {f.created && <span className="tag">new</span>}
+                  {f.deleted && <span className="tag">deleted</span>}
+                  <Counts added={f.added} removed={f.removed} />
+                </button>
               );
             })}
-          </ul>
+          </div>
         </div>
       )}
     </div>

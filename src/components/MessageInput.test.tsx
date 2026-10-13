@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MessageInput } from "./MessageInput";
 
 describe("MessageInput", () => {
@@ -39,6 +39,21 @@ describe("MessageInput", () => {
     fireEvent.compositionEnd(box);
     fireEvent.keyDown(box, { key: "Enter" });
     expect(onSend).toHaveBeenLastCalledWith("にほん");
+  });
+
+  it("doesn't send on the Enter that WebKit delivers after compositionend, still composing (keyCode 229)", () => {
+    const onSend = vi.fn();
+    render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} />);
+    const box = screen.getByPlaceholderText("Ask Claude…");
+    fireEvent.keyDown(box, { key: "Process", keyCode: 229 });
+    fireEvent.compositionStart(box);
+    fireEvent.change(box, { target: { value: "にほん" } });
+    fireEvent.compositionEnd(box);
+    fireEvent.keyDown(box, { key: "Enter", keyCode: 229 });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(box).toHaveValue("にほん");
+    fireEvent.keyDown(box, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledWith("にほん");
   });
 
   const type = (box: HTMLElement, value: string) => {
@@ -125,12 +140,27 @@ describe("MessageInput", () => {
       expect(names).toEqual(["/grill-me", "/mcp__github__review"]);
     });
 
+    it("mid-sentence, Enter sends a / that's just text, unless the user has arrowed into the menu", () => {
+      const onSend = vi.fn();
+      render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} commands={withSkills} skillIndex={index} />);
+      const box = screen.getByPlaceholderText("Ask Claude…") as HTMLTextAreaElement;
+      type(box, "re-run the checks on /gri");
+      expect(screen.getByRole("listbox", { name: "Commands" })).toBeInTheDocument();
+      fireEvent.keyDown(box, { key: "Enter" });
+      expect(onSend).toHaveBeenCalledWith("re-run the checks on /gri");
+      type(box, "re-run the checks on /gri");
+      fireEvent.keyDown(box, { key: "ArrowDown" });
+      fireEvent.keyDown(box, { key: "Enter" });
+      expect(onSend).toHaveBeenCalledTimes(1);
+      expect(box).toHaveValue("re-run the checks on /grill-me ");
+    });
+
     it("puts a picked skill where the / was, and the caret after it", () => {
       const onSend = vi.fn();
       render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} commands={withSkills} skillIndex={index} />);
       const box = screen.getByPlaceholderText("Ask Claude…") as HTMLTextAreaElement;
       type(box, "design the cache, /gri");
-      fireEvent.keyDown(box, { key: "Enter" });
+      fireEvent.keyDown(box, { key: "Tab" });
       expect(onSend).not.toHaveBeenCalled();
       expect(box).toHaveValue("design the cache, /grill-me ");
       expect(box.selectionStart).toBe("design the cache, /grill-me ".length);
@@ -144,6 +174,23 @@ describe("MessageInput", () => {
       expect(screen.queryByRole("listbox")).toBeNull();
       type(box, "/Users/c");
       expect(screen.queryByRole("listbox")).toBeNull();
+    });
+
+    it("says No files match only once the search is back, and Enter waits for it", async () => {
+      let answer: (files: { path: string; rel: string; hits: [] }[]) => void = () => {};
+      const findFiles = vi.fn(() => new Promise<{ path: string; rel: string; hits: [] }[]>((resolve) => (answer = resolve)));
+      const onSend = vi.fn();
+      render(<MessageInput status="idle" onSend={onSend} onStop={() => {}} findFiles={findFiles} />);
+      const box = screen.getByPlaceholderText("Ask Claude…");
+      type(box, "see @zzz");
+      await waitFor(() => expect(findFiles).toHaveBeenCalledWith("zzz"));
+      expect(screen.queryByText("No files match")).toBeNull();
+      fireEvent.keyDown(box, { key: "Enter" });
+      expect(onSend).not.toHaveBeenCalled();
+      await act(async () => answer([]));
+      expect(screen.getByText("No files match")).toBeInTheDocument();
+      fireEvent.keyDown(box, { key: "Enter" });
+      expect(onSend).toHaveBeenCalledWith("see @zzz");
     });
 
     it("warns about MCP servers that need you, linking to Settings", () => {
@@ -208,9 +255,24 @@ describe("MessageInput", () => {
     expect(onStop).toHaveBeenCalledOnce();
   });
 
-  it("is disabled while starting", () => {
-    render(<MessageInput status="starting" onSend={() => {}} onStop={() => {}} />);
+  it("names the message box for screen readers", () => {
+    render(<MessageInput status="idle" onSend={() => {}} onStop={() => {}} />);
+    expect(screen.getByRole("textbox", { name: "Message to Claude" })).toBeInTheDocument();
+  });
+
+  it("is disabled while starting, with a way out if the chat gives one", () => {
+    const { rerender } = render(<MessageInput status="starting" onSend={() => {}} onStop={() => {}} />);
     expect(screen.getByPlaceholderText("Starting Claude…")).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    const onCancelStart = vi.fn();
+    rerender(<MessageInput status="starting" onSend={() => {}} onStop={() => {}} onCancelStart={onCancelStart} />);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onCancelStart).toHaveBeenCalledOnce();
+  });
+
+  it("says why the box is off once Claude has stopped", () => {
+    render(<MessageInput status="ended" onSend={() => {}} onStop={() => {}} />);
+    expect(screen.getByPlaceholderText("Claude stopped — restart to continue")).toBeDisabled();
   });
 
   it("on a Step-by-step page, Enter stays on the step and ⌘Enter sends and moves on", () => {
@@ -228,6 +290,18 @@ describe("MessageInput", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send & next" }));
     expect(sendAndNext).toHaveBeenLastCalledWith("and this");
   });
+  it("⌘Enter while Claude works queues the message, as Enter does, instead of dropping it", () => {
+    const set = vi.fn();
+    const sendAndNext = vi.fn();
+    render(<MessageInput status="running" onSend={() => {}} onStop={() => {}} sendAndNext={sendAndNext} queue={{ items: [], set }} />);
+    const box = screen.getByPlaceholderText("Queue a message…");
+    fireEvent.change(box, { target: { value: "rename it" } });
+    fireEvent.keyDown(box, { key: "Enter", metaKey: true });
+    expect(set).toHaveBeenCalledWith(["rename it"]);
+    expect(sendAndNext).not.toHaveBeenCalled();
+    expect(box).toHaveValue("");
+  });
+
   describe("terminal mode", () => {
     it("turns on with \"!\", runs the command on Enter (even while Claude works) and leaves on Backspace", () => {
       const onRun = vi.fn();
@@ -337,6 +411,24 @@ describe("MessageInput", () => {
       paste(queueBox, lines(10));
       fireEvent.keyDown(queueBox, { key: "Enter" });
       expect(set).toHaveBeenCalledWith([lines(10)]);
+    });
+
+    it("is queued as its placeholder, and Stop puts the placeholder back, still sent in full", () => {
+      const onSend = vi.fn();
+      const onStop = vi.fn();
+      const { rerender } = render(<MessageInput status="running" onSend={onSend} onStop={onStop} />);
+      const queueBox = screen.getByPlaceholderText("Queue a message…") as HTMLTextAreaElement;
+      paste(queueBox, lines(10));
+      fireEvent.keyDown(queueBox, { key: "Enter" });
+      expect(screen.getByText("[Pasted text #1 · 10 lines]")).toBeInTheDocument();
+      // A paste while the first waits gets a number of its own.
+      paste(queueBox, lines(8));
+      fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+      expect(onStop).toHaveBeenCalled();
+      expect(queueBox).toHaveValue("[Pasted text #1 · 10 lines]\n\n[Pasted text #2 · 8 lines]");
+      rerender(<MessageInput status="idle" onSend={onSend} onStop={onStop} />);
+      fireEvent.keyDown(box(), { key: "Enter" });
+      expect(onSend).toHaveBeenCalledWith(`${lines(10)}\n\n${lines(8)}`);
     });
 
     it("is not made in a shell command", () => {

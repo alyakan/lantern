@@ -76,6 +76,15 @@ impl Slots {
     }
 }
 
+/// Shuts chats down together (the app is quitting), so one slow claude doesn't hold up the rest.
+pub async fn shut_down_all(slots: Vec<Arc<Slot>>) {
+    let mut tasks = tokio::task::JoinSet::new();
+    for s in slots {
+        tasks.spawn(async move { s.shut_down().await });
+    }
+    while tasks.join_next().await.is_some() {}
+}
+
 /// A sink for one slot's events.
 pub fn tagged(id: &str, emit: impl Fn(SlotEvent) + Send + Sync + 'static) -> Sink {
     let id = id.to_string();
@@ -87,10 +96,12 @@ impl Slot {
     pub async fn shut_down(&self) {
         self.bridge.cancel_all();
         self.shells.stop_all();
-        if let Some(s) = self.session.lock().await.take() {
+        // Taken out before stopping: the lock would otherwise be held while claude stops, blocking send and stop_task.
+        let session = self.session.lock().await.take();
+        if let Some(s) = session {
             s.stop().await;
         }
-        let _ = std::fs::remove_file(&self.bridge.socket_path);
+        self.bridge.close().await;
     }
 
     pub fn folder(&self) -> Result<PathBuf, String> {
@@ -141,5 +152,52 @@ mod tests {
         assert!(slots.remove("s1").is_some());
         assert!(slots.get("s1").is_err());
         assert_eq!(slots.drain().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn chats_shut_down_together_and_a_stopping_session_does_not_hold_its_lock() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        // Ignores SIGTERM, so each one takes the whole grace period to stop. It says so once it has, as a SIGTERM
+        // before that would simply kill it.
+        let fake = dir.path().join("claude");
+        let ready = dir.path().join("ready");
+        let body = format!("#!/bin/sh\ntrap '' TERM\necho ready > {}\nwhile true; do sleep 1; done\n", ready.display());
+        std::fs::write(&fake, body).unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let cfg = crate::session::SessionConfig {
+            claude: fake,
+            folder: dir.path().to_path_buf(),
+            mode: crate::args::Mode::Ask,
+            auto_approve: false,
+            resume: None,
+            model: None,
+            effort: None,
+            advisor: None,
+            subagent_model: None,
+            helper: crate::args::HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into() },
+            path_env: None,
+        };
+        let slots = Slots::default();
+        let mut open = vec![];
+        for id in ["s1", "s2"] {
+            let slot = slots.get_or_create(id, dir.path(), |_| {}).unwrap();
+            let session = Session::spawn(&cfg, Arc::new(|_: UiEvent| {}), Arc::new(|_: &str, _: Option<String>| {})).unwrap();
+            *slot.session.lock().await = Some(session);
+            open.push(slot);
+        }
+        for _ in 0..500 {
+            if ready.exists() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        let started = std::time::Instant::now();
+        let closing = tokio::spawn(shut_down_all(open.clone()));
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(open[0].session.try_lock().is_ok(), "the session lock is held while claude stops");
+        closing.await.unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(9), "the chats were shut down one after another");
+        assert!(open.iter().all(|s| !s.bridge.socket_path.exists()));
     }
 }

@@ -23,9 +23,17 @@ fn git(folder: &Path, args: &[&str]) -> Option<Vec<u8>> {
     out.status.success().then_some(out.stdout)
 }
 
-/// `git status` entries as (two-letter code, path from the repo root).
-fn status(folder: &Path) -> Option<Vec<(String, String)>> {
+/// A `git status` entry: (two-letter code, path from the repo root, the path a rename or copy came from).
+type Entry = (String, String, Option<String>);
+
+/// `git status` entries.
+fn status(folder: &Path) -> Option<Vec<Entry>> {
     let out = git(folder, &["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", "."])?;
+    Some(parse_status(&out))
+}
+
+/// Porcelain v1 `-z` output: "XY path" records, a rename or copy followed by the path it came from.
+fn parse_status(out: &[u8]) -> Vec<Entry> {
     let mut fields = out.split(|b| *b == 0).filter(|f| !f.is_empty()).map(|f| String::from_utf8_lossy(f).into_owned());
     let mut entries = vec![];
     while let Some(f) = fields.next() {
@@ -33,13 +41,10 @@ fn status(folder: &Path) -> Option<Vec<(String, String)>> {
             continue;
         }
         let (code, path) = (f[..2].to_string(), f[3..].to_string());
-        // A rename or copy is followed by the path it came from.
-        if code.starts_with('R') || code.starts_with('C') {
-            fields.next();
-        }
-        entries.push((code, path));
+        let from = if code.starts_with('R') || code.starts_with('C') { fields.next() } else { None };
+        entries.push((code, path, from));
     }
-    Some(entries)
+    entries
 }
 
 fn looks_textual(path: &Path) -> bool {
@@ -51,8 +56,13 @@ fn looks_textual(path: &Path) -> bool {
     !bytes.iter().take(8000).any(|b| *b == 0)
 }
 
+/// The files under `folder`, walked as the file tree walks them: hidden files listed, .gitignore honoured even outside
+/// a git checkout, and the folders it never shows left out.
 fn list_files(folder: &Path) -> HashSet<String> {
     ignore::WalkBuilder::new(folder)
+        .hidden(false)
+        .require_git(false)
+        .filter_entry(|e| !crate::files::ALWAYS_HIDDEN.contains(&e.file_name().to_string_lossy().as_ref()))
         .build()
         .flatten()
         .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
@@ -66,7 +76,7 @@ impl Baseline {
     pub fn take(folder: &Path) -> Baseline {
         let prefix = git(folder, &["rev-parse", "--show-prefix"]).map(|p| String::from_utf8_lossy(&p).trim().to_string());
         match (prefix, status(folder)) {
-            (Some(prefix), Some(entries)) => Baseline::Git { folder: folder.to_path_buf(), prefix, dirty: entries.into_iter().map(|e| e.1).collect() },
+            (Some(prefix), Some(entries)) => Baseline::Git { folder: folder.to_path_buf(), prefix, dirty: entries.into_iter().flat_map(|(_, path, from)| [Some(path), from]).flatten().collect() },
             _ => Baseline::Files { folder: folder.to_path_buf(), files: list_files(folder) },
         }
     }
@@ -78,27 +88,35 @@ impl Baseline {
         match self {
             Baseline::Git { folder, prefix, dirty } => {
                 let Some(entries) = status(folder) else { return vec![] };
-                entries
-                    .into_iter()
-                    .filter(|(_, path)| !dirty.contains(path))
-                    .filter_map(|(code, path)| {
+                let mut found = vec![];
+                for (code, path, from) in entries {
+                    // A rename's new path is a file the chat didn't have; its old path is gone, and HEAD still has it.
+                    let mut paths = vec![(path, code == "??" || code.starts_with(['A', 'R', 'C']))];
+                    if code.starts_with('R') {
+                        paths.extend(from.map(|old| (old, false)));
+                    }
+                    for (rel, new) in paths {
                         // Paths come from the repo root; the chat's own paths are under its folder as given.
-                        let abs = folder.join(path.strip_prefix(prefix.as_str())?);
-                        if known(&abs.to_string_lossy()) {
-                            return None;
+                        let Some(local) = rel.strip_prefix(prefix.as_str()) else { continue };
+                        let abs = folder.join(local);
+                        if dirty.contains(&rel) || known(&abs.to_string_lossy()) {
+                            continue;
                         }
-                        let original = if code == "??" || code.starts_with('A') {
+                        let original = if new {
                             if !looks_textual(&abs) {
-                                return None;
+                                continue;
                             }
                             None
                         } else {
-                            let bytes = git(folder, &["show", &format!("HEAD:{path}")])?;
-                            Some(String::from_utf8_lossy(&bytes).into_owned())
+                            match git(folder, &["show", &format!("HEAD:{rel}")]) {
+                                Some(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
+                                None => continue,
+                            }
                         };
-                        Some((abs.to_string_lossy().into_owned(), original))
-                    })
-                    .collect()
+                        found.push((abs.to_string_lossy().into_owned(), original));
+                    }
+                }
+                found
             }
             Baseline::Files { folder, files } => list_files(folder)
                 .into_iter()
@@ -134,23 +152,28 @@ pub fn uncommitted(folder: &Path) -> Option<Vec<Uncommitted>> {
             }
         }
     }
-    let rows = entries
-        .into_iter()
-        .filter_map(|(code, path)| {
-            let abs = folder.join(path.strip_prefix(prefix.as_str())?);
-            let untracked = code == "??";
-            let created = untracked || code.starts_with('A');
+    let mut rows = vec![];
+    for (code, path, from) in entries {
+        let untracked = code == "??";
+        // A rename's old path is listed too, as deleted: the numstat is --no-renames, so it has its own line count.
+        let mut paths = vec![(path, untracked || code.starts_with(['A', 'R', 'C']))];
+        if code.starts_with('R') {
+            paths.extend(from.map(|old| (old, false)));
+        }
+        for (rel, created) in paths {
+            let Some(local) = rel.strip_prefix(prefix.as_str()) else { continue };
+            let abs = folder.join(local);
             let deleted = !abs.exists();
-            let (added, removed) = match counts.get(&path) {
+            let (added, removed) = match counts.get(&rel) {
                 Some(c) => *c,
                 None if untracked && looks_textual(&abs) => (std::fs::read_to_string(&abs).map(|t| t.lines().count()).unwrap_or(0), 0),
-                // Binary, too big to count, or a rename's old path.
-                _ if untracked => return None,
+                // Binary or too big to count (an untracked file).
+                _ if untracked => continue,
                 _ => (0, 0),
             };
-            Some((abs.to_string_lossy().into_owned(), created, deleted, added, removed))
-        })
-        .collect();
+            rows.push((abs.to_string_lossy().into_owned(), created, deleted, added, removed));
+        }
+    }
     Some(rows)
 }
 
@@ -162,6 +185,23 @@ pub fn committed(folder: &Path, path: &Path) -> Result<Option<String>, String> {
     Ok(git(folder, &["show", &spec]).map(|b| String::from_utf8_lossy(&b).into_owned()))
 }
 
+/// Both sides of a file's diff in the Git view: as the last commit has it, and as it is on disk (None if it's gone).
+/// `path` has to lie inside `folder` once `..` and symlinks are resolved, or the diff would show any file the user can read.
+pub fn diff_sides(folder: &Path, path: &Path) -> Result<(Option<String>, Option<String>), String> {
+    const OUTSIDE: &str = "That path is outside the open folder.";
+    let root = folder.canonicalize().map_err(|e| e.to_string())?;
+    match path.canonicalize() {
+        Ok(real) if real.starts_with(&root) => {
+            let current = std::fs::read(&real).ok().map(|b| String::from_utf8_lossy(&b).into_owned());
+            Ok((committed(&root, &real)?, current))
+        }
+        Ok(_) => Err(OUTSIDE.into()),
+        // A deleted file: nothing on disk to read, and only its name is looked up in git, so `..` is refused.
+        Err(_) if path.starts_with(folder) && !path.components().any(|c| c == std::path::Component::ParentDir) => Ok((committed(folder, path)?, None)),
+        Err(_) => Err(OUTSIDE.into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,16 +210,20 @@ mod tests {
         assert!(Command::new("git").arg("-C").arg(dir).args(args).output().unwrap().status.success(), "git {args:?}");
     }
 
+    fn init(dir: &Path) {
+        sh(dir, &["init", "-q"]);
+        sh(dir, &["config", "user.email", "t@t"]);
+        sh(dir, &["config", "user.name", "t"]);
+        std::fs::write(dir.join("kept.txt"), "kept\n").unwrap();
+        std::fs::write(dir.join("edited.txt"), "before\n").unwrap();
+        std::fs::write(dir.join("gone.txt"), "gone\n").unwrap();
+        sh(dir, &["add", "."]);
+        sh(dir, &["commit", "-qm", "init"]);
+    }
+
     fn repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
-        sh(dir.path(), &["init", "-q"]);
-        sh(dir.path(), &["config", "user.email", "t@t"]);
-        sh(dir.path(), &["config", "user.name", "t"]);
-        std::fs::write(dir.path().join("kept.txt"), "kept\n").unwrap();
-        std::fs::write(dir.path().join("edited.txt"), "before\n").unwrap();
-        std::fs::write(dir.path().join("gone.txt"), "gone\n").unwrap();
-        sh(dir.path(), &["add", "."]);
-        sh(dir.path(), &["commit", "-qm", "init"]);
+        init(dir.path());
         dir
     }
 
@@ -243,5 +287,58 @@ mod tests {
         let plain = tempfile::tempdir().unwrap();
         assert!(uncommitted(plain.path()).is_none());
         assert!(committed(plain.path(), &plain.path().join("x")).is_err());
+    }
+
+    #[test]
+    fn git_diff_refuses_paths_that_leave_the_folder() {
+        let outer = tempfile::tempdir().unwrap();
+        let root = outer.path().join("project");
+        std::fs::create_dir(&root).unwrap();
+        init(&root);
+        std::fs::write(outer.path().join("secret.txt"), "secret\n").unwrap();
+        std::fs::write(root.join("edited.txt"), "after\n").unwrap();
+        std::fs::remove_file(root.join("gone.txt")).unwrap();
+
+        assert!(diff_sides(&root, &root.join("../secret.txt")).is_err());
+        assert!(diff_sides(&root, &root.join("../gone.txt")).is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(outer.path().join("secret.txt"), root.join("link.txt")).unwrap();
+            assert!(diff_sides(&root, &root.join("link.txt")).is_err());
+        }
+        assert_eq!(diff_sides(&root, &root.join("edited.txt")).unwrap(), (Some("before\n".into()), Some("after\n".into())));
+        assert_eq!(diff_sides(&root, &root.join("gone.txt")).unwrap(), (Some("gone\n".into()), None));
+    }
+
+    #[test]
+    fn porcelain_renames_carry_the_path_they_came_from() {
+        assert_eq!(parse_status(b"R  new.txt\0old.txt\0?? x.txt\0"), vec![("R ".into(), "new.txt".into(), Some("old.txt".into())), ("??".into(), "x.txt".into(), None)]);
+    }
+
+    #[test]
+    fn a_git_mv_shows_as_the_new_file_created_and_the_old_one_deleted() {
+        let dir = repo();
+        let d = dir.path();
+        let base = Baseline::take(d);
+        sh(d, &["mv", "kept.txt", "renamed.txt"]);
+        assert_eq!(names(base.changes(|_| false)), vec![("kept.txt".into(), Some("kept\n".into())), ("renamed.txt".into(), None)]);
+        let mut rows = uncommitted(d).unwrap();
+        rows.sort();
+        let rows: Vec<_> = rows.into_iter().map(|(p, c, del, a, r)| (p.rsplit('/').next().unwrap().to_string(), c, del, a, r)).collect();
+        assert_eq!(rows, vec![("kept.txt".into(), false, true, 0, 1), ("renamed.txt".into(), true, false, 1, 0)]);
+    }
+
+    #[test]
+    fn without_git_the_walk_follows_the_gitignore_and_skips_node_modules_but_not_dotfiles() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        std::fs::write(d.join(".gitignore"), "build/\n").unwrap();
+        let base = Baseline::take(d);
+        std::fs::create_dir_all(d.join("node_modules/pkg")).unwrap();
+        std::fs::create_dir(d.join("build")).unwrap();
+        std::fs::write(d.join("node_modules/pkg/index.js"), "x\n").unwrap();
+        std::fs::write(d.join("build/out.js"), "x\n").unwrap();
+        std::fs::write(d.join(".env"), "KEY=1\n").unwrap();
+        assert_eq!(names(base.changes(|_| false)), vec![(".env".into(), None)]);
     }
 }

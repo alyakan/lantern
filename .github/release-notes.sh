@@ -15,7 +15,8 @@ while IFS= read -r subject; do
   if [[ "$title" =~ ^(.*)\ \(#([0-9]+)\)$ ]]; then
     title="${BASH_REMATCH[1]}"
     pr="${BASH_REMATCH[2]}"
-    changelog=$(gh pr view "$pr" --json body -q .body | tr -d '\r' | awk '/^## /{on = /^## Changelog/; next} on && /^- /')
+    # A PR that can't be read (an issue's number, a rate limit, not logged in) falls back to its title below.
+    changelog=$(gh pr view "$pr" --json body -q .body | tr -d '\r' | awk '/^## /{on = /^## Changelog/; next} on && /^- /') || changelog=""
   fi
   if [ -n "$changelog" ]; then
     notes+="$changelog"$'\n'

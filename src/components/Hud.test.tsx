@@ -75,6 +75,17 @@ describe("Hud", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it("leaves Enter and Space on its buttons to the buttons, and opens the chat only from the toast itself", () => {
+    const onOpenChat = vi.fn();
+    render(<Hud event={{ key: 1, kind: "waiting", chat: { slot: "s2", title: "Add retries", project: null } }} onOpenChat={onOpenChat} />);
+    fireEvent.keyDown(screen.getByRole("button", { name: "Dismiss" }), { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("button", { name: /Turn toast sounds/ }), { key: " " });
+    expect(onOpenChat).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("status"), { key: "Enter" });
+    expect(onOpenChat).toHaveBeenCalledWith("s2");
+  });
+
   it("about another chat, names it and opens it when clicked", () => {
     const onOpenChat = vi.fn();
     render(<Hud event={{ key: 1, kind: "waiting", chat: { slot: "s2", title: "Add retries", project: "web" } }} onOpenChat={onOpenChat} />);

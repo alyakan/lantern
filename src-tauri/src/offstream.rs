@@ -28,7 +28,7 @@ pub enum Source {
 /// The id a workflow agent's Agent step gets (the chat has no tool call for it): from its journal key, which stays
 /// the same when a resumed run starts it again under a new agent id, so a retry continues the same step.
 pub fn agent_step_id(entry: &Value) -> String {
-    let key = entry["key"].as_str().and_then(|k| k.split(':').nth(1)).map(|h| &h[..h.len().min(16)]);
+    let key = entry["key"].as_str().and_then(|k| k.split(':').nth(1)).map(|h| h.get(..16).unwrap_or(h));
     format!("wfa-{}", key.or(entry["agentId"].as_str()).unwrap_or("agent"))
 }
 
@@ -287,6 +287,15 @@ mod tests {
         assert!(!end.iter().any(|e| matches!(e, UiEvent::AgentStarted { .. })));
         assert!(matches!(end.last().unwrap(), UiEvent::ToolFinished { is_error: false, output, .. } if output == "Use fewer rows"));
         watches.ended("toolu_wf");
+    }
+
+    #[test]
+    fn a_step_id_is_cut_to_16_bytes_without_splitting_a_character() {
+        // The 16th byte falls inside the é: no cut there, so the whole part after the colon is the id (stable for the key).
+        let rest = format!("{}éb", "a".repeat(15));
+        assert_eq!(agent_step_id(&serde_json::json!({"key": format!("v2:{rest}")})), format!("wfa-{rest}"));
+        assert_eq!(agent_step_id(&serde_json::json!({"key": "v2:abc"})), "wfa-abc");
+        assert_eq!(agent_step_id(&serde_json::json!({"agentId": "a9"})), "wfa-a9");
     }
 
     #[tokio::test]

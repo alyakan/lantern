@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 const MAX_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
 
 /// Always hidden, even in folders without a .gitignore.
-const ALWAYS_HIDDEN: &[&str] = &[".git", "node_modules", ".DS_Store"];
+pub(crate) const ALWAYS_HIDDEN: &[&str] = &[".git", "node_modules", ".DS_Store"];
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct Entry {
@@ -207,7 +207,9 @@ const LINE_WINDOW: usize = 240;
 fn text_regex(q: &TextQuery) -> Result<regex::Regex, String> {
     let body = if q.regex { q.pattern.clone() } else { regex::escape(&q.pattern) };
     let body = if q.whole_word { format!(r"\b(?:{body})\b") } else { body };
-    regex::RegexBuilder::new(&body).case_insensitive(!q.case_sensitive).size_limit(1 << 22).build().map_err(|e| format!("That isn't a valid regular expression: {e}"))
+    // ^ and $ are line starts and ends, as in an editor: the whole file is searched, not one line at a time. CRLF
+    // files end their lines with \r\n, so $ has to match before the \r too.
+    regex::RegexBuilder::new(&body).multi_line(true).crlf(true).case_insensitive(!q.case_sensitive).size_limit(1 << 22).build().map_err(|e| format!("That isn't a valid regular expression: {e}"))
 }
 
 /// A line split into matched and unmatched pieces; a long one cut to a window around its first match.
@@ -364,7 +366,8 @@ fn create_temp(target: &Path) -> std::io::Result<(PathBuf, std::fs::File)> {
 /// Saves `text` as the file at `path` inside `root`, if the file is still what the editor opened it as: `expected` is
 /// that text (None: the file shouldn't exist). Anything else on disk is a Conflict and nothing is written, so a save
 /// never overwrites what changed meanwhile (Claude's edit, git). Writes go to a temporary file beside it, then replace
-/// it, so a crash can't leave half a file, and keep its permissions and a byte-order mark it had.
+/// it, so a crash can't leave half a file, and keep its permissions and a byte-order mark it had. The check and the
+/// replace are two steps: an edit that lands between them is overwritten (Claude's tools don't take this lock).
 pub fn write_file(root: &Path, path: &Path, text: &str, expected: Option<&str>) -> Result<Written, String> {
     let full = inside_or_new(root, path)?;
     // Only a regular file: reading a pipe or device here would hang, and there's nothing to edit in one.
@@ -397,10 +400,17 @@ pub fn write_file(root: &Path, path: &Path, text: &str, expected: Option<&str>) 
         use std::io::Write;
         file.write_all(out.as_bytes())?;
         file.flush()?;
+        // The bytes reach the disk before the rename can make them the file: a crash can't leave it empty or short.
+        file.sync_all()?;
         if let Ok(meta) = std::fs::metadata(&full) {
             std::fs::set_permissions(&tmp, meta.permissions())?;
         }
-        std::fs::rename(&tmp, &full)
+        std::fs::rename(&tmp, &full)?;
+        // And the rename itself is flushed to disk (best effort: not every filesystem allows syncing a folder).
+        if let Some(dir) = full.parent().and_then(|d| std::fs::File::open(d).ok()) {
+            let _ = dir.sync_all();
+        }
+        Ok(())
     };
     write().map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
@@ -579,6 +589,20 @@ mod tests {
         assert_eq!(r.files[0].lines[1].pieces, vec![Piece { text: "const userProfile = new ".into(), hit: false }, Piece { text: "User".into(), hit: true }, Piece { text: "();".into(), hit: false }]);
         assert!(search_text(root, &q("(", false, false, true), &never).is_err());
         assert!(search_text(root, &q("user", false, false, false), &|| true).is_err());
+    }
+
+    #[test]
+    fn anchors_match_at_every_line_not_only_the_first_and_last() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        fs::write(root.join("a.ts"), "// header\nimport x from 'x';\n").unwrap();
+        fs::write(root.join("b.ts"), "import y from 'y';\r\nconst z = 1;\r\n").unwrap();
+        let never = || false;
+        let q = |pattern: &str| TextQuery { pattern: pattern.into(), case_sensitive: true, whole_word: false, regex: true };
+        let lines = |r: TextResults| r.files.iter().flat_map(|f| f.lines.iter().map(|l| format!("{}:{}", f.rel, l.line))).collect::<Vec<_>>();
+        assert_eq!(lines(search_text(root, &q("^import"), &never).unwrap()), vec!["a.ts:2", "b.ts:1"]);
+        // A CRLF file's line ends before its \r.
+        assert_eq!(lines(search_text(root, &q("';$"), &never).unwrap()), vec!["a.ts:2", "b.ts:1"]);
     }
 
     /// Opt-in timing on a real folder: `LANTERN_SEARCH_ROOT=/path cargo test --lib real_search -- --ignored --nocapture`

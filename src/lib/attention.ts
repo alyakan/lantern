@@ -42,6 +42,8 @@ export function attentionFor(items: ChatItem[], folder: string | null, describe:
   if (last?.type !== "turn") return null;
   if (last.stopped) return { key: last.id, kind: "stopped", title, body: "Stopped" };
   if (last.isError) return { key: last.id, kind: "failed", title, body: `Ended with an error${last.result ? `: ${firstLine(last.result)}` : ""}` };
-  const reply = [...items].reverse().find((it) => it.type === "assistant");
+  // This turn's reply only: a turn that just ran tools has none, and an earlier turn's reply isn't news.
+  const turnStart = items.map((it) => it.type).lastIndexOf("user");
+  const reply = items.slice(turnStart + 1).reverse().find((it) => it.type === "assistant");
   return { key: last.id, kind: "finished", title, body: (reply?.type === "assistant" && firstLine(reply.text)) || "Done" };
 }

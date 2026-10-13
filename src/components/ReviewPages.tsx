@@ -123,7 +123,8 @@ export interface ReviewedFinding {
 }
 
 /** The summary page's table: every finding across the files, with its severity and your verdict. */
-export function ReviewSummaryTable({ rows, onAction }: { rows: ReviewedFinding[]; onAction: (text: string) => void }) {
+// The actions send a message, so they wait while Claude works: a message sent then would skip the composer's queue.
+export function ReviewSummaryTable({ rows, onAction, busy = false }: { rows: ReviewedFinding[]; onAction: (text: string) => void; busy?: boolean }) {
   const counts = (s: Severity) => rows.filter((r) => r.finding.severity === s).length;
   const agreed = rows.filter((r) => r.verdict === "agree").length;
   return (
@@ -166,10 +167,12 @@ export function ReviewSummaryTable({ rows, onAction }: { rows: ReviewedFinding[]
         </div>
       )}
       <div className="review-actions">
-        <button className="primary" onClick={() => onAction("Write it up: put the accepted findings in a local file, grouped by file.")}>
+        <button className="primary" disabled={busy} onClick={() => onAction("Write it up: put the accepted findings in a local file, grouped by file.")}>
           Write it up
         </button>
-        <button onClick={() => onAction("Fix them: hand the accepted findings to incremental-dev as the plan.")}>Fix them</button>
+        <button disabled={busy} onClick={() => onAction("Fix them: hand the accepted findings to incremental-dev as the plan.")}>
+          Fix them
+        </button>
       </div>
     </div>
   );

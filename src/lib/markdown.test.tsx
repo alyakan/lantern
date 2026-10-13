@@ -144,3 +144,24 @@ describe("Md", () => {
     expect(container.querySelector(".code-block-lang")).toHaveTextContent("Code");
   });
 });
+
+describe("pictures", () => {
+  const text = "Done.\n\n![status](https://tracker.example/p.png)";
+
+  it("aren't loaded in Claude's text, which can be steered into naming a server", () => {
+    const { container } = render(<Md>{text}</Md>);
+    expect(container.querySelector("img")).toBeNull();
+    expect(container).toHaveTextContent("[Image: status]");
+  });
+
+  it("aren't loaded inside a plan step's fields either", () => {
+    const { container } = render(<Md>{"```\nFile:   a.ts\nChange: ![x](https://tracker.example/p.png) edit\nVerify: a test\n```"}</Md>);
+    expect(container.querySelector("img")).toBeNull();
+    expect(container).toHaveTextContent("[Image: x]");
+  });
+
+  it("load when the caller allows them", () => {
+    const { container } = render(<Md images>{text}</Md>);
+    expect(container.querySelector("img")).toHaveAttribute("src", "https://tracker.example/p.png");
+  });
+});

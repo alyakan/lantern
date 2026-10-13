@@ -112,11 +112,16 @@ describe("SummaryTab", () => {
     expect(screen.getByText("Changes not available for this step")).toBeInTheDocument();
   });
 
-  it("leaves a failed lookup as no files, and a step not built yet without a line about changes", async () => {
-    changeSummary.mockImplementation(() => Promise.reject(new Error("nope")));
-    show({ headline: null, rows: [row({ id: "a", built: true, changes: true, range: { from: 1, to: 1 } }), row({ id: "b", title: "Next up", built: false, changes: false })] });
-    expect(await screen.findByText("No files changed")).toBeInTheDocument();
+  it("says a failed lookup failed, not that nothing changed, and offers to try again", async () => {
+    changeSummary.mockRejectedValueOnce(new Error("nope")).mockResolvedValueOnce([{ path: "/p/src/a.ts", created: false, added: 2, removed: 0 }]);
+    show({ headline: null, rows: [row({ id: "a", title: "Built", built: true, changes: true, range: { from: 1, to: 1 } }), row({ id: "b", title: "Next up", built: false, changes: false })] });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't read the files some steps changed.");
+    expect(screen.getByText("Couldn't read this step's changes")).toBeInTheDocument();
+    expect(screen.queryByText("No files changed")).toBeNull();
     expect(within(screen.getByRole("button", { name: /Next up/ })).queryByText(/changed|available/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findByText("a.ts")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("shows a reviewed file's findings and size", () => {

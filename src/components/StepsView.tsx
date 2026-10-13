@@ -170,6 +170,8 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey || isTyping(document.activeElement) || document.activeElement?.closest(".monaco-editor")) return;
+      // A dialog or menu that's open takes the arrows for itself.
+      if (document.querySelector("dialog[open], .menu, [role='dialog'], [role='menu']")) return;
       if (e.key === "ArrowLeft") go(at - 1);
       if (e.key === "ArrowRight") go(at + 1);
     };
@@ -255,7 +257,7 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
                   suggestion={p.heading?.kind === "switch" ? { current: flavour, answer: pages[i + 1]?.turns[0].prompt.text ?? null, onAnswer: i === last && !running && onSend ? onSend : undefined } : null}
                   verdicts={verdicts[p.key]}
                   onVerdict={i === last && !running ? (index, v) => setVerdict(p.key, index, v) : undefined}
-                  summary={p.heading?.kind === "summary" && onSend ? { rows: reviewed, onAction: onSend } : null}
+                  summary={p.heading?.kind === "summary" && onSend ? { rows: reviewed, onAction: onSend, busy: running } : null}
                   folder={state.folder}
                   runs={state.backgroundRuns}
                   latest={latestOf.get(p.key) ?? p.main}
@@ -317,7 +319,7 @@ interface PageProps extends StreamHandlers {
   verdicts?: Record<number, Verdict>;
   onVerdict?: (index: number, v: Verdict | null) => void;
   /** Review's summary page: every finding with its verdict, and the actions after the review. */
-  summary?: { rows: ReviewedFinding[]; onAction: (text: string) => void } | null;
+  summary?: { rows: ReviewedFinding[]; onAction: (text: string) => void; busy: boolean } | null;
   folder: string | null;
   /** Which turn holds Claude's latest version of the step, whichever one the page shows. */
   latest: number;
@@ -394,7 +396,7 @@ function Page({ page, first, live, teach, review, suggestion, verdicts, onVerdic
         <ChatStream items={mainItems} folder={folder} live={live && page.main === page.turns.length - 1} {...handlers} />
         {reviewFile && <ReviewFileView file={reviewFile} verdicts={verdicts} onVerdict={onVerdict} />}
         {h?.kind === "switch" && h.flavour && suggestion && <SuggestionCard flavour={h.flavour} why={h.title} {...suggestion} />}
-        {summary && <ReviewSummaryTable rows={summary.rows} onAction={summary.onAction} />}
+        {summary && <ReviewSummaryTable rows={summary.rows} onAction={summary.onAction} busy={summary.busy} />}
       </div>
       <StepCommands page={page} runs={runs} />
       {page.turns.length > 1 && (
@@ -625,13 +627,17 @@ function StepCommand({ command, run }: { command: ToolItem; run?: BackgroundRun 
   return (
     <div className={`step-command ${status}${run ? " background" : ""}`}>
       <button className="step-command-line" aria-expanded={open} disabled={!command.output} onClick={() => setOpen(!open)} title={run?.summary}>
-        <span className="step-command-status" aria-label={status === "error" ? "failed" : status === "running" ? "running" : "done"}>
+        <span className="step-command-status" role="img" aria-label={status === "error" ? "failed" : status === "running" ? "running" : "done"}>
           {status === "running" ? <span className="spinner" aria-hidden /> : status === "error" ? "✕" : "✓"}
         </span>
         <code className="step-command-text">{command.summary}</code>
         {run && <span className="step-command-note">{run.status === "running" ? "in background" : run.status === "completed" ? "finished in background" : `${run.status} in background`}</span>}
       </button>
-      {open && command.output && <pre className="step-output step-command-output">{command.output}</pre>}
+      {open && command.output && (
+        <pre className="step-output step-command-output" role="region" aria-label="Command output" tabIndex={0}>
+          {command.output}
+        </pre>
+      )}
     </div>
   );
 }
