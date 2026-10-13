@@ -48,8 +48,9 @@ function listDir(dir: string) {
 }
 
 const sleep =(ms: number) => new Promise((r) => setTimeout(r, ms));
-// Events carry their chat's slot, like the real backend's.
-const sendTo = (slot: string) => (event: UiEvent) => emit("ui-event", { slot, event });
+// Events carry their chat's slot, like the real backend's. One for a window that is already gone (a test that ended before
+// a scripted turn did, a closed browser tab) has nobody to reach and is dropped, rather than failing in the background.
+const sendTo = (slot: string) => (event: UiEvent) => emit("ui-event", { slot, event }).catch(() => {});
 type Send = ReturnType<typeof sendTo>;
 
 async function streamText(send: Send, blockId: string, text: string) {

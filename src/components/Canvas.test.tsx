@@ -1,11 +1,11 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { chatsReducer, initialChats, type Chats } from "../sessions";
 import { initialState, type State } from "../store";
 import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions } from "../lib/canvasContext";
 import { orchestraNodes } from "../lib/orchestraView";
 import { GAP, MAIN_SIZE, overlaps, SUMMARY_ZOOM, WORKER_SIZE } from "../lib/canvas";
-import { Canvas, newLayout, placeNodes } from "./Canvas";
+import { Canvas, newLayout, placeNodes, UPDATE_REQUEST } from "./Canvas";
 
 // jsdom has no PointerEvent, so its clientX, button and pointerId would never reach a handler.
 if (typeof window.PointerEvent === "undefined") {
@@ -292,5 +292,54 @@ describe("oversight", () => {
   it("shows no cost until something has cost anything", () => {
     setup(team(1));
     expect(screen.getByRole("button", { name: "Team" }).textContent).toBe("Team");
+  });
+});
+
+describe("asking for an update", () => {
+  const mount = (chats: Chats, a: NodeActions, onFocus = vi.fn()) => {
+    const store = createChatStore();
+    store.set(chats.slots);
+    render(
+      <ChatStoreContext.Provider value={store}>
+        <NodeActionsContext.Provider value={a}>
+          <Canvas nodes={orchestraNodes(chats, () => "Main agent")} layout={newLayout()} activeSlot="s1" attention={[]} onFocus={onFocus} onOpen={vi.fn()} />
+        </NodeActionsContext.Provider>
+      </ChatStoreContext.Provider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Team" }));
+    return onFocus;
+  };
+  const ask = () => screen.getByRole("button", { name: "Ask the main agent for an update" });
+
+  it("sends the main agent a request for a plain-language status report, and takes you to it", () => {
+    const a = actions();
+    const onFocus = mount(team(2), a);
+    fireEvent.click(ask());
+    expect(a.send).toHaveBeenCalledTimes(1);
+    expect(a.send).toHaveBeenCalledWith("s1", UPDATE_REQUEST);
+    expect(a.queue).not.toHaveBeenCalled();
+    expect(UPDATE_REQUEST).toMatch(/plain language/);
+    expect(onFocus).toHaveBeenCalledWith("s1");
+    expect(screen.queryByRole("dialog", { name: "Team" })).toBeNull();
+  });
+
+  it("waits behind what the main agent is doing, after anything already queued, like anything typed to it", () => {
+    const chats = team(1);
+    chats.slots.s1 = { ...chats.slots.s1, status: "running", queued: ["earlier"] };
+    const a = actions();
+    mount(chats, a);
+    fireEvent.click(ask());
+    expect(a.queue).toHaveBeenCalledWith("s1", ["earlier", UPDATE_REQUEST]);
+    expect(a.send).not.toHaveBeenCalled();
+  });
+
+  it("is not offered when there are no workers to report on, or the main agent can't take it", () => {
+    mount(team(0), actions());
+    expect(screen.queryByRole("button", { name: "Ask the main agent for an update" })).toBeNull();
+    cleanup();
+    const stopped = team(1);
+    stopped.slots.s1 = { ...stopped.slots.s1, status: "ended" };
+    mount(stopped, actions());
+    expect(screen.queryByRole("button", { name: "Ask the main agent for an update" })).toBeNull();
   });
 });

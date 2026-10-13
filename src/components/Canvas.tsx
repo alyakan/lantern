@@ -17,7 +17,7 @@ import {
   type Size,
   type View,
 } from "../lib/canvas";
-import { useChatState, useChatStates } from "../lib/canvasContext";
+import { useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
 import { money, nodeStatus, readyToMerge, STATUS_LABEL, summaryLine, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
 import { totalCost, type State } from "../store";
 import { NodeBody } from "./NodeBody";
@@ -165,9 +165,14 @@ const TetherLine = memo(function TetherLine({ slot, d }: { slot: string; d: stri
  * Everyone on the team at a glance: who is doing what, what each has said last, and what the team has cost so far. A row
  * takes you to that agent. The team's cost counts every agent, however far off the canvas it is.
  */
+/** What "Ask for an update" asks the main agent: a status report a person can read without knowing the code. */
+export const UPDATE_REQUEST =
+  "Give me a short status report in plain language: for each worker, what it has done, what it is doing now, and anything blocked or waiting for my decision. Look at each worker's latest work first if you need to. No code unless I ask.";
+
 function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string) => void }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
+  const actions = useNodeActions();
   const states = useChatStates(nodes.map((n) => n.slot));
   const bySlot: Record<string, State> = {};
   nodes.forEach((n, i) => {
@@ -175,6 +180,17 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
   });
   const ready = readyToMerge(nodes, bySlot);
   const total = money(Object.values(bySlot).reduce((sum, s) => sum + totalCost(s), 0));
+  const main = nodes.find((n) => n.role === "main");
+  const mainState = main ? bySlot[main.slot] : undefined;
+  const canAsk = !!main && !!mainState && (mainState.status === "idle" || mainState.status === "running") && nodes.some((n) => n.role === "worker");
+  // Sent now when the main agent is free, and queued behind what it is doing when it isn't (like anything typed to it).
+  const askForUpdate = () => {
+    if (!main || !mainState) return;
+    if (mainState.status === "running") actions.queue(main.slot, [...mainState.queued, UPDATE_REQUEST]);
+    else actions.send(main.slot, UPDATE_REQUEST);
+    setOpen(false);
+    onGoTo(main.slot);
+  };
 
   // Closes when you click anywhere else or press Escape.
   useEffect(() => {
@@ -222,6 +238,11 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
               );
             })}
           </ul>
+          {canAsk && (
+            <button className="team-ask" onClick={askForUpdate} title="The main agent writes up where everything stands, in plain language">
+              Ask the main agent for an update
+            </button>
+          )}
         </div>
       )}
       <button className="canvas-fit" aria-expanded={open} aria-label="Team" title="Everyone on the team, and what it has cost" onClick={() => setOpen(!open)}>
