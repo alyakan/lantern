@@ -1,0 +1,513 @@
+//! "Always allow" rules. A rule answers a permission request in the app, without a card, when the request is one it
+//! matches. Rules only ever allow: Deny always asks. They're Lantern's own (never written to Claude Code's settings),
+//! and a folder's are saved in app data. A rule is conservative by design: when in doubt it doesn't match, and the card
+//! comes up as it would have anyway.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::BTreeMap;
+use std::path::{Component, Path, PathBuf};
+use std::sync::Mutex;
+
+/// Where a rule applies: this chat only (kept in memory with the chat), or every chat in a folder (saved).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Scope {
+    Chat,
+    Folder,
+}
+
+/// What a rule matches within its tool's input.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Matcher {
+    /// Every call to the tool. Not for Bash, which always needs a command to match.
+    Any,
+    /// Bash: exactly this command.
+    Exact { text: String },
+    /// Bash: a command that starts with these one or two words, followed by anything.
+    Prefix { text: String },
+    /// A file tool: a file at or under this absolute folder.
+    Dir { path: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Rule {
+    pub tool: String,
+    #[serde(flatten)]
+    pub matcher: Matcher,
+}
+
+/// A rule the user made on a card, and where it applies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewRule {
+    pub scope: Scope,
+    #[serde(flatten)]
+    pub rule: Rule,
+}
+
+/// A rule as Settings lists it. `folder` is the folder a folder rule is for (None for a chat rule).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuleEntry {
+    pub scope: Scope,
+    pub folder: Option<String>,
+    #[serde(flatten)]
+    pub rule: Rule,
+}
+
+/// Tools no rule answers: their card carries something the user must read or answer (a plan, a question, a bug to
+/// reproduce).
+const NEVER_AUTO: &[&str] = &["ExitPlanMode", "AskUserQuestion", "Reproduce"];
+/// Lantern's own MCP tools (its permission prompt and reproduce request), which are never a rule's tool.
+const OWN_TOOL_PREFIX: &str = "mcp__lantern__";
+/// Claude Code's tools that take a file path.
+const FILE_TOOLS: &[&str] = &["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"];
+/// The Bash input keys a rule can read. Any other (`dangerouslyDisableSandbox`, say) means the call isn't one to allow
+/// by rule.
+const BASH_KEYS: &[&str] = &["command", "description", "timeout", "run_in_background"];
+/// Programs that run other commands. A rule for one of them would allow whatever it's given, so none can be made.
+const WRAPPERS: &[&str] = &["sh", "bash", "zsh", "dash", "fish", "ksh", "env", "sudo", "su", "doas", "xargs", "eval", "exec", "command", "nohup", "time", "timeout", "nice", "ssh", "npx", "bunx", "pnpx", "uvx", "pipx"];
+/// The characters a rule's words can have. Anything else (quotes, operators, globs, `$`) keeps a command from matching.
+const WORD_CHARS: &str = "-_./:@=+,";
+
+/// Whether a command is plain enough to match a rule: no shell operators, substitutions, globs or escapes, and no
+/// control characters, so that a space is the only thing that separates its words.
+pub fn is_plain(command: &str) -> bool {
+    !command.chars().any(|c| c.is_control() || ";&|<>()$`\\*?[]{}".contains(c))
+}
+
+/// A Bash prefix's words, if it can be one: one or two words of plain characters, none of them an option, and not
+/// starting with a wrapper (a one-word wrapper would allow anything).
+fn prefix_words(text: &str) -> Option<Vec<&str>> {
+    let words: Vec<&str> = text.split(' ').collect();
+    let ok = text.len() >= 2 && (1..=2).contains(&words.len()) && !WRAPPERS.contains(&words[0]) && words.iter().all(|w| !w.is_empty() && !w.starts_with('-') && w.chars().all(|c| c.is_ascii_alphanumeric() || WORD_CHARS.contains(c)));
+    ok.then_some(words)
+}
+
+fn prefix_matches(text: &str, command: &str) -> bool {
+    let Some(words) = prefix_words(text) else { return false };
+    if !is_plain(command) {
+        return false;
+    }
+    let given: Vec<&str> = command.split(' ').filter(|w| !w.is_empty()).collect();
+    given.len() >= words.len() && given[..words.len()] == words[..]
+}
+
+/// The command of a Bash call, if its input has only keys a rule can read.
+fn bash_command<'a>(tool: &str, input: &'a Value) -> Option<&'a str> {
+    if tool != "Bash" {
+        return None;
+    }
+    let obj = input.as_object()?;
+    if obj.keys().any(|k| !BASH_KEYS.contains(&k.as_str())) {
+        return None;
+    }
+    obj.get("command")?.as_str()
+}
+
+/// A path that is absolute and has no `..` in it.
+fn plain_path(path: &str) -> bool {
+    let p = Path::new(path);
+    p.is_absolute() && !path.contains('\0') && !p.components().any(|c| matches!(c, Component::ParentDir))
+}
+
+/// The path a file tool's input names (`file_path`, or a notebook's `notebook_path`), if it's a plain one.
+fn file_path(input: &Value) -> Option<&str> {
+    let path = input.get("file_path").or_else(|| input.get("notebook_path"))?.as_str()?;
+    plain_path(path).then_some(path)
+}
+
+/// `path` with symlinks resolved in its deepest part that exists. The rest doesn't exist yet, so has none.
+pub fn resolve(path: &Path) -> PathBuf {
+    let mut rest: Vec<std::ffi::OsString> = Vec::new();
+    let mut at = path;
+    loop {
+        if let Ok(real) = std::fs::canonicalize(at) {
+            return rest.iter().rev().fold(real, |acc, part| acc.join(part));
+        }
+        match (at.parent(), at.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                at = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
+}
+
+/// The input as rules see it: a file tool's path resolved (see `resolve`), so a link inside a folder can't pass as a
+/// file in it. Matched on this; the tool still gets its input as Claude sent it.
+pub fn for_matching(tool: &str, input: &Value) -> Value {
+    let Some(path) = FILE_TOOLS.contains(&tool).then(|| file_path(input)).flatten() else { return input.clone() };
+    let key = if input.get("file_path").is_some() { "file_path" } else { "notebook_path" };
+    let mut out = input.clone();
+    out[key] = Value::String(resolve(Path::new(path)).display().to_string());
+    out
+}
+
+/// The key a folder is saved under: its real path, as the chat sees it.
+pub fn folder_key(folder: &Path) -> String {
+    resolve(folder).display().to_string()
+}
+
+/// Whether `rule` allows this call. `input` should come through `for_matching`. False for any tool a rule can't answer,
+/// and for input this can't read.
+pub fn matches(rule: &Rule, tool: &str, input: &Value) -> bool {
+    if rule.tool != tool || NEVER_AUTO.contains(&tool) || tool.starts_with(OWN_TOOL_PREFIX) || !input.is_object() {
+        return false;
+    }
+    match &rule.matcher {
+        Matcher::Any if tool == "Bash" => false,
+        Matcher::Any if FILE_TOOLS.contains(&tool) => file_path(input).is_some(),
+        Matcher::Any => true,
+        Matcher::Exact { text } => bash_command(tool, input).is_some_and(|c| c == text.as_str() && is_plain(text)),
+        Matcher::Prefix { text } => bash_command(tool, input).is_some_and(|c| prefix_matches(text, c)),
+        Matcher::Dir { path } => FILE_TOOLS.contains(&tool) && file_path(input).is_some_and(|p| Path::new(p).starts_with(path)),
+    }
+}
+
+/// The rule as it will be kept (a folder's path resolved), or why it can't be. Only rules this accepts are made, and
+/// loaded rules are checked against it again.
+pub fn validate(rule: &Rule) -> Result<Rule, String> {
+    let tool = rule.tool.as_str();
+    if tool.is_empty() || tool.len() > 100 || tool.chars().any(char::is_control) || NEVER_AUTO.contains(&tool) || tool.starts_with(OWN_TOOL_PREFIX) {
+        return Err(format!("Lantern can't make a rule for {tool:?}."));
+    }
+    let matcher = match &rule.matcher {
+        Matcher::Any if tool != "Bash" => Matcher::Any,
+        Matcher::Exact { text } if tool == "Bash" && text.len() >= 2 && is_plain(text) => rule.matcher.clone(),
+        Matcher::Prefix { text } if tool == "Bash" && prefix_words(text).is_some() => rule.matcher.clone(),
+        Matcher::Dir { path } if FILE_TOOLS.contains(&tool) && plain_path(path) && path != "/" && path.len() <= 4096 => Matcher::Dir { path: resolve(Path::new(path)).display().to_string() },
+        _ => return Err(format!("A rule for {tool} can't match that way.")),
+    };
+    Ok(Rule { tool: rule.tool.clone(), matcher })
+}
+
+/// The folder rules, saved as JSON by folder (the chat's folder key). A file that doesn't parse is moved aside, not
+/// overwritten, like titles.json.
+pub struct FolderRules {
+    path: Option<PathBuf>,
+    rules: Mutex<BTreeMap<String, Vec<Rule>>>,
+}
+
+impl FolderRules {
+    pub fn load(path: Option<PathBuf>) -> Self {
+        let rules = path.as_deref().map(read_rules).unwrap_or_default();
+        Self { path, rules: Mutex::new(rules) }
+    }
+
+    pub fn for_folder(&self, folder: &str) -> Vec<Rule> {
+        self.rules.lock().unwrap().get(folder).cloned().unwrap_or_default()
+    }
+
+    pub fn all(&self) -> Vec<(String, Vec<Rule>)> {
+        self.rules.lock().unwrap().iter().map(|(f, r)| (f.clone(), r.clone())).collect()
+    }
+
+    /// Adds a validated rule for a folder (a rule already there isn't added twice).
+    pub fn add(&self, folder: &str, rule: Rule) {
+        let mut rules = self.rules.lock().unwrap();
+        let list = rules.entry(folder.to_string()).or_default();
+        if !list.contains(&rule) {
+            list.push(rule);
+        }
+        self.save(&rules);
+    }
+
+    pub fn remove(&self, folder: &str, rule: &Rule) {
+        let mut rules = self.rules.lock().unwrap();
+        if let Some(list) = rules.get_mut(folder) {
+            list.retain(|r| r != rule);
+            if list.is_empty() {
+                rules.remove(folder);
+            }
+        }
+        self.save(&rules);
+    }
+
+    fn save(&self, rules: &BTreeMap<String, Vec<Rule>>) {
+        let Some(path) = &self.path else { return };
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        // Written beside the file and renamed over it, so a write cut short can't leave a truncated file.
+        let tmp = path.with_extension("json.tmp");
+        if let Ok(json) = serde_json::to_string_pretty(rules) {
+            if std::fs::write(&tmp, json).is_ok() {
+                let _ = std::fs::rename(&tmp, path);
+            }
+        }
+    }
+}
+
+/// The rules saved at `path`, each checked again (a hand-edited one that wouldn't be made is dropped).
+fn read_rules(path: &Path) -> BTreeMap<String, Vec<Rule>> {
+    let Ok(bytes) = std::fs::read(path) else { return BTreeMap::new() };
+    match serde_json::from_slice::<BTreeMap<String, Vec<Rule>>>(&bytes) {
+        Ok(saved) => saved.into_iter().map(|(folder, rules)| (folder, rules.iter().filter_map(|r| validate(r).ok()).collect())).filter(|(_, r): &(String, Vec<Rule>)| !r.is_empty()).collect(),
+        Err(_) => {
+            let _ = std::fs::rename(path, path.with_extension("json.corrupt"));
+            BTreeMap::new()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn bash(matcher: Matcher) -> Rule {
+        Rule { tool: "Bash".into(), matcher }
+    }
+    fn prefix(text: &str) -> Rule {
+        bash(Matcher::Prefix { text: text.into() })
+    }
+    fn exact(text: &str) -> Rule {
+        bash(Matcher::Exact { text: text.into() })
+    }
+    fn cmd(command: &str) -> Value {
+        json!({"command": command})
+    }
+
+    #[test]
+    fn a_prefix_covers_its_words_and_whatever_follows_them() {
+        let r = prefix("git status");
+        for c in ["git status", "git status --short", "git  status -s", " git status"] {
+            assert!(matches(&r, "Bash", &cmd(c)), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn a_prefix_ends_at_a_word_boundary() {
+        let r = prefix("git status");
+        for c in ["git statusx", "git status-x", "git stat", "git", "git-status", "gitstatus", "xgit status", "git stash", "git log status"] {
+            assert!(!matches(&r, "Bash", &cmd(c)), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn shell_operators_and_substitutions_never_ride_on_a_prefix() {
+        let r = prefix("npm test");
+        for c in [
+            "npm test; rm -rf ~",
+            "npm test && rm x",
+            "npm test || rm x",
+            "npm test | sh",
+            "npm test & rm x",
+            "npm test `rm x`",
+            "npm test $(rm x)",
+            "npm test ${HOME}",
+            "npm test $HOME",
+            "npm test > /etc/hosts",
+            "npm test < x",
+            "npm test <(rm x)",
+            "npm test\nrm x",
+            "npm test\rrm x",
+            "npm test\trm x",
+            "npm test \\; rm x",
+            "npm test *",
+            "npm test ?",
+            "npm test [a]",
+            "npm test {a,b}",
+            "(npm test)",
+        ] {
+            assert!(!matches(&r, "Bash", &cmd(c)), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn a_command_that_starts_differently_never_matches() {
+        let r = prefix("npm test");
+        for c in ["FOO=1 npm test", "env npm test", "npm tests", "pnpm test", "npmtest", "./npm test"] {
+            assert!(!matches(&r, "Bash", &cmd(c)), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn an_exact_command_matches_only_itself() {
+        let r = exact("npm test");
+        assert!(matches(&r, "Bash", &cmd("npm test")));
+        for c in ["npm test -- x", "npm tests", "npm test ", "npm test;", "npm test\n"] {
+            assert!(!matches(&r, "Bash", &cmd(c)), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn bash_input_is_read_only_when_every_key_is_known() {
+        let r = prefix("npm test");
+        assert!(matches(&r, "Bash", &json!({"command": "npm test", "description": "run", "timeout": 5, "run_in_background": false})));
+        assert!(!matches(&r, "Bash", &json!({"command": "npm test", "dangerouslyDisableSandbox": true})));
+        assert!(!matches(&r, "Bash", &json!({"cmd": "npm test"})));
+        assert!(!matches(&r, "Bash", &json!({"command": 5})));
+        assert!(!matches(&r, "Bash", &json!("npm test")));
+    }
+
+    #[test]
+    fn bash_never_matches_every_call() {
+        assert!(!matches(&bash(Matcher::Any), "Bash", &cmd("rm -rf x")));
+    }
+
+    #[test]
+    fn tools_no_rule_answers_are_never_matched() {
+        for tool in ["ExitPlanMode", "AskUserQuestion", "Reproduce", "mcp__lantern__approve", "mcp__lantern__reproduce"] {
+            let r = Rule { tool: tool.into(), matcher: Matcher::Any };
+            assert!(!matches(&r, tool, &json!({"x": 1})), "{tool}");
+        }
+    }
+
+    #[test]
+    fn other_tools_match_by_their_full_name() {
+        let r = Rule { tool: "mcp__linear__save_issue".into(), matcher: Matcher::Any };
+        assert!(matches(&r, "mcp__linear__save_issue", &json!({"title": "x"})));
+        assert!(!matches(&r, "mcp__linear__save_issues", &json!({})));
+        assert!(!matches(&r, "mcp__linear__save_issue", &json!("not an object")));
+    }
+
+    #[test]
+    fn a_folder_covers_the_files_under_it_and_nothing_else() {
+        let r = Rule { tool: "Edit".into(), matcher: Matcher::Dir { path: "/Users/a/proj".into() } };
+        assert!(matches(&r, "Edit", &json!({"file_path": "/Users/a/proj/src/x.ts"})));
+        assert!(matches(&r, "Edit", &json!({"file_path": "/Users/a/proj"})));
+        for p in ["/Users/a/projx/x.ts", "/Users/a/proj/../secret", "src/x.ts", "/etc/passwd", "/Users/a/pro", ""] {
+            assert!(!matches(&r, "Edit", &json!({"file_path": p})), "{p:?}");
+        }
+        assert!(!matches(&r, "Edit", &json!({"path": "/Users/a/proj/x"})));
+        assert!(!matches(&r, "Write", &json!({"file_path": "/Users/a/proj/x"})));
+    }
+
+    #[test]
+    fn a_file_tool_with_any_file_still_needs_a_plain_path() {
+        let r = Rule { tool: "Read".into(), matcher: Matcher::Any };
+        assert!(matches(&r, "Read", &json!({"file_path": "/a/b"})));
+        assert!(!matches(&r, "Read", &json!({"file_path": "b"})));
+        assert!(!matches(&r, "Read", &json!({"file_path": "/a/../b"})));
+        assert!(!matches(&r, "Read", &json!({})));
+    }
+
+    #[test]
+    fn notebooks_use_their_notebook_path() {
+        let r = Rule { tool: "NotebookEdit".into(), matcher: Matcher::Dir { path: "/p".into() } };
+        assert!(matches(&r, "NotebookEdit", &json!({"notebook_path": "/p/n.ipynb"})));
+    }
+
+    #[test]
+    fn a_matcher_only_goes_with_the_tools_it_is_for() {
+        assert!(!matches(&Rule { tool: "Edit".into(), matcher: Matcher::Exact { text: "npm test".into() } }, "Edit", &json!({"file_path": "/a"})));
+        assert!(!matches(&Rule { tool: "Bash".into(), matcher: Matcher::Dir { path: "/a".into() } }, "Bash", &cmd("ls")));
+    }
+
+    #[test]
+    fn only_rules_that_match_as_intended_are_made() {
+        for good in [prefix("npm test"), prefix("ls"), prefix("npm"), exact("npm test -- --grep \"a b\""), Rule { tool: "Edit".into(), matcher: Matcher::Any }, Rule { tool: "mcp__linear__x".into(), matcher: Matcher::Any }] {
+            assert!(validate(&good).is_ok(), "{good:?}");
+        }
+        let bad = [
+            prefix(""),
+            prefix("a"),
+            prefix("*"),
+            prefix(" npm"),
+            prefix("npm test extra words"),
+            prefix("npm;rm"),
+            prefix("npm$x"),
+            prefix("npm -e"),
+            prefix("-x"),
+            prefix("sh"),
+            prefix("bash -c"),
+            prefix("env"),
+            prefix("sudo rm"),
+            exact(""),
+            exact("x"),
+            exact("npm test\nrm"),
+            bash(Matcher::Any),
+            bash(Matcher::Dir { path: "/a".into() }),
+            Rule { tool: "Edit".into(), matcher: Matcher::Prefix { text: "npm test".into() } },
+            Rule { tool: "Edit".into(), matcher: Matcher::Dir { path: "rel/x".into() } },
+            Rule { tool: "Edit".into(), matcher: Matcher::Dir { path: "/a/../b".into() } },
+            Rule { tool: "Edit".into(), matcher: Matcher::Dir { path: "/".into() } },
+            Rule { tool: "mcp__linear__x".into(), matcher: Matcher::Dir { path: "/a".into() } },
+            Rule { tool: "AskUserQuestion".into(), matcher: Matcher::Any },
+            Rule { tool: "ExitPlanMode".into(), matcher: Matcher::Any },
+            Rule { tool: "mcp__lantern__approve".into(), matcher: Matcher::Any },
+            Rule { tool: "".into(), matcher: Matcher::Any },
+        ];
+        for b in bad {
+            assert!(validate(&b).is_err(), "{b:?}");
+        }
+    }
+
+    #[test]
+    fn a_folder_rule_is_kept_by_its_real_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::os::unix::fs::symlink(&real, dir.path().join("alias")).unwrap();
+        let rule = Rule { tool: "Edit".into(), matcher: Matcher::Dir { path: dir.path().join("alias").display().to_string() } };
+        assert_eq!(validate(&rule).unwrap().matcher, Matcher::Dir { path: std::fs::canonicalize(&real).unwrap().display().to_string() });
+    }
+
+    #[test]
+    fn a_symlink_inside_the_folder_does_not_pass_as_a_file_in_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = std::fs::canonicalize(dir.path()).unwrap().join("proj");
+        let outside = std::fs::canonicalize(dir.path()).unwrap().join("outside");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, folder.join("link")).unwrap();
+        let rule = Rule { tool: "Read".into(), matcher: Matcher::Dir { path: folder.display().to_string() } };
+        let asked = json!({"file_path": folder.join("link/secret.txt").display().to_string()});
+        assert!(!matches(&rule, "Read", &for_matching("Read", &asked)));
+        let inside = json!({"file_path": folder.join("src/new.txt").display().to_string()});
+        assert!(matches(&rule, "Read", &for_matching("Read", &inside)));
+        // Matching resolves the path but the tool still gets its input as Claude sent it.
+        assert_eq!(for_matching("Bash", &cmd("ls")), cmd("ls"));
+    }
+
+    #[test]
+    fn a_saved_folder_rule_comes_back_and_leaves_no_temp_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sub/permission_rules.json");
+        let rule = prefix("npm test");
+        FolderRules::load(Some(path.clone())).add("/repo", rule.clone());
+        let again = FolderRules::load(Some(path.clone()));
+        assert_eq!(again.for_folder("/repo"), vec![rule.clone()]);
+        assert!(again.for_folder("/other").is_empty());
+        assert!(!dir.path().join("sub/permission_rules.json.tmp").exists());
+        again.add("/repo", rule.clone());
+        assert_eq!(again.for_folder("/repo").len(), 1, "the same rule isn't kept twice");
+        again.remove("/repo", &rule);
+        assert!(FolderRules::load(Some(path)).for_folder("/repo").is_empty());
+    }
+
+    #[test]
+    fn a_corrupt_rules_file_is_kept_aside_not_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("permission_rules.json");
+        std::fs::write(&path, r#"{"/repo": [{"tool": "Bash"#).unwrap();
+        assert!(FolderRules::load(Some(path.clone())).all().is_empty());
+        assert_eq!(std::fs::read_to_string(dir.path().join("permission_rules.json.corrupt")).unwrap(), r#"{"/repo": [{"tool": "Bash"#);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn rules_are_checked_again_when_loaded() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("permission_rules.json");
+        let hand_edited = json!({"/repo": [
+            {"tool": "Bash", "kind": "any"},
+            {"tool": "Bash", "kind": "prefix", "text": "n"},
+            {"tool": "ExitPlanMode", "kind": "any"},
+            {"tool": "Bash", "kind": "prefix", "text": "npm test"}
+        ]});
+        std::fs::write(&path, hand_edited.to_string()).unwrap();
+        assert_eq!(FolderRules::load(Some(path)).for_folder("/repo"), vec![prefix("npm test")]);
+    }
+
+    #[test]
+    fn rules_are_written_in_the_shape_the_settings_list_uses() {
+        let entry = RuleEntry { scope: Scope::Folder, folder: Some("/repo".into()), rule: prefix("git status") };
+        assert_eq!(serde_json::to_value(&entry).unwrap(), json!({"scope": "folder", "folder": "/repo", "tool": "Bash", "kind": "prefix", "text": "git status"}));
+        let new: NewRule = serde_json::from_value(json!({"scope": "chat", "tool": "Read", "kind": "dir", "path": "/a"})).unwrap();
+        assert_eq!(new, NewRule { scope: Scope::Chat, rule: Rule { tool: "Read".into(), matcher: Matcher::Dir { path: "/a".into() } } });
+    }
+}
