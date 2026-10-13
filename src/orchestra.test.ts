@@ -5,7 +5,7 @@ import type { UiEvent } from "./types";
 
 const main: State = { ...initialState, status: "idle", claudePath: "/bin/claude", mode: "ask", folder: "/p", contextWindow: 200_000, orchestrator: true, sessionId: "m1" };
 
-const spawned: UiEvent = { kind: "agent_spawned", worker: "w1", name: "Login form", brief: "Build the login form", folder: "/wt/login-form", branch: "lantern/login-form", base: "main", isolation: "worktree" };
+const spawned: UiEvent = { kind: "agent_spawned", worker: "w1", name: "Login form", brief: "Build the login form", folder: "/wt/login-form", branch: "lantern/login-form", base: "main", isolation: "worktree", mode: "auto" };
 
 const on = (slot: string, event: UiEvent) => ({ type: "in" as const, slot, action: { type: "ui_event" as const, event } });
 const ev = (state: State, event: UiEvent) => reducer(state, { type: "ui_event", event });
@@ -24,6 +24,11 @@ describe("a worker the main agent starts", () => {
     // The main agent's own chat gets no item for it.
     expect(c.slots.s1.items).toEqual([]);
     expect(c.active).toBe("s1");
+  });
+
+  it("starts in the mode the backend gave it, never assumed", () => {
+    const c = chatsReducer(initialChats(main), on("s1", { ...spawned, mode: "ask" }));
+    expect(c.slots.w1.mode).toBe("ask");
   });
 
   it("is not opened twice, and its first events land in it", () => {

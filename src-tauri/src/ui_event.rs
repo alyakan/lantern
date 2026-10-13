@@ -142,7 +142,7 @@ pub enum UiEvent {
     ShellSecret { id: String, secret: bool },
     /// On the main agent's slot: it started a worker, whose chat is the slot `worker`. Sent before the worker's claude
     /// starts, so the UI has the chat open when its first event arrives.
-    AgentSpawned { worker: String, name: String, brief: String, folder: String, branch: Option<String>, base: Option<String>, isolation: String },
+    AgentSpawned { worker: String, name: String, brief: String, folder: String, branch: Option<String>, base: Option<String>, isolation: String, mode: String },
     /// On the main agent's slot: a note from Lantern for it (a worker finished, crashed or waits on the user), to be sent
     /// as a message when the main agent is idle. Several are joined into one.
     AgentWake { text: String },

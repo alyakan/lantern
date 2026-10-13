@@ -61,7 +61,7 @@ export type UiEvent =
   | { kind: "shell_done"; id: string; code: number | null; stopped: boolean }
   | { kind: "shell_secret"; id: string; secret: boolean }
   /** On the main agent's chat: it started a worker, whose chat is the slot `worker` (open before its first event). */
-  | { kind: "agent_spawned"; worker: string; name: string; brief: string; folder: string; branch: string | null; base: string | null; isolation: "worktree" | "shared" }
+  | { kind: "agent_spawned"; worker: string; name: string; brief: string; folder: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; mode: Mode }
   /** On the main agent's chat: a note from Lantern for it (a worker finished, crashed or waits on the user). */
   | { kind: "agent_wake"; text: string }
   /** On a worker's chat: the main agent sent it this. */

@@ -41,6 +41,8 @@ pub struct SpawnRequest {
     pub brief: String,
     pub folder: PathBuf,
     pub model: Option<String>,
+    /// The mode it starts in (see args::worker_mode): never more autonomous than the main agent.
+    pub mode: crate::args::Mode,
 }
 
 /// The app, as the orchestra needs it.
@@ -48,6 +50,8 @@ pub trait Host: Send + Sync + 'static {
     /// An event for one chat's slot in the UI.
     fn emit(&self, slot: &str, event: UiEvent);
     fn main_folder(&self, main: &str) -> Result<PathBuf, String>;
+    /// The mode workers of this main agent start in.
+    fn worker_mode(&self, main: &str) -> crate::args::Mode;
     /// Where workers' worktrees go (outside the project, so they don't show up in it).
     fn worktree_root(&self) -> PathBuf;
     fn path_env(&self) -> Fut<'_, Option<String>>;
@@ -363,6 +367,7 @@ impl Orchestra {
                 },
             );
         }
+        let mode = self.host.worker_mode(main);
         // Told to the UI first: the worker's own events carry its slot, and the UI drops events for a chat it doesn't know.
         self.host.emit(
             main,
@@ -374,9 +379,10 @@ impl Orchestra {
                 branch: worktree.as_ref().map(|w| w.branch.clone()),
                 base: worktree.as_ref().and_then(|w| w.base.clone()),
                 isolation: isolation.to_string(),
+                mode: if mode == crate::args::Mode::Auto { "auto".into() } else { "ask".into() },
             },
         );
-        let req = SpawnRequest { parent: main.to_string(), slot: id.clone(), name: name.clone(), brief, folder: run_folder.clone(), model };
+        let req = SpawnRequest { parent: main.to_string(), slot: id.clone(), name: name.clone(), brief, folder: run_folder.clone(), model, mode };
         if let Err(e) = self.host.spawn_worker(req).await {
             {
                 let mut inner = self.inner.lock().unwrap();
@@ -760,6 +766,8 @@ mod tests {
         stopped: Mutex<Vec<String>>,
         spawn_fails: Mutex<Option<String>>,
         transcript: Mutex<Vec<UiEvent>>,
+        /// The mode the main agent runs in (the default is Ask, as in Mode's first variant).
+        main_mode: Mutex<Option<crate::args::Mode>>,
     }
 
     impl Host for FakeHost {
@@ -768,6 +776,9 @@ mod tests {
         }
         fn main_folder(&self, _: &str) -> Result<PathBuf, String> {
             Ok(self.folder.lock().unwrap().clone())
+        }
+        fn worker_mode(&self, _: &str) -> crate::args::Mode {
+            crate::args::worker_mode(self.main_mode.lock().unwrap().unwrap_or(crate::args::Mode::Auto), false)
         }
         fn worktree_root(&self) -> PathBuf {
             self.worktrees.lock().unwrap().clone()
@@ -857,6 +868,18 @@ mod tests {
         assert_eq!((spawned[0].slot.as_str(), spawned[0].brief.as_str(), spawned[0].parent.as_str()), ("w1", "Do the thing", "s1"));
         assert_eq!(spawned[0].folder, Path::new(folder));
         assert!(o.is_worker("w1"));
+    }
+
+    #[tokio::test]
+    async fn a_worker_starts_in_the_mode_the_main_agent_allows_and_the_ui_is_told() {
+        let (host, o, _repo, _wt) = setup();
+        spawn(&o, "on auto").await;
+        *host.main_mode.lock().unwrap() = Some(crate::args::Mode::Ask);
+        spawn(&o, "on ask").await;
+        let spawned = host.spawned.lock().unwrap().clone();
+        assert_eq!((spawned[0].mode, spawned[1].mode), (crate::args::Mode::Auto, crate::args::Mode::Ask));
+        let modes: Vec<String> = host.events_for("s1").into_iter().filter_map(|e| if let UiEvent::AgentSpawned { mode, .. } = e { Some(mode) } else { None }).collect();
+        assert_eq!(modes, ["auto", "ask"]);
     }
 
     #[tokio::test]

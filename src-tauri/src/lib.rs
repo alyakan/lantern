@@ -101,6 +101,11 @@ impl orchestra::Host for AppHost {
         self.app.state::<AppState>().slots.get(main)?.folder()
     }
 
+    fn worker_mode(&self, main: &str) -> Mode {
+        let cfg = self.app.state::<AppState>().slots.get(main).ok().and_then(|s| s.config.lock().unwrap().clone());
+        cfg.map_or(Mode::Ask, |c| args::worker_mode(c.mode, c.auto_approve))
+    }
+
     fn worktree_root(&self) -> std::path::PathBuf {
         self.app.path().app_local_data_dir().unwrap_or_else(|_| std::env::temp_dir()).join("worktrees")
     }
@@ -115,9 +120,11 @@ impl orchestra::Host for AppHost {
             let parent = state.slots.get(&req.parent)?;
             let mut cfg = parent.config.lock().unwrap().clone().ok_or("The main agent has no folder open.")?;
             let s = slot_for(&self.app, &state, &req.slot)?;
-            // Workers run on Auto, so a prompt only reaches the user when Claude Code's own classifier can't decide.
+            // On Auto a prompt only reaches the user when Claude Code's own classifier can't decide, which is what makes a
+            // team of workers workable: but only when the main agent is on Auto too. Otherwise an Ask-mode main agent
+            // (the user approves each of its actions) could start workers that don't ask.
             cfg.folder = req.folder;
-            cfg.mode = Mode::Auto;
+            cfg.mode = req.mode;
             cfg.auto_approve = false;
             cfg.resume = None;
             if req.model.is_some() {
