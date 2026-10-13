@@ -104,11 +104,14 @@ function isPlainPath(path: string): boolean {
   return path.startsWith("/") && !path.split("/").includes("..") && !path.includes("\u0000");
 }
 
-/** Names no file-tool rule covers (see PROTECTED_NAMES in rules.rs): a path with one of them is never offered a rule. */
-export const PROTECTED_NAMES = [".git", ".claude", ".mcp.json", ".vscode", ".idea", ".husky", ".gitmodules", ".gitattributes", ".gitconfig", ".envrc"];
+/** Names no file-tool rule covers, git, editor and Claude config and the build and package files (see PROTECTED_NAMES in rules.rs). */
+export const PROTECTED_NAMES = [
+  ".git", ".claude", ".mcp.json", ".vscode", ".idea", ".husky", ".gitmodules", ".gitattributes", ".gitconfig", ".envrc", ".cargo", ".npmrc", ".yarnrc", ".yarnrc.yml", ".yarn", ".pnpmfile.cjs", ".githooks", ".pre-commit-config.yaml", ".cursor", ".zed", "package.json", "Cargo.toml", "build.rs", "Makefile", "go.mod",
+];
 
+/** Whether a path has a protected component. Names match in any case, as on a case-insensitive filesystem. */
 function isProtectedPath(path: string): boolean {
-  return path.split("/").some((part) => PROTECTED_NAMES.includes(part));
+  return path.split("/").some((part) => PROTECTED_NAMES.some((name) => name.toLowerCase() === part.toLowerCase()));
 }
 
 /** The rules the card can offer for a tool call: none when the input isn't one a rule can read. Scope comes from the menu. */

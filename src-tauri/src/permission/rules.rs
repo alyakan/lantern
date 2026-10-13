@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
+use std::os::unix::fs::MetadataExt;
 use std::sync::Mutex;
 
 /// Where a rule applies: this chat only (kept in memory with the chat), or every chat in a folder (saved).
@@ -213,11 +214,16 @@ fn bash_command<'a>(tool: &str, input: &'a Value) -> Option<&'a str> {
 /// Names that no file-tool rule covers: git's own config, hooks and attributes, and the config of Claude Code, editors and
 /// git helpers. A write to one of these can make a later command that's allowed run code (a git config's pager or
 /// fsmonitor, a hook), so a rule that reached one would compose into code execution. The check is on the resolved path.
-const PROTECTED_NAMES: &[&str] = &[".git", ".claude", ".mcp.json", ".vscode", ".idea", ".husky", ".gitmodules", ".gitattributes", ".gitconfig", ".envrc"];
+/// Also the build and package files that the vetted commands run or read (`npm test` runs package.json's scripts, `cargo
+/// build` runs build.rs and reads .cargo/config.toml, `make` runs Makefile): a rule doesn't cover those either.
+const PROTECTED_NAMES: &[&str] = &[
+    ".git", ".claude", ".mcp.json", ".vscode", ".idea", ".husky", ".gitmodules", ".gitattributes", ".gitconfig", ".envrc", ".cargo", ".npmrc", ".yarnrc", ".yarnrc.yml", ".yarn", ".pnpmfile.cjs", ".githooks", ".pre-commit-config.yaml", ".cursor", ".zed", "package.json", "Cargo.toml", "build.rs", "Makefile", "go.mod",
+];
 
-/// Whether a path has a component no file-tool rule covers (see PROTECTED_NAMES).
+/// Whether a path has a component no file-tool rule covers (see PROTECTED_NAMES). Names match in any case: macOS
+/// filesystems are case-insensitive by default, so `.GIT` is `.git`.
 fn protected(path: &str) -> bool {
-    Path::new(path).components().any(|c| matches!(c, Component::Normal(name) if name.to_str().is_some_and(|s| PROTECTED_NAMES.contains(&s))))
+    Path::new(path).components().any(|c| matches!(c, Component::Normal(name) if name.to_str().is_some_and(|s| PROTECTED_NAMES.iter().any(|p| s.eq_ignore_ascii_case(p)))))
 }
 
 /// A path that is absolute and has no `..` in it.
@@ -254,6 +260,11 @@ pub fn resolve(path: &Path) -> Option<PathBuf> {
             // Exists, a link included: followed to where it really is.
             Ok(_) => {
                 let real = std::fs::canonicalize(at).ok()?;
+                // A hard link is a second name for a file that may sit anywhere (a .git config, say), and its own path doesn't
+                // show that. A file with more than one name isn't one a rule can place, so nothing matches it.
+                if std::fs::metadata(&real).is_ok_and(|m| m.is_file() && m.nlink() > 1) {
+                    return None;
+                }
                 return Some(rest.iter().rev().fold(real, |acc, part| acc.join(part)));
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -883,6 +894,69 @@ mod tests {
         }
         let ok = Rule { tool: "Edit".into(), matcher: Matcher::Dir { path: "/p/src".into() } };
         assert!(validate(&ok).is_ok());
+    }
+
+    #[test]
+    fn protected_names_match_whatever_their_case() {
+        // macOS filesystems are case-insensitive by default, so these are the same files.
+        let dir = Rule { tool: "Write".into(), matcher: Matcher::Dir { path: "/Users/a/proj".into() } };
+        let any = Rule { tool: "Write".into(), matcher: Matcher::Any };
+        for p in ["/Users/a/proj/.GIT/config", "/Users/a/proj/.Claude/settings.json", "/Users/a/proj/.MCP.JSON", "/Users/a/proj/Package.JSON"] {
+            let input = json!({"file_path": p, "content": "x"});
+            assert!(!matches(&dir, "Write", &input), "{p}");
+            assert!(!matches(&any, "Write", &input), "{p}");
+        }
+        assert!(validate(&Rule { tool: "Edit".into(), matcher: Matcher::Dir { path: "/p/.GIT".into() } }).is_err());
+    }
+
+    #[test]
+    fn build_and_package_files_are_never_covered() {
+        // What the vetted build and test commands run, and the config they read: no rule covers those files.
+        let dir = Rule { tool: "Write".into(), matcher: Matcher::Dir { path: "/Users/a/proj".into() } };
+        let any = Rule { tool: "Write".into(), matcher: Matcher::Any };
+        for p in [
+            "/Users/a/proj/.cargo/config.toml",
+            "/Users/a/proj/.npmrc",
+            "/Users/a/proj/.yarnrc",
+            "/Users/a/proj/.yarnrc.yml",
+            "/Users/a/proj/.yarn/releases/yarn.cjs",
+            "/Users/a/proj/.pnpmfile.cjs",
+            "/Users/a/proj/.githooks/pre-push",
+            "/Users/a/proj/.pre-commit-config.yaml",
+            "/Users/a/proj/.cursor/rules.md",
+            "/Users/a/proj/.zed/settings.json",
+            "/Users/a/proj/package.json",
+            "/Users/a/proj/Cargo.toml",
+            "/Users/a/proj/build.rs",
+            "/Users/a/proj/Makefile",
+            "/Users/a/proj/go.mod",
+        ] {
+            let input = json!({"file_path": p, "content": "x"});
+            assert!(!matches(&dir, "Write", &input), "{p}");
+            assert!(!matches(&any, "Write", &input), "{p}");
+        }
+        let ordinary = json!({"file_path": "/Users/a/proj/src/main.rs", "content": "x"});
+        assert!(matches(&dir, "Write", &ordinary));
+        assert!(matches(&any, "Write", &ordinary));
+    }
+
+    #[test]
+    fn a_hard_link_to_a_protected_file_is_not_a_file_in_the_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = std::fs::canonicalize(tmp.path()).unwrap().join("proj");
+        std::fs::create_dir_all(folder.join(".git")).unwrap();
+        std::fs::write(folder.join(".git/config"), "[core]\n").unwrap();
+        // A second name for the same file, with no protected name in its own path: a write through it changes .git/config.
+        std::fs::hard_link(folder.join(".git/config"), folder.join("ok.txt")).unwrap();
+        let dir_rule = Rule { tool: "Write".into(), matcher: Matcher::Dir { path: folder.display().to_string() } };
+        let any = Rule { tool: "Write".into(), matcher: Matcher::Any };
+        let asked = json!({"file_path": folder.join("ok.txt").display().to_string(), "content": "x"});
+        assert!(!matches(&dir_rule, "Write", &for_matching("Write", &asked)));
+        assert!(!matches(&any, "Write", &for_matching("Write", &asked)));
+        // A file with one name is still an ordinary file in the folder.
+        std::fs::write(folder.join("src.txt"), "x").unwrap();
+        let ordinary = json!({"file_path": folder.join("src.txt").display().to_string(), "content": "x"});
+        assert!(matches(&dir_rule, "Write", &for_matching("Write", &ordinary)));
     }
 
     #[test]

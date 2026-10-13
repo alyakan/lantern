@@ -123,6 +123,13 @@ describe("ruleChoices", () => {
     expect(ruleChoices("Write", { file_path: "/a.txt", content: "x" })).toEqual([{ tool: "Write", kind: "any" }]);
   });
 
+  it("offers nothing for a build or package file, whatever its case, so each one asks", () => {
+    for (const path of ["/p/.GIT/config", "/p/.Claude/settings.json", "/p/.MCP.JSON", "/p/Package.JSON", "/p/.cargo/config.toml", "/p/package.json", "/p/Cargo.toml", "/p/build.rs", "/p/Makefile", "/p/go.mod", "/p/.yarn/releases/yarn.cjs"]) {
+      expect(ruleChoices("Write", { file_path: path, content: "x" }), path).toEqual([]);
+    }
+    expect(ruleChoices("Write", { file_path: "/p/src/main.rs", content: "x" })).toHaveLength(2);
+  });
+
   it("offers nothing for a file inside git or config folders, so each one asks", () => {
     for (const path of ["/p/.git/config", "/p/.git/hooks/pre-commit", "/p/.claude/settings.json", "/p/.mcp.json", "/p/.vscode/tasks.json", "/p/sub/.envrc"]) {
       expect(ruleChoices("Write", { file_path: path, content: "x" }), path).toEqual([]);
