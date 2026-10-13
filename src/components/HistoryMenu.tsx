@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import type { SessionSummary } from "../types";
 import { relativeTime } from "../lib/time";
+import { SessionActionsContext, pinnedFirst, resumeCommand } from "../lib/sessionActions";
 import { FolderIcon } from "./icons";
 
 /** A chat that's open in the background: running, waiting for you, or finished and kept open until you close it. */
@@ -32,7 +33,8 @@ interface Props {
 }
 
 // The dropdown under the title bar's History button: search, then the open chats (the one on screen first), then past
-// sessions for this folder, newest first.
+// sessions for this folder, pinned ones first and the rest newest first. Each past session has its own actions, when
+// there's a folder to act in (see SessionActionsContext).
 export function HistoryMenu({ sessions, currentId, onOpen, onClose, open = [], onSwitch, onCloseChat }: Props) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
@@ -41,7 +43,14 @@ export function HistoryMenu({ sessions, currentId, onOpen, onClose, open = [], o
   const shownOpen = open.filter((c) => matches(c.title));
   // The chat on screen is open too: it leads the Open list rather than sitting among past sessions.
   const current = sessions?.find((s) => s.id === currentId && matches(s.title)) ?? null;
-  const shown = sessions?.filter((s) => s.id !== currentId && !openIds.has(s.id) && matches(s.title)) ?? null;
+  const actions = useContext(SessionActionsContext);
+  const listed = sessions?.filter((s) => s.id !== currentId && !openIds.has(s.id) && matches(s.title)) ?? null;
+  const shown = listed && actions ? pinnedFirst(listed, actions.pinned) : listed;
+  // Which session's actions are open, a name being typed for one, the names saved here, and the one just copied.
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<{ id: string; text: string } | null>(null);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [copied, setCopied] = useState<string | null>(null);
 
   return (
     <div className="menu history-menu" role="dialog" aria-label="Session history">
@@ -102,14 +111,72 @@ export function HistoryMenu({ sessions, currentId, onOpen, onClose, open = [], o
         <div className="menu-empty">{q ? "No matching sessions" : "No past sessions in this folder"}</div>
       ) : (
         <ul className="menu-list" aria-label="Past sessions">
-          {shown.map((s) => (
-            <li key={s.id}>
-              <button className="menu-row" title={s.title} onClick={() => onOpen(s.id)}>
-                <span className="menu-row-title">{s.title}</span>
-                <span className="menu-row-meta">{relativeTime(s.updated_ms)}</span>
-              </button>
-            </li>
-          ))}
+          {shown.map((s) => {
+            const title = names[s.id] ?? s.title;
+            const pinned = !!actions?.pinned.includes(s.id);
+            const editing = renaming?.id === s.id ? renaming : null;
+            return (
+              <li key={s.id}>
+                {editing ? (
+                  <form
+                    className="session-rename"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const name = editing.text.trim();
+                      if (!name || !actions) return;
+                      setRenaming(null);
+                      actions.onRename(s.id, name).then(() => setNames((all) => ({ ...all, [s.id]: name })), () => {});
+                    }}
+                  >
+                    <input
+                      aria-label="Name for this session"
+                      autoFocus
+                      value={editing.text}
+                      onChange={(e) => setRenaming({ id: s.id, text: e.target.value })}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") setRenaming(null);
+                      }}
+                    />
+                    <button type="submit" className="link-button" disabled={!editing.text.trim()}>
+                      Save
+                    </button>
+                  </form>
+                ) : (
+                  <div className="session-row">
+                    <button className="menu-row" title={title} onClick={() => onOpen(s.id)}>
+                      <span className="menu-row-title">{title}</span>
+                      <span className="menu-row-meta">{pinned ? `Pinned · ${relativeTime(s.updated_ms)}` : relativeTime(s.updated_ms)}</span>
+                    </button>
+                    {actions && (
+                      <button className="icon session-more" aria-label={`Actions for ${title}`} aria-expanded={menuFor === s.id} onClick={() => setMenuFor(menuFor === s.id ? null : s.id)}>
+                        ⋯
+                      </button>
+                    )}
+                  </div>
+                )}
+                {actions && menuFor === s.id && !editing && (
+                  <div className="session-actions">
+                    <button className="link-button" onClick={() => setRenaming({ id: s.id, text: title })}>
+                      Rename
+                    </button>
+                    <button className="link-button" onClick={() => actions.onTogglePin(s.id)}>
+                      {pinned ? "Unpin" : "Pin to top"}
+                    </button>
+                    <button className="link-button" onClick={() => actions.onExport(s.id, title)}>
+                      Export as Markdown
+                    </button>
+                    <button
+                      className="link-button"
+                      title="The command that picks this session up in a terminal"
+                      onClick={() => navigator.clipboard?.writeText(resumeCommand(actions.folder, s.id)).then(() => setCopied(s.id), () => {})}
+                    >
+                      {copied === s.id ? "Copied" : "Copy resume command"}
+                    </button>
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

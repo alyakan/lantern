@@ -85,6 +85,10 @@ export const api = {
   /** Stops one of the chat's background tasks (a run_in_background command, a background agent). */
   stopTask: (slot: string, taskId: string) => invoke<void>("stop_task", { slot, taskId }),
   listSessions: (folder: string) => invoke<SessionSummary[]>("list_sessions", { folder }),
+  /** Names a past session in Lantern (its History menu's Rename). The name beats every other title the session has. */
+  renameSession: (sessionId: string, title: string) => invoke<void>("rename_session", { sessionId, title }),
+  /** A past session's events, read from its transcript without starting claude (for Export as Markdown). */
+  sessionEvents: (folder: string, sessionId: string) => invoke<UiEvent[]>("session_events", { folder, sessionId }),
   /** A short title for the session (Claude Code's, one made before, or a new one from its first prompt); null if none. */
   titleSession: (claudePath: string, folder: string, sessionId: string, prompt: string) => invoke<string | null>("title_session", { claudePath, folder, sessionId, prompt }),
   recentFolders: () => invoke<RecentFolder[]>("recent_folders"),

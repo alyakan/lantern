@@ -884,6 +884,13 @@ export function installMockBackend() {
           return new Promise((r) => setTimeout(() => r([FOLDER, "/Users/you/projects/web-dashboard", "/Users/you/src/infra", "/Users/you/notes"].map((path, i) => ({ path, updated_ms: Date.now() - i * 3_600_000 }))), 100));
         case "list_sessions":
           return new Promise((r) => setTimeout(() => r(SESSIONS), 150));
+        case "rename_session": {
+          const session = SESSIONS.find((s) => s.id === a.sessionId);
+          if (session) session.title = String(a.title);
+          return undefined;
+        }
+        case "session_events":
+          return REPLAY;
         case "open_session":
           return REPLAY;
         case "title_session":

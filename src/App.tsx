@@ -5,7 +5,8 @@ import { prNumberOf, reviewHints } from "./lib/review";
 import { openFind } from "./lib/editorFind";
 import { StepsIntro } from "./components/StepsIntro";
 import { windowFocused } from "./lib/windowFocus";
-import { initialState, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
+import { initialState, reducer, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
+import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend } from "./sessions";
 import type { Mode } from "./types";
 import { attentionFor } from "./lib/attention";
@@ -905,6 +906,36 @@ export default function App() {
   useShortcut(",", () => setSettingsAt(settingsAt ?? "general"));
   // Installs the downloaded update and relaunches. The window says so (the overlay) until it does: closing every chat
   // and reopening is otherwise just a window that vanishes. Started from Settings, that closes first.
+  // The History menu's actions on past sessions, for the folder on screen: pins are kept per folder, and a rename also
+  // renames the open chat of that session.
+  const [pinnedBy, setPinnedBy] = usePersistentState<Record<string, string[]>>("settings.pinnedSessions", {});
+  const sessionActions: SessionActions | null = state.folder
+    ? {
+        folder: state.folder,
+        pinned: pinnedBy[state.folder] ?? [],
+        onTogglePin: (id) => {
+          const folder = state.folder!;
+          const pinned = pinnedBy[folder] ?? [];
+          setPinnedBy({ ...pinnedBy, [folder]: pinned.includes(id) ? pinned.filter((p) => p !== id) : [...pinned, id] });
+        },
+        onRename: async (id, title) => {
+          await api.renameSession(id, title);
+          setTitles((all) => ({ ...all, [id]: title }));
+        },
+        onExport: (id, title) => {
+          const folder = state.folder!;
+          // The transcript as the chat would show it, read without starting claude: its prompts, replies and steps.
+          api
+            .sessionEvents(folder, id)
+            .then((events) => {
+              const replayed = reducer({ ...initialState, folder }, { type: "history_loaded", sessionId: id, events });
+              return api.exportText(exportFileName(title), sessionMarkdown(title, replayed.items, folder));
+            })
+            .catch((e) => dispatch({ type: "failed", text: errText(e) }));
+        },
+      }
+    : null;
+
   const restartToUpdate = () => {
     setInstallStarted(true);
     setSettingsAt(null);
@@ -968,7 +999,7 @@ export default function App() {
   if (state.status === "setup") return <SetupScreen error={state.setupError} onCheck={locate} />;
 
   return (
-    <SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}>
+    <SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}>
       <div className="app">
         <TopBar
           folder={state.folder}
@@ -1113,6 +1144,6 @@ export default function App() {
           onClose={() => setGuideAt(null)}
         />
       </div>
-    </ModeGuideContext.Provider></SlotContext.Provider>
+    </SessionActionsContext.Provider></ModeGuideContext.Provider></SlotContext.Provider>
   );
 }
