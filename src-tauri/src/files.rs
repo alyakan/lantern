@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 const MAX_PREVIEW_BYTES: u64 = 2 * 1024 * 1024;
 
 /// Always hidden, even in folders without a .gitignore.
-pub(crate) const ALWAYS_HIDDEN: &[&str] =&[".git", "node_modules", ".DS_Store"];
+pub(crate) const ALWAYS_HIDDEN: &[&str] = &[".git", "node_modules", ".DS_Store"];
 
 #[derive(Debug, Serialize, PartialEq)]
 pub struct Entry {

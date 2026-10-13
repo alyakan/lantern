@@ -54,15 +54,18 @@ fn shell_value(shell: &str, expr: &str, timeout: Duration) -> Option<String> {
     let path = std::env::temp_dir().join(format!("lantern-shell-{}-{}", std::process::id(), SEQ.fetch_add(1, Ordering::Relaxed)));
     let mut out = std::fs::OpenOptions::new().read(true).write(true).create_new(true).open(&path).ok()?;
     let _ = std::fs::remove_file(&path);
-    let mut child = Command::new(shell)
-        .args(["-ilc", &script])
-        .stdin(Stdio::null())
-        .stdout(Stdio::from(out.try_clone().ok()?))
-        .stderr(Stdio::null())
-        // Its own group, so a timeout stops what the rc files started too.
-        .process_group(0)
-        .spawn()
-        .ok()?;
+    let mut cmd = Command::new(shell);
+    cmd.args(["-ilc", &script]).stdin(Stdio::null()).stdout(Stdio::from(out.try_clone().ok()?)).stderr(Stdio::null());
+    // Its own session, which is its own group too (the pid is the group id), so a timeout stops what the rc files started
+    // as well. A session, not just a group: an interactive shell in a background group of the terminal Lantern was started
+    // from (`tauri dev`) is stopped by it, and the read below would only ever time out.
+    unsafe {
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    let mut child = cmd.spawn().ok()?;
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {

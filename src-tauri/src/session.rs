@@ -76,12 +76,19 @@ impl Session {
         if let Some(p) = &cfg.path_env {
             cmd.env("PATH", p);
         }
-        // Its own group: stopping claude signals the group, so the background tasks it started go with it.
+        // Its own session, so its own group (the pid is the group id): stopping claude signals the group, and the
+        // background tasks it started go with it. A session rather than just a group, so no terminal Lantern was started
+        // from is shared: a child that touches it from a background group is stopped there, where here it just fails.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
         let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .process_group(0)
             .kill_on_drop(true)
             .spawn()
             .map_err(|e| format!("Failed to start {}: {e}", cfg.claude.display()))?;
@@ -236,7 +243,11 @@ impl Session {
     /// tasks it started stop with it.
     pub async fn stop(mut self) {
         self.stopping.store(true, Ordering::SeqCst);
-        drop(self.stdin.lock().await.take());
+        // Closing stdin is the polite part. A write stuck on a claude that isn't reading holds the lock, and must not
+        // keep the signals below from going out.
+        if let Ok(mut stdin) = tokio::time::timeout(Duration::from_secs(1), self.stdin.lock()).await {
+            drop(stdin.take());
+        }
         if self.is_running() {
             signal_group(self.pid, libc::SIGTERM);
         }
@@ -262,15 +273,24 @@ async fn write_line(stdin: &AsyncMutex<Option<ChildStdin>>, line: &str) -> bool 
     }
 }
 
+/// How many reads in a row may fail before a pipe counts as closed.
+const READ_ERRORS: u32 = 100;
+
 /// The next line of a pipe, or None once it's closed. Bytes that aren't UTF-8 are replaced rather than ending the
-/// read: a pipe that stops being drained blocks claude, and the chat would sit "running" forever.
+/// read: a pipe that stops being drained blocks claude, and the chat would sit "running" forever. A read that fails is
+/// tried again, but a pipe that only ever fails is as good as closed, or this would never end.
 async fn next_line<R: AsyncBufRead + Unpin>(reader: &mut R, buf: &mut Vec<u8>) -> Option<String> {
+    let mut failed = 0;
     loop {
         buf.clear();
         match reader.read_until(b'\n', buf).await {
             Ok(0) => return None,
             Ok(_) => return Some(String::from_utf8_lossy(buf).trim_end_matches(['\n', '\r']).to_string()),
-            Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+            Err(_) if failed >= READ_ERRORS => return None,
+            Err(_) => {
+                failed += 1;
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
         }
     }
 }
@@ -585,6 +605,22 @@ cat > /dev/null"#,
             UiEvent::SessionStarted { session_id, .. } => assert_eq!(session_id, "after-junk"),
             _ => unreachable!(),
         }
+    }
+
+    /// A pipe whose every read fails.
+    struct Failing;
+    impl tokio::io::AsyncRead for Failing {
+        fn poll_read(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>, _: &mut tokio::io::ReadBuf<'_>) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Ready(Err(std::io::Error::other("broken pipe")))
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pipe_that_only_fails_ends_the_stream_instead_of_retrying_forever() {
+        let mut reader = BufReader::new(Failing);
+        let mut buf = Vec::new();
+        let line = tokio::time::timeout(Duration::from_secs(10), next_line(&mut reader, &mut buf)).await.expect("retried forever");
+        assert_eq!(line, None);
     }
 
     #[tokio::test]
