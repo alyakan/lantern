@@ -79,11 +79,50 @@ const WRAPPERS: &[&str] = &["sh", "bash", "zsh", "dash", "fish", "ksh", "env", "
 const DENIED_FIRST: &[&str] = &[
     "python", "node", "deno", "bun", "ruby", "perl", "php", "awk", "gawk", "sed", "find", "rm", "rmdir", "mv", "cp", "dd", "chmod", "chown", "curl", "wget", "tee", "make", "osascript", "open", "ln", "truncate", "shred", "tar", "unzip", "rsync", "scp", "nc", "ncat", "telnet", "kill", "killall", "pkill", "launchctl", "defaults", "security", "networksetup", "diskutil", "hdiutil", "crontab", "at", "tmux", "screen", "script", "expect", "swift", "xcodebuild", "gcc", "clang", "cc",
 ];
-/// Tools whose first word is a subcommand (`git status`): a prefix of one names the subcommand too.
-const SUBCOMMAND_TOOLS: &[&str] = &["git", "npm", "yarn", "pnpm", "cargo", "docker", "kubectl", "brew", "pip", "go", "gh"];
-/// Subcommands that run a program or a project's script (`npm run`, `cargo run`, `docker exec`): no prefix ends in one.
-/// Such a rule can only be Exact, for the one command.
-const RUNNERS: &[&str] = &["exec", "dlx", "x", "run", "run-script"];
+/// The Bash prefixes a rule can be made of: a program and the subcommand after it, or for the programs that only read, the
+/// program alone. Read-only, build and test commands only. Anything else (runners, installs, pushes, a program not here)
+/// can only be an Exact rule for one command. The first word is matched exactly, so a path, a version or another
+/// spelling of one of these isn't one of them.
+///
+/// Not here, though they look harmless: `npm install`, `npm ci`, `yarn install` and `pnpm install` run the project's
+/// dependency scripts, and `npm audit` can fix (its prefix covers `audit fix`). Those are Exact-only.
+const VETTED: &[(&str, &[&str])] = &[
+    ("git", &["status", "diff", "log", "show", "branch", "remote", "rev-parse", "ls-files", "blame"]),
+    ("npm", &["test", "outdated", "ls"]),
+    ("yarn", &["test", "outdated", "ls"]),
+    ("pnpm", &["test", "outdated", "ls"]),
+    ("cargo", &["test", "check", "build", "clippy", "fmt", "doc", "tree"]),
+    ("go", &["test", "build", "vet", "list"]),
+    ("ls", &[]),
+    ("pwd", &[]),
+    ("cat", &[]),
+    ("head", &[]),
+    ("tail", &[]),
+    ("wc", &[]),
+    ("which", &[]),
+    ("whoami", &[]),
+    ("date", &[]),
+    ("echo", &[]),
+    ("tsc", &[]),
+    ("vitest", &[]),
+    ("jest", &[]),
+    ("pytest", &[]),
+    ("eslint", &[]),
+    ("rg", &[]),
+    ("grep", &[]),
+    ("diff", &[]),
+    ("file", &[]),
+    ("stat", &[]),
+    ("du", &[]),
+    ("df", &[]),
+];
+/// Arguments that make a command write somewhere or run a program of its choice (git's --output, an external diff, a
+/// pager, a config that sets one). A command with one of these never matches a prefix, whichever command it is.
+/// `REFUSED_PREFIXES` match the start of an argument's name (before any `=`), `REFUSED_NAMES` the whole name, and
+/// `REFUSED_SHORT` the start of the argument itself. A name-only match keeps `--pretty` (not `--pre`) allowed.
+const REFUSED_PREFIXES: &[&str] = &["--out", "--exec", "--upload-pack", "--receive-pack", "--ssh-command", "--editor", "--pager", "--config", "--git-dir", "--work-tree"];
+const REFUSED_NAMES: &[&str] = &["--ext-diff", "--textconv", "--pre", "--pre-glob"];
+const REFUSED_SHORT: &[&str] = &["-o", "-c", "-C"];
 /// The characters a rule's words can have. Anything else (quotes, operators, globs, `$`) keeps a command from matching.
 const WORD_CHARS: &str = "-_./:@=+,";
 
@@ -107,31 +146,44 @@ fn program_name(word: &str) -> String {
     }
 }
 
-/// A Bash prefix's words, if it can be one: one or two words of plain characters, none of them an option. It can't start
-/// with a path (an arbitrary program) or a program that runs anything (a wrapper, an interpreter, a destructive tool), and
-/// a subcommand tool needs its subcommand, so `git` alone is refused but `git status` is not.
+/// Whether a prefix's words are a vetted command (see VETTED): one program that only reads, or a program and its subcommand.
+fn vetted(words: &[&str]) -> bool {
+    let (program, sub) = match words {
+        [program] => (*program, None),
+        [program, sub] => (*program, Some(*sub)),
+        _ => return false,
+    };
+    VETTED.iter().any(|(name, subs)| *name == program && sub.map_or(subs.is_empty(), |s| subs.contains(&s)))
+}
+
+/// A Bash prefix's words, if it can be one: a vetted command (VETTED) of plain characters, none of them an option. The
+/// program must also not be a wrapper or a denied program (DENIED_FIRST, judged by its normalised name): a second layer,
+/// behind the list.
 fn prefix_words(text: &str) -> Option<Vec<&str>> {
     let words: Vec<&str> = text.split(' ').collect();
-    let first = words[0];
-    let name = program_name(first);
+    let name = program_name(words[0]);
     let ok = text.len() >= 2
-        && (1..=2).contains(&words.len())
-        && !first.contains('/')
+        && vetted(&words)
         && !WRAPPERS.contains(&name.as_str())
         && !DENIED_FIRST.contains(&name.as_str())
-        && !(words.len() == 1 && SUBCOMMAND_TOOLS.contains(&name.as_str()))
-        && !(words.len() == 2 && RUNNERS.contains(&words[1].to_ascii_lowercase().as_str()))
         && words.iter().all(|w| !w.is_empty() && !w.starts_with('-') && w.chars().all(|c| c.is_ascii_alphanumeric() || WORD_CHARS.contains(c)));
     ok.then_some(words)
 }
 
+/// Whether an argument (after a prefix) makes its command write somewhere or run a program of its choice.
+fn refused_argument(arg: &str) -> bool {
+    let name = arg.split('=').next().unwrap_or(arg);
+    REFUSED_PREFIXES.iter().any(|p| name.starts_with(p)) || REFUSED_NAMES.contains(&name) || REFUSED_SHORT.iter().any(|s| arg.starts_with(s))
+}
+
 fn prefix_matches(text: &str, command: &str) -> bool {
     let Some(words) = prefix_words(text) else { return false };
-    if !is_plain(command) {
+    // A quote groups words the way the shell does, not the way the split below does, so a command with one is left to a card.
+    if !is_plain(command) || command.contains(['\'', '"']) {
         return false;
     }
     let given: Vec<&str> = command.split(' ').filter(|w| !w.is_empty()).collect();
-    given.len() >= words.len() && given[..words.len()] == words[..]
+    given.len() >= words.len() && given[..words.len()] == words[..] && !given[words.len()..].iter().any(|a| refused_argument(a))
 }
 
 /// The command of a Bash call, if its input has only keys a rule can read.
@@ -467,7 +519,7 @@ mod tests {
 
     #[test]
     fn only_rules_that_match_as_intended_are_made() {
-        for good in [prefix("npm test"), prefix("ls"), prefix("npm ci"), exact("npm test -- --grep \"a b\""), Rule { tool: "Edit".into(), matcher: Matcher::Any }, Rule { tool: "mcp__linear__x".into(), matcher: Matcher::Any }] {
+        for good in [prefix("npm test"), prefix("ls"), prefix("npm outdated"), exact("npm test -- --grep \"a b\""), Rule { tool: "Edit".into(), matcher: Matcher::Any }, Rule { tool: "mcp__linear__x".into(), matcher: Matcher::Any }] {
             assert!(validate(&good).is_ok(), "{good:?}");
         }
         let bad = [
@@ -579,10 +631,10 @@ mod tests {
             assert!(validate(&prefix(text)).is_err(), "{text}");
             assert!(!matches(&prefix(text), "Bash", &cmd(&format!("{text} status"))), "{text}");
         }
-        for good in ["git status", "npm test", "cargo test", "docker ps", "gh pr"] {
+        for good in ["git status", "npm test", "cargo test"] {
             assert!(validate(&prefix(good)).is_ok(), "{good}");
         }
-        for text in ["npm exec", "npm dlx", "npm x", "docker exec", "kubectl exec", "git x", "npx"] {
+        for text in ["npm exec", "npm dlx", "npm x", "docker exec", "kubectl exec", "git x", "npx", "docker ps", "gh pr"] {
             assert!(validate(&prefix(text)).is_err(), "{text}");
         }
     }
@@ -609,7 +661,7 @@ mod tests {
 
     #[test]
     fn the_everyday_subcommands_are_still_prefixes() {
-        for text in ["npm test", "npm ci", "git status", "git diff", "git log", "cargo test", "cargo build", "cargo check"] {
+        for text in ["npm test", "git status", "git diff", "git log", "cargo test", "cargo build", "cargo check"] {
             assert!(validate(&prefix(text)).is_ok(), "{text}");
             assert!(matches(&prefix(text), "Bash", &cmd(&format!("{text} --verbose"))), "{text}");
         }
@@ -619,6 +671,93 @@ mod tests {
     fn the_newly_listed_tools_are_not_prefixes() {
         for text in ["osascript", "open", "ln", "truncate", "shred", "tar", "unzip", "rsync", "scp", "nc", "ncat", "telnet", "kill", "killall", "pkill", "launchctl", "defaults", "security", "networksetup", "diskutil", "hdiutil", "crontab", "at", "tmux", "screen", "script", "expect", "swift", "xcodebuild", "gcc", "clang", "cc"] {
             assert!(validate(&prefix(text)).is_err(), "{text}");
+        }
+    }
+
+    #[test]
+    fn only_vetted_commands_can_be_prefixes() {
+        for (program, subs) in VETTED {
+            if subs.is_empty() {
+                assert!(validate(&prefix(program)).is_ok(), "{program}");
+                assert!(matches(&prefix(program), "Bash", &cmd(&format!("{program} -la /tmp"))), "{program}");
+            }
+            for sub in subs.iter() {
+                let text = format!("{program} {sub}");
+                assert!(validate(&prefix(&text)).is_ok(), "{text}");
+                assert!(matches(&prefix(&text), "Bash", &cmd(&format!("{text} --quiet"))), "{text}");
+            }
+        }
+    }
+
+    #[test]
+    fn nothing_outside_the_vetted_list_can_be_a_prefix() {
+        for text in [
+            "npm run", "npm exec", "npm publish", "npx", "yarn run", "yarn dlx", "cargo run", "cargo install", "go run", "go generate", "make", "make test", "docker ps", "docker run", "kubectl get",
+            "python x", "python3 x", "node x", "ruby x", "git add", "git commit", "git push", "git checkout", "git reset", "git clean", "git rebase", "git config", "git stash", "git fetch", "git pull",
+            "rm", "mv", "sed", "awk", "xargs", "bash", "sh", "env", "sudo", "curl", "open", "git", "npm", "cargo", "prettier", "gh pr", "brew install", "pip install", "unknown-tool",
+        ] {
+            assert!(validate(&prefix(text)).is_err(), "{text}");
+            assert!(!matches(&prefix(text), "Bash", &cmd(text)), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_vetted_program_must_be_spelled_exactly() {
+        for text in ["/usr/bin/git status", "./git status", "~/git status", "git3 status", "Git status", "GIT status", "npm@10 test", "ls2", "Ls", "git  status", "git status/x"] {
+            assert!(validate(&prefix(text)).is_err(), "{text}");
+        }
+        // Exact still covers one command, however it's spelled.
+        assert!(validate(&exact("/usr/bin/git status")).is_ok());
+    }
+
+    #[test]
+    fn a_vetted_command_with_an_argument_that_writes_or_runs_code_is_not_matched() {
+        for (text, command) in [
+            ("git log", "git log --output=/tmp/x"),
+            ("git log", "git log --output /tmp/x"),
+            ("git log", "git log -o x"),
+            ("git diff", "git diff --ext-diff"),
+            ("git show", "git show --textconv"),
+            ("git log", "git log --exec-path=/x"),
+            ("git status", "git status --git-dir=/x"),
+            ("git status", "git status --work-tree /x"),
+            ("git log", "git log --config=core.pager=sh"),
+            ("git log", "git log --pager=sh"),
+            ("git log", "git log --editor=x"),
+            ("cargo test", "cargo test --config x"),
+            ("cargo build", "cargo build -C x"),
+            ("cargo build", "cargo build --config=x"),
+            ("go test", "go test -C dir"),
+            ("npm test", "npm test --ssh-command=x"),
+            ("ls", "ls --upload-pack=x"),
+            ("rg", "rg --pre=sh foo"),
+            ("rg", "rg --pre-glob x foo"),
+            ("grep", "grep --pre sh x"),
+            ("git log", "git log -c core.pager=sh"),
+        ] {
+            assert!(!matches(&prefix(text), "Bash", &cmd(command)), "{command}");
+        }
+        // The arguments a command is normally run with still match.
+        for (text, command) in [("git log", "git log --oneline -5"), ("git log", "git log --pretty=oneline"), ("git diff", "git diff --cached"), ("ls", "ls -la /tmp"), ("rg", "rg -f patterns foo")] {
+            assert!(matches(&prefix(text), "Bash", &cmd(command)), "{command}");
+        }
+    }
+
+    #[test]
+    fn a_quote_in_the_command_is_never_a_prefix_match() {
+        assert!(!matches(&prefix("git log"), "Bash", &cmd("git log --grep='fix bug'")));
+        assert!(!matches(&prefix("git log"), "Bash", &cmd("git log \"--oneline\"")));
+        // Exact keeps its quotes, when the text is identical.
+        assert!(matches(&exact("git log --grep=\"a b\""), "Bash", &cmd("git log --grep=\"a b\"")));
+        assert!(!matches(&exact("git log --grep=\"a b\""), "Bash", &cmd("git log --grep='a b'")));
+    }
+
+    #[test]
+    fn installs_and_fixes_are_exact_only() {
+        for text in ["npm install", "npm ci", "yarn install", "pnpm install", "npm audit", "yarn audit", "pnpm audit"] {
+            assert!(validate(&prefix(text)).is_err(), "{text}");
+            assert!(validate(&exact(text)).is_ok(), "{text}");
+            assert!(matches(&exact(text), "Bash", &cmd(text)), "{text}");
         }
     }
 
