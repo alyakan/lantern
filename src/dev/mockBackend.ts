@@ -932,6 +932,19 @@ export function installMockBackend() {
           mockFiles[path] = String(a.text);
           return { status: "saved", changed: true };
         }
+        // Like the backend, for the dev page: every file goes back to its first original (the mock keeps one).
+        case "revert_files":
+          return (a.files as { path: string }[]).map((f) => {
+            const before = mockFileText(f.path);
+            mockFiles[f.path] = ORIGINAL;
+            return { path: f.path, status: "reverted", before, after: ORIGINAL, reason: null };
+          });
+        case "undo_revert":
+          return (a.files as { path: string; target: string | null }[]).map((f) => {
+            if (f.target === null) delete mockFiles[f.path];
+            else mockFiles[f.path] = f.target;
+            return { path: f.path, status: "reverted", before: null, after: f.target, reason: null };
+          });
         // &update: a newer Lantern is downloaded and waiting.
         case "update_status":
           return new URLSearchParams(location.search).has("update") ? { version: NEXT_VERSION } : null;

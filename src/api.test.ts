@@ -85,6 +85,12 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ["listDir", () => api.listDir("s1", "/repo/src"), ["list_dir", { slot: "s1", path: "/repo/src" }]],
   ["readFile", () => api.readFile("s1", "a.ts"), ["read_file", { slot: "s1", path: "a.ts" }]],
   ["writeFile", () => api.writeFile("s1", "a.ts", "x", null), ["write_file", { slot: "s1", path: "a.ts", text: "x", expected: null }]],
+  [
+    "revertFiles",
+    () => api.revertFiles("s1", "turn", 2, 4, [{ path: "a.ts", expected: "x" }]),
+    ["revert_files", { slot: "s1", scope: "turn", turn: 2, toTurn: 4, files: [{ path: "a.ts", expected: "x" }] }],
+  ],
+  ["undoRevert", () => api.undoRevert("s1", [{ path: "a.ts", target: null, expected: "x" }]), ["undo_revert", { slot: "s1", files: [{ path: "a.ts", target: null, expected: "x" }] }]],
   ["exportText", () => api.exportText("out.md", "# Doc"), ["export_text", { fileName: "out.md", text: "# Doc" }]],
   ["findFiles", () => api.findFiles("s1", "retry"), ["find_files", { slot: "s1", query: "retry" }]],
   ["searchText", () => api.searchText("s1", query), ["search_text", { slot: "s1", query }]],

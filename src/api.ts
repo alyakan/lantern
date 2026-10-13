@@ -15,6 +15,15 @@ export interface BranchReview {
 
 export type WriteResult = { status: "saved"; changed: boolean } | { status: "conflict"; current: string | null };
 
+/** What reverting (or undoing a revert of) one file came to. `before` and `after` are the text either side of it (null: absent). */
+export interface RevertOutcome {
+  path: string;
+  status: "reverted" | "trashed" | "conflict" | "not_revertible";
+  before: string | null;
+  after: string | null;
+  reason: string | null;
+}
+
 /** Every chat-specific call names its slot: the chat (and claude process) it's about. */
 export const api = {
   locateClaude: (pathOverride: string | null) => invoke<string>("locate_claude", { pathOverride }),
@@ -73,6 +82,14 @@ export const api = {
    * there now (null: gone).
    */
   writeFile: (slot: string, path: string, text: string, expected: string | null) => invoke<WriteResult>("write_file", { slot, path, text, expected }),
+  /**
+   * Puts the files back to how they stood before a range of turns (`scope` "turn", with `turn` and `toTurn`) or before
+   * the chat ("session"). Each file comes with the text the user was shown as its current text (null: shown as deleted).
+   */
+  revertFiles: (slot: string, scope: ChangeScope, turn: number | null, toTurn: number | null, files: { path: string; expected: string | null }[]) =>
+    invoke<RevertOutcome[]>("revert_files", { slot, scope, turn, toTurn, files }),
+  /** Undoes a revert: each file goes back to `target` (null: absent), if it still holds `expected` (what the revert left). */
+  undoRevert: (slot: string, files: { path: string; target: string | null; expected: string | null }[]) => invoke<RevertOutcome[]>("undo_revert", { slot, files }),
   /** Saves an exported document at a path from the save dialog (a markdown file, anywhere). */
   /** Opens the save dialog and writes the document where the user picks; the path picked, or null if they cancel. */
   exportText: (fileName: string, text: string) => invoke<string | null>("export_text", { fileName, text }),

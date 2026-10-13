@@ -17,6 +17,7 @@ pub mod stream_parser;
 pub mod test_runs;
 pub mod titles;
 pub mod trash;
+pub mod revert;
 pub mod ui_event;
 pub mod updates;
 
@@ -646,6 +647,25 @@ async fn write_file(state: State<'_, AppState>, slot: String, path: String, text
     tauri::async_runtime::spawn_blocking(move || save_tracked(&root, &changes, &path, &text, expected.as_deref())).await.map_err(|e| e.to_string())?
 }
 
+/// Puts the chosen files back to how they stood before a turn, a range of turns, or the chat (see revert.rs). Each comes
+/// with the text the user was shown, so a newer edit is reported as a conflict rather than overwritten.
+#[tauri::command]
+async fn revert_files(state: State<'_, AppState>, slot: String, scope: changes::Scope, turn: Option<usize>, to_turn: Option<usize>, files: Vec<revert::Shown>) -> Result<Vec<revert::Outcome>, String> {
+    let s = state.slots.get(&slot)?;
+    let root = s.folder()?;
+    let changes = s.changes.clone();
+    tauri::async_runtime::spawn_blocking(move || revert::revert_files(&root, &changes, scope, turn, to_turn, &files, &trash::move_to_trash))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Undoes a revert: each file goes back to the text it had before, or is taken away if the revert brought it back.
+#[tauri::command]
+async fn undo_revert(state: State<'_, AppState>, slot: String, files: Vec<revert::Undo>) -> Result<Vec<revert::Outcome>, String> {
+    let root = state.slots.get(&slot)?.folder()?;
+    tauri::async_runtime::spawn_blocking(move || revert::undo(&root, &files, &trash::move_to_trash)).await.map_err(|e| e.to_string())
+}
+
 /// Saves an exported document (a plan as markdown). The save dialog is opened here rather than by the webview, and only
 /// the path it returns is written, so a file can't be written anywhere the user didn't pick. None: the dialog was cancelled.
 #[tauri::command]
@@ -862,6 +882,8 @@ pub fn run() {
             list_dir,
             read_file,
             write_file,
+            revert_files,
+            undo_revert,
             export_text,
             find_files,
             resolve_files,

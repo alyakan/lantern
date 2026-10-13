@@ -15,7 +15,7 @@ pub struct Entry {
 }
 
 /// Resolves `path` and checks it lies inside `root`, so the webview can't read arbitrary files.
-fn inside(root: &Path, path: &Path) -> Result<PathBuf, String> {
+pub(crate) fn inside(root: &Path, path: &Path) -> Result<PathBuf, String> {
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let full = path.canonicalize().map_err(|e| e.to_string())?;
     if full.starts_with(&root) {
@@ -303,7 +303,7 @@ pub fn search_text(root: &Path, q: &TextQuery, cancelled: &(dyn Fn() -> bool + S
     Ok(TextResults { files, truncated: truncated.into_inner() })
 }
 
-const BOM: &str = "\u{feff}";
+pub(crate) const BOM: &str = "\u{feff}";
 
 /// The text of a file inside `root`, for the editor. A leading byte-order mark isn't part of the text the editor
 /// shows (it keeps it aside); `write_file` puts it back.
@@ -337,7 +337,7 @@ pub enum Written {
 }
 
 /// Resolves a file that may not exist yet: itself if it does, otherwise its folder (which must) plus its name.
-fn inside_or_new(root: &Path, path: &Path) -> Result<PathBuf, String> {
+pub(crate) fn inside_or_new(root: &Path, path: &Path) -> Result<PathBuf, String> {
     if path.exists() {
         return inside(root, path);
     }
