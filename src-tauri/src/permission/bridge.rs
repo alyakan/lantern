@@ -1,7 +1,9 @@
 use super::protocol::{BridgeRequest, BridgeResponse};
+use super::rules::{self, FolderRules, Rule, Scope};
 use crate::ui_event::{Sink, UiEvent};
+use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -15,21 +17,35 @@ const MAX_REQUEST: u64 = 32 << 20;
 /// How long a connection may take to send its request before it's dropped.
 const REQUEST_WAIT: Duration = Duration::from_secs(10);
 
-/// Unix-socket server that turns helper requests into UI permission cards.
+/// Unix-socket server that turns helper requests into UI permission cards, or answers them by a rule.
 pub struct PermissionBridge {
     pub socket_path: PathBuf,
     pending: Mutex<HashMap<String, oneshot::Sender<BridgeResponse>>>,
     counter: AtomicU64,
     /// The accept loop, stopped by `close`.
     accept: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    /// "This chat" rules: kept here, so they last as long as the chat does.
+    chat_rules: Mutex<Vec<Rule>>,
+    /// The chat's folder, by its rule key (see `rules::folder_key`), once its claude has started in it.
+    folder: Mutex<Option<String>>,
+    /// The rules for folders, shared by every chat.
+    folder_rules: Arc<FolderRules>,
 }
 
 impl PermissionBridge {
-    pub fn start(socket_path: PathBuf, sink: Sink) -> std::io::Result<Arc<Self>> {
+    pub fn start(socket_path: PathBuf, sink: Sink, folder_rules: Arc<FolderRules>) -> std::io::Result<Arc<Self>> {
         let _ = std::fs::remove_file(&socket_path);
         let std_listener = std::os::unix::net::UnixListener::bind(&socket_path)?;
         std_listener.set_nonblocking(true)?;
-        let bridge = Arc::new(Self { socket_path, pending: Mutex::new(HashMap::new()), counter: AtomicU64::new(0), accept: Mutex::new(None) });
+        let bridge = Arc::new(Self {
+            socket_path,
+            pending: Mutex::new(HashMap::new()),
+            counter: AtomicU64::new(0),
+            accept: Mutex::new(None),
+            chat_rules: Mutex::new(Vec::new()),
+            folder: Mutex::new(None),
+            folder_rules,
+        });
         let b = bridge.clone();
         let accept = tauri::async_runtime::spawn(async move {
             let Ok(listener) = UnixListener::from_std(std_listener) else { return };
@@ -60,6 +76,15 @@ impl PermissionBridge {
         // The helper sends nothing after its request, so its read half only tells us when it has gone.
         let mut read = reader.into_inner().into_inner();
         let id = format!("perm-{}", self.counter.fetch_add(1, Ordering::SeqCst) + 1);
+        if let Some((scope, rule)) = self.rule_for(&req.tool_name, &req.input) {
+            // A rule answers it: no card, and the tool gets its input as Claude sent it, not the resolved paths matched on.
+            sink(UiEvent::PermissionAutoAllowed { request_id: id, tool_name: req.tool_name, input: req.input, scope, rule });
+            let resp = BridgeResponse { allow: true, message: None, updated_input: None };
+            if let Ok(json) = serde_json::to_string(&resp) {
+                let _ = write.write_all(format!("{json}\n").as_bytes()).await;
+            }
+            return;
+        }
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id.clone(), tx);
         sink(UiEvent::PermissionRequested { request_id: id.clone(), tool_name: req.tool_name, input: req.input });
@@ -95,6 +120,53 @@ impl PermissionBridge {
         self.pending.lock().unwrap().clear();
     }
 
+    /// The chat is in this folder from now on: its folder rules apply.
+    pub fn set_folder(&self, folder: &Path) {
+        *self.folder.lock().unwrap() = Some(rules::folder_key(folder));
+    }
+
+    pub fn folder(&self) -> Option<String> {
+        self.folder.lock().unwrap().clone()
+    }
+
+    pub fn chat_rules(&self) -> Vec<Rule> {
+        self.chat_rules.lock().unwrap().clone()
+    }
+
+    /// A new conversation starts in this chat, so its "this chat" rules go with the old one.
+    pub fn clear_chat_rules(&self) {
+        self.chat_rules.lock().unwrap().clear();
+    }
+
+    /// Makes a rule, if it's one `rules::validate` accepts. A folder rule needs the chat to have a folder.
+    pub fn add_rule(&self, scope: Scope, rule: Rule) -> Result<(), String> {
+        let rule = rules::validate(&rule)?;
+        match scope {
+            Scope::Chat => {
+                let mut chat = self.chat_rules.lock().unwrap();
+                if !chat.contains(&rule) {
+                    chat.push(rule);
+                }
+            }
+            Scope::Folder => self.folder_rules.add(&self.folder().ok_or("Open a folder first.")?, rule),
+        }
+        Ok(())
+    }
+
+    pub fn remove_chat_rule(&self, rule: &Rule) {
+        self.chat_rules.lock().unwrap().retain(|r| r != rule);
+    }
+
+    /// The rule that allows this request, if any: this chat's first, then the chat folder's.
+    fn rule_for(&self, tool: &str, input: &Value) -> Option<(Scope, Rule)> {
+        let input = rules::for_matching(tool, input);
+        if let Some(rule) = self.chat_rules.lock().unwrap().iter().find(|r| rules::matches(r, tool, &input)) {
+            return Some((Scope::Chat, rule.clone()));
+        }
+        let folder = self.folder()?;
+        self.folder_rules.for_folder(&folder).into_iter().find(|r| rules::matches(r, tool, &input)).map(|r| (Scope::Folder, r))
+    }
+
     /// Stops accepting helpers and removes the socket (the chat is closing). The caller denies pending requests first.
     pub async fn close(&self) {
         let accept = self.accept.lock().unwrap().take();
@@ -128,7 +200,7 @@ mod tests {
     fn setup() -> (Arc<PermissionBridge>, mpsc::UnboundedReceiver<UiEvent>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let (tx, rx) = mpsc::unbounded_channel();
-        let bridge = PermissionBridge::start(dir.path().join("b.sock"), Arc::new(move |ev| { let _ = tx.send(ev); })).unwrap();
+        let bridge = PermissionBridge::start(dir.path().join("b.sock"), Arc::new(move |ev| { let _ = tx.send(ev); }), Arc::new(FolderRules::load(None))).unwrap();
         (bridge, rx, dir)
     }
 
@@ -137,12 +209,25 @@ mod tests {
     }
 
     fn ask_in_background(bridge: &PermissionBridge) -> tokio::task::JoinHandle<BridgeResponse> {
+        ask_tool_in_background(bridge, "Bash", json!({"command": "npm test"}))
+    }
+
+    fn ask_tool_in_background(bridge: &PermissionBridge, tool: &str, input: Value) -> tokio::task::JoinHandle<BridgeResponse> {
         let socket = bridge.socket_path.display().to_string();
-        tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &request()))
+        let req = BridgeRequest { tool_name: tool.into(), input, tool_use_id: None };
+        tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &req))
+    }
+
+    fn prefix_rule(text: &str) -> Rule {
+        Rule { tool: "Bash".into(), matcher: rules::Matcher::Prefix { text: text.into() } }
+    }
+
+    async fn next_event(rx: &mut mpsc::UnboundedReceiver<UiEvent>) -> UiEvent {
+        tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap()
     }
 
     async fn next_request_id(rx: &mut mpsc::UnboundedReceiver<UiEvent>) -> String {
-        match tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.unwrap().unwrap() {
+        match next_event(rx).await {
             UiEvent::PermissionRequested { request_id, tool_name, input } => {
                 assert_eq!(tool_name, "Bash");
                 assert_eq!(input["command"], "npm test");
@@ -213,5 +298,106 @@ mod tests {
         assert!(!path.exists());
         // The accept loop held a clone of the bridge; once it's stopped only ours is left.
         assert_eq!(Arc::strong_count(&bridge), 1);
+    }
+
+    #[tokio::test]
+    async fn a_chat_rule_answers_its_request_without_a_card() {
+        let (bridge, mut rx, _dir) = setup();
+        bridge.add_rule(Scope::Chat, prefix_rule("npm test")).unwrap();
+        let helper = ask_in_background(&bridge);
+        match next_event(&mut rx).await {
+            UiEvent::PermissionAutoAllowed { request_id, tool_name, input, scope, rule } => {
+                assert_eq!((request_id.as_str(), tool_name.as_str(), input["command"].as_str()), ("perm-1", "Bash", Some("npm test")));
+                assert_eq!((scope, rule), (Scope::Chat, prefix_rule("npm test")));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(helper.await.unwrap(), BridgeResponse { allow: true, message: None, updated_input: None });
+        assert!(rx.try_recv().is_err(), "no card came up");
+    }
+
+    #[tokio::test]
+    async fn a_request_the_rule_does_not_match_still_gets_a_card() {
+        let (bridge, mut rx, _dir) = setup();
+        bridge.add_rule(Scope::Chat, prefix_rule("npm test")).unwrap();
+        let helper = ask_tool_in_background(&bridge, "Bash", json!({"command": "npm test; rm -rf ~"}));
+        let id = match next_event(&mut rx).await {
+            UiEvent::PermissionRequested { request_id, .. } => request_id,
+            other => panic!("unexpected {other:?}"),
+        };
+        assert!(bridge.respond(&id, false, None, None));
+        assert!(!helper.await.unwrap().allow);
+    }
+
+    #[tokio::test]
+    async fn a_folder_rule_applies_in_its_folder_only() {
+        let (bridge, mut rx, dir) = setup();
+        let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        bridge.set_folder(&a);
+        bridge.add_rule(Scope::Folder, prefix_rule("npm test")).unwrap();
+        let helper = ask_in_background(&bridge);
+        assert!(matches!(next_event(&mut rx).await, UiEvent::PermissionAutoAllowed { scope: Scope::Folder, .. }));
+        assert!(helper.await.unwrap().allow);
+        bridge.set_folder(&b);
+        let helper = ask_in_background(&bridge);
+        assert!(matches!(next_event(&mut rx).await, UiEvent::PermissionRequested { .. }), "another folder has its own rules");
+        bridge.cancel_all();
+        assert!(!helper.await.unwrap().allow);
+    }
+
+    #[tokio::test]
+    async fn a_folder_rule_needs_a_folder_and_a_valid_rule() {
+        let (bridge, _rx, dir) = setup();
+        assert!(bridge.add_rule(Scope::Folder, prefix_rule("npm test")).is_err(), "no folder open");
+        bridge.set_folder(dir.path());
+        assert!(bridge.add_rule(Scope::Folder, prefix_rule("npm test")).is_ok());
+        assert!(bridge.add_rule(Scope::Chat, prefix_rule("*")).is_err());
+        assert!(bridge.add_rule(Scope::Chat, Rule { tool: "ExitPlanMode".into(), matcher: rules::Matcher::Any }).is_err());
+        assert!(bridge.chat_rules().is_empty(), "nothing invalid is kept");
+    }
+
+    #[tokio::test]
+    async fn clearing_the_chat_rules_brings_the_cards_back() {
+        let (bridge, mut rx, _dir) = setup();
+        bridge.add_rule(Scope::Chat, prefix_rule("npm test")).unwrap();
+        bridge.clear_chat_rules();
+        let helper = ask_in_background(&bridge);
+        let id = next_request_id(&mut rx).await;
+        assert!(bridge.respond(&id, true, None, None));
+        assert!(helper.await.unwrap().allow);
+    }
+
+    #[tokio::test]
+    async fn a_folder_rule_does_not_pass_a_symlink_out_of_its_folder() {
+        let (bridge, mut rx, dir) = setup();
+        let folder = std::fs::canonicalize(dir.path()).unwrap().join("proj");
+        let outside = std::fs::canonicalize(dir.path()).unwrap().join("outside");
+        std::fs::create_dir_all(folder.join("real")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(folder.join("real"), folder.join("alias")).unwrap();
+        std::os::unix::fs::symlink(&outside, folder.join("out")).unwrap();
+        bridge.set_folder(&folder);
+        bridge.add_rule(Scope::Folder, Rule { tool: "Read".into(), matcher: rules::Matcher::Dir { path: folder.display().to_string() } }).unwrap();
+
+        // Inside the folder, through a link that stays in it: allowed, and the tool gets the path it asked for.
+        let through = folder.join("alias/x.ts").display().to_string();
+        let helper = ask_tool_in_background(&bridge, "Read", json!({"file_path": through}));
+        match next_event(&mut rx).await {
+            UiEvent::PermissionAutoAllowed { input, .. } => assert_eq!(input["file_path"], through),
+            other => panic!("unexpected {other:?}"),
+        }
+        assert!(helper.await.unwrap().allow);
+
+        // Through a link that leaves it: a card, as before the rule.
+        let escape = folder.join("out/secret.txt").display().to_string();
+        let helper = ask_tool_in_background(&bridge, "Read", json!({"file_path": escape}));
+        let id = match next_event(&mut rx).await {
+            UiEvent::PermissionRequested { request_id, .. } => request_id,
+            other => panic!("unexpected {other:?}"),
+        };
+        assert!(bridge.respond(&id, false, None, None));
+        assert!(!helper.await.unwrap().allow);
     }
 }

@@ -834,6 +834,15 @@ export function installMockBackend() {
           pendingPermission[String(a.slot)]?.(Boolean(a.allow));
           delete pendingPermission[String(a.slot)];
           return null;
+        case "add_permission_rule":
+        case "remove_permission_rule":
+          return null;
+        case "list_permission_rules":
+          // A couple of rules, so Settings has something to show in the browser preview.
+          return [
+            { scope: "folder", folder: FOLDER, tool: "Bash", kind: "prefix", text: "npm test" },
+            { scope: "chat", folder: null, tool: "Edit", kind: "dir", path: `${FOLDER}/src` },
+          ];
         case "git_branch":
           return "main";
         case "set_model":

@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
-import type { DirEntry, FileDiff, FoundFile, McpServerSpec, Mode, RecentFolder, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateState } from "./types";
+import type { DirEntry, FileDiff, FoundFile, McpServerSpec, Mode, NewRule, RecentFolder, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -63,6 +63,11 @@ export const api = {
   /** `updatedInput`: on allow, the tool's input as it should run (AskUserQuestion's, with the user's answers). */
   respondPermission: (slot: string, requestId: string, allow: boolean, message: string | null = null, updatedInput: Record<string, unknown> | null = null) =>
     invoke<void>("respond_permission", { slot, requestId, allow, message, updatedInput }),
+  /** Makes an "Always allow" rule from a card (the request itself is answered by respondPermission). */
+  addPermissionRule: (slot: string, rule: NewRule) => invoke<void>("add_permission_rule", { slot, rule }),
+  /** The rules Settings lists: this chat's (when `slot` is open) and every folder's. */
+  listPermissionRules: (slot: string | null) => invoke<RuleEntry[]>("list_permission_rules", { slot }),
+  removePermissionRule: (slot: string | null, entry: RuleEntry) => invoke<void>("remove_permission_rule", { slot, entry }),
   gitBranch: (folder: string) => invoke<string | null>("git_branch", { folder }),
   /** The user's name for their messages (macOS full name, else git's user.name); null if none. */
   userName: () => invoke<string | null>("user_name"),
