@@ -76,6 +76,17 @@ fn branch_exists(repo: &Path, branch: &str, path_env: Option<&str>) -> bool {
     run(repo, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch}")], path_env).is_ok()
 }
 
+/// The linked worktree `folder` is in (or is), as a restored worker's: None when it is a main checkout (its `.git` is a
+/// directory, not the file a linked worktree has) or no repository at all. The branch it started from is not known.
+pub fn existing_worktree(folder: &Path, path_env: Option<&str>) -> Option<Worktree> {
+    let root = repo_root(folder, path_env)?;
+    if !root.join(".git").is_file() {
+        return None;
+    }
+    let branch = current_branch(&root)?;
+    Some(Worktree { folder: folder.to_path_buf(), root, branch, base: None })
+}
+
 /// A linked worktree for a worker, on a branch of its own.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Worktree {
@@ -279,6 +290,21 @@ mod tests {
         let b = add_worktree(main.path(), &parent, "Login form", "w2", None).unwrap();
         assert_eq!(b.branch, "lantern/login-form-2");
         assert_ne!(a.root, b.root);
+    }
+
+    #[test]
+    fn a_worktree_that_is_already_there_is_recognised_and_a_main_checkout_is_not() {
+        let main = repo();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        // git names the real path (on macOS /var is /private/var), so compare real paths.
+        let real = |p: &Path| std::fs::canonicalize(p).unwrap();
+        let found = existing_worktree(&wt.folder, None).unwrap();
+        assert_eq!((found.branch.as_str(), real(&found.root), found.base.as_deref()), ("lantern/w", real(&wt.root), None));
+        // From a subfolder of it too, and the main checkout and a plain folder are not worktrees.
+        std::fs::create_dir_all(wt.folder.join("sub")).unwrap();
+        assert_eq!(real(&existing_worktree(&wt.folder.join("sub"), None).unwrap().root), real(&wt.root));
+        assert_eq!(existing_worktree(main.path(), None), None);
+        assert_eq!(existing_worktree(tempfile::tempdir().unwrap().path(), None), None);
     }
 
     #[test]

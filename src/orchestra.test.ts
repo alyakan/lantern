@@ -193,3 +193,20 @@ describe("user_sent", () => {
     expect(s.items[s.items.length - 1]).not.toHaveProperty("auto");
   });
 });
+
+describe("adopting a restored worker", () => {
+  const meta = { parent: "s1", name: "Login form", brief: "", folder: "/wt/login", branch: "lantern/login-form", base: "main", isolation: "worktree" as const };
+
+  it("makes a restored chat a worker of an open main agent again", () => {
+    let c = chatsReducer(initialChats(main), { type: "add", slot: "s2" });
+    c = chatsReducer(c, { type: "adopt", slot: "s2", meta });
+    expect(c.agents.s2).toEqual(meta);
+  });
+
+  it("does nothing for a chat that is not open, or a main agent that is not", () => {
+    const c = initialChats(main);
+    expect(chatsReducer(c, { type: "adopt", slot: "gone", meta })).toBe(c);
+    const orphan = chatsReducer(c, { type: "add", slot: "s2" });
+    expect(chatsReducer(orphan, { type: "adopt", slot: "s2", meta: { ...meta, parent: "nope" } })).toBe(orphan);
+  });
+});

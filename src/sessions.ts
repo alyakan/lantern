@@ -31,7 +31,9 @@ export type ChatsAction =
   /** A new, empty chat that inherits the app-wide bits (claude's path, the permission mode) from the active one. */
   | { type: "add"; slot: string }
   | { type: "activate"; slot: string }
-  | { type: "remove"; slot: string };
+  | { type: "remove"; slot: string }
+  /** A restored chat is a worker of an open main agent again (the backend adopted it): its tether and notes come back. */
+  | { type: "adopt"; slot: string; meta: AgentMeta };
 
 export const FIRST_SLOT = "s1";
 
@@ -77,6 +79,8 @@ export function chatsReducer(chats: Chats, action: ChatsAction): Chats {
     }
     case "activate":
       return chats.slots[action.slot] ? { ...chats, active: action.slot } : chats;
+    case "adopt":
+      return chats.slots[action.slot] && chats.slots[action.meta.parent] ? { ...chats, agents: { ...chats.agents, [action.slot]: action.meta } } : chats;
     case "remove": {
       if (action.slot === chats.active || !chats.slots[action.slot]) return chats;
       const { [action.slot]: _, ...rest } = chats.slots;

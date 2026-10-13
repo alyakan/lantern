@@ -238,6 +238,17 @@ struct Settings {
     /// Start the chat as the main agent of an orchestra: it can spawn workers (see orchestra.rs).
     #[serde(default)]
     orchestrator: bool,
+    /// Reopen the chat as a worker of an open main agent (a team restored after Lantern was closed).
+    #[serde(default)]
+    worker: Option<WorkerSettings>,
+}
+
+/// Whose worker a restored chat is.
+#[derive(serde::Deserialize, Clone)]
+struct WorkerSettings {
+    name: String,
+    /// The main agent's slot, which has to be open already.
+    parent: String,
 }
 
 fn checked_effort(effort: Option<String>) -> Result<Option<String>, String> {
@@ -261,7 +272,14 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
         effort: checked_effort(settings.effort)?,
         advisor: checked_model(settings.advisor)?,
         subagent_model: checked_model(settings.subagent_model)?,
-        helper: helper_config(slot, if settings.orchestrator { Role::Main } else { Role::Normal })?,
+        helper: helper_config(
+            slot,
+            match (settings.orchestrator, settings.worker) {
+                (true, _) => Role::Main,
+                (false, Some(w)) => Role::Worker { name: w.name },
+                (false, None) => Role::Normal,
+            },
+        )?,
         path_env: login_path(state).await,
     })
 }
@@ -1052,12 +1070,20 @@ async fn open_session(
     slot: String,
     claude_path: String,
     folder: String,
-    settings: Settings,
+    mut settings: Settings,
     session_id: String,
 ) -> Result<OpenedSession, String> {
     let s = slot_for(&app, &state, &slot)?;
+    // A worker of a main agent that isn't open (it was closed, or restored on its own) reopens as an ordinary chat.
+    if settings.worker.as_ref().is_some_and(|w| !state.orchestra.is_main(&w.parent)) {
+        settings.worker = None;
+    }
+    let worker = settings.worker.clone();
     let cfg = new_config(&state, &s, claude_path, folder, settings, Some(session_id.clone())).await?;
     enroll(&state, &slot, &s, &cfg.helper.role);
+    if let Some(w) = worker {
+        state.orchestra.adopt(&slot, &w.parent, &w.name, &cfg.folder).await?;
+    }
     let root = projects_root()?;
     let folder = cfg.folder.clone();
     let aliases = aliases_for(&state, &folder.to_string_lossy());

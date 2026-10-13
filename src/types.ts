@@ -239,6 +239,8 @@ export interface Settings {
   subagent_model?: string | null;
   /** Start the chat as the main agent of an orchestra: it can spawn workers. */
   orchestrator?: boolean;
+  /** Reopen the chat as a worker of an open main agent (a team restored after Lantern was closed). */
+  worker?: { name: string; parent: string };
 }
 
 /** A file search result (see files::find): the file, and which characters of `rel` matched. */

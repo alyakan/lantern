@@ -62,3 +62,48 @@ describe("restoring chats at launch", () => {
     await waitFor(() => expect(localStorage.getItem("session.openChats")).toBe("[]"));
   });
 });
+
+describe("restoring a team at launch", () => {
+  const WORKTREE = "/Users/you/Library/Application Support/lantern/worktrees/acme-api/login-form-w1";
+  // The worker is listed before its main agent, so putting the team back has to open the main agent first.
+  const team: SavedChat[] = [
+    { sessionId: "aaaa11", folder: WORKTREE, title: "Login form", draft: "", active: false, orchestra: { role: "worker", name: "Login form", parentSession: "bbbb22", branch: "lantern/login-form", base: "main", isolation: "worktree" } },
+    { sessionId: "bbbb22", folder: FOLDER, title: "Build the login flow", draft: "", active: true, orchestra: { role: "main" } },
+  ];
+
+  beforeEach(() => {
+    vi.resetModules();
+    clearMocks();
+    localStorage.clear();
+    localStorage.setItem("settings.lastFolder", JSON.stringify(FOLDER));
+    localStorage.setItem("session.openChats", JSON.stringify(team));
+  });
+
+  it("puts the main agent and its worker back together, and offers the canvas", async () => {
+    await launch();
+    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    // The chats are an orchestra again: the canvas can be shown.
+    await screen.findByRole("button", { name: "Show the canvas" });
+    // Saved as they are now, with the worker still naming its main agent by session.
+    await waitFor(() => {
+      const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
+      const bySession = Object.fromEntries(saved.map((c) => [c.sessionId, c]));
+      expect(bySession.bbbb22.orchestra).toEqual({ role: "main" });
+      expect(bySession.aaaa11.orchestra).toEqual({ role: "worker", name: "Login form", parentSession: "bbbb22", branch: "lantern/login-form", base: "main", isolation: "worktree" });
+      expect(bySession.bbbb22.active).toBe(true);
+    });
+  });
+
+  it("brings a worker back as an ordinary chat when its main agent is not restored with it", async () => {
+    localStorage.setItem("session.openChats", JSON.stringify([team[0], { ...team[1], sessionId: "cccc33", orchestra: undefined }]));
+    await launch();
+    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    await screen.findByText("Should the backoff have jitter so clients don't retry in lockstep?");
+    await waitFor(() => {
+      const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
+      expect(saved).toHaveLength(2);
+      expect(saved.every((c) => !c.orchestra)).toBe(true);
+    });
+    expect(screen.queryByRole("button", { name: "Show the canvas" })).toBeNull();
+  });
+});

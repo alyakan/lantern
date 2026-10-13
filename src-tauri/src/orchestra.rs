@@ -243,6 +243,40 @@ impl Orchestra {
         self.inner.lock().unwrap().mains.entry(slot.to_string()).or_default();
     }
 
+    /// A worker from an earlier run, brought back with its chat: it reports to `parent` again (an open main agent), and
+    /// its worktree is found where it was left. Idle until it does something, and the main agent hears of it from then.
+    pub async fn adopt(self: &Arc<Self>, slot: &str, parent: &str, name: &str, folder: &Path) -> Result<(), String> {
+        if !self.is_main(parent) {
+            return Err("The main agent this worker belonged to isn't open.".into());
+        }
+        let (f, env) = (folder.to_path_buf(), self.host.path_env().await);
+        let worktree = tokio::task::spawn_blocking(move || git::existing_worktree(&f, env.as_deref())).await.map_err(|e| e.to_string())?;
+        let mut inner = self.inner.lock().unwrap();
+        if inner.workers.contains_key(slot) {
+            return Ok(());
+        }
+        inner.order.push(slot.to_string());
+        inner.workers.insert(
+            slot.to_string(),
+            Worker {
+                parent: parent.to_string(),
+                name: untrusted(name, 60),
+                folder: folder.to_path_buf(),
+                worktree,
+                status: Status::Idle,
+                session_id: None,
+                last_text: String::new(),
+                latest: String::new(),
+                turns: 0,
+                waiting_on: None,
+                waiting_since: None,
+                wait_seq: 0,
+                merge: Merge::None,
+            },
+        );
+        Ok(())
+    }
+
     pub fn is_main(&self, slot: &str) -> bool {
         self.inner.lock().unwrap().mains.contains_key(slot)
     }
@@ -1317,6 +1351,41 @@ mod tests {
         o.discard("w1", true).await.unwrap();
         assert!(!wt.root.exists());
         assert!(!branches(repo.path()).contains("lantern/login"));
+    }
+
+    #[tokio::test]
+    async fn a_worker_from_an_earlier_run_is_adopted_with_its_worktree_and_can_be_merged_again() {
+        let (host, o, repo, _wt) = setup();
+        spawn(&o, "login").await;
+        commit_in_worktree(&o, "w1", "b.txt", "b\n");
+        let (_, _, wt) = o.worktree_of("w1").unwrap();
+        // Lantern was quit and reopened: the registry is empty, the worktree and branch are still on disk.
+        o.forget("w1");
+        assert_eq!(call(&o, "list_agents", json!({})).await.unwrap(), "No workers yet.");
+        // Its main agent is not open yet.
+        assert!(o.adopt("w1", "s9", "Login", &wt.folder).await.unwrap_err().contains("isn't open"));
+        o.adopt("w1", "s1", "Login", &wt.folder).await.unwrap();
+        o.adopt("w1", "s1", "Login", &wt.folder).await.unwrap(); // idempotent
+        let list = call(&o, "list_agents", json!({})).await.unwrap();
+        assert_eq!(list.lines().count(), 1, "{list}");
+        assert!(list.contains("w1 \"Login\" — idle") && list.contains("branch lantern/login"), "{list}");
+        // It takes part again: the main agent can write to it, and propose its branch, which the user can approve.
+        call(&o, "message_agent", json!({"id": "w1", "text": "carry on"})).await.unwrap();
+        assert_eq!(host.sent.lock().unwrap().last().unwrap().1, "[From the main agent] carry on");
+        call(&o, "propose_merge", json!({"id": "w1", "summary": "x"})).await.unwrap();
+        o.approve_merge("w1").await.unwrap();
+        assert!(repo.path().join("b.txt").is_file());
+        // And its notes reach the main agent.
+        o.observe("w1", &done("Back at it."));
+        assert!(host.wakes().last().unwrap().contains("Back at it."));
+    }
+
+    #[tokio::test]
+    async fn a_restored_worker_that_shared_the_main_folder_has_no_branch_to_merge() {
+        let (_h, o, repo, _wt) = setup();
+        o.adopt("w4", "s1", "Research", repo.path()).await.unwrap();
+        assert!(call(&o, "list_agents", json!({})).await.unwrap().contains("shared folder"));
+        assert!(call(&o, "propose_merge", json!({"id": "w4", "summary": "x"})).await.unwrap_err().contains("shares your folder"));
     }
 
     #[tokio::test]
