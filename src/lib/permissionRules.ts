@@ -16,53 +16,40 @@ export const FILE_TOOLS: Record<string, { key: string; keys: string[] }> = {
   MultiEdit: { key: "file_path", keys: ["file_path", "edits"] },
   NotebookEdit: { key: "notebook_path", keys: ["notebook_path", "cell_id", "cell_type", "edit_mode", "new_source"] },
 };
-/** Programs that run other commands. */
+/** Programs that run other commands (a second layer behind VETTED). */
 export const WRAPPERS = ["sh", "bash", "zsh", "dash", "fish", "ksh", "env", "sudo", "su", "doas", "xargs", "eval", "exec", "command", "nohup", "time", "timeout", "nice", "ssh", "npx", "bunx", "pnpx", "uvx", "pipx"];
-/** Programs a prefix can't start with: interpreters, and tools whose flags run or destroy things. */
+/** Programs a prefix can't start with (a second layer behind VETTED). */
 export const DENIED_FIRST = [
   "python", "node", "deno", "bun", "ruby", "perl", "php", "awk", "gawk", "sed", "find", "rm", "rmdir", "mv", "cp", "dd", "chmod", "chown", "curl", "wget", "tee", "make", "osascript", "open", "ln", "truncate", "shred", "tar", "unzip", "rsync", "scp", "nc", "ncat", "telnet", "kill", "killall", "pkill", "launchctl", "defaults", "security", "networksetup", "diskutil", "hdiutil", "crontab", "at", "tmux", "screen", "script", "expect", "swift", "xcodebuild", "gcc", "clang", "cc",
 ];
 /** The Bash prefixes a rule can be made of: a program and its subcommand, or a program that only reads (see VETTED in rules.rs). */
 export const VETTED: [string, string[]][] = [
-  ["git", ["status", "diff", "log", "show", "branch", "remote", "rev-parse", "ls-files", "blame"]],
-  ["npm", ["test", "outdated", "ls"]],
-  ["yarn", ["test", "outdated", "ls"]],
-  ["pnpm", ["test", "outdated", "ls"]],
-  ["cargo", ["test", "check", "build", "clippy", "fmt", "doc", "tree"]],
-  ["go", ["test", "build", "vet", "list"]],
+  ["git", ["status", "diff", "log", "show", "branch", "rev-parse"]],
+  ["npm", ["test"]],
+  ["cargo", ["test", "check", "build", "clippy"]],
+  ["go", ["test", "vet"]],
   ["ls", []],
   ["pwd", []],
-  ["cat", []],
-  ["head", []],
-  ["tail", []],
-  ["wc", []],
   ["which", []],
   ["whoami", []],
   ["date", []],
-  ["echo", []],
-  ["tsc", []],
-  ["vitest", []],
-  ["jest", []],
-  ["pytest", []],
-  ["eslint", []],
-  ["rg", []],
-  ["grep", []],
-  ["diff", []],
-  ["file", []],
-  ["stat", []],
-  ["du", []],
-  ["df", []],
 ];
-/** Arguments that make a command write somewhere or run a program of its choice; a prefix never matches a command with one. */
-export const REFUSED_PREFIXES = ["--out", "--exec", "--upload-pack", "--receive-pack", "--ssh-command", "--editor", "--pager", "--config", "--git-dir", "--work-tree"];
-export const REFUSED_NAMES = ["--ext-diff", "--textconv", "--pre", "--pre-glob"];
-export const REFUSED_SHORT = ["-o", "-c", "-C"];
 
-/** Whether an argument after a prefix makes its command write somewhere or run a program of its choice. */
-export function refusedArgument(arg: string): boolean {
-  const name = arg.split("=")[0];
-  return REFUSED_PREFIXES.some((p) => name.startsWith(p)) || REFUSED_NAMES.includes(name) || REFUSED_SHORT.some((s) => arg.startsWith(s));
-}
+/** The flags a vetted command takes after its prefix (see benign_flags in rules.rs). */
+export const BENIGN_FLAGS: Record<string, string[]> = {
+  "git status": ["--oneline", "--stat", "--name-only", "--name-status", "--porcelain", "--short", "--no-color", "--cached"],
+  "git diff": ["--oneline", "--stat", "--name-only", "--name-status", "--porcelain", "--short", "--no-color", "--cached"],
+  "git log": ["--oneline", "--stat", "--name-only", "--name-status", "--porcelain", "--short", "--no-color", "--cached"],
+  "git show": ["--oneline", "--stat", "--name-only", "--name-status", "--porcelain", "--short", "--no-color", "--cached"],
+  "git branch": ["--oneline", "--stat", "--name-only", "--name-status", "--porcelain", "--short", "--no-color", "--cached"],
+  ls: ["-l", "-a", "-la", "-lh", "-R"],
+  "cargo test": ["--release", "--all", "--workspace", "--lib", "--quiet", "-q"],
+  "cargo check": ["--release", "--all", "--workspace", "--lib", "--quiet", "-q"],
+  "cargo build": ["--release", "--all", "--workspace", "--lib", "--quiet", "-q"],
+  "cargo clippy": ["--release", "--all", "--workspace", "--lib", "--quiet", "-q"],
+  "go test": ["-v"],
+  "go vet": ["-v"],
+};
 
 const WORD = /^[A-Za-z0-9_\-./:@=+,]+$/;
 // The characters that keep a command from matching a rule (shell operators, substitutions, globs, escapes, controls).
@@ -71,6 +58,34 @@ const NOT_PLAIN = /[;&|<>()$`\\*?[\]{}\u0000-\u001f\u007f-\u009f]/;
 /** Whether a command is plain enough to match a rule. */
 export function isPlainCommand(command: string): boolean {
   return !NOT_PLAIN.test(command);
+}
+
+/** A plain token: letters, digits and `_ - . / : @ + ,`. */
+function plainToken(s: string): boolean {
+  return s !== "" && /^[A-Za-z0-9_\-./:@+,]+$/.test(s);
+}
+
+/** Whether a flag after a vetted prefix is one it takes. */
+function flagAllowed(prefix: string, flag: string): boolean {
+  if ((BENIGN_FLAGS[prefix] ?? []).includes(flag)) return true;
+  if (!prefix.startsWith("git ")) return false;
+  const digits = flag.startsWith("-") ? flag.slice(1) : "";
+  return flag === "-n" || (digits !== "" && /^[0-9]+$/.test(digits)) || (flag.startsWith("--format=") && plainToken(flag.slice("--format=".length)));
+}
+
+/** Whether the arguments after a vetted prefix are all allowed: flags it takes, and plain positional tokens inside the folder. */
+export function argumentsAllowed(prefix: string, args: string[]): boolean {
+  return args.every((arg) => (arg.startsWith("-") ? flagAllowed(prefix, arg) : prefix !== "git branch" && !arg.startsWith("/") && !arg.includes("..") && plainToken(arg)));
+}
+
+/** A prefix the backend would make: a vetted command (VETTED) of plain words, and not a wrapper or a denied program. */
+export function isPrefix(text: string): boolean {
+  const words = text.split(" ");
+  const [program, sub] = words;
+  const entry = VETTED.find(([name]) => name === program);
+  const vetted = words.length === 1 ? !!entry && entry[1].length === 0 : words.length === 2 ? !!entry && entry[1].includes(sub) : false;
+  const name = programName(program);
+  return text.length >= 2 && vetted && !WRAPPERS.includes(name) && !DENIED_FIRST.includes(name) && words.every((w) => w !== "" && !w.startsWith("-") && WORD.test(w));
 }
 
 /** The program a first word names, spelled plainly (see `program_name` in rules.rs). */
@@ -82,16 +97,6 @@ export function programName(word: string): string {
     if (next.length === name.length) return name;
     name = next;
   }
-}
-
-/** A prefix the backend would make: a vetted command (VETTED) of plain words, none an option, and not a wrapper or a denied program. */
-export function isPrefix(text: string): boolean {
-  const words = text.split(" ");
-  const [program, sub] = words;
-  const entry = VETTED.find(([name]) => name === program);
-  const vetted = words.length === 1 ? !!entry && entry[1].length === 0 : words.length === 2 ? !!entry && entry[1].includes(sub) : false;
-  const name = programName(program);
-  return text.length >= 2 && vetted && !WRAPPERS.includes(name) && !DENIED_FIRST.includes(name) && words.every((w) => w !== "" && !w.startsWith("-") && WORD.test(w));
 }
 
 /** A path the backend would match on: absolute, with no `..` in it. */
@@ -108,11 +113,11 @@ export function ruleChoices(tool: string, input: unknown): Rule[] {
     if (typeof command !== "string" || Object.keys(o).some((k) => !BASH_KEYS.includes(k)) || !isPlainCommand(command) || command.length < 2) return [];
     const words = command.split(" ").filter(Boolean);
     const out: Rule[] = [{ tool, kind: "exact", text: command }];
-    // A prefix never matches a command with a quote in it, nor one whose arguments write or run code (see rules.rs).
+    // A prefix never matches a command with a quote in it, nor one whose arguments aren't allowed (see rules.rs).
     if (/['"]/.test(command)) return out;
     const two = words.slice(0, 2).join(" ");
-    if (words.length >= 2 && isPrefix(two) && !words.slice(2).some(refusedArgument)) out.push({ tool, kind: "prefix", text: two });
-    if (isPrefix(words[0]) && !words.slice(1).some(refusedArgument)) out.push({ tool, kind: "prefix", text: words[0] });
+    if (words.length >= 2 && isPrefix(two) && argumentsAllowed(two, words.slice(2))) out.push({ tool, kind: "prefix", text: two });
+    if (isPrefix(words[0]) && argumentsAllowed(words[0], words.slice(1))) out.push({ tool, kind: "prefix", text: words[0] });
     return out;
   }
   const file = FILE_TOOLS[tool];

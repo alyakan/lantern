@@ -17,16 +17,26 @@ function rustVetted(): [string, string[]][] {
   return [...body.matchAll(/\("([^"]+)", &\[([^\]]*)\]\)/g)].map((m) => [m[1], [...m[2].matchAll(/"([^"]+)"/g)].map((s) => s[1])]);
 }
 
+/** The flags of rules.rs's benign_flags match, by prefix (each arm can list several prefixes). */
+function rustBenign(): Record<string, string[]> {
+  const start = rulesRs.indexOf("fn benign_flags");
+  const body = rulesRs.slice(start, rulesRs.indexOf("_ => &[]", start));
+  const out: Record<string, string[]> = {};
+  for (const arm of body.matchAll(/((?:"[^"]+"\s*\|\s*)*"[^"]+")\s*=>\s*&\[([^\]]*)\]/g)) {
+    const flags = [...arm[2].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    for (const name of arm[1].matchAll(/"([^"]+)"/g)) out[name[1]] = flags;
+  }
+  return out;
+}
+
 describe("the lists mirror the backend's", () => {
   it("match rules.rs", () => {
     expect(mirror.WRAPPERS).toEqual(rustStrings("WRAPPERS"));
     expect(mirror.DENIED_FIRST).toEqual(rustStrings("DENIED_FIRST"));
     expect(mirror.BASH_KEYS).toEqual(rustStrings("BASH_KEYS"));
     expect(mirror.NEVER_AUTO_TOOLS).toEqual(rustStrings("NEVER_AUTO"));
-    expect(mirror.REFUSED_PREFIXES).toEqual(rustStrings("REFUSED_PREFIXES"));
-    expect(mirror.REFUSED_NAMES).toEqual(rustStrings("REFUSED_NAMES"));
-    expect(mirror.REFUSED_SHORT).toEqual(rustStrings("REFUSED_SHORT"));
     expect(mirror.VETTED).toEqual(rustVetted());
+    expect(mirror.BENIGN_FLAGS).toEqual(rustBenign());
   });
 
   it("the file tools and their keys match rules.rs", () => {
@@ -38,7 +48,7 @@ describe("the lists mirror the backend's", () => {
 
 describe("isPrefix", () => {
   it("accepts the vetted commands and plain readers", () => {
-    for (const text of ["npm test", "git status", "git diff", "git log", "cargo test", "cargo build", "cargo check", "ls", "rg"]) {
+    for (const text of ["npm test", "git status", "git diff", "git log", "git rev-parse", "cargo test", "cargo build", "cargo check", "cargo clippy", "go vet", "ls", "pwd"]) {
       expect(isPrefix(text), text).toBe(true);
     }
   });
@@ -82,11 +92,19 @@ describe("ruleChoices", () => {
   });
 
   it("offers only the exact command when the prefix would be refused, quoted or writing", () => {
-    expect(ruleChoices("Bash", { command: "git log --output=/tmp/x" })).toEqual([{ tool: "Bash", kind: "exact", text: "git log --output=/tmp/x" }]);
-    expect(ruleChoices("Bash", { command: "git log --grep='fix bug'" })).toEqual([{ tool: "Bash", kind: "exact", text: "git log --grep='fix bug'" }]);
+    for (const command of ["git log --output=/tmp/x", "git log --grep='fix bug'", "git log /etc/passwd", "git diff --output=x", "npm test -- --coverage", "cargo build --target-dir=/x", "git branch newname"]) {
+      expect(ruleChoices("Bash", { command }), command).toEqual([{ tool: "Bash", kind: "exact", text: command }]);
+    }
+  });
+
+  it("offers the prefix when its arguments are the flags or plain words it takes", () => {
     expect(ruleChoices("Bash", { command: "git log --oneline -5" })).toEqual([
       { tool: "Bash", kind: "exact", text: "git log --oneline -5" },
       { tool: "Bash", kind: "prefix", text: "git log" },
+    ]);
+    expect(ruleChoices("Bash", { command: "cargo test --release" })).toEqual([
+      { tool: "Bash", kind: "exact", text: "cargo test --release" },
+      { tool: "Bash", kind: "prefix", text: "cargo test" },
     ]);
   });
 

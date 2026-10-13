@@ -87,42 +87,60 @@ const DENIED_FIRST: &[&str] = &[
 /// Not here, though they look harmless: `npm install`, `npm ci`, `yarn install` and `pnpm install` run the project's
 /// dependency scripts, and `npm audit` can fix (its prefix covers `audit fix`). Those are Exact-only.
 const VETTED: &[(&str, &[&str])] = &[
-    ("git", &["status", "diff", "log", "show", "branch", "remote", "rev-parse", "ls-files", "blame"]),
-    ("npm", &["test", "outdated", "ls"]),
-    ("yarn", &["test", "outdated", "ls"]),
-    ("pnpm", &["test", "outdated", "ls"]),
-    ("cargo", &["test", "check", "build", "clippy", "fmt", "doc", "tree"]),
-    ("go", &["test", "build", "vet", "list"]),
+    ("git", &["status", "diff", "log", "show", "branch", "rev-parse"]),
+    ("npm", &["test"]),
+    ("cargo", &["test", "check", "build", "clippy"]),
+    ("go", &["test", "vet"]),
     ("ls", &[]),
     ("pwd", &[]),
-    ("cat", &[]),
-    ("head", &[]),
-    ("tail", &[]),
-    ("wc", &[]),
     ("which", &[]),
     ("whoami", &[]),
     ("date", &[]),
-    ("echo", &[]),
-    ("tsc", &[]),
-    ("vitest", &[]),
-    ("jest", &[]),
-    ("pytest", &[]),
-    ("eslint", &[]),
-    ("rg", &[]),
-    ("grep", &[]),
-    ("diff", &[]),
-    ("file", &[]),
-    ("stat", &[]),
-    ("du", &[]),
-    ("df", &[]),
 ];
-/// Arguments that make a command write somewhere or run a program of its choice (git's --output, an external diff, a
-/// pager, a config that sets one). A command with one of these never matches a prefix, whichever command it is.
-/// `REFUSED_PREFIXES` match the start of an argument's name (before any `=`), `REFUSED_NAMES` the whole name, and
-/// `REFUSED_SHORT` the start of the argument itself. A name-only match keeps `--pretty` (not `--pre`) allowed.
-const REFUSED_PREFIXES: &[&str] = &["--out", "--exec", "--upload-pack", "--receive-pack", "--ssh-command", "--editor", "--pager", "--config", "--git-dir", "--work-tree"];
-const REFUSED_NAMES: &[&str] = &["--ext-diff", "--textconv", "--pre", "--pre-glob"];
-const REFUSED_SHORT: &[&str] = &["-o", "-c", "-C"];
+
+/// The flags a vetted command takes after its prefix. Any other flag (one with a value, --output, --target-dir, -C...)
+/// means the rule doesn't match and the card comes up. A list of flags that are known to only read or to build here, not
+/// a denylist: a test runner can write files through many flags, so none is trusted that isn't listed. For `git` also
+/// `-n`, `-<digits>` (like -5) and `--format=<plain token>` (see `flag_allowed`).
+fn benign_flags(prefix: &str) -> &'static [&'static str] {
+    match prefix {
+        "git status" | "git diff" | "git log" | "git show" | "git branch" => &["--oneline", "--stat", "--name-only", "--name-status", "--porcelain", "--short", "--no-color", "--cached"],
+        "ls" => &["-l", "-a", "-la", "-lh", "-R"],
+        "cargo test" | "cargo check" | "cargo build" | "cargo clippy" => &["--release", "--all", "--workspace", "--lib", "--quiet", "-q"],
+        "go test" | "go vet" => &["-v"],
+        _ => &[],
+    }
+}
+
+/// A plain token: letters, digits and `_ - . / : @ + ,`. Nothing that a shell would expand or group.
+fn plain_token(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "_-./:@+,".contains(c))
+}
+
+/// Whether a flag after a vetted prefix is one it takes.
+fn flag_allowed(prefix: &str, flag: &str) -> bool {
+    if benign_flags(prefix).contains(&flag) {
+        return true;
+    }
+    if !prefix.starts_with("git ") {
+        return false;
+    }
+    flag == "-n"
+        || flag.strip_prefix('-').is_some_and(|d| !d.is_empty() && d.chars().all(|c| c.is_ascii_digit()))
+        || flag.strip_prefix("--format=").is_some_and(plain_token)
+}
+
+/// Whether the arguments after a vetted prefix are all allowed: flags it takes, and positional tokens that are plain and
+/// stay inside the folder (no absolute path, no `..`). `git branch` takes none, since a name would create a branch.
+fn arguments_allowed(prefix: &str, args: &[&str]) -> bool {
+    args.iter().all(|arg| {
+        if arg.starts_with('-') {
+            flag_allowed(prefix, arg)
+        } else {
+            !(prefix == "git branch" || arg.starts_with('/') || arg.contains("..")) && plain_token(arg)
+        }
+    })
+}
 /// The characters a rule's words can have. Anything else (quotes, operators, globs, `$`) keeps a command from matching.
 const WORD_CHARS: &str = "-_./:@=+,";
 
@@ -170,12 +188,6 @@ fn prefix_words(text: &str) -> Option<Vec<&str>> {
     ok.then_some(words)
 }
 
-/// Whether an argument (after a prefix) makes its command write somewhere or run a program of its choice.
-fn refused_argument(arg: &str) -> bool {
-    let name = arg.split('=').next().unwrap_or(arg);
-    REFUSED_PREFIXES.iter().any(|p| name.starts_with(p)) || REFUSED_NAMES.contains(&name) || REFUSED_SHORT.iter().any(|s| arg.starts_with(s))
-}
-
 fn prefix_matches(text: &str, command: &str) -> bool {
     let Some(words) = prefix_words(text) else { return false };
     // A quote groups words the way the shell does, not the way the split below does, so a command with one is left to a card.
@@ -183,7 +195,7 @@ fn prefix_matches(text: &str, command: &str) -> bool {
         return false;
     }
     let given: Vec<&str> = command.split(' ').filter(|w| !w.is_empty()).collect();
-    given.len() >= words.len() && given[..words.len()] == words[..] && !given[words.len()..].iter().any(|a| refused_argument(a))
+    given.len() >= words.len() && given[..words.len()] == words[..] && arguments_allowed(text, &given[words.len()..])
 }
 
 /// The command of a Bash call, if its input has only keys a rule can read.
@@ -393,7 +405,7 @@ mod tests {
     #[test]
     fn a_prefix_covers_its_words_and_whatever_follows_them() {
         let r = prefix("git status");
-        for c in ["git status", "git status --short", "git  status -s", " git status"] {
+        for c in ["git status", "git status --short", "git  status --porcelain", " git status"] {
             assert!(matches(&r, "Bash", &cmd(c)), "{c:?}");
         }
     }
@@ -519,7 +531,7 @@ mod tests {
 
     #[test]
     fn only_rules_that_match_as_intended_are_made() {
-        for good in [prefix("npm test"), prefix("ls"), prefix("npm outdated"), exact("npm test -- --grep \"a b\""), Rule { tool: "Edit".into(), matcher: Matcher::Any }, Rule { tool: "mcp__linear__x".into(), matcher: Matcher::Any }] {
+        for good in [prefix("npm test"), prefix("ls"), prefix("cargo check"), exact("npm test -- --grep \"a b\""), Rule { tool: "Edit".into(), matcher: Matcher::Any }, Rule { tool: "mcp__linear__x".into(), matcher: Matcher::Any }] {
             assert!(validate(&good).is_ok(), "{good:?}");
         }
         let bad = [
@@ -663,7 +675,7 @@ mod tests {
     fn the_everyday_subcommands_are_still_prefixes() {
         for text in ["npm test", "git status", "git diff", "git log", "cargo test", "cargo build", "cargo check"] {
             assert!(validate(&prefix(text)).is_ok(), "{text}");
-            assert!(matches(&prefix(text), "Bash", &cmd(&format!("{text} --verbose"))), "{text}");
+            assert!(matches(&prefix(text), "Bash", &cmd(&format!("{text} src"))), "{text}");
         }
     }
 
@@ -679,12 +691,14 @@ mod tests {
         for (program, subs) in VETTED {
             if subs.is_empty() {
                 assert!(validate(&prefix(program)).is_ok(), "{program}");
-                assert!(matches(&prefix(program), "Bash", &cmd(&format!("{program} -la /tmp"))), "{program}");
+                assert!(matches(&prefix(program), "Bash", &cmd(&format!("{program} src"))), "{program}");
             }
             for sub in subs.iter() {
                 let text = format!("{program} {sub}");
                 assert!(validate(&prefix(&text)).is_ok(), "{text}");
-                assert!(matches(&prefix(&text), "Bash", &cmd(&format!("{text} --quiet"))), "{text}");
+                // `git branch` takes flags only (a name would create a branch), so it's probed with one.
+                let probe = if text == "git branch" { "--oneline" } else { "src" };
+                assert!(matches(&prefix(&text), "Bash", &cmd(&format!("{text} {probe}"))), "{text}");
             }
         }
     }
@@ -692,7 +706,8 @@ mod tests {
     #[test]
     fn nothing_outside_the_vetted_list_can_be_a_prefix() {
         for text in [
-            "npm run", "npm exec", "npm publish", "npx", "yarn run", "yarn dlx", "cargo run", "cargo install", "go run", "go generate", "make", "make test", "docker ps", "docker run", "kubectl get",
+            "npm run", "npm exec", "npm publish", "npm ci", "npm install", "npm audit", "npm outdated", "npm ls", "npx", "yarn run", "yarn dlx", "yarn test", "pnpm test", "cargo run", "cargo install", "cargo doc", "cargo tree", "cargo fmt", "go run", "go list", "go build", "go generate", "make", "make test", "docker ps", "docker run", "kubectl get",
+            "cat", "head", "tail", "rg", "grep", "diff", "file", "stat", "du", "df", "echo", "wc", "tsc", "vitest", "jest", "pytest", "eslint", "prettier", "git remote", "git ls-files", "git blame",
             "python x", "python3 x", "node x", "ruby x", "git add", "git commit", "git push", "git checkout", "git reset", "git clean", "git rebase", "git config", "git stash", "git fetch", "git pull",
             "rm", "mv", "sed", "awk", "xargs", "bash", "sh", "env", "sudo", "curl", "open", "git", "npm", "cargo", "prettier", "gh pr", "brew install", "pip install", "unknown-tool",
         ] {
@@ -738,8 +753,49 @@ mod tests {
             assert!(!matches(&prefix(text), "Bash", &cmd(command)), "{command}");
         }
         // The arguments a command is normally run with still match.
-        for (text, command) in [("git log", "git log --oneline -5"), ("git log", "git log --pretty=oneline"), ("git diff", "git diff --cached"), ("ls", "ls -la /tmp"), ("rg", "rg -f patterns foo")] {
+        for (text, command) in [("git log", "git log --oneline -5"), ("git log", "git log -n 5"), ("git diff", "git diff --cached"), ("git log", "git log --format=oneline"), ("ls", "ls -la src"), ("cargo build", "cargo build --release -q")] {
             assert!(matches(&prefix(text), "Bash", &cmd(command)), "{command}");
+        }
+    }
+
+    #[test]
+    fn only_the_flags_a_vetted_command_is_known_to_read_or_build_with_are_allowed() {
+        for (text, command) in [
+            // Flags nothing here takes, or that write or run something (a flag with a value, a runner, an output).
+            ("git diff", "git diff --output=x"),
+            ("git log", "git log --pretty=oneline"),
+            ("git log", "git log --format=%h"),
+            ("git log", "git log -o x"),
+            ("git log", "git log -c core.pager=sh"),
+            ("git log", "git log --exec-path=/x"),
+            ("git status", "git status --git-dir=/x"),
+            ("git show", "git show --textconv"),
+            ("cargo build", "cargo build --target-dir=/x"),
+            ("cargo build", "cargo build -C x"),
+            ("cargo test", "cargo test --config x"),
+            ("cargo test", "cargo test -- --nocapture"),
+            ("npm test", "npm test -- --coverage"),
+            ("npm test", "npm test --ssh-command=x"),
+            ("go test", "go test -run X"),
+            ("go test", "go test -count=1"),
+            ("ls", "ls --upload-pack=x"),
+            ("ls", "ls -la /tmp"),
+            ("ls", "ls ~"),
+            ("ls", "ls ../x"),
+            ("git diff", "git diff /etc/passwd"),
+            ("git log", "git log ../x"),
+            // `git branch` takes no name: a name would create a branch.
+            ("git branch", "git branch newname"),
+            ("git branch", "git branch -D main"),
+            ("npm test", "npm test src/../x"),
+        ] {
+            assert!(!matches(&prefix(text), "Bash", &cmd(command)), "{command}");
+        }
+        // Not here at all: a test runner or a reader outside the vetted list, whatever its flags.
+        for command in ["pytest --basetemp=/x", "jest --outputFile=x", "vitest --outputFile x", "tsc --outDir x", "eslint --fix src", "cat ~/.ssh/id_rsa", "rg foo", "grep -r x .", "head -5 x", "prettier --write x"] {
+            let program = command.split(' ').next().unwrap();
+            assert!(validate(&prefix(program)).is_err(), "{command}");
+            assert!(!matches(&prefix(program), "Bash", &cmd(command)), "{command}");
         }
     }
 
