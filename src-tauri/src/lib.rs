@@ -16,6 +16,7 @@ pub mod outside;
 pub mod stream_parser;
 pub mod test_runs;
 pub mod titles;
+pub mod trash;
 pub mod ui_event;
 pub mod updates;
 
