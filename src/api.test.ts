@@ -42,6 +42,8 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ["skillSave", () => api.skillSave("s1", "/skills/a/SKILL.md", "new", "old"), ["skill_save", { slot: "s1", path: "/skills/a/SKILL.md", text: "new", expected: "old" }]],
   ["mcpAdd", () => api.mcpAdd("s1", spec), ["mcp_add", { slot: "s1", spec }]],
   ["mcpRemove", () => api.mcpRemove("s1", "linear", null), ["mcp_remove", { slot: "s1", name: "linear", scope: null }]],
+  ["mcpForm", () => api.mcpForm("s1", "linear", "user"), ["mcp_form", { slot: "s1", name: "linear", scope: "user" }]],
+  ["mcpEdit", () => api.mcpEdit("s1", { name: "linear", scope: "user" }, spec), ["mcp_edit", { slot: "s1", fromName: "linear", fromScope: "user", spec }]],
   ["shellInput", () => api.shellInput("s1", "r1", "y\r"), ["shell_input", { slot: "s1", id: "r1", text: "y\r" }]],
   ["stopShell", () => api.stopShell("s1", "r1"), ["stop_shell", { slot: "s1", id: "r1" }]],
   ["interrupt", () => api.interrupt("s1"), ["interrupt", { slot: "s1" }]],

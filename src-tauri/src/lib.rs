@@ -4,6 +4,7 @@ pub mod cli_locator;
 pub mod files;
 pub mod git;
 pub mod history;
+pub mod mcp_config;
 pub mod navigation;
 pub mod permission;
 pub mod pr;
@@ -455,6 +456,64 @@ async fn mcp_remove(state: State<'_, AppState>, slot: String, name: String, scop
     claude_mcp(&state, &slot, args).await
 }
 
+/// Claude Code's own settings file: ~/.claude.json, or inside CLAUDE_CONFIG_DIR when that's set.
+fn claude_json_file() -> Result<std::path::PathBuf, String> {
+    match std::env::var_os("CLAUDE_CONFIG_DIR") {
+        Some(dir) => Ok(std::path::PathBuf::from(dir).join(".claude.json")),
+        None => Ok(std::path::PathBuf::from(std::env::var_os("HOME").ok_or("HOME is not set")?).join(".claude.json")),
+    }
+}
+
+/// A server's stored settings for the edit form, with its secret values masked (see mcp_config).
+#[tauri::command]
+async fn mcp_form(state: State<'_, AppState>, slot: String, name: String, scope: String) -> Result<mcp_config::Form, String> {
+    let folder = state.slots.get(&slot)?.folder()?;
+    let stored = mcp_config::read_entry(&claude_json_file()?, &folder, &name, &scope)?.ok_or_else(|| format!("{name} isn't there any more. Reload the list."))?;
+    mcp_config::to_form(&name, &scope, &stored)
+}
+
+fn add_json_args(scope: &str, name: &str, json: &str) -> Vec<String> {
+    ["mcp", "add-json", "-s", scope, "--", name, json].map(String::from).to_vec()
+}
+
+fn remove_args(scope: &str, name: &str) -> Vec<String> {
+    ["mcp", "remove", "-s", scope, "--", name].map(String::from).to_vec()
+}
+
+/// Saves an edited server: `from_name` and `from_scope` are where it is now, `spec` where it should be. The new entry is
+/// added before the old one is removed, so a failure never loses the server. The exception is a server that keeps its
+/// name in its scope: that name can't be added twice, so the old entry is removed and put back if the new one fails.
+#[tauri::command]
+async fn mcp_edit(state: State<'_, AppState>, slot: String, from_name: String, from_scope: String, spec: McpServerSpec) -> Result<String, String> {
+    // The same checks as adding, on the new name, scope, type and address.
+    mcp_add_args(&spec)?;
+    let folder = state.slots.get(&slot)?.folder()?;
+    let stored = mcp_config::read_entry(&claude_json_file()?, &folder, &from_name, &from_scope)?.ok_or_else(|| format!("{from_name} isn't there any more. Reload the list."))?;
+    let config = mcp_config::to_config(&spec, &stored)?;
+    let name = spec.name.trim().to_string();
+    if spec.scope == "project" && from_scope != "project" && mcp_config::has_literal_secret(&config) {
+        return Err("The project's .mcp.json is committed, so a secret can't go in it. Use ${NAME} for a value Claude Code reads from your environment, or keep the server in your own settings.".into());
+    }
+    let json = config.to_string();
+    if name == from_name && spec.scope == from_scope {
+        claude_mcp(&state, &slot, remove_args(&from_scope, &from_name)).await?;
+        if let Err(e) = claude_mcp(&state, &slot, add_json_args(&spec.scope, &name, &json)).await {
+            return Err(match claude_mcp(&state, &slot, add_json_args(&from_scope, &from_name, &stored.to_string())).await {
+                Ok(_) => format!("{e} {from_name} is back as it was."),
+                Err(again) => format!("{e} {from_name} couldn't be put back ({again}). Add it again with Add server."),
+            });
+        }
+    } else {
+        claude_mcp(&state, &slot, add_json_args(&spec.scope, &name, &json)).await?;
+        if let Err(e) = claude_mcp(&state, &slot, remove_args(&from_scope, &from_name)).await {
+            // The old entry is still there: take the new one back out.
+            let undone = claude_mcp(&state, &slot, remove_args(&spec.scope, &name)).await.is_ok();
+            return Err(if undone { format!("{e} Nothing changed.") } else { format!("{e} Both are there now: remove one with Remove.") });
+        }
+    }
+    Ok(format!("Saved {name}."))
+}
+
 /// Runs a command the user typed after "!" in the chat's folder; its output arrives as ui-events.
 #[tauri::command]
 async fn run_shell(app: AppHandle, state: State<'_, AppState>, slot: String, id: String, command: String) -> Result<(), String> {
@@ -875,6 +934,8 @@ pub fn run() {
             skill_save,
             mcp_add,
             mcp_remove,
+            mcp_form,
+            mcp_edit,
             shell_input,
             stop_shell,
             interrupt,

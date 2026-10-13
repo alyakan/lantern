@@ -833,6 +833,21 @@ export function installMockBackend() {
           if (at >= 0) mockServers.splice(at, 1);
           return `Removed MCP server ${String(a.name)}`;
         }
+        case "mcp_form": {
+          const s = mockServers.find((m) => m.name === a.name && m.scope === a.scope);
+          if (!s) return Promise.reject(`${String(a.name)} isn't there any more. Reload the list.`);
+          const type = String(s.config?.type ?? "stdio");
+          const headers = Object.keys((s.config?.headers as object | undefined) ?? {});
+          return { name: s.name, transport: type === "stdio" ? "stdio" : type, target: String(s.config?.url ?? s.config?.command ?? ""), scope: s.scope, env: [], headers: headers.map((k) => `${k}: •••`) };
+        }
+        case "mcp_edit": {
+          const from = mockServers.findIndex((m) => m.name === a.fromName && m.scope === a.fromScope);
+          if (from < 0) return Promise.reject(`${String(a.fromName)} isn't there any more. Reload the list.`);
+          const spec = a.spec as { name: string; transport: string; target: string; scope: string };
+          mockServers.splice(from, 1);
+          mockServers.unshift({ name: spec.name, status: "pending", config: spec.transport === "stdio" ? { type: "stdio", command: spec.target } : { type: spec.transport, url: spec.target }, scope: spec.scope });
+          return `Saved ${spec.name}.`;
+        }
         case "shell_input":
           mockReplies[`${String(a.slot)}:${String(a.id)}`]?.(String(a.text));
           return null;

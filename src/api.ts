@@ -43,6 +43,10 @@ export const api = {
   mcpAdd: (slot: string, spec: McpServerSpec) => invoke<string>("mcp_add", { slot, spec }),
   /** `scope` null: whichever scope it's in. */
   mcpRemove: (slot: string, name: string, scope: string | null) => invoke<string>("mcp_remove", { slot, name, scope }),
+  /** A server's stored settings for the edit form: its secret values come back as "•••" (kept as they are when saved). */
+  mcpForm: (slot: string, name: string, scope: string) => invoke<McpServerSpec>("mcp_form", { slot, name, scope }),
+  /** Saves an edited server from where it is (`from`) to `spec`: the new entry is added before the old one is removed. */
+  mcpEdit: (slot: string, from: { name: string; scope: string }, spec: McpServerSpec) => invoke<string>("mcp_edit", { slot, fromName: from.name, fromScope: from.scope, spec }),
   /** Types into a running command: a reply ending in "\r", or "\u0004" to end its input. */
   shellInput: (slot: string, id: string, text: string) => invoke<void>("shell_input", { slot, id, text }),
   stopShell: (slot: string, id: string) => invoke<void>("stop_shell", { slot, id }),

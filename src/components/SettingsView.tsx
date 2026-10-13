@@ -230,6 +230,9 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
   const [logins, setLogins] = useState<Record<string, Record<string, { callback: boolean }>>>({});
   const loggingIn = slot ? logins[slot] ?? {} : {};
   const [adding, setAdding] = useState(false);
+  // The server whose settings are open in the form, and the one whose removal is waiting for a yes.
+  const [editing, setEditing] = useState<{ name: string; scope: McpServerSpec["scope"] } | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ text: string; restart: boolean } | null>(null);
 
   // Each chat's answers are for that chat: this identity changes with the chat, and a reply from another is dropped. A
@@ -256,6 +259,8 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
     setNotice(null);
     setError(null);
     setAdding(false);
+    setEditing(null);
+    setConfirmRemove(null);
     void load();
   }, [chat]);
 
@@ -319,15 +324,18 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
     }
   };
 
-  const added = async (name: string) => {
+  // A saved edit always needs a restart: the chat read the old settings when it started.
+  const added = async (name: string, edited: boolean) => {
     setAdding(false);
+    setEditing(null);
     // Plugins reload re-reads MCP settings in newer Claude Code; otherwise it takes a restart.
     await api.claudeRequest(slot, { subtype: "reload_plugins" }).catch(() => {});
     const r = await api.claudeRequest<{ mcpServers?: McpServer[] }>(slot, { subtype: "mcp_status" }).catch(() => null);
     if (chat !== current.current) return;
     const list = r?.mcpServers ?? servers ?? [];
     setServers(list);
-    setNotice(list.some((s) => s.name === name) ? { text: `Added ${name}.`, restart: false } : { text: `Added ${name}. Restart the chat to connect to it.`, restart: true });
+    if (edited) setNotice({ text: `Saved ${name}. Restart the chat to use the change.`, restart: true });
+    else setNotice(list.some((s) => s.name === name) ? { text: `Added ${name}.`, restart: false } : { text: `Added ${name}. Restart the chat to connect to it.`, restart: true });
   };
 
   const order = (s: McpServer) => (s.scope === "claudeai" ? 2 : s.source === "plugin" ? 1 : 0);
@@ -339,11 +347,19 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
           <h2 className="mode-guide-title">MCP servers</h2>
           <p className="mode-guide-summary">The tools and data Claude can reach beyond this folder. Changes here are Claude Code's own settings, so the terminal sees them too.</p>
         </div>
-        <button className="primary" onClick={() => setAdding(!adding)} aria-expanded={adding}>
+        <button
+          className="primary"
+          onClick={() => {
+            setEditing(null);
+            setAdding(!adding);
+          }}
+          aria-expanded={adding}
+        >
           Add server
         </button>
       </div>
-      {adding && <AddServerForm slot={slot} onAdded={added} onCancel={() => setAdding(false)} />}
+      {adding && <AddServerForm slot={slot} onAdded={(name) => added(name, false)} onCancel={() => setAdding(false)} />}
+      {editing && <AddServerForm key={`${editing.scope}/${editing.name}`} slot={slot} edit={editing} onAdded={(name) => added(name, true)} onCancel={() => setEditing(null)} />}
       {notice && (
         <div className="settings-notice" role="status">
           {notice.text}
@@ -453,11 +469,42 @@ function McpPage({ slot, live, mcpTools, onRestartChat }: PageProps) {
                       </button>
                     )}
                     {removable(s) && (
-                      <button className="danger" onClick={() => void remove(s)} disabled={!!busy[s.name]}>
+                      <button
+                        onClick={() => {
+                          setAdding(false);
+                          setEditing({ name: s.name, scope: s.scope as McpServerSpec["scope"] });
+                        }}
+                        disabled={!!busy[s.name]}
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {removable(s) && (
+                      <button className="danger" onClick={() => setConfirmRemove(s.name)} disabled={!!busy[s.name]}>
                         Remove
                       </button>
                     )}
                   </div>
+                  {confirmRemove === s.name && (
+                    <div className="skill-confirm mcp-confirm" role="alertdialog" aria-label={`Remove ${displayName(s)}`}>
+                      <div>
+                        Remove <b>{displayName(s)}</b> from {scopeWords(s.scope)}?
+                        {s.scope === "project" && " This rewrites the project's .mcp.json, which is committed, so the removal goes into its next commit."}
+                      </div>
+                      <div className="skill-confirm-actions">
+                        <button onClick={() => setConfirmRemove(null)}>Cancel</button>
+                        <button
+                          className="danger"
+                          onClick={() => {
+                            setConfirmRemove(null);
+                            void remove(s);
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </li>
@@ -498,35 +545,78 @@ function CallbackField({ onSubmit }: { onSubmit: (url: string) => void }) {
   );
 }
 
+/** Where a scope keeps its servers, in words for a confirm. */
+const scopeWords = (scope: string | undefined) => (scope === "project" ? "this project's .mcp.json" : scope === "local" ? "your settings for this project" : "your settings, for every project");
+
 const SCOPES: { value: McpServerSpec["scope"]; label: string; hint: string }[] = [
   { value: "local", label: "Just me, this project", hint: "Kept in your own settings for this folder" },
   { value: "user", label: "Just me, every project", hint: "Available in all your folders" },
   { value: "project", label: "Everyone on this project", hint: "Saved in .mcp.json, to commit with the code" },
 ];
 
-/** A new server: what to call it, how to reach it, and where it applies. Runs `claude mcp add`. */
-function AddServerForm({ slot, onAdded, onCancel }: { slot: string; onAdded: (name: string) => void; onCancel: () => void }) {
-  const [spec, setSpec] = useState<{ name: string; transport: McpServerSpec["transport"]; target: string; scope: McpServerSpec["scope"]; extra: string }>({ name: "", transport: "http", target: "", scope: "local", extra: "" });
+/**
+ * A server's settings: a new one (`claude mcp add`), or one being edited (`mcp_edit`, from where it is now). An edit
+ * loads the stored settings with their secret values masked: a masked value is kept as it is when saved.
+ */
+function AddServerForm({ slot, edit, onAdded, onCancel }: { slot: string; edit?: { name: string; scope: McpServerSpec["scope"] }; onAdded: (name: string, edited: boolean) => void; onCancel: () => void }) {
+  const [spec, setSpec] = useState<{ name: string; transport: McpServerSpec["transport"]; target: string; scope: McpServerSpec["scope"]; extra: string }>({
+    name: edit?.name ?? "",
+    transport: "http",
+    target: "",
+    scope: edit?.scope ?? "local",
+    extra: "",
+  });
+  const [loaded, setLoaded] = useState(!edit);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const set = (patch: Partial<typeof spec>) => setSpec({ ...spec, ...patch });
+  // Saving into the project's .mcp.json, which is committed, asks first.
+  const [confirmProject, setConfirmProject] = useState(false);
+  const set = (patch: Partial<typeof spec>) => {
+    setConfirmProject(false);
+    setSpec({ ...spec, ...patch });
+  };
   const stdio = spec.transport === "stdio";
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (!edit) return;
+    let current = true;
+    api.mcpForm(slot, edit.name, edit.scope).then(
+      (f) => {
+        if (!current) return;
+        setSpec({ name: f.name, transport: f.transport, target: f.target, scope: f.scope, extra: (f.transport === "stdio" ? f.env : f.headers).join("\n") });
+        setLoaded(true);
+      },
+      (e) => current && setError(errText(e)),
+    );
+    return () => {
+      current = false;
+    };
+  }, [slot, edit?.name, edit?.scope]);
+  const save = async () => {
+    if (edit && spec.scope === "project" && !confirmProject) {
+      setConfirmProject(true);
+      return;
+    }
     setSaving(true);
     setError(null);
     const lines = spec.extra.split("\n").map((l) => l.trim()).filter(Boolean);
+    const next = { name: spec.name.trim(), transport: spec.transport, target: spec.target, scope: spec.scope, env: stdio ? lines : [], headers: stdio ? [] : lines };
     try {
-      await api.mcpAdd(slot, { name: spec.name.trim(), transport: spec.transport, target: spec.target, scope: spec.scope, env: stdio ? lines : [], headers: stdio ? [] : lines });
-      onAdded(spec.name.trim());
+      if (edit) await api.mcpEdit(slot, edit, next);
+      else await api.mcpAdd(slot, next);
+      onAdded(next.name, !!edit);
     } catch (err) {
       setError(errText(err));
     } finally {
       setSaving(false);
     }
   };
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    void save();
+  };
   return (
-    <form className="mcp-add" onSubmit={submit} aria-label="Add an MCP server">
+    <form className="mcp-add" onSubmit={submit} aria-label={edit ? "Edit an MCP server" : "Add an MCP server"}>
+      {edit && <div className="wide settings-muted">{loaded ? "Secret values show as •••. Leave one as it is to keep what's saved." : "Reading the server's settings…"}</div>}
       <label>
         Name
         <input value={spec.name} onChange={(e) => set({ name: e.target.value })} placeholder="sentry" autoFocus required autoCapitalize="off" autoCorrect="off" spellCheck={false} />
@@ -564,12 +654,25 @@ function AddServerForm({ slot, onAdded, onCancel }: { slot: string; onAdded: (na
           {error}
         </div>
       )}
+      {confirmProject && (
+        <div className="skill-confirm wide" role="alertdialog" aria-label="Save to the project">
+          <div>This writes the project's .mcp.json, which is committed: everyone who gets the project gets this server, and any secret written here is in the repository.</div>
+          <div className="skill-confirm-actions">
+            <button type="button" onClick={() => setConfirmProject(false)} disabled={saving}>
+              Cancel
+            </button>
+            <button type="button" className="primary" onClick={() => void save()} disabled={saving}>
+              Save to .mcp.json
+            </button>
+          </div>
+        </div>
+      )}
       <div className="wide mcp-add-actions">
         <button type="button" onClick={onCancel}>
           Cancel
         </button>
-        <button type="submit" className="primary" disabled={saving}>
-          {saving ? "Adding…" : "Add"}
+        <button type="submit" className="primary" disabled={saving || !loaded || confirmProject}>
+          {saving ? (edit ? "Saving…" : "Adding…") : edit ? "Save" : "Add"}
         </button>
       </div>
     </form>
