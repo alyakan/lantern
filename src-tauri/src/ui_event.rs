@@ -79,7 +79,20 @@ pub enum UiEvent {
     TestRun { parent: Option<String>, tool_use_id: String, command: String, run: crate::test_runs::TestRun },
     Retrying { attempt: u64, max_retries: u64, error: String },
     /// `context_window`: the model's context size in tokens, from the result's per-model usage.
-    TurnDone { is_error: bool, result: Option<String>, cost_usd: Option<f64>, duration_ms: Option<u64>, auth_hint: bool, denied: usize, context_window: Option<u64> },
+    /// `cost_usd` and `tokens` are this turn's (None when they can't be told apart from the session's totals, see
+    /// stream_parser.rs); `session_cost_usd` and `session_tokens` are the claude process's running totals.
+    TurnDone {
+        is_error: bool,
+        result: Option<String>,
+        cost_usd: Option<f64>,
+        tokens: Option<u64>,
+        session_cost_usd: Option<f64>,
+        session_tokens: u64,
+        duration_ms: Option<u64>,
+        auth_hint: bool,
+        denied: usize,
+        context_window: Option<u64>,
+    },
     /// How many tokens the conversation takes up as of the latest main-thread API call.
     ContextUsed { tokens: u64 },
     /// What claude is running in the background now (a Bash command with run_in_background, a background agent…):
@@ -107,7 +120,7 @@ pub enum UiEvent {
     /// folder) or a background subagent (`dir` None: found by its Agent call). The session follows it (offstream.rs)
     /// and doesn't pass this on.
     Offstream { tool_use_id: String, dir: Option<String> },
-    /// What the turn cost per model (the main model, subagents', the advisor's), from the result.
+    /// What the turn cost per model (the main model, subagents', the advisor's): empty when the turn's share isn't known.
     ModelUsage { models: Vec<ModelCost> },
     /// The MCP tools claude can use this session ("mcp__server__tool"), from its init message.
     McpTools { tools: Vec<String> },

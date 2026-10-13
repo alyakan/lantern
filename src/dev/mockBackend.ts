@@ -95,7 +95,7 @@ const slotMode: Record<string, string> = {};
 /** Step by step's Debug: hypotheses, a round of evidence with the reproduce card, the fix, then done; Next moves on. */
 async function playDebug(slot: string, text: string) {
   const send = sendTo(slot);
-  const done = () => send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, duration_ms: 2400, auth_hint: false, denied: 0, context_window: 200_000 });
+  const done = () => send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 2400, auth_hint: false, denied: 0, context_window: 200_000 });
   const moves = /^(next|ok|yes|start)/i.test(text.trim());
   const n = stepPage[slot] === undefined ? 0 : moves ? stepPage[slot] + 1 : stepPage[slot];
   stepPage[slot] = n;
@@ -142,7 +142,7 @@ function suggestionFor(text: string): { flavour: string; why: string } {
  */
 async function playStepByStep(slot: string, raw: string) {
   const send = sendTo(slot);
-  const done = () => send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, duration_ms: 1400, auth_hint: false, denied: 0, context_window: 200_000 });
+  const done = () => send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 1400, auth_hint: false, denied: 0, context_window: 200_000 });
   const note = /^\[Lantern: this chat switched to (Build|Learn|Review|Debug)\b[^\]]*\]\s*/.exec(raw);
   const text = note ? raw.slice(note[0].length) : raw;
   if (stepPage[slot] === undefined && flavourOfSlot[slot] === undefined && !note) {
@@ -188,12 +188,12 @@ async function playSteps(slot: string, text: string, teach: boolean) {
   if (!approved && text.trim().endsWith("?") && stepPage[slot] !== undefined) {
     // A question about the step: answered without a heading, so it stays on the page.
     await streamText(send, `sq-${Date.now()}:0`, "Good question. A `Set` keeps the check to one `has()` call and names the policy in one place; a range check would also retry 500 and 501, which usually aren't transient.");
-    return send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, duration_ms: 1200, auth_hint: false, denied: 0, context_window: 200_000 });
+    return send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 1200, auth_hint: false, denied: 0, context_window: 200_000 });
   }
   const n = stepPage[slot] === undefined ? 0 : approved ? stepPage[slot] + 1 : stepPage[slot];
   stepPage[slot] = n;
   const why = teach ? "\n\n### Why this way\n\nA `Set` makes the check a single `has()` call, and keeping the codes in one named place means the policy reads at a glance. An alternative is a range check (`status >= 500`), but that would also retry 500 and 501, which usually aren't transient." : "";
-  const done = () => send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, duration_ms: 2400, auth_hint: false, denied: 0, context_window: 200_000 });
+  const done = () => send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 2400, auth_hint: false, denied: 0, context_window: 200_000 });
   if (n === 0) {
     await send({ kind: "session_started", session_id: `mock-${slot}`, model: "claude-opus-5-5", cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
     await send({ kind: "tool_started", parent: null, tool_use_id: "s0a", name: "Skill", summary: "incremental-dev" });
@@ -253,7 +253,7 @@ async function playReview(slot: string, text: string) {
   const moves = /^next/i.test(text.trim());
   if (!moves && stepPage[slot] !== undefined) {
     await streamText(send, `rq-${Date.now()}:0`, "Only if the server sends `Retry-After`; otherwise the backoff is the fallback.");
-    return send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, duration_ms: 1200, auth_hint: false, denied: 0, context_window: 200_000 });
+    return send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 1200, auth_hint: false, denied: 0, context_window: 200_000 });
   }
   const n = stepPage[slot] === undefined ? 0 : stepPage[slot] + 1;
   stepPage[slot] = n;
@@ -284,7 +284,7 @@ async function playReview(slot: string, text: string) {
     pages.splice(0, pages.length, ...skillFormat);
   }
   await streamText(send, `rp${n}-${Date.now()}:0`, pages[Math.min(n, pages.length - 1)]);
-  await send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, duration_ms: 2400, auth_hint: false, denied: 0, context_window: 200_000 });
+  await send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 2400, auth_hint: false, denied: 0, context_window: 200_000 });
 }
 
 /** Each chat's background tasks, as claude would list them. */
@@ -293,7 +293,7 @@ const mockTasks: Record<string, { id: string; task_type: string; description: st
 /** Built-in commands answer at once without calling the model, like the real CLI in stream-json mode. */
 async function playCommand(slot: string, text: string) {
   const send = sendTo(slot);
-  const done = () => send({ kind: "turn_done", is_error: false, result: "", cost_usd: null, duration_ms: 40, auth_hint: false, denied: 0, context_window: null });
+  const done = () => send({ kind: "turn_done", is_error: false, result: "", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 40, auth_hint: false, denied: 0, context_window: null });
   if (text === "/clear") {
     await send({ kind: "conversation_reset" });
     return done();
@@ -354,7 +354,7 @@ async function playTeamTurn(slot: string) {
   await advise("adv3");
   await streamText(send, "tm:1", "Done: the fixtures mock the clock, and all 14 auth tests pass.");
   await send({ kind: "model_usage", models: [{ model: "claude-sonnet-5-5", cost_usd: 0.41, input_tokens: 182000, output_tokens: 6900 }, { model: "claude-haiku-5-5", cost_usd: 0.06, input_tokens: 96000, output_tokens: 3100 }, { model: "claude-opus-5-5", cost_usd: 0.38, input_tokens: 151000, output_tokens: 2400 }] });
-  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.85, duration_ms: 21000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.85, tokens: 12_000, session_cost_usd: 0.85, session_tokens: 12_000, duration_ms: 21000, auth_hint: false, denied: 0, context_window: 1_000_000 });
 }
 
 /**
@@ -371,7 +371,7 @@ async function playWorkflowTurn(slot: string) {
   await send({ kind: "tool_finished", parent: null, tool_use_id: wf, is_error: false, output: "Workflow launched in background." });
   await send({ kind: "task_started", task_id: "wofb", tool_use_id: wf });
   await send({ kind: "background_tasks", tasks: [{ id: "wofb", task_type: "local_workflow", description: "settings-redesign" }] });
-  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.02, duration_ms: 4000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.02, tokens: 12_000, session_cost_usd: 0.02, session_tokens: 12_000, duration_ms: 4000, auth_hint: false, denied: 0, context_window: 1_000_000 });
   const agent = async (id: string, label: string, phase: string, model: string) => {
     await send({ kind: "tool_started", parent: wf, tool_use_id: id, name: "Agent", summary: label });
     await send({ kind: "agent_started", tool_use_id: id, subagent_type: phase, description: label, model: null });
@@ -397,7 +397,7 @@ async function playWorkflowTurn(slot: string) {
   await send({ kind: "task_ended", task_id: "wofb", tool_use_id: wf, status: "completed", summary: "Workflow settings-redesign completed" });
   await send({ kind: "background_tasks", tasks: [] });
   await streamText(send, "wf:1", "The workflow finished: the judge picked the hub-split design.");
-  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.3, duration_ms: 9000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.3, tokens: 12_000, session_cost_usd: 0.3, session_tokens: 12_000, duration_ms: 9000, auth_hint: false, denied: 0, context_window: 1_000_000 });
 }
 
 /** Claude asks before starting (sent with "ask me" in the message): AskUserQuestion, then a reply using the answers. */
@@ -419,7 +419,7 @@ async function playQuestionTurn(slot: string) {
   const allowed = await new Promise<boolean>((resolve) => (pendingPermission[slot] = resolve));
   const answers = lastAnswers[slot];
   await streamText(send, "q:0", allowed && answers ? `Going with: ${Object.values(answers).join("; ")}.` : "No answer, so I'll put retries in fetchJson for 429 and 503.");
-  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.01, duration_ms: 3000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.01, tokens: 12_000, session_cost_usd: 0.01, session_tokens: 12_000, duration_ms: 3000, auth_hint: false, denied: 0, context_window: 1_000_000 });
 }
 
 async function playTurn(slot: string) {
@@ -516,14 +516,14 @@ async function playTurn(slot: string) {
   const watch = { id: "bwatch", task_type: "local_bash", description: "npx vitest --watch src/client" };
   mockTasks[slot] = [dev, watch];
   await send({ kind: "background_tasks", tasks: [dev, watch] });
-  await send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, duration_ms: 8200, auth_hint: false, denied: allowed ? 0 : 1, context_window: 200_000 });
+  await send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 8200, auth_hint: false, denied: allowed ? 0 : 1, context_window: 200_000 });
   // One ends later: claude says so on its own, in a turn nobody prompted.
   if (new URLSearchParams(location.search).has("bgend")) {
     await sleep(4000);
     mockTasks[slot] = (mockTasks[slot] ?? []).filter((t) => t.id !== watch.id);
     await send({ kind: "background_tasks", tasks: mockTasks[slot] });
     await streamText(send, `bg-${Date.now()}:0`, "The watcher exited: all 4 retry tests still pass.");
-    await send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, duration_ms: 900, auth_hint: false, denied: 0, context_window: 200_000 });
+    await send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 900, auth_hint: false, denied: 0, context_window: 200_000 });
   }
 }
 

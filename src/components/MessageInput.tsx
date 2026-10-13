@@ -53,7 +53,7 @@ interface Props {
   /** The chat's queued messages; without it the box keeps its own queue. */
   queue?: { items: string[]; set: (next: string[]) => void };
   /** Context use and timing for the footer meter. */
-  usage?: { used: number | null; window: number; lastTurnMs: number | null; actions?: { onCompact: () => void; onClear: () => void } };
+  usage?: { used: number | null; window: number; lastTurnMs: number | null; actions?: { onCompact: () => void; onClear: () => void }; session?: { cost: number | null; tokens: number } };
   /** The model chip becomes a picker: what the user chose (null = default) and how to change it. */
   models?: { chosen: string | null; onChoose: (model: string | null) => void; defaultModel?: string | null; ids?: Record<string, string>; options?: ModelOption[] };
   /** Thinking effort: the chosen level (null = default) and how to change it. */
@@ -531,7 +531,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           {!terminal && effort && effortLevels.length > 0 && <EffortPicker chosen={effort.chosen} levels={effortLevels} onChoose={effort.onChoose} disabled={busy} />}
           {!terminal && harness && <HarnessPicker {...harness} disabled={busy} />}
           <div className="spacer" />
-          {usage && <ContextMeter used={usage.used} window={usage.window} running={running} lastTurnMs={usage.lastTurnMs} actions={usage.actions} />}
+          {usage && <ContextMeter used={usage.used} window={usage.window} running={running} lastTurnMs={usage.lastTurnMs} actions={usage.actions} session={usage.session} />}
           {terminal ? (
             <button className="send run" aria-label="Run" title="Run (Enter)" disabled={!canSend} onClick={submit}>
               <ArrowUpIcon />

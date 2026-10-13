@@ -38,7 +38,7 @@ export type UiEvent =
   | { kind: "tool_finished"; parent: string | null; tool_use_id: string; is_error: boolean; output: string }
   | { kind: "test_run"; parent: string | null; tool_use_id: string; command: string; run: TestRun }
   | { kind: "retrying"; attempt: number; max_retries: number; error: string }
-  | { kind: "turn_done"; is_error: boolean; result: string | null; cost_usd: number | null; duration_ms: number | null; auth_hint: boolean; denied: number; context_window: number | null }
+  | { kind: "turn_done"; is_error: boolean; result: string | null; cost_usd: number | null; tokens?: number | null; session_cost_usd?: number | null; session_tokens?: number; duration_ms: number | null; auth_hint: boolean; denied: number; context_window: number | null }
   | { kind: "context_used"; tokens: number }
   | { kind: "background_tasks"; tasks: { id: string; task_type: string; description: string }[] }
   | { kind: "task_started"; task_id: string; tool_use_id: string }

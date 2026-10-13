@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { usageLine } from "../lib/cost";
 
 /** "4.2s", "38s", "2m 05s". */
 export function formatDuration(ms: number): string {
@@ -22,10 +23,12 @@ interface Props {
   lastTurnMs: number | null;
   /** Compact and Clear, shown when the meter warns or is clicked, and only while Claude isn't working. */
   actions?: { onCompact: () => void; onClear: () => void };
+  /** What the session has cost and used so far, for the tooltip (each known or not, see lib/cost.ts). */
+  session?: { cost: number | null; tokens: number };
 }
 
 // Beside the send button: how full the context is, and while Claude works, how long it has been at it.
-export function ContextMeter({ used, window, running, lastTurnMs, actions }: Props) {
+export function ContextMeter({ used, window, running, lastTurnMs, actions, session }: Props) {
   const [started, setStarted] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [open, setOpen] = useState(false);
@@ -47,6 +50,7 @@ export function ContextMeter({ used, window, running, lastTurnMs, actions }: Pro
   const details = [
     used !== null && `${used.toLocaleString()} of ${window.toLocaleString()} tokens of context used`,
     lastTurnMs !== null && `Last turn took ${formatDuration(lastTurnMs)}`,
+    session && usageLine(session.cost, session.tokens) && `Session so far: ${usageLine(session.cost, session.tokens)}`,
   ].filter(Boolean).join("\n");
   const label = `${percent}% of context used${note ? `, ${note.toLowerCase()}` : ""}`;
   const showActions = !!actions && !running && (level !== null || open);

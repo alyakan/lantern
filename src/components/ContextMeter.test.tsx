@@ -20,6 +20,16 @@ describe("ContextMeter", () => {
     expect(meter.closest(".context-meter")).toHaveAttribute("title", "61,480 of 200,000 tokens of context used\nLast turn took 8.2s");
   });
 
+  it("adds the session's cost and tokens so far to the tooltip, when there are any", () => {
+    render(<ContextMeter used={61_480} window={200_000} running={false} lastTurnMs={null} session={{ cost: 0.9, tokens: 400_000 }} />);
+    expect(screen.getByLabelText("31% of context used").closest(".context-meter")).toHaveAttribute("title", "61,480 of 200,000 tokens of context used\nSession so far: $0.90 · 400k tokens");
+  });
+
+  it("gives the session in tokens alone when no cost is billed", () => {
+    render(<ContextMeter used={61_480} window={200_000} running={false} lastTurnMs={null} session={{ cost: null, tokens: 400_000 }} />);
+    expect(screen.getByLabelText("31% of context used").closest(".context-meter")).toHaveAttribute("title", "61,480 of 200,000 tokens of context used\nSession so far: 400k tokens");
+  });
+
   it("shows nothing before any reply", () => {
     const { container } = render(<ContextMeter used={null} window={200_000} running={false} lastTurnMs={null} />);
     expect(container).toBeEmptyDOMElement();

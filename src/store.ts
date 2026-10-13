@@ -79,7 +79,8 @@ export type ChatItem =
   | ShellItem
   /** `autoRule`: a rule allowed it with no card (decision is then "allowed"); `scope` is where that rule applies. */
   | { type: "permission"; id: string; toolName: string; input: unknown; decision: "allowed" | "denied" | null; note?: string; autoRule?: { scope: RuleScope; rule: Rule } }
-  | { type: "turn"; id: string; isError: boolean; stopped: boolean; result: string | null; durationMs: number | null; denied: number };
+  /** What the turn cost and used (see lib/cost.ts): each null when not known. */
+  | { type: "turn"; id: string; isError: boolean; stopped: boolean; result: string | null; durationMs: number | null; denied: number; cost?: number | null; tokens?: number | null };
 
 export interface ChangedFile {
   path: string;
@@ -123,6 +124,9 @@ export interface State {
   mcpTools: string[];
   /** What the last turn cost per model (main, subagents', advisor's). */
   modelUsage: ModelCost[];
+  /** The claude process's running totals (what the session has cost and used so far), null until a turn reports. */
+  sessionCost: number | null;
+  sessionTokens: number;
   /** /clear just emptied the conversation; its turn's end adds no marker. */
   cleared: boolean;
   contextWindow: number | null;
@@ -186,6 +190,8 @@ export const initialState: State = {
   models: [],
   mcpTools: [],
   modelUsage: [],
+  sessionCost: null,
+  sessionTokens: 0,
   cleared: false,
   contextWindow: null,
   mode: "ask",
@@ -307,7 +313,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [] };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [] };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -450,7 +456,9 @@ function applyEvent(state: State, ev: UiEvent): State {
         contextWindow: ev.context_window ?? state.contextWindow,
         // The turn that ran /clear ends in an empty conversation; a marker alone would leave a blank chat, not the start screen.
         cleared: false,
-        items: state.cleared ? state.items : [...state.items, { type: "turn", id: `t${seq}`, isError: ev.is_error && !state.stopRequested, stopped: state.stopRequested, result: ev.is_error ? ev.result : null, durationMs: ev.duration_ms, denied: ev.denied }],
+        items: state.cleared ? state.items : [...state.items, { type: "turn", id: `t${seq}`, isError: ev.is_error && !state.stopRequested, stopped: state.stopRequested, result: ev.is_error ? ev.result : null, durationMs: ev.duration_ms, denied: ev.denied, cost: ev.cost_usd, tokens: ev.tokens ?? null }],
+        ...(ev.session_cost_usd != null ? { sessionCost: ev.session_cost_usd } : {}),
+        sessionTokens: ev.session_tokens ?? state.sessionTokens,
       };
     }
     case "permission_requested":

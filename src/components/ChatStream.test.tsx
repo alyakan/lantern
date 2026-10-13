@@ -113,3 +113,27 @@ describe("message actions", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 });
+
+describe("a turn's usage", () => {
+  const turn = (cost: number | null, tokens: number | null): ChatItem[] => [
+    { type: "user", id: "u1", text: "hi" },
+    { type: "assistant", id: "a1", text: "Hello." },
+    { type: "turn", id: "t1", isError: false, stopped: false, result: null, durationMs: 900, denied: 0, cost, tokens },
+  ];
+
+  it("shows the cost and the tokens a turn used", () => {
+    render(<ChatStream items={turn(0.04, 12_345)} folder={null} {...handlers} />);
+    expect(screen.getByText("$0.04 · 12k tokens")).toHaveClass("turn-usage");
+  });
+
+  it("shows tokens alone when the login bills no cost, with no dollar figure", () => {
+    render(<ChatStream items={turn(null, 12_345)} folder={null} {...handlers} />);
+    expect(screen.getByText("12k tokens")).toBeInTheDocument();
+    expect(screen.queryByText(/\$/)).toBeNull();
+  });
+
+  it("says nothing when neither is known", () => {
+    const { container } = render(<ChatStream items={turn(null, null)} folder={null} {...handlers} />);
+    expect(container.querySelector(".turn-note")).toBeNull();
+  });
+});
