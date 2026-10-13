@@ -2057,6 +2057,7 @@ version = "0.1.15"
 dependencies = [
  "ignore",
  "libc",
+ "muda",
  "regex",
  "serde",
  "serde_json",
@@ -2067,6 +2068,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-updater",
+ "tauri-plugin-window-state",
  "tempfile",
  "tokio",
 ]
@@ -2127,6 +2129,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61ff90caf6077a803a240f62fdbe88645a890bbca49ef8174c3cb0404362171d"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "libxdo"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00333b8756a3d28e78def82067a377de7fa61b24909000aeaa2b446a948d14db"
+dependencies = [
+ "libxdo-sys",
+]
+
+[[package]]
+name = "libxdo-sys"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db23b9e7e2b7831bbd8aac0bbeeeb7b68cbebc162b227e7052e8e55829a09212"
+dependencies = [
+ "libc",
+ "x11",
 ]
 
 [[package]]
@@ -2249,6 +2270,7 @@ dependencies = [
  "dpi",
  "gtk",
  "keyboard-types",
+ "libxdo",
  "objc2",
  "objc2-app-kit",
  "objc2-core-foundation",
@@ -4089,6 +4111,21 @@ dependencies = [
  "url",
  "windows-sys 0.61.2",
  "zip",
+]
+
+[[package]]
+name = "tauri-plugin-window-state"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d6815cab7b212f9cfe16a9d79d8d22f9e14159e4a9460f7dec1467167a008e3"
+dependencies = [
+ "bitflags 2.13.2",
+ "log",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

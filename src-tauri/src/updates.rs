@@ -7,10 +7,13 @@ use std::sync::Mutex;
 /// Installs a downloaded update over the running app (it takes effect on the next launch).
 pub type Install = Box<dyn FnOnce() -> Result<(), String> + Send>;
 
-/// What the UI is told about a ready update.
+/// What the UI is told about a ready update. `notes` is the release's body (its "What's new"), as the release published
+/// it; the update's manifest carries it, so it's known before the update is installed.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct UpdateInfo {
     pub version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
 }
 
 /// Where updating has got to, told to the window as it happens (the `update-state` event) so it can show it.
@@ -24,7 +27,11 @@ pub enum UpdateState {
     UpToDate,
     /// `total` is None when the server doesn't say how big it is.
     Downloading { version: String, downloaded: u64, total: Option<u64> },
-    Ready { version: String },
+    Ready {
+        version: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        notes: Option<String>,
+    },
     Installing { version: String },
     Restarting,
     Failed { error: String },
@@ -32,6 +39,7 @@ pub enum UpdateState {
 
 struct Ready {
     version: String,
+    notes: Option<String>,
     install: Install,
 }
 
@@ -60,12 +68,12 @@ impl Updates {
     }
 
     /// A downloaded, verified update and how to install it. A newer one found later replaces it.
-    pub fn offer(&self, version: String, install: Install) {
-        *self.ready.lock().unwrap() = Some(Ready { version, install });
+    pub fn offer(&self, version: String, notes: Option<String>, install: Install) {
+        *self.ready.lock().unwrap() = Some(Ready { version, notes, install });
     }
 
     pub fn ready(&self) -> Option<UpdateInfo> {
-        self.ready.lock().unwrap().as_ref().map(|r| UpdateInfo { version: r.version.clone() })
+        self.ready.lock().unwrap().as_ref().map(|r| UpdateInfo { version: r.version.clone(), notes: r.notes.clone() })
     }
 
     /// Installs the waiting update, once, and returns its version.
@@ -114,7 +122,7 @@ pub async fn check(app: &tauri::AppHandle, manual: bool) -> Result<UpdateState, 
         Err(state) => return Ok(state),
     };
     if let Some(info) = updates.ready() {
-        return Ok(UpdateState::Ready { version: info.version });
+        return Ok(UpdateState::Ready { version: info.version, notes: info.notes });
     }
     publish(app, UpdateState::Checking);
     match download_newer(app).await {
@@ -134,6 +142,7 @@ async fn download_newer(app: &tauri::AppHandle) -> Result<UpdateState, String> {
     use tauri_plugin_updater::UpdaterExt;
     let Some(update) = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())? else { return Ok(UpdateState::UpToDate) };
     let version = update.version.clone();
+    let notes = update.body.clone();
     publish(app, UpdateState::Downloading { version: version.clone(), downloaded: 0, total: None });
     let mut progress = Progress::default();
     let bytes = update
@@ -147,9 +156,9 @@ async fn download_newer(app: &tauri::AppHandle) -> Result<UpdateState, String> {
         )
         .await
         .map_err(|e| e.to_string())?;
-    app.state::<Updates>().offer(version.clone(), Box::new(move || update.install(bytes).map_err(|e| e.to_string())));
-    let _ = app.emit("update-ready", UpdateInfo { version: version.clone() });
-    Ok(UpdateState::Ready { version })
+    app.state::<Updates>().offer(version.clone(), notes.clone(), Box::new(move || update.install(bytes).map_err(|e| e.to_string())));
+    let _ = app.emit("update-ready", UpdateInfo { version: version.clone(), notes: notes.clone() });
+    Ok(UpdateState::Ready { version, notes })
 }
 
 /// Turns the downloader's call per chunk into a few updates for the window: one per percent when the size is known,
@@ -202,8 +211,8 @@ mod tests {
     fn a_downloaded_update_is_reported_then_installed_once() {
         let updates = Updates::default();
         let installs = Arc::new(AtomicUsize::new(0));
-        updates.offer("0.1.2".into(), counting(&installs));
-        assert_eq!(updates.ready(), Some(UpdateInfo { version: "0.1.2".into() }));
+        updates.offer("0.1.2".into(), None, counting(&installs));
+        assert_eq!(updates.ready(), Some(UpdateInfo { version: "0.1.2".into(), notes: None }));
         assert_eq!(updates.install(), Ok("0.1.2".into()));
         assert_eq!(installs.load(Ordering::SeqCst), 1);
         // Restarting to update ends in a quit, which mustn't install it a second time.
@@ -213,12 +222,22 @@ mod tests {
     }
 
     #[test]
+    fn the_release_notes_of_a_waiting_update_are_kept_until_it_is_installed() {
+        let updates = Updates::default();
+        let installs = Arc::new(AtomicUsize::new(0));
+        updates.offer("0.1.3".into(), Some("## What's new\n\n- Faster search".into()), counting(&installs));
+        assert_eq!(updates.ready().and_then(|u| u.notes), Some("## What's new\n\n- Faster search".into()));
+        assert_eq!(updates.install(), Ok("0.1.3".into()));
+        assert_eq!(updates.ready(), None);
+    }
+
+    #[test]
     fn a_newer_download_replaces_the_one_waiting() {
         let updates = Updates::default();
         let first = Arc::new(AtomicUsize::new(0));
         let second = Arc::new(AtomicUsize::new(0));
-        updates.offer("0.1.2".into(), counting(&first));
-        updates.offer("0.1.3".into(), counting(&second));
+        updates.offer("0.1.2".into(), None, counting(&first));
+        updates.offer("0.1.3".into(), None, counting(&second));
         assert_eq!(updates.install(), Ok("0.1.3".into()));
         assert_eq!((first.load(Ordering::SeqCst), second.load(Ordering::SeqCst)), (0, 1));
     }
@@ -226,7 +245,7 @@ mod tests {
     #[test]
     fn a_failed_install_says_why() {
         let updates = Updates::default();
-        updates.offer("0.1.2".into(), Box::new(|| Err("disk full".into())));
+        updates.offer("0.1.2".into(), None, Box::new(|| Err("disk full".into())));
         assert_eq!(updates.install(), Err("Couldn't install Lantern 0.1.2: disk full".into()));
     }
 
@@ -243,6 +262,9 @@ mod tests {
         assert_eq!(json(UpdateState::UpToDate), r#"{"kind":"up_to_date"}"#);
         assert_eq!(json(UpdateState::Downloading { version: "0.1.3".into(), downloaded: 5, total: Some(10) }), r#"{"kind":"downloading","version":"0.1.3","downloaded":5,"total":10}"#);
         assert_eq!(json(UpdateState::Downloading { version: "0.1.3".into(), downloaded: 5, total: None }), r#"{"kind":"downloading","version":"0.1.3","downloaded":5,"total":null}"#);
+        assert_eq!(json(UpdateState::Ready { version: "0.1.3".into(), notes: None }), r#"{"kind":"ready","version":"0.1.3"}"#);
+        assert_eq!(json(UpdateState::Ready { version: "0.1.3".into(), notes: Some("- Faster".into()) }), r#"{"kind":"ready","version":"0.1.3","notes":"- Faster"}"#);
+        assert_eq!(serde_json::to_string(&UpdateInfo { version: "0.1.3".into(), notes: None }).unwrap(), r#"{"version":"0.1.3"}"#);
         assert_eq!(json(UpdateState::Installing { version: "0.1.3".into() }), r#"{"kind":"installing","version":"0.1.3"}"#);
         assert_eq!(json(UpdateState::Failed { error: "offline".into() }), r#"{"kind":"failed","error":"offline"}"#);
         assert_eq!(UpdateState::default(), UpdateState::Idle);

@@ -609,6 +609,39 @@ button.icon.session-more { flex: none; width: 24px; height: 24px; margin-right: 
 .session-rename { display: flex; align-items: center; gap: 8px; padding: 4px 8px; }
 .session-rename input { flex: 1; min-width: 0; font-size: calc(12.5px * var(--font-scale)); }
 .menu-empty { padding: 14px 10px; font-size: calc(12.5px * var(--font-scale)); color: var(--muted); text-align: center; }
+/* The command palette (⇧⌘P): one search over everything Lantern can do, each line with its shortcut. */
+.palette { width: min(560px, calc(100vw - 48px)); max-height: min(460px, calc(100vh - 96px)); padding: 0; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--field); color: var(--text); box-shadow: var(--shadow); }
+.palette::backdrop { background: rgba(0, 0, 0, 0.28); }
+.palette[open] { animation: guide-in 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
+.palette-body { display: flex; flex-direction: column; gap: 4px; min-height: 0; max-height: inherit; padding: 8px; }
+.palette-search { flex: none; height: 34px; font-size: calc(14px * var(--font-scale)); }
+.palette-list { flex: 1 1 auto; min-height: 0; margin: 0; padding: 0; list-style: none; overflow-y: auto; }
+.palette-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: var(--radius-chip); font-size: calc(13px * var(--font-scale)); }
+.palette-row:hover { background: var(--bg-hover); }
+.palette-row.current { background: var(--bg-active); }
+.palette-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.palette-group { flex: none; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.palette-shortcut { flex: none; min-width: 2.4em; padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg-subtle); font-family: var(--ui); font-size: calc(11.5px * var(--font-scale)); color: var(--text-2); text-align: center; }
+/* ⌘/: the shortcuts the registry has, by group. A dimmed one can't be used right now. */
+.shortcuts { width: min(640px, calc(100vw - 48px)); max-height: min(560px, calc(100vh - 96px)); padding: 0; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--field); color: var(--text); box-shadow: var(--shadow); }
+.shortcuts::backdrop { background: rgba(0, 0, 0, 0.28); }
+.shortcuts[open] { animation: guide-in 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
+.shortcuts-body { display: flex; flex-direction: column; gap: 12px; max-height: inherit; padding: 20px 24px 16px; overflow-y: auto; }
+.shortcuts-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; }
+.shortcuts-group-title { margin: 0 0 4px; font-size: calc(11px * var(--font-scale)); font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.shortcuts-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+.shortcuts-row { display: flex; align-items: center; gap: 10px; padding: 4px 8px; border-radius: var(--radius-chip); font-size: calc(12.5px * var(--font-scale)); color: var(--text); }
+.shortcuts-row.off { color: var(--muted-text); }
+.shortcuts-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shortcuts-key { flex: none; min-width: 2.4em; padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg-subtle); font-family: var(--ui); font-size: calc(11.5px * var(--font-scale)); color: var(--text-2); text-align: center; }
+.shortcuts-row.off .shortcuts-key { color: var(--muted-text); }
+/* What's new after an update: the release's changes, with its heading and install line left out. */
+.whats-new { width: min(560px, calc(100vw - 48px)); max-height: min(560px, calc(100vh - 96px)); padding: 0; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--field); color: var(--text); box-shadow: var(--shadow); }
+.whats-new::backdrop { background: rgba(0, 0, 0, 0.28); }
+.whats-new[open] { animation: guide-in 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
+.whats-new-body { display: flex; flex-direction: column; gap: 12px; max-height: inherit; padding: 20px 24px 16px; overflow-y: auto; }
+.whats-new-notes { font-size: calc(13px * var(--font-scale)); color: var(--text-2); user-select: text; }
+.whats-new-link { font-size: calc(12px * var(--font-scale)); color: var(--muted); text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 2px; }
 /* The changed-file picker uses the shared dropdown (.menu); it opens under the button. */
 .file-menu { top: calc(100% + 4px); left: 0; width: 420px; max-width: calc(100vw - 48px); max-height: 360px; }
 .file-menu .menu-row { align-items: center; font-family: var(--mono); font-size: calc(12px * var(--font-scale)); }
@@ -1372,6 +1405,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 @media (prefers-reduced-motion: reduce) { .updates-bar-fill { transition: none; } .updates-bar-fill.unknown { animation: none; } }
 .updates-ready { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .updates-ready .update-menu { bottom: auto; top: calc(100% + 6px); left: 0; right: auto; }
+.updates-whats-new { display: flex; flex-wrap: wrap; gap: 14px; font-size: calc(12px * var(--font-scale)); }
 
 /* The window while Lantern replaces itself: over everything (a modal dialog), until it reopens. */
 .updating { padding: 0; border: none; outline: none; background: transparent; color: var(--text); max-width: none; }

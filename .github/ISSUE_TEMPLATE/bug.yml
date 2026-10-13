@@ -1,0 +1,27 @@
+name: Bug report
+description: Something in Lantern doesn't work the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "Choose **Help ▸ Report a Bug…** in Lantern (or pick it in the command palette, ⇧⌘P). It copies the diagnostics below and opens this form: paste them into the Diagnostics box. They hold the Lantern, macOS and Claude Code versions, the model and the last error. No prompts or files."
+  - type: textarea
+    id: steps
+    attributes:
+      label: What happened, and what did you expect?
+      description: The steps that lead to it, in order, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste what Help ▸ Report a Bug… copied.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: other
+    attributes:
+      label: Anything else
+      description: A screenshot, the chat's folder type, or anything that seems related.

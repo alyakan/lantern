@@ -22,20 +22,27 @@ import { agentGraph } from "./lib/agentGraph";
 import { BUILT_IN, CUSTOM_HARNESS, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
-import type { McpServer, NewRule, SkillEntry } from "./types";
+import type { McpServer, NewRule, SkillEntry, UpdateInfo } from "./types";
 import { stepFile, usePersistentState } from "./lib/layout";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyAppearance, type Appearance, type TextSize } from "./lib/theme";
 import { notify } from "./lib/notify";
-import { useShortcut } from "./lib/shortcuts";
+import { availableActions, runAction, useAction } from "./lib/actions";
+import type { PaletteEntry } from "./lib/palette";
+import { newVersionToShow, notesFor, rememberNotes, versionsWithNotes } from "./lib/whatsNew";
+import { NEW_ISSUE_URL } from "./lib/bugReport";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { WhatsNew } from "./components/WhatsNew";
+import { CommandPalette } from "./components/CommandPalette";
+import { ShortcutSheet } from "./components/ShortcutSheet";
 import { activityStatus } from "./lib/status";
 import { failedCount } from "./lib/activity";
 import { scrollWithin } from "./lib/scrollWithin";
 
 import { SlotContext } from "./lib/slot";
 import { ModeGuideContext } from "./lib/modeGuide";
-import { ModeGuide, type GuideKey } from "./components/ModeGuide";
-import { SettingsView, type SettingsTab } from "./components/SettingsView";
+import { GUIDE, ModeGuide, type GuideKey } from "./components/ModeGuide";
+import { SettingsView, TAB_LABEL, type SettingsTab } from "./components/SettingsView";
 import { UpdatingOverlay } from "./components/UpdatingOverlay";
 import { isInstalling, useUpdateState } from "./lib/updates";
 import { BannerView } from "./components/BannerView";
@@ -150,10 +157,10 @@ export default function App() {
     setReviewCollapsed(false);
     setSearchKey({ mode, key: Date.now() });
   };
-  useShortcut("p", () => openSearch("files"), !!state.folder);
-  useShortcut("f", () => openSearch("text"), !!state.folder, true);
+  useAction("find-file", () => openSearch("files"), !!state.folder);
+  useAction("search-files", () => openSearch("text"), !!state.folder);
   // ⌘F: find in the file the right pane shows (Monaco's find bar), from anywhere in the window.
-  useShortcut("f", () => void openFind(), !reviewCollapsed);
+  useAction("find-in-file", () => void openFind(), !reviewCollapsed);
   // Per chat: which failed steps the title bar's count was cleared for.
   const [clearedFailures, setClearedFailures] = useState<Record<string, string>>({});
   // A test run the chat asked the right pane to show.
@@ -173,7 +180,12 @@ export default function App() {
   const installing = installStarted || isInstalling(updates.state);
 
   // Actions for one chat. Async results always go to the chat that asked, even if another is on screen by then.
-  const to = (slot: string) => (action: Action) => dispatchChats({ type: "in", slot, action });
+  // The last error any chat showed is kept in memory for Help ▸ Report a Bug… (it's never saved).
+  const lastError = useRef<string | null>(null);
+  const to = (slot: string) => (action: Action) => {
+    if (action.type === "failed" || action.type === "turn_failed" || action.type === "stop_failed") lastError.current = action.text;
+    dispatchChats({ type: "in", slot, action });
+  };
   const dispatch = to(active);
 
   const locate = (pathOverride: string | null) =>
@@ -190,13 +202,27 @@ export default function App() {
     };
   }, []);
 
-  // The update may have been found before this window was listening, so ask as well as listen.
+  // The update may have been found before this window was listening, so ask as well as listen. Its notes are kept for
+  // the version that installs it, which shows them on its first launch.
   useEffect(() => {
-    const unlisten = api.onUpdateReady(setUpdate);
-    api.updateStatus().then((u) => u && setUpdate(u), () => {});
+    const offer = (u: UpdateInfo) => {
+      rememberNotes(localStorage, u);
+      setUpdate(u);
+    };
+    const unlisten = api.onUpdateReady(offer);
+    api.updateStatus().then((u) => u && offer(u), () => {});
     return () => {
       unlisten.then((stop) => stop());
     };
+  }, []);
+  // "What's new in X" once after an update: the running version, if it's not the one this window last saw.
+  const [whatsNew, setWhatsNew] = useState<{ version: string; notes: string | null } | null>(null);
+  const showWhatsNew = (version: string) => setWhatsNew({ version, notes: notesFor(localStorage, version) });
+  useEffect(() => {
+    api.appVersion().then((running) => {
+      const version = typeof running === "string" ? newVersionToShow(localStorage, running) : null;
+      if (version) showWhatsNew(version);
+    }, () => {});
   }, []);
   // "Lantern ▸ Check for Updates…": open the Updates page and look.
   useEffect(() => {
@@ -206,6 +232,18 @@ export default function App() {
     });
     return () => {
       unlisten.then((stop) => stop());
+    };
+  }, []);
+  // A menu bar item runs its action (the same one its shortcut runs). A folder in Open Recent opens as the folder
+  // menu's pick does; the ref is read at the time of the pick, so it sees the chats as they are then.
+  const pickRecent = useRef<(path: string) => void>(() => {});
+  pickRecent.current = (path) => startFresh(path);
+  useEffect(() => {
+    const unlisten = api.onMenuAction((id) => runAction(id));
+    const unlistenRecent = api.onOpenRecent((path) => pickRecent.current(path));
+    return () => {
+      unlisten.then((stop) => stop());
+      unlistenRecent.then((stop) => stop());
     };
   }, []);
 
@@ -751,13 +789,9 @@ export default function App() {
     setReviewCollapsed(false);
   };
 
+  useAction("toggle-changes", () => setReviewCollapsed(!reviewCollapsed));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey && e.key === "\\") {
-        e.preventDefault();
-        setReviewCollapsed(!reviewCollapsed);
-        return;
-      }
       if (reviewCollapsed || e.metaKey || e.ctrlKey || e.altKey || isTyping(document.activeElement)) return;
       const delta = e.key === "j" ? 1 : e.key === "k" ? -1 : 0;
       const next = delta && stepFile(shownFiles, state.selectedFile, delta);
@@ -903,7 +937,40 @@ export default function App() {
   // "How the modes work", open on a mode's page.
   const [guideAt, setGuideAt] = useState<GuideKey | null>(null);
   const [settingsAt, setSettingsAt] = useState<SettingsTab | null>(null);
-  useShortcut(",", () => setSettingsAt(settingsAt ?? "general"));
+  useAction("settings", () => setSettingsAt(settingsAt ?? "general"));
+  // ⇧⌘P: every action that can run, and the things that aren't shortcuts: switching mode or harness, and each Settings
+  // page. Listed as they are when the palette opens.
+  const [palette, setPalette] = useState<PaletteEntry[] | null>(null);
+  const paletteEntries = (): PaletteEntry[] => {
+    const ready = !!state.folder && !isBusy(state);
+    const modes = (["ask", "auto", "steps"] as const)
+      .filter((m) => ready && m !== state.mode)
+      .map((m): PaletteEntry => ({ id: `mode:${m}`, title: `Switch to ${GUIDE[m].label}`, group: "Mode", shortcut: null, run: () => changeMode(m) }));
+    const harnesses = presets
+      .filter((h) => ready && h.id !== harnessOf(active).id)
+      .map((h): PaletteEntry => ({ id: `harness:${h.id}`, title: `Use the ${h.name} harness`, group: "Harness", shortcut: null, run: () => switchHarness(h) }));
+    const tabs = (["general", "harness", "mcp", "skills", "permissions", "updates"] as SettingsTab[])
+      .filter((t) => t !== "harness" || !!state.folder)
+      .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
+    return [...availableActions(), ...modes, ...harnesses, ...tabs];
+  };
+  // Pressed again while open, it closes.
+  useAction("command-palette", () => setPalette((open) => (open ? null : paletteEntries())));
+  // ⌘/ and Help ▸ Keyboard Shortcuts: the sheet of shortcuts, toggled the same way.
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  useAction("keyboard-shortcuts", () => setShortcutsOpen((open) => !open));
+  // Help ▸ Report a Bug…: the diagnostics go to the clipboard and the new-issue page opens. The error shown is the chat's
+  // banner's if one is up, else the last one a chat showed.
+  useAction("report-bug", () => {
+    const error = state.banner?.kind === "error" ? state.banner.text : lastError.current;
+    api.copyDiagnostics(state.claudePath, state.model, error).then(
+      () => {
+        dispatch({ type: "notice", text: "Diagnostics copied. Paste them into the issue form that just opened." });
+        openUrl(NEW_ISSUE_URL).catch(() => {});
+      },
+      (e) => dispatch({ type: "failed", text: errText(e) }),
+    );
+  });
   // Installs the downloaded update and relaunches. The window says so (the overlay) until it does: closing every chat
   // and reopening is otherwise just a window that vanishes. Started from Settings, that closes first.
   // The History menu's actions on past sessions, for the folder on screen: pins are kept per folder, and a rename also
@@ -1116,7 +1183,14 @@ export default function App() {
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
           general={{ notify: notifyPrefs, onNotify: setNotifyPrefs, appearance, onAppearance: setAppearance, textSize, onTextSize: setTextSize }}
-          updates={{ version: updates.version, state: updates.state, onCheck: updates.check, ready: updateOffer ?? null }}
+          updates={{
+            version: updates.version,
+            state: updates.state,
+            onCheck: updates.check,
+            ready: updateOffer ?? null,
+            whatsNew: versionsWithNotes(localStorage, [updates.version, update?.version]),
+            onWhatsNew: showWhatsNew,
+          }}
           harness={{
             saved: presets.slice(1),
             onSave: (next) => {
@@ -1132,6 +1206,9 @@ export default function App() {
           }}
         />
         {installing && <UpdatingOverlay state={updates.state} version={update?.version ?? null} />}
+        {palette && <CommandPalette entries={palette} onClose={() => setPalette(null)} />}
+        {shortcutsOpen && <ShortcutSheet available={availableActions().map((a) => a.id)} onClose={() => setShortcutsOpen(false)} />}
+        {whatsNew && <WhatsNew version={whatsNew.version} notes={whatsNew.notes} onClose={() => setWhatsNew(null)} />}
         <ModeGuide
           open={guideAt}
           mode={state.mode}

@@ -999,6 +999,9 @@ export function installMockBackend() {
           return new URLSearchParams(location.search).has("update") ? { version: NEXT_VERSION } : null;
         case "app_version":
           return APP_VERSION;
+        // Help ▸ Report a Bug…: the block the real command copies, with made-up versions.
+        case "copy_diagnostics":
+          return `\`\`\`text\nLantern ${APP_VERSION}\nmacOS 15.4\nClaude Code 2.1.284 (Claude Code)\nModel ${a.model ?? "default"}\nLast error: none\n\`\`\``;
         case "update_state":
           return mockUpdate.state;
         // ?check=new (the default) finds NEXT_VERSION and downloads it; =uptodate, =fail and =dev end the other ways.

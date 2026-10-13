@@ -1,10 +1,12 @@
 pub mod args;
 pub mod changes;
 pub mod cli_locator;
+pub mod diagnostics;
 pub mod files;
 pub mod git;
 pub mod history;
 pub mod mcp_config;
+pub mod menu;
 pub mod navigation;
 pub mod permission;
 pub mod pr;
@@ -177,7 +179,9 @@ async fn locate_claude(path_override: Option<String>) -> Result<String, String> 
 async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String, claude_path: String, folder: String, settings: Settings) -> Result<(), String> {
     let s = slot_for(&app, &state, &slot)?;
     let cfg = new_config(&state, &s, claude_path, folder, settings, None).await?;
-    launch(&app, &slot, &s, cfg, true).await
+    launch(&app, &slot, &s, cfg, true).await?;
+    menu::refresh_recent(&app).await;
+    Ok(())
 }
 
 /// Restarts a chat's claude on the same session (`--resume`), e.g. with a new permission mode or effort.
@@ -246,7 +250,7 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 
 #[tauri::command]
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
-async fn send_message(state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
+async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
     let s = state.slots.get(&slot)?;
     let mut session = s.session.lock().await;
     let claude = session.as_mut().ok_or("No Claude session is running")?;
@@ -256,6 +260,12 @@ async fn send_message(state: State<'_, AppState>, slot: String, text: String) ->
     if let Err(e) = claude.send(&text).await {
         s.changes.lock().unwrap().cancel_turn(turn);
         return Err(e);
+    }
+    // The folder's history is first written with its first message: Open Recent lists it from then on.
+    let folder = s.config.lock().unwrap().as_ref().map(|c| c.folder.display().to_string());
+    drop(session);
+    if folder.is_some_and(|f| !menu::lists(&app, &f)) {
+        menu::refresh_recent(&app).await;
     }
     Ok(turn)
 }
@@ -891,14 +901,10 @@ async fn open_session(
         .await
         .map_err(|e| e.to_string())??;
     launch(&app, &slot, &s, cfg, true).await?;
+    menu::refresh_recent(&app).await;
     s.changes.lock().unwrap().restore(replayed.edits, replayed.edits_before_last_turn);
     Ok(replayed.events)
 }
-
-/// A newer Lantern already downloaded and verified, for a window that started listening after it was found.
-/// The menu item's id: "Lantern ▸ Check for Updates…".
-const CHECK_FOR_UPDATES: &str = "check-for-updates";
-const QUIT: &str = "quit";
 
 #[tauri::command]
 fn update_status(updates: State<'_, updates::Updates>) -> Option<updates::UpdateInfo> {
@@ -927,6 +933,23 @@ fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
 
+/// Help ▸ Report a Bug…: copies the diagnostics block (versions, model, last error) to the clipboard and returns it.
+/// The window then opens the new-issue page.
+#[tauri::command]
+async fn copy_diagnostics(app: AppHandle, state: State<'_, AppState>, claude_path: Option<String>, model: Option<String>, last_error: Option<String>) -> Result<String, String> {
+    let path_env = login_path(&state).await;
+    let (macos, claude) = tauri::async_runtime::spawn_blocking(move || {
+        (diagnostics::macos_version(), claude_path.and_then(|path| diagnostics::claude_version(&path, path_env.as_deref())))
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let home = std::env::var("HOME").ok();
+    let block = diagnostics::report(&app.package_info().version.to_string(), macos.as_deref(), claude.as_deref(), model.as_deref(), last_error.as_deref(), home.as_deref());
+    let to_copy = block.clone();
+    tauri::async_runtime::spawn_blocking(move || diagnostics::copy(&to_copy)).await.map_err(|e| e.to_string())??;
+    Ok(block)
+}
+
 /// Installs the downloaded update, stops every chat's claude, and relaunches into the new version, telling the window
 /// each step so it can show them. A failed install leaves the chats running.
 #[tauri::command]
@@ -949,9 +972,18 @@ async fn restart_to_update(app: AppHandle, state: State<'_, AppState>, updates: 
     app.restart()
 }
 
+/// What the window keeps across launches: where it was, how big, and whether it was full screen. Not whether it was
+/// visible (the plugin would then show it only when it was, and a window saved hidden would never appear again) and
+/// not its decorations (the title bar is an overlay Lantern sets itself).
+fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
+    use tauri_plugin_window_state::StateFlags;
+    StateFlags::POSITION | StateFlags::SIZE | StateFlags::FULLSCREEN
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_window_state::Builder::default().with_state_flags(window_state_flags()).build())
         .plugin(tauri_plugin_opener::init())
         .plugin(navigation::init())
         .plugin(tauri_plugin_dialog::init())
@@ -966,42 +998,33 @@ pub fn run() {
             if updates::checks_enabled() {
                 tauri::async_runtime::spawn(updates::watch(app.handle().clone()));
             }
-            // The standard menu, with "Check for Updates…" under About: Mac users look for it there. (It's the standard
-            // menu, not a new one, so the Edit menu's copy and paste keep working.)
-            #[cfg(target_os = "macos")]
-            {
-                use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
-                let handle = app.handle();
-                let menu = Menu::default(handle)?;
-                if let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next() {
-                    app_menu.insert(&MenuItem::with_id(handle, CHECK_FOR_UPDATES, "Check for Updates…", true, None::<&str>)?, 1)?;
-                    app_menu.insert(&PredefinedMenuItem::separator(handle)?, 2)?;
-                    // The standard Quit ends the app without a close request, so the window's guard for unsaved edits
-                    // never hears of it. This one closes the window instead, which does.
-                    if let Some(quit) = app_menu.items()?.into_iter().last() {
-                        app_menu.remove(&quit)?;
-                    }
-                    app_menu.append(&MenuItem::with_id(handle, QUIT, "Quit Lantern", true, Some("CmdOrCtrl+Q"))?)?;
-                }
-                app.set_menu(menu)?;
-            }
+            // The menu bar (menu.rs), then its Open Recent list filled in from the history.
+            app.manage(menu::RecentMenu::default());
+            menu::refresh(app.handle(), Vec::new())?;
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move { menu::refresh_recent(&handle).await });
             Ok(())
         })
         .on_menu_event(|app, event| {
-            if event.id() == CHECK_FOR_UPDATES {
+            let id = event.id().0.as_str();
+            if id == menu::CHECK_FOR_UPDATES {
                 // The window opens Settings on its Updates page and starts a check.
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
                 let _ = app.emit("check-for-updates", ());
-            } else if event.id() == QUIT {
+            } else if id == menu::QUIT {
+                // The standard Quit ends the app without a close request, so the window's guard for unsaved edits never
+                // hears of it. This closes the window instead, which does.
                 match app.get_webview_window("main") {
                     Some(window) => {
                         let _ = window.close();
                     }
                     None => app.exit(0),
                 }
+            } else {
+                menu::chosen(app, id);
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -1055,7 +1078,8 @@ pub fn run() {
             update_state,
             check_for_updates,
             app_version,
-            restart_to_update
+            restart_to_update,
+            copy_diagnostics
         ])
         .build(tauri::generate_context!())
         .expect("error while building Lantern")
@@ -1079,6 +1103,28 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_keeps_where_it_was_how_big_and_full_screen_but_not_whether_it_was_hidden() {
+        let flags = window_state_flags();
+        assert!(flags.contains(tauri_plugin_window_state::StateFlags::POSITION | tauri_plugin_window_state::StateFlags::SIZE | tauri_plugin_window_state::StateFlags::FULLSCREEN));
+        assert!(!flags.intersects(tauri_plugin_window_state::StateFlags::VISIBLE | tauri_plugin_window_state::StateFlags::DECORATIONS));
+    }
+
+    #[test]
+    fn the_window_state_plugin_is_granted_to_the_main_window() {
+        let capability: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let granted = capability["permissions"].as_array().unwrap();
+        assert!(granted.iter().any(|p| p == "window-state:default"));
+    }
+
+    #[test]
+    fn the_window_keeps_the_minimum_size_it_is_built_with_so_a_restored_size_cannot_go_below_it() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let window = &config["app"]["windows"][0];
+        assert_eq!(window["minWidth"], 900);
+        assert_eq!(window["minHeight"], 600);
+    }
 
     #[test]
     fn a_saved_edit_is_tracked_under_the_ui_path_with_its_original_even_in_a_symlinked_folder() {
