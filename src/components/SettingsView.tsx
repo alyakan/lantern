@@ -6,9 +6,10 @@ import { describeConfig, displayName, groupSkills, iconOf, removable, sourceOf, 
 import { Md } from "./Md";
 import { HarnessSettings, type HarnessSettingsProps } from "./HarnessSettings";
 import { UpdatesPage, type UpdatesPageProps } from "./UpdatesPage";
+import { PermissionRules } from "./PermissionRules";
 
-export type SettingsTab = "mcp" | "skills" | "harness" | "updates";
-const TAB_LABEL: Record<SettingsTab, string> = { mcp: "MCP servers", skills: "Skills", harness: "Harness", updates: "Updates" };
+export type SettingsTab = "mcp" | "skills" | "harness" | "updates" | "permissions";
+const TAB_LABEL: Record<SettingsTab, string> = { mcp: "MCP servers", skills: "Skills", harness: "Harness", updates: "Updates", permissions: "Permissions" };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -60,7 +61,7 @@ export function SettingsView({ open, onClose, harness, updates, ...page }: Props
           <nav className="mode-guide-nav" aria-label="Settings">
             <div className="mode-guide-group">
               <div className="mode-guide-group-title">Settings</div>
-              {(["harness", "mcp", "skills", "updates"] as const)
+              {(["harness", "mcp", "skills", "permissions", "updates"] as const)
                 .filter((t) => (t !== "harness" || harness) && (t !== "updates" || updates))
                 .map((t) => (
                   <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} onClick={() => setTab(t)}>
@@ -70,7 +71,7 @@ export function SettingsView({ open, onClose, harness, updates, ...page }: Props
             </div>
           </nav>
           <article className="mode-guide-page settings-page">
-            {tab === "harness" && harness ? <HarnessSettings {...harness} /> : tab === "updates" && updates ? <UpdatesPage {...updates} /> : tab === "skills" ? <SkillsPage {...page} /> : <McpPage {...page} />}
+            {tab === "harness" && harness ? <HarnessSettings {...harness} /> : tab === "updates" && updates ? <UpdatesPage {...updates} /> : tab === "skills" ? <SkillsPage {...page} /> : tab === "permissions" ? <PermissionRules slot={page.slot} /> : <McpPage {...page} />}
             <div className="mode-guide-actions">
               <button onClick={onClose}>Close</button>
             </div>
