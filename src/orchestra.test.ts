@@ -151,6 +151,6 @@ describe("user_sent", () => {
     expect(s.autoStreak).toBe(1);
     s = reducer({ ...s, status: "idle" }, { type: "user_sent", text: "hello" });
     expect(s.autoStreak).toBe(0);
-    expect(s.items.at(-1)).not.toHaveProperty("auto");
+    expect(s.items[s.items.length - 1]).not.toHaveProperty("auto");
   });
 });
