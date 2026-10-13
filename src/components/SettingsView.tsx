@@ -3,13 +3,16 @@ import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import type { McpServer, McpServerSpec, SkillEntry, SlashCommand } from "../types";
 import { describeConfig, displayName, groupSkills, iconOf, removable, sourceOf, statusOf, toolsOf, withoutFrontmatter } from "../lib/mcp";
+import { setChime, useChimeOn } from "../lib/chime";
+import { PAUSE_MS, type NotifyPrefs } from "../lib/notifyPrefs";
+import type { Appearance, TextSize } from "../lib/theme";
 import { Md } from "./Md";
 import { NewSkillForm } from "./SkillForm";
 import { HarnessSettings, type HarnessSettingsProps } from "./HarnessSettings";
 import { UpdatesPage, type UpdatesPageProps } from "./UpdatesPage";
 
-export type SettingsTab = "mcp" | "skills" | "harness" | "updates";
-const TAB_LABEL: Record<SettingsTab, string> = { mcp: "MCP servers", skills: "Skills", harness: "Harness", updates: "Updates" };
+export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates";
+const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Harness", updates: "Updates" };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -33,12 +36,14 @@ interface Props {
   harness?: HarnessSettingsProps;
   /** The running version and how updating is going, for the Updates page. */
   updates?: UpdatesPageProps;
+  /** Notifications, appearance and text size, for the General page (App keeps them saved). */
+  general?: GeneralSettingsProps;
 }
 
-/** Settings: MCP servers (status, log in, add, remove) and skills (yours, the project's, plugins'). */
-export function SettingsView({ open, onClose, harness, updates, ...page }: Props) {
+/** Settings: General (notifications, sound, look), MCP servers (status, log in, add, remove) and skills. */
+export function SettingsView({ open, onClose, harness, updates, general, ...page }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [tab, setTab] = useState<SettingsTab>(open ?? "mcp");
+  const [tab, setTab] = useState<SettingsTab>(open ?? "general");
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -61,8 +66,8 @@ export function SettingsView({ open, onClose, harness, updates, ...page }: Props
           <nav className="mode-guide-nav" aria-label="Settings">
             <div className="mode-guide-group">
               <div className="mode-guide-group-title">Settings</div>
-              {(["harness", "mcp", "skills", "updates"] as const)
-                .filter((t) => (t !== "harness" || harness) && (t !== "updates" || updates))
+              {(["general", "harness", "mcp", "skills", "updates"] as const)
+                .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "updates" || updates))
                 .map((t) => (
                   <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} onClick={() => setTab(t)}>
                     {TAB_LABEL[t]}
@@ -71,7 +76,17 @@ export function SettingsView({ open, onClose, harness, updates, ...page }: Props
             </div>
           </nav>
           <article className="mode-guide-page settings-page">
-            {tab === "harness" && harness ? <HarnessSettings {...harness} /> : tab === "updates" && updates ? <UpdatesPage {...updates} /> : tab === "skills" ? <SkillsPage {...page} /> : <McpPage {...page} />}
+            {tab === "general" && general ? (
+              <GeneralPage {...general} />
+            ) : tab === "harness" && harness ? (
+              <HarnessSettings {...harness} />
+            ) : tab === "updates" && updates ? (
+              <UpdatesPage {...updates} />
+            ) : tab === "skills" ? (
+              <SkillsPage {...page} />
+            ) : (
+              <McpPage {...page} />
+            )}
             <div className="mode-guide-actions">
               <button onClick={onClose}>Close</button>
             </div>
@@ -82,7 +97,122 @@ export function SettingsView({ open, onClose, harness, updates, ...page }: Props
   );
 }
 
+export interface GeneralSettingsProps {
+  notify: NotifyPrefs;
+  onNotify: (prefs: NotifyPrefs) => void;
+  appearance: Appearance;
+  onAppearance: (appearance: Appearance) => void;
+  textSize: TextSize;
+  onTextSize: (size: TextSize) => void;
+}
+
 type PageProps = Omit<Props, "open" | "onClose">;
+
+const NOTIFY_EVENTS: { key: "finished" | "waiting" | "failed"; label: string }[] = [
+  { key: "finished", label: "A turn finishes" },
+  { key: "waiting", label: "Claude needs you (a question, a plan, a permission)" },
+  { key: "failed", label: "A turn fails" },
+];
+
+/** General: when Lantern tells you about Claude (notifications, a pause), the toasts' sound, and how the window looks. */
+function GeneralPage({ notify, onNotify, appearance, onAppearance, textSize, onTextSize }: GeneralSettingsProps) {
+  const sound = useChimeOn();
+  const paused = notify.pausedUntil > Date.now();
+  const set = (patch: Partial<NotifyPrefs>) => onNotify({ ...notify, ...patch });
+  return (
+    <>
+      <div className="settings-head">
+        <div>
+          <h2 className="mode-guide-title">General</h2>
+          <p className="mode-guide-summary">When Lantern tells you about a chat, and how it looks. Saved on this Mac.</p>
+        </div>
+      </div>
+      <section className="general-section" aria-labelledby="general-notify">
+        <h3 id="general-notify" className="general-title">
+          Notifications
+        </h3>
+        <label className="general-option">
+          <input type="checkbox" checked={notify.on} onChange={(e) => set({ on: e.target.checked })} />
+          <span>Tell me in macOS notifications and in the window</span>
+        </label>
+        <div className="general-indent">
+          {NOTIFY_EVENTS.map(({ key, label }) => (
+            <label key={key} className="general-option">
+              <input type="checkbox" checked={notify[key]} disabled={!notify.on} onChange={(e) => set({ [key]: e.target.checked } as Partial<NotifyPrefs>)} />
+              <span>{label}</span>
+            </label>
+          ))}
+          <span className="settings-muted">A turn you stopped counts as finished.</span>
+        </div>
+        <div className="general-row">
+          {paused ? (
+            <>
+              <span className="settings-muted">Paused until {new Date(notify.pausedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+              <button onClick={() => set({ pausedUntil: 0 })}>Resume</button>
+            </>
+          ) : (
+            <button onClick={() => set({ pausedUntil: Date.now() + PAUSE_MS })} disabled={!notify.on}>
+              Pause for 1 hour
+            </button>
+          )}
+        </div>
+      </section>
+      <section className="general-section" aria-labelledby="general-sound">
+        <h3 id="general-sound" className="general-title">
+          Sound
+        </h3>
+        <label className="general-option">
+          <input type="checkbox" checked={sound} onChange={(e) => setChime(e.target.checked)} />
+          <span>Play a sound with the toasts (the speaker on a toast does the same)</span>
+        </label>
+      </section>
+      <section className="general-section" aria-labelledby="general-look">
+        <h3 id="general-look" className="general-title">
+          Appearance
+        </h3>
+        <Choices<Appearance>
+          legend="Theme"
+          name="appearance"
+          value={appearance}
+          onChange={onAppearance}
+          options={[
+            ["system", "Follow macOS"],
+            ["light", "Light"],
+            ["dark", "Dark"],
+          ]}
+        />
+        <Choices<TextSize>
+          legend="Text size"
+          name="text-size"
+          value={textSize}
+          onChange={onTextSize}
+          options={[
+            ["small", "Small"],
+            ["default", "Default"],
+            ["large", "Large"],
+          ]}
+        />
+      </section>
+    </>
+  );
+}
+
+/** A row of radio buttons under a legend: one of a few settings. */
+function Choices<T extends string>({ legend, name, value, options, onChange }: { legend: string; name: string; value: T; options: [T, string][]; onChange: (v: T) => void }) {
+  return (
+    <fieldset className="general-choices">
+      <legend>{legend}</legend>
+      <div className="general-choice-row">
+        {options.map(([v, label]) => (
+          <label key={v} className="general-choice">
+            <input type="radio" name={name} checked={value === v} onChange={() => onChange(v)} />
+            <span>{label}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
 
 interface AuthReply {
   authUrl?: string;

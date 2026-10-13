@@ -63,7 +63,8 @@ describe("SettingsView", () => {
   it("logs in through the browser, reconnects and turns servers off", async () => {
     render(<SettingsView open="mcp" {...props} />);
     const list = await screen.findByRole("list", { name: "MCP servers" });
-    fireEvent.click(within(list).getByRole("button", { name: "Log in" }));
+    // The list is there before the servers arrive: wait for the row's button, not the list.
+    fireEvent.click(await within(list).findByRole("button", { name: "Log in" }));
     await waitFor(() => expect(openUrl).toHaveBeenCalledWith("https://auth.example/x"));
     expect(claudeRequest).toHaveBeenCalledWith("s1", { subtype: "mcp_authenticate", serverName: "sentry" });
     const postgres = within(list).getAllByRole("listitem")[1];

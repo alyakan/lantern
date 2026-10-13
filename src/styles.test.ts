@@ -29,9 +29,11 @@ describe("text you can select and copy", () => {
 });
 
 describe("colours", () => {
-  // The dark theme's own values, from its block of the stylesheet.
-  const dark = css.match(/@media \(prefers-color-scheme: dark\) \{\s*:root \{([^}]*)\}/)?.[1] ?? "";
-  const token = (name: string) => dark.match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})\\b`, "i"))?.[1] ?? "";
+  // The dark theme's two blocks: macOS's, when Settings follows it, and the one Settings forces.
+  const system = css.match(/@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme="light"\]\) \{([^}]*)\}/)?.[1] ?? "";
+  const forced = css.match(/:root\[data-theme="dark"\] \{([^}]*)\}/)?.[1] ?? "";
+  const light = css.match(/:root \{([^}]*)\}/)?.[1] ?? "";
+  const tokenIn = (block: string, name: string) => block.match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})\\b`, "i"))?.[1] ?? "";
   const luminance = (hex: string) => {
     const [r, g, b] = [1, 3, 5].map((i) => {
       const c = parseInt(hex.slice(i, i + 2), 16) / 255;
@@ -43,13 +45,21 @@ describe("colours", () => {
     const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
     return (hi + 0.05) / (lo + 0.05);
   };
+  // Each declaration as "name: value", so the two dark blocks can be compared line for line.
+  const declarations = (block: string) =>
+    block
+      .split(";")
+      .map((d) => d.replace(/\/\*.*?\*\//g, "").trim())
+      .filter(Boolean);
 
   it("gives a dark code block a background of its own, readable, on the pane and the chat card", () => {
-    const code = token("code-bg");
-    expect(code).not.toBe("");
-    expect(code).not.toBe(token("pane"));
-    expect(code).not.toBe(token("sidebar"));
-    expect(contrast(token("text"), code)).toBeGreaterThanOrEqual(4.5);
+    for (const block of [system, forced]) {
+      const code = tokenIn(block, "code-bg");
+      expect(code).not.toBe("");
+      expect(code).not.toBe(tokenIn(block, "pane"));
+      expect(code).not.toBe(tokenIn(block, "sidebar"));
+      expect(contrast(tokenIn(block, "text"), code)).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   it("keeps a selected item's fill when the pointer is over it", () => {
@@ -58,12 +68,26 @@ describe("colours", () => {
     }
   });
 
+  it("has the forced dark theme use the same colours as macOS's dark theme, so they can't drift apart", () => {
+    expect(system).not.toBe("");
+    expect(declarations(forced).filter((d) => !d.startsWith("color-scheme"))).toEqual(declarations(system));
+  });
+
+  it("forces light by leaving the light tokens alone, and keeps macOS's dark tokens off a forced light", () => {
+    expect(css).toMatch(/@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme="light"\]\)/);
+    expect(css).toMatch(/:root\[data-theme="light"\] \{\s*color-scheme: light;?\s*\}/);
+    expect(tokenIn(light, "bg")).toBe("#ffffff");
+  });
+
+  it("scales every font size by Settings' text size, so none is a bare px value", () => {
+    expect(css).toMatch(/--font-scale: 1;/);
+    expect(css).not.toMatch(/font(?:-size)?:\s*(?:\d+\s+)*\d+(?:\.\d+)?px/);
+  });
+
   describe("small text that has to be read", () => {
     // Each rule is on one line. The tab track sits on the glass capsule, which is see-through, so the test checks the
     // opaque surfaces it's over (the pane and the chat card): the glass is a shade of them.
     const body = (sel: string) => css.split("\n").find((l) => l.startsWith(`${sel} {`)) ?? "";
-    const light = css.match(/:root \{([^}]*)\}/)?.[1] ?? "";
-    const lightToken = (name: string) => light.match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})\\b`, "i"))?.[1] ?? "";
 
     it("uses the readable muted text, not the faint or decorative grey, for placeholders and the tab track", () => {
       for (const sel of [".pane-tabs-track button", ".menu-search::placeholder", ".repro-input::placeholder"]) {
@@ -71,16 +95,15 @@ describe("colours", () => {
       }
     });
 
-    it("keeps the readable muted text at 4.5:1 or more on the pane and the chat card, in both themes", () => {
-      for (const [muted, surface] of [
-        [lightToken("muted-text"), lightToken("pane")],
-        [lightToken("muted-text"), lightToken("sidebar")],
-        [token("muted-text"), token("pane")],
-        [token("muted-text"), token("sidebar")],
-      ]) {
-        expect(muted).not.toBe("");
-        expect(surface).not.toBe("");
-        expect(contrast(muted, surface)).toBeGreaterThanOrEqual(4.5);
+    it("keeps the readable muted text at 4.5:1 or more on the pane and the chat card, in every theme", () => {
+      for (const block of [light, system, forced]) {
+        for (const surface of ["pane", "sidebar"]) {
+          const muted = tokenIn(block, "muted-text");
+          const background = tokenIn(block, surface);
+          expect(muted).not.toBe("");
+          expect(background).not.toBe("");
+          expect(contrast(muted, background)).toBeGreaterThanOrEqual(4.5);
+        }
       }
     });
   });
