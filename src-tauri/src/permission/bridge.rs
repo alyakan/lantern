@@ -76,7 +76,11 @@ impl PermissionBridge {
         // The helper sends nothing after its request, so its read half only tells us when it has gone.
         let mut read = reader.into_inner().into_inner();
         let id = format!("perm-{}", self.counter.fetch_add(1, Ordering::SeqCst) + 1);
-        if let Some((scope, rule)) = self.rule_for(&req.tool_name, &req.input) {
+        // Looked at again right before the answer, so a link swapped in while this was looking is caught where that's cheap.
+        // That narrows the window; it doesn't close it, since the command runs after the answer (see rules::matches).
+        let matched = self.rule_for(&req.tool_name, &req.input);
+        let matched = matched.filter(|(_, rule)| self.rule_for(&req.tool_name, &req.input).is_some_and(|(_, again)| again == *rule));
+        if let Some((scope, rule)) = matched {
             // A rule answers it: no card, and the tool gets its input as Claude sent it, not the resolved paths matched on.
             sink(UiEvent::PermissionAutoAllowed { request_id: id, tool_name: req.tool_name, input: req.input, scope, rule });
             let resp = BridgeResponse { allow: true, message: None, updated_input: None };

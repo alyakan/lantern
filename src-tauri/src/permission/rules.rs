@@ -76,11 +76,14 @@ const BASH_KEYS: &[&str] = &["command", "description", "timeout", "run_in_backgr
 const WRAPPERS: &[&str] = &["sh", "bash", "zsh", "dash", "fish", "ksh", "env", "sudo", "su", "doas", "xargs", "eval", "exec", "command", "nohup", "time", "timeout", "nice", "ssh", "npx", "bunx", "pnpx", "uvx", "pipx"];
 /// Programs a Prefix can't start with: interpreters, and tools whose flags run or destroy things (find -delete, sed -i,
 /// curl -o). An Exact rule for one command is still fine.
-const DENIED_FIRST: &[&str] = &["python", "python3", "node", "deno", "bun", "ruby", "perl", "php", "awk", "gawk", "sed", "find", "rm", "rmdir", "mv", "cp", "dd", "chmod", "chown", "curl", "wget", "tee", "make"];
+const DENIED_FIRST: &[&str] = &[
+    "python", "node", "deno", "bun", "ruby", "perl", "php", "awk", "gawk", "sed", "find", "rm", "rmdir", "mv", "cp", "dd", "chmod", "chown", "curl", "wget", "tee", "make", "osascript", "open", "ln", "truncate", "shred", "tar", "unzip", "rsync", "scp", "nc", "ncat", "telnet", "kill", "killall", "pkill", "launchctl", "defaults", "security", "networksetup", "diskutil", "hdiutil", "crontab", "at", "tmux", "screen", "script", "expect", "swift", "xcodebuild", "gcc", "clang", "cc",
+];
 /// Tools whose first word is a subcommand (`git status`): a prefix of one names the subcommand too.
 const SUBCOMMAND_TOOLS: &[&str] = &["git", "npm", "yarn", "pnpm", "cargo", "docker", "kubectl", "brew", "pip", "go", "gh"];
-/// Subcommands that run some other program (`npm exec`, `docker exec`): no prefix ends in one.
-const RUNNERS: &[&str] = &["exec", "dlx", "x"];
+/// Subcommands that run a program or a project's script (`npm run`, `cargo run`, `docker exec`): no prefix ends in one.
+/// Such a rule can only be Exact, for the one command.
+const RUNNERS: &[&str] = &["exec", "dlx", "x", "run", "run-script"];
 /// The characters a rule's words can have. Anything else (quotes, operators, globs, `$`) keeps a command from matching.
 const WORD_CHARS: &str = "-_./:@=+,";
 
@@ -90,18 +93,34 @@ pub fn is_plain(command: &str) -> bool {
     !command.chars().any(|c| c.is_control() || ";&|<>()$`\\*?[]{}".contains(c))
 }
 
+/// The program a first word names, spelled plainly: lowercase, without a directory, a version (python3.12 is python)
+/// or a "js" (nodejs is node). Spellings only ever reduce to a listed name, so the lists match more of them.
+fn program_name(word: &str) -> String {
+    let mut name = word.rsplit('/').next().unwrap_or(word).to_ascii_lowercase();
+    loop {
+        let trimmed = name.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
+        let next = trimmed.strip_suffix("js").filter(|s| !s.is_empty()).unwrap_or(trimmed);
+        if next.len() == name.len() {
+            return name;
+        }
+        name = next.to_string();
+    }
+}
+
 /// A Bash prefix's words, if it can be one: one or two words of plain characters, none of them an option. It can't start
-/// with a program that runs anything (a wrapper, an interpreter, a destructive tool), and a subcommand tool needs its
-/// subcommand, so `git` alone is refused but `git status` is not.
+/// with a path (an arbitrary program) or a program that runs anything (a wrapper, an interpreter, a destructive tool), and
+/// a subcommand tool needs its subcommand, so `git` alone is refused but `git status` is not.
 fn prefix_words(text: &str) -> Option<Vec<&str>> {
     let words: Vec<&str> = text.split(' ').collect();
     let first = words[0];
+    let name = program_name(first);
     let ok = text.len() >= 2
         && (1..=2).contains(&words.len())
-        && !WRAPPERS.contains(&first)
-        && !DENIED_FIRST.contains(&first)
-        && !(words.len() == 1 && SUBCOMMAND_TOOLS.contains(&first))
-        && !(words.len() == 2 && RUNNERS.contains(&words[1]))
+        && !first.contains('/')
+        && !WRAPPERS.contains(&name.as_str())
+        && !DENIED_FIRST.contains(&name.as_str())
+        && !(words.len() == 1 && SUBCOMMAND_TOOLS.contains(&name.as_str()))
+        && !(words.len() == 2 && RUNNERS.contains(&words[1].to_ascii_lowercase().as_str()))
         && words.iter().all(|w| !w.is_empty() && !w.starts_with('-') && w.chars().all(|c| c.is_ascii_alphanumeric() || WORD_CHARS.contains(c)));
     ok.then_some(words)
 }
@@ -195,6 +214,10 @@ pub fn folder_key(folder: &Path) -> String {
 
 /// Whether `rule` allows this call. `input` should come through `for_matching`. False for any tool a rule can't answer,
 /// and for input this can't read.
+///
+/// A file path is resolved when the request arrives, and the tool runs after that answer. A rule can't see a link that's
+/// changed while the command is starting, so a link swapped in between the check and the write isn't caught. Nothing in
+/// Lantern can close that gap; a folder rule covers the files you expect to see, not a sandbox.
 pub fn matches(rule: &Rule, tool: &str, input: &Value) -> bool {
     if rule.tool != tool || NEVER_AUTO.contains(&tool) || tool.starts_with(OWN_TOOL_PREFIX) || !input.is_object() {
         return false;
@@ -444,7 +467,7 @@ mod tests {
 
     #[test]
     fn only_rules_that_match_as_intended_are_made() {
-        for good in [prefix("npm test"), prefix("ls"), prefix("npm run"), exact("npm test -- --grep \"a b\""), Rule { tool: "Edit".into(), matcher: Matcher::Any }, Rule { tool: "mcp__linear__x".into(), matcher: Matcher::Any }] {
+        for good in [prefix("npm test"), prefix("ls"), prefix("npm ci"), exact("npm test -- --grep \"a b\""), Rule { tool: "Edit".into(), matcher: Matcher::Any }, Rule { tool: "mcp__linear__x".into(), matcher: Matcher::Any }] {
             assert!(validate(&good).is_ok(), "{good:?}");
         }
         let bad = [
@@ -560,6 +583,41 @@ mod tests {
             assert!(validate(&prefix(good)).is_ok(), "{good}");
         }
         for text in ["npm exec", "npm dlx", "npm x", "docker exec", "kubectl exec", "git x", "npx"] {
+            assert!(validate(&prefix(text)).is_err(), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_program_spelled_another_way_is_still_refused_as_a_prefix() {
+        for text in ["/bin/sh", "/usr/bin/env", "/usr/bin/python3", "./script.sh", "~/x", "python3.12", "Python", "nodejs", "bash5", "Rm", "/bin/rm", "node.js", "/opt/homebrew/bin/npm"] {
+            assert!(validate(&prefix(text)).is_err(), "{text}");
+            assert!(!matches(&prefix(text), "Bash", &cmd(&format!("{text} x"))), "{text}");
+        }
+        // A path in the first word is an arbitrary program, as Exact it's still just the one command.
+        assert!(validate(&exact("./script.sh --fast")).is_ok());
+    }
+
+    #[test]
+    fn a_script_runner_is_only_ever_an_exact_rule() {
+        for text in ["npm run", "npm run-script", "yarn run", "pnpm run", "cargo run", "go run", "docker run", "kubectl exec", "npm exec", "npx"] {
+            assert!(validate(&prefix(text)).is_err(), "{text}");
+        }
+        assert!(validate(&exact("npm run build")).is_ok());
+        assert!(matches(&exact("npm run build"), "Bash", &cmd("npm run build")));
+        assert!(!matches(&exact("npm run build"), "Bash", &cmd("npm run deploy")));
+    }
+
+    #[test]
+    fn the_everyday_subcommands_are_still_prefixes() {
+        for text in ["npm test", "npm ci", "git status", "git diff", "git log", "cargo test", "cargo build", "cargo check"] {
+            assert!(validate(&prefix(text)).is_ok(), "{text}");
+            assert!(matches(&prefix(text), "Bash", &cmd(&format!("{text} --verbose"))), "{text}");
+        }
+    }
+
+    #[test]
+    fn the_newly_listed_tools_are_not_prefixes() {
+        for text in ["osascript", "open", "ln", "truncate", "shred", "tar", "unzip", "rsync", "scp", "nc", "ncat", "telnet", "kill", "killall", "pkill", "launchctl", "defaults", "security", "networksetup", "diskutil", "hdiutil", "crontab", "at", "tmux", "screen", "script", "expect", "swift", "xcodebuild", "gcc", "clang", "cc"] {
             assert!(validate(&prefix(text)).is_err(), "{text}");
         }
     }
