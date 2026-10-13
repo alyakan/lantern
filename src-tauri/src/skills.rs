@@ -350,6 +350,15 @@ pub fn create(config: &Path, folder: Option<&Path>, kind: &str, scope: &str, nam
         "project" => folder.map(|f| f.join(".claude")).ok_or("Open a folder to make a skill for its project.")?,
         _ => return Err("Put it in yours or in this project's folder.".into()),
     };
+    // A project can ship a link at .claude, .claude/skills or .claude/commands: making something through it would write
+    // wherever it points, outside the project. (Your own ~/.claude may be linked, to a dotfiles folder: that's yours.)
+    if scope == "project" {
+        for part in [base.clone(), base.join("skills"), base.join("commands")] {
+            if std::fs::symlink_metadata(&part).is_ok_and(|m| m.file_type().is_symlink()) {
+                return Err(format!("{} is a link, so nothing is made through it.", part.display()));
+            }
+        }
+    }
     // A JSON string is a valid YAML double-quoted scalar, so any quotes or backslashes in the line come out as typed.
     let quoted = serde_json::to_string(&description).map_err(|e| e.to_string())?;
     match kind {
@@ -612,6 +621,30 @@ mod tests {
         assert!(std::fs::read_to_string(home.path().join("commands/review.md")).unwrap().contains("Review"));
         create(home.path(), None, "skill", "user", "twice", "One").unwrap();
         assert!(create(home.path(), None, "skill", "user", "twice", "Two").is_err());
+    }
+
+    #[test]
+    fn a_project_cannot_make_creating_a_skill_write_outside_it_through_a_link() {
+        let home = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        // .claude/skills and .claude/commands as links to somewhere else, and .claude itself as one in a second project.
+        std::fs::create_dir(project.path().join(".claude")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), project.path().join(".claude/skills")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), project.path().join(".claude/commands")).unwrap();
+        for kind in ["skill", "command"] {
+            assert!(create(home.path(), Some(project.path()), kind, "project", "sneaky", "x").unwrap_err().contains("is a link"), "{kind}");
+        }
+        let linked = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), linked.path().join(".claude")).unwrap();
+        assert!(create(home.path(), Some(linked.path()), "skill", "project", "sneaky", "x").is_err());
+        assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 0, "nothing was written through a link");
+        // Your own ~/.claude may be a link (to a dotfiles folder), and that still works.
+        let dotfiles = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(dotfiles.path(), config.path().join("skills")).unwrap();
+        create(config.path(), None, "skill", "user", "mine", "Mine").unwrap();
+        assert!(dotfiles.path().join("mine/SKILL.md").exists());
     }
 
     #[test]
