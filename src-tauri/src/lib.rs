@@ -927,9 +927,18 @@ async fn restart_to_update(app: AppHandle, state: State<'_, AppState>, updates: 
     app.restart()
 }
 
+/// What the window keeps across launches: where it was, how big, and whether it was full screen. Not whether it was
+/// visible (the plugin would then show it only when it was, and a window saved hidden would never appear again) and
+/// not its decorations (the title bar is an overlay Lantern sets itself).
+fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
+    use tauri_plugin_window_state::StateFlags;
+    StateFlags::POSITION | StateFlags::SIZE | StateFlags::FULLSCREEN
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_window_state::Builder::default().with_state_flags(window_state_flags()).build())
         .plugin(tauri_plugin_opener::init())
         .plugin(navigation::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1045,6 +1054,28 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_keeps_where_it_was_how_big_and_full_screen_but_not_whether_it_was_hidden() {
+        let flags = window_state_flags();
+        assert!(flags.contains(tauri_plugin_window_state::StateFlags::POSITION | tauri_plugin_window_state::StateFlags::SIZE | tauri_plugin_window_state::StateFlags::FULLSCREEN));
+        assert!(!flags.intersects(tauri_plugin_window_state::StateFlags::VISIBLE | tauri_plugin_window_state::StateFlags::DECORATIONS));
+    }
+
+    #[test]
+    fn the_window_state_plugin_is_granted_to_the_main_window() {
+        let capability: serde_json::Value = serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let granted = capability["permissions"].as_array().unwrap();
+        assert!(granted.iter().any(|p| p == "window-state:default"));
+    }
+
+    #[test]
+    fn the_window_keeps_the_minimum_size_it_is_built_with_so_a_restored_size_cannot_go_below_it() {
+        let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let window = &config["app"]["windows"][0];
+        assert_eq!(window["minWidth"], 900);
+        assert_eq!(window["minHeight"], 600);
+    }
 
     #[test]
     fn a_saved_edit_is_tracked_under_the_ui_path_with_its_original_even_in_a_symlinked_folder() {
