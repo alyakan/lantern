@@ -13,7 +13,7 @@ import { UpdatesPage, type UpdatesPageProps } from "./UpdatesPage";
 import { PermissionRules } from "./PermissionRules";
 
 export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions";
-const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Harness", updates: "Updates", permissions: "Permissions" };
+export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Harness", updates: "Updates", permissions: "Permissions" };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 

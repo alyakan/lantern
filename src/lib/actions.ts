@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { PaletteEntry } from "./palette";
 
 /**
  * Every action Lantern offers by name: the macOS menu bar, the keyboard shortcuts, the command palette and the cheat
@@ -42,15 +43,6 @@ export interface ActionDef {
 }
 
 export type ActionId = (typeof CATALOGUE)[number]["id"];
-
-/** An enabled action as the palette lists it: its title and shortcut, and what choosing it does. */
-export interface RunnableAction {
-  id: string;
-  title: string;
-  group: ActionGroup;
-  shortcut: string | null;
-  run: () => void;
-}
 
 /** The shortcut as macOS writes it: ⇧ before ⌘, the key in capitals. */
 export function shortcutLabel(def: Pick<ActionDef, "key" | "shift">): string | null {
@@ -123,7 +115,7 @@ export function useAction(id: ActionId, run: () => void, enabled = true): void {
 }
 
 /** The actions that can run now, with their shortcuts, for the palette. */
-export function availableActions(): RunnableAction[] {
+export function availableActions(): PaletteEntry[] {
   return ACTIONS.flatMap((def) => {
     const list = owners.get(def.id);
     const handler = list?.[list.length - 1];

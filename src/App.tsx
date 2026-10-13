@@ -24,15 +24,17 @@ import { stepFile, usePersistentState } from "./lib/layout";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyAppearance, type Appearance, type TextSize } from "./lib/theme";
 import { notify } from "./lib/notify";
-import { runAction, useAction } from "./lib/actions";
+import { availableActions, runAction, useAction } from "./lib/actions";
+import type { PaletteEntry } from "./lib/palette";
+import { CommandPalette } from "./components/CommandPalette";
 import { activityStatus } from "./lib/status";
 import { failedCount } from "./lib/activity";
 import { scrollWithin } from "./lib/scrollWithin";
 
 import { SlotContext } from "./lib/slot";
 import { ModeGuideContext } from "./lib/modeGuide";
-import { ModeGuide, type GuideKey } from "./components/ModeGuide";
-import { SettingsView, type SettingsTab } from "./components/SettingsView";
+import { GUIDE, ModeGuide, type GuideKey } from "./components/ModeGuide";
+import { SettingsView, TAB_LABEL, type SettingsTab } from "./components/SettingsView";
 import { UpdatingOverlay } from "./components/UpdatingOverlay";
 import { isInstalling, useUpdateState } from "./lib/updates";
 import { BannerView } from "./components/BannerView";
@@ -883,6 +885,24 @@ export default function App() {
   const [guideAt, setGuideAt] = useState<GuideKey | null>(null);
   const [settingsAt, setSettingsAt] = useState<SettingsTab | null>(null);
   useAction("settings", () => setSettingsAt(settingsAt ?? "general"));
+  // ⇧⌘P: every action that can run, and the things that aren't shortcuts: switching mode or harness, and each Settings
+  // page. Listed as they are when the palette opens.
+  const [palette, setPalette] = useState<PaletteEntry[] | null>(null);
+  const paletteEntries = (): PaletteEntry[] => {
+    const ready = !!state.folder && !isBusy(state);
+    const modes = (["ask", "auto", "steps"] as const)
+      .filter((m) => ready && m !== state.mode)
+      .map((m): PaletteEntry => ({ id: `mode:${m}`, title: `Switch to ${GUIDE[m].label}`, group: "Mode", shortcut: null, run: () => changeMode(m) }));
+    const harnesses = presets
+      .filter((h) => ready && h.id !== harnessOf(active).id)
+      .map((h): PaletteEntry => ({ id: `harness:${h.id}`, title: `Use the ${h.name} harness`, group: "Harness", shortcut: null, run: () => switchHarness(h) }));
+    const tabs = (["general", "harness", "mcp", "skills", "permissions", "updates"] as SettingsTab[])
+      .filter((t) => t !== "harness" || !!state.folder)
+      .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
+    return [...availableActions(), ...modes, ...harnesses, ...tabs];
+  };
+  // Pressed again while open, it closes.
+  useAction("command-palette", () => setPalette((open) => (open ? null : paletteEntries())));
   // Installs the downloaded update and relaunches. The window says so (the overlay) until it does: closing every chat
   // and reopening is otherwise just a window that vanishes. Started from Settings, that closes first.
   const restartToUpdate = () => {
@@ -1080,6 +1100,7 @@ export default function App() {
           }}
         />
         {installing && <UpdatingOverlay state={updates.state} version={update?.version ?? null} />}
+        {palette && <CommandPalette entries={palette} onClose={() => setPalette(null)} />}
         <ModeGuide
           open={guideAt}
           mode={state.mode}
