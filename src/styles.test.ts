@@ -73,6 +73,12 @@ describe("colours", () => {
     expect(declarations(forced).filter((d) => !d.startsWith("color-scheme"))).toEqual(declarations(system));
   });
 
+  it("lets every dark-only rule give way to a forced light, so no colour sticks to macOS's dark", () => {
+    const guarded = [...css.matchAll(/prefers-color-scheme: dark\) \{\s*([^{]*)\{/g)].map((m) => m[1].trim());
+    expect(guarded.length).toBeGreaterThan(1);
+    for (const selector of guarded) expect(selector).toBe(':root:not([data-theme="light"])');
+  });
+
   it("forces light by leaving the light tokens alone, and keeps macOS's dark tokens off a forced light", () => {
     expect(css).toMatch(/@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme="light"\]\)/);
     expect(css).toMatch(/:root\[data-theme="light"\] \{\s*color-scheme: light;?\s*\}/);

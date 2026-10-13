@@ -924,7 +924,7 @@ export default function App() {
           reviewCollapsed={reviewCollapsed}
           onOpenFolder={openFolder}
           onToggleReview={() => setReviewCollapsed(!reviewCollapsed)}
-          onOpenSettings={() => setSettingsAt("mcp")}
+          onOpenSettings={() => setSettingsAt("general")}
           sessionId={state.sessionId}
           loadSessions={loadSessions}
           onOpenSession={openSession}

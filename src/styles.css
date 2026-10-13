@@ -881,7 +881,8 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 
 /* Review pages: a file's findings as cards, severity in orange (blocker) and yellow (should fix), nits grey. */
 :root { --sev-blocker: #d9661f; --sev-should: #a88400; }
-@media (prefers-color-scheme: dark) { :root { --sev-blocker: #f0914a; --sev-should: #e3b341; } }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --sev-blocker: #f0914a; --sev-should: #e3b341; } }
+:root[data-theme="dark"] { --sev-blocker: #f0914a; --sev-should: #e3b341; }
 .review-file { display: flex; flex-direction: column; gap: 16px; }
 .review-file-header { display: inline-flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: inherit; }
 .review-file-header svg { align-self: center; flex: none; width: 14px; height: 16px; color: var(--muted); }
