@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { ToolItem } from "../store";
-import { ActivityGroup } from "./ActivityGroup";
+import { ActivityGroup, SHOWN_OUTPUT_LINES } from "./ActivityGroup";
 
 const tool = (id: string, name: string, extra: Partial<ToolItem> = {}): ToolItem => ({
   type: "tool", id, name, summary: "/p/src/a.ts", status: "done", output: null, edit: null, children: [], ...extra,
@@ -32,7 +32,7 @@ describe("ActivityGroup", () => {
     const onOpenFile = vi.fn();
     render(<ActivityGroup steps={[tool("1", "Task", { children: [tool("s", "Edit", { edit })] })]} folder="/p" onDecide={() => {}} onOpenFile={onOpenFile} />);
     fireEvent.click(screen.getByRole("button", { name: /1 file changed/ }));
-    fireEvent.click(screen.getByRole("button", { name: /src\/b\.ts/ }));
+    fireEvent.click(screen.getByTitle("Show in the review panel"));
     expect(onOpenFile).toHaveBeenCalledWith("/p/src/b.ts");
   });
 
@@ -44,8 +44,8 @@ describe("ActivityGroup", () => {
     const line = screen.getByRole("button", { name: /2 files changed/ });
     expect(line).toHaveTextContent("2 files changed+3−2");
     fireEvent.click(line);
-    expect(screen.getByRole("button", { name: /src\/b\.ts/ })).toHaveTextContent("src/b.tsnew+3−1");
-    expect(screen.getByRole("button", { name: /src\/c\.ts/ })).toHaveTextContent("src/c.ts−1");
+    expect(screen.getByRole("button", { name: /^src\/b\.ts/ })).toHaveTextContent("src/b.tsnew+3−1");
+    expect(screen.getByRole("button", { name: /^src\/c\.ts/ })).toHaveTextContent("src/c.ts−1");
   });
 
   it("while live, is one line naming the current step instead of a list", () => {
@@ -79,5 +79,19 @@ describe("ActivityGroup", () => {
   it("has no summary line when the group is only applied edits", () => {
     render(<ActivityGroup steps={[tool("1", "Edit", { edit })]} folder="/p" {...handlers} />);
     expect(screen.getAllByRole("button")).toHaveLength(1);
+  });
+});
+
+describe("long output and changes", () => {
+  it("shows a step's first lines of output, and the rest on Show all", () => {
+    const output = Array.from({ length: SHOWN_OUTPUT_LINES + 10 }, (_, i) => `row ${i}`).join("\n");
+    render(<ActivityGroup steps={[tool("1", "Read", { output })]} folder="/p" {...handlers} />);
+    fireEvent.click(screen.getByRole("button", { name: /Read 1 file/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Read src\/a\.ts/ }));
+    const shown = screen.getByRole("region", { name: "Step output" });
+    expect(shown.textContent?.split("\n")).toHaveLength(SHOWN_OUTPUT_LINES);
+    fireEvent.click(screen.getByRole("button", { name: `Show all ${SHOWN_OUTPUT_LINES + 10} lines` }));
+    expect(screen.getByRole("region", { name: "Step output" }).textContent).toContain(`row ${SHOWN_OUTPUT_LINES + 9}`);
+    expect(screen.queryByRole("button", { name: /Show all/ })).toBeNull();
   });
 });

@@ -347,6 +347,13 @@ button.msg-action:hover:not(:disabled) { background: var(--bg-hover); color: var
 .step-children { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px 6px; padding: 8px 0 8px 12px; border-left: 1px solid var(--line-strong); }
 .edit-line { display: flex; align-items: center; gap: 8px; align-self: flex-start; max-width: 100%; border: 1px solid var(--line); background: var(--bg-subtle); padding: 3px 8px; font-size: calc(12px * var(--font-scale)); font-family: var(--mono); color: var(--text-2); border-radius: var(--radius-inner); }
 .edit-line:hover:not(:disabled) { border-color: var(--line-strong); background: var(--bg-hover); color: var(--text); }
+.edit-row { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 100%; }
+.edit-head { display: flex; align-items: center; gap: 4px; max-width: 100%; }
+button.edit-toggle { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 20px; padding: 0; border: none; background: none; color: var(--muted); }
+button.edit-toggle:hover:not(:disabled) { color: var(--text); }
+.edit-hunks { align-self: stretch; }
+.edit-hunks pre { margin: 0; padding: 6px 12px; background: var(--code-bg); border-radius: var(--radius-inner); max-height: 320px; overflow: auto; }
+.edit-hunks .link-button { margin: 4px 0 0 12px; }
 .file-changes { display: flex; flex-direction: column; gap: 3px; margin: 2px 0 4px 5px; padding-left: 11px; border-left: 1px solid var(--line-strong); }
 .edit-icon { color: var(--muted); font-family: var(--ui); }
 .edit-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
