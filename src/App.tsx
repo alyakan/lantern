@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RevertOutcome } from "./api";
 import { prNumberOf, reviewHints } from "./lib/review";
@@ -65,6 +65,9 @@ import { RestoreCard } from "./components/RestoreCard";
 import { chatsToSave, loadSaved, save, screenFirst, withOffered, type SavedChat } from "./lib/restore";
 import { SplitPane } from "./components/SplitPane";
 import { TopBar } from "./components/TopBar";
+import { Canvas, newLayout } from "./components/Canvas";
+import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions } from "./lib/canvasContext";
+import { needingYou, orchestraNodes } from "./lib/orchestraView";
 import "./styles.css";
 
 /** How many `name` steps have finished, subagents' included. */
@@ -126,6 +129,14 @@ export default function App() {
   const [chats, dispatchChats] = useReducer(chatsReducer, undefined, () => initialChats({ ...initialState, mode: lastFolder ? modeFor(lastFolder) : "ask" }));
   const active = chats.active;
   const state = chats.slots[active];
+  // An orchestra shows as a canvas of its agents or as one chat at a time. The canvas's layout is kept here, so going to a
+  // chat and back finds the agents where they were; its chats are handed to it through a store, so each agent redraws only
+  // for its own chat.
+  const [view, setView] = useState<"chat" | "canvas">("chat");
+  const canvasLayout = useRef(newLayout());
+  const [chatStore] = useState(createChatStore);
+  chatStore.assign(chats.slots);
+  useLayoutEffect(() => chatStore.notify(), [chats.slots, chatStore]);
   const reopened = useRef(false);
   const slotSeq = useRef(1);
   // Each chat's unsent text, so switching away and back doesn't lose it. A ref: typing needn't re-render the app.
@@ -325,7 +336,9 @@ export default function App() {
   const startIn = (slot: string, folder: string, quiet = false, orchestrator = false) => {
     const { claudePath } = state;
     if (!claudePath) return;
-    const mode = modeFor(folder);
+    // An orchestra starts on Auto, so its workers (which never get more freedom than their main agent) can get on without
+    // asking at every step. It doesn't change the project's own mode (see the effect below).
+    const mode: Mode = orchestrator ? "auto" : modeFor(folder);
     const h = findHarness(presets, harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)({ type: "folder_opened", folder });
@@ -350,7 +363,8 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (state.folder && modes[state.folder] !== state.mode) setModes({ ...modes, [state.folder]: state.mode });
+    // Not an orchestra's: its Auto is its own, and a worker's folder is a worktree that's gone with it.
+    if (state.folder && !state.orchestrator && !chats.agents[active] && modes[state.folder] !== state.mode) setModes({ ...modes, [state.folder]: state.mode });
   }, [state.mode, state.folder]);
   useEffect(() => {
     if (state.sessionId && sessionModes[state.sessionId] !== state.mode) setSessionModes({ ...sessionModes, [state.sessionId]: state.mode });
@@ -684,23 +698,23 @@ export default function App() {
     }
   };
 
-  const stop = () => {
-    const slot = active;
-    dispatch({ type: "stop_requested" });
+  const stopIn = (slot: string) => {
+    to(slot)({ type: "stop_requested" });
     api.interrupt(slot).catch((e) => to(slot)({ type: "stop_failed", text: errText(e) }));
   };
+  const stop = () => stopIn(active);
 
   // `note`: what the user wrote on a reproduce card; it goes back to Claude with the answer.
   // `answered`: the tool's input with what the user chose in it (AskUserQuestion's answers).
   // `remember`: an "Always allow…" rule. It's saved first, so the chat's next matching request is answered by it; if it
   // can't be saved, this request is still answered and the error is shown.
-  const decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => {
-    const slot = active;
+  const decideIn = (slot: string, id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => {
     to(slot)({ type: "permission_decided", id, allow, note });
     const answer = () => api.respondPermission(slot, id, allow, note ?? null, answered ?? null).catch((e) => to(slot)({ type: "turn_failed", text: errText(e) }));
     if (!remember) return answer();
     api.addPermissionRule(slot, remember).catch((e) => to(slot)({ type: "turn_failed", text: errText(e) })).then(answer);
   };
+  const decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => decideIn(active, id, allow, note, answered, remember);
 
   // From the title bar's failure count: bring the latest failed step's activity into view, opened.
   const showFailure = () => {
@@ -808,6 +822,68 @@ export default function App() {
   };
 
   useAction("toggle-changes", () => setReviewCollapsed(!reviewCollapsed));
+
+  // The orchestra. Agents on the canvas are chats like any other, so what they can do is the app's own, for their slot.
+  // Another agent is the one the rest of the app (the title bar, shortcuts) is about now. Unlike switching chats, this
+  // never closes the one it leaves: an empty main agent that is only waiting for its first message is still the orchestra.
+  const focusAgent = (slot: string) => {
+    if (slot !== active && chats.slots[slot]) dispatchChats({ type: "activate", slot });
+  };
+  /** One agent full size: the chat view, on that agent. */
+  const showAgent = (slot: string) => {
+    focusAgent(slot);
+    setView("chat");
+  };
+  const newOrchestra = () => {
+    if (!state.folder) return;
+    startFresh(state.folder, false, true);
+    setView("canvas");
+  };
+  const doing = {
+    send: sendIn,
+    stop: stopIn,
+    queue: (slot: string, items: string[]) => to(slot)({ type: "queue_set", items }),
+    decide: decideIn,
+    openFile: (slot: string, path: string) => {
+      const s = chats.slots[slot];
+      if (!s) return;
+      showAgent(slot);
+      to(slot)({ type: "select_file", path });
+      if (s.folder) setCollapsedBy({ ...collapsedBy, [s.folder]: false });
+    },
+    openTestRun: (slot: string, id: string) => {
+      showAgent(slot);
+      setFocusRun({ id, key: Date.now() });
+      if (chats.slots[slot]?.folder) setCollapsedBy({ ...collapsedBy, [chats.slots[slot].folder!]: false });
+    },
+    stopShell: (slot: string, id: string) => api.stopShell(slot, id).catch(() => {}),
+    shellInput: (slot: string, id: string, text: string) =>
+      api.shellInput(slot, id, text).catch((e) => to(slot)({ type: "ui_event", event: { kind: "shell_output", id, text: `\n${errText(e)}\n` } })),
+    restart: (slot: string) => {
+      const s = chats.slots[slot];
+      if (!s) return;
+      if (relaunch.current[slot]) relaunch.current[slot]();
+      else restart(slot, s.mode);
+    },
+  };
+  // Agents are handed one set of actions for good and call through it to whatever this render has, so they never redraw for it.
+  const doingRef = useRef(doing);
+  doingRef.current = doing;
+  const nodeActions = useMemo<NodeActions>(
+    () => ({
+      send: (slot, text) => doingRef.current.send(slot, text),
+      stop: (slot) => doingRef.current.stop(slot),
+      queue: (slot, items) => doingRef.current.queue(slot, items),
+      decide: (slot, id, allow, note, answered) => doingRef.current.decide(slot, id, allow, note, answered),
+      openFile: (slot, path) => doingRef.current.openFile(slot, path),
+      openTestRun: (slot, id) => doingRef.current.openTestRun(slot, id),
+      stopShell: (slot, id) => doingRef.current.stopShell(slot, id),
+      shellInput: (slot, id, text) => doingRef.current.shellInput(slot, id, text),
+      restart: (slot) => doingRef.current.restart(slot),
+    }),
+    [],
+  );
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (reviewCollapsed || e.metaKey || e.ctrlKey || e.altKey || isTyping(document.activeElement)) return;
@@ -895,7 +971,7 @@ export default function App() {
   const openChats: OpenChat[] = Object.entries(chats.slots)
     .filter(([slot]) => slot !== active)
     .sort(([a], [b]) => lastTouched(b) - lastTouched(a))
-    .map(([slot, s]) => ({ slot, title: chatTitle(s, titles), state: chatState(s, drafts.current[slot]), unread: !!unread[slot], background: s.backgroundTasks.length, sessionId: s.sessionId, elsewhere: s.folder && s.folder !== state.folder ? basename(s.folder) : null }));
+    .map(([slot, s]) => ({ slot, title: chats.agents[slot]?.name ?? chatTitle(s, titles), state: chatState(s, drafts.current[slot]), unread: !!unread[slot], background: s.backgroundTasks.length, sessionId: s.sessionId, elsewhere: s.folder && s.folder !== state.folder ? basename(s.folder) : null }));
 
   // For the title bar: steps that failed in the latest turn, and other chats waiting for an answer.
   const lastPrompt = state.items.map((it) => it.type).lastIndexOf("user");
@@ -904,6 +980,14 @@ export default function App() {
   const failedKey = turnTools.filter((t) => t.status === "error").map((t) => t.id).join(",");
   const failed = clearedFailures[active] === failedKey ? 0 : failedCount(turnTools);
   const waiting = openChats.filter((c) => c.state === "waiting").length;
+
+  // Every agent of an orchestra, the ones waiting for you, and whether the canvas is what's shown.
+  const mains = Object.values(chats.slots).filter((s) => s.orchestrator).length;
+  const nodes = orchestraNodes(chats, (_slot, s) => (mains > 1 && s.folder ? `Main agent · ${basename(s.folder)}` : "Main agent"));
+  const inOrchestra = nodes.length > 0;
+  const showCanvas = view === "canvas" && inOrchestra;
+  const attention = needingYou(nodes, chats.slots);
+  useShortcut("c", () => setView((v) => (v === "canvas" ? "chat" : "canvas")), inOrchestra, true);
 
   const lastTurn = [...state.items].reverse().find((it) => it.type === "turn");
   const lastTurnMs = lastTurn?.type === "turn" ? lastTurn.durationMs : null;
@@ -1160,9 +1244,19 @@ export default function App() {
           onStopTask={(id) => api.stopTask(active, id)}
           onClearFailures={() => setClearedFailures({ ...clearedFailures, [active]: failedKey })}
           onShowFailure={showFailure}
+          orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView, onNew: newOrchestra }}
         />
         <Hud event={hud} onOpenChat={switchTo} />
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
+        {showCanvas ? (
+          <ChatStoreContext.Provider value={chatStore}>
+            <NodeActionsContext.Provider value={nodeActions}>
+              <ErrorBoundary name="canvas">
+                <Canvas nodes={nodes} layout={canvasLayout.current} activeSlot={active} attention={attention} onFocus={focusAgent} onOpen={showAgent} />
+              </ErrorBoundary>
+            </NodeActionsContext.Provider>
+          </ChatStoreContext.Provider>
+        ) : (
         <SplitPane
           ratio={splitRatio}
           collapsed={reviewCollapsed}
@@ -1241,6 +1335,7 @@ export default function App() {
             </ErrorBoundary>
           }
         />
+        )}
         <SettingsView
           open={settingsAt}
           onClose={() => setSettingsAt(null)}

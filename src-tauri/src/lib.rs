@@ -152,6 +152,10 @@ impl orchestra::Host for AppHost {
             // Taken out before stopping: the lock would otherwise be held while claude stops.
             let session = s.session.lock().await.take();
             if let Some(session) = session {
+                // Remembered, so restarting the chat carries on the same conversation rather than starting another.
+                if let (Some(id), Some(cfg)) = (session.session_id(), s.config.lock().unwrap().as_mut()) {
+                    cfg.resume = Some(id);
+                }
                 session.stop().await;
             }
         })

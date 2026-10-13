@@ -29,6 +29,7 @@
   --accent-text: #ffffff;
   --working: #d4693f;      /* Claude's orange, only while it works */
   --unread: #0a84ff;       /* a chat finished in the background, not opened yet */
+  --attn: #c47f00;         /* an agent on the canvas that is waiting for you */
   --add: #1a7f37;
   --del: #cf222e;
   --warn: #9a6700;
@@ -79,6 +80,7 @@
     --accent-text: #1a1a1d;
     --working: #ef8a5c;
     --unread: #0a84ff;
+    --attn: #f0b44c;
     --add: #6bd488;
     --del: #ff8a93;
     --warn: #e3b341;
@@ -840,6 +842,8 @@ button.background-task-stop:hover:not(:disabled) { background: var(--bg-hover); 
 .auto-turn { display: flex; align-items: center; gap: 7px; margin: 6px 0 2px; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
 .auto-turn::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .auto-turn-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text-2); }
+.auto-turn-line { display: block; line-height: 1.4; }
+.auto-turn > span:nth-child(2) { flex: 0 1 auto; min-width: 0; max-width: 100%; }
 .auto-turn-time { font-variant-numeric: tabular-nums; }
 /* Something you sent, in Step by step: your initials, name and the time, then the message. */
 .user-note { display: flex; flex-direction: column; gap: 5px; padding: 9px 12px 10px; border-radius: 10px; background: var(--bg-user); font-size: calc(13px * var(--font-scale)); user-select: text; }
@@ -1454,3 +1458,85 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .revert-undo-note { flex: 1; color: var(--muted); font-size: calc(11.5px * var(--font-scale)); }
 .revert-all { margin-left: 4px; }
 .summary-revert { margin-left: 4px; }
+
+/* The orchestra's canvas: agents as floating chats on a pannable, zoomable surface, tethered to the main agent. */
+.canvas { position: relative; flex: 1; min-height: 0; margin: 0 var(--edge) var(--edge); overflow: hidden; border-radius: 10px; box-shadow: var(--card-shadow); cursor: grab; touch-action: none; overscroll-behavior: none;
+  background-color: var(--bg-subtle);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--text) 16%, transparent) 1px, transparent 1.3px);
+  background-size: calc(28px * var(--zoom, 1)) calc(28px * var(--zoom, 1));
+  background-position: var(--vx, 0) var(--vy, 0); }
+.canvas.panning { cursor: grabbing; }
+.canvas-world { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; will-change: transform; }
+.canvas-world.animating { transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
+.canvas-tethers { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
+.tether { fill: none; stroke: color-mix(in srgb, var(--text) 30%, transparent); stroke-width: 3px; vector-effect: non-scaling-stroke; stroke-linecap: round; transition: stroke 0.3s; }
+.tether.working { stroke: var(--working); stroke-width: 3.5px; stroke-dasharray: 1 9; animation: graph-flow 0.6s linear infinite; }
+.tether.waiting { stroke: var(--attn); stroke-width: 3.5px; stroke-dasharray: 8 7; animation: graph-flow 1.2s linear infinite; }
+.tether.idle { stroke: color-mix(in srgb, var(--add) 70%, var(--text) 10%); }
+.tether.ended { stroke: var(--del); stroke-dasharray: 3 7; opacity: 0.7; }
+.canvas.summary .node-body { cursor: zoom-in; }
+
+.canvas-node { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; background: var(--sidebar); box-shadow: var(--card-shadow); cursor: default; transition: box-shadow 0.2s; }
+.canvas-node.main { box-shadow: var(--shadow); }
+.canvas-node.focused { box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--text) 38%, transparent), var(--shadow); }
+.canvas-node.waiting { box-shadow: 0 0 0 2px var(--attn), var(--shadow); animation: node-attn 1.8s ease-in-out infinite; }
+@keyframes node-attn { 50% { box-shadow: 0 0 0 2px var(--attn), 0 0 24px color-mix(in srgb, var(--attn) 50%, transparent), var(--shadow); } }
+.node-head { display: flex; align-items: center; gap: 9px; height: 52px; flex: none; padding: 0 8px 0 14px; border-bottom: 1px solid var(--line); cursor: grab; user-select: none; -webkit-user-select: none; }
+.canvas-node.folded .node-head { border-bottom: none; }
+.node-head:active { cursor: grabbing; }
+.node-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--faint); }
+.node-dot.working { background: var(--working); animation: agents-pulse 1.2s ease-in-out infinite; }
+.node-dot.waiting { background: var(--attn); animation: agents-pulse 0.9s ease-in-out infinite; }
+.node-dot.idle { background: var(--add); }
+.node-dot.ended { background: var(--del); }
+.node-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.node-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 13.5px var(--ui); }
+.node-meta { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted-text); }
+.node-meta svg { flex: none; }
+.node-status { flex: none; font-size: 11.5px; color: var(--muted-text); white-space: nowrap; }
+.canvas-node.waiting .node-status { color: var(--attn); font-weight: 600; }
+.node-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.node-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.node-chat .chat { padding: 0 14px 8px; }
+.node-resize { position: absolute; right: 0; bottom: 0; width: 20px; height: 20px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 0 55%, var(--line-strong) 55% 62%, transparent 62% 72%, var(--line-strong) 72% 79%, transparent 79%); border-bottom-right-radius: 12px; opacity: 0.8; }
+.node-resize:hover { opacity: 1; }
+
+.node-composer { flex: none; padding: 8px 10px 10px; border-top: 1px solid var(--line); }
+.node-composer-box { display: flex; align-items: flex-end; gap: 6px; padding: 6px 6px 6px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--field); transition: border-color 0.12s; }
+.node-composer-box:focus-within { border-color: var(--faint); }
+.node-composer textarea { flex: 1; min-width: 0; max-height: 140px; padding: 2px 0; resize: none; border: none; outline: none; background: none; color: inherit; font: 13px/1.45 var(--ui); }
+.node-composer textarea::placeholder { color: var(--muted-text); }
+.node-composer textarea:disabled { cursor: default; }
+.node-send { flex: none; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; border-radius: 50%; background: var(--accent); color: var(--accent-text); }
+.node-send:disabled { opacity: 0.3; }
+.node-send.stop { background: var(--bg-active); color: var(--text); }
+.node-queue { margin: 0 0 6px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.node-queue li { display: flex; align-items: center; gap: 6px; padding: 2px 4px 2px 8px; border-radius: 6px; background: var(--glass); font-size: 12px; color: var(--muted-text); }
+.node-queue li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-banner { flex: none; display: flex; align-items: center; gap: 8px; margin: 0 10px 6px; padding: 6px 10px; border-radius: 6px; background: var(--info-bg); font-size: 12px; }
+.node-banner.error { background: var(--error-bg); }
+.node-banner.auth { background: var(--auth-bg); }
+.node-banner span { flex: 1; min-width: 0; }
+.node-banner button { flex: none; height: 22px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field); color: var(--text); font-size: 12px; }
+
+.node-summary { padding: 16px 16px 20px; }
+.node-summary-line { margin: 0; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; font: 500 14px/1.45 var(--ui); color: var(--text-2); }
+.node-summary-note { margin: 10px 0 0; font-size: 12.5px; font-weight: 600; color: var(--attn); }
+/* Zoomed out until a chat can't be read: the title and the latest words are drawn at a size that reads on screen. */
+.canvas.summary .node-head { height: calc(40px / var(--zoom)); gap: calc(8px / var(--zoom)); padding: 0 calc(14px / var(--zoom)); }
+.canvas.summary .node-name { font-size: calc(13px / var(--zoom)); }
+.canvas.summary .node-status { font-size: calc(11px / var(--zoom)); }
+.canvas.summary .node-dot { width: calc(8px / var(--zoom)); height: calc(8px / var(--zoom)); }
+.canvas.summary .node-meta, .canvas.summary .node-head .icon, .canvas.summary .node-resize { display: none; }
+.canvas.summary .node-summary { padding: calc(14px / var(--zoom)); }
+.canvas.summary .node-summary-line { font-size: calc(13px / var(--zoom)); -webkit-line-clamp: 8; }
+.canvas.summary .node-summary-note { font-size: calc(12px / var(--zoom)); }
+
+.canvas-controls { position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field); box-shadow: var(--card-shadow); cursor: default; }
+.canvas-controls .icon { width: 26px; height: 26px; font-size: 17px; line-height: 1; border-radius: 50%; }
+.canvas-zoom { min-width: 42px; text-align: center; font-size: 12px; color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.canvas-fit { height: 26px; padding: 0 11px; border: none; border-radius: 999px; background: none; color: var(--text-2); font-size: 12px; }
+.canvas-fit:hover { background: var(--bg-hover); color: var(--text); }
+.canvas-attention { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 14px; border: 1px solid var(--attn); border-radius: 999px; background: var(--field); color: var(--text); font: 600 12.5px var(--ui); box-shadow: var(--shadow); cursor: pointer; }
+.canvas-attention:hover { background: var(--bg-hover); }
+@media (prefers-reduced-motion: reduce) { .canvas-world.animating { transition: none; } .tether.working, .tether.waiting, .canvas-node.waiting { animation: none; } }
