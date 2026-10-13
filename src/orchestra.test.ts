@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialState, reducer, type Action, type State } from "./store";
+import { initialState, reducer, totalCost, type Action, type State } from "./store";
 import { chatsReducer, initialChats, WAKE_LIMIT, wakesPaused, wakesToSend, type Chats } from "./sessions";
 import type { UiEvent } from "./types";
 
@@ -141,6 +141,45 @@ describe("merge proposals", () => {
     expect(ev(open, { kind: "merge_resolved", worker: "w1", outcome: "failed", detail: "The main checkout has 1 uncommitted change" }).proposals[0]).toMatchObject({ status: "open", problem: "The main checkout has 1 uncommitted change" });
     // Another worker's resolution leaves it alone.
     expect(ev(open, { kind: "merge_resolved", worker: "w2", outcome: "merged", detail: "main" }).proposals).toEqual(open.proposals);
+  });
+
+  it("count each answer from the backend, so an approval that fails the same way twice is still answered", () => {
+    let s = ev(main, proposed);
+    expect(s.proposals[0].attempts).toBe(0);
+    const conflict: UiEvent = { kind: "merge_resolved", worker: "w1", outcome: "conflicts", detail: "a.ts" };
+    s = ev(ev(s, conflict), conflict);
+    expect(s.proposals[0]).toMatchObject({ attempts: 2, problem: "Conflicts with main in a.ts.", status: "open" });
+    // A fresh proposal for the same worker starts over.
+    expect(ev(s, proposed).proposals[0].attempts).toBe(0);
+  });
+});
+
+describe("what a chat has cost", () => {
+  const done = (cost: number | null): UiEvent => ({ kind: "turn_done", is_error: false, result: null, cost_usd: cost, duration_ms: 1000, auth_hint: false, denied: 0, context_window: null });
+
+  it("is the running total claude reports, not a sum of totals", () => {
+    // claude's total_cost_usd counts its whole process: 0.007 after turn one, 0.014 after turn two.
+    let s = ev(main, done(0.007));
+    s = ev(s, done(0.014));
+    expect(totalCost(s)).toBeCloseTo(0.014);
+  });
+
+  it("carries what an earlier claude cost when a restart starts the count again", () => {
+    let s = ev(main, done(0.02));
+    s = ev(s, done(0.03));
+    // The chat was restarted (a new mode): the new process starts from nothing.
+    s = ev(s, done(0.005));
+    expect(totalCost(s)).toBeCloseTo(0.035);
+    s = ev(s, done(0.012));
+    expect(totalCost(s)).toBeCloseTo(0.042);
+  });
+
+  it("is left alone by a turn that reports no cost, and starts over with a new conversation", () => {
+    let s = ev(main, done(0.02));
+    s = ev(s, done(null));
+    expect(totalCost(s)).toBeCloseTo(0.02);
+    expect(totalCost(reducer(s, { type: "folder_opened", folder: "/q" }))).toBe(0);
+    expect(totalCost(initialState)).toBe(0);
   });
 });
 

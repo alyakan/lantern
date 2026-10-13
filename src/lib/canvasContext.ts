@@ -1,4 +1,4 @@
-import { createContext, useContext, useSyncExternalStore } from "react";
+import { createContext, useContext, useRef, useSyncExternalStore } from "react";
 import type { State } from "../store";
 
 /**
@@ -48,6 +48,20 @@ export function useChatState(slot: string): State | undefined {
   return useSyncExternalStore(store.subscribe, () => store.get(slot), () => store.get(slot));
 }
 
+/** Several chats' states at once, redrawing when any of them changes (for the team list and totals, not for each agent). */
+export function useChatStates(slots: string[]): (State | undefined)[] {
+  const store = useContext(ChatStoreContext);
+  const last = useRef<(State | undefined)[]>([]);
+  // The same array while nothing changed, which is what useSyncExternalStore needs to not redraw in a loop.
+  const snapshot = () => {
+    const next = slots.map((s) => store.get(s));
+    if (next.length === last.current.length && next.every((s, i) => s === last.current[i])) return last.current;
+    last.current = next;
+    return next;
+  };
+  return useSyncExternalStore(store.subscribe, snapshot, snapshot);
+}
+
 /** What an agent on the canvas can do, for whichever chat it is. Stable for the app's life, so agents needn't redraw for it. */
 export interface NodeActions {
   send(slot: string, text: string): void;
@@ -61,6 +75,11 @@ export interface NodeActions {
   shellInput(slot: string, id: string, text: string): void;
   /** Starts the agent again after it stopped. */
   restart(slot: string): void;
+  /** The user's answer to a worker's merge proposal: merge its branch into the main checkout, or not yet. */
+  approveMerge(worker: string): void;
+  declineMerge(worker: string): void;
+  /** Removes a merged worker's worktree; rejects with why it couldn't. */
+  removeWorktree(worker: string): Promise<void>;
 }
 
 export const NodeActionsContext = createContext<NodeActions | null>(null);

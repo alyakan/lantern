@@ -29,7 +29,7 @@ function team(workers = 2): Chats {
   return c;
 }
 
-const actions = (): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn() });
+const actions = (): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()) });
 
 function setup(chats: Chats, extra: { attention?: string[]; layout?: ReturnType<typeof newLayout> } = {}) {
   const store = createChatStore();
@@ -239,5 +239,58 @@ describe("the canvas", () => {
     expect(w2Body.textContent).toContain("Done for now");
     // The other agent's DOM was left alone.
     expect(screen.getByLabelText(/Worker Worker 1/).querySelector(".node-chat")).toBe(w1Before);
+  });
+});
+
+describe("oversight", () => {
+  const proposal = { worker: "w1", name: "Worker 1", branch: "lantern/w1", into: "main", summary: "Adds it", commits: 2, files: [{ path: "a.ts", added: 3, removed: 1 }], uncommitted: 0, status: "open" as const, problem: null, attempts: 0 };
+  const withProposal = (): Chats => {
+    const c = team(2);
+    return { ...c, slots: { ...c.slots, s1: { ...c.slots.s1, proposals: [proposal] } } };
+  };
+
+  it("shows the merge on the worker it is for, and on the main agent, and calls the worker ready to merge", () => {
+    const chats = withProposal();
+    chats.slots.w1 = { ...chats.slots.w1, status: "idle", thinking: false };
+    setup(chats);
+    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    expect(within(w1).getByText("Ready to merge")).toBeTruthy();
+    expect(within(w1).getByRole("group", { name: "Merge lantern/w1" })).toBeTruthy();
+    expect(within(screen.getByLabelText(/Main agent Main agent/)).getByRole("group", { name: "Merge lantern/w1" })).toBeTruthy();
+    // The other worker has nothing to show.
+    expect(within(screen.getByLabelText(/Worker Worker 2/)).queryByRole("group", { name: /Merge/ })).toBeNull();
+  });
+
+  it("lists the team with what each is doing, takes you to one, and counts what the team has cost", () => {
+    const chats = withProposal();
+    chats.slots.s1 = { ...chats.slots.s1, costSeen: 0.5 };
+    chats.slots.w1 = { ...chats.slots.w1, status: "idle", thinking: false, costBase: 0.1, costSeen: 0.25, items: [{ type: "assistant", id: "a", text: "Finished the form" }] };
+    const { onFocus } = setup(chats);
+    const button = screen.getByRole("button", { name: "Team" });
+    expect(button.textContent).toBe("Team · $0.85");
+    fireEvent.click(button);
+    const list = screen.getByRole("dialog", { name: "Team" });
+    expect(within(list).getByText("Ready to merge")).toBeTruthy();
+    expect(within(list).getByText("Finished the form")).toBeTruthy();
+    expect(within(list).getByText("$0.35")).toBeTruthy();
+    fireEvent.click(within(list).getByText("Worker 1"));
+    expect(onFocus).toHaveBeenCalledWith("w1");
+    expect(screen.queryByRole("dialog", { name: "Team" })).toBeNull();
+  });
+
+  it("closes the team list on Escape and on a click elsewhere", () => {
+    setup(team(1));
+    fireEvent.click(screen.getByRole("button", { name: "Team" }));
+    expect(screen.getByRole("dialog", { name: "Team" })).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Team" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Team" }));
+    fireEvent.pointerDown(screen.getByTestId("canvas"));
+    expect(screen.queryByRole("dialog", { name: "Team" })).toBeNull();
+  });
+
+  it("shows no cost until something has cost anything", () => {
+    setup(team(1));
+    expect(screen.getByRole("button", { name: "Team" }).textContent).toBe("Team");
   });
 });

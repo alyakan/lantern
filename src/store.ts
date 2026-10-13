@@ -122,6 +122,8 @@ export interface MergeProposal {
   status: "open" | "merged" | "declined";
   /** Why the last approval didn't merge (conflicting files, a dirty checkout); the proposal stays open to try again. */
   problem: string | null;
+  /** How many times the backend has answered an approval: an attempt that fails the same way twice is still an answer. */
+  attempts: number;
 }
 
 export interface State {
@@ -134,6 +136,13 @@ export interface State {
   autoStreak: number;
   /** The merges the main agent asked for, oldest first. */
   proposals: MergeProposal[];
+  /**
+   * What this chat has cost in dollars: `costBase` from claude processes that have since ended (a restart starts the
+   * count again), plus `costSeen`, the running total the current one last reported (claude's total_cost_usd counts the
+   * whole process, not each turn). See `totalCost`.
+   */
+  costBase: number;
+  costSeen: number;
   /** Messages typed while Claude works, sent together when the turn ends. Per chat, so a background chat keeps its own. */
   queued: string[];
   claudePath: string | null;
@@ -206,12 +215,17 @@ export interface BackgroundTask {
   since: number;
 }
 
+/** What the chat has cost so far, across restarts of its claude. */
+export const totalCost = (s: Pick<State, "costBase" | "costSeen">) => s.costBase + s.costSeen;
+
 export const initialState: State = {
   status: "locating",
   orchestrator: false,
   wakes: [],
   autoStreak: 0,
   proposals: [],
+  costBase: 0,
+  costSeen: 0,
   queued: [],
   claudePath: null,
   setupError: null,
@@ -349,7 +363,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [] };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], costBase: 0, costSeen: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -483,12 +497,17 @@ function applyEvent(state: State, ev: UiEvent): State {
           ? null
           : state.banner;
       const seq = state.seq + 1;
+      // A total lower than the last one is a claude that started over (a restart): what the earlier one cost is kept.
+      const reported = ev.cost_usd;
+      const restarted = reported !== null && reported < state.costSeen;
       return {
         ...state,
         status: "idle",
         thinking: false,
         banner,
         seq,
+        costBase: restarted ? state.costBase + state.costSeen : state.costBase,
+        costSeen: reported ?? state.costSeen,
         contextWindow: ev.context_window ?? state.contextWindow,
         // The turn that ran /clear ends in an empty conversation; a marker alone would leave a blank chat, not the start screen.
         cleared: false,
@@ -537,7 +556,7 @@ function applyEvent(state: State, ev: UiEvent): State {
         banner: ev.reason ? { kind: "error", text: ev.reason, action: null } : { kind: "info", text: "The main agent stopped this worker. Restart it to carry on.", action: "restart" },
       };
     case "merge_proposed": {
-      const proposal: MergeProposal = { worker: ev.worker, name: ev.name, branch: ev.branch, into: ev.into, summary: ev.summary, commits: ev.commits, files: ev.files, uncommitted: ev.uncommitted, status: "open", problem: null };
+      const proposal: MergeProposal = { worker: ev.worker, name: ev.name, branch: ev.branch, into: ev.into, summary: ev.summary, commits: ev.commits, files: ev.files, uncommitted: ev.uncommitted, status: "open", problem: null, attempts: 0 };
       return { ...state, proposals: [...state.proposals.filter((p) => p.worker !== ev.worker), proposal] };
     }
     case "merge_resolved":
@@ -545,9 +564,10 @@ function applyEvent(state: State, ev: UiEvent): State {
         ...state,
         proposals: state.proposals.map((p): MergeProposal => {
           if (p.worker !== ev.worker) return p;
-          if (ev.outcome === "merged") return { ...p, status: "merged", problem: null };
-          if (ev.outcome === "declined") return { ...p, status: "declined", problem: null };
-          return { ...p, problem: ev.outcome === "conflicts" ? `Conflicts with ${p.into} in ${ev.detail}.` : ev.detail };
+          const answered = { attempts: p.attempts + 1 };
+          if (ev.outcome === "merged") return { ...p, ...answered, status: "merged", problem: null };
+          if (ev.outcome === "declined") return { ...p, ...answered, status: "declined", problem: null };
+          return { ...p, ...answered, problem: ev.outcome === "conflicts" ? `Conflicts with ${p.into} in ${ev.detail}.` : ev.detail };
         }),
       };
     case "unknown":

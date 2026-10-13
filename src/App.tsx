@@ -87,6 +87,11 @@ const HERO_PLACEHOLDER: Record<Flavour | "none", string> = {
   debug: "What's going wrong, and when?",
 };
 
+/** An orchestra's main agent starts on the mode the user chose for it. */
+interface OrchestraStart {
+  mode: Mode;
+}
+
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
 // A stable empty list, so a chat with no skills loaded yet doesn't hand the composer a new one each render.
@@ -102,6 +107,8 @@ export default function App() {
   const [sessionModes, setSessionModes] = usePersistentState<Record<string, string>>("settings.modeBySession", {});
   // Step by step's auto-approve, per project too.
   const [autoBy, setAutoBy] = usePersistentState<Record<string, boolean>>("settings.autoApproveByFolder", {});
+  // How each project's orchestras run, once the user has chosen (see newOrchestra).
+  const [orchestraModes, setOrchestraModes] = usePersistentState<Record<string, "auto" | "ask">>("settings.orchestraModeByFolder", {});
   const autoFor = (folder: string | null) => (folder ? (autoBy[folder] ?? false) : false);
   const [lastFolder, setLastFolder] = usePersistentState<string | null>("settings.lastFolder", null);
   // Each folder's sent prompts, for ↑ in the box (see MessageInput). Kept per folder, newest last.
@@ -328,23 +335,24 @@ export default function App() {
   };
 
   // `quiet`: reopening the remembered project at launch; if that fails (e.g. the folder is gone), just forget it.
-  const startFresh = (folder: string, quiet = false, orchestrator = false) => {
-    if (state.claudePath) startIn(takeSlot(), folder, quiet, orchestrator);
+  const startFresh = (folder: string, quiet = false, orchestra?: OrchestraStart) => {
+    if (state.claudePath) startIn(takeSlot(), folder, quiet, orchestra);
   };
 
-  /** `orchestrator`: the chat is the main agent of an orchestra, which can start worker agents. */
-  const startIn = (slot: string, folder: string, quiet = false, orchestrator = false) => {
+  /** `orchestra`: the chat is the main agent of an orchestra, which can start worker agents, on the mode the user chose for it. */
+  const startIn = (slot: string, folder: string, quiet = false, orchestra?: OrchestraStart) => {
     const { claudePath } = state;
     if (!claudePath) return;
-    // An orchestra starts on Auto, so its workers (which never get more freedom than their main agent) can get on without
-    // asking at every step. It doesn't change the project's own mode (see the effect below).
-    const mode: Mode = orchestrator ? "auto" : modeFor(folder);
+    // An orchestra runs on the mode the user chose for it (asked the first time, see newOrchestra), which its workers never
+    // exceed. It doesn't change the project's own mode (see the effect below).
+    const mode: Mode = orchestra ? orchestra.mode : modeFor(folder);
+    const orchestrator = !!orchestra;
     const h = findHarness(presets, harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode });
     to(slot)({ type: "orchestrator_set", on: orchestrator });
-    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, orchestrator);
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, orchestra);
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
     api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder), ...(orchestrator ? { orchestrator } : {}) }).then(
       () => {
@@ -363,8 +371,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Not an orchestra's: its Auto is its own, and a worker's folder is a worktree that's gone with it.
+    // Not an orchestra's: its mode is its own, and a worker's folder is a worktree that's gone with it.
     if (state.folder && !state.orchestrator && !chats.agents[active] && modes[state.folder] !== state.mode) setModes({ ...modes, [state.folder]: state.mode });
+    // An orchestra's mode, as the user last set it for its main agent, is what the project's next one starts on.
+    if (state.folder && state.orchestrator && (state.mode === "auto" || state.mode === "ask") && orchestraModes[state.folder] !== state.mode) setOrchestraModes({ ...orchestraModes, [state.folder]: state.mode });
   }, [state.mode, state.folder]);
   useEffect(() => {
     if (state.sessionId && sessionModes[state.sessionId] !== state.mode) setSessionModes({ ...sessionModes, [state.sessionId]: state.mode });
@@ -834,9 +844,21 @@ export default function App() {
     focusAgent(slot);
     setView("chat");
   };
-  const newOrchestra = () => {
-    if (!state.folder) return;
-    startFresh(state.folder, false, true);
+  // How a project's orchestras run, once chosen. Starting a team is not the same as consenting to agents that act without
+  // asking, so the first time it is asked, and the answer is kept for that project (changed in the main agent's mode menu).
+  const newOrchestra = async () => {
+    const folder = state.folder;
+    if (!folder) return;
+    let mode = orchestraModes[folder];
+    if (!mode) {
+      const auto = await ask(
+        "An orchestra is a main agent and the workers it starts, all acting in this project.\n\nOn Auto, Claude Code's own safety checks approve routine actions, so agents can work without stopping at every step. On Ask, every agent asks you before each action. Workers never get more freedom than the main agent.",
+        { title: "How should this team run?", kind: "info", okLabel: "Run on Auto", cancelLabel: "Run on Ask" },
+      ).catch(() => false);
+      mode = auto ? "auto" : "ask";
+      setOrchestraModes({ ...orchestraModes, [folder]: mode });
+    }
+    startFresh(folder, false, { mode });
     setView("canvas");
   };
   const doing = {
@@ -865,6 +887,17 @@ export default function App() {
       if (relaunch.current[slot]) relaunch.current[slot]();
       else restart(slot, s.mode);
     },
+    // The answer to a merge the main agent asked for. The backend says how it went (merge_resolved); an answer that never
+    // got that far (nothing waiting, no such worker) is told to the main agent's chat, where the card is.
+    approveMerge: (worker: string) => {
+      const main = chats.agents[worker]?.parent;
+      api.approveMerge(worker).catch((e) => main && to(main)({ type: "ui_event", event: { kind: "merge_resolved", worker, outcome: "failed", detail: errText(e) } }));
+    },
+    declineMerge: (worker: string) => {
+      const main = chats.agents[worker]?.parent;
+      api.declineMerge(worker).catch((e) => main && to(main)({ type: "ui_event", event: { kind: "merge_resolved", worker, outcome: "failed", detail: errText(e) } }));
+    },
+    removeWorktree: (worker: string) => api.discardWorktree(worker, false).catch((e) => Promise.reject(errText(e))),
   };
   // Agents are handed one set of actions for good and call through it to whatever this render has, so they never redraw for it.
   const doingRef = useRef(doing);
@@ -880,6 +913,9 @@ export default function App() {
       stopShell: (slot, id) => doingRef.current.stopShell(slot, id),
       shellInput: (slot, id, text) => doingRef.current.shellInput(slot, id, text),
       restart: (slot) => doingRef.current.restart(slot),
+      approveMerge: (worker) => doingRef.current.approveMerge(worker),
+      declineMerge: (worker) => doingRef.current.declineMerge(worker),
+      removeWorktree: (worker) => doingRef.current.removeWorktree(worker),
     }),
     [],
   );

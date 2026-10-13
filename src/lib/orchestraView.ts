@@ -70,7 +70,20 @@ export function summaryLine(s: State, max = 160): string {
   return "Waiting to start";
 }
 
-/** The agents that are waiting on the user (a permission prompt), in canvas order. */
+/** The workers whose branch the main agent has asked the user to merge, and the user hasn't answered. */
+export function readyToMerge(nodes: OrchestraNode[], slots: Record<string, State>): Set<string> {
+  return new Set(nodes.filter((n) => n.role === "main").flatMap((n) => (slots[n.slot]?.proposals ?? []).filter((p) => p.status === "open").map((p) => p.worker)));
+}
+
+/** The agents that are waiting on the user (a permission prompt, or a merge to approve), in canvas order. */
 export function needingYou(nodes: OrchestraNode[], slots: Record<string, State>): string[] {
-  return nodes.filter((n) => slots[n.slot] && nodeStatus(slots[n.slot]) === "waiting").map((n) => n.slot);
+  const merges = readyToMerge(nodes, slots);
+  return nodes.filter((n) => slots[n.slot] && (nodeStatus(slots[n.slot]) === "waiting" || merges.has(n.slot))).map((n) => n.slot);
+}
+
+/** Dollars for a screen: "$0.42", "$12.30", "<$0.01" for something that cost a little, nothing for nothing. */
+export function money(usd: number): string {
+  if (usd <= 0) return "";
+  if (usd < 0.01) return "<$0.01";
+  return `$${usd < 10 ? usd.toFixed(2) : usd.toFixed(usd < 100 ? 1 : 0)}`;
 }

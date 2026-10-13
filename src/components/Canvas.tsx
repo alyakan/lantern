@@ -17,8 +17,9 @@ import {
   type Size,
   type View,
 } from "../lib/canvas";
-import { useChatState } from "../lib/canvasContext";
-import { nodeStatus, STATUS_LABEL, summaryLine, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
+import { useChatState, useChatStates } from "../lib/canvasContext";
+import { money, nodeStatus, readyToMerge, STATUS_LABEL, summaryLine, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
+import { totalCost, type State } from "../store";
 import { NodeBody } from "./NodeBody";
 import { BranchIcon, ChevronIcon, OpenOutIcon } from "./icons";
 
@@ -73,6 +74,8 @@ interface Props {
 
 interface FrameProps {
   slot: string;
+  /** The main agent a worker reports to. */
+  parent: string | null;
   role: "main" | "worker";
   name: string;
   branch: string | null;
@@ -105,15 +108,20 @@ function SummaryBody({ slot }: { slot: string }) {
   );
 }
 
-const Frame = memo(function Frame({ slot, role, name, branch, box, z, focused, summary, collapsed, onGrab, onDrag, onRelease, onToggle, onOpen, onPress, onZoomTo }: FrameProps) {
+const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, focused, summary, collapsed, onGrab, onDrag, onRelease, onToggle, onOpen, onPress, onZoomTo }: FrameProps) {
   const state = useChatState(slot);
+  const owner = useChatState(parent ?? slot);
   const status: NodeStatus = state ? nodeStatus(state) : "ended";
   const folded = collapsed;
+  // A worker whose branch the main agent has asked the user to merge: that is what it is waiting on, and it's theirs to answer.
+  const ready = !!parent && !!owner?.proposals.some((p) => p.worker === slot && p.status === "open");
+  const label = ready && status === "idle" ? "Ready to merge" : STATUS_LABEL[status];
+  const spent = state ? money(totalCost(state)) : "";
   return (
     <section
-      className={`canvas-node ${role} ${status}${focused ? " focused" : ""}${folded ? " folded" : ""}`}
+      className={`canvas-node ${role} ${status}${ready ? " ready" : ""}${focused ? " focused" : ""}${folded ? " folded" : ""}`}
       data-node={slot}
-      aria-label={`${role === "main" ? "Main agent" : "Worker"} ${name}, ${STATUS_LABEL[status]}`}
+      aria-label={`${role === "main" ? "Main agent" : "Worker"} ${name}, ${label}`}
       style={{ transform: `translate(${box.x}px, ${box.y}px)`, width: box.w, height: folded ? COLLAPSED_HEIGHT : box.h, zIndex: z }}
       onPointerDownCapture={() => onPress(slot)}
     >
@@ -125,10 +133,10 @@ const Frame = memo(function Frame({ slot, role, name, branch, box, z, focused, s
           </span>
           <span className="node-meta" title={branch ?? undefined}>
             {branch && <BranchIcon />}
-            {[role === "main" ? "Runs the team" : branch ? branch.replace(/^lantern\//, "") : "Shared folder", state ? MODE_LABEL[state.mode] : null].filter(Boolean).join(" · ")}
+            {[role === "main" ? "Runs the team" : branch ? branch.replace(/^lantern\//, "") : "Shared folder", state ? MODE_LABEL[state.mode] : null, spent || null].filter(Boolean).join(" · ")}
           </span>
         </span>
-        <span className="node-status">{STATUS_LABEL[status]}</span>
+        <span className="node-status">{label}</span>
         <button className="icon" aria-label={folded ? `Expand ${name}` : `Collapse ${name}`} title={folded ? "Expand" : "Collapse to its title"} onClick={() => onToggle(slot)}>
           <ChevronIcon up={!folded} />
         </button>
@@ -138,7 +146,7 @@ const Frame = memo(function Frame({ slot, role, name, branch, box, z, focused, s
       </header>
       {!folded && (
         <div className="node-body" onClick={summary ? () => onZoomTo(slot) : undefined} title={summary ? "Zoom in on this agent" : undefined}>
-          {summary ? <SummaryBody slot={slot} /> : <NodeBody slot={slot} />}
+          {summary ? <SummaryBody slot={slot} /> : <NodeBody slot={slot} parent={parent} />}
         </div>
       )}
       {!folded && <div className="node-resize" aria-hidden onPointerDown={(e) => onGrab(e, slot, "resize")} onPointerMove={onDrag} onPointerUp={onRelease} onPointerCancel={onRelease} />}
@@ -153,7 +161,77 @@ const TetherLine = memo(function TetherLine({ slot, d }: { slot: string; d: stri
   return <path className={`tether ${status}`} data-tether={slot} d={d} />;
 });
 
-function Controls({ zoom, attention, onZoom, onFit, onNext }: { zoom: number; attention: number; onZoom: (factor: number) => void; onFit: () => void; onNext: () => void }) {
+/**
+ * Everyone on the team at a glance: who is doing what, what each has said last, and what the team has cost so far. A row
+ * takes you to that agent. The team's cost counts every agent, however far off the canvas it is.
+ */
+function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const states = useChatStates(nodes.map((n) => n.slot));
+  const bySlot: Record<string, State> = {};
+  nodes.forEach((n, i) => {
+    if (states[i]) bySlot[n.slot] = states[i]!;
+  });
+  const ready = readyToMerge(nodes, bySlot);
+  const total = money(Object.values(bySlot).reduce((sum, s) => sum + totalCost(s), 0));
+
+  // Closes when you click anywhere else or press Escape.
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+
+  return (
+    <div className="canvas-team" ref={box}>
+      {open && (
+        <div className="canvas-team-list" role="dialog" aria-label="Team">
+          <ul>
+            {nodes.map((n) => {
+              const s = bySlot[n.slot];
+              if (!s) return null;
+              const status = nodeStatus(s);
+              const label = ready.has(n.slot) && status === "idle" ? "Ready to merge" : STATUS_LABEL[status];
+              const spent = money(totalCost(s));
+              return (
+                <li key={n.slot}>
+                  <button
+                    onClick={() => {
+                      setOpen(false);
+                      onGoTo(n.slot);
+                    }}
+                  >
+                    <span className={`node-dot ${status}`} aria-hidden />
+                    <span className="team-text">
+                      <span className="team-name">{n.name}</span>
+                      <span className="team-line">{summaryLine(s, 90)}</span>
+                    </span>
+                    <span className="team-state">
+                      {label}
+                      {spent && <span className="team-cost">{spent}</span>}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+      <button className="canvas-fit" aria-expanded={open} aria-label="Team" title="Everyone on the team, and what it has cost" onClick={() => setOpen(!open)}>
+        Team{total ? ` · ${total}` : ""}
+      </button>
+    </div>
+  );
+}
+
+function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo }: { zoom: number; attention: number; nodes: OrchestraNode[]; onZoom: (factor: number) => void; onFit: () => void; onNext: () => void; onGoTo: (slot: string) => void }) {
   return (
     <>
       {attention > 0 && (
@@ -175,6 +253,7 @@ function Controls({ zoom, attention, onZoom, onFit, onNext }: { zoom: number; at
         <button className="canvas-fit" aria-label="Fit everything" title="Fit everything in view" onClick={onFit}>
           Fit
         </button>
+        <Team nodes={nodes} onGoTo={onGoTo} />
       </div>
     </>
   );
@@ -431,6 +510,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
           <Frame
             key={n.slot}
             slot={n.slot}
+            parent={n.parent}
             role={n.role}
             name={n.name}
             branch={n.branch}
@@ -449,7 +529,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
           />
         ))}
       </div>
-      <Controls zoom={zoomPct} attention={attention.length} onZoom={zoomBy} onFit={() => { layout.touched = false; fit(true); }} onNext={next} />
+      <Controls zoom={zoomPct} attention={attention.length} nodes={nodes} onZoom={zoomBy} onFit={() => { layout.touched = false; fit(true); }} onNext={next} onGoTo={goTo} />
     </div>
   );
 }

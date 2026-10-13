@@ -448,7 +448,8 @@ async function playOrchestraTurn(slot: string) {
       branch: w.branch,
       base: w.branch ? "main" : null,
       isolation: w.branch ? "worktree" : "shared",
-      mode: "auto",
+      // Never more freedom than the main agent (see worker_mode in the backend).
+      mode: slotMode[slot] === "auto" ? "auto" : "ask",
     });
     await send({ kind: "tool_finished", parent: null, tool_use_id: id, is_error: false, output: `Started worker ${w.id} ("${w.name}").` });
     void playWorker(slot, w);
