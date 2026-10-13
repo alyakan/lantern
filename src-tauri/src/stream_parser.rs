@@ -653,6 +653,18 @@ mod tests {
     }
 
     #[test]
+    fn compaction_lines_are_bookkeeping_the_chat_ignores() {
+        // /compact writes a compact_boundary (or a microcompact one) before its result; neither is a chat event.
+        let mut p = StreamParser::default();
+        let boundary = r#"{"type":"system","subtype":"compact_boundary","content":"Conversation compacted","compact_metadata":{"trigger":"manual","pre_tokens":150000}}"#;
+        assert!(p.parse_line(boundary).is_empty());
+        assert!(p.parse_line(r#"{"type":"system","subtype":"microcompact_boundary"}"#).is_empty());
+        // A compaction with nothing to compact still ends with a result, so the turn ends.
+        let done = p.parse_line(r#"{"type":"result","subtype":"success","is_error":false,"result":"","duration_ms":81,"total_cost_usd":0,"modelUsage":{}}"#);
+        assert!(matches!(done.last(), Some(UiEvent::TurnDone { is_error: false, .. })));
+    }
+
+    #[test]
     fn turn_done_is_last_and_stream_is_clean() {
         let evs = parse_all(WRITE_FIXTURE);
         assert_eq!(

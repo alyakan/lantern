@@ -31,6 +31,7 @@
   --unread: #0a84ff;       /* a chat finished in the background, not opened yet */
   --add: #1a7f37;
   --del: #cf222e;
+  --warn: #9a6700;
   --info-bg: #f3f3f5;
   --error-bg: #fdefef;
   --auth-bg: #fdf6e6;
@@ -80,6 +81,7 @@
     --unread: #0a84ff;
     --add: #6bd488;
     --del: #ff8a93;
+    --warn: #e3b341;
     --info-bg: #2a2a30;
     --error-bg: #3a1f22;
     --auth-bg: #37301a;
@@ -115,6 +117,7 @@
   --unread: #0a84ff;
   --add: #6bd488;
   --del: #ff8a93;
+  --warn: #e3b341;
   --info-bg: #2a2a30;
   --error-bg: #3a1f22;
   --auth-bg: #37301a;
@@ -457,6 +460,12 @@ button.icon.queue-remove { flex: none; width: 20px; height: 20px; font-size: cal
 .composer-item { display: inline-flex; align-items: center; gap: 5px; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
 .context-meter { display: inline-flex; align-items: center; gap: 10px; margin-right: 10px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted); font-variant-numeric: tabular-nums; cursor: default; }
 .context-used { display: inline-flex; align-items: center; gap: 6px; }
+button.context-used { padding: 0; border: none; background: none; color: inherit; font: inherit; cursor: pointer; }
+.context-meter.warn .context-used { color: var(--warn); }
+.context-meter.full .context-used { color: var(--del); }
+.context-note { font-weight: 500; }
+.context-actions { display: inline-flex; align-items: center; gap: 2px; }
+button.ghost.context-compact, button.ghost.context-clear { height: 20px; padding: 0 6px; font-size: calc(11.5px * var(--font-scale)); color: var(--text-2); }
 .model-picker { position: relative; }
 .model-button { height: 22px; margin-left: -6px; padding: 0 6px; border: none; background: none; border-radius: var(--radius-chip); }
 .model-button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-2); }

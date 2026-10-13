@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { ContextMeter, formatDuration } from "./ContextMeter";
 
 afterEach(() => vi.useRealTimers());
@@ -33,5 +33,54 @@ describe("ContextMeter", () => {
     expect(screen.getByText("12s")).toBeInTheDocument();
     rerender(<ContextMeter used={null} window={200_000} running={false} lastTurnMs={12_000} />);
     expect(screen.queryByText("12s")).toBeNull();
+  });
+});
+
+describe("ContextMeter's warning", () => {
+  const actions = { onCompact: vi.fn(), onClear: vi.fn() };
+  const meter = (used: number, running = false) => <ContextMeter used={used} window={200_000} running={running} lastTurnMs={null} actions={actions} />;
+  const at = (percent: number) => (percent / 100) * 200_000;
+
+  it("turns amber at 75% and red at 90%, saying so in words", () => {
+    const { container, rerender } = render(meter(at(74)));
+    expect(container.querySelector(".context-meter")).not.toHaveClass("warn");
+    expect(screen.queryByText(/Getting full|Nearly full/)).toBeNull();
+    rerender(meter(at(75)));
+    expect(container.querySelector(".context-meter")).toHaveClass("warn");
+    expect(screen.getByRole("button", { name: "75% of context used, getting full" })).toBeInTheDocument();
+    rerender(meter(at(90)));
+    expect(container.querySelector(".context-meter")).toHaveClass("full");
+    expect(screen.getByText("Nearly full")).toBeInTheDocument();
+  });
+
+  it("offers Compact and Clear once it warns, and sends each", () => {
+    actions.onCompact.mockReset();
+    actions.onClear.mockReset();
+    render(meter(at(80)));
+    fireEvent.click(screen.getByRole("button", { name: "Compact" }));
+    expect(actions.onCompact).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(actions.onClear).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers them on a click of the meter below the warning, and folds them back", () => {
+    render(meter(at(31)));
+    expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "31% of context used" }));
+    expect(screen.getByRole("button", { name: "31% of context used" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Compact" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "31% of context used" }));
+    expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
+  });
+
+  it("doesn't offer them while Claude works", () => {
+    render(meter(at(95), true));
+    expect(screen.queryByRole("button", { name: "Compact" })).toBeNull();
+  });
+
+  it("is plain text, with nothing to press, when no actions are given", () => {
+    render(<ContextMeter used={at(95)} window={200_000} running={false} lastTurnMs={null} />);
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText("Nearly full")).toBeInTheDocument();
   });
 });

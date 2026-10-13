@@ -553,6 +553,17 @@ export default function App() {
     go();
   };
 
+  // /clear drops the conversation (the files it changed stay), so it's asked about first.
+  const clearChat = async (slot: string) => {
+    const sure = await ask("Claude forgets this conversation. The files it changed stay as they are.", {
+      title: "Clear this conversation?",
+      kind: "warning",
+      okLabel: "Clear",
+      cancelLabel: "Keep it",
+    });
+    if (sure) sendIn(slot, "/clear");
+  };
+
   const changeMode = (mode: Mode) =>
     unlessBackground(active, () => {
       if (mode !== "steps") dispatch({ type: "flavour_picked", flavour: null });
@@ -934,7 +945,7 @@ export default function App() {
       models={{ chosen: settingsFor(active).model, onChoose: chooseModel, defaultModel, ids: modelIds, options: state.models }}
       effort={{ chosen: settingsFor(active).effort, onChoose: changeEffort }}
       harness={state.folder ? { presets, chosen: harnessOf(active).id, onChoose: (id) => switchHarness(findHarness(presets, id)), onEdit: () => setSettingsAt("harness") } : undefined}
-      usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs }}
+      usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs, actions: state.folder && !stepsMode ? { onCompact: () => sendIn(active, "/compact"), onClear: () => clearChat(active) } : undefined }}
       queue={{ items: state.queued, set: (items) => dispatch({ type: "queue_set", items }) }}
       history={state.folder ? { entries: promptsBy[state.folder] ?? [], remember: (entry) => setPromptsBy({ ...promptsBy, [state.folder!]: withPrompt(promptsBy[state.folder!] ?? [], entry) }) } : undefined}
       commands={state.commands}
