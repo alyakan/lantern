@@ -210,13 +210,19 @@ export interface TestCase {
   location: string | null;
 }
 
+/** A downloaded update that's waiting (the backend's `UpdateInfo`). `notes`: the release's body, its "What's new". */
+export interface UpdateInfo {
+  version: string;
+  notes?: string;
+}
+
 /** Where updating Lantern has got to (the backend's `UpdateState`). */
 export type UpdateState =
   | { kind: "idle" }
   | { kind: "checking" }
   | { kind: "up_to_date" }
   | { kind: "downloading"; version: string; downloaded: number; total: number | null }
-  | { kind: "ready"; version: string }
+  | { kind: "ready"; version: string; notes?: string }
   | { kind: "installing"; version: string }
   | { kind: "restarting" }
   | { kind: "failed"; error: string };

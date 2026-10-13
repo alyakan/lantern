@@ -70,6 +70,19 @@ describe("UpdatingOverlay", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Closing your chats and restarting…");
   });
 
+  it("offers What's new for the running version and the waiting one, when they have notes", () => {
+    const onWhatsNew = vi.fn();
+    show({ kind: "idle" }, { whatsNew: ["0.1.9", "0.1.10"], onWhatsNew });
+    fireEvent.click(screen.getByRole("button", { name: "What's new in 0.1.10" }));
+    expect(onWhatsNew).toHaveBeenCalledWith("0.1.10");
+    expect(screen.getByRole("button", { name: "What's new in 0.1.9" })).toBeInTheDocument();
+  });
+
+  it("offers no What's new when no version has notes", () => {
+    show({ kind: "idle" }, { whatsNew: [], onWhatsNew: () => {} });
+    expect(screen.queryByRole("button", { name: /What's new/ })).toBeNull();
+  });
+
   it("shows straight away, before the backend has said anything, and can't be dismissed", () => {
     render(<UpdatingOverlay state={{ kind: "idle" }} version="0.1.10" />);
     expect(screen.getByRole("alert")).toHaveTextContent("Updating to Lantern 0.1.10");

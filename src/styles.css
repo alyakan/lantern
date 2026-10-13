@@ -605,6 +605,13 @@ button.icon.open-chat-close { position: absolute; right: 4px; width: 22px; heigh
 .shortcuts-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shortcuts-key { flex: none; min-width: 2.4em; padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg-subtle); font-family: var(--ui); font-size: calc(11.5px * var(--font-scale)); color: var(--text-2); text-align: center; }
 .shortcuts-row.off .shortcuts-key { color: var(--muted-text); }
+/* What's new after an update: the release's changes, with its heading and install line left out. */
+.whats-new { width: min(560px, calc(100vw - 48px)); max-height: min(560px, calc(100vh - 96px)); padding: 0; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--field); color: var(--text); box-shadow: var(--shadow); }
+.whats-new::backdrop { background: rgba(0, 0, 0, 0.28); }
+.whats-new[open] { animation: guide-in 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
+.whats-new-body { display: flex; flex-direction: column; gap: 12px; max-height: inherit; padding: 20px 24px 16px; overflow-y: auto; }
+.whats-new-notes { font-size: calc(13px * var(--font-scale)); color: var(--text-2); user-select: text; }
+.whats-new-link { font-size: calc(12px * var(--font-scale)); color: var(--muted); text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 2px; }
 /* The changed-file picker uses the shared dropdown (.menu); it opens under the button. */
 .file-menu { top: calc(100% + 4px); left: 0; width: 420px; max-width: calc(100vw - 48px); max-height: 360px; }
 .file-menu .menu-row { align-items: center; font-family: var(--mono); font-size: calc(12px * var(--font-scale)); }
@@ -1368,6 +1375,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 @media (prefers-reduced-motion: reduce) { .updates-bar-fill { transition: none; } .updates-bar-fill.unknown { animation: none; } }
 .updates-ready { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .updates-ready .update-menu { bottom: auto; top: calc(100% + 6px); left: 0; right: auto; }
+.updates-whats-new { display: flex; flex-wrap: wrap; gap: 14px; font-size: calc(12px * var(--font-scale)); }
 
 /* The window while Lantern replaces itself: over everything (a modal dialog), until it reopens. */
 .updating { padding: 0; border: none; outline: none; background: transparent; color: var(--text); max-width: none; }

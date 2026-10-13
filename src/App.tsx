@@ -19,13 +19,15 @@ import { agentGraph } from "./lib/agentGraph";
 import { BUILT_IN, CUSTOM_HARNESS, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
-import type { McpServer, NewRule, SkillEntry } from "./types";
+import type { McpServer, NewRule, SkillEntry, UpdateInfo } from "./types";
 import { stepFile, usePersistentState } from "./lib/layout";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyAppearance, type Appearance, type TextSize } from "./lib/theme";
 import { notify } from "./lib/notify";
 import { availableActions, runAction, useAction } from "./lib/actions";
 import type { PaletteEntry } from "./lib/palette";
+import { newVersionToShow, notesFor, rememberNotes, versionsWithNotes } from "./lib/whatsNew";
+import { WhatsNew } from "./components/WhatsNew";
 import { CommandPalette } from "./components/CommandPalette";
 import { ShortcutSheet } from "./components/ShortcutSheet";
 import { activityStatus } from "./lib/status";
@@ -188,13 +190,27 @@ export default function App() {
     };
   }, []);
 
-  // The update may have been found before this window was listening, so ask as well as listen.
+  // The update may have been found before this window was listening, so ask as well as listen. Its notes are kept for
+  // the version that installs it, which shows them on its first launch.
   useEffect(() => {
-    const unlisten = api.onUpdateReady(setUpdate);
-    api.updateStatus().then((u) => u && setUpdate(u), () => {});
+    const offer = (u: UpdateInfo) => {
+      rememberNotes(localStorage, u);
+      setUpdate(u);
+    };
+    const unlisten = api.onUpdateReady(offer);
+    api.updateStatus().then((u) => u && offer(u), () => {});
     return () => {
       unlisten.then((stop) => stop());
     };
+  }, []);
+  // "What's new in X" once after an update: the running version, if it's not the one this window last saw.
+  const [whatsNew, setWhatsNew] = useState<{ version: string; notes: string | null } | null>(null);
+  const showWhatsNew = (version: string) => setWhatsNew({ version, notes: notesFor(localStorage, version) });
+  useEffect(() => {
+    api.appVersion().then((running) => {
+      const version = typeof running === "string" ? newVersionToShow(localStorage, running) : null;
+      if (version) showWhatsNew(version);
+    }, () => {});
   }, []);
   // "Lantern ▸ Check for Updates…": open the Updates page and look.
   useEffect(() => {
@@ -1088,7 +1104,14 @@ export default function App() {
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
           general={{ notify: notifyPrefs, onNotify: setNotifyPrefs, appearance, onAppearance: setAppearance, textSize, onTextSize: setTextSize }}
-          updates={{ version: updates.version, state: updates.state, onCheck: updates.check, ready: updateOffer ?? null }}
+          updates={{
+            version: updates.version,
+            state: updates.state,
+            onCheck: updates.check,
+            ready: updateOffer ?? null,
+            whatsNew: versionsWithNotes(localStorage, [updates.version, update?.version]),
+            onWhatsNew: showWhatsNew,
+          }}
           harness={{
             saved: presets.slice(1),
             onSave: (next) => {
@@ -1106,6 +1129,7 @@ export default function App() {
         {installing && <UpdatingOverlay state={updates.state} version={update?.version ?? null} />}
         {palette && <CommandPalette entries={palette} onClose={() => setPalette(null)} />}
         {shortcutsOpen && <ShortcutSheet available={availableActions().map((a) => a.id)} onClose={() => setShortcutsOpen(false)} />}
+        {whatsNew && <WhatsNew version={whatsNew.version} notes={whatsNew.notes} onClose={() => setWhatsNew(null)} />}
         <ModeGuide
           open={guideAt}
           mode={state.mode}
