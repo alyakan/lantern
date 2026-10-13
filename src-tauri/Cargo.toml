@@ -42,3 +42,5 @@ strip = true
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# The menu's accelerators are checked with the parser the menu itself uses (tauri's own copy of it).
+muda = "0.20"

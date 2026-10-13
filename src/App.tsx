@@ -24,7 +24,7 @@ import { stepFile, usePersistentState } from "./lib/layout";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyAppearance, type Appearance, type TextSize } from "./lib/theme";
 import { notify } from "./lib/notify";
-import { useShortcut } from "./lib/shortcuts";
+import { runAction, useAction } from "./lib/actions";
 import { activityStatus } from "./lib/status";
 import { failedCount } from "./lib/activity";
 import { scrollWithin } from "./lib/scrollWithin";
@@ -145,10 +145,10 @@ export default function App() {
     setReviewCollapsed(false);
     setSearchKey({ mode, key: Date.now() });
   };
-  useShortcut("p", () => openSearch("files"), !!state.folder);
-  useShortcut("f", () => openSearch("text"), !!state.folder, true);
+  useAction("find-file", () => openSearch("files"), !!state.folder);
+  useAction("search-files", () => openSearch("text"), !!state.folder);
   // ⌘F: find in the file the right pane shows (Monaco's find bar), from anywhere in the window.
-  useShortcut("f", () => void openFind(), !reviewCollapsed);
+  useAction("find-in-file", () => void openFind(), !reviewCollapsed);
   // Per chat: which failed steps the title bar's count was cleared for.
   const [clearedFailures, setClearedFailures] = useState<Record<string, string>>({});
   // A test run the chat asked the right pane to show.
@@ -201,6 +201,18 @@ export default function App() {
     });
     return () => {
       unlisten.then((stop) => stop());
+    };
+  }, []);
+  // A menu bar item runs its action (the same one its shortcut runs). A folder in Open Recent opens as the folder
+  // menu's pick does; the ref is read at the time of the pick, so it sees the chats as they are then.
+  const pickRecent = useRef<(path: string) => void>(() => {});
+  pickRecent.current = (path) => startFresh(path);
+  useEffect(() => {
+    const unlisten = api.onMenuAction((id) => runAction(id));
+    const unlistenRecent = api.onOpenRecent((path) => pickRecent.current(path));
+    return () => {
+      unlisten.then((stop) => stop());
+      unlistenRecent.then((stop) => stop());
     };
   }, []);
 
@@ -725,13 +737,9 @@ export default function App() {
     setReviewCollapsed(false);
   };
 
+  useAction("toggle-changes", () => setReviewCollapsed(!reviewCollapsed));
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.metaKey && e.key === "\\") {
-        e.preventDefault();
-        setReviewCollapsed(!reviewCollapsed);
-        return;
-      }
       if (reviewCollapsed || e.metaKey || e.ctrlKey || e.altKey || isTyping(document.activeElement)) return;
       const delta = e.key === "j" ? 1 : e.key === "k" ? -1 : 0;
       const next = delta && stepFile(shownFiles, state.selectedFile, delta);
@@ -874,7 +882,7 @@ export default function App() {
   // "How the modes work", open on a mode's page.
   const [guideAt, setGuideAt] = useState<GuideKey | null>(null);
   const [settingsAt, setSettingsAt] = useState<SettingsTab | null>(null);
-  useShortcut(",", () => setSettingsAt(settingsAt ?? "general"));
+  useAction("settings", () => setSettingsAt(settingsAt ?? "general"));
   // Installs the downloaded update and relaunches. The window says so (the overlay) until it does: closing every chat
   // and reopening is otherwise just a window that vanishes. Started from Settings, that closes first.
   const restartToUpdate = () => {

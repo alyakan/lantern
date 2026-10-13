@@ -5,6 +5,7 @@ pub mod files;
 pub mod git;
 pub mod history;
 pub mod mcp_config;
+pub mod menu;
 pub mod navigation;
 pub mod permission;
 pub mod pr;
@@ -175,7 +176,9 @@ async fn locate_claude(path_override: Option<String>) -> Result<String, String> 
 async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String, claude_path: String, folder: String, settings: Settings) -> Result<(), String> {
     let s = slot_for(&app, &state, &slot)?;
     let cfg = new_config(&state, &s, claude_path, folder, settings, None).await?;
-    launch(&app, &slot, &s, cfg, true).await
+    launch(&app, &slot, &s, cfg, true).await?;
+    menu::refresh_recent(&app).await;
+    Ok(())
 }
 
 /// Restarts a chat's claude on the same session (`--resume`), e.g. with a new permission mode or effort.
@@ -244,7 +247,7 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 
 #[tauri::command]
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
-async fn send_message(state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
+async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
     let s = state.slots.get(&slot)?;
     let mut session = s.session.lock().await;
     let claude = session.as_mut().ok_or("No Claude session is running")?;
@@ -254,6 +257,12 @@ async fn send_message(state: State<'_, AppState>, slot: String, text: String) ->
     if let Err(e) = claude.send(&text).await {
         s.changes.lock().unwrap().cancel_turn(turn);
         return Err(e);
+    }
+    // The folder's history is first written with its first message: Open Recent lists it from then on.
+    let folder = s.config.lock().unwrap().as_ref().map(|c| c.folder.display().to_string());
+    drop(session);
+    if folder.is_some_and(|f| !menu::lists(&app, &f)) {
+        menu::refresh_recent(&app).await;
     }
     Ok(turn)
 }
@@ -864,14 +873,10 @@ async fn open_session(
         .await
         .map_err(|e| e.to_string())??;
     launch(&app, &slot, &s, cfg, true).await?;
+    menu::refresh_recent(&app).await;
     s.changes.lock().unwrap().restore(replayed.edits, replayed.edits_before_last_turn);
     Ok(replayed.events)
 }
-
-/// A newer Lantern already downloaded and verified, for a window that started listening after it was found.
-/// The menu item's id: "Lantern ▸ Check for Updates…".
-const CHECK_FOR_UPDATES: &str = "check-for-updates";
-const QUIT: &str = "quit";
 
 #[tauri::command]
 fn update_status(updates: State<'_, updates::Updates>) -> Option<updates::UpdateInfo> {
@@ -938,42 +943,33 @@ pub fn run() {
             if updates::checks_enabled() {
                 tauri::async_runtime::spawn(updates::watch(app.handle().clone()));
             }
-            // The standard menu, with "Check for Updates…" under About: Mac users look for it there. (It's the standard
-            // menu, not a new one, so the Edit menu's copy and paste keep working.)
-            #[cfg(target_os = "macos")]
-            {
-                use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
-                let handle = app.handle();
-                let menu = Menu::default(handle)?;
-                if let Some(MenuItemKind::Submenu(app_menu)) = menu.items()?.into_iter().next() {
-                    app_menu.insert(&MenuItem::with_id(handle, CHECK_FOR_UPDATES, "Check for Updates…", true, None::<&str>)?, 1)?;
-                    app_menu.insert(&PredefinedMenuItem::separator(handle)?, 2)?;
-                    // The standard Quit ends the app without a close request, so the window's guard for unsaved edits
-                    // never hears of it. This one closes the window instead, which does.
-                    if let Some(quit) = app_menu.items()?.into_iter().last() {
-                        app_menu.remove(&quit)?;
-                    }
-                    app_menu.append(&MenuItem::with_id(handle, QUIT, "Quit Lantern", true, Some("CmdOrCtrl+Q"))?)?;
-                }
-                app.set_menu(menu)?;
-            }
+            // The menu bar (menu.rs), then its Open Recent list filled in from the history.
+            app.manage(menu::RecentMenu::default());
+            menu::refresh(app.handle(), Vec::new())?;
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move { menu::refresh_recent(&handle).await });
             Ok(())
         })
         .on_menu_event(|app, event| {
-            if event.id() == CHECK_FOR_UPDATES {
+            let id = event.id().0.as_str();
+            if id == menu::CHECK_FOR_UPDATES {
                 // The window opens Settings on its Updates page and starts a check.
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.set_focus();
                 }
                 let _ = app.emit("check-for-updates", ());
-            } else if event.id() == QUIT {
+            } else if id == menu::QUIT {
+                // The standard Quit ends the app without a close request, so the window's guard for unsaved edits never
+                // hears of it. This closes the window instead, which does.
                 match app.get_webview_window("main") {
                     Some(window) => {
                         let _ = window.close();
                     }
                     None => app.exit(0),
                 }
+            } else {
+                menu::chosen(app, id);
             }
         })
         .invoke_handler(tauri::generate_handler![

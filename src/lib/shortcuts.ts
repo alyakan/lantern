@@ -1,20 +1,10 @@
-import { useEffect, useRef } from "react";
+import { actionIdForKey, useAction } from "./actions";
 
 /**
- * Runs `handler` on ⌘+`key` (with Shift when `shift`; no other modifiers) anywhere in the window, while `enabled`.
- * Components register the shortcuts for the buttons they own, so a shortcut is off exactly when its button is.
+ * Runs `handler` on ⌘+`key` (with Shift when `shift`; no other modifiers) while `enabled`. The key is an action of the
+ * registry (src/lib/actions.ts), so the menu bar, the palette and the keyboard all run the same one. Components use
+ * this for the shortcuts of the buttons they own, so a shortcut is off exactly when its button is.
  */
 export function useShortcut(key: string, handler: () => void, enabled = true, shift = false) {
-  const latest = useRef(handler);
-  latest.current = handler;
-  useEffect(() => {
-    if (!enabled) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey !== shift || e.key.toLowerCase() !== key) return;
-      e.preventDefault();
-      latest.current();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [key, enabled, shift]);
+  useAction(actionIdForKey(key, shift), handler, enabled);
 }
