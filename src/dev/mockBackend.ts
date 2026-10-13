@@ -596,11 +596,12 @@ const mockServers: McpServer[] = [
 const MCP_TOOLS = ["mcp__claude_ai_Linear__list_issues", "mcp__claude_ai_Linear__create_issue", "mcp__claude_ai_Linear__update_issue", "mcp__claude_ai_Linear__list_projects"];
 
 const MOCK_SKILLS: SkillEntry[] = [
-  { name: "grill-me", kind: "skill", source: "user", plugin: null, path: "/Users/you/.claude/skills/grill-me/SKILL.md", description: "Interview the user relentlessly about a plan or design until reaching shared understanding." },
-  { name: "pr-description", kind: "skill", source: "user", plugin: null, path: "/Users/you/.claude/skills/pr-description/SKILL.md", description: "Write a short, human-sounding pull request description from the real commits." },
-  { name: "deploy", kind: "command", source: "project", plugin: null, path: `${FOLDER}/.claude/commands/deploy.md`, description: "Build, tag and deploy to staging" },
-  { name: "superpowers:brainstorming", kind: "skill", source: "plugin", plugin: "superpowers", path: "/Users/you/.claude/plugins/cache/x/superpowers/5.0/skills/brainstorming/SKILL.md", description: "You MUST use this before any creative work: explores intent, requirements and design." },
-  { name: "superpowers:systematic-debugging", kind: "skill", source: "plugin", plugin: "superpowers", path: "/Users/you/.claude/plugins/cache/x/superpowers/5.0/skills/systematic-debugging/SKILL.md", description: "Use when encountering any bug or test failure, before proposing fixes." },
+  { name: "grill-me", kind: "skill", source: "user", plugin: null, path: "/Users/you/.claude/skills/grill-me/SKILL.md", description: "Interview the user relentlessly about a plan or design until reaching shared understanding.", disabled: false },
+  { name: "pr-description", kind: "skill", source: "user", plugin: null, path: "/Users/you/.claude/skills/pr-description/SKILL.md", description: "Write a short, human-sounding pull request description from the real commits.", disabled: false },
+  { name: "deploy", kind: "command", source: "project", plugin: null, path: `${FOLDER}/.claude/commands/deploy.md`, description: "Build, tag and deploy to staging", disabled: false },
+  { name: "reviewer", kind: "agent", source: "user", plugin: null, path: "/Users/you/.claude/agents/reviewer.md", description: "Reviews a diff for correctness and clarity.", disabled: false },
+  { name: "superpowers:brainstorming", kind: "skill", source: "plugin", plugin: "superpowers", path: "/Users/you/.claude/plugins/cache/x/superpowers/5.0/skills/brainstorming/SKILL.md", description: "You MUST use this before any creative work: explores intent, requirements and design.", disabled: false },
+  { name: "superpowers:systematic-debugging", kind: "skill", source: "plugin", plugin: "superpowers", path: "/Users/you/.claude/plugins/cache/x/superpowers/5.0/skills/systematic-debugging/SKILL.md", description: "Use when encountering any bug or test failure, before proposing fixes.", disabled: false },
 ];
 
 function mockClaudeRequest(request: { subtype: string; serverName?: string; enabled?: boolean }): unknown {
@@ -628,7 +629,6 @@ function mockClaudeRequest(request: { subtype: string; serverName?: string; enab
       if (server) server.status = "needs-auth";
       return {};
     case "reload_plugins":
-    case "reload_skills":
       return { commands: COMMANDS.map((c) => ({ name: c.name, description: c.description, argumentHint: c.argument_hint })) };
   }
   return Promise.reject(`${request.subtype} isn't in the mock`);
@@ -805,6 +805,24 @@ export function installMockBackend() {
           const skill = MOCK_SKILLS.find((k) => k.path === a.path);
           return `---\nname: ${skill?.name}\n---\n# ${skill?.name}\n\n${skill?.description}\n\n## How it works\n\n1. Read the request.\n2. Ask one question at a time.\n3. Summarise what was decided.\n`;
         }
+        case "skill_create": {
+          const kind = a.kind as "skill" | "command";
+          const name = String(a.name);
+          const dir = a.scope === "project" ? `${FOLDER}/.claude` : "/Users/you/.claude";
+          const path = kind === "skill" ? `${dir}/skills/${name}/SKILL.md` : `${dir}/commands/${name}.md`;
+          if (MOCK_SKILLS.some((k) => k.path === path)) return Promise.reject(`There's already a ${kind} called ${name} there.`);
+          MOCK_SKILLS.push({ name, kind, source: a.scope === "project" ? "project" : "user", plugin: null, path, description: String(a.description), disabled: false });
+          return path;
+        }
+        case "skill_delete": {
+          const at = MOCK_SKILLS.findIndex((k) => k.path === a.path);
+          if (at < 0) return Promise.reject("That isn't a skill or command you can delete.");
+          MOCK_SKILLS.splice(at, 1);
+          return `/Users/you/.Trash/${String(a.path).split("/").slice(-2, -1)[0]}`;
+        }
+        case "skill_save":
+          if (!MOCK_SKILLS.some((k) => k.path === a.path)) return Promise.reject("That isn't a skill or command you can change.");
+          return { status: "saved", changed: a.text !== a.expected };
         case "mcp_add": {
           const spec = a.spec as { name: string; transport: string; target: string; scope: string };
           mockServers.unshift({ name: spec.name, status: "pending", config: spec.transport === "stdio" ? { type: "stdio", command: spec.target } : { type: spec.transport, url: spec.target }, scope: spec.scope });
@@ -814,6 +832,21 @@ export function installMockBackend() {
           const at = mockServers.findIndex((m) => m.name === a.name);
           if (at >= 0) mockServers.splice(at, 1);
           return `Removed MCP server ${String(a.name)}`;
+        }
+        case "mcp_form": {
+          const s = mockServers.find((m) => m.name === a.name && m.scope === a.scope);
+          if (!s) return Promise.reject(`${String(a.name)} isn't there any more. Reload the list.`);
+          const type = String(s.config?.type ?? "stdio");
+          const headers = Object.keys((s.config?.headers as object | undefined) ?? {});
+          return { name: s.name, transport: type === "stdio" ? "stdio" : type, target: String(s.config?.url ?? s.config?.command ?? ""), scope: s.scope, env: [], headers: headers.map((k) => `${k}: •••`) };
+        }
+        case "mcp_edit": {
+          const from = mockServers.findIndex((m) => m.name === a.fromName && m.scope === a.fromScope);
+          if (from < 0) return Promise.reject(`${String(a.fromName)} isn't there any more. Reload the list.`);
+          const spec = a.spec as { name: string; transport: string; target: string; scope: string };
+          mockServers.splice(from, 1);
+          mockServers.unshift({ name: spec.name, status: "pending", config: spec.transport === "stdio" ? { type: "stdio", command: spec.target } : { type: spec.transport, url: spec.target }, scope: spec.scope });
+          return `Saved ${spec.name}.`;
         }
         case "shell_input":
           mockReplies[`${String(a.slot)}:${String(a.id)}`]?.(String(a.text));

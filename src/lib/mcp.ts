@@ -61,12 +61,18 @@ export function describeConfig(s: McpServer): { label: string; value: string }[]
 /** An icon the server publishes, if it's on the web (https). */
 export const iconOf = (s: McpServer) => s.serverInfo?.icons?.find((i) => i.src.startsWith("https://"))?.src ?? null;
 
-/** Skills and commands grouped as Settings lists them: yours, the project's, then each plugin's. */
+/** Where each group sits; plugins come between claude.ai's synced skills and the agents. */
+const GROUP_RANK: Record<string, number> = { Yours: 0, "This project": 1, "From claude.ai": 2, Agents: 4 };
+
+/**
+ * Skills, commands and agents grouped as Settings lists them: yours, the project's, claude.ai's synced ones, each
+ * plugin's, then the agents (read-only, wherever they come from).
+ */
 export function groupSkills(entries: SkillEntry[]): { title: string; entries: SkillEntry[] }[] {
   const groups = new Map<string, SkillEntry[]>();
-  const order = (e: SkillEntry) => (e.source === "user" ? "Yours" : e.source === "project" ? "This project" : `Plugin · ${e.plugin}`);
+  const order = (e: SkillEntry) => (e.kind === "agent" ? "Agents" : e.source === "user" ? "Yours" : e.source === "project" ? "This project" : e.source === "synced" ? "From claude.ai" : `Plugin · ${e.plugin}`);
   for (const e of entries) groups.set(order(e), [...(groups.get(order(e)) ?? []), e]);
-  const rank = (t: string) => (t === "Yours" ? 0 : t === "This project" ? 1 : 2);
+  const rank = (t: string) => GROUP_RANK[t] ?? 3;
   return [...groups.entries()]
     .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
     .map(([title, list]) => ({ title, entries: list.sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "skill" ? -1 : 1)) }));
