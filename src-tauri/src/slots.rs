@@ -33,6 +33,8 @@ pub struct Slot {
     pub text_search: std::sync::atomic::AtomicU64,
     /// Commands the user runs from the chat box.
     pub shells: Arc<crate::shell::Shells>,
+    /// The process id of this chat's claude (0 before it has started): who the main agent's helper must descend from.
+    pub claude_pid: Arc<std::sync::atomic::AtomicU32>,
 }
 
 /// Slot ids come from the UI and end up in a socket path (macOS allows ~104 bytes), so they're short and plain.
@@ -58,7 +60,7 @@ impl Slots {
         }
         let socket = socket_dir.join(format!("lantern-{}-{id}.sock", std::process::id()));
         let bridge = PermissionBridge::start(socket, tagged(id, emit), folder_rules).map_err(|e| e.to_string())?;
-        let slot = Arc::new(Slot { session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default() });
+        let slot = Arc::new(Slot { session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid: Arc::default() });
         slots.insert(id.to_string(), slot.clone());
         Ok(slot)
     }
@@ -177,7 +179,7 @@ mod tests {
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: crate::args::HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), token: None },
+            helper: crate::args::HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default() },
             path_env: None,
         };
         let slots = Slots::default();

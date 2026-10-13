@@ -11,6 +11,7 @@ pub mod navigation;
 pub mod orchestra;
 pub mod permission;
 pub mod pr;
+pub mod process;
 pub mod session;
 pub mod shell;
 pub mod skills;
@@ -159,7 +160,14 @@ impl orchestra::Host for AppHost {
 fn enroll(state: &AppState, id: &str, slot: &Slot, role: &Role) {
     if *role == Role::Main {
         state.orchestra.register_main(id);
-        slot.bridge.set_orchestra(state.orchestra.handler(id.to_string()));
+        // A call is the main agent's only when the process making it is one its own claude started (its helper): the OS
+        // says who is on the other end of the socket, and a worker's shell can't pass for it.
+        let claude = slot.claude_pid.clone();
+        let from_this_chats_claude: permission::bridge::OrchestraAuth = Arc::new(move |caller| {
+            let main = claude.load(std::sync::atomic::Ordering::SeqCst);
+            main != 0 && process::descends_from(caller, main)
+        });
+        slot.bridge.set_orchestra(state.orchestra.handler(id.to_string()), from_this_chats_claude);
     } else {
         state.orchestra.forget(id);
     }
@@ -172,9 +180,7 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
 
 fn helper_config(slot: &Slot, role: Role) -> Result<HelperConfig, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    // The main agent's helper is started with the secret its bridge expects on orchestra calls; no one else has it.
-    let token = if role == Role::Main { Some(slot.bridge.orchestra_token()?) } else { None };
-    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role, token })
+    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role })
 }
 
 /// Stops the slot's running session (denying its pending prompts) and starts `cfg` in it.
@@ -197,6 +203,7 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, cfg: SessionConfig, clea
     let changes = slot.changes.clone();
     let on_edit: EditHook = Arc::new(move |path: &str, original: Option<String>| changes.lock().unwrap().record(path, original));
     let mut started = Session::spawn(&cfg, slots::tagged(id, emitter(app)), on_edit)?;
+    slot.claude_pid.store(started.pid(), std::sync::atomic::Ordering::SeqCst);
     started.initialize().await;
     *session = Some(started);
     *slot.config.lock().unwrap() = Some(cfg);

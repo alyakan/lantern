@@ -113,8 +113,6 @@ pub struct HelperConfig {
     pub socket: String,
     /// Only the main agent's helper offers the orchestra tools.
     pub role: Role,
-    /// The main agent's secret for them (see BridgeRequest::token); None for every other chat.
-    pub token: Option<String>,
 }
 
 /// A model alias or id: letters, digits, '-', '.', and a bracketed suffix like "[1m]". Never starts with '-'.
@@ -147,9 +145,10 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
     // step the server also has Debug's reproduce card.
     {
         let mut env = serde_json::json!({"LANTERN_SOCKET": helper.socket});
-        // What makes a helper the main agent's: its tools are offered only with this, and the bridge checks it on every call.
-        if let (Role::Main, Some(token)) = (&helper.role, &helper.token) {
-            env["LANTERN_TOKEN"] = token.clone().into();
+        // Which tools the helper lists. Not a secret (this is on claude's command line, where any process of the user
+        // reads it): the app checks who is calling, not what they say they are.
+        if helper.role == Role::Main {
+            env["LANTERN_ROLE"] = "main".into();
         }
         let cfg = serde_json::json!({"mcpServers": {"lantern": {
             "type": "stdio",
@@ -225,15 +224,17 @@ mod tests {
     }
 
     fn helper() -> HelperConfig {
-        HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Normal, token: None }
+        HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Normal }
     }
 
     #[test]
-    fn the_main_agent_gets_the_orchestra_tools_allowed_and_its_secret_in_the_helper_env() {
-        let main = HelperConfig { role: Role::Main, token: Some("s3cret".into()), ..helper() };
+    fn the_main_agent_gets_the_orchestra_tools_allowed_and_its_role_in_the_helper_env() {
+        let main = HelperConfig { role: Role::Main, ..helper() };
         let a = build_args(Mode::Ask, false, None, None, None, &main);
         let cfg: serde_json::Value = serde_json::from_str(value_after(&a, "--mcp-config").unwrap()).unwrap();
-        assert_eq!(cfg["mcpServers"]["lantern"]["env"]["LANTERN_TOKEN"], "s3cret");
+        assert_eq!(cfg["mcpServers"]["lantern"]["env"]["LANTERN_ROLE"], "main");
+        // No secret goes on claude's command line, where any process of the user can read it.
+        assert_eq!(cfg["mcpServers"]["lantern"]["env"].as_object().unwrap().len(), 2);
         let allowed = value_after(&a, "--allowedTools").unwrap();
         for tool in ["spawn_agent", "list_agents", "read_agent", "message_agent", "stop_agent", "propose_merge"] {
             assert!(allowed.split(',').any(|t| t == format!("mcp__lantern__{tool}")), "{tool}");
@@ -248,11 +249,10 @@ mod tests {
 
     #[test]
     fn a_worker_is_named_in_its_prompt_and_cannot_spawn_agents() {
-        // Even a secret handed to a worker's config by mistake isn't passed on: only the main role carries it.
-        let worker = HelperConfig { role: Role::Worker { name: "login-form".into() }, token: Some("s3cret".into()), ..helper() };
+        let worker = HelperConfig { role: Role::Worker { name: "login-form".into() }, ..helper() };
         let a = build_args(Mode::Auto, false, None, None, None, &worker);
         let cfg: serde_json::Value = serde_json::from_str(value_after(&a, "--mcp-config").unwrap()).unwrap();
-        assert!(cfg["mcpServers"]["lantern"]["env"].get("LANTERN_TOKEN").is_none());
+        assert!(cfg["mcpServers"]["lantern"]["env"].get("LANTERN_ROLE").is_none());
         assert!(!a.iter().any(|x| x == "--allowedTools"));
         let prompt = value_after(&a, "--append-system-prompt").unwrap();
         assert!(prompt.contains("named \"login-form\"") && prompt.contains("never merge, push or switch branches"));
