@@ -1089,6 +1089,14 @@ label.mcp-scope-option { flex-direction: row; align-items: flex-start; gap: 8px;
 .skill-preview-head button { margin-left: auto; font-size: 12px; white-space: nowrap; flex: none; }
 .skill-preview-head .skill-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .skill-preview-body { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; font-size: 12.5px; user-select: text; cursor: auto; }
+.skill-origin { padding: 5px 12px 0; }
+.skill-confirm { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--bg-subtle); font-size: 12.5px; overflow-wrap: anywhere; }
+.skill-confirm code { font-family: var(--mono); font-size: 11.5px; }
+.skill-confirm-actions, .skill-editor-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.skill-editor { flex: 1; min-height: 240px; margin: 8px 12px 0; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: 12px/1.5 var(--mono); resize: none; outline: none; user-select: text; }
+.skill-editor:focus { border-color: var(--faint); }
+.skill-editor-actions { padding: 8px 12px; }
+.skills-actions { display: flex; gap: 6px; flex: none; margin-top: 4px; }
 
 /* Harness: the chip under the chat box and Settings → Harness. */
 .model-button.harness-on { color: var(--text-2); }

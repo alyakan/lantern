@@ -33,6 +33,13 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ["claudeRequest", () => api.claudeRequest("s1", { subtype: "mcp_status" }), ["claude_request", { slot: "s1", request: { subtype: "mcp_status" } }]],
   ["skillIndex", () => api.skillIndex(null), ["skill_index", { slot: null }]],
   ["readSkill", () => api.readSkill(null, "/skills/a/SKILL.md"), ["read_skill", { slot: null, path: "/skills/a/SKILL.md" }]],
+  [
+    "skillCreate",
+    () => api.skillCreate("s1", "command", "project", "ship", "Ship it"),
+    ["skill_create", { slot: "s1", kind: "command", scope: "project", name: "ship", description: "Ship it" }],
+  ],
+  ["skillDelete", () => api.skillDelete("s1", "/skills/a/SKILL.md"), ["skill_delete", { slot: "s1", path: "/skills/a/SKILL.md" }]],
+  ["skillSave", () => api.skillSave("s1", "/skills/a/SKILL.md", "new", "old"), ["skill_save", { slot: "s1", path: "/skills/a/SKILL.md", text: "new", expected: "old" }]],
   ["mcpAdd", () => api.mcpAdd("s1", spec), ["mcp_add", { slot: "s1", spec }]],
   ["mcpRemove", () => api.mcpRemove("s1", "linear", null), ["mcp_remove", { slot: "s1", name: "linear", scope: null }]],
   ["shellInput", () => api.shellInput("s1", "r1", "y\r"), ["shell_input", { slot: "s1", id: "r1", text: "y\r" }]],

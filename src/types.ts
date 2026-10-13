@@ -106,11 +106,14 @@ export interface McpServer {
 /** A skill or custom command found on disk (see src-tauri/src/skills.rs). */
 export interface SkillEntry {
   name: string;
-  kind: "skill" | "command";
-  source: "user" | "project" | "plugin";
+  kind: "skill" | "command" | "agent";
+  /** "synced" is claude.ai's skills, kept in ~/.claude/skills/synced. */
+  source: "user" | "project" | "plugin" | "synced";
   plugin: string | null;
   path: string;
   description: string;
+  /** The plugin it comes from is turned off in settings, so claude doesn't load it. */
+  disabled: boolean;
 }
 
 /** A server to add with `claude mcp add`. */

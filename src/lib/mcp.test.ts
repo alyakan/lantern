@@ -33,13 +33,28 @@ describe("mcp helpers", () => {
   });
 
   it("groups skills: yours, the project's, then each plugin, skills before commands", () => {
-    const e = (name: string, source: SkillEntry["source"], kind: SkillEntry["kind"] = "skill", plugin: string | null = null): SkillEntry => ({ name, source, kind, plugin, path: "", description: "" });
+    const e = (name: string, source: SkillEntry["source"], kind: SkillEntry["kind"] = "skill", plugin: string | null = null): SkillEntry => ({ name, source, kind, plugin, path: "", description: "", disabled: false });
     const groups = groupSkills([e("z:b", "plugin", "skill", "z"), e("deploy", "project", "command"), e("b", "user", "command"), e("a", "user"), e("a:c", "plugin", "skill", "a")]);
     expect(groups.map((g) => [g.title, g.entries.map((x) => x.name)])).toEqual([
       ["Yours", ["a", "b"]],
       ["This project", ["deploy"]],
       ["Plugin · a", ["a:c"]],
       ["Plugin · z", ["z:b"]],
+    ]);
+  });
+
+  it("puts claude.ai's synced skills and every agent in their own groups, last", () => {
+    const e = (name: string, over: Partial<SkillEntry>): SkillEntry => ({ name, source: "user", kind: "skill", plugin: null, path: "", description: "", disabled: false, ...over });
+    const groups = groupSkills([
+      e("reviewer", { kind: "agent" }),
+      e("figma:scout", { kind: "agent", source: "plugin", plugin: "figma" }),
+      e("anthropic-skills:docs", { source: "synced" }),
+      e("a", {}),
+    ]);
+    expect(groups.map((g) => [g.title, g.entries.map((x) => x.name)])).toEqual([
+      ["Yours", ["a"]],
+      ["From claude.ai", ["anthropic-skills:docs"]],
+      ["Agents", ["figma:scout", "reviewer"]],
     ]);
   });
 

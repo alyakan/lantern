@@ -4,6 +4,7 @@ import { api } from "../api";
 import type { McpServer, McpServerSpec, SkillEntry, SlashCommand } from "../types";
 import { describeConfig, displayName, groupSkills, iconOf, removable, sourceOf, statusOf, toolsOf, withoutFrontmatter } from "../lib/mcp";
 import { Md } from "./Md";
+import { NewSkillForm } from "./SkillForm";
 import { HarnessSettings, type HarnessSettingsProps } from "./HarnessSettings";
 import { UpdatesPage, type UpdatesPageProps } from "./UpdatesPage";
 
@@ -450,57 +451,158 @@ function SkillsPage({ slot, live, commands, onCommands }: PageProps) {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<SkillEntry | null>(null);
+  // The file as it is on disk (frontmatter and all), what an edit is checked against; the preview shows it without.
+  const [raw, setRaw] = useState<string | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [version, setVersion] = useState(0);
   const [reloading, setReloading] = useState(false);
+  const [adding, setAdding] = useState<"skill" | "command" | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  // Whether the last save was refused because the file changed on disk: then the text can be kept or discarded.
+  const [changedOnDisk, setChangedOnDisk] = useState(false);
+  // The file the preview is showing now: an edit that lands after the pick changed is dropped, not shown under the new one.
+  const shownPath = useRef<string | null>(null);
 
-  const load = () => api.skillIndex(slot).then(setEntries, (e) => setError(errText(e)));
+  const load = () =>
+    api.skillIndex(slot).then(
+      (list) => {
+        setEntries(list);
+        return list;
+      },
+      (e) => {
+        setError(errText(e));
+        return null;
+      },
+    );
   useEffect(() => {
     void load();
   }, [slot]);
   useEffect(() => {
+    shownPath.current = picked?.path ?? null;
     setPreview(null);
+    setRaw(null);
+    setEditing(false);
+    setConfirming(false);
+    setActionError(null);
+    setChangedOnDisk(false);
     // A read of the skill picked before this one lands in its own time: it's dropped rather than shown under this skill.
     let current = true;
     if (picked) {
       api.readSkill(slot, picked.path).then(
-        (t) => current && setPreview(withoutFrontmatter(t)),
+        (t) => {
+          if (!current) return;
+          setRaw(t);
+          setPreview(withoutFrontmatter(t));
+        },
         (e) => current && setPreview(`Couldn't read it: ${errText(e)}`),
       );
     }
     return () => {
       current = false;
     };
-  }, [picked?.path]);
+  }, [picked?.path, version]);
 
-  const reload = async () => {
+  const reload = async (): Promise<SkillEntry[] | null> => {
     setReloading(true);
     try {
       if (slot && live) {
         const r = await api.claudeRequest<{ commands?: { name: string; description?: string; argumentHint?: string }[] }>(slot, { subtype: "reload_plugins" });
         if (r?.commands && onCommands) onCommands(r.commands.map((c) => ({ name: c.name, description: c.description ?? "", argument_hint: c.argumentHint ?? "" })));
       }
-      await load();
+      return await load();
     } catch (e) {
       setError(errText(e));
+      return null;
     } finally {
       setReloading(false);
     }
   };
 
+  // Only your skills and commands, and the project's, can be changed; a plugin's, claude.ai's and agents are read-only.
+  const owned = !!picked && picked.kind !== "agent" && (picked.source === "user" || picked.source === "project") && raw !== null;
+  const origin = (e: SkillEntry) =>
+    e.kind === "agent" ? "An agent, read-only" : e.source === "user" ? "Your ~/.claude folder" : e.source === "project" ? "This project's .claude folder" : e.source === "synced" ? "From claude.ai, read-only" : `From plugin ${e.plugin}, read-only`;
+
+  const created = async (path: string) => {
+    setAdding(null);
+    const list = await reload();
+    const made = list?.find((e) => e.path === path);
+    if (made) setPicked(made);
+  };
+
+  const save = async () => {
+    if (!picked || raw === null) return;
+    const path = picked.path;
+    setSaving(true);
+    setActionError(null);
+    setChangedOnDisk(false);
+    try {
+      const r = await api.skillSave(slot, path, draft, raw);
+      if (shownPath.current !== path) return;
+      if (r.status === "saved") {
+        setRaw(draft);
+        setPreview(withoutFrontmatter(draft));
+        setEditing(false);
+        await reload();
+      } else {
+        setChangedOnDisk(true);
+        setActionError(
+          r.current === null
+            ? "It's gone from disk, so nothing was saved. Your text is still here: copy it out before you leave this file."
+            : "It changed on disk since you opened it, so nothing was saved. Your text is still here, or discard it to see the file as it is now.",
+        );
+      }
+    } catch (e) {
+      if (shownPath.current === path) setActionError(errText(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async (entry: SkillEntry) => {
+    setSaving(true);
+    setActionError(null);
+    try {
+      await api.skillDelete(slot, entry.path);
+      setPicked(null);
+      await reload();
+    } catch (e) {
+      setActionError(errText(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const q = query.trim().toLowerCase();
-  const shown = (entries ?? []).filter((e) => !q || e.name.toLowerCase().includes(q) || e.description.toLowerCase().includes(q));
-  const loaded = (e: SkillEntry) => commands.length === 0 || commands.some((c) => c.name === e.name);
+  const matches = (entries ?? []).filter((e) => !q || e.name.toLowerCase().includes(q) || e.description.toLowerCase().includes(q));
+  // Agents aren't slash commands, so claude's list can't say whether it has them; only skills and commands are checked.
+  const loaded = (e: SkillEntry) => e.kind === "agent" || commands.length === 0 || commands.some((c) => c.name === e.name);
+  // Where the folder a skill lives in is: the SKILL.md's folder, or a command's file itself.
+  const trashPath = picked?.kind === "skill" ? picked.path.replace(/\/SKILL\.md$/, "") : picked?.path;
   return (
     <>
       <div className="settings-head">
         <div>
           <h2 className="mode-guide-title">Skills</h2>
-          <p className="mode-guide-summary">What Claude can do on request: type / in the chat box to use one. Skills and commands live in your ~/.claude folder, the project's .claude folder, or come with plugins.</p>
+          <p className="mode-guide-summary">What Claude can do on request: type / in the chat box to use one. Yours are in ~/.claude, the project's in its .claude folder; plugins and claude.ai's come read-only, and so do agents.</p>
         </div>
-        <button onClick={() => void reload()} disabled={reloading} title="Pick up skills and plugins added since the chat started">
-          {reloading ? "Reloading…" : "Reload"}
-        </button>
+        <div className="skills-actions">
+          <button className="primary" onClick={() => setAdding(adding === "skill" ? null : "skill")} aria-expanded={adding === "skill"}>
+            New skill
+          </button>
+          <button onClick={() => setAdding(adding === "command" ? null : "command")} aria-expanded={adding === "command"}>
+            New command
+          </button>
+          <button onClick={() => void reload()} disabled={reloading} title="Pick up skills and plugins added since the chat started">
+            {reloading ? "Reloading…" : "Reload"}
+          </button>
+        </div>
       </div>
+      {adding && <NewSkillForm slot={slot} kind={adding} onCreated={(path) => void created(path)} onCancel={() => setAdding(null)} />}
       <input className="settings-search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter skills and commands" aria-label="Filter skills and commands" />
       {error && (
         <div className="settings-error" role="alert">
@@ -509,8 +611,8 @@ function SkillsPage({ slot, live, commands, onCommands }: PageProps) {
       )}
       <div className="skills-split">
         <div className="skills-list">
-          {entries?.length === 0 && <Empty title="" text="No skills yet. Add a folder with a SKILL.md to ~/.claude/skills, or install a plugin." />}
-          {groupSkills(shown).map((g) => (
+          {entries?.length === 0 && <Empty title="" text="No skills yet. Make one with New skill or New command, or install a plugin that brings its own." />}
+          {groupSkills(matches).map((g) => (
             <section key={g.title} className="skills-group">
               <h3 className="mode-guide-group-title">{g.title}</h3>
               <ul>
@@ -519,7 +621,11 @@ function SkillsPage({ slot, live, commands, onCommands }: PageProps) {
                     <button className={`skill-row${picked?.name === e.name ? " active" : ""}`} onClick={() => setPicked(e)}>
                       <span className="skill-name">/{e.name}</span>
                       <span className={`skill-kind ${e.kind}`}>{e.kind}</span>
-                      {!loaded(e) && <span className="skill-kind off" title="Claude Code didn't load it in this chat (a plugin that's off here?)">not loaded</span>}
+                      {e.disabled ? (
+                        <span className="skill-kind off" title="Its plugin is turned off in Claude Code's settings, so claude doesn't load it">turned off</span>
+                      ) : (
+                        !loaded(e) && <span className="skill-kind off" title="Claude Code didn't load it in this chat (a plugin that's off here?)">not loaded</span>
+                      )}
                       <span className="skill-desc">{e.description}</span>
                     </button>
                   </li>
@@ -532,10 +638,77 @@ function SkillsPage({ slot, live, commands, onCommands }: PageProps) {
           <aside className="skill-preview" aria-label={`/${picked.name}`}>
             <div className="skill-preview-head">
               <span className="skill-name">/{picked.name}</span>
-              <button onClick={() => void revealItemInDir(picked.path)}>Show in Finder</button>
+              {!editing && !confirming && <button onClick={() => void revealItemInDir(picked.path)}>Show in Finder</button>}
+              {owned && !editing && !confirming && (
+                <>
+                  <button
+                    onClick={() => {
+                      setDraft(raw ?? "");
+                      setEditing(true);
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button className="danger" onClick={() => setConfirming(true)}>
+                    Delete
+                  </button>
+                </>
+              )}
             </div>
-            {/* A skill's text is someone else's, not Claude's: its pictures aren't loaded. */}
-            <div className="skill-preview-body msg assistant">{preview === null ? <span className="settings-muted">Loading…</span> : <Md images={false}>{preview}</Md>}</div>
+            <div className="skill-origin settings-muted">{origin(picked)}</div>
+            {actionError && (
+              <div className="settings-error" role="alert">
+                {actionError}
+              </div>
+            )}
+            {confirming && (
+              <div className="skill-confirm" role="alertdialog" aria-label={`Delete /${picked.name}`}>
+                <div>
+                  <code>{trashPath}</code> goes to the Trash. You can put it back from there.
+                </div>
+                <div className="skill-confirm-actions">
+                  <button onClick={() => setConfirming(false)} disabled={saving}>
+                    Cancel
+                  </button>
+                  <button className="danger" onClick={() => void remove(picked)} disabled={saving}>
+                    Move to Trash
+                  </button>
+                </div>
+              </div>
+            )}
+            {editing ? (
+              <>
+                <textarea className="skill-editor" aria-label={`Edit /${picked.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck={false} />
+                <div className="skill-editor-actions">
+                  <button
+                    onClick={() => {
+                      setEditing(false);
+                      setDraft("");
+                      setActionError(null);
+                    }}
+                    disabled={saving}
+                  >
+                    Cancel
+                  </button>
+                  {changedOnDisk && (
+                    <button
+                      onClick={() => {
+                        // Discarding reads the file as it is now, so the next save is checked against that.
+                        setVersion((v) => v + 1);
+                      }}
+                    >
+                      Discard my text
+                    </button>
+                  )}
+                  <button className="primary" onClick={() => void save()} disabled={saving}>
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              /* A skill's text is someone else's, not Claude's: its pictures aren't loaded. */
+              <div className="skill-preview-body msg assistant">{preview === null ? <span className="settings-muted">Loading…</span> : <Md images={false}>{preview}</Md>}</div>
+            )}
           </aside>
         )}
       </div>

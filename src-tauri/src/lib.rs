@@ -251,9 +251,9 @@ async fn send_message(state: State<'_, AppState>, slot: String, text: String) ->
     Ok(turn)
 }
 
-/// The control requests Settings may send to a chat's claude: MCP servers' status and actions, and reloading
-/// skills and plugins. Anything else is refused.
-const SETTINGS_REQUESTS: &[&str] = &["mcp_status", "mcp_reconnect", "mcp_toggle", "mcp_authenticate", "mcp_oauth_callback_url", "mcp_clear_auth", "reload_skills", "reload_plugins"];
+/// The control requests Settings may send to a chat's claude: MCP servers' status and actions, and reloading plugins
+/// (which is how claude picks up skills, commands and agents too). Anything else is refused.
+const SETTINGS_REQUESTS: &[&str] = &["mcp_status", "mcp_reconnect", "mcp_toggle", "mcp_authenticate", "mcp_oauth_callback_url", "mcp_clear_auth", "reload_plugins"];
 
 /// Sends one of SETTINGS_REQUESTS to the chat's claude and returns its reply.
 #[tauri::command]
@@ -290,6 +290,30 @@ async fn read_skill(state: State<'_, AppState>, slot: Option<String>, path: Stri
     let folder = slot.and_then(|id| state.slots.get(&id).ok()).and_then(|s| s.folder().ok());
     let config = skills::config_dir().ok_or("HOME is not set")?;
     tauri::async_runtime::spawn_blocking(move || skills::read(&config, folder.as_deref(), std::path::Path::new(&path))).await.map_err(|e| e.to_string())?
+}
+
+/// Makes a skill or command in yours or the chat folder's project (see skills::create). Returns its file.
+#[tauri::command]
+async fn skill_create(state: State<'_, AppState>, slot: Option<String>, kind: String, scope: String, name: String, description: String) -> Result<String, String> {
+    let folder = slot.and_then(|id| state.slots.get(&id).ok()).and_then(|s| s.folder().ok());
+    let config = skills::config_dir().ok_or("HOME is not set")?;
+    tauri::async_runtime::spawn_blocking(move || skills::create(&config, folder.as_deref(), &kind, &scope, &name, &description).map(|p| p.display().to_string())).await.map_err(|e| e.to_string())?
+}
+
+/// Moves a skill's folder or a command's file to the Trash (see skills::delete). Returns where it went.
+#[tauri::command]
+async fn skill_delete(state: State<'_, AppState>, slot: Option<String>, path: String) -> Result<String, String> {
+    let folder = slot.and_then(|id| state.slots.get(&id).ok()).and_then(|s| s.folder().ok());
+    let config = skills::config_dir().ok_or("HOME is not set")?;
+    tauri::async_runtime::spawn_blocking(move || skills::delete(&config, folder.as_deref(), std::path::Path::new(&path)).map(|p| p.display().to_string())).await.map_err(|e| e.to_string())?
+}
+
+/// Saves a skill or command file's text, if it's still what Settings read (see skills::save).
+#[tauri::command]
+async fn skill_save(state: State<'_, AppState>, slot: Option<String>, path: String, text: String, expected: String) -> Result<files::Written, String> {
+    let folder = slot.and_then(|id| state.slots.get(&id).ok()).and_then(|s| s.folder().ok());
+    let config = skills::config_dir().ok_or("HOME is not set")?;
+    tauri::async_runtime::spawn_blocking(move || skills::save(&config, folder.as_deref(), std::path::Path::new(&path), &text, &expected)).await.map_err(|e| e.to_string())?
 }
 
 /// A server to add with `claude mcp add`.
@@ -846,6 +870,9 @@ pub fn run() {
             claude_request,
             skill_index,
             read_skill,
+            skill_create,
+            skill_delete,
+            skill_save,
             mcp_add,
             mcp_remove,
             shell_input,

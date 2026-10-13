@@ -122,7 +122,7 @@ describe("MessageInput", () => {
 
   describe("anywhere in the message", () => {
     const withSkills = [...commands, { name: "grill-me", description: "Interview the user (user)", argument_hint: "" }, { name: "mcp__github__review", description: "Review a PR (MCP)", argument_hint: "" }];
-    const index = [{ name: "grill-me", kind: "skill" as const, source: "user" as const, plugin: null, path: "/h/SKILL.md", description: "Interview the user" }];
+    const index = [{ name: "grill-me", kind: "skill" as const, source: "user" as const, plugin: null, path: "/h/SKILL.md", description: "Interview the user", disabled: false }];
     const type = (box: HTMLElement, value: string) => {
       fireEvent.change(box, { target: { value, selectionStart: value.length } });
     };

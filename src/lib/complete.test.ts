@@ -31,13 +31,26 @@ describe("describeCommands", () => {
       { name: "superpowers:brainstorming", description: "Explore (plugin:superpowers)", argument_hint: "" },
       { name: "mcp__claude_ai_Linear__triage", description: "Triage (MCP)", argument_hint: "" },
     ];
-    const index = [{ name: "grill-me", kind: "skill" as const, source: "user" as const, plugin: null, path: "", description: "" }];
+    const index = [{ name: "grill-me", kind: "skill" as const, source: "user" as const, plugin: null, path: "", description: "", disabled: false }];
     expect(describeCommands(commands, index).map((c) => [c.name, c.kind, c.source, c.description])).toEqual([
       ["clear", "command", "Built-in", "Clear history"],
       ["grill-me", "skill", "Yours", "Interview the user"],
       ["deploy", "command", "Project", "Ship it"],
       ["superpowers:brainstorming", "skill", "superpowers", "Explore"],
       ["mcp__claude_ai_Linear__triage", "mcp", "Linear", "Triage"],
+    ]);
+  });
+
+  it("doesn't let an agent stand in for a skill of the same name, and labels claude.ai's skills", () => {
+    const commands = [{ name: "review", description: "Review (user)", argument_hint: "" }, { name: "docs", description: "Docs", argument_hint: "" }];
+    const index = [
+      { name: "review", kind: "agent" as const, source: "user" as const, plugin: null, path: "", description: "", disabled: false },
+      { name: "review", kind: "command" as const, source: "user" as const, plugin: null, path: "", description: "", disabled: false },
+      { name: "docs", kind: "skill" as const, source: "synced" as const, plugin: null, path: "", description: "", disabled: false },
+    ];
+    expect(describeCommands(commands, index).map((c) => [c.name, c.kind, c.source])).toEqual([
+      ["review", "command", "Yours"],
+      ["docs", "skill", "claude.ai"],
     ]);
   });
 
