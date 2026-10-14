@@ -57,20 +57,21 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   [
     "getFileDiff",
     () => api.getFileDiff("s1", "a.ts"),
-    ["get_file_diff", { slot: "s1", path: "a.ts", scope: "session", turn: null, toTurn: null, pr: null }],
+    ["get_file_diff", { slot: "s1", path: "a.ts", scope: "session", turn: null, toTurn: null, pr: null, base: null }],
   ],
   [
     "getFileDiff (a turn range)",
     () => api.getFileDiff("s1", "a.ts", "turn", 2, 4),
-    ["get_file_diff", { slot: "s1", path: "a.ts", scope: "turn", turn: 2, toTurn: 4, pr: null }],
+    ["get_file_diff", { slot: "s1", path: "a.ts", scope: "turn", turn: 2, toTurn: 4, pr: null, base: null }],
   ],
-  ["changeSummary", () => api.changeSummary("s1"), ["change_summary", { slot: "s1", scope: "session", turn: null, toTurn: null, pr: null, hints: null }]],
+  ["changeSummary", () => api.changeSummary("s1"), ["change_summary", { slot: "s1", scope: "session", turn: null, toTurn: null, pr: null, hints: null, base: null }]],
   [
     "changeSummary (a PR)",
     () => api.changeSummary("s1", "pr", null, null, 128, ["a.ts"]),
-    ["change_summary", { slot: "s1", scope: "pr", turn: null, toTurn: null, pr: 128, hints: ["a.ts"] }],
+    ["change_summary", { slot: "s1", scope: "pr", turn: null, toTurn: null, pr: 128, hints: ["a.ts"], base: null }],
   ],
-  ["branchReview", () => api.branchReview("s1", ["a.ts"]), ["branch_review", { slot: "s1", hints: ["a.ts"] }]],
+  ["branchReview", () => api.branchReview("s1", ["a.ts"]), ["branch_review", { slot: "s1", hints: ["a.ts"], base: null }]],
+  ["branchReview (stacked)", () => api.branchReview("s1", [], "feat/core"), ["branch_review", { slot: "s1", hints: [], base: "feat/core" }]],
   ["respondPermission", () => api.respondPermission("s1", "req-1", true), ["respond_permission", { slot: "s1", requestId: "req-1", allow: true, message: null, updatedInput: null }]],
   [
     "respondPermission (answers)",

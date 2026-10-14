@@ -9,7 +9,10 @@ export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
 /** A local branch under review: its commits (newest first) since it left `base`. */
 export interface BranchReview {
   branch: string;
+  /** What it is compared with: the branch it is stacked on, or the default branch. */
   base: string;
+  /** Why it isn't the base the review named, when that one couldn't be found. */
+  note?: string;
   commits: { sha: string; subject: string; author: string; at: number }[];
 }
 
@@ -75,12 +78,14 @@ export const api = {
   restartSession: (slot: string, mode: Mode, effort: string | null, autoApprove: boolean | null = null) => invoke<void>("restart_session", { slot, mode, effort, autoApprove }),
   /** `turn`: with the "turn" scope, which turn (the latest when null); `toTurn`: the end of a range of turns from it. */
   /** `pr`: with the "pr" scope, the pull request's number. */
-  getFileDiff: (slot: string, path: string, scope: ChangeScope = "session", turn: number | null = null, toTurn: number | null = null, pr: number | null = null) =>
-    invoke<FileDiff>("get_file_diff", { slot, path, scope, turn, toTurn, pr }),
+  /** `base`: with the "branch" scope, the branch it is compared with (null: Lantern works it out). */
+  getFileDiff: (slot: string, path: string, scope: ChangeScope = "session", turn: number | null = null, toTurn: number | null = null, pr: number | null = null, base: string | null = null) =>
+    invoke<FileDiff>("get_file_diff", { slot, path, scope, turn, toTurn, pr, base }),
   /** `hints`: with "pr" and "branch", the reviewed files, which pick the repository in a folder that holds several. */
-  changeSummary: (slot: string, scope: ChangeScope = "session", turn: number | null = null, toTurn: number | null = null, pr: number | null = null, hints: string[] | null = null) =>
-    invoke<ChangedFile[]>("change_summary", { slot, scope, turn, toTurn, pr, hints }),
-  branchReview: (slot: string, hints: string[]) => invoke<BranchReview>("branch_review", { slot, hints }),
+  changeSummary: (slot: string, scope: ChangeScope = "session", turn: number | null = null, toTurn: number | null = null, pr: number | null = null, hints: string[] | null = null, base: string | null = null) =>
+    invoke<ChangedFile[]>("change_summary", { slot, scope, turn, toTurn, pr, hints, base }),
+  /** `base`: the branch the review says it is stacked on; null lets Lantern work it out. */
+  branchReview: (slot: string, hints: string[], base: string | null = null) => invoke<BranchReview>("branch_review", { slot, hints, base }),
   /** `message` goes back to Claude: a reason, or the user's note on a reproduce request. */
   /** `updatedInput`: on allow, the tool's input as it should run (AskUserQuestion's, with the user's answers). */
   respondPermission: (slot: string, requestId: string, allow: boolean, message: string | null = null, updatedInput: Record<string, unknown> | null = null) =>

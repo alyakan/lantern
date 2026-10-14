@@ -315,7 +315,7 @@ function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr,
         </button>
       </div>
       <Suspense fallback={<div className="empty">Loading diff…</div>}>
-        <FullDiff path={current.path} refreshKey={refreshKey} layout={layout} scope={scope} turn={scope === "turn" ? (stepRange?.from ?? null) : null} toTurn={scope === "turn" ? (stepRange?.to ?? null) : null} pr={scope === "pr" ? (pr ?? null) : null} reveal={diffLine?.path === current.path ? ({ line: diffLine.line, key: diffLine.key } satisfies Reveal) : null} />
+        <FullDiff path={current.path} refreshKey={refreshKey} layout={layout} scope={scope} turn={scope === "turn" ? (stepRange?.from ?? null) : null} toTurn={scope === "turn" ? (stepRange?.to ?? null) : null} pr={scope === "pr" ? (pr ?? null) : null} base={scope === "branch" ? (branch?.base ?? null) : null} reveal={diffLine?.path === current.path ? ({ line: diffLine.line, key: diffLine.key } satisfies Reveal) : null} />
       </Suspense>
     </>
   );
@@ -407,6 +407,7 @@ function BranchCommits({ review }: { review: BranchReview }) {
           {n} commit{n === 1 ? "" : "s"} on <span className="branch-commits-name">{review.branch}</span> since {review.base}
         </span>
       </button>
+      {review.note && <div className="branch-commits-note">{review.note}</div>}
       {open && (
         <ol className="branch-commits-list">
           {review.commits.map((c) => (

@@ -91,6 +91,21 @@ export function prNumberOf(items: readonly { type: string; text?: string }[]): n
 }
 
 /**
+ * The branch a reviewed local branch is stacked on, as the review's Frame names it: a line `Base: feat/core` (also
+ * `**Base:** \`feat/core\``). The latest Frame that names one wins; null when none does (Lantern then works it out).
+ */
+export function baseBranchOf(items: readonly { type: string; text?: string }[]): string | null {
+  const LINE = /^\s*(?:[-*]\s*)?(?:\*\*)?Base:?(?:\*\*)?:?\s*`?([A-Za-z0-9._/-]+)`?\s*$/im;
+  let found: string | null = null;
+  for (const it of items) {
+    if (it.type !== "assistant" || !it.text || parseHeading(it.text)?.kind !== "frame") continue;
+    const m = LINE.exec(it.text);
+    if (m) found = m[1];
+  }
+  return found;
+}
+
+/**
  * What says which repository a review is in, when the folder holds several: the reviewed files' paths (from their
  * pages), and absolute paths Claude used in its steps (`git -C /…/repo log`, a Read of a file).
  */

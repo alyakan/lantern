@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RevertOutcome } from "./api";
-import { prNumberOf, reviewHints } from "./lib/review";
+import { baseBranchOf, prNumberOf, reviewHints } from "./lib/review";
 import { openFind } from "./lib/editorFind";
 import { StepsIntro } from "./components/StepsIntro";
 import { windowFocused } from "./lib/windowFocus";
@@ -857,6 +857,8 @@ export default function App() {
   const reviewBranch = reviewing && reviewPr === null;
   const hints = reviewing ? reviewHints(state.items, state.folder) : [];
   const hintKey = hints.join("\n");
+  // A local branch stacked on another: the base the review's Frame names (null: the backend works it out).
+  const reviewBase = reviewing ? baseBranchOf(state.items) : null;
   const scope: ChangeScope = (changeScope === "pr" && reviewPr === null) || (changeScope === "branch" && !reviewBranch) ? "session" : changeScope;
   const prPicked = useRef<string | null>(null);
   useEffect(() => {
@@ -870,15 +872,15 @@ export default function App() {
   useEffect(() => {
     if (scope !== "branch" || !state.folder) return;
     let live = true;
-    const key = `${active}:${hintKey}`;
-    Promise.all([api.branchReview(active, hints), api.changeSummary(active, "branch", null, null, null, hints)]).then(
+    const key = `${active}:${hintKey}:${reviewBase ?? ""}`;
+    Promise.all([api.branchReview(active, hints, reviewBase), api.changeSummary(active, "branch", null, null, null, hints, reviewBase)]).then(
       ([review, files]) => live && setBranchFiles({ key, review, files, error: null }),
       (e) => live && setBranchFiles({ key, review: null, files: [], error: errText(e) }),
     );
     return () => {
       live = false;
     };
-  }, [scope, active, state.folder, hintKey, state.seq]);
+  }, [scope, active, state.folder, hintKey, reviewBase, state.seq]);
   const shownBranch = branchFiles?.key.startsWith(`${active}:`) ? branchFiles : null;
   // Keyed by chat and folder as well as the PR number: another chat reviewing the same PR has its own files.
   const prKey = `${active}:${state.folder}:${reviewPr}`;

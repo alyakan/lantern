@@ -861,12 +861,13 @@ fn stop_shell(state: State<'_, AppState>, slot: String, id: String) -> Result<()
     Ok(())
 }
 
-/// The checked-out branch's commits since it left the default branch, for reviewing a local branch.
+/// The checked-out branch's commits since it left its base, for reviewing a local branch. `base`: the branch the review
+/// says it is stacked on (see pr::branch for what is used when it doesn't say, or names one that isn't there).
 #[tauri::command]
-async fn branch_review(state: State<'_, AppState>, slot: String, hints: Option<Vec<String>>) -> Result<pr::BranchReview, String> {
+async fn branch_review(state: State<'_, AppState>, slot: String, hints: Option<Vec<String>>, base: Option<String>) -> Result<pr::BranchReview, String> {
     let folder = state.slots.get(&slot)?.folder()?;
     let hints = hints.unwrap_or_default();
-    tauri::async_runtime::spawn_blocking(move || pr::branch(&folder, &hints).map(|(_, review)| review)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || pr::branch(&folder, &hints, base.as_deref()).map(|(_, review)| review)).await.map_err(|e| e.to_string())?
 }
 
 /// Stops one of the chat's background tasks; claude then lists what's left.
@@ -887,9 +888,11 @@ async fn interrupt(state: State<'_, AppState>, slot: String) -> Result<(), Strin
     Ok(())
 }
 
-/// `pr`: with the "pr" scope, the pull request's number.
+/// `pr`: with the "pr" scope, the pull request's number. `base`: with the "branch" scope, the branch it is compared with.
 #[tauri::command]
-async fn get_file_diff(state: State<'_, AppState>, slot: String, path: String, scope: Option<changes::Scope>, turn: Option<usize>, to_turn: Option<usize>, pr: Option<u32>) -> Result<FileDiff, String> {
+// A command's arguments are what the window names in its call, so they stay separate rather than bundled.
+#[allow(clippy::too_many_arguments)]
+async fn get_file_diff(state: State<'_, AppState>, slot: String, path: String, scope: Option<changes::Scope>, turn: Option<usize>, to_turn: Option<usize>, pr: Option<u32>, base: Option<String>) -> Result<FileDiff, String> {
     let s = state.slots.get(&slot)?;
     if scope == Some(changes::Scope::Pr) {
         // The file's path picks its repository, as it did for change_summary's list.
@@ -899,7 +902,7 @@ async fn get_file_diff(state: State<'_, AppState>, slot: String, path: String, s
     if scope == Some(changes::Scope::Branch) {
         // The file's own repository: in a workspace of several, that's the one under review.
         let dir = std::path::Path::new(&path).parent().map(|p| p.to_path_buf()).unwrap_or(s.folder()?);
-        return tauri::async_runtime::spawn_blocking(move || pr::branch(&dir, &[]).and_then(|(range, _)| pr::file(&range, &path))).await.map_err(|e| e.to_string())?;
+        return tauri::async_runtime::spawn_blocking(move || pr::branch(&dir, &[], base.as_deref()).and_then(|(range, _)| pr::file(&range, &path))).await.map_err(|e| e.to_string())?;
     }
     if scope == Some(changes::Scope::Git) {
         let folder = s.folder()?;
@@ -914,7 +917,8 @@ async fn get_file_diff(state: State<'_, AppState>, slot: String, path: String, s
 /// A chat's changed files as they stand on disk, so the Changes list catches what happened outside Claude's edits.
 #[tauri::command]
 /// `hints`: with the "pr" and "branch" scopes, the reviewed files' paths, which pick the repository when the folder
-/// holds several.
+/// holds several. `base`: with the "branch" scope, the branch it is compared with.
+#[allow(clippy::too_many_arguments)]
 async fn change_summary(
     state: State<'_, AppState>,
     slot: String,
@@ -923,6 +927,7 @@ async fn change_summary(
     to_turn: Option<usize>,
     pr: Option<u32>,
     hints: Option<Vec<String>>,
+    base: Option<String>,
 ) -> Result<Vec<changes::ChangeSummary>, String> {
     let s = state.slots.get(&slot)?;
     if scope == Some(changes::Scope::Pr) {
@@ -932,7 +937,7 @@ async fn change_summary(
     if scope == Some(changes::Scope::Branch) {
         let folder = s.folder()?;
         let hints = hints.unwrap_or_default();
-        return tauri::async_runtime::spawn_blocking(move || pr::branch(&folder, &hints).and_then(|(range, _)| pr::summary(&range))).await.map_err(|e| e.to_string())?;
+        return tauri::async_runtime::spawn_blocking(move || pr::branch(&folder, &hints, base.as_deref()).and_then(|(range, _)| pr::summary(&range))).await.map_err(|e| e.to_string())?;
     }
     if scope == Some(changes::Scope::Git) {
         let folder = s.folder()?;

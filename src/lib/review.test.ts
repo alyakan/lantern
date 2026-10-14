@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isVerdictNext, parseReviewFile, prNumberOf, reviewHints, splitFileTitle, verdictMessage, withoutCue } from "./review";
+import { baseBranchOf, isVerdictNext, parseReviewFile, prNumberOf, reviewHints, splitFileTitle, verdictMessage, withoutCue } from "./review";
 
 // As Claude wrote it for PostHog/posthog-ios#863 (trimmed).
 const clean = `### What changed
@@ -80,6 +80,25 @@ describe("prNumberOf", () => {
     expect(prNumberOf([{ type: "user", text: "Review PR #1" }, { type: "user", text: "Next" }, { type: "user", text: "now PR 2" }])).toBe(2);
     // Issue numbers elsewhere in a reply aren't the PR.
     expect(prNumberOf([{ type: "user", text: "Review this diff" }, { type: "assistant", text: "This fixes (#77) from the tracker." }])).toBeNull();
+  });
+});
+
+describe("baseBranchOf", () => {
+  const frame = (body: string) => ({ type: "assistant", text: `# Frame — Review lantern/ui\n\n${body}` });
+  it("is the branch the review's Frame says it is stacked on, in the ways Claude writes it", () => {
+    expect(baseBranchOf([frame("Base: feat/core\n\nTwo commits on top of it.")])).toBe("feat/core");
+    expect(baseBranchOf([frame("**Base:** `origin/feat/core`")])).toBe("origin/feat/core");
+    expect(baseBranchOf([frame("- Base: main")])).toBe("main");
+  });
+
+  it("is the latest Frame's, and only a Frame's", () => {
+    expect(baseBranchOf([frame("Base: feat/core"), { type: "assistant", text: "# Frame — again\n\nBase: feat/api" }])).toBe("feat/api");
+    expect(baseBranchOf([{ type: "assistant", text: "# File 1 of 2 — a.ts (+1 −0)\n\nBase: nope" }, { type: "user", text: "Base: nope" }])).toBeNull();
+    expect(baseBranchOf([frame("Two commits.")])).toBeNull();
+  });
+
+  it("isn't fooled by something that isn't a branch name", () => {
+    expect(baseBranchOf([frame("Base: the core branch, roughly")])).toBeNull();
   });
 });
 
