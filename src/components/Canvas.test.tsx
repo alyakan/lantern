@@ -29,22 +29,23 @@ function team(workers = 2): Chats {
   return c;
 }
 
-const actions = (): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), draft: vi.fn(() => ""), setDraft: vi.fn() });
+const actions = (over: Partial<NodeActions> = {}): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(), ...over });
 
-function setup(chats: Chats, extra: { attention?: string[]; layout?: ReturnType<typeof newLayout> } = {}) {
+function setup(chats: Chats, extra: { attention?: string[]; layout?: ReturnType<typeof newLayout>; actions?: Partial<NodeActions> } = {}) {
   const store = createChatStore();
   store.set(chats.slots);
   const layout = extra.layout ?? newLayout();
   const handlers = { onFocus: vi.fn(), onOpen: vi.fn() };
   const nodes = orchestraNodes(chats, () => "Main agent");
+  const acts = actions(extra.actions);
   const ui = (
     <ChatStoreContext.Provider value={store}>
-      <NodeActionsContext.Provider value={actions()}>
+      <NodeActionsContext.Provider value={acts}>
         <Canvas nodes={nodes} layout={layout} activeSlot="s1" attention={extra.attention ?? []} {...handlers} />
       </NodeActionsContext.Provider>
     </ChatStoreContext.Provider>
   );
-  return { ...render(ui), layout, store, ...handlers, nodes };
+  return { ...render(ui), layout, store, ...handlers, nodes, acts };
 }
 
 describe("placeNodes", () => {
@@ -466,5 +467,146 @@ describe("what the loop guard holds back, and what is typed", () => {
     expect(box.value).toBe("half a thought");
     fireEvent.change(box, { target: { value: "half a thought, and more" } });
     expect(a.setDraft).toHaveBeenLastCalledWith("w1", "half a thought, and more");
+  });
+});
+
+/** The team with the given workers taken off the canvas, as the user's Hide leaves it. */
+function hidden(chats: Chats, ...workers: string[]): Chats {
+  return workers.reduce((c, slot) => chatsReducer(c, { type: "set_hidden", slot, hidden: true }), chats);
+}
+
+const head = (name: string) => screen.getByLabelText(new RegExp(`^Worker Worker ${name},`)).querySelector(".node-head")!;
+
+describe("the menu of an agent's card", () => {
+  it("opens on a right-click on a worker's title or body, on its first item, and is a menu", () => {
+    setup(team(2));
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(fireEvent.contextMenu(head("1"), { clientX: 40, clientY: 30 })).toBe(false); // the browser's own menu is held back
+    const menu = screen.getByRole("menu", { name: "Worker 1 actions" });
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual([expect.stringMatching(/^Hide/)]);
+    expect(document.activeElement).toBe(within(menu).getByRole("menuitem", { name: /Hide/ }));
+    // From the body too, and for another agent: the menu is that agent's.
+    fireEvent.contextMenu(screen.getByLabelText(/Worker Worker 2/).querySelector(".node-body")!, { clientX: 60, clientY: 60 });
+    expect(screen.getAllByRole("menu")).toHaveLength(1);
+    expect(screen.getByRole("menu", { name: "Worker 2 actions" })).toBeTruthy();
+  });
+
+  it("is not offered on the main agent", () => {
+    setup(team(1));
+    expect(fireEvent.contextMenu(screen.getByLabelText(/Main agent Main agent/).querySelector(".node-head")!)).toBe(true);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("leaves the browser's menu to the box where you type and to text you have selected", () => {
+    setup(team(1));
+    const box = within(screen.getByLabelText(/Worker Worker 1/)).getByLabelText("Message this agent");
+    expect(fireEvent.contextMenu(box)).toBe(true);
+    expect(screen.queryByRole("menu")).toBeNull();
+    const selection = vi.spyOn(window, "getSelection").mockReturnValue({ toString: () => "picked words" } as Selection);
+    expect(fireEvent.contextMenu(head("1"))).toBe(true);
+    expect(screen.queryByRole("menu")).toBeNull();
+    selection.mockRestore();
+  });
+
+  it("closes on Escape, on a press elsewhere, and on Tab, without doing anything", () => {
+    const { acts } = setup(team(1));
+    fireEvent.contextMenu(head("1"));
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: /Hide/ }), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.contextMenu(head("1"));
+    fireEvent.pointerDown(screen.getByTestId("canvas"), { button: 0, pointerId: 1 });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.contextMenu(head("1"));
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: /Hide/ }), { key: "Tab" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(acts.hide).not.toHaveBeenCalled();
+  });
+
+  it("hides the worker it was opened on, and closes", () => {
+    const { acts } = setup(team(2));
+    fireEvent.contextMenu(head("2"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Hide/ }));
+    expect(acts.hide).toHaveBeenCalledWith("w2");
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("does not let a worker that needs you be hidden", () => {
+    const { acts } = setup(team(1), { attention: ["w1"] });
+    fireEvent.contextMenu(head("1"));
+    const item = screen.getByRole("menuitem", { name: /Hide/ }) as HTMLButtonElement;
+    expect(item.disabled).toBe(true);
+    expect(item.textContent).toContain("needs you");
+    fireEvent.click(item);
+    expect(acts.hide).not.toHaveBeenCalled();
+  });
+
+  it("does not pan, zoom or move anything: the right button is not a gesture", () => {
+    const { layout } = setup(team(1));
+    const canvas = screen.getByTestId("canvas");
+    const view = layout.view;
+    const box = { ...layout.boxes.w1 };
+    act(() => {
+      fireEvent.pointerDown(canvas, { button: 2, pointerId: 1, clientX: 50, clientY: 50 });
+      fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 150, clientY: 90 });
+      fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 150, clientY: 90 });
+      fireEvent.pointerDown(head("1"), { button: 2, pointerId: 2, clientX: 50, clientY: 50 });
+      fireEvent.pointerMove(head("1"), { pointerId: 2, clientX: 150, clientY: 90 });
+      fireEvent.pointerUp(head("1"), { pointerId: 2 });
+      // A control-click is a right-click on a Mac, and must not start a pan either.
+      fireEvent.pointerDown(canvas, { button: 0, ctrlKey: true, pointerId: 3, clientX: 50, clientY: 50 });
+      fireEvent.pointerMove(canvas, { pointerId: 3, clientX: 150, clientY: 90 });
+      fireEvent.pointerUp(canvas, { pointerId: 3, clientX: 150, clientY: 90 });
+    });
+    expect(layout.view).toEqual(view);
+    expect(layout.boxes.w1).toEqual(box);
+    expect(layout.touched).toBe(false);
+    // And the canvas still pans and zooms afterwards, with the menu open.
+    fireEvent.contextMenu(head("1"));
+    act(() => {
+      fireEvent.wheel(canvas, { deltaX: 0, deltaY: 40 });
+    });
+    expect(layout.view!.y).toBeCloseTo((view?.y ?? 0) - 40);
+  });
+});
+
+describe("agents taken off the canvas", () => {
+  it("are not drawn or tethered, keep their place, and are counted in a Hidden control", () => {
+    const { layout } = setup(hidden(team(2), "w1"));
+    expect(screen.getAllByRole("region").map((a) => a.getAttribute("aria-label"))).toEqual(["Main agent Main agent, Idle", "Worker Worker 2, Working"]);
+    expect(document.querySelectorAll("path.tether")).toHaveLength(1);
+    expect(layout.boxes.w1).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Hidden (1)" })).toBeTruthy();
+  });
+
+  it("show no Hidden control when there are none", () => {
+    setup(team(2));
+    expect(screen.queryByRole("button", { name: /Hidden/ })).toBeNull();
+  });
+
+  it("are listed by name and status, and each can be shown again", () => {
+    const { acts } = setup(hidden(team(2), "w1", "w2"));
+    fireEvent.click(screen.getByRole("button", { name: "Hidden (2)" }));
+    const list = screen.getByRole("dialog", { name: "Hidden agents" });
+    expect(within(list).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Show Worker 1, Working", "Show Worker 2, Working"]);
+    fireEvent.click(within(list).getByRole("button", { name: "Show Worker 2, Working" }));
+    expect(acts.show).toHaveBeenCalledWith("w2");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Hidden agents" })).toBeNull();
+  });
+
+  it("come back by themselves when they need the user, and not before", () => {
+    const quiet = setup(hidden(team(2), "w1", "w2"), { attention: ["w2"] });
+    expect(quiet.acts.show).toHaveBeenCalledTimes(1);
+    expect(quiet.acts.show).toHaveBeenCalledWith("w2");
+    cleanup();
+    const idle = setup(hidden(team(2), "w1"));
+    expect(idle.acts.show).not.toHaveBeenCalled();
+  });
+
+  it("are shown again when the user goes to one from the team list", () => {
+    const { acts } = setup(hidden(team(2), "w1"));
+    fireEvent.click(screen.getByRole("button", { name: "Team" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Team" })).getByText("Worker 1"));
+    expect(acts.show).toHaveBeenCalledWith("w1");
   });
 });

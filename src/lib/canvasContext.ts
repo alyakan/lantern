@@ -83,6 +83,9 @@ export interface NodeActions {
   setDraft(slot: string, text: string): void;
   /** Removes a merged worker's worktree; rejects with why it couldn't. */
   removeWorktree(worker: string): Promise<void>;
+  /** Takes a worker's card off the canvas (it keeps working), or puts it back. */
+  hide(worker: string): void;
+  show(worker: string): void;
 }
 
 export const NodeActionsContext = createContext<NodeActions | null>(null);

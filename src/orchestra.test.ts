@@ -225,6 +225,33 @@ describe("user_sent", () => {
   });
 });
 
+describe("hiding a worker", () => {
+  const withWorker = (): Chats => chatsReducer(initialChats(main), { type: "in", slot: "s1", action: { type: "ui_event", event: spawned } });
+
+  it("marks it hidden, and shows it again by dropping the mark (not by saying false)", () => {
+    const hidden = chatsReducer(withWorker(), { type: "set_hidden", slot: "w1", hidden: true });
+    expect(hidden.agents.w1.hidden).toBe(true);
+    const shown = chatsReducer(hidden, { type: "set_hidden", slot: "w1", hidden: false });
+    expect(shown.agents.w1).toEqual(withWorker().agents.w1);
+    expect("hidden" in shown.agents.w1).toBe(false);
+  });
+
+  it("changes nothing when it already is as asked, or the chat is no worker", () => {
+    const c = withWorker();
+    expect(chatsReducer(c, { type: "set_hidden", slot: "w1", hidden: false })).toBe(c);
+    expect(chatsReducer(c, { type: "set_hidden", slot: "s1", hidden: true })).toBe(c);
+    expect(chatsReducer(c, { type: "set_hidden", slot: "nope", hidden: true })).toBe(c);
+    const hidden = chatsReducer(c, { type: "set_hidden", slot: "w1", hidden: true });
+    expect(chatsReducer(hidden, { type: "set_hidden", slot: "w1", hidden: true })).toBe(hidden);
+  });
+
+  it("is kept when the worker is brought back with the chat", () => {
+    let c = chatsReducer(initialChats(main), { type: "add", slot: "s2" });
+    c = chatsReducer(c, { type: "adopt", slot: "s2", meta: { parent: "s1", name: "Login form", brief: "", folder: "/wt/login", branch: "lantern/login-form", base: "main", isolation: "worktree", hidden: true } });
+    expect(c.agents.s2.hidden).toBe(true);
+  });
+});
+
 describe("adopting a restored worker", () => {
   const meta = { parent: "s1", name: "Login form", brief: "", folder: "/wt/login", branch: "lantern/login-form", base: "main", isolation: "worktree" as const };
 

@@ -35,6 +35,14 @@ describe("orchestraNodes", () => {
     ]);
   });
 
+  it("marks the workers the user hid, and only those", () => {
+    let c = initialChats(main);
+    c = spawn(c, "w1", "Login");
+    c = spawn(c, "w2", "Signup");
+    c = chatsReducer(c, { type: "set_hidden", slot: "w2", hidden: true });
+    expect(orchestraNodes(c, name).map((n) => [n.slot, !!n.hidden])).toEqual([["s1", false], ["w1", false], ["w2", true]]);
+  });
+
   it("is empty when nothing is an orchestra, and a lone main agent is one", () => {
     expect(orchestraNodes(initialChats(base), name)).toEqual([]);
     expect(orchestraNodes(initialChats(main), name)).toHaveLength(1);

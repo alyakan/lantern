@@ -104,7 +104,7 @@ interface OrchestraStart {
  */
 type TeamRole =
   | { role: "main" }
-  | { role: "worker"; parent: string; name: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; parentReady?: Promise<boolean> };
+  | { role: "worker"; parent: string; name: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; hidden?: boolean; parentReady?: Promise<boolean> };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -482,7 +482,7 @@ export default function App() {
         delete relaunch.current[slot];
         to(slot)({ type: "history_loaded", sessionId, events: opened.events, movedFrom: opened.moved_from });
         to(slot)({ type: "session_ready" });
-        if (as?.role === "worker") dispatchChats({ type: "adopt", slot, meta: { parent: as.parent, name: as.name, brief: "", folder, branch: as.branch, base: as.base, isolation: as.isolation } });
+        if (as?.role === "worker") dispatchChats({ type: "adopt", slot, meta: { parent: as.parent, name: as.name, brief: "", folder, branch: as.branch, base: as.base, isolation: as.isolation, ...(as.hidden ? { hidden: true } : {}) } });
         return true;
       })
       .catch((e) => {
@@ -517,7 +517,7 @@ export default function App() {
     if (o?.role === "main") team = { role: "main" };
     else if (o?.role === "worker") {
       const parent = opened[o.parentSession] ?? openMainOf(o.parentSession);
-      if (parent) team = { role: "worker", parent: parent.slot, name: o.name, branch: o.branch, base: o.base, isolation: o.isolation, parentReady: parent.ready };
+      if (parent) team = { role: "worker", parent: parent.slot, name: o.name, branch: o.branch, base: o.base, isolation: o.isolation, hidden: o.hidden, parentReady: parent.ready };
     }
     if (c.sessionId) return resumeIn(slot, c.folder, c.sessionId, false, team);
     // Typed in the box but never sent: a new chat in its folder, as a main agent again if it was one.
@@ -985,6 +985,13 @@ export default function App() {
       api.declineMerge(worker).catch((e) => main && to(main)({ type: "ui_event", event: { kind: "merge_resolved", worker, outcome: "failed", detail: errText(e) } }));
     },
     removeWorktree: (worker: string) => api.discardWorktree(worker, false).catch((e) => Promise.reject(errText(e))),
+    // Hiding the agent whose chat is on screen moves the rest of the app to its main agent, so it isn't about a card nobody sees.
+    hide: (worker: string) => {
+      const parent = chats.agents[worker]?.parent;
+      dispatchChats({ type: "set_hidden", slot: worker, hidden: true });
+      if (worker === active && parent) focusAgent(parent);
+    },
+    show: (worker: string) => dispatchChats({ type: "set_hidden", slot: worker, hidden: false }),
     draft: (slot: string) => drafts.current[slot] ?? "",
     setDraft: (slot: string, text: string) => {
       if (text) drafts.current[slot] = text;
@@ -1009,6 +1016,8 @@ export default function App() {
       approveMerge: (worker) => doingRef.current.approveMerge(worker),
       declineMerge: (worker) => doingRef.current.declineMerge(worker),
       removeWorktree: (worker) => doingRef.current.removeWorktree(worker),
+      hide: (worker) => doingRef.current.hide(worker),
+      show: (worker) => doingRef.current.show(worker),
       draft: (slot) => doingRef.current.draft(slot),
       setDraft: (slot, text) => doingRef.current.setDraft(slot, text),
     }),
@@ -1057,7 +1066,7 @@ export default function App() {
 
   // Saved as they change, so a crash or force-quit leaves them to restore too.
   const saveOpen = () => save(withOffered(chatsToSave(chats.slots, active, drafts.current, titles, chats.agents), offer));
-  useEffect(saveOpen, [chats.slots, active, titles, offer]);
+  useEffect(saveOpen, [chats.slots, chats.agents, active, titles, offer]);
 
   const announced = useRef<Record<string, string>>({});
   // Chats that finished in the background and haven't been looked at since: a blue dot, like an unread message.
