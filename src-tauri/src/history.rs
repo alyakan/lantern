@@ -336,6 +336,94 @@ pub fn recent_user_folders(projects_root: &Path) -> Vec<RecentFolder> {
     found
 }
 
+/// How many records from the start of a transcript are looked at for the folder and the first prompt. Both are near the
+/// start of a session, so a long transcript's tail is never read by the folder listing.
+const OPENING_RECORDS: usize = 200;
+
+/// The folder a user session started in (its first recorded `cwd`), if the user typed a prompt in it: what `summarize`
+/// decides for a whole transcript, read here from its start only. Another entrypoint in those records rules it out too.
+fn opening_folder(path: &Path) -> Option<String> {
+    let mut folder = None;
+    let mut prompted = false;
+    for r in records(path).take(OPENING_RECORDS) {
+        if let Some(ep) = r.get("entrypoint").and_then(Value::as_str) {
+            if !USER_ENTRYPOINTS.contains(&ep) {
+                return None;
+            }
+        }
+        if folder.is_none() {
+            folder = r.get("cwd").and_then(Value::as_str).map(String::from);
+        }
+        prompted = prompted || prompt_text(&r).is_some();
+        if prompted && folder.is_some() {
+            break;
+        }
+    }
+    if prompted {
+        folder
+    } else {
+        None
+    }
+}
+
+/// A user session in a project directory: its id, its transcript, and when the transcript last changed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Found {
+    pub id: String,
+    pub path: PathBuf,
+    pub updated_ms: u64,
+}
+
+/// The user sessions in one project directory, each with the folder it started in (see `opening_folder`). Sessions
+/// with no typed prompt are left out, as `list_sessions` leaves them out.
+pub fn user_sessions_in(dir: &Path) -> Vec<(String, Found)> {
+    jsonl_files(dir)
+        .into_iter()
+        .filter_map(|path| {
+            let folder = opening_folder(&path)?;
+            let id = path.file_stem()?.to_string_lossy().into_owned();
+            let updated_ms = modified_ms(&path);
+            Some((folder, Found { id, path, updated_ms }))
+        })
+        .collect()
+}
+
+/// A folder the user has run sessions in, whether or not it still exists.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FolderSessions {
+    pub path: String,
+    pub exists: bool,
+    /// The sessions that started in it, each counted once.
+    pub sessions: usize,
+    /// When its newest session last changed.
+    pub updated_ms: u64,
+}
+
+/// Every folder with user sessions, across all project directories, most recently used first. A session is counted once
+/// by its id, even where a copy of it is in another directory (see relocate::ready_session). Temp folders are left out.
+pub fn session_folders(projects_root: &Path) -> Vec<FolderSessions> {
+    let Ok(dirs) = std::fs::read_dir(projects_root) else { return vec![] };
+    let mut by_folder: HashMap<String, HashMap<String, u64>> = HashMap::new();
+    for dir in dirs.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.is_dir()) {
+        for (folder, found) in user_sessions_in(&dir) {
+            let newest = by_folder.entry(folder).or_default().entry(found.id).or_insert(0);
+            *newest = (*newest).max(found.updated_ms);
+        }
+    }
+    let mut folders: Vec<FolderSessions> = by_folder
+        .into_iter()
+        .filter(|(path, _)| !is_temp(path))
+        .map(|(path, ids)| FolderSessions {
+            exists: Path::new(&path).is_dir(),
+            sessions: ids.len(),
+            updated_ms: ids.values().copied().max().unwrap_or(0),
+            path,
+        })
+        .collect();
+    folders.sort_by(|a, b| b.updated_ms.cmp(&a.updated_ms).then_with(|| a.path.cmp(&b.path)));
+    folders
+}
+
 /// The transcript file for a session id, if it exists.
 pub fn transcript_path(projects_root: &Path, folder: &Path, id: &str) -> Result<PathBuf, String> {
     transcript_path_with_aliases(projects_root, folder, &[], id)
@@ -760,5 +848,75 @@ mod tests {
         assert_eq!(typed("[Lantern note: only a note]"), Some("[Lantern note: only a note]".into()));
         // The moved note and a revert note can both come first.
         assert_eq!(typed("[Lantern note: this project moved from /a to /b.]\n\n[Lantern note: since your last message.]\n- /p/a.ts: put back.\n\nwhy?"), Some("why?".into()));
+    }
+
+    /// A transcript whose first records name `cwd`, with a typed prompt when `prompt` is Some (else only a meta record).
+    fn write_transcript(dir: &Path, id: &str, cwd: &str, prompt: Option<&str>) {
+        std::fs::create_dir_all(dir).unwrap();
+        let first = match prompt {
+            Some(text) => json!({"type": "user", "cwd": cwd, "entrypoint": "cli", "message": {"role": "user", "content": text}}),
+            None => json!({"type": "user", "cwd": cwd, "entrypoint": "cli", "isMeta": true, "message": {"role": "user", "content": "meta"}}),
+        };
+        std::fs::write(dir.join(format!("{id}.jsonl")), [rec(json!({"type": "queue-operation", "sessionId": id})), rec(first)].join("\n")).unwrap();
+    }
+
+    #[test]
+    fn folders_with_sessions_count_each_prompted_session_once_and_skip_temp_folders() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = |folder: &str| root.path().join(encode_folder(Path::new(folder)));
+        let (app, other) = ("/work/app", "/work/other");
+        write_transcript(&dir(app), "s1", app, Some("hi"));
+        write_transcript(&dir(app), "s2", app, None);
+        // A copy of s1 in another project directory (copy-on-open), and a session of its own there.
+        write_transcript(&dir(other), "s1", app, Some("hi"));
+        write_transcript(&dir(other), "s3", other, Some("there"));
+        write_transcript(&dir("/tmp/scratch"), "t1", "/tmp/scratch", Some("probe"));
+        let mut got: Vec<(String, usize)> = session_folders(root.path()).into_iter().map(|f| (f.path, f.sessions)).collect();
+        got.sort();
+        assert_eq!(got, vec![(app.to_string(), 1), (other.to_string(), 1)]);
+    }
+
+    #[test]
+    fn a_folder_is_known_whether_or_not_it_still_exists() {
+        let root = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
+        let (here, gone) = (work.path().join("here"), work.path().join("gone"));
+        std::fs::create_dir_all(&here).unwrap();
+        let (here_s, gone_s) = (here.to_string_lossy().into_owned(), gone.to_string_lossy().into_owned());
+        write_transcript(&root.path().join(encode_folder(&here)), "h1", &here_s, Some("a"));
+        write_transcript(&root.path().join(encode_folder(&gone)), "g1", &gone_s, Some("b"));
+        let folders = session_folders(root.path());
+        let exists = |path: &str| folders.iter().find(|f| f.path == path).map(|f| f.exists);
+        assert_eq!(exists(&here_s), Some(true));
+        assert_eq!(exists(&gone_s), Some(false));
+    }
+
+    #[test]
+    fn a_few_hundred_transcripts_are_listed_by_folder_quickly() {
+        let root = tempfile::tempdir().unwrap();
+        for d in 0..30 {
+            let folder = format!("/work/app-{d}");
+            let dir = root.path().join(encode_folder(Path::new(&folder)));
+            for s in 0..10 {
+                write_transcript(&dir, &format!("s{d}-{s}"), &folder, Some("hi"));
+            }
+            // Automation with no typed prompt, which isn't a session of the folder.
+            write_transcript(&dir, &format!("bot{d}"), &folder, None);
+        }
+        // Long transcripts: a prompt, then a long tail of tool output the listing doesn't need to read.
+        let dir = root.path().join(encode_folder(Path::new("/work/long")));
+        let tail = rec(json!({"type": "assistant", "uuid": "x", "message": {"role": "assistant", "content": [{"type": "text", "text": "x".repeat(10_000)}]}}));
+        for s in 0..3 {
+            write_transcript(&dir, &format!("long{s}"), "/work/long", Some("start"));
+            let p = dir.join(format!("long{s}.jsonl"));
+            let body = std::fs::read_to_string(&p).unwrap() + &format!("\n{tail}").repeat(500);
+            std::fs::write(&p, body).unwrap();
+        }
+        let started = std::time::Instant::now();
+        let folders = session_folders(root.path());
+        let elapsed = started.elapsed();
+        assert_eq!(folders.len(), 31);
+        assert_eq!(folders.iter().map(|f| f.sessions).sum::<usize>(), 303);
+        assert!(elapsed < std::time::Duration::from_secs(5), "listing 363 transcripts took {elapsed:?}");
     }
 }

@@ -171,6 +171,45 @@ pub fn moved_candidates(recent: &[RecentFolder], aliases: &[String]) -> Vec<Move
         .collect()
 }
 
+/// A place a folder's sessions were started in, for bringing them over.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OldLocation {
+    pub path: String,
+    pub exists: bool,
+    pub sessions: usize,
+    pub updated_ms: u64,
+    /// A place the folder was already brought over from (one of its aliases): its sessions are in History already.
+    pub already: bool,
+}
+
+/// Whether two paths are the same folder: equal, or the same real path when both exist (a link to it, say).
+pub fn same_place(a: &str, b: &str) -> bool {
+    a == b || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
+}
+
+/// The last component of a path, lowercased: how folders are matched by name.
+fn name_key(path: &str) -> String {
+    Path::new(path).file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default()
+}
+
+/// The places `dest` may have been before: each folder with sessions (see history::session_folders) whose last name is
+/// `dest`'s, ignoring case, and each of `dest`'s aliases. `dest` itself is never listed. Newest first.
+/// (moved_candidates only suggests a folder with the same last name, so a gone folder it suggests for `dest` is one of
+/// these already.)
+pub fn old_locations(folders: &[history::FolderSessions], dest: &str, aliases: &[String]) -> Vec<OldLocation> {
+    let mut found: Vec<OldLocation> = folders
+        .iter()
+        .filter(|f| !same_place(&f.path, dest))
+        .filter_map(|f| {
+            let already = aliases.iter().any(|a| same_place(a, &f.path));
+            let named_alike = name_key(&f.path) == name_key(dest);
+            (already || named_alike).then(|| OldLocation { path: f.path.clone(), exists: f.exists, sessions: f.sessions, updated_ms: f.updated_ms, already })
+        })
+        .collect();
+    found.sort_by(|a, b| b.updated_ms.cmp(&a.updated_ms).then_with(|| a.path.cmp(&b.path)));
+    found
+}
+
 /// What a move would bring, read without changing anything.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Preview {
@@ -187,7 +226,7 @@ pub struct Preview {
 
 pub fn preview(projects_root: &Path, claude_json: &Path, rules: &FolderRules, old: &str) -> Preview {
     let (sessions, bytes, linked) = match history::project_dir(projects_root, Path::new(old)) {
-        Some(dir) => session_files(&dir),
+        Some(dir) => session_files(&dir, old),
         None => (0, 0, 0),
     };
     let (memory, memory_linked) = memory_files(projects_root, old);
@@ -206,23 +245,20 @@ fn is_link(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
 }
 
-/// The transcripts in a project directory, the bytes they and their `<id>/` directories take, and the links skipped.
-fn session_files(dir: &Path) -> (usize, u64, usize) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return (0, 0, 0) };
-    let (mut sessions, mut bytes, mut linked) = (0, 0, 0);
-    for entry in entries.filter_map(Result::ok) {
-        let path = entry.path();
-        if path.extension().is_none_or(|x| x != "jsonl") {
-            continue;
-        }
-        if is_link(&path) {
-            linked += 1;
-        } else if history::is_regular_file(&path) {
+/// The sessions of `folder` in a project directory, the bytes they and their `<id>/` directories take, and the links
+/// skipped. Sessions are the ones the history lists for the folder (a typed prompt, started in it).
+fn session_files(dir: &Path, folder: &str) -> (usize, u64, usize) {
+    let (mut sessions, mut bytes) = (0, 0);
+    for (started_in, found) in history::user_sessions_in(dir) {
+        if started_in == folder {
             sessions += 1;
-            bytes += std::fs::metadata(&path).map_or(0, |m| m.len());
-            bytes += tree_bytes(&path.with_extension(""));
+            bytes += std::fs::metadata(&found.path).map_or(0, |m| m.len());
+            bytes += tree_bytes(&found.path.with_extension(""));
         }
     }
+    let linked = std::fs::read_dir(dir).map_or(0, |entries| {
+        entries.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "jsonl") && is_link(p)).count()
+    });
     (sessions, bytes, linked)
 }
 
@@ -885,6 +921,67 @@ mod tests {
         assert_eq!(p.rules, 0);
         let none = preview(&projects, &root.path().join("missing.json"), &rules, "/nowhere");
         assert_eq!(none, Preview { sessions: 0, bytes: 0, project_entry: false, memory_files: 0, rules: 0, linked: 0 });
+    }
+
+    #[test]
+    fn a_preview_counts_the_sessions_the_history_lists_for_the_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let projects = root.path().join("projects");
+        let old = root.path().join("old-app");
+        let old_s = old.to_string_lossy().into_owned();
+        let claude = claude_json(root.path(), "{}");
+        session(&projects, &old, "p1", &old_s, "hi");
+        // Automation with no typed prompt, in the same directory: not one of the folder's sessions.
+        let line = json!({"type": "user", "cwd": old_s, "entrypoint": "cli", "isMeta": true, "message": {"role": "user", "content": "meta"}});
+        std::fs::write(projects.join(encode_folder(&old)).join("bot.jsonl"), line.to_string()).unwrap();
+        assert_eq!(preview(&projects, &claude, &FolderRules::load(None), &old_s).sessions, 1);
+    }
+
+    fn folder_sessions(path: &Path, sessions: usize, updated_ms: u64) -> history::FolderSessions {
+        history::FolderSessions { path: path.to_string_lossy().into_owned(), exists: path.is_dir(), sessions, updated_ms }
+    }
+
+    #[test]
+    fn the_same_named_folder_is_found_in_every_place_it_was_newest_first() {
+        // Inside the crate's target dir: a temp dir's path is a scratch place, which the listing leaves out.
+        let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
+        let w = work.path();
+        let (dest, old, laptop, upper, unrelated) = (w.join("projects/acme-api"), w.join("old/acme-api"), w.join("laptop/acme-api"), w.join("src/ACME-API"), w.join("src/web"));
+        for d in [&dest, &old, &upper, &unrelated] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let folders = [folder_sessions(&unrelated, 4, 50), folder_sessions(&upper, 2, 30), folder_sessions(&laptop, 5, 40), folder_sessions(&old, 3, 10), folder_sessions(&dest, 9, 90)];
+        let found = old_locations(&folders, &dest.to_string_lossy(), &[]);
+        let shape: Vec<(String, bool, usize, bool)> = found.iter().map(|l| (l.path.clone(), l.exists, l.sessions, l.already)).collect();
+        assert_eq!(
+            shape,
+            vec![
+                (laptop.to_string_lossy().into_owned(), false, 5, false),
+                (upper.to_string_lossy().into_owned(), true, 2, false),
+                (old.to_string_lossy().into_owned(), true, 3, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_place_already_brought_over_is_listed_as_done_even_with_another_name() {
+        let w = std::path::PathBuf::from("/Users/me/code");
+        let (dest, alias) = (w.join("acme-api"), w.join("acme-old"));
+        let found = old_locations(&[folder_sessions(&alias, 4, 20)], &dest.to_string_lossy(), &[alias.to_string_lossy().into_owned()]);
+        assert_eq!(found, vec![OldLocation { path: alias.to_string_lossy().into_owned(), exists: false, sessions: 4, updated_ms: 20, already: true }]);
+        // Without the alias, the same folder isn't a candidate: its name differs.
+        assert!(old_locations(&[folder_sessions(&alias, 4, 20)], &dest.to_string_lossy(), &[]).is_empty());
+    }
+
+    #[test]
+    fn the_destination_is_never_listed_not_even_through_a_link() {
+        let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
+        let (dest, link) = (work.path().join("projects/acme-api"), work.path().join("links/acme-api"));
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&dest, &link).unwrap();
+        let found = old_locations(&[folder_sessions(&dest, 9, 90), folder_sessions(&link, 3, 10)], &dest.to_string_lossy(), &[]);
+        assert!(found.is_empty(), "{found:?}");
     }
 
     #[test]

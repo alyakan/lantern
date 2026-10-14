@@ -962,6 +962,21 @@ async fn moved_folder_candidates(state: State<'_, AppState>) -> Result<Vec<reloc
     tauri::async_runtime::spawn_blocking(move || relocate::moved_candidates(&history::recent_user_folders(&root), &aliases)).await.map_err(|e| e.to_string())
 }
 
+/// The places `folder` was before, whose sessions Lantern can bring over (see relocate::old_locations). Read only.
+#[tauri::command]
+async fn old_locations(state: State<'_, AppState>, folder: String) -> Result<Vec<relocate::OldLocation>, String> {
+    let root = projects_root()?;
+    let aliases: Vec<String> = aliases_for(&state, &folder).iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    tauri::async_runtime::spawn_blocking(move || relocate::old_locations(&history::session_folders(&root), &folder, &aliases)).await.map_err(|e| e.to_string())
+}
+
+/// Every folder with sessions, gone ones included, for choosing where a folder was when nothing was found under its name.
+#[tauri::command]
+async fn known_folders() -> Result<Vec<history::FolderSessions>, String> {
+    let root = projects_root()?;
+    tauri::async_runtime::spawn_blocking(move || history::session_folders(&root)).await.map_err(|e| e.to_string())
+}
+
 /// What moving `old` to `new` would bring over. Nothing is changed.
 #[tauri::command]
 async fn relocation_preview(state: State<'_, AppState>, old: String, new: String) -> Result<relocate::Preview, String> {
@@ -1153,6 +1168,8 @@ pub fn run() {
             open_session,
             relocations_list,
             moved_folder_candidates,
+            old_locations,
+            known_folders,
             relocation_preview,
             relocate_folder,
             update_status,

@@ -103,6 +103,8 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ],
   ["relocationsList", () => api.relocationsList(), ["relocations_list"]],
   ["movedFolderCandidates", () => api.movedFolderCandidates(), ["moved_folder_candidates"]],
+  ["oldLocations", () => api.oldLocations("/repo"), ["old_locations", { folder: "/repo" }]],
+  ["knownFolders", () => api.knownFolders(), ["known_folders"]],
   ["relocationPreview", () => api.relocationPreview("/old", "/new"), ["relocation_preview", { old: "/old", new: "/new" }]],
   [
     "relocateFolder",

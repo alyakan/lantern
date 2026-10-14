@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
-import type { DirEntry, FileDiff, FoundFile, McpServerSpec, MovedFolder, Mode, NewRule, OpenedSession, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NewRule, OldLocation, OpenedSession, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -99,6 +99,10 @@ export const api = {
   relocationsList: () => invoke<RelocationEntry[]>("relocations_list"),
   /** The recent folders that are gone, each with the place it probably moved to. */
   movedFolderCandidates: () => invoke<MovedFolder[]>("moved_folder_candidates"),
+  /** The places the folder was before whose sessions can be brought over: named like it, or already brought over. */
+  oldLocations: (folder: string) => invoke<OldLocation[]>("old_locations", { folder }),
+  /** Every folder with sessions, gone ones included, for choosing where a folder was before. */
+  knownFolders: () => invoke<FolderSessions[]>("known_folders"),
   /** What moving `old` to `next` would bring over. Nothing is changed. */
   relocationPreview: (old: string, next: string) => invoke<RelocationPreview>("relocation_preview", { old, new: next }),
   /** Records that the folder at `old` is now at `next`, carrying over what `options` chooses. Nothing is deleted or overwritten. */

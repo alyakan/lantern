@@ -93,6 +93,24 @@ export interface MovedFolder {
   suggested: string | null;
 }
 
+/** A place a folder's sessions were started in, that can be brought over (old_locations). */
+export interface OldLocation {
+  path: string;
+  exists: boolean;
+  sessions: number;
+  updated_ms: number;
+  /** Already brought over: its sessions are in History. */
+  already: boolean;
+}
+
+/** A folder that has sessions, whether or not it still exists (known_folders). */
+export interface FolderSessions {
+  path: string;
+  exists: boolean;
+  sessions: number;
+  updated_ms: number;
+}
+
 /** What moving a folder would bring over, read without changing anything. */
 export interface RelocationPreview {
   sessions: number;
