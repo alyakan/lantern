@@ -12,6 +12,7 @@ pub mod orchestra;
 pub mod permission;
 pub mod pr;
 pub mod process;
+pub mod provider;
 pub mod session;
 pub mod shell;
 pub mod skills;
@@ -29,6 +30,7 @@ pub mod updates;
 
 use args::{HelperConfig, Mode, Role};
 use changes::FileDiff;
+use provider::ProviderId;
 use session::{EditHook, Session, SessionConfig};
 use slots::{Slot, SlotEvent, Slots};
 use std::sync::{Arc, OnceLock};
@@ -354,7 +356,8 @@ async fn user_name() -> Option<String> {
 
 #[tauri::command]
 async fn locate_claude(path_override: Option<String>) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || cli_locator::locate(path_override.as_deref()).map(|p| p.display().to_string()))
+    // The window only knows Claude Code for now: which provider's binary is wanted will come with its choice.
+    tauri::async_runtime::spawn_blocking(move || ProviderId::Claude.provider().locate(path_override.as_deref()).map(|p| p.display().to_string()))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -1274,7 +1277,7 @@ fn app_version(app: AppHandle) -> String {
 async fn copy_diagnostics(app: AppHandle, state: State<'_, AppState>, claude_path: Option<String>, model: Option<String>, last_error: Option<String>) -> Result<String, String> {
     let path_env = login_path(&state).await;
     let (macos, claude) = tauri::async_runtime::spawn_blocking(move || {
-        (diagnostics::macos_version(), claude_path.and_then(|path| diagnostics::claude_version(&path, path_env.as_deref())))
+        (diagnostics::macos_version(), claude_path.and_then(|path| ProviderId::Claude.provider().version(&path, path_env.as_deref())))
     })
     .await
     .map_err(|e| e.to_string())?;
