@@ -7,6 +7,7 @@ import { Md } from "./Md";
 import { ArchitecturePane } from "../lib/architecturePane";
 import { architectureMap } from "../lib/architecture";
 import { pagesOf } from "../lib/steps";
+import { TESTO_MAP } from "../lib/testoMap";
 
 vi.mock("../api", () => ({ api: { userName: () => Promise.resolve("Ada Lovelace") } }));
 // Mermaid needs a real browser's layout: older maps and other diagrams are tested on a stand-in drawing.
@@ -152,3 +153,39 @@ describe("a diagram in a message", () => {
     expect(big.getByRole("button", { name: "Fit", hidden: true })).toBeInTheDocument();
   });
 });
+
+describe("a layered map in the Map tab", () => {
+  const overview = `# Overview — Testo on iOS\n\n\`\`\`architecture\n${JSON.stringify(TESTO_MAP)}\n\`\`\``;
+  const map = architectureMap(pagesOf([{ type: "user", id: "u0", text: "map it" }, { type: "assistant", id: "a0", text: overview }]))!;
+  const box = (name: RegExp) => screen.getByRole("button", { name });
+
+  it("draws each layer as a band, each box's status, and the boxes Claude found a problem with", () => {
+    const { container } = render(<ArchitectureTab map={map} current={[]} pageNames={{}} onOpenPage={() => {}} />);
+    expect([...container.querySelectorAll(".arch-band-label")].map((t) => t.textContent)).toEqual(["UI", "Business logic", "Device boundary", "Testo implementation", "External"]);
+    expect(box(/^Gating, done/)).toHaveClass("st-done");
+    expect(box(/^Sensor field and view model, planned/)).toHaveClass("st-planned");
+    expect(box(/^Window events and expected quantities, in progress, has an issue/)).toHaveClass("has-issue");
+    // Its long label is wrapped onto two lines, not cut short.
+    expect([...box(/^Window events/).querySelectorAll("tspan")].map((t) => t.textContent)).toEqual(["Window events and", "expected quantities"]);
+    const legend = within(screen.getByLabelText("Legend"));
+    expect(legend.getByText("Done")).toBeInTheDocument();
+    expect(legend.getByText("Planned")).toBeInTheDocument();
+    expect(legend.getByText(/crossings$/)).toBeInTheDocument();
+  });
+
+  it("lists every issue, Claude's and the boundary crossing Lantern found, and marks the arrows", () => {
+    const { container } = render(<ArchitectureTab map={map} current={[]} pageNames={{}} onOpenPage={() => {}} />);
+    const list = within(screen.getByLabelText("Issues"));
+    expect(list.getByText("3 issues")).toBeInTheDocument();
+    expect(list.getByText(/goes around Device boundary/)).toBeInTheDocument();
+    expect(list.getByText(/found by Lantern from the layers/)).toBeInTheDocument();
+    expect(container.querySelectorAll(".arch-edge.skip")).toHaveLength(1);
+    expect(container.querySelectorAll(".arch-edge.issue")).toHaveLength(1);
+    expect(container.querySelectorAll(".arch-crossing").length).toBeGreaterThan(10);
+    // Hovering a box shows what it is, its layer and its issue.
+    fireEvent.mouseEnter(box(/^Window events/));
+    expect(screen.getByText("Testo implementation", { selector: ".arch-panel-layer" })).toBeInTheDocument();
+    expect(screen.getByText(/two jobs in one type/, { selector: ".arch-panel-issue" })).toBeInTheDocument();
+  });
+});
+

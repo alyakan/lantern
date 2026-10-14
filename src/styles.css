@@ -1750,9 +1750,56 @@ button.arch-node:hover:not(:disabled) { background: var(--bg-hover); color: var(
 .arch-box:focus-visible .arch-ring { stroke: var(--focus, var(--text-2)); }
 .arch-ring { stroke-width: 1.75; }
 .arch-box.covered .arch-ring { stroke: color-mix(in srgb, var(--text) 80%, transparent); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--text) 30%, transparent)); }
-.arch-graph.focused .arch-box:not(.covered):not(.shown) { opacity: 0.45; }
+.arch-graph.focused .arch-box:not(.covered):not(.shown) { opacity: 0.55; }
 .arch-graph.focused .arch-edge:not(.lit) { opacity: 0.4; }
 
 /* The Overview page's own copy of the map. */
 .arch-block-body { padding: 10px 12px; overflow-x: auto; cursor: zoom-in; }
 .arch-block-body .arch-graph { max-width: 100%; height: auto; margin: 0 auto; }
+
+.arch-edge-tag rect { fill: var(--pane); stroke: var(--line); stroke-width: 0.8; }
+.arch-edge.skip .arch-edge-tag rect { stroke: color-mix(in srgb, var(--sev-should) 60%, transparent); }
+.arch-edge.issue .arch-edge-tag rect { stroke: color-mix(in srgb, var(--del) 60%, transparent); }
+
+/* Layers: each a band across the map, its name on the left. */
+.arch-band rect { fill: color-mix(in srgb, var(--text) 2.5%, transparent); }
+.arch-band.odd rect { fill: color-mix(in srgb, var(--text) 5%, transparent); }
+.arch-band-line { stroke: var(--line-strong); stroke-width: 1; stroke-dasharray: 6 5; }
+.arch-band-label { font: 600 calc(11px * var(--font-scale)) var(--ui); letter-spacing: 0.05em; text-transform: uppercase; fill: var(--muted); }
+/* Where an arrow crosses from one layer into the next; amber when it goes around a layer, red when Claude marked it. */
+.arch-crossing { fill: var(--pane); stroke: var(--text-2); stroke-width: 1.4; }
+.arch-edge.skip path { stroke: var(--sev-should); stroke-dasharray: 6 4; }
+.arch-edge.skip .arch-crossing { stroke: var(--sev-should); }
+.arch-edge.skip .arch-edge-label { fill: var(--sev-should); }
+.arch-edge.issue path { stroke: var(--del); stroke-dasharray: 6 4; }
+.arch-edge.issue .arch-crossing { stroke: var(--del); }
+.arch-edge.issue .arch-edge-label { fill: var(--del); }
+
+/* How far a box is built: done solid green, in progress amber, planned a dashed outline; its caption says it too. */
+.arch-caption { text-anchor: middle; font: 600 calc(10px * var(--font-scale)) var(--ui); letter-spacing: 0.02em; fill: var(--muted); pointer-events: none; }
+.arch-box.st-done .arch-rect { stroke: var(--add); stroke-width: 1.8; fill: color-mix(in srgb, var(--add) 9%, var(--field)); }
+.arch-box.st-done .arch-caption { fill: var(--add); }
+.arch-box.st-in-progress .arch-rect { stroke: var(--sev-should); stroke-width: 1.8; fill: color-mix(in srgb, var(--sev-should) 10%, var(--field)); }
+.arch-box.st-in-progress .arch-caption { fill: var(--sev-should); }
+.arch-box.st-planned .arch-rect { stroke: var(--faint); stroke-width: 1.5; stroke-dasharray: 5 4; fill: color-mix(in srgb, var(--field) 55%, transparent); }
+.arch-box.st-planned .arch-label { fill: var(--text-2); }
+.arch-box.st-planned .arch-caption { fill: var(--muted); }
+/* A box Claude found a problem with. */
+.arch-issue-badge circle { fill: var(--del); stroke: var(--pane); stroke-width: 2; }
+.arch-issue-badge text { text-anchor: middle; font: 700 calc(11px * var(--font-scale)) var(--ui); fill: #fff; pointer-events: none; }
+.arch-box.has-issue .arch-rect { stroke: color-mix(in srgb, var(--del) 75%, var(--line-strong)); }
+
+.arch-badge.st-done { background: color-mix(in srgb, var(--add) 16%, transparent); color: var(--add); }
+.arch-badge.st-in-progress { background: color-mix(in srgb, var(--sev-should) 18%, transparent); color: var(--sev-should); }
+.arch-badge.st-planned { background: var(--bg-active); color: var(--muted); border: 1px dashed var(--faint); }
+.arch-badge.crossings { background: var(--bg-active); color: var(--text-2); }
+.arch-panel-layer { font-size: calc(11px * var(--font-scale)); color: var(--muted); }
+.arch-panel-issue { margin-top: 4px; color: var(--del); line-height: 1.5; }
+.arch-panel-hint { font-size: calc(11px * var(--font-scale)); color: var(--faint); }
+.arch-issues ul { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; max-height: 132px; overflow-y: auto; }
+.arch-issues li { display: flex; gap: 6px; align-items: baseline; padding: 2px 6px; border-radius: var(--radius-chip); color: var(--text-2); line-height: 1.45; cursor: default; }
+.arch-issues li:hover, .arch-issues li.picked { background: var(--bg-hover); }
+.arch-issues li.marked .arch-issue-mark { color: var(--del); }
+.arch-issues li.found .arch-issue-mark { color: var(--sev-should); }
+.arch-issue-by { color: var(--faint); }
+
