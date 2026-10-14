@@ -25,6 +25,7 @@ The terminal is a fine place to talk to Claude Code, but a hard place to follow 
 - **Long pastes.** Pasting more than a few lines into the box shows `[Pasted text #1 · 120 lines]` instead of the text; the whole text is sent. Your sent messages show at most three lines, with **Show more** for the rest.
 - **Search.** ⌘P finds files, ⌘⇧F searches text (regex, case, whole word), ⌘F searches inside an open file or diff.
 - **History and sessions.** Pick up any earlier Claude Code session for a folder, including ones started in the terminal. Several chats can run side by side, with a notice when one finishes or needs you. The chats open when Lantern closes are offered back the next time it opens.
+- **Moved folders.** Claude Code keeps a folder's sessions under its path, so after you move a repository its history stays where it was. **Relocate Folder…** (⇧⌘R, or the folder menu) asks where the folder was and where it is now, shows what it finds (sessions, their size, and the MCP servers, permissions and memory Claude Code keeps for the path), and records the move: the old sessions then show in History, and a session that's opened is copied into the new folder, never moved or overwritten. The original files are left where they are. Lantern also offers a "Moved?" entry in the folder menu for a recent folder whose path has gone, when exactly one folder with the same name is there; nothing moves until you confirm.
 
 ![A Step-by-step plan page](docs/screenshots/steps.png)
 

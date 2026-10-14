@@ -23,7 +23,7 @@ import { BUILT_IN, CUSTOM_HARNESS, DEFAULT_HARNESS, findHarness, presetsOf, sett
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
 import type { McpServer, MovedFolder, NewRule, SkillEntry, UpdateInfo } from "./types";
-import { LAST_FOLDER, OPEN_CHATS, migrateFolderState, type Migrated } from "./lib/relocate";
+import { LAST_FOLDER, OPEN_CHATS, migrateFolderState, withMovedNote, type Migrated } from "./lib/relocate";
 import { RelocateDialog } from "./components/RelocateDialog";
 import { stepFile, usePersistentState } from "./lib/layout";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
@@ -415,7 +415,7 @@ export default function App() {
           return to(slot)({ type: "failed", text: opened.read_only });
         }
         delete relaunch.current[slot];
-        to(slot)({ type: "history_loaded", sessionId, events: opened.events });
+        to(slot)({ type: "history_loaded", sessionId, events: opened.events, movedFrom: opened.moved_from });
         to(slot)({ type: "session_ready" });
       })
       .catch((e) => startGen.current[slot] === gen && to(slot)({ type: "failed", text: errText(e) }));
@@ -547,7 +547,9 @@ export default function App() {
     const noted = withSkillNote(text, skillNames(slot));
     // Files reverted since the last message: Claude is told, so it doesn't act on what it last wrote.
     const reverted = withRevertNote(pick ? withFlavourNote(pick, noted) : noted, chats.slots[slot]?.revertNotes ?? []);
-    api.sendMessage(slot, withShellContext(items, reverted)).then(
+    // A chat opened from a place the folder moved from: Claude is told once that the paths in earlier messages are old.
+    const moved = withMovedNote(reverted, chats.slots[slot]?.movedFrom ?? null, chats.slots[slot]?.folder ?? null);
+    api.sendMessage(slot, withShellContext(items, moved)).then(
       (turn) => typeof turn === "number" && to(slot)({ type: "turn_numbered", turn }),
       (e) => to(slot)({ type: "turn_failed", text: errText(e) }),
     );

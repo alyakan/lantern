@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { FOLDER_RECORDS, LAST_FOLDER, NOT_FOLDER_KEYED, OPEN_CHATS, migrateFolderState, type KeyValueStore } from "./relocate";
+import { FOLDER_RECORDS, LAST_FOLDER, NOT_FOLDER_KEYED, OPEN_CHATS, migrateFolderState, movedNote, withMovedNote, type KeyValueStore } from "./relocate";
+import { initialState, reducer } from "../store";
 
 /** An in-memory localStorage: the keys and values as they'd be saved. */
 function memoryStore(initial: Record<string, unknown> = {}): KeyValueStore & { data: Map<string, string> } {
@@ -84,6 +85,29 @@ describe("migrateFolderState", () => {
       },
     };
     expect(migrateFolderState(store, OLD, NEXT)["settings.modeByFolder"]).toEqual({ [OLD]: "steps", [NEXT]: "steps" });
+  });
+});
+
+describe("the moved note", () => {
+  it("says the project moved, and that earlier paths are the old ones", () => {
+    expect(movedNote(OLD, NEXT)).toBe(`[Lantern note: This project moved from ${OLD} to ${NEXT}: paths in earlier messages are the old ones.]`);
+  });
+
+  it("goes in front of the message, and only when there's a move and it isn't a slash command", () => {
+    expect(withMovedNote("why?", OLD, NEXT)).toBe(`${movedNote(OLD, NEXT)}\n\nwhy?`);
+    expect(withMovedNote("why?", null, NEXT)).toBe("why?");
+    expect(withMovedNote("why?", OLD, null)).toBe("why?");
+    expect(withMovedNote("/compact", OLD, NEXT)).toBe("/compact");
+  });
+
+  it("is set by opening a session from the old place, goes with the first message, and stays for a slash command", () => {
+    const opened = reducer(initialState, { type: "folder_opened", folder: NEXT });
+    const replayed = reducer(opened, { type: "history_loaded", sessionId: "s1", events: [], movedFrom: OLD });
+    expect(replayed.movedFrom).toBe(OLD);
+    expect(reducer(replayed, { type: "user_sent", text: "/compact" }).movedFrom).toBe(OLD);
+    expect(reducer(replayed, { type: "user_sent", text: "why?" }).movedFrom).toBeNull();
+    // A session opened from its own folder has no note.
+    expect(reducer(opened, { type: "history_loaded", sessionId: "s2", events: [] }).movedFrom).toBeNull();
   });
 });
 

@@ -40,6 +40,20 @@ export const NOT_FOLDER_KEYED = [
   "summary.exportResults",
 ] as const;
 
+/**
+ * The note Claude gets once, in front of the first message sent in a chat opened from a place the folder moved from:
+ * the paths in the earlier messages are the old ones. It's the same kind of block as the revert note.
+ */
+export function movedNote(from: string, to: string): string {
+  return `[Lantern note: This project moved from ${from} to ${to}: paths in earlier messages are the old ones.]`;
+}
+
+/** The message with the moved note in front of it (a slash command goes to Claude as it is, so it gets none). */
+export function withMovedNote(text: string, from: string | null, to: string | null): string {
+  if (!from || !to || text.startsWith("/")) return text;
+  return `${movedNote(from, to)}\n\n${text}`;
+}
+
 /** What the migration changed: each key's new value, as it was written. */
 export type Migrated = Record<string, unknown>;
 

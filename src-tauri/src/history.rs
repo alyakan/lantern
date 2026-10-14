@@ -135,13 +135,17 @@ fn prompt_text(r: &Value) -> Option<String> {
     Some(trimmed.to_string())
 }
 
-/// The note Lantern puts in front of a message it sends (a revert's, a moved folder's): one block, then a blank line, then
-/// what the user typed. It's not part of the prompt, so a replayed chat doesn't show it.
+/// The notes Lantern puts in front of a message it sends (a revert's, a moved folder's): each is a block, then a blank line,
+/// then what the user typed. They aren't part of the prompt, so a replayed chat doesn't show them.
 fn without_lantern_note(text: &str) -> &str {
-    if !text.starts_with("[Lantern note:") {
-        return text;
+    let mut rest = text;
+    while rest.starts_with("[Lantern note:") {
+        match rest.split_once("\n\n") {
+            Some((_, after)) => rest = after,
+            None => break,
+        }
     }
-    text.split_once("\n\n").map_or(text, |(_, rest)| rest)
+    rest
 }
 
 /// Tags Claude Code and Lantern wrap around what they put in a user record (a command the user ran and its output, a
@@ -754,5 +758,7 @@ mod tests {
         assert_eq!(typed("[Lantern note: this project moved from /a to /b. Paths in earlier messages are the old ones.]\n\nwhy?"), Some("why?".into()));
         assert_eq!(typed("[Lantern note: since your last message the user reverted these files.]\n- /p/a.ts: put back.\n\nwhy?"), Some("why?".into()));
         assert_eq!(typed("[Lantern note: only a note]"), Some("[Lantern note: only a note]".into()));
+        // The moved note and a revert note can both come first.
+        assert_eq!(typed("[Lantern note: this project moved from /a to /b.]\n\n[Lantern note: since your last message.]\n- /p/a.ts: put back.\n\nwhy?"), Some("why?".into()));
     }
 }
