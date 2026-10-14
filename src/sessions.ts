@@ -12,6 +12,8 @@ export interface AgentMeta {
   branch: string | null;
   base: string | null;
   isolation: "worktree" | "shared";
+  /** Taken off the canvas by the user: it keeps working, and comes back by itself when it needs them. Absent: on the canvas. */
+  hidden?: boolean;
 }
 
 /**
@@ -33,7 +35,11 @@ export type ChatsAction =
   | { type: "activate"; slot: string }
   | { type: "remove"; slot: string }
   /** A restored chat is a worker of an open main agent again (the backend adopted it): its tether and notes come back. */
-  | { type: "adopt"; slot: string; meta: AgentMeta };
+  | { type: "adopt"; slot: string; meta: AgentMeta }
+  /** A worker is taken off the canvas, or put back on it. */
+  | { type: "set_hidden"; slot: string; hidden: boolean }
+  /** A worker was closed from its card: its chat goes, and if it was on screen the main agent is. */
+  | { type: "close_agent"; slot: string };
 
 export const FIRST_SLOT = "s1";
 
@@ -81,6 +87,17 @@ export function chatsReducer(chats: Chats, action: ChatsAction): Chats {
       return chats.slots[action.slot] ? { ...chats, active: action.slot } : chats;
     case "adopt":
       return chats.slots[action.slot] && chats.slots[action.meta.parent] ? { ...chats, agents: { ...chats.agents, [action.slot]: action.meta } } : chats;
+    case "set_hidden": {
+      const meta = chats.agents[action.slot];
+      if (!meta || !!meta.hidden === action.hidden) return chats;
+      const { hidden: _, ...rest } = meta;
+      return { ...chats, agents: { ...chats.agents, [action.slot]: action.hidden ? { ...rest, hidden: true } : rest } };
+    }
+    case "close_agent": {
+      const parent = chats.agents[action.slot]?.parent;
+      const left = chats.active === action.slot && parent && chats.slots[parent] ? { ...chats, active: parent } : chats;
+      return chatsReducer(left, { type: "remove", slot: action.slot });
+    }
     case "remove": {
       if (action.slot === chats.active || !chats.slots[action.slot]) return chats;
       const { [action.slot]: _, ...rest } = chats.slots;

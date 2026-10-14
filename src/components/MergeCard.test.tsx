@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { NodeActionsContext, type NodeActions } from "../lib/canvasContext";
 import type { MergeProposal } from "../store";
 import { MergeCard } from "./MergeCard";
+import { visibleProposals } from "./NodeBody";
 
 const proposal: MergeProposal = {
   worker: "w1",
@@ -24,7 +25,7 @@ const proposal: MergeProposal = {
 
 const actions = (over: Partial<NodeActions> = {}): NodeActions => ({
   send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(),
-  approveMerge: vi.fn(), declineMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), draft: vi.fn(() => ""), setDraft: vi.fn(),
+  approveMerge: vi.fn(), declineMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), spawn: vi.fn(() => Promise.resolve()), closeCheck: vi.fn(() => Promise.resolve({ worktree: true, branch: null, uncommitted: 0, unmerged_commits: 0 })), closeWorker: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(),
   ...over,
 });
 
@@ -101,5 +102,25 @@ describe("the merge card", () => {
     });
     await waitFor(() => expect(screen.getByText("Worktree removed.")).toBeTruthy());
     expect(removeWorktree).toHaveBeenCalledWith("w1");
+  });
+});
+
+describe("which merges an agent shows", () => {
+  const p = (over: Partial<MergeProposal>): MergeProposal => ({ ...proposal, ...over });
+
+  it("shows open ones, and the latest merged one per worker", () => {
+    const all = [p({ worker: "w1", status: "merged", branch: "a" }), p({ worker: "w1", status: "merged", branch: "b" }), p({ worker: "w2", status: "open", branch: "c" })];
+    expect(visibleProposals(all, null).map((x) => x.branch)).toEqual(["b", "c"]);
+  });
+
+  it("leaves a declined one out, so no answered line stays above the composer", () => {
+    const all = [p({ worker: "w1", status: "declined" }), p({ worker: "w2", status: "open", branch: "c" })];
+    expect(visibleProposals(all, null).map((x) => x.branch)).toEqual(["c"]);
+    expect(visibleProposals(all, "w1")).toEqual([]);
+  });
+
+  it("brings a worker's merge back when the main agent asks again", () => {
+    const all = [p({ status: "declined" }), p({ status: "open", branch: "again" })];
+    expect(visibleProposals(all, "w1").map((x) => x.branch)).toEqual(["again"]);
   });
 });

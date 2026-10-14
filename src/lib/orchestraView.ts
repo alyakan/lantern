@@ -1,5 +1,6 @@
 import { wakesPaused, type Chats } from "../sessions";
 import type { ChatItem, State } from "../store";
+import type { CloseCheck } from "../types";
 
 /** What an agent on the canvas is doing, in the words a product owner would use. */
 export type NodeStatus = "starting" | "working" | "waiting" | "idle" | "ended";
@@ -29,6 +30,8 @@ export interface OrchestraNode {
   /** The worker's own branch, when it has a worktree. */
   branch: string | null;
   isolation: "worktree" | "shared" | null;
+  /** The user took it off the canvas (it is still on the team). Absent: shown. */
+  hidden?: boolean;
 }
 
 /**
@@ -38,7 +41,7 @@ export interface OrchestraNode {
 export function orchestraNodes(chats: Chats, mainName: (slot: string, s: State) => string): OrchestraNode[] {
   const mains = Object.entries(chats.slots).filter(([, s]) => s.orchestrator).map(([slot]) => slot);
   const nodes: OrchestraNode[] = [];
-  const worker = ([slot, meta]: [string, Chats["agents"][string]], parent: string | null): OrchestraNode => ({ slot, role: "worker", parent, name: meta.name, branch: meta.branch, isolation: meta.isolation });
+  const worker = ([slot, meta]: [string, Chats["agents"][string]], parent: string | null): OrchestraNode => ({ slot, role: "worker", parent, name: meta.name, branch: meta.branch, isolation: meta.isolation, ...(meta.hidden ? { hidden: true } : {}) });
   for (const main of mains) {
     nodes.push({ slot: main, role: "main", parent: null, name: mainName(main, chats.slots[main]), branch: null, isolation: null });
     for (const entry of Object.entries(chats.agents)) if (entry[1].parent === main && chats.slots[entry[0]]) nodes.push(worker(entry, main));
@@ -103,4 +106,11 @@ export function money(usd: number): string {
   if (usd <= 0) return "";
   if (usd < 0.01) return "<$0.01";
   return `$${usd < 10 ? usd.toFixed(2) : usd.toFixed(usd < 100 ? 1 : 0)}`;
+}
+
+/** What closing a worker would throw away, in words: "3 uncommitted files and 2 commits that aren't merged". Empty when nothing. */
+export function lostText(c: CloseCheck): string {
+  const files = c.uncommitted > 0 ? `${c.uncommitted} uncommitted file${c.uncommitted === 1 ? "" : "s"}` : null;
+  const commits = c.unmerged_commits > 0 ? (c.unmerged_commits === 1 ? "1 commit that isn't merged" : `${c.unmerged_commits} commits that aren't merged`) : null;
+  return [files, commits].filter(Boolean).join(" and ");
 }
