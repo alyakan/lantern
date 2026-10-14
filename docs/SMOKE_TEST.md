@@ -15,5 +15,15 @@ Run against the built `Lantern.app` (launched from Finder, not a terminal, so PA
 11. Huge output: "Run `seq 1 100000`." The card output ends with `…` and the UI stays responsive.
 12. Before the first message: the input is enabled right after opening a folder, and switching Ask/Auto right after opening works.
 13. Press Stop mid-turn while an Allow/Deny card is pending. The card shows Denied, and the next prompt still works.
+
+Orchestras (use a scratch git repo with at least one commit):
+
+- New orchestra asks whether the team runs on Auto or Ask the first time, and not again for that project. The canvas shows one agent, the main agent, with its mode.
+- Ask it: "Add a file a.txt in one worker and b.txt in another, each on its own branch." Two workers appear, tethered, each in a worktree under Lantern's app data (`~/Library/Application Support/…/worktrees`), each on a `lantern/…` branch. The main chat names each worker it started.
+- A worker that needs permission (on Ask) pulses amber, the pill says "1 agent needs you", and the prompt is in that worker's own window. Answering it there lets the worker carry on.
+- Type to a worker directly. It answers; the main agent's next note mentions that you messaged it.
+- When a worker finishes, the main agent gets a note and replies without you typing. When it asks to merge, the worker reads "Ready to merge". Approve merges its branch into the main checkout (check `git log`); a dirty main checkout says so and offers Try again; Not yet leaves it unmerged.
+- Quit and reopen Lantern, then Restore all: the main agent and its workers come back as a team, with the tethers and the canvas, and the main agent can message them again.
+- Pan, zoom and drag stay smooth with four agents streaming at once. Zoomed out, agents are cards and a click zooms in.
 14. With the app launched from Finder, a hook or MCP server that needs Homebrew or Node works.
 15. Memory: Activity Monitor shows the Lantern process (plus its WebContent process) well under Electron-class usage (roughly 150+ MB); note the numbers here.

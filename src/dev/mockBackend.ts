@@ -48,8 +48,9 @@ function listDir(dir: string) {
 }
 
 const sleep =(ms: number) => new Promise((r) => setTimeout(r, ms));
-// Events carry their chat's slot, like the real backend's.
-const sendTo = (slot: string) => (event: UiEvent) => emit("ui-event", { slot, event });
+// Events carry their chat's slot, like the real backend's. One for a window that is already gone (a test that ended before
+// a scripted turn did, a closed browser tab) has nobody to reach and is dropped, rather than failing in the background.
+const sendTo = (slot: string) => (event: UiEvent) => emit("ui-event", { slot, event }).catch(() => {});
 type Send = ReturnType<typeof sendTo>;
 
 async function streamText(send: Send, blockId: string, text: string) {
@@ -448,7 +449,8 @@ async function playOrchestraTurn(slot: string) {
       branch: w.branch,
       base: w.branch ? "main" : null,
       isolation: w.branch ? "worktree" : "shared",
-      mode: "auto",
+      // Never more freedom than the main agent (see worker_mode in the backend).
+      mode: slotMode[slot] === "auto" ? "auto" : "ask",
     });
     await send({ kind: "tool_finished", parent: null, tool_use_id: id, is_error: false, output: `Started worker ${w.id} ("${w.name}").` });
     void playWorker(slot, w);

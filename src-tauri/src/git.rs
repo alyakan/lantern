@@ -1,5 +1,7 @@
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 /// The git directory of the checkout at `folder`: `.git` itself, or (in a linked worktree, where `.git` is a file saying
 /// `gitdir: <path>`) the directory that file points to.
@@ -29,22 +31,71 @@ fn parse_head(head: &str) -> Option<String> {
     (head.len() >= 7 && head.chars().all(|c| c.is_ascii_hexdigit())).then(|| head[..7].to_string())
 }
 
+/// The longest a git command may take. A checkout of a huge repository, or a hook that waits for something, must not hold a
+/// tool call (and the prompts queued behind it) for ever.
+const GIT_TIMEOUT: Duration = Duration::from_secs(180);
+
 /// Runs `git` in `dir` and returns its trimmed stdout; a failure is git's own message. Blocking: call it off the async
-/// threads. Never asks for a password or opens an editor.
+/// threads. Never asks for a password or opens an editor, and is stopped after `GIT_TIMEOUT`.
 fn run(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, String> {
+    run_within(dir, args, path_env, GIT_TIMEOUT)
+}
+
+fn run_within(dir: &Path, args: &[&str], path_env: Option<&str>, limit: Duration) -> Result<String, String> {
+    run_raw_within(dir, args, path_env, limit).map(|out| out.trim().to_string())
+}
+
+/// What `run` returns, exactly as git wrote it: for lists of file names (`-z`), where a name's own spaces count.
+fn run_raw(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, String> {
+    run_raw_within(dir, args, path_env, GIT_TIMEOUT)
+}
+
+fn run_raw_within(dir: &Path, args: &[&str], path_env: Option<&str>, limit: Duration) -> Result<String, String> {
     let mut cmd = Command::new("git");
-    cmd.args(args).current_dir(dir).env("GIT_TERMINAL_PROMPT", "0").env("GIT_EDITOR", "true").stdin(std::process::Stdio::null());
+    cmd.args(args).current_dir(dir).env("GIT_TERMINAL_PROMPT", "0").env("GIT_EDITOR", "true").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Some(p) = path_env {
         cmd.env("PATH", p);
     }
-    let out = cmd.output().map_err(|e| format!("Could not run git: {e}"))?;
-    let text = |b: &[u8]| String::from_utf8_lossy(b).trim().to_string();
-    if out.status.success() {
-        Ok(text(&out.stdout))
+    let mut child = cmd.spawn().map_err(|e| format!("Could not run git: {e}"))?;
+    // Both pipes are read as git writes, or a command with a lot of output would fill one and wait on us.
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut bytes);
+            }
+            bytes
+        })
+    };
+    let (out, err) = (drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>)), drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>)));
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() > limit => {
+                // Not waited for further: a hook it started may hold the pipes open, and we are done with it.
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("git {} took longer than {} seconds and was stopped.", args.first().unwrap_or(&""), limit.as_secs()));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(15)),
+            Err(e) => return Err(format!("Could not run git: {e}")),
+        }
+    };
+    let text = |b: Vec<u8>| String::from_utf8_lossy(&b).to_string();
+    let (stdout, stderr) = (text(out.join().unwrap_or_default()), text(err.join().unwrap_or_default()));
+    if status.success() {
+        Ok(stdout)
     } else {
-        let err = text(&out.stderr);
-        Err(if err.is_empty() { text(&out.stdout) } else { err })
+        let (stdout, stderr) = (stdout.trim(), stderr.trim());
+        Err(if stderr.is_empty() { stdout } else { stderr }.to_string())
     }
+}
+
+/// The branch `folder`'s checkout is on, from git itself (so from any folder inside it); None for a detached HEAD or no
+/// repository. `current_branch` above also names a detached HEAD by its commit, which is no place to merge into.
+pub fn branch_of(folder: &Path, path_env: Option<&str>) -> Option<String> {
+    run(folder, &["symbolic-ref", "--short", "-q", "HEAD"], path_env).ok().filter(|b| !b.is_empty())
 }
 
 /// The top of the repository `folder` is in, or None when it isn't in one.
@@ -74,6 +125,17 @@ pub fn slug(name: &str) -> String {
 
 fn branch_exists(repo: &Path, branch: &str, path_env: Option<&str>) -> bool {
     run(repo, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch}")], path_env).is_ok()
+}
+
+/// The linked worktree `folder` is in (or is), as a restored worker's: None when it is a main checkout (its `.git` is a
+/// directory, not the file a linked worktree has) or no repository at all. The branch it started from is not known.
+pub fn existing_worktree(folder: &Path, path_env: Option<&str>) -> Option<Worktree> {
+    let root = repo_root(folder, path_env)?;
+    if !root.join(".git").is_file() {
+        return None;
+    }
+    let branch = current_branch(&root)?;
+    Some(Worktree { folder: folder.to_path_buf(), root, branch, base: None })
 }
 
 /// A linked worktree for a worker, on a branch of its own.
@@ -169,16 +231,51 @@ pub enum Merged {
     Conflicts(Vec<String>),
 }
 
-/// Merges `branch` into whatever the main checkout has checked out, with a merge commit so the branch's own commits
-/// stay readable. The checkout must be clean. A conflict is undone, not left half-merged.
-pub fn merge(repo: &Path, branch: &str, message: &str, path_env: Option<&str>) -> Result<Merged, String> {
-    let into = current_branch(repo).ok_or("The main checkout isn't on a branch.")?;
+/// The files `branch` adds that the main checkout already has on disk but keeps out of git (ignored): a merge writes over
+/// them, silently, and `status` never lists them, so the clean-checkout check can't see them.
+fn would_overwrite_ignored(repo: &Path, branch: &str, path_env: Option<&str>) -> Result<Vec<String>, String> {
+    // Paths below are relative to the top of the repository, whichever folder inside it the main agent was opened in.
+    let root = repo_root(repo, path_env).unwrap_or_else(|| repo.to_path_buf());
+    // Names are read exactly as git writes them (NUL-separated, untrimmed) and handed back as literal paths: a name that
+    // starts with ":" or holds `*` or `[` would otherwise be read by git as a pathspec pattern, and not match itself.
+    let added = run_raw(&root, &["--literal-pathspecs", "diff", "--name-only", "-z", "--diff-filter=AR", &format!("HEAD...{branch}")], path_env)?;
+    let paths: Vec<&str> = added.split('\0').filter(|p| !p.is_empty()).collect();
+    let mut tracked = std::collections::HashSet::new();
+    for chunk in paths.chunks(200) {
+        let mut args = vec!["--literal-pathspecs", "ls-files", "-z", "--"];
+        args.extend(chunk);
+        for p in run_raw(&root, &args, path_env)?.split('\0').filter(|p| !p.is_empty()) {
+            tracked.insert(p.to_string());
+        }
+    }
+    // What the branch adds that the checkout already has on disk without tracking it: since the clean-checkout check already
+    // covers untracked files that aren't ignored, these are ignored ones. Asked of the disk rather than of git's ignore
+    // rules, so a different spelling of the same file (the filesystem here ignores case) is found too.
+    Ok(paths.iter().filter(|p| !tracked.contains(**p) && root.join(p).symlink_metadata().is_ok()).map(|p| p.to_string()).collect())
+}
+
+/// Merges `branch` into `into`, with a merge commit so the branch's own commits stay readable. `into` is the branch the
+/// user was shown when they were asked: the main checkout must still be on it, or nothing is merged. The checkout must be
+/// clean, and a file the user keeps out of git (ignored) is never overwritten by the merge. A conflict is undone, not left
+/// half-merged.
+pub fn merge(repo: &Path, into: &str, branch: &str, message: &str, path_env: Option<&str>) -> Result<Merged, String> {
+    match branch_of(repo, path_env) {
+        Some(now) if now == into => {}
+        Some(now) => return Err(format!("The main checkout is on {now} now, not {into}, which is where the merge was proposed. Switch it back to {into}, or ask for the merge again.")),
+        None => return Err("The main checkout isn't on a branch, so there is nothing to merge into.".into()),
+    }
     let dirty = dirty(repo, path_env)?;
     if !dirty.is_empty() {
         return Err(format!("The main checkout has {} uncommitted change{}; commit or stash them first, then approve the merge again.", dirty.len(), if dirty.len() == 1 { "" } else { "s" }));
     }
+    let clobbered = would_overwrite_ignored(repo, branch, path_env)?;
+    if !clobbered.is_empty() {
+        let shown: Vec<&str> = clobbered.iter().take(5).map(String::as_str).collect();
+        let more = if clobbered.len() > 5 { format!(" and {} more", clobbered.len() - 5) } else { String::new() };
+        return Err(format!("The merge would overwrite files you keep out of git ({}{more}). Move them aside, then approve the merge again.", shown.join(", ")));
+    }
     match run(repo, &["merge", "--no-ff", "-m", message, branch], path_env) {
-        Ok(_) => Ok(Merged::Into(into)),
+        Ok(_) => Ok(Merged::Into(into.to_string())),
         Err(e) => {
             let conflicts: Vec<String> = run(repo, &["diff", "--name-only", "--diff-filter=U"], path_env).unwrap_or_default().lines().map(String::from).collect();
             let _ = run(repo, &["merge", "--abort"], path_env);
@@ -197,7 +294,11 @@ pub fn remove_worktree(repo: &Path, root: &Path, branch: &str, delete_branch: bo
     args.push(&root_arg);
     run(repo, &args, path_env)?;
     if delete_branch {
-        run(repo, &["branch", if force { "-D" } else { "-d" }, branch], path_env)?;
+        // Unforced, a branch with commits that were never merged is kept (git refuses): the worktree is gone either way.
+        let deleted = run(repo, &["branch", if force { "-D" } else { "-d" }, branch], path_env);
+        if force {
+            deleted?;
+        }
     }
     Ok(())
 }
@@ -282,6 +383,21 @@ mod tests {
     }
 
     #[test]
+    fn a_worktree_that_is_already_there_is_recognised_and_a_main_checkout_is_not() {
+        let main = repo();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        // git names the real path (on macOS /var is /private/var), so compare real paths.
+        let real = |p: &Path| std::fs::canonicalize(p).unwrap();
+        let found = existing_worktree(&wt.folder, None).unwrap();
+        assert_eq!((found.branch.as_str(), real(&found.root), found.base.as_deref()), ("lantern/w", real(&wt.root), None));
+        // From a subfolder of it too, and the main checkout and a plain folder are not worktrees.
+        std::fs::create_dir_all(wt.folder.join("sub")).unwrap();
+        assert_eq!(real(&existing_worktree(&wt.folder.join("sub"), None).unwrap().root), real(&wt.root));
+        assert_eq!(existing_worktree(main.path(), None), None);
+        assert_eq!(existing_worktree(tempfile::tempdir().unwrap().path(), None), None);
+    }
+
+    #[test]
     fn a_directory_left_by_an_earlier_run_is_never_reused() {
         let main = repo();
         let parent = worktrees();
@@ -340,7 +456,7 @@ mod tests {
         let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
         std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
         commit_all(&wt.folder, "add b", None).unwrap();
-        assert_eq!(merge(main.path(), &wt.branch, "Merge w", None), Ok(Merged::Into("main".into())));
+        assert_eq!(merge(main.path(), "main", &wt.branch, "Merge w", None), Ok(Merged::Into("main".into())));
         assert!(main.path().join("b.txt").is_file());
         assert_eq!(run(main.path(), &["log", "-1", "--format=%s"], None).unwrap(), "Merge w");
     }
@@ -353,7 +469,7 @@ mod tests {
         commit_all(&wt.folder, "worker edit", None).unwrap();
         std::fs::write(main.path().join("a.txt"), "main\n").unwrap();
         run(main.path(), &["commit", "-q", "-am", "main edit"], None).unwrap();
-        assert_eq!(merge(main.path(), &wt.branch, "Merge w", None), Ok(Merged::Conflicts(vec!["a.txt".into()])));
+        assert_eq!(merge(main.path(), "main", &wt.branch, "Merge w", None), Ok(Merged::Conflicts(vec!["a.txt".into()])));
         assert!(dirty(main.path(), None).unwrap().is_empty(), "the checkout was left mid-merge");
         assert_eq!(std::fs::read_to_string(main.path().join("a.txt")).unwrap(), "main\n");
     }
@@ -365,7 +481,7 @@ mod tests {
         std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
         commit_all(&wt.folder, "add b", None).unwrap();
         std::fs::write(main.path().join("a.txt"), "loose\n").unwrap();
-        let err = merge(main.path(), &wt.branch, "Merge w", None).unwrap_err();
+        let err = merge(main.path(), "main", &wt.branch, "Merge w", None).unwrap_err();
         assert!(err.contains("1 uncommitted change"), "{err}");
         assert!(!main.path().join("b.txt").exists());
     }
@@ -376,11 +492,123 @@ mod tests {
         let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
         std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
         commit_all(&wt.folder, "add b", None).unwrap();
-        // Not merged: `branch -d` refuses, and the worktree is gone by then, so a caller sees the error and the branch.
-        assert!(remove_worktree(main.path(), &wt.root, &wt.branch, true, false, None).is_err());
+        // Not merged: `branch -d` refuses, so the branch (with its commit) is kept, and the worktree is gone either way.
+        assert!(remove_worktree(main.path(), &wt.root, &wt.branch, true, false, None).is_ok());
         assert!(!wt.root.exists());
         assert!(branch_exists(main.path(), &wt.branch, None));
         run(main.path(), &["branch", "-D", &wt.branch], None).unwrap();
+    }
+
+    #[test]
+    fn a_merge_only_goes_into_the_branch_that_was_proposed_and_never_onto_a_detached_head() {
+        let main = repo();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
+        commit_all(&wt.folder, "add b", None).unwrap();
+        // The checkout was moved to another branch after the card was shown.
+        run(main.path(), &["checkout", "-q", "-b", "other"], None).unwrap();
+        let err = merge(main.path(), "main", &wt.branch, "Merge w", None).unwrap_err();
+        assert!(err.contains("is on other now, not main"), "{err}");
+        assert!(!main.path().join("b.txt").exists());
+        // A detached HEAD is no branch at all.
+        run(main.path(), &["checkout", "-q", "--detach"], None).unwrap();
+        assert_eq!(branch_of(main.path(), None), None);
+        let err = merge(main.path(), "main", &wt.branch, "Merge w", None).unwrap_err();
+        assert!(err.contains("isn't on a branch"), "{err}");
+        assert!(!main.path().join("b.txt").exists());
+        run(main.path(), &["checkout", "-q", "main"], None).unwrap();
+        assert_eq!(merge(main.path(), "main", &wt.branch, "Merge w", None), Ok(Merged::Into("main".into())));
+    }
+
+    #[test]
+    fn a_merge_from_a_folder_inside_the_repository_finds_its_branch() {
+        let main = repo();
+        std::fs::create_dir_all(main.path().join("packages/app")).unwrap();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
+        commit_all(&wt.folder, "add b", None).unwrap();
+        let sub = main.path().join("packages/app");
+        assert_eq!(branch_of(&sub, None).as_deref(), Some("main"));
+        assert_eq!(merge(&sub, "main", &wt.branch, "Merge w", None), Ok(Merged::Into("main".into())));
+        assert!(main.path().join("b.txt").is_file());
+    }
+
+    #[test]
+    fn a_merge_never_overwrites_a_file_the_user_keeps_out_of_git() {
+        let main = repo();
+        std::fs::write(main.path().join(".gitignore"), "config.local\n").unwrap();
+        run(main.path(), &["add", "-A"], None).unwrap();
+        run(main.path(), &["commit", "-q", "-m", "ignore config"], None).unwrap();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        // The worker force-adds a path the user ignores locally.
+        std::fs::write(wt.folder.join("config.local"), "shared-from-worker\n").unwrap();
+        run(&wt.folder, &["add", "-f", "config.local"], None).unwrap();
+        run(&wt.folder, &["commit", "-q", "-m", "add config"], None).unwrap();
+        std::fs::write(main.path().join("config.local"), "my-secret-token\n").unwrap();
+        // The dirty check doesn't see ignored files, so it is the merge itself that must refuse.
+        assert!(dirty(main.path(), None).unwrap().is_empty());
+        let result = merge(main.path(), "main", &wt.branch, "Merge w", None);
+        assert_eq!(std::fs::read_to_string(main.path().join("config.local")).unwrap(), "my-secret-token\n", "{result:?}");
+        assert!(result.is_err() || matches!(result, Ok(Merged::Conflicts(_))), "{result:?}");
+        assert!(dirty(main.path(), None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn names_with_pattern_characters_or_odd_spacing_are_checked_as_the_literal_files_they_are() {
+        let main = repo();
+        std::fs::write(main.path().join(".gitignore"), "*.local\n:*\n[ab]*\n *\n").unwrap();
+        run(main.path(), &["add", "-A"], None).unwrap();
+        run(main.path(), &["commit", "-q", "-m", "ignore"], None).unwrap();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        // Names git would read as pathspec magic or patterns, or that begin with a space.
+        let names = [":(exclude)x.local", ":plain.local", "[ab].local", "a*.local", " lead.local"];
+        for n in names {
+            std::fs::write(wt.folder.join(n), "from worker\n").unwrap();
+            run(&wt.folder, &["--literal-pathspecs", "add", "-f", "--", n], None).unwrap();
+        }
+        run(&wt.folder, &["commit", "-q", "-m", "odd names"], None).unwrap();
+        for n in names {
+            std::fs::write(main.path().join(n), "mine\n").unwrap();
+        }
+        let hit = would_overwrite_ignored(main.path(), &wt.branch, None).unwrap();
+        for n in names {
+            assert!(hit.iter().any(|h| h == n), "{n:?} was missed: {hit:?}");
+        }
+        assert!(merge(main.path(), "main", &wt.branch, "Merge w", None).is_err());
+        for n in names {
+            assert_eq!(std::fs::read_to_string(main.path().join(n)).unwrap(), "mine\n", "{n:?}");
+        }
+    }
+
+    #[test]
+    fn a_different_spelling_of_a_file_on_a_case_insensitive_disk_is_still_found() {
+        let main = repo();
+        std::fs::write(main.path().join("Notes.LOCAL"), "mine\n").unwrap();
+        let on_disk_is_case_blind = main.path().join("notes.local").symlink_metadata().is_ok();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        std::fs::write(wt.folder.join("notes.local"), "theirs\n").unwrap();
+        run(&wt.folder, &["add", "-f", "notes.local"], None).unwrap();
+        run(&wt.folder, &["commit", "-q", "-m", "add"], None).unwrap();
+        let hit = would_overwrite_ignored(main.path(), &wt.branch, None).unwrap();
+        // Where the disk treats the two spellings as one file (the default on a Mac), the merge would write over it.
+        assert_eq!(!hit.is_empty(), on_disk_is_case_blind, "{hit:?}");
+    }
+
+    #[test]
+    fn a_git_command_that_takes_too_long_is_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        run(dir.path(), &["init", "-q"], None).unwrap();
+        // A hook that never finishes.
+        let hook = dir.path().join(".git/hooks/pre-commit");
+        std::fs::write(&hook, "#!/bin/sh\nsleep 30\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(dir.path().join("a"), "a").unwrap();
+        run(dir.path(), &["add", "-A"], None).unwrap();
+        let started = Instant::now();
+        let err = run_within(dir.path(), &["-c", "user.email=a@b.c", "-c", "user.name=T", "commit", "-m", "x"], None, Duration::from_millis(400)).unwrap_err();
+        assert!(err.contains("took longer than"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(5), "waited {:?}", started.elapsed());
     }
 
     #[test]

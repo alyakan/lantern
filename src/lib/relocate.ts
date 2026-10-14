@@ -9,6 +9,7 @@ export const FOLDER_RECORDS = [
   "settings.harnessByFolder",
   "review.collapsedByFolder",
   "settings.pinnedSessions",
+  "settings.orchestraModeByFolder",
 ] as const;
 
 /** The folder that was open last, reopened at launch. */

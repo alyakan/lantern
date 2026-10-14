@@ -1461,7 +1461,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .summary-revert { margin-left: 4px; }
 
 /* The orchestra's canvas: agents as floating chats on a pannable, zoomable surface, tethered to the main agent. */
-.canvas { position: relative; flex: 1; min-height: 0; margin: 0 var(--edge) var(--edge); overflow: hidden; border-radius: 10px; box-shadow: var(--card-shadow); cursor: grab; touch-action: none; overscroll-behavior: none;
+.canvas { position: relative; flex: 1; min-height: 0; margin: 0 var(--edge) var(--edge); overflow: hidden; overflow: clip; border-radius: 10px; box-shadow: var(--card-shadow); cursor: grab; touch-action: none; overscroll-behavior: none;
   background-color: var(--bg-subtle);
   background-image: radial-gradient(circle, color-mix(in srgb, var(--text) 16%, transparent) 1px, transparent 1.3px);
   background-size: calc(28px * var(--zoom, 1)) calc(28px * var(--zoom, 1));
@@ -1541,3 +1541,44 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .canvas-attention { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 14px; border: 1px solid var(--attn); border-radius: 999px; background: var(--field); color: var(--text); font: 600 calc(12.5px * var(--font-scale)) var(--ui); box-shadow: var(--shadow); cursor: pointer; }
 .canvas-attention:hover { background: var(--bg-hover); }
 @media (prefers-reduced-motion: reduce) { .canvas-world.animating { transition: none; } .tether.working, .tether.waiting, .canvas-node.waiting { animation: none; } }
+
+/* Oversight on the canvas: a merge waiting for the user, and the team at a glance. */
+.canvas-node.ready { box-shadow: 0 0 0 2px var(--attn), var(--shadow); }
+.canvas-node.ready .node-status { color: var(--attn); font-weight: 600; }
+.node-merges { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 8px 10px 0; max-height: 45%; overflow-y: auto; }
+.merge-card { display: flex; flex-direction: column; gap: 7px; padding: 10px 12px; border: 1px solid var(--attn); border-radius: 9px; background: var(--field); font-size: calc(12.5px * var(--font-scale)); }
+.merge-card.quiet { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 6px 10px; border-color: var(--line-strong); color: var(--muted-text); font-size: calc(12px * var(--font-scale)); }
+.merge-card.quiet button { height: 22px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 999px; background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
+.merge-check { color: var(--add); font-weight: 700; }
+.merge-title { font-weight: 600; font-size: calc(13px * var(--font-scale)); line-height: 1.35; }
+.merge-title code { font: calc(12px * var(--font-scale)) var(--mono); padding: 0 4px; border-radius: var(--radius-chip); background: var(--code-bg); }
+.merge-facts { display: flex; align-items: center; gap: 2px; color: var(--muted-text); font-size: calc(12px * var(--font-scale)); }
+.merge-add { color: var(--add); font-variant-numeric: tabular-nums; }
+.merge-del { color: var(--del); font-variant-numeric: tabular-nums; }
+.merge-link { margin-left: auto; border: none; background: none; padding: 0; color: var(--text-2); font-size: calc(12px * var(--font-scale)); text-decoration: underline; text-underline-offset: 2px; }
+.merge-files { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font: calc(11.5px * var(--font-scale)) var(--mono); }
+.merge-files li { display: flex; gap: 8px; }
+.merge-files li span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.merge-more { color: var(--muted-text); font-family: var(--ui); }
+.merge-summary { margin: 0; line-height: 1.45; color: var(--text-2); }
+.merge-from { color: var(--muted-text); }
+.merge-note { margin: 0; color: var(--muted-text); font-size: calc(12px * var(--font-scale)); }
+.merge-problem { margin: 0; color: var(--del); font-size: calc(12px * var(--font-scale)); line-height: 1.4; }
+.merge-actions { display: flex; gap: 8px; }
+.merge-actions button { height: 28px; padding: 0 13px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field); color: var(--text); font-size: calc(12.5px * var(--font-scale)); }
+.merge-actions .merge-approve { border-color: transparent; background: var(--accent); color: var(--accent-text); font-weight: 600; }
+.merge-actions button:disabled { opacity: 0.55; }
+
+.canvas-team { position: relative; display: inline-flex; }
+.canvas-team-list { position: absolute; left: 0; bottom: calc(100% + 12px); width: 380px; max-height: min(420px, 60vh); overflow-y: auto; padding: 6px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--field); box-shadow: var(--shadow); }
+.canvas-team-list ul { margin: 0; padding: 0; list-style: none; }
+.canvas-team-list li button { width: 100%; display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border: none; border-radius: 8px; background: none; color: var(--text); text-align: left; }
+.canvas-team-list li button:hover { background: var(--bg-hover); }
+.canvas-team-list .node-dot { margin-top: 5px; }
+.team-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.team-name { font: 600 calc(13px * var(--font-scale)) var(--ui); }
+.team-line { font-size: calc(12px * var(--font-scale)); color: var(--muted-text); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.team-state { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.team-cost { font-variant-numeric: tabular-nums; }
+.team-ask { width: calc(100% - 12px); margin: 4px 6px 6px; height: 32px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field); color: var(--text); font-size: calc(12.5px * var(--font-scale)); font-weight: 600; }
+.team-ask:hover { background: var(--bg-hover); }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type State } from "../store";
 import { chatsReducer, initialChats, type Chats } from "../sessions";
-import { needingYou, nodeStatus, orchestraNodes, summaryLine } from "./orchestraView";
+import { money, needingYou, nodeStatus, orchestraNodes, readyToMerge, summaryLine } from "./orchestraView";
 
 const base: State = { ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/p" };
 const main: State = { ...base, orchestrator: true };
@@ -77,6 +77,35 @@ describe("summaryLine", () => {
     expect(summaryLine({ ...base, items: [asked, tool] })).toBe("Bash npm test");
     expect(summaryLine({ ...base, items: [asked] })).toBe("Build the login form");
     expect(summaryLine(base)).toBe("Waiting to start");
+  });
+});
+
+describe("money", () => {
+  it("writes dollars for a screen", () => {
+    expect(money(0)).toBe("");
+    expect(money(-1)).toBe("");
+    expect(money(0.004)).toBe("<$0.01");
+    expect(money(0.0137)).toBe("$0.01");
+    expect(money(0.425)).toBe("$0.42");
+    expect(money(9.994)).toBe("$9.99");
+    expect(money(12.34)).toBe("$12.3");
+    expect(money(250.6)).toBe("$251");
+  });
+});
+
+describe("a merge waiting for you", () => {
+  const proposal = (worker: string, status: "open" | "merged" | "declined" = "open") => ({ worker, name: worker, branch: `lantern/${worker}`, into: "main", summary: "", commits: 1, files: [], uncommitted: 0, status, problem: null, attempts: 0 });
+
+  it("makes its worker one that needs you, even though the worker itself is idle", () => {
+    let c = spawn(initialChats(main), "w1", "A");
+    c = spawn(c, "w2", "B");
+    const slots = { ...c.slots, s1: { ...c.slots.s1, proposals: [proposal("w2"), proposal("w1", "merged")] } };
+    const nodes = orchestraNodes({ ...c, slots }, name);
+    expect([...readyToMerge(nodes, slots)]).toEqual(["w2"]);
+    expect(needingYou(nodes, slots)).toEqual(["w2"]);
+    // Once answered it no longer does.
+    const answered = { ...slots, s1: { ...slots.s1, proposals: [proposal("w2", "declined")] } };
+    expect(needingYou(nodes, answered)).toEqual([]);
   });
 });
 

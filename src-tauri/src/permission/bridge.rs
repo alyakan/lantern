@@ -357,36 +357,45 @@ mod tests {
         assert!(tokio::time::timeout(Duration::from_millis(100), rx.recv()).await.is_err());
     }
 
-    /// The real shape of it: a client in another process (a shell and `nc`, standing in for a helper) is let in when the
-    /// bridge trusts the process that started it, and refused when it trusts another.
+    /// The real shape of it: a client in another process is let in only when the process the bridge trusts started it
+    /// itself (claude starting its helper), and not when something in between did (a command run in a shell).
     #[tokio::test]
-    async fn a_client_started_by_the_trusted_process_is_accepted_and_one_started_by_anything_else_is_not() {
+    async fn only_a_client_started_directly_by_the_trusted_process_is_accepted() {
         use std::process::{Command, Stdio};
         let (bridge, _rx, _dir) = setup();
         let socket = bridge.socket_path.display().to_string();
         let request = serde_json::to_string(&orchestra_call()).unwrap();
-        // Runs in a child of this test, like a helper in a child of claude, and prints what the bridge answers.
-        let call = move || -> BridgeResponse {
-            let out = Command::new("sh")
-                .arg("-c")
-                .arg(format!("printf '%s\\n' '{request}' | nc -U -w 2 '{socket}'"))
-                .stdin(Stdio::null())
-                .output()
-                .unwrap();
-            serde_json::from_slice(&out.stdout).unwrap_or(BridgeResponse { allow: false, message: Some("no answer".into()), updated_input: None })
+        let answer = |out: std::process::Output| serde_json::from_slice(&out.stdout).unwrap_or(BridgeResponse { allow: false, message: Some("no answer".into()), updated_input: None });
+        // `nc` started by this test itself, like a helper started by claude.
+        let direct = {
+            let (socket, request) = (socket.clone(), request.clone());
+            move || -> BridgeResponse {
+                let mut child = Command::new("nc").args(["-U", "-w", "2", &socket]).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+                std::io::Write::write_all(&mut child.stdin.take().unwrap(), format!("{request}\n").as_bytes()).unwrap();
+                answer(child.wait_with_output().unwrap())
+            }
+        };
+        // The same through a shell: a command the main agent ran, a grandchild.
+        let through_shell = {
+            let (socket, request) = (socket.clone(), request.clone());
+            move || -> BridgeResponse {
+                answer(Command::new("sh").arg("-c").arg(format!("printf '%s\\n' '{request}' | nc -U -w 2 '{socket}'")).stdin(Stdio::null()).output().unwrap())
+            }
         };
         let handler: OrchestraHandler = Arc::new(|_, _| Box::pin(async { BridgeResponse { allow: true, message: Some("ran".into()), updated_input: None } }));
-        // The main agent's claude is some other process: the client isn't its descendant.
+        let me = std::process::id();
+        // The trusted process is this one: its own child is let in; one started through a shell is not.
+        bridge.set_orchestra(handler.clone(), Arc::new(move |pid| crate::process::is_child_of(pid, me)));
+        let accepted = tokio::task::spawn_blocking(direct.clone()).await.unwrap();
+        assert_eq!(accepted.message.as_deref(), Some("ran"));
+        let refused = tokio::task::spawn_blocking(through_shell).await.unwrap();
+        assert!(!refused.allow && refused.message.unwrap().contains("Not authorized"), "a command run in a shell passed for the helper");
+        // The trusted process is another one: nothing of this test's is let in.
         let sleeper = Command::new("sleep").arg("30").stdin(Stdio::null()).spawn().unwrap();
         let other = sleeper.id();
-        bridge.set_orchestra(handler.clone(), Arc::new(move |pid| crate::process::descends_from(pid, other)));
-        let refused = tokio::task::spawn_blocking(call.clone()).await.unwrap();
+        bridge.set_orchestra(handler, Arc::new(move |pid| crate::process::is_child_of(pid, other)));
+        let refused = tokio::task::spawn_blocking(direct).await.unwrap();
         assert!(!refused.allow && refused.message.unwrap().contains("Not authorized"), "a process outside the main agent's tree was let in");
-        // The main agent's claude is this process: the client is its grandchild (through the shell).
-        let me = std::process::id();
-        bridge.set_orchestra(handler, Arc::new(move |pid| crate::process::descends_from(pid, me)));
-        let accepted = tokio::task::spawn_blocking(call).await.unwrap();
-        assert_eq!(accepted.message.as_deref(), Some("ran"));
         let mut sleeper = sleeper;
         let _ = sleeper.kill();
         let _ = sleeper.wait();

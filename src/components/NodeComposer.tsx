@@ -3,13 +3,14 @@ import { useNodeActions } from "../lib/canvasContext";
 import type { Status } from "../store";
 import { ArrowUpIcon, HudStopIcon } from "./icons";
 
-/** What was typed in each agent's box and not sent, so zooming out (which swaps the chat for a card) doesn't lose it. */
-const drafts = new Map<string, string>();
-
-/** The box under an agent on the canvas: talk to it directly. Slash commands and @ mentions are in the full chat. */
+/**
+ * The box under an agent on the canvas: talk to it directly. Slash commands and @ mentions are in the full chat. What is
+ * typed and not sent is kept by the app, the same place the full-size chat box keeps it: so it survives zooming out (which
+ * swaps the chat for a card), opening the agent full size, and quitting, and counts as unsent text when the chat is left.
+ */
 export function NodeComposer({ slot, status, queued }: { slot: string; status: Status; queued: string[] }) {
   const actions = useNodeActions();
-  const [text, setText] = useState(() => drafts.get(slot) ?? "");
+  const [text, setText] = useState(() => actions.draft(slot));
   const box = useRef<HTMLTextAreaElement>(null);
   const working = status === "running";
   const blocked = status !== "idle" && status !== "running";
@@ -23,8 +24,7 @@ export function NodeComposer({ slot, status, queued }: { slot: string; status: S
 
   const change = (value: string) => {
     setText(value);
-    if (value) drafts.set(slot, value);
-    else drafts.delete(slot);
+    actions.setDraft(slot, value);
   };
 
   const submit = () => {

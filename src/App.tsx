@@ -8,7 +8,8 @@ import { windowFocused } from "./lib/windowFocus";
 import { initialState, reducer, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend } from "./sessions";
-import type { Mode } from "./types";
+import type { Mode, UiEvent } from "./types";
+import { batchPerFrame } from "./lib/frameBatch";
 import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
 import { isTyping } from "./lib/typing";
@@ -87,6 +88,24 @@ const HERO_PLACEHOLDER: Record<Flavour | "none", string> = {
   debug: "What's going wrong, and when?",
 };
 
+/** The chat whose merge cards include `worker`'s: its main agent's, even if the worker's own chat has been closed. */
+function mergeOwner(chats: { slots: Record<string, { proposals: { worker: string }[] }> }, worker: string): string | undefined {
+  return Object.keys(chats.slots).find((slot) => chats.slots[slot].proposals.some((p) => p.worker === worker));
+}
+
+/** An orchestra's main agent starts on the mode the user chose for it. */
+interface OrchestraStart {
+  mode: Mode;
+}
+
+/**
+ * What a restored chat was in an orchestra. A worker is reopened under its main agent once that has finished opening
+ * (`parentReady`), so the backend knows the main agent by the time it adopts the worker.
+ */
+type TeamRole =
+  | { role: "main" }
+  | { role: "worker"; parent: string; name: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; parentReady?: Promise<boolean> };
+
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
 // A stable empty list, so a chat with no skills loaded yet doesn't hand the composer a new one each render.
@@ -102,6 +121,8 @@ export default function App() {
   const [sessionModes, setSessionModes] = usePersistentState<Record<string, string>>("settings.modeBySession", {});
   // Step by step's auto-approve, per project too.
   const [autoBy, setAutoBy] = usePersistentState<Record<string, boolean>>("settings.autoApproveByFolder", {});
+  // How each project's orchestras run, once the user has chosen (see newOrchestra).
+  const [orchestraModes, setOrchestraModes] = usePersistentState<Record<string, "auto" | "ask">>("settings.orchestraModeByFolder", {});
   const autoFor = (folder: string | null) => (folder ? (autoBy[folder] ?? false) : false);
   const [lastFolder, setLastFolder] = usePersistentState<string | null>("settings.lastFolder", null);
   // Each folder's sent prompts, for ↑ in the box (see MessageInput). Kept per folder, newest last.
@@ -208,9 +229,15 @@ export default function App() {
     );
 
   useEffect(() => {
-    const unlisten = api.onUiEvent((slot, event) => dispatchChats({ type: "in", slot, action: { type: "ui_event", event } }));
+    // Events from every chat are applied together once a frame, in the order they came: a chat that streams dozens a second
+    // (or several at once, on the canvas) is drawn once for them, not once for each.
+    const batch = batchPerFrame<{ slot: string; event: UiEvent }>((items) => {
+      for (const { slot, event } of items) dispatchChats({ type: "in", slot, action: { type: "ui_event", event } });
+    });
+    const unlisten = api.onUiEvent((slot, event) => batch.push({ slot, event }));
     locate(null);
     return () => {
+      batch.flush();
       unlisten.then((stop) => stop());
     };
   }, []);
@@ -328,23 +355,24 @@ export default function App() {
   };
 
   // `quiet`: reopening the remembered project at launch; if that fails (e.g. the folder is gone), just forget it.
-  const startFresh = (folder: string, quiet = false, orchestrator = false) => {
-    if (state.claudePath) startIn(takeSlot(), folder, quiet, orchestrator);
+  const startFresh = (folder: string, quiet = false, orchestra?: OrchestraStart) => {
+    if (state.claudePath) startIn(takeSlot(), folder, quiet, orchestra);
   };
 
-  /** `orchestrator`: the chat is the main agent of an orchestra, which can start worker agents. */
-  const startIn = (slot: string, folder: string, quiet = false, orchestrator = false) => {
+  /** `orchestra`: the chat is the main agent of an orchestra, which can start worker agents, on the mode the user chose for it. */
+  const startIn = (slot: string, folder: string, quiet = false, orchestra?: OrchestraStart) => {
     const { claudePath } = state;
     if (!claudePath) return;
-    // An orchestra starts on Auto, so its workers (which never get more freedom than their main agent) can get on without
-    // asking at every step. It doesn't change the project's own mode (see the effect below).
-    const mode: Mode = orchestrator ? "auto" : modeFor(folder);
+    // An orchestra runs on the mode the user chose for it (asked the first time, see newOrchestra), which its workers never
+    // exceed. It doesn't change the project's own mode (see the effect below).
+    const mode: Mode = orchestra ? orchestra.mode : modeFor(folder);
+    const orchestrator = !!orchestra;
     const h = findHarness(presets, harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode });
     to(slot)({ type: "orchestrator_set", on: orchestrator });
-    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, orchestrator);
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, orchestra);
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
     api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder), ...(orchestrator ? { orchestrator } : {}) }).then(
       () => {
@@ -363,8 +391,10 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Not an orchestra's: its Auto is its own, and a worker's folder is a worktree that's gone with it.
+    // Not an orchestra's: its mode is its own, and a worker's folder is a worktree that's gone with it.
     if (state.folder && !state.orchestrator && !chats.agents[active] && modes[state.folder] !== state.mode) setModes({ ...modes, [state.folder]: state.mode });
+    // An orchestra's mode, as the user last set it for its main agent, is what the project's next one starts on.
+    if (state.folder && state.orchestrator && (state.mode === "auto" || state.mode === "ask") && orchestraModes[state.folder] !== state.mode) setOrchestraModes({ ...orchestraModes, [state.folder]: state.mode });
   }, [state.mode, state.folder]);
   useEffect(() => {
     if (state.sessionId && sessionModes[state.sessionId] !== state.mode) setSessionModes({ ...sessionModes, [state.sessionId]: state.mode });
@@ -408,9 +438,14 @@ export default function App() {
     resumeIn(takeSlot(), folder, sessionId, reuse);
   };
 
-  const resumeIn = (slot: string, folder: string, sessionId: string, reuse = false) => {
+  /**
+   * `team`: the chat was part of an orchestra: a main agent (reopened as one), or a worker of an open main agent, which
+   * is reopened as its worker once that main agent has finished opening (`parentReady`; the backend adopts a worker only
+   * into a main agent it already knows). Resolves to whether the chat opened.
+   */
+  const resumeIn = (slot: string, folder: string, sessionId: string, reuse = false, team?: TeamRole): Promise<boolean> => {
     const { claudePath } = state;
-    if (!claudePath) return;
+    if (!claudePath) return Promise.resolve(false);
     // The mode it was last in (and for an older Debug, Teach or Review session, that flavour of Step by step); one from
     // before modes were kept per session reopens as a plain chat, not as whatever this folder's newest chat is doing.
     const { mode, flavour: flavourStart } = savedMode(sessionModes[sessionId]);
@@ -419,22 +454,41 @@ export default function App() {
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)(reuse ? { type: "restarting" } : { type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode, flavourStart });
-    relaunch.current[slot] = () => resumeIn(slot, folder, sessionId, reuse);
+    to(slot)({ type: "orchestrator_set", on: team?.role === "main" });
+    // Trying again later doesn't wait on a main agent that has long since opened (or not).
+    const again: TeamRole | undefined = team?.role === "worker" ? { ...team, parentReady: undefined } : team;
+    relaunch.current[slot] = () => void resumeIn(slot, folder, sessionId, reuse, again);
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
-    api
-      .openSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder) }, sessionId)
-      .then((opened) => {
-        if (startGen.current[slot] !== gen) return;
+    const open = (as: TeamRole | undefined) =>
+      api.openSession(
+        slot,
+        claudePath,
+        folder,
+        { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder), ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent } } : {}) },
+        sessionId,
+      );
+    // A worker waits for its main agent: if that one didn't open, this one comes back as an ordinary chat.
+    const adopted = team?.role === "worker" && team.parentReady ? team.parentReady.then((ok) => (ok ? team : undefined)) : Promise.resolve(team);
+    return adopted
+      .then((as) => open(as).then((opened) => ({ opened, as })))
+      .then(({ opened, as }) => {
+        if (startGen.current[slot] !== gen) return false;
         // Not resumed (its copy into this folder failed): the transcript is shown, and Retry copies it again.
         if (opened.read_only) {
           to(slot)({ type: "history_loaded", sessionId, events: opened.events });
-          return to(slot)({ type: "failed", text: opened.read_only });
+          to(slot)({ type: "failed", text: opened.read_only });
+          return false;
         }
         delete relaunch.current[slot];
         to(slot)({ type: "history_loaded", sessionId, events: opened.events, movedFrom: opened.moved_from });
         to(slot)({ type: "session_ready" });
+        if (as?.role === "worker") dispatchChats({ type: "adopt", slot, meta: { parent: as.parent, name: as.name, brief: "", folder, branch: as.branch, base: as.base, isolation: as.isolation } });
+        return true;
       })
-      .catch((e) => startGen.current[slot] === gen && to(slot)({ type: "failed", text: errText(e) }));
+      .catch((e) => {
+        if (startGen.current[slot] === gen) to(slot)({ type: "failed", text: errText(e) });
+        return false;
+      });
   };
 
   // The chats that were open when Lantern last closed, offered back at launch until restored, dismissed, or a message
@@ -453,13 +507,29 @@ export default function App() {
   };
 
   // A chat from last time, into `slot`: its conversation continued, or (typed but never sent) a new one in its folder;
-  // either way with its unsent text back in the box.
-  const restoreInto = (slot: string, c: SavedChat) => {
+  // either way with its unsent text back in the box. A chat that was part of an orchestra comes back as part of it: a worker
+  // finds its main agent among the open chats (or, when that is being restored too, in `opened`, by its session).
+  // Resolves to whether it opened.
+  const restoreInto = (slot: string, c: SavedChat, opened: Record<string, { slot: string; ready: Promise<boolean> }> = {}): Promise<boolean> => {
     if (c.draft) drafts.current[slot] = c.draft;
-    if (c.sessionId) resumeIn(slot, c.folder, c.sessionId);
-    else startIn(slot, c.folder);
+    const o = c.orchestra;
+    let team: TeamRole | undefined;
+    if (o?.role === "main") team = { role: "main" };
+    else if (o?.role === "worker") {
+      const parent = opened[o.parentSession] ?? openMainOf(o.parentSession);
+      if (parent) team = { role: "worker", parent: parent.slot, name: o.name, branch: o.branch, base: o.base, isolation: o.isolation, parentReady: parent.ready };
+    }
+    if (c.sessionId) return resumeIn(slot, c.folder, c.sessionId, false, team);
+    // Typed in the box but never sent: a new chat in its folder, as a main agent again if it was one.
+    startIn(slot, c.folder, false, team?.role === "main" ? { mode: orchestraModes[c.folder] ?? "ask" } : undefined);
+    return Promise.resolve(true);
   };
   const openAlready = (c: SavedChat) => (c.sessionId ? Object.entries(chats.slots).find(([, s]) => s.sessionId === c.sessionId)?.[0] : undefined);
+  /** The main agent already open for this session, if there is one (already opened, so there is nothing to wait for). */
+  const openMainOf = (session: string) => {
+    const slot = Object.entries(chats.slots).find(([, s]) => s.orchestrator && s.sessionId === session)?.[0];
+    return slot ? { slot, ready: Promise.resolve(true) } : undefined;
+  };
 
   // One chat, on screen (in the empty chat on screen if there is one).
   const restoreOne = (c: SavedChat) => {
@@ -467,23 +537,39 @@ export default function App() {
     const already = openAlready(c);
     if (already) return switchTo(already);
     if (!state.claudePath) return;
-    restoreInto(takeSlot(), c);
+    void restoreInto(takeSlot(), c);
     setComposerEpoch((e) => e + 1);
     setLastFolder(c.folder);
   };
 
-  // Every chat: the one that was on screen comes back on screen, the others open behind it.
+  // Every chat: the one that was on screen comes back on screen, the others open behind it. Main agents of an orchestra
+  // are opened first, so their workers can be put back under them.
   const restoreAll = () => {
-    const [first, ...rest] = screenFirst(offer);
+    const [first] = screenFirst(offer);
     if (!first || !state.claudePath) return;
-    restoreOne(first);
+    const ordered = screenFirst(offer);
+    const isMain = (c: SavedChat) => c.orchestra?.role === "main";
+    const inOrder = [...ordered.filter(isMain), ...ordered.filter((c) => !isMain(c))];
     setOffer([]);
-    for (const c of rest) {
-      if (openAlready(c)) continue;
-      const slot = `s${++slotSeq.current}`;
-      dispatchChats({ type: "add", slot });
-      restoreInto(slot, c);
-    }
+    const opened: Record<string, { slot: string; ready: Promise<boolean> }> = {};
+    let onScreen: string | undefined;
+    inOrder.forEach((c, i) => {
+      const already = openAlready(c);
+      let slot: string;
+      if (already) {
+        slot = already;
+      } else {
+        // The first goes into the empty chat on screen, if there is one; the rest into chats of their own.
+        slot = i === 0 ? takeSlot() : `s${++slotSeq.current}`;
+        if (i !== 0) dispatchChats({ type: "add", slot });
+        const ready = restoreInto(slot, c, opened);
+        if (isMain(c) && c.sessionId) opened[c.sessionId] = { slot, ready };
+      }
+      if (c === first) onScreen = slot;
+    });
+    if (onScreen) dispatchChats({ type: "activate", slot: onScreen });
+    setComposerEpoch((e) => e + 1);
+    setLastFolder(first.folder);
   };
 
   const syncChanges = (slot: string) =>
@@ -598,8 +684,9 @@ export default function App() {
       sendIn(slot, text);
     }
     // Notes from an orchestra's workers go to the main agent as soon as it is idle (not only when a turn ends: it is
-    // usually idle when a worker finishes), joined into one message.
-    for (const { slot, text } of wakesToSend(chats.slots)) {
+    // usually idle when a worker finishes), joined into one message. Not to a chat that was just sent its queue above: this
+    // render still has it idle, and a second message would start a second turn on top of that one.
+    for (const { slot, text } of wakesToSend(chats.slots, new Set(due.map((d) => d.slot)))) {
       to(slot)({ type: "wakes_taken" });
       sendIn(slot, text, undefined, true);
     }
@@ -834,9 +921,29 @@ export default function App() {
     focusAgent(slot);
     setView("chat");
   };
-  const newOrchestra = () => {
-    if (!state.folder) return;
-    startFresh(state.folder, false, true);
+  // The canvas gets these two fixed, calling through to this render's: a new function each render would make every agent on
+  // it redraw for every event of every chat, which is what its per-agent subscriptions are there to avoid.
+  const focusRef = useRef(focusAgent);
+  focusRef.current = focusAgent;
+  const showRef = useRef(showAgent);
+  showRef.current = showAgent;
+  const canvasFocus = useMemo(() => (slot: string) => focusRef.current(slot), []);
+  const canvasOpen = useMemo(() => (slot: string) => showRef.current(slot), []);
+  // How a project's orchestras run, once chosen. Starting a team is not the same as consenting to agents that act without
+  // asking, so the first time it is asked, and the answer is kept for that project (changed in the main agent's mode menu).
+  const newOrchestra = async () => {
+    const folder = state.folder;
+    if (!folder) return;
+    let mode = orchestraModes[folder];
+    if (!mode) {
+      const auto = await ask(
+        "An orchestra is a main agent and the workers it starts, all acting in this project.\n\nOn Auto, Claude Code's own safety checks approve routine actions, so agents can work without stopping at every step. On Ask, every agent asks you before each action. Workers never get more freedom than the main agent.",
+        { title: "How should this team run?", kind: "info", okLabel: "Run on Auto", cancelLabel: "Run on Ask" },
+      ).catch(() => false);
+      mode = auto ? "auto" : "ask";
+      setOrchestraModes({ ...orchestraModes, [folder]: mode });
+    }
+    startFresh(folder, false, { mode });
     setView("canvas");
   };
   const doing = {
@@ -865,6 +972,25 @@ export default function App() {
       if (relaunch.current[slot]) relaunch.current[slot]();
       else restart(slot, s.mode);
     },
+    // The answer to a merge the main agent asked for. The backend says how it went (merge_resolved); an answer that never
+    // got that far (nothing waiting, no such worker) is told to the main agent's chat, where the card is.
+    // The main agent whose chat holds the card: found from the proposal itself, because the worker's chat may be closed by now
+    // (and with it its place among the agents).
+    approveMerge: (worker: string) => {
+      const main = mergeOwner(chats, worker);
+      api.approveMerge(worker).catch((e) => main && to(main)({ type: "ui_event", event: { kind: "merge_resolved", worker, outcome: "failed", detail: errText(e) } }));
+    },
+    declineMerge: (worker: string) => {
+      const main = mergeOwner(chats, worker);
+      api.declineMerge(worker).catch((e) => main && to(main)({ type: "ui_event", event: { kind: "merge_resolved", worker, outcome: "failed", detail: errText(e) } }));
+    },
+    removeWorktree: (worker: string) => api.discardWorktree(worker, false).catch((e) => Promise.reject(errText(e))),
+    draft: (slot: string) => drafts.current[slot] ?? "",
+    setDraft: (slot: string, text: string) => {
+      if (text) drafts.current[slot] = text;
+      else delete drafts.current[slot];
+      saveOpen();
+    },
   };
   // Agents are handed one set of actions for good and call through it to whatever this render has, so they never redraw for it.
   const doingRef = useRef(doing);
@@ -880,6 +1006,11 @@ export default function App() {
       stopShell: (slot, id) => doingRef.current.stopShell(slot, id),
       shellInput: (slot, id, text) => doingRef.current.shellInput(slot, id, text),
       restart: (slot) => doingRef.current.restart(slot),
+      approveMerge: (worker) => doingRef.current.approveMerge(worker),
+      declineMerge: (worker) => doingRef.current.declineMerge(worker),
+      removeWorktree: (worker) => doingRef.current.removeWorktree(worker),
+      draft: (slot) => doingRef.current.draft(slot),
+      setDraft: (slot, text) => doingRef.current.setDraft(slot, text),
     }),
     [],
   );
@@ -925,7 +1056,7 @@ export default function App() {
   }, [chats.slots]);
 
   // Saved as they change, so a crash or force-quit leaves them to restore too.
-  const saveOpen = () => save(withOffered(chatsToSave(chats.slots, active, drafts.current, titles), offer));
+  const saveOpen = () => save(withOffered(chatsToSave(chats.slots, active, drafts.current, titles, chats.agents), offer));
   useEffect(saveOpen, [chats.slots, active, titles, offer]);
 
   const announced = useRef<Record<string, string>>({});
@@ -940,6 +1071,10 @@ export default function App() {
       const key = a && `${s.sessionId}:${a.key}`;
       if (!a || !key || key === announced.current[slot]) continue;
       announced.current[slot] = key;
+      // An agent of the orchestra on the canvas in front of you is already on screen with what it is doing: no pop-up for it.
+      // Away from the window you still hear of it.
+      const onScreen = view === "canvas" && windowFocused() && (s.orchestrator || !!chats.agents[slot]);
+      if (onScreen) continue;
       // Settings can have this kind of event off, or paused: then neither a notification nor a toast.
       const wanted = shouldNotify(notifyPrefs, a.kind);
       if (wanted && (!windowFocused() || slot !== chats.active)) notify(a.title, a.body, a.kind);
@@ -947,7 +1082,7 @@ export default function App() {
       if (slot !== chats.active) {
         if (a.kind === "finished" || a.kind === "failed") setUnread((u) => ({ ...u, [slot]: true }));
         const project = s.folder && s.folder !== state.folder ? basename(s.folder) : null;
-        if (wanted) setHud({ key: Date.now(), kind: a.kind, body: a.body, chat: { slot, title: chatTitle(s, titles), project } });
+        if (wanted) setHud({ key: Date.now(), kind: a.kind, body: a.body, chat: { slot, title: chats.agents[slot]?.name ?? chatTitle(s, titles), project } });
       }
     }
   }, [chats.slots]);
@@ -1252,7 +1387,7 @@ export default function App() {
           <ChatStoreContext.Provider value={chatStore}>
             <NodeActionsContext.Provider value={nodeActions}>
               <ErrorBoundary name="canvas">
-                <Canvas nodes={nodes} layout={canvasLayout.current} activeSlot={active} attention={attention} onFocus={focusAgent} onOpen={showAgent} />
+                <Canvas nodes={nodes} layout={canvasLayout.current} activeSlot={active} attention={attention} onFocus={canvasFocus} onOpen={canvasOpen} />
               </ErrorBoundary>
             </NodeActionsContext.Provider>
           </ChatStoreContext.Provider>
