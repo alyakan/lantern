@@ -5,8 +5,8 @@ import { parsePlanStep } from "./markdown";
 
 /** What a Step-by-step message says it is, from the heading it starts with (see STEPS_PROMPT in args.rs). */
 export interface Heading {
-  kind: "frame" | "plan" | "plan-complete" | "plan-update" | "step" | "done" | "file" | "summary" | "evidence" | "fix" | "switch";
-  /** The step's number, and for implementation steps the plan's length. */
+  kind: "frame" | "plan" | "plan-complete" | "plan-update" | "step" | "done" | "file" | "summary" | "evidence" | "fix" | "switch" | "overview" | "part";
+  /** The step's number, and for implementation steps (and Architecture's parts) the plan's length. */
   n: number | null;
   total: number | null;
   title: string;
@@ -16,7 +16,7 @@ export interface Heading {
 
 type UserItem = Extract<ChatItem, { type: "user" }>;
 
-const HEADING = /^#{1,3}\s*(Frame|Plan step\s+(\d+)|Plan complete|Plan update|Step\s+(\d+)\s+of\s+(\d+)|File\s+(\d+)\s+of\s+(\d+)|Summary|Done|Evidence(?:\s+(\d+))?|Fix|Switch to\s+(Build|Learn|Review|Debug))\b\s*(?:[—–:-]+\s*(.*))?$/i;
+const HEADING = /^#{1,3}\s*(Frame|Plan step\s+(\d+)|Plan complete|Plan update|Step\s+(\d+)\s+of\s+(\d+)|File\s+(\d+)\s+of\s+(\d+)|Summary|Done|Evidence(?:\s+(\d+))?|Fix|Switch to\s+(Build|Learn|Review|Debug|Architecture)|Overview|Part\s+(\d+)\s+of\s+(\d+))\b\s*(?:[—–:-]+\s*(.*))?$/i;
 
 /**
  * incremental-pr-review's own file line, when Claude writes the skill's format rather than a "# File N of M" heading:
@@ -39,13 +39,15 @@ export function parseHeading(text: string): Heading | null {
   const m = HEADING.exec(first);
   if (!m) return null;
   const word = m[1].toLowerCase();
-  const title = (m[9] ?? "").trim();
+  const title = (m[11] ?? "").trim();
   if (word.startsWith("switch to")) return { kind: "switch", n: null, total: null, title, flavour: m[8].toLowerCase() as Flavour };
   if (word.startsWith("evidence")) return { kind: "evidence", n: m[7] ? Number(m[7]) : null, total: null, title };
   if (word === "fix") return { kind: "fix", n: null, total: null, title };
   if (word.startsWith("file")) return { kind: "file", n: Number(m[5]), total: Number(m[6]), title };
   if (word === "summary") return { kind: "summary", n: null, total: null, title };
   if (word === "frame") return { kind: "frame", n: null, total: null, title };
+  if (word === "overview") return { kind: "overview", n: null, total: null, title };
+  if (word.startsWith("part")) return { kind: "part", n: Number(m[9]), total: Number(m[10]), title };
   if (word.startsWith("plan step")) return { kind: "plan", n: Number(m[2]), total: null, title };
   if (word === "plan update") return { kind: "plan-update", n: null, total: null, title };
   if (word === "plan complete") return { kind: "plan-complete", n: null, total: Number(/(\d+)/.exec(title)?.[1] ?? NaN) || null, title };
@@ -114,11 +116,11 @@ export const startText = (label: string) => `Start ${label}.`;
 export const stayText = (label: string) => `Stay in ${label}.`;
 /** The flavour a "Start Debug." answer starts, if that's what the prompt is. */
 export function startedFlavour(text: string): Flavour | null {
-  const m = /^start\s+(build|learn|review|debug)\b[.!]*$/i.exec(text.trim());
+  const m = /^start\s+(build|learn|review|debug|architecture)\b[.!]*$/i.exec(text.trim());
   return m ? (m[1].toLowerCase() as Flavour) : null;
 }
 /** A "Stay in Build." answer: carry on as before. */
-export const stayedIn = (text: string) => /^stay in\s+(build|learn|review|debug)\b[.!]*$/i.test(text.trim());
+export const stayedIn = (text: string) => /^stay in\s+(build|learn|review|debug|architecture)\b[.!]*$/i.test(text.trim());
 /** What to show of a prompt: without the ⌘Enter suffix. */
 export const promptText = (text: string) => text.trimEnd().replace(NEXT_SUFFIX, "").trimEnd();
 
@@ -216,6 +218,10 @@ export function pageLabel(h: Heading | null): string {
       return "Fix";
     case "switch":
       return "Suggestion";
+    case "overview":
+      return "Overview";
+    case "part":
+      return `Part ${h.n} of ${h.total}`;
   }
 }
 

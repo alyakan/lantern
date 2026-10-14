@@ -21,10 +21,10 @@ describe("ModeGuide", () => {
     expect(onUse).toHaveBeenLastCalledWith("auto");
   });
 
-  it("lists three modes and four flavours, and says what to ask for Learn", () => {
+  it("lists three modes and five flavours, and says what to ask for Learn", () => {
     render(<ModeGuide open="learn" mode="ask" flavour={null} onClose={() => {}} />);
     const nav = screen.getByRole("navigation", { name: "Modes" });
-    expect([...nav.querySelectorAll(".mode-guide-tab")].map((t) => t.textContent)).toEqual(["Ask before actionsNow", "Auto-approve", "Step by step", "Build", "Learn", "Review", "Debug"]);
+    expect([...nav.querySelectorAll(".mode-guide-tab")].map((t) => t.textContent)).toEqual(["Ask before actionsNow", "Auto-approve", "Step by step", "Build", "Learn", "Review", "Debug", "Architecture"]);
     expect(screen.getByText(/Try: .*interview/)).toBeInTheDocument();
     // No switch offered while the chat can't change.
     expect(screen.queryByRole("button", { name: /^(Use|Start) / })).toBeNull();

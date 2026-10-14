@@ -3,17 +3,18 @@ import type { Mode } from "../types";
 import { isApproval, parseHeading, startedFlavour } from "./steps";
 
 /**
- * What Step by step is doing: building, building and explaining (for someone learning), reviewing a change, or
- * debugging. Claude suggests one and the user accepts it, or the user picks one; it doesn't change how claude runs.
+ * What Step by step is doing: building, building and explaining (for someone learning), reviewing a change, debugging,
+ * or mapping the architecture of a feature, fix or PR. Claude suggests one and the user accepts it, or the user picks
+ * one; it doesn't change how claude runs.
  */
-export type Flavour = "build" | "learn" | "review" | "debug";
+export type Flavour = "build" | "learn" | "review" | "debug" | "architecture";
 
-export const FLAVOURS: Flavour[] = ["build", "learn", "review", "debug"];
+export const FLAVOURS: Flavour[] = ["build", "learn", "review", "debug", "architecture"];
 
-export const FLAVOUR_LABEL: Record<Flavour, string> = { build: "Build", learn: "Learn", review: "Review", debug: "Debug" };
+export const FLAVOUR_LABEL: Record<Flavour, string> = { build: "Build", learn: "Learn", review: "Review", debug: "Debug", architecture: "Architecture" };
 
 /** What Step by step's page buttons and status line say while a flavour runs. */
-export const FLAVOUR_PHASE: Record<Flavour, string> = { build: "Building", learn: "Learning", review: "Reviewing", debug: "Debugging" };
+export const FLAVOUR_PHASE: Record<Flavour, string> = { build: "Building", learn: "Learning", review: "Reviewing", debug: "Debugging", architecture: "Mapping" };
 
 /**
  * A mode as saved by an older Lantern: Plan first is gone (its chats reopen asking before actions), and Debug, Teach and
@@ -45,7 +46,7 @@ export function flavourNote(flavour: Flavour): string {
 export const withFlavourNote = (flavour: Flavour, text: string) => `${flavourNote(flavour)}\n\n${text}`;
 
 // Older notes named a mode ("Step-by-step Review mode", "Teach mode"); they're read the same way.
-const NOTE = /^\[Lantern: this chat switched to (?:Step-by-step )?(Build|Learn|Teach|Review|Debug)\b[^\]]*\]\s*/;
+const NOTE = /^\[Lantern: this chat switched to (?:Step-by-step )?(Build|Learn|Teach|Review|Debug|Architecture)\b[^\]]*\]\s*/;
 
 /** A prompt as you wrote it, and the flavour a note Lantern put before it picked. */
 export function readFlavourNote(text: string): { text: string; flavour: Flavour | null } {
@@ -70,7 +71,9 @@ export function flavourOf(items: ChatItem[], start: Flavour | null = null): Flav
       // A reply without a heading answers a question: whatever was suggested still is.
       if (h) suggested = h.kind === "switch" ? (h.flavour ?? null) : null;
       const kind = h?.kind;
-      if (kind === "file" || kind === "summary") pages = "review";
+      // A Summary closes a Review and an Architecture map alike: it belongs to whichever the pages before it were.
+      if (kind === "file" || (kind === "summary" && pages !== "architecture")) pages = "review";
+      else if (kind === "overview" || kind === "part") pages = "architecture";
       else if (kind === "evidence" || kind === "fix") pages = "debug";
       else if (kind === "plan" || kind === "plan-complete" || kind === "step") pages = "build";
     } else if (it.type === "user" && !it.auto) {

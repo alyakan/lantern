@@ -32,6 +32,16 @@ describe("parseHeading", () => {
     expect(pageLabel(parseHeading("# Evidence 2 — x"))).toBe("Evidence 2");
   });
 
+  it("reads Architecture's pages and its suggestion", () => {
+    expect(parseHeading("# Overview — auth moves behind a gateway")).toEqual({ kind: "overview", n: null, total: null, title: "auth moves behind a gateway" });
+    expect(parseHeading("# Part 2 of 5 — Token store\n\nCovers: tokenStore")).toMatchObject({ kind: "part", n: 2, total: 5, title: "Token store" });
+    expect(parseHeading("# Switch to Architecture — you asked how it fits together")).toMatchObject({ kind: "switch", flavour: "architecture", title: "you asked how it fits together" });
+    expect(pageLabel(parseHeading("# Overview — x"))).toBe("Overview");
+    expect(pageLabel(parseHeading("# Part 2 of 5 — x"))).toBe("Part 2 of 5");
+    expect(startedFlavour("Start Architecture.")).toBe("architecture");
+    expect(stayedIn("Stay in Architecture.")).toBe(true);
+  });
+
   it("tells answers to a suggestion apart, and counts them as moving on", () => {
     expect(startedFlavour("Start Debug.")).toBe("debug");
     expect(startedFlavour("start learn")).toBe("learn");

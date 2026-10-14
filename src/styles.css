@@ -823,7 +823,8 @@ button.background-task-stop:hover:not(:disabled) { background: var(--bg-hover); 
 /* Still running in the background, beside the phase (the title bar's count, where you're looking). */
 .steps-background { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--working) 12%, transparent); color: var(--working); font-size: calc(11px * var(--font-scale)); }
 .steps-background .spinner { width: 9px; height: 9px; border-color: color-mix(in srgb, var(--working) 30%, transparent); border-top-color: var(--working); }
-.steps-viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.steps-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.steps-viewport { position: relative; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .steps-track { display: flex; height: 100%; will-change: transform; transition: transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1); }
 @media (prefers-reduced-motion: reduce) { .steps-track, .steps-dot { transition: none; } .steps-rail { scroll-behavior: auto; } }
 .step-page { flex: 0 0 100%; min-width: 0; height: 100%; overflow-y: auto; }
@@ -1615,3 +1616,48 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .new-agent-problem { margin: 0; color: var(--del); line-height: 1.4; }
 .new-agent-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .new-agent-actions button { height: 28px; padding: 0 13px; border-radius: 999px; font-size: calc(12.5px * var(--font-scale)); }
+
+/* Architecture: a diagram in a message, the part pages, and the map pinned beside the pages. */
+.code-block-note { margin-right: 8px; font-size: calc(11px * var(--font-scale)); color: var(--sev-should); }
+.diagram { padding: 12px; overflow-x: auto; }
+.diagram svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.arch-covers { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.arch-covers-label { font-size: calc(11px * var(--font-scale)); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.arch-node { padding: 1px 8px; border: none; border-radius: 999px; background: var(--bg-active); color: var(--text-2); font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); }
+button.arch-node:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.steps-intro-flavour:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.arch-dock-title { font-size: calc(11px * var(--font-scale)); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.map-empty { padding: 14px 10px; font-size: calc(12.5px * var(--font-scale)); color: var(--muted); text-align: center; }
+.map-zoom { position: sticky; top: 0; z-index: 1; display: inline-flex; margin-bottom: 8px; gap: 2px; padding: 2px; border-radius: 999px; background: var(--seg-track); }
+.map-zoom button { min-width: 28px; height: 22px; padding: 0 8px; border: none; border-radius: 999px; background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); font-variant-numeric: tabular-nums; }
+.map-zoom button:hover:not(:disabled) { background: var(--bg-hover); }
+.arch-big { width: min(1100px, 92vw); height: min(780px, 88vh); padding: 0; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--pane); color: var(--text); }
+.arch-big[open] { display: flex; flex-direction: column; }
+.arch-big::backdrop { background: rgba(0, 0, 0, 0.35); }
+.arch-big-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.arch-big-body { flex: 1; min-height: 0; overflow: auto; padding: 14px; }
+.arch-dock { position: relative; flex: none; display: flex; flex-direction: column; min-height: 0; max-height: 55%; border-bottom: 1px solid var(--line); background: var(--bg-subtle); }
+.arch-dock.collapsed { height: 26px; }
+.arch-dock-tab { flex: 1; display: flex; align-items: center; gap: 6px; width: 100%; padding: 0 20px; border: none; border-radius: 0; background: none; color: var(--muted); }
+.arch-dock-tab:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-2); }
+.arch-dock-handle { position: absolute; z-index: 2; left: 0; right: 0; bottom: -3px; height: 6px; cursor: row-resize; }
+.arch-dock-handle:hover, .arch-dock-handle:focus-visible, .arch-dock.dragging .arch-dock-handle { background: var(--line-strong); }
+.arch-dock-head { flex: none; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px 0 20px; }
+.arch-dock-hint { font-size: calc(11.5px * var(--font-scale)); color: var(--faint); }
+.arch-dock-btn { width: 24px; height: 24px; padding: 0; border: none; border-radius: var(--radius-chip); background: none; color: var(--muted); font-size: calc(14px * var(--font-scale)); line-height: 1; }
+.arch-dock-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.arch-dock-body { flex: 1; min-height: 0; overflow: hidden; padding: 0 20px 8px; }
+.map-empty { padding: 14px 10px; font-size: calc(12.5px * var(--font-scale)); color: var(--muted); text-align: center; }
+.map-diagram { height: 100%; }
+.map-diagram .map-svg { height: 100%; }
+.map-diagram .map-svg svg { display: block; width: 100%; height: 100%; max-width: none !important; }
+.map-diagram.large { height: auto; }
+.map-diagram.large .map-svg { height: auto; }
+.map-diagram.large .map-svg svg { width: auto; height: auto; }
+.map-svg g.node { transition: opacity 0.2s; }
+.map-svg.focused g.node:not(.covered) { opacity: 0.4; }
+.map-svg g.node.opens { cursor: pointer; }
+.map-svg g.node.opens:hover { opacity: 1; }
+.map-svg g.node.opens:hover :is(rect, polygon, circle, ellipse, path) { stroke-width: 2.5px !important; }
+.map-svg g.node.covered :is(rect, polygon, circle, ellipse, path) { stroke: var(--text) !important; stroke-width: 3px !important; }
+.map-svg g.node.covered { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--text) 45%, transparent)); }

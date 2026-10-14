@@ -86,6 +86,7 @@ const HERO_PLACEHOLDER: Record<Flavour | "none", string> = {
   learn: "What do you want to learn, and what for?",
   review: "Which change? e.g. Review PR 128, or Review my branch",
   debug: "What's going wrong, and when?",
+  architecture: "What should be mapped? A feature to design, a fix, or e.g. PR 128",
 };
 
 /** The chat whose merge cards include `worker`'s: its main agent's, even if the worker's own chat has been closed. */

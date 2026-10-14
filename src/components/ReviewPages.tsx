@@ -19,7 +19,7 @@ function LineChip({ path, finding }: { path: string | null; finding: Finding }) 
   );
 }
 
-function FindingCard({ path, finding, verdict, onVerdict }: { path: string | null; finding: Finding; verdict: Verdict | undefined; onVerdict?: (v: Verdict | null) => void }) {
+export function FindingCard({ path, finding, verdict, onVerdict }: { path: string | null; finding: Finding; verdict: Verdict | undefined; onVerdict?: (v: Verdict | null) => void }) {
   const sev = finding.severity;
   return (
     <div className={`finding${sev ? ` sev-${sev}` : ""}${verdict ? ` verdict-${verdict}` : ""}`}>
@@ -117,6 +117,7 @@ export function ReviewFileHeader({ path, added, removed }: { path: string; added
 }
 
 export interface ReviewedFinding {
+  /** The file reviewed, or the architecture part the concern is about. */
   path: string | null;
   finding: Finding;
   verdict: Verdict | undefined;
@@ -124,7 +125,7 @@ export interface ReviewedFinding {
 
 /** The summary page's table: every finding across the files, with its severity and your verdict. */
 // The actions send a message, so they wait while Claude works: a message sent then would skip the composer's queue.
-export function ReviewSummaryTable({ rows, onAction, busy = false }: { rows: ReviewedFinding[]; onAction: (text: string) => void; busy?: boolean }) {
+export function ReviewSummaryTable({ rows, onAction, busy = false, architecture = false }: { rows: ReviewedFinding[]; onAction: (text: string) => void; busy?: boolean; architecture?: boolean }) {
   const counts = (s: Severity) => rows.filter((r) => r.finding.severity === s).length;
   const agreed = rows.filter((r) => r.verdict === "agree").length;
   return (
@@ -141,17 +142,17 @@ export function ReviewSummaryTable({ rows, onAction, busy = false }: { rows: Rev
         <table className="review-table">
           <thead>
             <tr>
-              <th>File</th>
-              <th>Line</th>
-              <th>Finding</th>
+              <th>{architecture ? "Part" : "File"}</th>
+              {!architecture && <th>Line</th>}
+              <th>{architecture ? "Concern" : "Finding"}</th>
               <th>Verdict</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} className={r.verdict === "reject" ? "rejected" : ""}>
-                <td className="review-table-file">{r.path?.split("/").pop()}</td>
-                <td>{r.finding.line ?? "–"}</td>
+                <td className="review-table-file">{architecture ? r.path : r.path?.split("/").pop()}</td>
+                {!architecture && <td>{r.finding.line ?? "–"}</td>}
                 <td>
                   {r.finding.severity && <span className={`finding-sev sev-${r.finding.severity}`}>{SEVERITY[r.finding.severity]}</span>} <Md inline>{r.finding.text.split("\n")[0]}</Md>
                 </td>
@@ -163,16 +164,29 @@ export function ReviewSummaryTable({ rows, onAction, busy = false }: { rows: Rev
       ) : (
         <div className="review-clean">
           <HudCheckIcon />
-          No findings in any file
+          {architecture ? "No concerns in any part" : "No findings in any file"}
         </div>
       )}
       <div className="review-actions">
-        <button className="primary" disabled={busy} onClick={() => onAction("Write it up: put the accepted findings in a local file, grouped by file.")}>
-          Write it up
-        </button>
-        <button disabled={busy} onClick={() => onAction("Fix them: hand the accepted findings to incremental-dev as the plan.")}>
-          Fix them
-        </button>
+        {architecture ? (
+          <>
+            <button className="primary" disabled={busy} onClick={() => onAction("Start Build.")}>
+              Start Build
+            </button>
+            <button disabled={busy} onClick={() => onAction("Write it up: put the architecture, the decisions and the accepted concerns in a local markdown file.")}>
+              Write it up
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="primary" disabled={busy} onClick={() => onAction("Write it up: put the accepted findings in a local file, grouped by file.")}>
+              Write it up
+            </button>
+            <button disabled={busy} onClick={() => onAction("Fix them: hand the accepted findings to incremental-dev as the plan.")}>
+              Fix them
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

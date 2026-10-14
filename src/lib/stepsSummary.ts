@@ -6,7 +6,7 @@ import { movesOn, pageLabel, pageTitle, type StepPage } from "./steps";
 export interface SummaryRow {
   /** The page it was built from (a step's own page when it has one), so it's stable while the chat goes on. */
   id: string;
-  kind: "frame" | "step" | "plan-update" | "gap" | "file" | "evidence" | "fix" | "done" | "review-summary";
+  kind: "frame" | "step" | "plan-update" | "gap" | "file" | "evidence" | "fix" | "done" | "review-summary" | "overview" | "part";
   /** "Step 2", "File 3 of 7", "Evidence 1", "Frame", … */
   label: string;
   title: string;
@@ -246,7 +246,10 @@ export function summarize(pages: StepPage[]): StepsSummary {
     const page = e.page;
     const h = page.heading!;
     const kind = h.kind === "summary" ? "review-summary" : (h.kind as Exclude<SummaryRow["kind"], "step" | "gap" | "review-summary">);
-    const base = { id: page.key, kind, label: h.kind === "summary" ? "Review summary" : pageLabel(h), title: pageTitle(page) ?? "", built: true, current: page.key === lastKey, page: page.key, planPage: null, findings: null, stats: null } as const;
+    // A Summary closes a Review or an Architecture map: the page before it says which.
+    const before = included[included.indexOf(page) - 1]?.heading?.kind;
+    const summaryLabel = before === "part" || before === "overview" ? "Architecture summary" : "Review summary";
+    const base = { id: page.key, kind, label: h.kind === "summary" ? summaryLabel : pageLabel(h), title: pageTitle(page) ?? "", built: true, current: page.key === lastKey, page: page.key, planPage: null, findings: null, stats: null } as const;
     if (h.kind === "file") {
       const file = splitFileTitle(h.title);
       const review = parseReviewFile(h.title, messageOf(page));
@@ -274,6 +277,8 @@ export function summarize(pages: StepPage[]): StepsSummary {
   }
   const files = rows.filter((r) => r.kind === "file").length;
   if (files) parts.push(filesTotal && filesTotal > files ? `${files} of ${filesTotal} files reviewed` : `${files} file${files === 1 ? "" : "s"} reviewed`);
+  const mapped = rows.filter((r) => r.kind === "part").length;
+  if (mapped) parts.push(`${mapped} part${mapped === 1 ? "" : "s"} mapped`);
   const evidence = rows.filter((r) => r.kind === "evidence").length;
   if (evidence) parts.push(`${evidence} evidence round${evidence === 1 ? "" : "s"}`);
   return { headline: parts.length ? parts.join(" · ") : null, rows };

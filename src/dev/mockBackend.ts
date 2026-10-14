@@ -124,13 +124,33 @@ async function playDebug(slot: string, text: string) {
   return done();
 }
 
+/** Step by step's Architecture: a frame, the whole picture as one diagram, a page per part, then a summary; Next moves on. */
+async function playArchitecture(slot: string, text: string) {
+  const send = sendTo(slot);
+  const done = () => send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 2200, auth_hint: false, denied: 0, context_window: 200_000 });
+  const moves = /^(next|ok|yes|start)/i.test(text.trim());
+  const n = stepPage[slot] === undefined ? 0 : moves ? stepPage[slot] + 1 : stepPage[slot];
+  stepPage[slot] = n;
+  const pages = [
+    "# Frame — Retries in the API client\n\nA **feature to design**: `fetchJson` should retry transient failures. In scope: the client and its callers. Out of scope: the server's rate limiting.\n\nOne question changes the design: should callers be able to turn retries off per request? I've assumed yes.",
+    "# Overview — A retry policy between the client and the network\n\nThe design is **proposed**, not built. A new policy decides what is worth retrying; the client asks it and waits as it says.\n\n```mermaid\nflowchart LR\n  caller[Callers] --> client[fetchJson]:::changed\n  client --> policy[Retry policy]:::new\n  policy --> backoff[Backoff timer]:::new\n  client --> net[(Network)]\n  client --> log[Logger]:::changed\n  legacy[Old error wrapper]:::removed -.-> client\n```\n\nThe old error wrapper goes away: the client throws one error type itself.",
+    "# Part 1 of 3 — fetchJson\n\nCovers: client\n\n### Role\nThe one function every caller uses. It stays the front door, and gains an `attempts` argument.\n\n### Connects to\nCallers (unchanged signature, one new optional argument), the retry policy (asks `shouldRetry(status, attempt)`), the network and the logger.\n\n```mermaid\nsequenceDiagram\n  Caller->>fetchJson: fetchJson(url)\n  fetchJson->>Network: fetch\n  Network-->>fetchJson: 503\n  fetchJson->>Policy: shouldRetry(503, 1)\n  Policy-->>fetchJson: wait 500ms\n  fetchJson->>Network: fetch\n  Network-->>fetchJson: 200\n```\n\n### Changes\n- `src/client/retry.ts`: loops over attempts instead of failing on the first non-OK.\n- The old wrapper in `src/client/errors.ts` is removed.\n\n### Concerns\n⚠ (should-fix): a POST is retried like a GET, so a request that reached the server twice creates two records.\n⚠ (nit): `attempts = 3` is a magic number; name it where the policy lives.\n\n### Notes\nChecked the three callers in `src/server/routes.ts`: none depend on the old wrapper's message.",
+    "# Part 2 of 3 — Retry policy\n\nCovers: policy, backoff\n\n### Role\nDecides whether a failure is worth another try, and how long to wait.\n\n### Connects to\nOnly `fetchJson`. It has no I/O of its own, so it can be tested without a network.\n\n### Changes\n- New: `src/client/policy.ts` with `shouldRetry` and `delayFor`.\n\n### Concerns\nNone.",
+    "# Part 3 of 3 — Logger\n\nCovers: log\n\n### Role\nRecords each retry, so a flaky service shows up in the logs.\n\n### Connects to\n`fetchJson` calls it once per retry.\n\n### Changes\n- `src/client/log.ts`: one new line per retry, with the status and the wait.\n\n### Concerns\n⚠ (blocker): the URL is logged with its query string, which can hold a token.",
+    "# Summary — 3 parts, 2 concerns agreed, 1 dropped\n\nThe design holds together: the policy is the only new piece, and everything else changes by a few lines. Decisions: retries are on by default and off per request; GET is retried, POST isn't; the logger strips query strings.",
+  ];
+  await streamText(send, `ar${n}-${Date.now()}:0`, pages[Math.min(n, pages.length - 1)]);
+  return done();
+}
+
 /** Step by step: the flavour each chat is in, what Claude suggested, and the task it was suggested for. */
 const flavourOfSlot: Record<string, string> = {};
 const suggestedFor: Record<string, { flavour: string; task: string }> = {};
-const LABEL: Record<string, string> = { build: "Build", learn: "Learn", review: "Review", debug: "Debug" };
+const LABEL: Record<string, string> = { build: "Build", learn: "Learn", review: "Review", debug: "Debug", architecture: "Architecture" };
 
 /** What Claude would suggest for a task. */
 function suggestionFor(text: string): { flavour: string; why: string } {
+  if (/architecture|fit together|how should .* (work|fit)|design the/i.test(text)) return { flavour: "architecture", why: "you want to see how it fits together" };
   if (/\breview\b|\bPR\b|pull request/i.test(text)) return { flavour: "review", why: "you asked for a review of a change" };
   if (/crash|bug|broken|fails|error|wrong|reload|loses/i.test(text)) return { flavour: "debug", why: "this is a bug, so the cause comes first" };
   if (/learn|teach|interview|understand|exam|test prep/i.test(text)) return { flavour: "learn", why: "you said you want to learn this" };
@@ -144,12 +164,12 @@ function suggestionFor(text: string): { flavour: string; why: string } {
 async function playStepByStep(slot: string, raw: string) {
   const send = sendTo(slot);
   const done = () => send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 1400, auth_hint: false, denied: 0, context_window: 200_000 });
-  const note = /^\[Lantern: this chat switched to (Build|Learn|Review|Debug)\b[^\]]*\]\s*/.exec(raw);
+  const note = /^\[Lantern: this chat switched to (Build|Learn|Review|Debug|Architecture)\b[^\]]*\]\s*/.exec(raw);
   const text = note ? raw.slice(note[0].length) : raw;
   if (stepPage[slot] === undefined && flavourOfSlot[slot] === undefined && !note) {
     await send({ kind: "session_started", session_id: `mock-${slot}`, model: "claude-opus-5-5", cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
   }
-  const start = /^start (build|learn|review|debug)\b/i.exec(text.trim());
+  const start = /^start (build|learn|review|debug|architecture)\b/i.exec(text.trim());
   let task = text;
   if (note) {
     flavourOfSlot[slot] = note[1].toLowerCase();
@@ -169,13 +189,14 @@ async function playStepByStep(slot: string, raw: string) {
     if (fresh || changes) {
       suggestedFor[slot] = { flavour: s.flavour, task: text };
       await sleep(300);
-      await streamText(send, `sw-${Date.now()}:0`, `# Switch to ${LABEL[s.flavour]} — ${s.why}\n\n${s.flavour === "debug" ? "I'd find the cause from evidence before changing anything: likely causes first, then logs and a reproduction." : s.flavour === "review" ? "I'd read it one file at a time, with findings you can agree with or reject." : s.flavour === "learn" ? "I'd build it with you step by step, explaining the why of each step." : "I'd frame it, plan it one step at a time, then build each step when you say Next."}`);
+      await streamText(send, `sw-${Date.now()}:0`, `# Switch to ${LABEL[s.flavour]} — ${s.why}\n\n${s.flavour === "architecture" ? "I'd map the pieces and how they connect as one diagram, then go through each part with you, with the map beside every page." : s.flavour === "debug" ? "I'd find the cause from evidence before changing anything: likely causes first, then logs and a reproduction." : s.flavour === "review" ? "I'd read it one file at a time, with findings you can agree with or reject." : s.flavour === "learn" ? "I'd build it with you step by step, explaining the why of each step." : "I'd frame it, plan it one step at a time, then build each step when you say Next."}`);
       return done();
     }
   }
   const flavour = flavourOfSlot[slot];
   if (flavour === "debug") return playDebug(slot, task);
   if (flavour === "review") return playReview(slot, task);
+  if (flavour === "architecture") return playArchitecture(slot, task);
   return playSteps(slot, task, flavour === "learn");
 }
 

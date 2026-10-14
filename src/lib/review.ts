@@ -47,7 +47,7 @@ export const withoutCue = (text: string) => text.replace(CUE, "").trimEnd();
 const SEVERITY: Record<string, Severity> = { blocker: "blocker", "should-fix": "should-fix", "should fix": "should-fix", shouldfix: "should-fix", nit: "nit" };
 const FINDING = /^\s*(?:[-*]\s*)?⚠️?\s*(?:lines?\s+(\d+)(?:\s*[–-]\s*(\d+))?\s*)?(?:\(([^)]+)\))?\s*:?\s*(.*)$/i;
 
-function findingsOf(section: string): { findings: Finding[]; clean: boolean } {
+export function findingsOf(section: string): { findings: Finding[]; clean: boolean } {
   const body = section.trim();
   if (/^none\.?$/i.test(body)) return { findings: [], clean: true };
   const findings: Finding[] = [];
