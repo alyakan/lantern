@@ -35,6 +35,11 @@ export const api = {
   setModel: (slot: string, model: string | null) => invoke<void>("set_model", { slot, model }),
   /** Resolves to the turn's number (see the Changes pane's per-turn views). */
   sendMessage: (slot: string, text: string) => invoke<number>("send_message", { slot, text }),
+  /** The user approves a worker's merge: its branch goes into the main checkout (the outcome comes as `merge_resolved`). */
+  approveMerge: (worker: string) => invoke<void>("orchestra_approve_merge", { worker }),
+  declineMerge: (worker: string) => invoke<void>("orchestra_decline_merge", { worker }),
+  /** Removes a worker's worktree; loose work needs `force`, and an unmerged branch is kept either way. */
+  discardWorktree: (worker: string, force: boolean) => invoke<void>("orchestra_discard", { worker, force }),
   /** Runs a command the user typed after "!" in the chat's folder; its output comes as shell_output, then shell_done. */
   runShell: (slot: string, id: string, command: string) => invoke<void>("run_shell", { slot, id, command }),
   /** Asks the chat's claude something for Settings (MCP status and actions, reloading skills); resolves to its reply. */

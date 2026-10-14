@@ -1,5 +1,13 @@
-import { chatTitle } from "../sessions";
+import { chatTitle, type AgentMeta } from "../sessions";
 import type { State } from "../store";
+
+/**
+ * What a saved chat was in an orchestra. A worker names its main agent by that chat's session, which is still the same
+ * after a restart (slots are not), so the team can be put back together.
+ */
+export type SavedTeamRole =
+  | { role: "main" }
+  | { role: "worker"; name: string; parentSession: string; branch: string | null; base: string | null; isolation: "worktree" | "shared" };
 
 /** An open chat as saved for the next launch: its conversation (if it has one), where, and what was typed in its box. */
 export interface SavedChat {
@@ -9,17 +17,26 @@ export interface SavedChat {
   draft: string;
   /** The one on screen. */
   active: boolean;
+  /** Absent for a chat that was not part of an orchestra. */
+  orchestra?: SavedTeamRole;
 }
 
 const KEY = "session.openChats";
 
 /** The open chats worth bringing back: those with a conversation or with text typed in their box. */
-export function chatsToSave(slots: Record<string, State>, active: string, drafts: Record<string, string>, titles: Record<string, string>): SavedChat[] {
+export function chatsToSave(slots: Record<string, State>, active: string, drafts: Record<string, string>, titles: Record<string, string>, agents: Record<string, AgentMeta> = {}): SavedChat[] {
   return Object.entries(slots).flatMap(([slot, s]) => {
     const draft = drafts[slot]?.trim() ? drafts[slot] : "";
     const sessionId = s.items.length > 0 ? s.sessionId : null;
     if (!s.folder || (!sessionId && !draft)) return [];
-    return [{ sessionId, folder: s.folder, title: chatTitle(s, titles), draft, active: slot === active }];
+    const meta = agents[slot];
+    const parentSession = meta ? (slots[meta.parent]?.sessionId ?? null) : null;
+    const orchestra: SavedTeamRole | undefined = s.orchestrator
+      ? { role: "main" }
+      : meta && parentSession
+        ? { role: "worker", name: meta.name, parentSession, branch: meta.branch, base: meta.base, isolation: meta.isolation }
+        : undefined;
+    return [{ sessionId, folder: s.folder, title: meta?.name ?? chatTitle(s, titles), draft, active: slot === active, ...(orchestra ? { orchestra } : {}) }];
   });
 }
 

@@ -73,6 +73,8 @@ export type ChatItem =
       switchedTo?: Flavour;
       /** Sent from the box: the box's text as an encoded draft, so Edit brings its paste placeholders back (see lib/paste.ts). */
       draft?: string;
+      /** Sent by another agent, not typed here: the main agent's message to a worker, or a worker's brief. */
+      from?: string;
     }
   | { type: "assistant"; id: string; text: string }
   | ToolItem
@@ -106,8 +108,41 @@ export interface TestRunItem {
   run: TestRun;
 }
 
+/** A worker's branch the main agent asked the user to merge, and how that stands. */
+export interface MergeProposal {
+  worker: string;
+  name: string;
+  branch: string;
+  into: string;
+  summary: string;
+  commits: number;
+  files: { path: string; added: number; removed: number }[];
+  /** Loose work in the worker's worktree, which approving commits first. */
+  uncommitted: number;
+  status: "open" | "merged" | "declined";
+  /** Why the last approval didn't merge (conflicting files, a dirty checkout); the proposal stays open to try again. */
+  problem: string | null;
+  /** How many times the backend has answered an approval: an attempt that fails the same way twice is still an answer. */
+  attempts: number;
+}
+
 export interface State {
   status: Status;
+  /** This chat is the main agent of an orchestra: it can start workers. */
+  orchestrator: boolean;
+  /** Notes from Lantern for the main agent (a worker finished, crashed or waits on the user), sent when it is idle. */
+  wakes: string[];
+  /** Automatic turns in a row (from those notes) with nothing from the user between: the loop guard counts them. */
+  autoStreak: number;
+  /** The merges the main agent asked for, oldest first. */
+  proposals: MergeProposal[];
+  /**
+   * What this chat has cost in dollars: `costBase` from claude processes that have since ended (a restart starts the
+   * count again), plus `costSeen`, the running total the current one last reported (claude's total_cost_usd counts the
+   * whole process, not each turn). See `totalCost`.
+   */
+  costBase: number;
+  costSeen: number;
   /** Messages typed while Claude works, sent together when the turn ends. Per chat, so a background chat keeps its own. */
   queued: string[];
   claudePath: string | null;
@@ -180,8 +215,17 @@ export interface BackgroundTask {
   since: number;
 }
 
+/** What the chat has cost so far, across restarts of its claude. */
+export const totalCost = (s: Pick<State, "costBase" | "costSeen">) => s.costBase + s.costSeen;
+
 export const initialState: State = {
   status: "locating",
+  orchestrator: false,
+  wakes: [],
+  autoStreak: 0,
+  proposals: [],
+  costBase: 0,
+  costSeen: 0,
   queued: [],
   claudePath: null,
   setupError: null,
@@ -229,7 +273,10 @@ export type Action =
   | { type: "folder_cleared" }
   | { type: "history_loaded"; sessionId: string; events: UiEvent[]; movedFrom?: string | null }
   | { type: "session_ready" }
-  | { type: "user_sent"; text: string; switchedTo?: Flavour; draft?: string }
+  /** `auto`: sent by Lantern from agents' notes, not typed by the user. */
+  | { type: "user_sent"; text: string; switchedTo?: Flavour; draft?: string; auto?: boolean }
+  | { type: "wakes_taken" }
+  | { type: "orchestrator_set"; on: boolean }
   | { type: "mode_changed"; mode: Mode; flavourStart?: Flavour | null }
   | { type: "flavour_picked"; flavour: Flavour | null }
   | { type: "permission_decided"; id: string; allow: boolean; note?: string }
@@ -316,7 +363,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], costBase: 0, costSeen: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -450,12 +497,17 @@ function applyEvent(state: State, ev: UiEvent): State {
           ? null
           : state.banner;
       const seq = state.seq + 1;
+      // A total lower than the last one is a claude that started over (a restart): what the earlier one cost is kept.
+      const reported = ev.cost_usd;
+      const restarted = reported !== null && reported < state.costSeen;
       return {
         ...state,
         status: "idle",
         thinking: false,
         banner,
         seq,
+        costBase: restarted ? state.costBase + state.costSeen : state.costBase,
+        costSeen: reported ?? state.costSeen,
         contextWindow: ev.context_window ?? state.contextWindow,
         // The turn that ran /clear ends in an empty conversation; a marker alone would leave a blank chat, not the start screen.
         cleared: false,
@@ -488,6 +540,42 @@ function applyEvent(state: State, ev: UiEvent): State {
         banner: state.stopRequested ? state.banner : { kind: "error", text, action: "restart" },
       };
     }
+    case "agent_wake":
+      return { ...state, wakes: [...state.wakes, ev.text] };
+    // The main agent wrote to this worker: it shows as a message from it, and the worker is at work on it.
+    case "agent_message": {
+      const seq = state.seq + 1;
+      return { ...state, seq, stopRequested: false, status: state.status === "idle" ? "running" : state.status, thinking: state.status === "idle" || state.thinking, items: [...state.items, { type: "user", id: `u${seq}`, text: ev.text, at: Date.now(), from: ev.from }] };
+    }
+    // Stopped by the main agent, which is a decision of its own: the user's earlier Stop (if any) must not turn it into a
+    // restart (the app restarts a chat that ended after the user pressed Stop).
+    case "agent_stopped":
+      return {
+        ...state,
+        status: "ended",
+        thinking: false,
+        stopRequested: false,
+        items: denyPending(failRunning(state.items)),
+        banner: ev.reason ? { kind: "error", text: ev.reason, action: null } : { kind: "info", text: "The main agent stopped this worker. Restart it to carry on.", action: "restart" },
+      };
+    // The main agent's mode was lowered, so this worker's was too (its claude restarted on the same conversation).
+    case "agent_mode":
+      return { ...state, mode: ev.mode };
+    case "merge_proposed": {
+      const proposal: MergeProposal = { worker: ev.worker, name: ev.name, branch: ev.branch, into: ev.into, summary: ev.summary, commits: ev.commits, files: ev.files, uncommitted: ev.uncommitted, status: "open", problem: null, attempts: 0 };
+      return { ...state, proposals: [...state.proposals.filter((p) => p.worker !== ev.worker), proposal] };
+    }
+    case "merge_resolved":
+      return {
+        ...state,
+        proposals: state.proposals.map((p): MergeProposal => {
+          if (p.worker !== ev.worker) return p;
+          const answered = { attempts: p.attempts + 1 };
+          if (ev.outcome === "merged") return { ...p, ...answered, status: "merged", problem: null };
+          if (ev.outcome === "declined") return { ...p, ...answered, status: "declined", problem: null };
+          return { ...p, ...answered, problem: ev.outcome === "conflicts" ? `Conflicts with ${p.into} in ${ev.detail}.` : ev.detail };
+        }),
+      };
     case "unknown":
       return { ...state, debug: [...state.debug.slice(-99), JSON.stringify(ev.raw)] };
     case "parse_error":
@@ -526,7 +614,7 @@ export function reducer(state: State, action: Action): State {
       return state.status === "starting" ? { ...state, status: "idle" } : state;
     case "user_sent": {
       const seq = state.seq + 1;
-      const item: ChatItem = { type: "user", id: `u${seq}`, text: action.text, at: Date.now(), ...(action.switchedTo ? { switchedTo: action.switchedTo } : {}), ...(action.draft ? { draft: action.draft } : {}) };
+      const item: ChatItem = { type: "user", id: `u${seq}`, text: action.text, at: Date.now(), ...(action.auto ? { auto: true } : {}), ...(action.switchedTo ? { switchedTo: action.switchedTo } : {}), ...(action.draft ? { draft: action.draft } : {}) };
       // A picked flavour went with this message.
       // The commands run since the last message went with this one (unless it's a slash command).
       const sent = takesShellContext(action.text) ? state.items.map((it): ChatItem => (it.type === "shell" && !it.shared ? { ...it, shared: true } : it)) : state.items;
@@ -534,8 +622,14 @@ export function reducer(state: State, action: Action): State {
       const noted = takesShellContext(action.text) ? [] : state.revertNotes;
       // The moved-folder note goes with the first message that isn't a slash command, like the revert notes.
       const movedFrom = takesShellContext(action.text) ? null : state.movedFrom;
-      return { ...state, status: "running", thinking: true, stopRequested: false, seq, flavourPick: action.switchedTo ? null : state.flavourPick, items: [...sent, item], revertUndo: null, revertNotes: noted, movedFrom };
+      // Anything the user sends ends a run of automatic turns; the guard counts only the unattended ones.
+      const autoStreak = action.auto ? state.autoStreak + 1 : 0;
+      return { ...state, status: "running", thinking: true, stopRequested: false, seq, autoStreak, flavourPick: action.switchedTo ? null : state.flavourPick, items: [...sent, item], revertUndo: null, revertNotes: noted, movedFrom };
     }
+    case "wakes_taken":
+      return { ...state, wakes: [] };
+    case "orchestrator_set":
+      return { ...state, orchestrator: action.on };
     case "mode_changed":
       return { ...state, mode: action.mode, ...(action.flavourStart !== undefined ? { flavourStart: action.flavourStart } : {}) };
     case "flavour_picked":
@@ -551,12 +645,15 @@ export function reducer(state: State, action: Action): State {
         stopRequested: true,
         items: denyPending(state.items),
       };
+    // The old claude's cost is kept: the new one counts from nothing, and its first total may be more than the old one's.
     case "restarting":
       return {
         ...state,
         status: "starting",
         banner: null,
         stopRequested: false,
+        costBase: state.costBase + state.costSeen,
+        costSeen: 0,
         items: denyPending(state.items),
       };
     case "select_file":

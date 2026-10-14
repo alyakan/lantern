@@ -8,7 +8,7 @@ import { FolderMenu, type RelocateMenu } from "./FolderPill";
 import { useMenuKeys } from "./useMenuKeys";
 import { HistoryMenu, type OpenChat } from "./HistoryMenu";
 import type { ActivityStatus } from "../lib/status";
-import { BranchIcon, ClockIcon, FailIcon, FolderIcon, GearIcon, PaneIcon, PlusIcon, WaitIcon } from "./icons";
+import { BranchIcon, CanvasIcon, ClockIcon, FailIcon, FolderIcon, GearIcon, OrchestraIcon, PaneIcon, PlusIcon, WaitIcon } from "./icons";
 
 interface Props {
   folder: string | null;
@@ -48,6 +48,8 @@ interface Props {
   relocate?: RelocateMenu;
   /** The places this folder's sessions came from that aren't brought over (loaded when History opens), and opens the dialog for them. */
   bringOld?: { load: () => Promise<OldLocation[]>; onOpen: () => void };
+  /** Orchestras: a main agent and the workers it runs. `exists`: there is one, so the canvas can be shown. */
+  orchestra?: { view: "chat" | "canvas"; exists: boolean; attention: number; onView: (view: "chat" | "canvas") => void; onNew: () => void };
 }
 
 /** How long a stopped task may stay listed before its Stop comes back. */
@@ -64,7 +66,7 @@ function taskKind(type: string): string {
 // No native title bar: the traffic lights sit in the left gutter and the bar drags the window. In the centre, like
 // Xcode's activity viewer: the folder and branch on the left (it opens the folder menu, like Xcode's scheme), what
 // Claude is doing on the right, and a progress bar along its bottom edge while it works.
-export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, sessionId = null, loadSessions, onOpenSession, onNewSession, loadRecent, onPickFolder, openChats = [], onSwitchChat, onCloseChat, branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, relocate, bringOld }: Props) {
+export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, sessionId = null, loadSessions, onOpenSession, onNewSession, loadRecent, onPickFolder, openChats = [], onSwitchChat, onCloseChat, branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, relocate, bringOld, orchestra }: Props) {
   // A working chat keeps running in the background when you switch away, so only a starting one blocks switching.
   const busy = status === "starting";
   const backgroundRunning = openChats.some((c) => c.state === "running" || c.state === "waiting" || !!c.background);
@@ -226,6 +228,23 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
           {activity?.working && <span className="viewer-progress" aria-hidden />}
         </div>
         <div className="toolbar-group">
+          {orchestra?.exists && (
+            <button
+              className={`icon${orchestra.view === "canvas" ? " pressed" : ""}`}
+              aria-label={orchestra.view === "canvas" ? "Show the chat" : "Show the canvas"}
+              aria-pressed={orchestra.view === "canvas"}
+              title={orchestra.view === "canvas" ? "Back to the chat (⇧⌘C)" : "Show the canvas (⇧⌘C)"}
+              onClick={() => orchestra.onView(orchestra.view === "canvas" ? "chat" : "canvas")}
+            >
+              <CanvasIcon />
+              {orchestra.attention > 0 && orchestra.view !== "canvas" && <span className="dot" aria-hidden="true" />}
+            </button>
+          )}
+          {orchestra && (
+            <button className="icon" aria-label="New orchestra" title="New orchestra: a main agent that runs workers" disabled={!canUseSessions} onClick={orchestra.onNew}>
+              <OrchestraIcon />
+            </button>
+          )}
           {onNewSession && (
             <button className="icon" aria-label="New session" title="New session (⌘N)" disabled={!canUseSessions} onClick={onNewSession}>
               <PlusIcon />

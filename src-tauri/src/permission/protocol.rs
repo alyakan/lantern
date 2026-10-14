@@ -7,6 +7,17 @@ pub struct BridgeRequest {
     pub tool_name: String,
     pub input: Value,
     pub tool_use_id: Option<String>,
+    /// An orchestra tool call from the main agent (see orchestra.rs), not a permission prompt: `tool_name` is the tool and
+    /// `input` its arguments. The helper sets it, never the model, so a prompt can't pose as one. The reply's `allow` says
+    /// whether the call worked and its `message` is the result the model reads.
+    #[serde(default)]
+    pub orchestra: bool,
+}
+
+impl BridgeRequest {
+    pub fn permission(tool_name: String, input: Value, tool_use_id: Option<String>) -> Self {
+        Self { tool_name, input, tool_use_id, orchestra: false }
+    }
 }
 
 /// App → helper: the user's decision.

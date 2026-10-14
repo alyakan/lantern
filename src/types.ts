@@ -60,6 +60,20 @@ export type UiEvent =
   | { kind: "shell_output"; id: string; text: string }
   | { kind: "shell_done"; id: string; code: number | null; stopped: boolean }
   | { kind: "shell_secret"; id: string; secret: boolean }
+  /** On the main agent's chat: it started a worker, whose chat is the slot `worker` (open before its first event). */
+  | { kind: "agent_spawned"; worker: string; name: string; brief: string; folder: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; mode: Mode }
+  /** On the main agent's chat: a note from Lantern for it (a worker finished, crashed or waits on the user). */
+  | { kind: "agent_wake"; text: string }
+  /** On a worker's chat: the main agent sent it this. */
+  | { kind: "agent_message"; from: string; text: string }
+  /** On a worker's chat: its claude was stopped on purpose, or never started (`reason`). */
+  | { kind: "agent_stopped"; reason: string | null }
+  /** On a worker's chat: it now runs on this mode, because its main agent's was lowered. */
+  | { kind: "agent_mode"; mode: Mode }
+  /** On the main agent's chat: it asks the user to merge a worker's branch. */
+  | { kind: "merge_proposed"; worker: string; name: string; branch: string; into: string; summary: string; commits: number; files: { path: string; added: number; removed: number }[]; uncommitted: number }
+  /** How that ended: "merged" (detail: the branch merged into), "conflicts" (the files), "declined", "failed" (why). */
+  | { kind: "merge_resolved"; worker: string; outcome: "merged" | "conflicts" | "declined" | "failed"; detail: string }
   | { kind: "unknown"; raw: unknown }
   | { kind: "parse_error"; line: string };
 
@@ -225,6 +239,10 @@ export interface Settings {
   /** The harness: the advisor model and the subagents' model (null or absent = Claude Code's own settings). */
   advisor?: string | null;
   subagent_model?: string | null;
+  /** Start the chat as the main agent of an orchestra: it can spawn workers. */
+  orchestrator?: boolean;
+  /** Reopen the chat as a worker of an open main agent (a team restored after Lantern was closed). */
+  worker?: { name: string; parent: string };
 }
 
 /** A file search result (see files::find): the file, and which characters of `rel` matched. */

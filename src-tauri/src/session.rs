@@ -176,6 +176,11 @@ impl Session {
         self.session_id.lock().unwrap().clone()
     }
 
+    /// The process id of this claude.
+    pub fn pid(&self) -> u32 {
+        self.pid
+    }
+
     pub fn is_running(&self) -> bool {
         !*self.exited.borrow()
     }
@@ -358,7 +363,7 @@ mod tests {
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into() },
+            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default() },
             path_env: None,
         }
     }

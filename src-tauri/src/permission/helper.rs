@@ -6,8 +6,64 @@ pub const REPRODUCE: &str = "Reproduce";
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 
+/// The tools only the main agent has (see orchestra.rs). Each returns at once: this helper answers one message at a
+/// time, so a call that waited would hold up the permission prompts behind it.
+pub const ORCHESTRA_TOOLS: &[&str] = &["spawn_agent", "list_agents", "read_agent", "message_agent", "stop_agent", "propose_merge"];
+
+fn orchestra_tool_list() -> Vec<Value> {
+    let id = json!({"type": "string", "description": "The worker's id, as spawn_agent or list_agents gave it (w1, w2…)."});
+    vec![
+        json!({
+            "name": "spawn_agent",
+            "description": "Start a worker agent with a chat of its own. Returns at once with its id; it runs on its own and you get a note when it finishes a turn. Its brief is its whole task: write it for someone who has not seen this conversation.",
+            "inputSchema": {"type": "object", "properties": {
+                "name": {"type": "string", "description": "A short name for the worker (a few words), shown on the canvas and used for its branch."},
+                "brief": {"type": "string", "description": "The task: goal, files or areas involved, constraints, how to verify, what done looks like."},
+                "isolation": {"type": "string", "enum": ["worktree", "shared"], "description": "worktree (default): its own git worktree and branch. shared: your folder, only for work that writes nothing."},
+                "model": {"type": "string", "description": "A model alias for it (sonnet, opus, haiku…); omit to use yours."}
+            }, "required": ["name", "brief"]}
+        }),
+        json!({
+            "name": "list_agents",
+            "description": "Every worker you started: id, name, status, branch, turns and its latest message.",
+            "inputSchema": {"type": "object", "properties": {}}
+        }),
+        json!({
+            "name": "read_agent",
+            "description": "A worker's conversation, as plain entries. Without a cursor it returns the latest entries; with one, the entries from that index on (the reply says which cursor reads the next page).",
+            "inputSchema": {"type": "object", "properties": {
+                "id": id,
+                "cursor": {"type": "integer", "description": "Index of the first entry to return (0 is the start)."},
+                "limit": {"type": "integer", "description": "How many entries (default 30, at most 100)."}
+            }, "required": ["id"]}
+        }),
+        json!({
+            "name": "message_agent",
+            "description": "Send a worker an instruction or an answer. It appears in the worker's chat as from the main agent.",
+            "inputSchema": {"type": "object", "properties": {"id": id, "text": {"type": "string"}}, "required": ["id", "text"]}
+        }),
+        json!({
+            "name": "stop_agent",
+            "description": "Stop a worker. Its worktree and branch are kept.",
+            "inputSchema": {"type": "object", "properties": {"id": id}, "required": ["id"]}
+        }),
+        json!({
+            "name": "propose_merge",
+            "description": "Ask the user to merge a worker's branch into the main checkout. Only the user can approve it; you get a note with their answer.",
+            "inputSchema": {"type": "object", "properties": {"id": id, "summary": {"type": "string", "description": "What the branch does and what you checked, in plain language."}}, "required": ["id", "summary"]}
+        }),
+    ]
+}
+
 /// Answers one MCP JSON-RPC message. Returns None for notifications (no `id`).
 pub fn handle_message(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeResponse) -> Option<Value> {
+    handle_message_as(msg, ask, false)
+}
+
+/// `orchestrator`: this is the main agent's helper (`LANTERN_ROLE=main`), which also offers the orchestra tools. That only
+/// decides what is listed: the app lets a call through when the OS says the helper is the main agent's own process
+/// (see PermissionBridge), so a helper that claims the role without being its helper gets nowhere.
+pub fn handle_message_as(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeResponse, orchestrator: bool) -> Option<Value> {
     let id = msg.get("id")?.clone();
     let result = match msg["method"].as_str().unwrap_or("") {
         "initialize" => json!({
@@ -15,38 +71,37 @@ pub fn handle_message(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeResponse
             "capabilities": {"tools": {}},
             "serverInfo": {"name": "lantern", "version": env!("CARGO_PKG_VERSION")}
         }),
-        "tools/list" => json!({"tools": [{
-            "name": "approve",
-            "description": "Ask the Lantern user to allow or deny a tool call",
-            "inputSchema": {
-                "type": "object",
-                "properties": {"tool_name": {"type": "string"}, "input": {"type": "object"}, "tool_use_id": {"type": "string"}},
-                "required": ["tool_name", "input"]
+        "tools/list" => {
+            let mut tools = base_tools();
+            if orchestrator {
+                tools.extend(orchestra_tool_list());
             }
-        }, {
-            "name": "reproduce",
-            "description": "Debug mode: ask the user to reproduce the bug now, with your diagnostic logging in place. Waits until they have, and returns whether they could and anything they noted (e.g. pasted logs). Call it instead of ending your turn to ask them.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "steps": {"type": "string", "description": "Markdown: exactly what to do to trigger the bug, and where the logs will show up."}
-                },
-                "required": ["steps"]
+            json!({"tools": tools})
+        }
+        // Matched before the fallback below, which treats any other tool name as an `approve` call.
+        "tools/call" if ORCHESTRA_TOOLS.contains(&msg["params"]["name"].as_str().unwrap_or("")) => {
+            let tool = msg["params"]["name"].as_str().unwrap_or("");
+            if orchestrator {
+                let resp = ask(BridgeRequest { tool_name: tool.into(), input: msg["params"]["arguments"].clone(), tool_use_id: None, orchestra: true });
+                let text = resp.message.unwrap_or_else(|| if resp.allow { "Done.".into() } else { "That didn't work.".into() });
+                json!({"isError": !resp.allow, "content": [{"type": "text", "text": text}]})
+            } else {
+                json!({"isError": true, "content": [{"type": "text", "text": format!("{tool} is only available to the main agent.")}]})
             }
-        }]}),
+        }
         "tools/call" if msg["params"]["name"] == "reproduce" => {
-            let resp = ask(BridgeRequest { tool_name: REPRODUCE.into(), input: msg["params"]["arguments"].clone(), tool_use_id: None });
+            let resp = ask(BridgeRequest::permission(REPRODUCE.into(), msg["params"]["arguments"].clone(), None));
             let note = resp.message.filter(|m| !m.trim().is_empty()).map(|m| format!(" Their note: {m}")).unwrap_or_default();
             let text = if resp.allow { format!("The user reproduced the problem.{note}") } else { format!("The user could not reproduce the problem.{note}") };
             json!({"content": [{"type": "text", "text": text}]})
         }
         "tools/call" => {
             let args = &msg["params"]["arguments"];
-            let req = BridgeRequest {
-                tool_name: args["tool_name"].as_str().unwrap_or("").to_string(),
-                input: args["input"].clone(),
-                tool_use_id: args["tool_use_id"].as_str().map(String::from),
-            };
+            let req = BridgeRequest::permission(
+                args["tool_name"].as_str().unwrap_or("").to_string(),
+                args["input"].clone(),
+                args["tool_use_id"].as_str().map(String::from),
+            );
             let resp = ask(req.clone());
             json!({"content": [{"type": "text", "text": decision_json(&req.input, &resp).to_string()}]})
         }
@@ -56,6 +111,31 @@ pub fn handle_message(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeResponse
         _ => return Some(json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "Method not found"}})),
     };
     Some(json!({"jsonrpc": "2.0", "id": id, "result": result}))
+}
+
+fn base_tools() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "approve",
+            "description": "Ask the Lantern user to allow or deny a tool call",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"tool_name": {"type": "string"}, "input": {"type": "object"}, "tool_use_id": {"type": "string"}},
+                "required": ["tool_name", "input"]
+            }
+        }),
+        json!({
+            "name": "reproduce",
+            "description": "Debug mode: ask the user to reproduce the bug now, with your diagnostic logging in place. Waits until they have, and returns whether they could and anything they noted (e.g. pasted logs). Call it instead of ending your turn to ask them.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "steps": {"type": "string", "description": "Markdown: exactly what to do to trigger the bug, and where the logs will show up."}
+                },
+                "required": ["steps"]
+            }
+        }),
+    ]
 }
 
 /// Sends the request to the app and waits for the user's answer. Any failure means deny.
@@ -76,7 +156,12 @@ pub fn ask_bridge(socket: Option<&str>, req: &BridgeRequest) -> BridgeResponse {
 }
 
 /// The `--permission-helper` main loop: newline-delimited JSON-RPC on stdin/stdout.
-pub fn run_helper(mut input: impl BufRead, mut output: impl Write, socket: Option<&str>) -> io::Result<()> {
+pub fn run_helper(input: impl BufRead, output: impl Write, socket: Option<&str>) -> io::Result<()> {
+    run_helper_as(input, output, socket, false)
+}
+
+/// `orchestrator`: the main agent's helper (`LANTERN_ROLE=main`), which also serves the orchestra tools.
+pub fn run_helper_as(mut input: impl BufRead, mut output: impl Write, socket: Option<&str>, orchestrator: bool) -> io::Result<()> {
     let ask = |req: BridgeRequest| ask_bridge(socket, &req);
     let mut buf = Vec::new();
     loop {
@@ -86,7 +171,7 @@ pub fn run_helper(mut input: impl BufRead, mut output: impl Write, socket: Optio
         }
         // Bytes that aren't a JSON message are skipped: a bad line must not end the helper, or every later prompt is denied.
         let Ok(msg) = serde_json::from_slice::<Value>(&buf) else { continue };
-        if let Some(reply) = handle_message(&msg, &ask) {
+        if let Some(reply) = handle_message_as(&msg, &ask, orchestrator) {
             writeln!(output, "{reply}")?;
             output.flush()?;
         }
@@ -169,6 +254,63 @@ mod tests {
         assert_eq!(tools["result"]["tools"][1]["name"], "reproduce");
     }
 
+    fn tool_names(reply: &Value) -> Vec<String> {
+        reply["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect()
+    }
+
+    #[test]
+    fn only_the_main_agents_helper_lists_the_orchestra_tools() {
+        let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+        assert_eq!(tool_names(&handle_message_as(&list, &allow_all, false).unwrap()), ["approve", "reproduce"]);
+        let names = tool_names(&handle_message_as(&list, &allow_all, true).unwrap());
+        assert_eq!(&names[..2], ["approve", "reproduce"]);
+        assert_eq!(names[2..], *ORCHESTRA_TOOLS);
+    }
+
+    #[test]
+    fn an_orchestra_call_goes_to_the_app_flagged_and_its_result_comes_back_as_the_tool_result() {
+        let seen = std::cell::RefCell::new(None);
+        let msg = json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "spawn_agent", "arguments": {"name": "login", "brief": "Build it"}}});
+        let r = handle_message_as(&msg, &|req| {
+            *seen.borrow_mut() = Some(req);
+            BridgeResponse { allow: true, message: Some("Started w1.".into()), updated_input: None }
+        }, true)
+        .unwrap();
+        assert_eq!(r["result"]["content"][0]["text"], "Started w1.");
+        assert_eq!(r["result"]["isError"], false);
+        let req = seen.borrow().clone().unwrap();
+        assert!(req.orchestra);
+        assert_eq!((req.tool_name.as_str(), req.input["brief"].as_str()), ("spawn_agent", Some("Build it")));
+        // A failure reaches the model as a tool error with the reason.
+        let r = handle_message_as(&msg, &|_| BridgeResponse { allow: false, message: Some("At most 6 workers.".into()), updated_input: None }, true).unwrap();
+        assert_eq!((r["result"]["isError"].clone(), r["result"]["content"][0]["text"].clone()), (json!(true), json!("At most 6 workers.")));
+    }
+
+    #[test]
+    fn a_helper_that_is_not_the_main_agents_refuses_orchestra_calls_instead_of_treating_them_as_permission_prompts() {
+        let called = std::cell::Cell::new(false);
+        let msg = json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "spawn_agent", "arguments": {"name": "x", "brief": "y"}}});
+        let r = handle_message_as(&msg, &|_| {
+            called.set(true);
+            BridgeResponse { allow: true, message: None, updated_input: None }
+        }, false)
+        .unwrap();
+        assert!(!called.get());
+        assert_eq!(r["result"]["isError"], true);
+    }
+
+    #[test]
+    fn a_permission_prompt_cannot_pose_as_an_orchestra_call() {
+        // `approve` always builds its request from the arguments with `orchestra` false, whatever they claim.
+        let seen = std::cell::RefCell::new(None);
+        let msg = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "approve", "arguments": {"tool_name": "spawn_agent", "input": {}, "orchestra": true}}});
+        handle_message_as(&msg, &|req| {
+            *seen.borrow_mut() = Some(req);
+            BridgeResponse { allow: true, message: None, updated_input: None }
+        }, true);
+        assert!(!seen.borrow().clone().unwrap().orchestra);
+    }
+
     #[test]
     fn unknown_requests_are_refused_and_ping_is_answered() {
         let r = handle_message(&json!({"jsonrpc": "2.0", "id": "x", "method": "server/discover"}), &allow_all).unwrap();
@@ -180,7 +322,7 @@ mod tests {
 
     #[test]
     fn missing_socket_denies() {
-        let req = BridgeRequest { tool_name: "Bash".into(), input: json!({}), tool_use_id: None };
+        let req = BridgeRequest::permission("Bash".into(), json!({}), None);
         let r = ask_bridge(None, &req);
         assert!(!r.allow);
         assert!(r.message.unwrap().contains("denied"));

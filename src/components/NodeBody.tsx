@@ -1,0 +1,83 @@
+import { memo, useMemo, useRef } from "react";
+import { useChatState, useNodeActions } from "../lib/canvasContext";
+import { SlotContext } from "../lib/slot";
+import { WAKE_LIMIT, wakesPaused } from "../sessions";
+import type { MergeProposal } from "../store";
+import { ChatView } from "./ChatView";
+import type { StreamHandlers } from "./ChatStream";
+import { MergeCard } from "./MergeCard";
+import { NodeComposer } from "./NodeComposer";
+
+/**
+ * The merges to show for an agent: open ones, and the latest answered one for each worker (as a quiet line). A main
+ * agent shows every worker's; a worker shows its own.
+ */
+export function visibleProposals(all: MergeProposal[], worker: string | null): MergeProposal[] {
+  const mine = worker ? all.filter((p) => p.worker === worker) : all;
+  const seen = new Set<string>();
+  return [...mine]
+    .reverse()
+    .filter((p) => {
+      if (p.status === "open") return true;
+      if (seen.has(p.worker)) return false;
+      seen.add(p.worker);
+      return !mine.some((q) => q.worker === p.worker && q.status === "open");
+    })
+    .reverse();
+}
+
+/**
+ * An agent's conversation on the canvas, with its box: the same chat view as the full-size app, for this agent's own
+ * chat. It subscribes to that chat alone and keeps its handlers fixed, so it redraws when the agent does something and
+ * not when the canvas pans, zooms or moves another agent. `parent`: the main agent a worker reports to, whose merge
+ * proposals for it are shown here too.
+ */
+export const NodeBody = memo(function NodeBody({ slot, parent }: { slot: string; parent: string | null }) {
+  const state = useChatState(slot);
+  const owner = useChatState(parent ?? slot);
+  const actions = useNodeActions();
+  const latest = useRef(state);
+  latest.current = state;
+  const handlers = useMemo<StreamHandlers>(
+    () => ({
+      onDecide: (id, allow, note, answered) => actions.decide(slot, id, allow, note, answered),
+      onOpenFile: (path) => actions.openFile(slot, path),
+      onStopShell: (id) => actions.stopShell(slot, id),
+      onShellInput: (id, text) => actions.shellInput(slot, id, text),
+      testRunFor: (id) => latest.current?.testRuns.find((r) => r.id === id),
+      onOpenTestRun: (id) => actions.openTestRun(slot, id),
+    }),
+    [slot, actions],
+  );
+  if (!state) return null;
+  const proposals = visibleProposals(owner?.proposals ?? [], parent ? slot : null);
+  return (
+    <SlotContext.Provider value={slot}>
+      <div className="node-chat">
+        <ChatView state={state} {...handlers} />
+      </div>
+      {proposals.length > 0 && (
+        <div className="node-merges">
+          {proposals.map((p) => (
+            <MergeCard key={p.worker} proposal={p} />
+          ))}
+        </div>
+      )}
+      {wakesPaused(state) && (
+        <div className="node-banner info" role="status">
+          <span>
+            {state.wakes.length === 1 ? "1 update from the workers is" : `${state.wakes.length} updates from the workers are`} held back: {WAKE_LIMIT} replies in a row went out without you, and this keeps the team from running on unwatched.
+          </span>
+          <button onClick={() => actions.send(slot, "Carry on with the latest updates from the workers.")}>Pass them on</button>
+        </div>
+      )}
+      {state.banner && (
+        <div className={`node-banner ${state.banner.kind}`} role="status">
+          <span>{state.banner.text}</span>
+          {state.banner.action === "restart" && <button onClick={() => actions.restart(slot)}>Restart</button>}
+        </div>
+      )}
+      <NodeComposer slot={slot} status={state.status} queued={state.queued} />
+    </SlotContext.Provider>
+  );
+});
