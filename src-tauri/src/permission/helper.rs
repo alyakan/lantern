@@ -6,6 +6,10 @@ pub const REPRODUCE: &str = "Reproduce";
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 
+/// Tools every chat has that only say or show something, so they run without asking: Step by step's own instructions
+/// (`steps_guide`), and what the Changes pane compares while reviewing (`review_target`).
+pub const LANTERN_TOOLS: &[&str] = &["steps_guide", "review_target"];
+
 /// The tools only the main agent has (see orchestra.rs). Each returns at once: this helper answers one message at a
 /// time, so a call that waited would hold up the permission prompts behind it.
 pub const ORCHESTRA_TOOLS: &[&str] = &["spawn_agent", "list_agents", "read_agent", "message_agent", "stop_agent", "propose_merge"];
@@ -90,6 +94,14 @@ pub fn handle_message_as(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeRespo
                 json!({"isError": true, "content": [{"type": "text", "text": format!("{tool} is only available to the main agent.")}]})
             }
         }
+        "tools/call" if msg["params"]["name"] == "steps_guide" => {
+            let asked = msg["params"]["arguments"]["flavour"].as_str().unwrap_or("");
+            json!({"content": [{"type": "text", "text": steps_guide_text(asked)}]})
+        }
+        "tools/call" if msg["params"]["name"] == "review_target" => match review_target(&msg["params"]["arguments"]) {
+            Ok(text) => json!({"content": [{"type": "text", "text": text}]}),
+            Err(text) => json!({"isError": true, "content": [{"type": "text", "text": text}]}),
+        },
         "tools/call" if msg["params"]["name"] == "reproduce" => {
             let resp = ask(BridgeRequest::permission(REPRODUCE.into(), msg["params"]["arguments"].clone(), None));
             let note = resp.message.filter(|m| !m.trim().is_empty()).map(|m| format!(" Their note: {m}")).unwrap_or_default();
@@ -114,6 +126,40 @@ pub fn handle_message_as(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeRespo
     Some(json!({"jsonrpc": "2.0", "id": id, "result": result}))
 }
 
+/// What steps_guide answers: the rules every flavour shares, then the asked flavour's section (or every flavour's).
+pub fn steps_guide_text(flavour: &str) -> String {
+    use crate::args::{flavour_guide, steps_rules, FLAVOURS};
+    let one = (!flavour.trim().is_empty()).then(|| flavour_guide(flavour)).flatten();
+    if !flavour.trim().is_empty() && one.is_none() {
+        return format!("There is no flavour {flavour:?}. Step by step's flavours are {}.", FLAVOURS.join(", "));
+    }
+    let sections: Vec<String> = match one {
+        Some(g) => vec![g.text],
+        None => FLAVOURS.iter().filter_map(|f| flavour_guide(f)).map(|g| g.text).collect(),
+    };
+    format!("{}\n\n{}", steps_rules(), sections.join("\n\n"))
+}
+
+/// Checks a review_target call and says what the Changes pane shows now. The window reads the call itself (its card
+/// header, see stream_parser::summarize), so nothing is sent anywhere.
+fn review_target(args: &Value) -> Result<String, String> {
+    let pr = match &args["pr"] {
+        Value::Null => None,
+        v => Some(v.as_u64().filter(|n| (1..10_000_000).contains(n)).ok_or("`pr` is a pull request's number, or null for a local branch.")?),
+    };
+    let base = match &args["base"] {
+        Value::Null => None,
+        Value::String(s) if s.trim().is_empty() => None,
+        Value::String(s) if s.len() <= 200 && !s.starts_with('-') && !s.contains("..") && s.chars().all(|c| c.is_ascii_alphanumeric() || "._/-".contains(c)) => Some(s.trim().to_string()),
+        _ => return Err("`base` is a branch name, such as feat/core or origin/main.".into()),
+    };
+    Ok(match (pr, base) {
+        (Some(n), _) => format!("The Changes pane shows pull request #{n}'s changes now."),
+        (None, Some(b)) => format!("The Changes pane shows the checked-out branch's changes since {b} now."),
+        (None, None) => "The Changes pane shows the checked-out branch's changes now, against the branch Lantern finds it was built on.".into(),
+    })
+}
+
 fn base_tools() -> Vec<Value> {
     vec![
         json!({
@@ -123,6 +169,25 @@ fn base_tools() -> Vec<Value> {
                 "type": "object",
                 "properties": {"tool_name": {"type": "string"}, "input": {"type": "object"}, "tool_use_id": {"type": "string"}},
                 "required": ["tool_name", "input"]
+            }
+        }),
+        json!({
+            "name": "steps_guide",
+            "description": "How Lantern's Step-by-step mode works: the page rules, and each flavour's (Build, Learn, Review, Debug, Architecture) headings and format. Read it before working in a flavour you aren't sure of, or when Lantern says it couldn't read a page.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"flavour": {"type": "string", "description": "One flavour (Build, Learn, Review, Debug or Architecture); leave it out for all of them."}}
+            }
+        }),
+        json!({
+            "name": "review_target",
+            "description": "Set what Lantern's Changes pane compares while you review: a pull request by its number, or the checked-out branch against the branch it is built on. Call it when a review starts, and whenever what you review changes (you opened a PR for the branch, or moved to another PR).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pr": {"type": ["integer", "null"], "description": "The pull request's number; null for the checked-out local branch."},
+                    "base": {"type": "string", "description": "For a local branch: the branch it is stacked on (its PR's base, or the branch it was cut from). Leave it out to let Lantern find it."}
+                }
             }
         }),
         json!({
@@ -252,7 +317,7 @@ mod tests {
         let r = handle_message(&msg, &|_| BridgeResponse { allow: false, message: None, updated_input: None }).unwrap();
         assert_eq!(r["result"]["content"][0]["text"], "The user could not reproduce the problem.");
         let tools = handle_message(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &allow_all).unwrap();
-        assert_eq!(tools["result"]["tools"][1]["name"], "reproduce");
+        assert!(tool_names(&tools).contains(&"reproduce".to_string()));
     }
 
     fn tool_names(reply: &Value) -> Vec<String> {
@@ -262,10 +327,10 @@ mod tests {
     #[test]
     fn only_the_main_agents_helper_lists_the_orchestra_tools() {
         let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
-        assert_eq!(tool_names(&handle_message_as(&list, &allow_all, false).unwrap()), ["approve", "reproduce"]);
+        assert_eq!(tool_names(&handle_message_as(&list, &allow_all, false).unwrap()), ["approve", "steps_guide", "review_target", "reproduce"]);
         let names = tool_names(&handle_message_as(&list, &allow_all, true).unwrap());
-        assert_eq!(&names[..2], ["approve", "reproduce"]);
-        assert_eq!(names[2..], *ORCHESTRA_TOOLS);
+        assert_eq!(&names[..4], ["approve", "steps_guide", "review_target", "reproduce"]);
+        assert_eq!(names[4..], *ORCHESTRA_TOOLS);
     }
 
     #[test]
@@ -365,5 +430,39 @@ mod tests {
         let replies: Vec<Value> = String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
         assert_eq!(replies.len(), 1);
         assert_eq!(replies[0]["id"], 1);
+    }
+
+    fn tool_call(name: &str, arguments: Value) -> Value {
+        let msg = json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": name, "arguments": arguments}});
+        handle_message(&msg, &allow_all).unwrap()["result"].clone()
+    }
+
+    #[test]
+    fn every_chat_lists_lanterns_own_tools() {
+        let list = handle_message(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &allow_all).unwrap();
+        let names: Vec<_> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
+        assert!(names.contains(&"steps_guide".into()) && names.contains(&"review_target".into()), "{names:?}");
+    }
+
+    #[test]
+    fn steps_guide_gives_the_shared_rules_and_one_flavour_or_all() {
+        let text = |r: Value| r["content"][0]["text"].as_str().unwrap().to_string();
+        let review = text(tool_call("steps_guide", json!({"flavour": "review"})));
+        assert!(review.contains("You work one page at a time") && review.contains("# File N of M") && !review.contains("# Evidence N"));
+        let all = text(tool_call("steps_guide", json!({})));
+        assert!(all.contains("# File N of M") && all.contains("# Evidence N") && all.contains("# Overview"));
+        assert!(text(tool_call("steps_guide", json!({"flavour": "Teach"}))).contains("Step by step's flavours are Build, Learn, Review, Debug, Architecture"));
+    }
+
+    #[test]
+    fn review_target_says_what_the_pane_shows_and_refuses_what_isnt_a_pr_or_branch() {
+        let text = |r: &Value| r["content"][0]["text"].as_str().unwrap().to_string();
+        assert!(text(&tool_call("review_target", json!({"pr": 512}))).contains("#512"));
+        assert!(text(&tool_call("review_target", json!({"pr": null, "base": "feat/core"}))).contains("since feat/core"));
+        assert!(text(&tool_call("review_target", json!({}))).contains("built on"));
+        for bad in [json!({"pr": "512"}), json!({"pr": 0}), json!({"base": "--output=x"}), json!({"base": "main..x"})] {
+            let r = tool_call("review_target", bad.clone());
+            assert_eq!(r["isError"], true, "{bad}");
+        }
     }
 }

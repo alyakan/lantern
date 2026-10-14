@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseBranchOf, isVerdictNext, parseReviewFile, prNumberOf, reviewHints, splitFileTitle, verdictMessage, withoutCue } from "./review";
+import { baseBranchOf, reviewTargetOf, isVerdictNext, parseReviewFile, prNumberOf, reviewHints, splitFileTitle, verdictMessage, withoutCue } from "./review";
 
 // As Claude wrote it for PostHog/posthog-ios#863 (trimmed).
 const clean = `### What changed
@@ -80,6 +80,17 @@ describe("prNumberOf", () => {
     expect(prNumberOf([{ type: "user", text: "Review PR #1" }, { type: "user", text: "Next" }, { type: "user", text: "now PR 2" }])).toBe(2);
     // Issue numbers elsewhere in a reply aren't the PR.
     expect(prNumberOf([{ type: "user", text: "Review this diff" }, { type: "assistant", text: "This fixes (#77) from the tracker." }])).toBeNull();
+  });
+});
+
+describe("reviewTargetOf", () => {
+  const call = (summary: string, status: "done" | "error" = "done") => ({ type: "tool" as const, id: summary, name: "mcp__lantern__review_target", summary, status, output: null, edit: null, children: [] });
+  it("is what Claude last set the Changes pane to, and nothing until it does", () => {
+    expect(reviewTargetOf([])).toBeNull();
+    expect(reviewTargetOf([call("pr=none base=feat/core")])).toEqual({ pr: null, base: "feat/core" });
+    expect(reviewTargetOf([call("pr=none base=auto"), call("pr=512 base=auto")])).toEqual({ pr: 512, base: null });
+    // A call Lantern refused doesn't count.
+    expect(reviewTargetOf([call("pr=512 base=auto"), call("pr=0 base=auto", "error")])).toEqual({ pr: 512, base: null });
   });
 });
 

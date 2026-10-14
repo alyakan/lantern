@@ -2,6 +2,7 @@ import type { RevertOutcome } from "./api";
 import type { Hunk, ModelCost, ModelOption, Mode, Rule, RuleScope, SlashCommand, UiEvent, TestRun } from "./types";
 import { countChanges } from "./lib/diff";
 import { readFlavourNote, type Flavour } from "./lib/flavour";
+import { readPageNote } from "./lib/pageNote";
 import { revertSummary, undoOf, undoSummary, type RevertNote, type RevertUndo } from "./lib/revert";
 import { KEEP_CHARS, readShellContext, takesShellContext } from "./lib/shell";
 import { readSkillNote } from "./lib/skillNote";
@@ -392,7 +393,7 @@ function applyEvent(state: State, ev: UiEvent): State {
     case "user_text": {
       const seq = state.seq + 1;
       const sent = readShellContext(ev.text);
-      const read = readFlavourNote(sent.text);
+      const read = readFlavourNote(readPageNote(sent.text));
       const { flavour } = read;
       const text = readSkillNote(read.text);
       const at = ev.at ?? 0;

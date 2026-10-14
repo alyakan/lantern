@@ -188,6 +188,13 @@ describe("reducer", () => {
     expect(s.items[0]).toMatchObject({ type: "shell", command: "tail -f app.log", status: "unknown", code: null });
   });
 
+  it("a message replayed with Lantern's notes shows as it was typed, and keeps the flavour it switched to", () => {
+    const page = '[Lantern: your last message began "## Review · x", which isn\'t one of Review\'s headings, so it wasn\'t shown as a page. (end of Lantern\'s note)]';
+    const flavour = '[Lantern: this chat switched to Architecture. The user picked it. How Architecture works:\n\n{"nodes": [{"id": "a"}]}\n\n(end of Lantern\'s note)]';
+    const s = ev(initialState, { kind: "user_text", text: `${page}\n\n${flavour}\n\nmap it` });
+    expect(s.items[0]).toMatchObject({ type: "user", text: "map it", switchedTo: "architecture" });
+  });
+
   it("turn_done clears a retry banner", () => {
     let s = ev(running, { kind: "retrying", attempt: 1, max_retries: 10, error: "overloaded" });
     expect(s.banner?.kind).toBe("info");

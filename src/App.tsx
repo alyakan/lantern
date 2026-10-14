@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RevertOutcome } from "./api";
-import { baseBranchOf, prNumberOf, reviewHints } from "./lib/review";
+import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
+import { guidesByFlavour, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
 import { StepsIntro } from "./components/StepsIntro";
 import { windowFocused } from "./lib/windowFocus";
@@ -641,18 +642,27 @@ export default function App() {
     );
   }, [active, state.status, state.folder]);
 
+  // Step by step's flavours as the prompt has them, for the notes that repeat them (switching flavour, an unread page).
+  const [guides, setGuides] = useState<Guides>({});
+  useEffect(() => {
+    api.stepsGuide().then((list) => setGuides(guidesByFlavour(list)), () => {});
+  }, []);
+
   // A flavour picked since the chat's last message goes with this one, in a note telling Claude.
   // `draft`: the box's text as sent, with its paste placeholders (kept on the message so Edit can bring them back).
   // `auto`: sent by Lantern from agents' notes, not typed by the user.
   const sendIn = (slot: string, text: string, draft?: string, auto = false) => {
     const pick = chats.slots[slot]?.flavourPick ?? null;
+    const chat = chats.slots[slot];
+    // Claude's last reply looked like a page Lantern couldn't read: it hears so with this message, and the headings.
+    const unread = chat && chat.mode === "steps" && !pick ? pageNote(chat.items, chatFlavour(chat), guides) : null;
     to(slot)({ type: "user_sent", text, ...(auto ? { auto } : {}), ...(pick ? { switchedTo: pick } : {}), ...(draft ? { draft } : {}) });
     // Commands run since the last message go first, so Claude sees what they printed; skills named mid-message get
     // a note so Claude uses them.
     const items = chats.slots[slot]?.items ?? [];
     const noted = withSkillNote(text, skillNames(slot));
     // Files reverted since the last message: Claude is told, so it doesn't act on what it last wrote.
-    const reverted = withRevertNote(pick ? withFlavourNote(pick, noted) : noted, chats.slots[slot]?.revertNotes ?? []);
+    const reverted = withRevertNote(withPageNote(unread, pick ? withFlavourNote(pick, noted, guides[pick]?.text) : noted), chats.slots[slot]?.revertNotes ?? []);
     // A chat opened from a place the folder moved from: Claude is told once that the paths in earlier messages are old.
     const moved = withMovedNote(reverted, chats.slots[slot]?.movedFrom ?? null, chats.slots[slot]?.folder ?? null);
     api.sendMessage(slot, withShellContext(items, moved)).then(
@@ -851,14 +861,16 @@ export default function App() {
     };
   }, [changeScope, active, state.folder, state.changedFiles, state.status, state.seq]);
   // "PR #N" while a pull request is reviewed: its files against its base. Picked when the review names its PR.
-  // Reviewing with no PR named (a local branch): "Branch", its commits since it left the default branch.
-  const reviewing = flavour === "review" && state.items.length > 0;
-  const reviewPr = reviewing ? prNumberOf(state.items) : null;
+  // Reviewing with no PR named (a local branch): "Branch", its commits since it left its base. What Claude set with
+  // mcp__lantern__review_target comes first, in any flavour; without it, the review's own text says.
+  const reviewTarget = useMemo(() => reviewTargetOf(state.items), [state.items]);
+  const reviewing = (flavour === "review" || reviewTarget !== null) && state.items.length > 0;
+  const reviewPr = !reviewing ? null : reviewTarget ? reviewTarget.pr : prNumberOf(state.items);
   const reviewBranch = reviewing && reviewPr === null;
   const hints = reviewing ? reviewHints(state.items, state.folder) : [];
   const hintKey = hints.join("\n");
   // A local branch stacked on another: the base the review's Frame names (null: the backend works it out).
-  const reviewBase = reviewing ? baseBranchOf(state.items) : null;
+  const reviewBase = !reviewing ? null : reviewTarget ? reviewTarget.base : baseBranchOf(state.items);
   const scope: ChangeScope = (changeScope === "pr" && reviewPr === null) || (changeScope === "branch" && !reviewBranch) ? "session" : changeScope;
   const prPicked = useRef<string | null>(null);
   useEffect(() => {

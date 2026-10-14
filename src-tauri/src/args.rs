@@ -29,7 +29,8 @@ fn lantern_prompt(mode: Mode) -> String {
 - Ask: edits apply as you make them; anything else that needs permission shows the user an Allow/Deny card.
 - Auto: Claude Code's auto-mode classifier decides what runs.
 - Step by step: one page per message, in a flavour (Build, Learn, Review, Debug or Architecture), with Ask's permissions, or auto mode's if the user turned on auto-approve.
-This chat is in {current} mode. A message the user starts with `!` in Lantern's box is a shell command they ran themselves in this folder; its output reaches you with their next message as <bash-input> and <bash-stdout>. If they ask how Lantern works, its README lists what it does."
+This chat is in {current} mode. A message the user starts with `!` in Lantern's box is a shell command they ran themselves in this folder; its output reaches you with their next message as <bash-input> and <bash-stdout>. If they ask how Lantern works, its README lists what it does.
+Lantern's own tools, on its MCP server: mcp__lantern__steps_guide (how Step by step's flavours work: their headings and formats; read it whenever you're unsure of one), mcp__lantern__review_target (what the Changes pane compares in a review: a pull request, or the branch against its base) and, in Step by step, mcp__lantern__reproduce (Debug: has the user reproduce a bug). Lantern also reads your messages' format: the Step-by-step headings make your pages, and it will tell you when it couldn't read one."
     )
 }
 
@@ -38,7 +39,7 @@ pub const STEPS_PROMPT: &str = "You are in Lantern's Step-by-step mode. You work
 Step by step has five flavours: Build, Learn, Review, Debug and Architecture. Before you start one, ask: stop on a message whose very first line is
 # Switch to <Build|Learn|Review|Debug|Architecture> — <why it fits, in a few words>
 with at most a sentence or two under it. Lantern shows it as a card with buttons. Start that flavour, with its first page, only when the user answers \"Start <Flavour>.\" or agrees; \"Stay in <Flavour>.\" means carry on as you were, and \"Start <another flavour>.\" means that one instead. Ask for the first task in the chat too, and again whenever a request fits another flavour better than the current one (a crash reported during a Build is Debug; \"look at PR 12\" is Review; \"how should this fit together\" or \"map the architecture of PR 12\" is Architecture). Suggest Learn only when the user says they want to learn or understand something: for a job, an interview, a test, a codebase that's new to them. A message that starts with \"[Lantern: this chat switched to <Flavour>…]\" means the user picked that flavour themselves: work in it from then on, without asking.
-Start the text of every page with exactly one of its flavour's headings as the very first line. When the user asks about the current page, suggests something or discusses it, just answer, with no heading at all: the page stays as it is and your answer goes in the discussion under it. If that leads to a change, end your answer by asking whether to update the page, and don't rewrite it until they say yes. When they do (or ask for a change directly), write the complete page again under the same heading: the same format and sections, with the change worked in and everything that didn't change kept, so it takes the old version's place. Only a new page gets a new heading. Don't end a message by telling the user what to say next (\"Say Next for step 2\"); the page has buttons for that.
+Start the text of every page with exactly one of its flavour's headings as the very first line. When the user asks about the current page, suggests something or discusses it, just answer, with no heading at all: the page stays as it is and your answer goes in the discussion under it. If that leads to a change, end your answer by asking whether to update the page, and don't rewrite it until they say yes. When they do (or ask for a change directly), write the complete page again under the same heading: the same format and sections, with the change worked in and everything that didn't change kept, so it takes the old version's place. Only a new page gets a new heading. Write the heading exactly as given, with no prefix of your own before it (not \"## Review · File 2 of 9\" but \"# File 2 of 9 — …\"): Lantern reads it to make the page, and when it can't read a page it says so with the user's next message, with the headings to use. Don't end a message by telling the user what to say next (\"Say Next for step 2\"); the page has buttons for that.
 
 Build: follow the user's incremental-dev skill exactly (load it with the Skill tool, `incremental-dev`); if it isn't available, work that way anyway: frame the task, plan one step per page, then implement one step per page, nothing implemented before its plan step is approved. The user answers \"Next\" to approve a page. Headings:
 # Frame — <the task in a few words>
@@ -52,7 +53,7 @@ The plan gets locked: end the `# Plan complete` page by asking the user to lock 
 
 Learn: Build's pages and headings, for a user who is learning from this. In every page, explain the why as well as the what: the concept or pattern behind the change, how it fits the code around it, and what you considered instead and why you didn't choose it. Use short sections and small code excerpts. It is still one step per page.
 
-Review: follow the user's incremental-pr-review skill exactly (load it with the Skill tool, `incremental-pr-review`): frame the review, then one changed file per page, then the summary. Fetch GitHub pull requests with the gh CLI (gh pr view, gh pr diff); the PR does not need to be checked out. Never post anything to GitHub. A local branch (no PR number) may be stacked on another branch rather than cut from the default one: find what it was built on (its pull request's base, gh pr view --json baseRefName, when it has one; otherwise the nearest branch below it, git log --oneline --decorate), review only the commits it adds on top of that, and put a line of exactly Base: <branch> near the top of the Frame. Lantern compares the branch with it in the Changes pane; without that line it guesses. Headings:
+Review: follow the user's incremental-pr-review skill exactly (load it with the Skill tool, `incremental-pr-review`): frame the review, then one changed file per page, then the summary. Fetch GitHub pull requests with the gh CLI (gh pr view, gh pr diff); the PR does not need to be checked out. Never post anything to GitHub. A local branch (no PR number) may be stacked on another branch rather than cut from the default one: find what it was built on (its pull request's base, gh pr view --json baseRefName, when it has one; otherwise the nearest branch below it, git log --oneline --decorate), review only the commits it adds on top of that, and put a line of exactly Base: <branch> near the top of the Frame. Lantern compares the branch with it in the Changes pane; without that line it guesses. Call mcp__lantern__review_target when the review starts ({\"pr\": N} for a pull request, {\"pr\": null, \"base\": \"<branch>\"} for a local branch) and again whenever what you review changes, such as right after you open a pull request for the branch with gh pr create: the Changes pane shows it at once. Headings:
 # Frame — <the PR's title>
 # File N of M — <path> (+added −removed)
 # Summary — <files reviewed, findings accepted, findings dropped>
@@ -63,11 +64,40 @@ Debug: find the root cause from evidence before changing behaviour. Headings:
 # Evidence N — <what this round tells apart>: add the smallest temporary diagnostic logging that tells the hypotheses apart. Start every log message with [lantern-debug] and mark each added line or block with a comment containing lantern-debug, so all of it can be found and removed. Then trigger the bug: if a command or test you can run reproduces it, run that yourself; if only the user can (clicking through a UI, a device, a browser, an outside service), call the mcp__lantern__reproduce tool with exact steps and where the logs will appear. It waits until they have done it and returns their note (often the logs they saw); don't end your turn to ask them. Say which hypotheses the evidence confirms or rules out. If it's still unclear, the next round is another Evidence page.
 # Fix — <the change>: only once the cause is confirmed, fix it at its root. Reproduce again if that's the only way to verify the fix.
 # Done — <the root cause>: remove every trace of the temporary logging (search for lantern-debug), then summarise the root cause, the evidence, and the fix.
+
 Architecture: map the architecture of a feature, a fix or a pull request, so the user can review the design as pages. A feature that isn't built yet gets a proposed design: say it is proposed, and don't present it as what exists. For a fix or a pull request, read the code first (a pull request with gh pr view and gh pr diff, never posting anything to GitHub): draw what is there and what changes. Change no files in this flavour. Headings:
 # Frame — <what is being mapped>: say whether it is a feature to design, a fix or a pull request, what is in scope and what is not, and any question whose answer changes the design.
 # Overview — <the whole picture in a few words>: one ```architecture block, then a few sentences. Lantern draws it as the map in its Map tab, which stays open beside every page after it, lighting the part on screen; don't draw the Overview in Mermaid. The block is JSON, exactly: {\"nodes\": [{\"id\": \"authSvc\", \"label\": \"Auth service\", \"change\": \"changed\", \"note\": \"checks every request's token\"}], \"edges\": [{\"from\": \"gateway\", \"to\": \"authSvc\", \"label\": \"forwards requests\"}]}. Every node has a short, stable id of letters and digits (the pages refer to nodes by it, so keep the same ids if you ever rewrite the Overview), a label of a few words, a note of one line on what it does, and \"change\": \"new\", \"changed\" or \"removed\" for what the change does to it (leave it out for a node that stays as it is). Keep it to about twelve nodes (group the rest into one) and give each edge a label of what flows along it.
 # Part N of M — <the component or flow>: one part per page, ordered so each rests on the ones before it, with a first line of exactly Covers: <node id>, <node id> naming the Overview's nodes the part is about (Lantern lights them up on the map). Then the sections, exactly: ### Role (what it is for), ### Connects to (what it talks to and how; a second ```mermaid block, such as a sequenceDiagram for a flow, may go here), ### Changes (what is new, changed or removed in it, with files), ### Concerns (each on its own line as: ⚠ (blocker|should-fix|nit): <the problem and its concrete consequence>; a part with none has exactly None.), ### Notes. The user answers \"Next\", optionally followed by verdicts such as \"Agreed: finding 1. Rejected: finding 2.\"; a rejected concern is dropped for good.
 # Summary — <parts mapped, concerns agreed, concerns dropped>: the decisions that were made and the concerns that were agreed. It ends the flavour; the page has buttons to start building from it, so don't write any code.";
+
+/// Step by step's flavours, as STEPS_PROMPT names them (each has a section that starts with its name and a colon).
+pub const FLAVOURS: [&str; 5] = ["Build", "Learn", "Review", "Debug", "Architecture"];
+
+/// One flavour's part of STEPS_PROMPT: its section as written, and the headings its pages start with.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct FlavourGuide {
+    pub flavour: String,
+    pub text: String,
+    pub headings: Vec<String>,
+}
+
+/// The rules every flavour shares: STEPS_PROMPT before the first flavour's own section.
+pub fn steps_rules() -> &'static str {
+    let first = STEPS_PROMPT.find("\n\nBuild:").unwrap_or(STEPS_PROMPT.len());
+    &STEPS_PROMPT[..first]
+}
+
+/// A flavour's section of STEPS_PROMPT (by name, any case), the single place it is written: what the switch note, the
+/// note about a page Lantern couldn't read, and the steps_guide tool all repeat. Learn's pages use Build's headings.
+pub fn flavour_guide(flavour: &str) -> Option<FlavourGuide> {
+    let name = FLAVOURS.iter().find(|f| f.eq_ignore_ascii_case(flavour.trim()))?;
+    let section = |name: &str| STEPS_PROMPT.split("\n\n").find(|p| p.starts_with(&format!("{name}:"))).map(str::to_string);
+    let text = section(name)?;
+    let headings_of = |t: &str| t.lines().filter(|l| l.starts_with("# ")).map(|l| l.split_once(": ").map_or(l, |(h, _)| h).trim().to_string()).collect::<Vec<_>>();
+    let headings = if *name == "Learn" { headings_of(&section("Build")?) } else { headings_of(&text) };
+    Some(FlavourGuide { flavour: name.to_string(), text, headings })
+}
 
 impl Mode {
     /// The value `--permission-mode` takes.
@@ -251,6 +281,8 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
     if steps {
         allowed.push("mcp__lantern__reproduce".into());
     }
+    // Lantern's own read-only tools: what Step by step's flavours are, and what the Changes pane shows.
+    allowed.extend(crate::permission::helper::LANTERN_TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
     if helper.role == Role::Main {
         allowed.extend(crate::permission::helper::ORCHESTRA_TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
     }
@@ -384,7 +416,7 @@ mod tests {
         let a = build_args(Mode::Auto, false, None, None, None, &worker);
         let cfg: serde_json::Value = serde_json::from_str(value_after(&a, "--mcp-config").unwrap()).unwrap();
         assert!(cfg["mcpServers"]["lantern"]["env"].get("LANTERN_ROLE").is_none());
-        assert!(!a.iter().any(|x| x == "--allowedTools"));
+        assert_eq!(value_after(&a, "--allowedTools"), Some("mcp__lantern__steps_guide,mcp__lantern__review_target"), "only Lantern's read-only tools");
         let prompt = value_after(&a, "--append-system-prompt").unwrap();
         assert!(prompt.contains("named \"login-form\"") && prompt.contains("never merge, push or switch branches"));
         assert!(!prompt.contains("main agent of a Lantern orchestra"));
@@ -437,6 +469,7 @@ mod tests {
         expected.push(mcp(r#"{"LANTERN_SOCKET":"/tmp/a.sock"}"#));
         expected.extend(strs(&["--permission-prompt-tool", "mcp__lantern__approve", "--append-system-prompt"]));
         expected.push(lantern_prompt(Mode::Ask));
+        expected.extend(strs(&["--allowedTools", "mcp__lantern__steps_guide,mcp__lantern__review_target"]));
         let mut got = build_args(Mode::Ask, false, None, None, None, &helper());
         got.extend(harness_args(None));
         assert_eq!(got, expected);
@@ -453,7 +486,7 @@ mod tests {
             lantern_prompt(Mode::Steps)
         ));
         expected.push("--allowedTools".into());
-        expected.push("mcp__lantern__reproduce,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
+        expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
         expected.extend(strs(&["--resume", "sess-9", "--model", "opus", "--effort", "high", "--advisor", "fable"]));
         let mut got = build_args(Mode::Steps, true, Some("sess-9"), Some("opus"), Some("high"), &main);
         got.extend(harness_args(Some("fable")));
@@ -466,6 +499,7 @@ mod tests {
         expected.push(mcp(r#"{"LANTERN_SOCKET":"/tmp/a.sock"}"#));
         expected.extend(strs(&["--permission-prompt-tool", "mcp__lantern__approve", "--append-system-prompt"]));
         expected.push(format!("{}\n\n{}", lantern_prompt(Mode::Auto), worker_prompt("w")));
+        expected.extend(strs(&["--allowedTools", "mcp__lantern__steps_guide,mcp__lantern__review_target"]));
         assert_eq!(build_args(Mode::Auto, false, None, None, None, &worker), expected);
     }
 
@@ -549,12 +583,27 @@ mod tests {
         let a = build_args(Mode::Steps, false, None, None, None, &helper());
         assert_eq!(value_after(&a, "--permission-mode"), Some("acceptEdits"));
         assert_eq!(value_after(&a, "--permission-prompt-tool"), Some("mcp__lantern__approve"));
-        assert_eq!(value_after(&a, "--allowedTools"), Some("mcp__lantern__reproduce"));
+        assert_eq!(value_after(&a, "--allowedTools"), Some("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target"));
         let prompt = value_after(&a, "--append-system-prompt").unwrap();
-        for part in ["# Switch to", "incremental-dev", "# Plan step N", "Learn:", "incremental-pr-review", "# File N of M", "Never post", "# Evidence N", "mcp__lantern__reproduce", "lantern-debug", "[Lantern: this chat switched to", "list what you changed as a numbered list", "# Plan update", "Lock this plan?", "nothing is locked", "Architecture:", "# Overview", "# Part N of M", "Covers:", "Base: <branch>", "gh pr view --json baseRefName", "```architecture block", "\"change\": \"new\"", "don't draw the Overview in Mermaid"] {
+        for part in ["# Switch to", "incremental-dev", "# Plan step N", "Learn:", "incremental-pr-review", "# File N of M", "Never post", "# Evidence N", "mcp__lantern__reproduce", "lantern-debug", "[Lantern: this chat switched to", "list what you changed as a numbered list", "# Plan update", "Lock this plan?", "nothing is locked", "Architecture:", "# Overview", "# Part N of M", "Covers:", "Base: <branch>", "gh pr view --json baseRefName", "```architecture block", "\"change\": \"new\"", "don't draw the Overview in Mermaid", "mcp__lantern__review_target", "right after you open a pull request", "no prefix of your own"] {
             assert!(prompt.contains(part), "{part}");
         }
-        assert!(!build_args(Mode::Ask, false, None, None, None, &helper()).iter().any(|x| x == "--allowedTools"));
+        assert_eq!(value_after(&build_args(Mode::Ask, false, None, None, None, &helper()), "--allowedTools"), Some("mcp__lantern__steps_guide,mcp__lantern__review_target"));
+    }
+
+    #[test]
+    fn each_flavour_has_its_section_and_headings_once() {
+        let headings = |f: &str| flavour_guide(f).unwrap().headings;
+        assert_eq!(headings("Build"), ["# Frame — <the task in a few words>", "# Plan step N — <step title>", "# Plan complete — N steps", "# Plan update — <why the plan needs to change>", "# Step N of M — <step title>   (implementing plan step N of M)", "# Done — <what was built>"]);
+        assert_eq!(headings("learn"), headings("Build"), "Learn's pages are Build's");
+        assert_eq!(headings("Review"), ["# Frame — <the PR's title>", "# File N of M — <path> (+added −removed)", "# Summary — <files reviewed, findings accepted, findings dropped>"]);
+        assert_eq!(headings("Debug"), ["# Frame — <the bug in a few words>", "# Evidence N — <what this round tells apart>", "# Fix — <the change>", "# Done — <the root cause>"]);
+        assert_eq!(headings("Architecture"), ["# Frame — <what is being mapped>", "# Overview — <the whole picture in a few words>", "# Part N of M — <the component or flow>", "# Summary — <parts mapped, concerns agreed, concerns dropped>"]);
+        let review = flavour_guide("Review").unwrap();
+        assert!(review.text.starts_with("Review: ") && review.text.contains("mcp__lantern__review_target") && !review.text.contains("Debug:"));
+        assert!(flavour_guide("Teach").is_none());
+        // The rules every flavour shares come before them all.
+        assert!(steps_rules().starts_with("You are in Lantern's Step-by-step mode") && steps_rules().contains("# Switch to") && !steps_rules().contains("Build: follow"));
     }
 
     #[test]
@@ -563,7 +612,7 @@ mod tests {
             let a = build_args(mode, false, None, None, None, &helper());
             assert_eq!(a.iter().filter(|x| *x == "--append-system-prompt").count(), 1, "{name}: one prompt, not several");
             let prompt = value_after(&a, "--append-system-prompt").unwrap();
-            for part in ["running inside Lantern", "Ask:", "Auto:", "Step by step:", "Build, Learn, Review, Debug or Architecture", "<bash-input>", "This chat is in"] {
+            for part in ["running inside Lantern", "Ask:", "Auto:", "Step by step:", "Build, Learn, Review, Debug or Architecture", "<bash-input>", "This chat is in", "Lantern's own tools", "mcp__lantern__steps_guide", "mcp__lantern__review_target"] {
                 assert!(prompt.contains(part), "{name}: {part}");
             }
             assert!(prompt.contains(&format!("This chat is in {name}.")), "{name}");
@@ -589,7 +638,7 @@ mod tests {
         assert_eq!(value_after(&a, "--permission-mode"), Some("auto"));
         assert_eq!(value_after(&a, "--permission-prompt-tool"), Some("mcp__lantern__approve"));
         assert!(a.iter().any(|x| x == "--mcp-config"));
-        assert_eq!(value_after(&a, "--allowedTools"), Some("mcp__lantern__reproduce"));
+        assert_eq!(value_after(&a, "--allowedTools"), Some("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target"));
         let ask = build_args(Mode::Ask, true, None, None, None, &helper());
         assert_eq!(value_after(&ask, "--permission-mode"), Some("acceptEdits"));
         assert_eq!(value_after(&ask, "--permission-prompt-tool"), Some("mcp__lantern__approve"));

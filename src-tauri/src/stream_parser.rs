@@ -455,6 +455,13 @@ pub fn summarize(name: &str, input: &Value) -> String {
         "WebFetch" => s("url"),
         "WebSearch" => s("query"),
         "Task" | "Agent" => s("description"),
+        // Read by the window as what the Changes pane compares (see review.ts reviewTargetOf), on reopening a chat too.
+        "mcp__lantern__review_target" => Some(format!(
+            "pr={} base={}",
+            input.get("pr").and_then(Value::as_u64).map_or("none".to_string(), |n| n.to_string()),
+            input.get("base").and_then(Value::as_str).filter(|b| !b.trim().is_empty()).unwrap_or("auto")
+        )),
+        "mcp__lantern__steps_guide" => s("flavour"),
         // A workflow's name, from its script's meta (or the saved one it runs).
         "Workflow" => s("name").or_else(|| {
             let script = s("script")?;
@@ -949,5 +956,12 @@ mod tests {
         p.parse_line(&other.to_string());
         let done = serde_json::json!({"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "b2", "content": "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.1s"}]}});
         assert_eq!(p.parse_line(&done.to_string()).len(), 1);
+    }
+
+    #[test]
+    fn a_review_target_calls_header_is_what_it_set() {
+        assert_eq!(summarize("mcp__lantern__review_target", &serde_json::json!({"pr": 512})), "pr=512 base=auto");
+        assert_eq!(summarize("mcp__lantern__review_target", &serde_json::json!({"pr": null, "base": "feat/core"})), "pr=none base=feat/core");
+        assert_eq!(summarize("mcp__lantern__steps_guide", &serde_json::json!({"flavour": "Review"})), "Review");
     }
 }
