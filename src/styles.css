@@ -117,6 +117,7 @@
   --accent-text: #1a1a1d;
   --working: #ef8a5c;
   --unread: #0a84ff;
+  --attn: #f0b44c;
   --add: #6bd488;
   --del: #ff8a93;
   --warn: #e3b341;
@@ -1490,10 +1491,10 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .node-dot.idle { background: var(--add); }
 .node-dot.ended { background: var(--del); }
 .node-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.node-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 13.5px var(--ui); }
-.node-meta { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted-text); }
+.node-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 calc(13.5px * var(--font-scale)) var(--ui); }
+.node-meta { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11px * var(--font-scale)); color: var(--muted-text); }
 .node-meta svg { flex: none; }
-.node-status { flex: none; font-size: 11.5px; color: var(--muted-text); white-space: nowrap; }
+.node-status { flex: none; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); white-space: nowrap; }
 .canvas-node.waiting .node-status { color: var(--attn); font-weight: 600; }
 .node-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .node-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -1504,24 +1505,24 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .node-composer { flex: none; padding: 8px 10px 10px; border-top: 1px solid var(--line); }
 .node-composer-box { display: flex; align-items: flex-end; gap: 6px; padding: 6px 6px 6px 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--field); transition: border-color 0.12s; }
 .node-composer-box:focus-within { border-color: var(--faint); }
-.node-composer textarea { flex: 1; min-width: 0; max-height: 140px; padding: 2px 0; resize: none; border: none; outline: none; background: none; color: inherit; font: 13px/1.45 var(--ui); }
+.node-composer textarea { flex: 1; min-width: 0; max-height: 140px; padding: 2px 0; resize: none; border: none; outline: none; background: none; color: inherit; font: calc(13px * var(--font-scale))/1.45 var(--ui); }
 .node-composer textarea::placeholder { color: var(--muted-text); }
 .node-composer textarea:disabled { cursor: default; }
 .node-send { flex: none; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: none; border-radius: 50%; background: var(--accent); color: var(--accent-text); }
 .node-send:disabled { opacity: 0.3; }
 .node-send.stop { background: var(--bg-active); color: var(--text); }
 .node-queue { margin: 0 0 6px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
-.node-queue li { display: flex; align-items: center; gap: 6px; padding: 2px 4px 2px 8px; border-radius: 6px; background: var(--glass); font-size: 12px; color: var(--muted-text); }
+.node-queue li { display: flex; align-items: center; gap: 6px; padding: 2px 4px 2px 8px; border-radius: 6px; background: var(--glass); font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
 .node-queue li span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.node-banner { flex: none; display: flex; align-items: center; gap: 8px; margin: 0 10px 6px; padding: 6px 10px; border-radius: 6px; background: var(--info-bg); font-size: 12px; }
+.node-banner { flex: none; display: flex; align-items: center; gap: 8px; margin: 0 10px 6px; padding: 6px 10px; border-radius: 6px; background: var(--info-bg); font-size: calc(12px * var(--font-scale)); }
 .node-banner.error { background: var(--error-bg); }
 .node-banner.auth { background: var(--auth-bg); }
 .node-banner span { flex: 1; min-width: 0; }
-.node-banner button { flex: none; height: 22px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field); color: var(--text); font-size: 12px; }
+.node-banner button { flex: none; height: 22px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field); color: var(--text); font-size: calc(12px * var(--font-scale)); }
 
 .node-summary { padding: 16px 16px 20px; }
-.node-summary-line { margin: 0; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; font: 500 14px/1.45 var(--ui); color: var(--text-2); }
-.node-summary-note { margin: 10px 0 0; font-size: 12.5px; font-weight: 600; color: var(--attn); }
+.node-summary-line { margin: 0; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; font: 500 calc(14px * var(--font-scale))/1.45 var(--ui); color: var(--text-2); }
+.node-summary-note { margin: 10px 0 0; font-size: calc(12.5px * var(--font-scale)); font-weight: 600; color: var(--attn); }
 /* Zoomed out until a chat can't be read: the title and the latest words are drawn at a size that reads on screen. */
 .canvas.summary .node-head { height: calc(40px / var(--zoom)); gap: calc(8px / var(--zoom)); padding: 0 calc(14px / var(--zoom)); }
 .canvas.summary .node-name { font-size: calc(13px / var(--zoom)); }
@@ -1533,10 +1534,10 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .canvas.summary .node-summary-note { font-size: calc(12px / var(--zoom)); }
 
 .canvas-controls { position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field); box-shadow: var(--card-shadow); cursor: default; }
-.canvas-controls .icon { width: 26px; height: 26px; font-size: 17px; line-height: 1; border-radius: 50%; }
-.canvas-zoom { min-width: 42px; text-align: center; font-size: 12px; color: var(--muted-text); font-variant-numeric: tabular-nums; }
-.canvas-fit { height: 26px; padding: 0 11px; border: none; border-radius: 999px; background: none; color: var(--text-2); font-size: 12px; }
+.canvas-controls .icon { width: 26px; height: 26px; font-size: calc(17px * var(--font-scale)); line-height: 1; border-radius: 50%; }
+.canvas-zoom { min-width: 42px; text-align: center; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.canvas-fit { height: 26px; padding: 0 11px; border: none; border-radius: 999px; background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
 .canvas-fit:hover { background: var(--bg-hover); color: var(--text); }
-.canvas-attention { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 14px; border: 1px solid var(--attn); border-radius: 999px; background: var(--field); color: var(--text); font: 600 12.5px var(--ui); box-shadow: var(--shadow); cursor: pointer; }
+.canvas-attention { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 14px; border: 1px solid var(--attn); border-radius: 999px; background: var(--field); color: var(--text); font: 600 calc(12.5px * var(--font-scale)) var(--ui); box-shadow: var(--shadow); cursor: pointer; }
 .canvas-attention:hover { background: var(--bg-hover); }
 @media (prefers-reduced-motion: reduce) { .canvas-world.animating { transition: none; } .tether.working, .tether.waiting, .canvas-node.waiting { animation: none; } }

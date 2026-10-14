@@ -15,6 +15,8 @@ const CATALOGUE = [
   { id: "open-folder", title: "Open Folder…", group: "File", key: "o", menu: true, native: true },
   // In the palette and the shortcut sheet only: no native menu item, so the webview's keydown runs it.
   { id: "relocate-folder", title: "Bring old sessions here…", group: "File", key: "r", shift: true },
+  // Only while there is an orchestra: switches between its canvas and the chat view.
+  { id: "toggle-canvas", title: "Switch Canvas and Chat View", group: "View", key: "c", shift: true },
   { id: "session-history", title: "Session History", group: "View", key: "k", menu: true, skipInEditor: true },
   { id: "find-file", title: "Find File…", group: "Search", key: "p", menu: true, native: true },
   { id: "search-files", title: "Search in Files…", group: "Search", key: "f", shift: true, menu: true, native: true },

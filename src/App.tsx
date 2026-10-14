@@ -987,7 +987,7 @@ export default function App() {
   const inOrchestra = nodes.length > 0;
   const showCanvas = view === "canvas" && inOrchestra;
   const attention = needingYou(nodes, chats.slots);
-  useShortcut("c", () => setView((v) => (v === "canvas" ? "chat" : "canvas")), inOrchestra, true);
+  useAction("toggle-canvas", () => setView((v) => (v === "canvas" ? "chat" : "canvas")), inOrchestra);
 
   const lastTurn = [...state.items].reverse().find((it) => it.type === "turn");
   const lastTurnMs = lastTurn?.type === "turn" ? lastTurn.durationMs : null;
