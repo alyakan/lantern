@@ -142,8 +142,28 @@ impl orchestra::Host for AppHost {
         self.app.state::<AppState>().slots.get(main)?.folder()
     }
 
-    fn worker_mode(&self, main: &str) -> Mode {
-        main_ceiling(&self.app.state::<AppState>(), main)
+    fn main_provider(&self, main: &str) -> ProviderId {
+        let state = self.app.state::<AppState>();
+        let cfg = state.slots.get(main).ok().and_then(|s| s.config.lock().unwrap().as_ref().map(|c| c.provider));
+        cfg.unwrap_or_default()
+    }
+
+    fn available_providers(&self, main: &str) -> orchestra::Fut<'_, Vec<ProviderId>> {
+        let own = self.main_provider(main);
+        Box::pin(async move {
+            let mut available = vec![own];
+            for id in ProviderId::all().into_iter().filter(|id| *id != own) {
+                if tauri::async_runtime::spawn_blocking(move || id.provider().locate(None)).await.is_ok_and(|found| found.is_ok()) {
+                    available.push(id);
+                }
+            }
+            available
+        })
+    }
+
+    fn worker_mode(&self, main: &str, provider: ProviderId) -> Mode {
+        let ceiling = main_ceiling(&self.app.state::<AppState>(), main);
+        args::capped_mode(ceiling, false, ceiling, &capabilities_of(provider)).0
     }
 
     fn worktree_root(&self) -> std::path::PathBuf {
@@ -159,8 +179,18 @@ impl orchestra::Host for AppHost {
             let state = self.app.state::<AppState>();
             let parent_slot = req.parent.clone();
             let parent = state.slots.get(&req.parent)?;
-            // The worker runs on its main agent's provider: it is cloned with the rest of the config.
+            // The worker runs on its main agent's provider unless another was asked for: it is cloned with the rest of the config.
             let mut cfg = parent.config.lock().unwrap().clone().ok_or("The main agent has no folder open.")?;
+            if req.provider != cfg.provider {
+                // Another provider's CLI is a program, models and settings of its own: none of the main agent's carry over.
+                let id = req.provider;
+                cfg.binary = tauri::async_runtime::spawn_blocking(move || id.provider().locate(None)).await.map_err(|e| e.to_string())??;
+                cfg.provider = id;
+                cfg.model = None;
+                cfg.effort = None;
+                cfg.advisor = None;
+                cfg.subagent_model = None;
+            }
             let s = slot_for(&self.app, &state, &req.slot)?;
             // On Auto a prompt only reaches the user when Claude Code's own classifier can't decide, which is what makes a
             // team of workers workable: but only when the main agent is on Auto too. Otherwise an Ask-mode main agent

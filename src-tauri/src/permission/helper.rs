@@ -20,7 +20,8 @@ fn orchestra_tool_list() -> Vec<Value> {
                 "name": {"type": "string", "description": "A short name for the worker (a few words), shown on the canvas and used for its branch."},
                 "brief": {"type": "string", "description": "The task: goal, files or areas involved, constraints, how to verify, what done looks like."},
                 "isolation": {"type": "string", "enum": ["worktree", "shared"], "description": "worktree (default): its own git worktree and branch. shared: your folder, only for work that writes nothing."},
-                "model": {"type": "string", "description": "A model alias for it (sonnet, opus, haiku…); omit to use yours."}
+                "provider": {"type": "string", "description": "Which agent provider runs it, from the providers your instructions list; omit to use yours. Only a listed one is available."},
+                "model": {"type": "string", "description": "A model for it, as the provider that runs it names models (for claude: sonnet, opus, haiku…); omit to use yours, or that provider's default when it isn't yours."}
             }, "required": ["name", "brief"]}
         }),
         json!({
@@ -265,6 +266,18 @@ mod tests {
         let names = tool_names(&handle_message_as(&list, &allow_all, true).unwrap());
         assert_eq!(&names[..2], ["approve", "reproduce"]);
         assert_eq!(names[2..], *ORCHESTRA_TOOLS);
+    }
+
+    #[test]
+    fn spawn_agent_takes_an_optional_provider_and_leaves_the_choice_of_one_to_the_app() {
+        let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+        let tools = handle_message_as(&list, &allow_all, true).unwrap();
+        let spawn = tools["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "spawn_agent").unwrap().clone();
+        assert_eq!(spawn["inputSchema"]["required"], json!(["name", "brief"]));
+        // No list of names in the schema: which providers exist is up to the app, which answers a wrong one with the right ones.
+        assert_eq!(spawn["inputSchema"]["properties"]["provider"]["type"], "string");
+        assert!(spawn["inputSchema"]["properties"]["provider"].get("enum").is_none());
+        assert!(spawn["inputSchema"]["properties"]["model"]["description"].as_str().unwrap().contains("provider"));
     }
 
     #[test]
