@@ -252,6 +252,34 @@ describe("hiding a worker", () => {
   });
 });
 
+describe("closing a worker from its card", () => {
+  const withWorkers = (): Chats => {
+    let c = chatsReducer(initialChats(main), { type: "in", slot: "s1", action: { type: "ui_event", event: spawned } });
+    return chatsReducer(c, { type: "in", slot: "s1", action: { type: "ui_event", event: { ...spawned, worker: "w2", name: "Other" } } });
+  };
+
+  it("removes its chat and its place on the team", () => {
+    const c = chatsReducer(withWorkers(), { type: "close_agent", slot: "w2" });
+    expect(Object.keys(c.slots)).toEqual(["s1", "w1"]);
+    expect(Object.keys(c.agents)).toEqual(["w1"]);
+    expect(c.active).toBe("s1");
+  });
+
+  it("takes the chat on screen to the main agent instead of refusing, as removing the chat on screen would", () => {
+    let c = chatsReducer(withWorkers(), { type: "activate", slot: "w1" });
+    expect(chatsReducer(c, { type: "remove", slot: "w1" }).slots.w1).toBeTruthy();
+    c = chatsReducer(c, { type: "close_agent", slot: "w1" });
+    expect(c.slots.w1).toBeUndefined();
+    expect(c.active).toBe("s1");
+  });
+
+  it("is a plain removal for a chat that is not a worker", () => {
+    const c = chatsReducer(initialChats(main), { type: "add", slot: "s2" });
+    expect(chatsReducer(c, { type: "close_agent", slot: "s2" }).slots.s2).toBeUndefined();
+    expect(chatsReducer(c, { type: "close_agent", slot: "s1" })).toBe(c);
+  });
+});
+
 describe("adopting a restored worker", () => {
   const meta = { parent: "s1", name: "Login form", brief: "", folder: "/wt/login", branch: "lantern/login-form", base: "main", isolation: "worktree" as const };
 

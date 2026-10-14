@@ -18,10 +18,12 @@ import {
   type View,
 } from "../lib/canvas";
 import { useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
-import { money, nodeStatus, readyToMerge, STATUS_LABEL, summaryLine, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
+import { lostText, money, nodeStatus, readyToMerge, STATUS_LABEL, summaryLine, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
 import { useDismiss } from "../lib/useDismiss";
 import { totalCost, type State } from "../store";
+import type { CloseCheck } from "../types";
 import { AgentMenu, type AgentMenuItem } from "./AgentMenu";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { HiddenAgents } from "./HiddenAgents";
 import { NodeBody } from "./NodeBody";
 import { BranchIcon, ChevronIcon, OpenOutIcon } from "./icons";
@@ -63,6 +65,7 @@ export function placeNodes(layout: CanvasLayout, nodes: { slot: string; role: "m
 const COLLAPSED_HEIGHT = 52;
 /** Room the agent menu needs, so one opened near an edge is moved in. */
 const MENU_SIZE = { w: 270, h: 120 };
+const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : "That didn't work.");
 const MODE_LABEL = { ask: "Ask", auto: "Auto", steps: "Step by step" } as const;
 
 interface Props {
@@ -521,6 +524,28 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     const room = (at: number, edge: number, size: number) => (size > 0 ? Math.max(8, Math.min(at, size - edge)) : at);
     setMenu({ slot, x: room(from.left - at.left, MENU_SIZE.w, size.current.w), y: room(from.top - at.top, MENU_SIZE.h, size.current.h) });
   }, []);
+  // "Clean up and close": asked what would be lost first. Nothing to lose closes at once; otherwise the user is asked, and
+  // until they say yes nothing is stopped or removed.
+  const [closing, setClosing] = useState<{ slot: string; check: CloseCheck } | null>(null);
+  const [closeBusy, setCloseBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const closeAgent = (slot: string, force: boolean) => {
+    setCloseBusy(true);
+    actions.closeWorker(slot, force).then(
+      () => setClosing(null),
+      (e) => {
+        setClosing(null);
+        setProblem(errText(e));
+      },
+    ).finally(() => setCloseBusy(false));
+  };
+  const askToClose = (slot: string) => {
+    setProblem(null);
+    actions.closeCheck(slot).then(
+      (check) => (lostText(check) ? setClosing({ slot, check }) : closeAgent(slot, false)),
+      (e) => setProblem(errText(e)),
+    );
+  };
   const menuNode = menu ? nodes.find((n) => n.slot === menu.slot) : undefined;
   const menuItems = (n: OrchestraNode): AgentMenuItem[] => {
     const needsYou = attention.includes(n.slot);
@@ -533,6 +558,16 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
         run: () => {
           setMenu(null);
           actions.hide(n.slot);
+        },
+      },
+      {
+        key: "close",
+        label: "Clean up and close",
+        hint: n.isolation === "shared" ? "Stops it and removes its card. It shares your folder, so no files are removed." : "Stops it, deletes its worktree and branch, and removes its card.",
+        danger: true,
+        run: () => {
+          setMenu(null);
+          askToClose(n.slot);
         },
       },
     ];
@@ -611,6 +646,19 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
         ))}
       </div>
       <Controls zoom={zoomPct} attention={attention.length} nodes={nodes} onZoom={zoomBy} onFit={() => { layout.touched = false; fit(true); }} onNext={next} onGoTo={goTo} onShow={actions.show} />
+      {problem && (
+        <div className="canvas-problem canvas-overlay" role="alert">
+          <span>{problem}</span>
+          <button onClick={() => setProblem(null)}>Dismiss</button>
+        </div>
+      )}
+      {closing && (
+        <ConfirmDialog title={`Close ${nodes.find((n) => n.slot === closing.slot)?.name ?? "this agent"}?`} confirmLabel="Discard work and close" busyLabel="Closing…" busy={closeBusy} onConfirm={() => closeAgent(closing.slot, true)} onCancel={() => setClosing(null)}>
+          <p>
+            It has <strong>{lostText(closing.check)}</strong>. Closing it stops it and deletes its worktree{closing.check.branch ? <> and branch <code>{closing.check.branch}</code></> : null}, so that work is gone for good.
+          </p>
+        </ConfirmDialog>
+      )}
       {menu && menuNode && <AgentMenu name={menuNode.name} items={menuItems(menuNode)} x={menu.x} y={menu.y} onDismiss={() => setMenu(null)} />}
     </div>
   );

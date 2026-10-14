@@ -303,8 +303,8 @@ export default function App() {
 
   // Removes a chat and closes its claude. The reducer never removes the chat on screen, so after a switch this is
   // safe for the chat left behind, even though `active` here still names it.
-  const forget = (slot: string) => {
-    dispatchChats({ type: "remove", slot });
+  const forget = (slot: string, agent = false) => {
+    dispatchChats({ type: agent ? "close_agent" : "remove", slot });
     delete drafts.current[slot];
     delete relaunch.current[slot];
     api.closeSession(slot).catch(() => {});
@@ -985,6 +985,9 @@ export default function App() {
       api.declineMerge(worker).catch((e) => main && to(main)({ type: "ui_event", event: { kind: "merge_resolved", worker, outcome: "failed", detail: errText(e) } }));
     },
     removeWorktree: (worker: string) => api.discardWorktree(worker, false).catch((e) => Promise.reject(errText(e))),
+    closeCheck: (worker: string) => api.closeWorkerCheck(worker).catch((e) => Promise.reject(errText(e))),
+    // The backend has stopped it and told the main agent by the time this resolves; the chat goes from the app now.
+    closeWorker: (worker: string, force: boolean) => api.closeWorker(worker, force).then(() => forget(worker, true), (e) => Promise.reject(errText(e))),
     // Hiding the agent whose chat is on screen moves the rest of the app to its main agent, so it isn't about a card nobody sees.
     hide: (worker: string) => {
       const parent = chats.agents[worker]?.parent;
@@ -1016,6 +1019,8 @@ export default function App() {
       approveMerge: (worker) => doingRef.current.approveMerge(worker),
       declineMerge: (worker) => doingRef.current.declineMerge(worker),
       removeWorktree: (worker) => doingRef.current.removeWorktree(worker),
+      closeCheck: (worker) => doingRef.current.closeCheck(worker),
+      closeWorker: (worker, force) => doingRef.current.closeWorker(worker, force),
       hide: (worker) => doingRef.current.hide(worker),
       show: (worker) => doingRef.current.show(worker),
       draft: (slot) => doingRef.current.draft(slot),

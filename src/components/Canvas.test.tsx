@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { chatsReducer, initialChats, WAKE_LIMIT, type Chats } from "../sessions";
 import { initialState, type State } from "../store";
@@ -29,7 +29,7 @@ function team(workers = 2): Chats {
   return c;
 }
 
-const actions = (over: Partial<NodeActions> = {}): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(), ...over });
+const actions = (over: Partial<NodeActions> = {}): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), closeCheck: vi.fn(() => Promise.resolve({ worktree: true, branch: null, uncommitted: 0, unmerged_commits: 0 })), closeWorker: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(), ...over });
 
 function setup(chats: Chats, extra: { attention?: string[]; layout?: ReturnType<typeof newLayout>; actions?: Partial<NodeActions> } = {}) {
   const store = createChatStore();
@@ -483,7 +483,7 @@ describe("the menu of an agent's card", () => {
     expect(screen.queryByRole("menu")).toBeNull();
     expect(fireEvent.contextMenu(head("1"), { clientX: 40, clientY: 30 })).toBe(false); // the browser's own menu is held back
     const menu = screen.getByRole("menu", { name: "Worker 1 actions" });
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual([expect.stringMatching(/^Hide/)]);
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.querySelector(".menu-label")!.textContent)).toEqual(["Hide", "Clean up and close"]);
     expect(document.activeElement).toBe(within(menu).getByRole("menuitem", { name: /Hide/ }));
     // From the body too, and for another agent: the menu is that agent's.
     fireEvent.contextMenu(screen.getByLabelText(/Worker Worker 2/).querySelector(".node-body")!, { clientX: 60, clientY: 60 });
@@ -608,5 +608,107 @@ describe("agents taken off the canvas", () => {
     fireEvent.click(screen.getByRole("button", { name: "Team" }));
     fireEvent.click(within(screen.getByRole("dialog", { name: "Team" })).getByText("Worker 1"));
     expect(acts.show).toHaveBeenCalledWith("w1");
+  });
+});
+
+describe("cleaning up and closing an agent", () => {
+  const lost = { worktree: true, branch: "lantern/w1", uncommitted: 3, unmerged_commits: 2 };
+  const none = { worktree: true, branch: "lantern/w1", uncommitted: 0, unmerged_commits: 0 };
+  const chooseClose = (name = "1") => {
+    fireEvent.contextMenu(head(name));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Clean up and close/ }));
+  };
+
+  it("closes at once when there is nothing to lose, after asking what there is", async () => {
+    const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.resolve(none)) } });
+    chooseClose();
+    await waitFor(() => expect(acts.closeWorker).toHaveBeenCalledWith("w1", false));
+    expect(acts.closeCheck).toHaveBeenCalledWith("w1");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("says exactly what would be lost and stops nothing until the user agrees", async () => {
+    const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.resolve(lost)) } });
+    chooseClose();
+    const dialog = await screen.findByRole("alertdialog", { name: "Close Worker 1?" });
+    expect(dialog.textContent).toContain("It has 3 uncommitted files and 2 commits that aren't merged.");
+    expect(dialog.textContent).toContain("lantern/w1");
+    // Cancel is the default: it has the focus, and a press of Enter there cancels.
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(acts.closeWorker).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(acts.closeWorker).not.toHaveBeenCalled();
+  });
+
+  it("cancels on Escape and on a press outside the box, and keeps Tab inside it", async () => {
+    const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.resolve(lost)) } });
+    chooseClose();
+    const dialog = await screen.findByRole("alertdialog");
+    const [cancel, discard] = within(dialog).getAllByRole("button");
+    fireEvent.keyDown(cancel, { key: "Tab" });
+    expect(document.activeElement).toBe(discard);
+    fireEvent.keyDown(discard, { key: "Tab" });
+    expect(document.activeElement).toBe(cancel);
+    fireEvent.keyDown(cancel, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(discard);
+    fireEvent.keyDown(discard, { key: "Escape" });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    chooseClose();
+    fireEvent.pointerDown(await screen.findByRole("alertdialog").then((d) => d.parentElement!), { button: 0, pointerId: 1 });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(acts.closeWorker).not.toHaveBeenCalled();
+  });
+
+  it("throws the work away only on the destructive button, and closes", async () => {
+    const closeWorker = vi.fn(() => Promise.resolve());
+    setup(team(2), { actions: { closeCheck: vi.fn(() => Promise.resolve(lost)), closeWorker } });
+    chooseClose("2");
+    const dialog = await screen.findByRole("alertdialog", { name: "Close Worker 2?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard work and close" }));
+    expect(closeWorker).toHaveBeenCalledWith("w2", true);
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+
+  it("says why when it can't be closed, instead of closing", async () => {
+    const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.reject("That worker's branch is being merged right now.")) } });
+    chooseClose();
+    expect((await screen.findByRole("alert")).textContent).toContain("being merged right now");
+    expect(acts.closeWorker).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("says why when closing failed after it was agreed", async () => {
+    setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.resolve(lost)), closeWorker: vi.fn(() => Promise.reject("git said no")) } });
+    chooseClose();
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Discard work and close" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("git said no");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("tells a worker in the shared folder that nothing is removed from it", () => {
+    let chats = initialChats(main);
+    chats = chatsReducer(chats, { type: "in", slot: "s1", action: { type: "ui_event", event: { kind: "agent_spawned", worker: "w1", name: "Reader", brief: "Read", folder: "/p", branch: null, base: null, isolation: "shared", mode: "auto" } } });
+    setup(chats);
+    fireEvent.contextMenu(screen.getByLabelText(/^Worker Reader,/).querySelector(".node-head")!);
+    expect(screen.getByRole("menuitem", { name: /Clean up and close/ }).textContent).toContain("shares your folder, so no files are removed");
+  });
+
+  it("is offered with Hide, with the destructive one marked", () => {
+    setup(team(1));
+    fireEvent.contextMenu(head("1"));
+    const items = screen.getAllByRole("menuitem");
+    expect(items.map((i) => i.querySelector(".menu-label")!.textContent)).toEqual(["Hide", "Clean up and close"]);
+    expect(items[1].className).toBe("danger");
+    // The arrow keys move between them, and wrap.
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0], { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(items[1], { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0], { key: "End" });
+    expect(document.activeElement).toBe(items[1]);
   });
 });

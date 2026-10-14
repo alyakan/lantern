@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type State } from "../store";
 import { chatsReducer, initialChats, type Chats } from "../sessions";
-import { money, needingYou, nodeStatus, orchestraNodes, readyToMerge, summaryLine, teamMain, teamNodes } from "./orchestraView";
+import { money, needingYou, nodeStatus, orchestraNodes, readyToMerge, summaryLine, teamMain, teamNodes, lostText } from "./orchestraView";
 
 const base: State = { ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/p" };
 const main: State = { ...base, orchestrator: true };
@@ -158,5 +158,20 @@ describe("needingYou", () => {
     c = spawn(c, "w2", "B");
     const slots = { ...c.slots, w2: asking, s1: { ...asking, orchestrator: true } };
     expect(needingYou(orchestraNodes({ ...c, slots }, name), slots)).toEqual(["s1", "w2"]);
+  });
+});
+
+describe("lostText", () => {
+  const check = (uncommitted: number, unmerged_commits: number) => ({ worktree: true, branch: "lantern/x", uncommitted, unmerged_commits });
+
+  it("says what would be lost, in the words the question uses", () => {
+    expect(lostText(check(3, 2))).toBe("3 uncommitted files and 2 commits that aren't merged");
+    expect(lostText(check(1, 1))).toBe("1 uncommitted file and 1 commit that isn't merged");
+    expect(lostText(check(0, 2))).toBe("2 commits that aren't merged");
+    expect(lostText(check(4, 0))).toBe("4 uncommitted files");
+  });
+
+  it("is empty when nothing would be", () => {
+    expect(lostText(check(0, 0))).toBe("");
   });
 });
