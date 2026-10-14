@@ -1,0 +1,89 @@
+/**
+ * Lantern's own state for a folder, which follows the folder when it moves. These keys hold an object keyed by the
+ * folder's path (what usePersistentState saved for it); migrateFolderState gives the new path the old one's entry.
+ */
+export const FOLDER_RECORDS = [
+  "settings.modeByFolder",
+  "settings.autoApproveByFolder",
+  "settings.promptHistory",
+  "settings.harnessByFolder",
+  "review.collapsedByFolder",
+  "settings.pinnedSessions",
+] as const;
+
+/** The folder that was open last, reopened at launch. */
+export const LAST_FOLDER = "settings.lastFolder";
+/** The chats open when Lantern last closed, each with the folder it was in. */
+export const OPEN_CHATS = "session.openChats";
+
+/** Every key the app saves that isn't about one folder (a session, a model, a setting). Listed so a new key is a decision. */
+export const NOT_FOLDER_KEYED = [
+  "settings.modeBySession",
+  "settings.harnessBySession",
+  "settings.model",
+  "settings.effort",
+  "settings.defaultModel",
+  "settings.modelIds",
+  "settings.contextWindows",
+  "settings.harnessPresets",
+  "settings.appearance",
+  "settings.textSize",
+  "review.collapsed",
+  "review.ratio",
+  "review.scope",
+  "review.tab",
+  "review.diffLayout",
+  "review.commitsOpen",
+  "files.markdownView",
+  "summary.exportResults",
+] as const;
+
+/** What the migration changed: each key's new value, as it was written. */
+export type Migrated = Record<string, unknown>;
+
+/** The part of localStorage the migration uses, so a test can pass its own. */
+export type KeyValueStore = Pick<Storage, "getItem" | "setItem">;
+
+function readJson(store: KeyValueStore, key: string): unknown {
+  try {
+    const raw = store.getItem(key);
+    return raw === null ? undefined : JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * Carries a folder's saved state over from `old` to `next` when the folder moves. Each per-folder entry is copied to the
+ * new path, unless the new path already has one (which is kept). The last folder and the saved chats in the old folder
+ * name the new one. Returns what was written, so the caller can update the state it keeps in memory: without that, the
+ * next save would write the old values back.
+ */
+export function migrateFolderState(store: KeyValueStore, old: string, next: string): Migrated {
+  const changed: Migrated = {};
+  for (const key of FOLDER_RECORDS) {
+    const saved = readJson(store, key);
+    if (!isRecord(saved) || !(old in saved) || next in saved) continue;
+    changed[key] = { ...saved, [next]: saved[old] };
+  }
+  if (readJson(store, LAST_FOLDER) === old) changed[LAST_FOLDER] = next;
+  const chats = readJson(store, OPEN_CHATS);
+  if (Array.isArray(chats) && chats.some((c) => isRecord(c) && c.folder === old)) {
+    // A chat from the old folder is the same chat now (its session, or its unsent text), so it's kept once.
+    const sessions = new Set(chats.filter((c) => isRecord(c) && c.folder === next && c.sessionId).map((c) => (c as { sessionId: string }).sessionId));
+    const moved = chats
+      .filter((c) => !(isRecord(c) && c.folder === old && typeof c.sessionId === "string" && sessions.has(c.sessionId)))
+      .map((c) => (isRecord(c) && c.folder === old ? { ...c, folder: next } : c));
+    changed[OPEN_CHATS] = moved;
+  }
+  for (const [key, value] of Object.entries(changed)) {
+    try {
+      store.setItem(key, JSON.stringify(value));
+    } catch {
+      // storage unavailable: the in-memory state still has the move
+    }
+  }
+  return changed;
+}
