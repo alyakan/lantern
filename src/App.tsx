@@ -22,7 +22,9 @@ import { agentGraph } from "./lib/agentGraph";
 import { BUILT_IN, CUSTOM_HARNESS, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
-import type { McpServer, NewRule, SkillEntry, UpdateInfo } from "./types";
+import type { McpServer, MovedFolder, NewRule, SkillEntry, UpdateInfo } from "./types";
+import { LAST_FOLDER, OPEN_CHATS, migrateFolderState, withMovedNote, type Migrated } from "./lib/relocate";
+import { RelocateDialog } from "./components/RelocateDialog";
 import { stepFile, usePersistentState } from "./lib/layout";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyAppearance, type Appearance, type TextSize } from "./lib/theme";
@@ -405,10 +407,15 @@ export default function App() {
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
     api
       .openSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder) }, sessionId)
-      .then((events) => {
+      .then((opened) => {
         if (startGen.current[slot] !== gen) return;
+        // Not resumed (its copy into this folder failed): the transcript is shown, and Retry copies it again.
+        if (opened.read_only) {
+          to(slot)({ type: "history_loaded", sessionId, events: opened.events });
+          return to(slot)({ type: "failed", text: opened.read_only });
+        }
         delete relaunch.current[slot];
-        to(slot)({ type: "history_loaded", sessionId, events });
+        to(slot)({ type: "history_loaded", sessionId, events: opened.events, movedFrom: opened.moved_from });
         to(slot)({ type: "session_ready" });
       })
       .catch((e) => startGen.current[slot] === gen && to(slot)({ type: "failed", text: errText(e) }));
@@ -540,7 +547,9 @@ export default function App() {
     const noted = withSkillNote(text, skillNames(slot));
     // Files reverted since the last message: Claude is told, so it doesn't act on what it last wrote.
     const reverted = withRevertNote(pick ? withFlavourNote(pick, noted) : noted, chats.slots[slot]?.revertNotes ?? []);
-    api.sendMessage(slot, withShellContext(items, reverted)).then(
+    // A chat opened from a place the folder moved from: Claude is told once that the paths in earlier messages are old.
+    const moved = withMovedNote(reverted, chats.slots[slot]?.movedFrom ?? null, chats.slots[slot]?.folder ?? null);
+    api.sendMessage(slot, withShellContext(items, moved)).then(
       (turn) => typeof turn === "number" && to(slot)({ type: "turn_numbered", turn }),
       (e) => to(slot)({ type: "turn_failed", text: errText(e) }),
     );
@@ -976,6 +985,52 @@ export default function App() {
   // The History menu's actions on past sessions, for the folder on screen: pins are kept per folder, and a rename also
   // renames the open chat of that session.
   const [pinnedBy, setPinnedBy] = usePersistentState<Record<string, string[]>>("settings.pinnedSessions", {});
+
+  // Folders that seem to have moved (their path is gone), and the "moved?" notices the user dismissed. They're found from
+  // the folder menu and at launch; nothing is relocated without the user asking in the Relocate dialog.
+  const [moved, setMoved] = useState<MovedFolder[]>([]);
+  const [dismissedMoves, setDismissedMoves] = usePersistentState<string[]>("relocate.dismissed", []);
+  const [relocating, setRelocating] = useState<{ start: { old: string; suggested: string | null } | null } | null>(null);
+  const refreshMoved = () => api.movedFolderCandidates().then(setMoved, () => setMoved([]));
+  useEffect(() => {
+    refreshMoved();
+  }, []);
+  useAction("relocate-folder", () => setRelocating({ start: null }), true);
+  const relocateMenu = {
+    moved: moved.filter((m) => !dismissedMoves.includes(m.old)),
+    onRelocate: (from: MovedFolder | null) => setRelocating({ start: from ? { old: from.old, suggested: from.suggested } : null }),
+    onDismiss: (old: string) => setDismissedMoves([...dismissedMoves, old]),
+  };
+  const loadRecentFolders = () => {
+    refreshMoved();
+    return api.recentFolders();
+  };
+  // A move is recorded: the folder's saved state follows it, in storage and in the state kept here (which the next save
+  // would otherwise write back as it was).
+  const carryFolderState = (old: string, next: string) => {
+    const changed: Migrated = migrateFolderState(localStorage, old, next);
+    const take = <T,>(key: string) => changed[key] as T | undefined;
+    const modes = take<Record<string, string>>("settings.modeByFolder");
+    if (modes) setModes(modes);
+    const auto = take<Record<string, boolean>>("settings.autoApproveByFolder");
+    if (auto) setAutoBy(auto);
+    const prompts = take<Record<string, string[]>>("settings.promptHistory");
+    if (prompts) setPromptsBy(prompts);
+    const harness = take<Record<string, string>>("settings.harnessByFolder");
+    if (harness) setHarnessByFolder(harness);
+    const collapsed = take<Record<string, boolean>>("review.collapsedByFolder");
+    if (collapsed) setCollapsedBy(collapsed);
+    const pinned = take<Record<string, string[]>>("settings.pinnedSessions");
+    if (pinned) setPinnedBy(pinned);
+    const last = take<string>(LAST_FOLDER);
+    if (last) setLastFolder(last);
+    if (changed[OPEN_CHATS]) setOffer((chats) => chats.map((c) => (c.folder === old ? { ...c, folder: next } : c)));
+  };
+  const relocated = (old: string, next: string) => {
+    carryFolderState(old, next);
+    setRelocating(null);
+    refreshMoved();
+  };
   const sessionActions: SessionActions | null = state.folder
     ? {
         folder: state.folder,
@@ -1039,7 +1094,7 @@ export default function App() {
       folder={state.folder}
       onOpenFolder={openFolder}
       sessions={{ load: loadSessions, currentId: state.sessionId, onOpen: openSession, open: openChats, onSwitch: switchTo }}
-      folders={{ load: api.recentFolders, onPick: (path) => startFresh(path) }}
+      folders={{ load: loadRecentFolders, onPick: (path) => startFresh(path), relocate: relocateMenu }}
       models={{ chosen: settingsFor(active).model, onChoose: chooseModel, defaultModel, ids: modelIds, options: state.models }}
       effort={{ chosen: settingsFor(active).effort, onChoose: changeEffort }}
       harness={state.folder ? { presets, chosen: harnessOf(active).id, onChoose: (id) => switchHarness(findHarness(presets, id)), onEdit: () => setSettingsAt("harness") } : undefined}
@@ -1080,8 +1135,9 @@ export default function App() {
           loadSessions={loadSessions}
           onOpenSession={openSession}
           onNewSession={() => state.folder && startFresh(state.folder)}
-          loadRecent={api.recentFolders}
+          loadRecent={loadRecentFolders}
           onPickFolder={(path) => startFresh(path)}
+          relocate={relocateMenu}
           openChats={openChats}
           onSwitchChat={switchTo}
           onCloseChat={closeChat}
@@ -1209,6 +1265,15 @@ export default function App() {
         {palette && <CommandPalette entries={palette} onClose={() => setPalette(null)} />}
         {shortcutsOpen && <ShortcutSheet available={availableActions().map((a) => a.id)} onClose={() => setShortcutsOpen(false)} />}
         {whatsNew && <WhatsNew version={whatsNew.version} notes={whatsNew.notes} onClose={() => setWhatsNew(null)} />}
+        {relocating && (
+          <RelocateDialog
+            current={state.folder}
+            start={relocating.start}
+            pickFolder={() => open({ directory: true, multiple: false }).then((picked) => (typeof picked === "string" ? picked : null))}
+            onCancel={() => setRelocating(null)}
+            onDone={relocated}
+          />
+        )}
         <ModeGuide
           open={guideAt}
           mode={state.mode}

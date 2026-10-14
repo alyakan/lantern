@@ -10,7 +10,7 @@ import { CompletionMenu, type McpIssue } from "./CompletionMenu";
 import { ArrowUpIcon, BranchIcon, FolderIcon, SparkIcon } from "./icons";
 import { ContextMeter } from "./ContextMeter";
 import { EFFORT_LEVELS, EffortPicker } from "./EffortPicker";
-import { FolderPill } from "./FolderPill";
+import { FolderPill, type RelocateMenu } from "./FolderPill";
 import { ModeMenu } from "./ModeMenu";
 import type { Flavour } from "../lib/flavour";
 import { ModelPicker } from "./ModelPicker";
@@ -49,7 +49,7 @@ interface Props {
   /** Shown next to the folder pill in the empty state: pick a past session to continue. */
   sessions?: { load: () => Promise<SessionSummary[]>; currentId: string | null; onOpen: (id: string) => void; open?: OpenChat[]; onSwitch?: (slot: string) => void };
   /** The folder capsule's menu: recent folders to switch to. */
-  folders?: { load: () => Promise<RecentFolder[]>; onPick: (path: string) => void };
+  folders?: { load: () => Promise<RecentFolder[]>; onPick: (path: string) => void; relocate?: RelocateMenu };
   /** The chat's queued messages; without it the box keeps its own queue. */
   queue?: { items: string[]; set: (next: string[]) => void };
   /** Context use and timing for the footer meter. */
@@ -368,7 +368,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
       {hero && onOpenFolder && (
         <div className="composer-pills">
           {folders ? (
-            <FolderPill folder={folder ?? null} loadRecent={folders.load} onPick={folders.onPick} onBrowse={onOpenFolder} disabled={busy} />
+            <FolderPill folder={folder ?? null} loadRecent={folders.load} onPick={folders.onPick} onBrowse={onOpenFolder} disabled={busy} relocate={folders.relocate} />
           ) : (
             <button className="pill" onClick={onOpenFolder} disabled={busy} title={folder ?? "Open a folder for Claude to work in"}>
               <FolderIcon />

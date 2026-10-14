@@ -4,7 +4,7 @@ import { elapsed } from "../lib/time";
 import type { RecentFolder, SessionSummary } from "../types";
 import { basename } from "../lib/diff";
 import { useAction } from "../lib/actions";
-import { FolderMenu } from "./FolderPill";
+import { FolderMenu, type RelocateMenu } from "./FolderPill";
 import { useMenuKeys } from "./useMenuKeys";
 import { HistoryMenu, type OpenChat } from "./HistoryMenu";
 import type { ActivityStatus } from "../lib/status";
@@ -44,6 +44,8 @@ interface Props {
   onShowFailure?: () => void;
   /** Hides the failure count until something else fails. */
   onClearFailures?: () => void;
+  /** The folder menu's relocation parts (see FolderPill). */
+  relocate?: RelocateMenu;
 }
 
 /** How long a stopped task may stay listed before its Stop comes back. */
@@ -60,7 +62,7 @@ function taskKind(type: string): string {
 // No native title bar: the traffic lights sit in the left gutter and the bar drags the window. In the centre, like
 // Xcode's activity viewer: the folder and branch on the left (it opens the folder menu, like Xcode's scheme), what
 // Claude is doing on the right, and a progress bar along its bottom edge while it works.
-export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, sessionId = null, loadSessions, onOpenSession, onNewSession, loadRecent, onPickFolder, openChats = [], onSwitchChat, onCloseChat, branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures }: Props) {
+export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, sessionId = null, loadSessions, onOpenSession, onNewSession, loadRecent, onPickFolder, openChats = [], onSwitchChat, onCloseChat, branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, relocate }: Props) {
   // A working chat keeps running in the background when you switch away, so only a starting one blocks switching.
   const busy = status === "starting";
   const backgroundRunning = openChats.some((c) => c.state === "running" || c.state === "waiting" || !!c.background);
@@ -270,7 +272,7 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
             onCloseChat={onCloseChat}
           />
         )}
-        {menu === "folders" && onPickFolder && <FolderMenu folder={folder} recent={recent} onPick={onPickFolder} onBrowse={onOpenFolder} onClose={close} onKeyDown={folderKeys.onKeyDown} />}
+        {menu === "folders" && onPickFolder && <FolderMenu folder={folder} recent={recent} onPick={onPickFolder} onBrowse={onOpenFolder} onClose={close} onKeyDown={folderKeys.onKeyDown} relocate={relocate} />}
       </div>
       <div className="topbar-side end" data-tauri-drag-region>
         <div className="toolbar-group">

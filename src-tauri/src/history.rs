@@ -52,9 +52,34 @@ pub fn project_dir(projects_root: &Path, folder: &Path) -> Option<PathBuf> {
     })
 }
 
+/// Where a folder's sessions are kept: its own project directory first, then the one of each place it was before (its
+/// aliases, see relocate). A directory listed twice is listed once.
+pub fn project_dirs(projects_root: &Path, folder: &Path, aliases: &[PathBuf]) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for f in std::iter::once(folder).chain(aliases.iter().map(PathBuf::as_path)) {
+        if let Some(dir) = project_dir(projects_root, f) {
+            if !dirs.contains(&dir) {
+                dirs.push(dir);
+            }
+        }
+    }
+    dirs
+}
+
+/// A file that is itself a file, not a link to one: a link in a project directory can point anywhere (the home folder, a
+/// secret), so only real files are sessions.
+pub fn is_regular_file(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_file())
+}
+
+/// A directory that is itself a directory, not a link to one (see is_regular_file).
+pub fn is_real_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_dir())
+}
+
 fn jsonl_files(dir: &Path) -> Vec<PathBuf> {
     std::fs::read_dir(dir)
-        .map(|rd| rd.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "jsonl")).collect())
+        .map(|rd| rd.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "jsonl") && is_regular_file(p)).collect())
         .unwrap_or_default()
 }
 
@@ -103,11 +128,24 @@ fn prompt_text(r: &Value) -> Option<String> {
         }
         _ => return None,
     };
-    let trimmed = text.trim();
+    let trimmed = without_lantern_note(text.trim()).trim();
     if trimmed.is_empty() || INJECTED_TAGS.iter().any(|t| trimmed.starts_with(t)) || trimmed.starts_with("[Request interrupted") {
         return None;
     }
     Some(trimmed.to_string())
+}
+
+/// The notes Lantern puts in front of a message it sends (a revert's, a moved folder's): each is a block, then a blank line,
+/// then what the user typed. They aren't part of the prompt, so a replayed chat doesn't show them.
+fn without_lantern_note(text: &str) -> &str {
+    let mut rest = text;
+    while rest.starts_with("[Lantern note:") {
+        match rest.split_once("\n\n") {
+            Some((_, after)) => rest = after,
+            None => break,
+        }
+    }
+    rest
 }
 
 /// Tags Claude Code and Lantern wrap around what they put in a user record (a command the user ran and its output, a
@@ -160,8 +198,9 @@ pub fn transcript_title(path: &Path) -> Option<String> {
 }
 
 /// `titles`: the ones Lantern made, for sessions Claude Code didn't title (those run with `-p`). `renamed`: the names the
-/// user gave in Lantern, which beat every other title.
-fn summarize(path: &Path, folder: &str, titles: &HashMap<String, String>, renamed: &HashMap<String, String>) -> Option<SessionSummary> {
+/// user gave in Lantern, which beat every other title. `folders`: the paths a session may have started in (the folder
+/// and the places it was before).
+fn summarize(path: &Path, folders: &[String], titles: &HashMap<String, String>, renamed: &HashMap<String, String>) -> Option<SessionSummary> {
     let mut prompts = 0;
     let mut first = None;
     let mut cwd_ok = false;
@@ -174,7 +213,7 @@ fn summarize(path: &Path, folder: &str, titles: &HashMap<String, String>, rename
         }
         // The folder it started in decides: a `cd` during the session moves later records' cwd, not the session.
         if let (false, Some(cwd)) = (cwd_ok, r.get("cwd").and_then(Value::as_str)) {
-            if cwd != folder {
+            if !folders.iter().any(|f| f == cwd) {
                 return None;
             }
             cwd_ok = true;
@@ -201,9 +240,24 @@ fn summarize(path: &Path, folder: &str, titles: &HashMap<String, String>, rename
 
 /// Sessions for `folder`, newest first. Sessions with no typed prompt (e.g. plugin automation) are left out.
 pub fn list_sessions(projects_root: &Path, folder: &Path, titles: &HashMap<String, String>, renamed: &HashMap<String, String>) -> Vec<SessionSummary> {
-    let Some(dir) = project_dir(projects_root, folder) else { return vec![] };
-    let want = folder.to_string_lossy();
-    let mut sessions: Vec<SessionSummary> = jsonl_files(&dir).iter().filter_map(|f| summarize(f, &want, titles, renamed)).collect();
+    list_sessions_with_aliases(projects_root, folder, &[], titles, renamed)
+}
+
+/// Sessions for `folder` and for the places it was before (`aliases`), newest first. A session in more than one of those
+/// directories is listed once, from the folder's own directory when it's there.
+pub fn list_sessions_with_aliases(projects_root: &Path, folder: &Path, aliases: &[PathBuf], titles: &HashMap<String, String>, renamed: &HashMap<String, String>) -> Vec<SessionSummary> {
+    let folders: Vec<String> = std::iter::once(folder).chain(aliases.iter().map(PathBuf::as_path)).map(|p| p.to_string_lossy().into_owned()).collect();
+    let mut seen = std::collections::HashSet::new();
+    let mut sessions: Vec<SessionSummary> = Vec::new();
+    for dir in project_dirs(projects_root, folder, aliases) {
+        for f in jsonl_files(&dir) {
+            if let Some(s) = summarize(&f, &folders, titles, renamed) {
+                if seen.insert(s.id.clone()) {
+                    sessions.push(s);
+                }
+            }
+        }
+    }
     sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_ms));
     sessions
 }
@@ -218,20 +272,26 @@ fn modified_ms(path: &Path) -> u64 {
     std::fs::metadata(path).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as u64)
 }
 
-/// The folder a transcript was recorded in, if the session was the user's own (terminal or Lantern).
-fn user_session_cwd(path: &Path) -> Option<String> {
-    let mut cwd = None;
+/// The folder a transcript in the project directory `dir_name` belongs to, if the session was the user's own (terminal or
+/// Lantern). A session moved from another folder and resumed here keeps the old folder as its first `cwd`, so the cwd
+/// that encodes to this directory's name is preferred: it's the folder the directory is for.
+fn user_session_cwd(path: &Path, dir_name: &str) -> Option<String> {
+    let mut first = None;
+    let mut own = None;
     for r in records(path).take(40) {
         if let Some(ep) = r.get("entrypoint").and_then(Value::as_str) {
             if !USER_ENTRYPOINTS.contains(&ep) {
                 return None;
             }
         }
-        if cwd.is_none() {
-            cwd = r.get("cwd").and_then(Value::as_str).map(String::from);
+        if let Some(cwd) = r.get("cwd").and_then(Value::as_str) {
+            if own.is_none() && encode_folder(Path::new(cwd)) == dir_name {
+                own = Some(cwd.to_string());
+            }
+            first.get_or_insert_with(|| cwd.to_string());
         }
     }
-    cwd
+    own.or(first)
 }
 
 /// Scratch folders (probes, tools' temp dirs) aren't projects anyone wants to reopen.
@@ -249,37 +309,53 @@ fn keep_newest_per_folder(found: &mut Vec<RecentFolder>) {
 /// Folders the user has used Claude Code in, most recent first, that still exist. The directory name is a lossy
 /// encoding of the path, so the real path comes from the `cwd` recorded in its newest user session.
 pub fn recent_folders(projects_root: &Path, limit: usize) -> Vec<RecentFolder> {
+    let mut found: Vec<RecentFolder> = recent_user_folders(projects_root).into_iter().filter(|r| Path::new(&r.path).is_dir()).collect();
+    found.truncate(limit);
+    found
+}
+
+/// Every folder the user has used Claude Code in, most recent first, whether or not it still exists: a moved folder is
+/// one whose path is gone (see relocate::moved_candidates).
+pub fn recent_user_folders(projects_root: &Path) -> Vec<RecentFolder> {
     let Ok(dirs) = std::fs::read_dir(projects_root) else { return vec![] };
     let mut found: Vec<RecentFolder> = dirs
         .filter_map(Result::ok)
         .map(|e| e.path())
         .filter(|p| p.is_dir())
         .filter_map(|dir| {
+            let name = dir.file_name()?.to_string_lossy().into_owned();
             let mut files: Vec<(u64, PathBuf)> = jsonl_files(&dir).into_iter().map(|f| (modified_ms(&f), f)).collect();
             files.sort_by_key(|(ms, _)| std::cmp::Reverse(*ms));
             // Only the newest few: a folder used only by plugin automation lately isn't one the user picks.
-            files.into_iter().take(5).find_map(|(updated_ms, f)| user_session_cwd(&f).map(|path| RecentFolder { path, updated_ms }))
+            files.into_iter().take(5).find_map(|(updated_ms, f)| user_session_cwd(&f, &name).map(|path| RecentFolder { path, updated_ms }))
         })
-        .filter(|r| !is_temp(&r.path) && Path::new(&r.path).is_dir())
+        .filter(|r| !is_temp(&r.path))
         .collect();
     found.sort_by_key(|r| std::cmp::Reverse(r.updated_ms));
     keep_newest_per_folder(&mut found);
-    found.truncate(limit);
     found
 }
 
 /// The transcript file for a session id, if it exists.
 pub fn transcript_path(projects_root: &Path, folder: &Path, id: &str) -> Result<PathBuf, String> {
+    transcript_path_with_aliases(projects_root, folder, &[], id)
+}
+
+/// The transcript file for a session id: in the folder's directory first, then in the directories of its aliases.
+pub fn transcript_path_with_aliases(projects_root: &Path, folder: &Path, aliases: &[PathBuf], id: &str) -> Result<PathBuf, String> {
     if !valid_id(id) {
         return Err("That is not a session id.".into());
     }
-    let dir = project_dir(projects_root, folder).ok_or("No past sessions exist for this folder.")?;
-    let path = dir.join(format!("{id}.jsonl"));
-    if path.is_file() {
-        Ok(path)
-    } else {
-        Err("That session's transcript no longer exists.".into())
+    let dirs = project_dirs(projects_root, folder, aliases);
+    if dirs.is_empty() {
+        return Err("No past sessions exist for this folder.".into());
     }
+    dirs.iter().map(|dir| dir.join(format!("{id}.jsonl"))).find(|p| is_regular_file(p)).ok_or_else(|| "That session's transcript no longer exists.".into())
+}
+
+/// The folder a transcript was started in: the first `cwd` it records (a `cd` later on doesn't change it).
+pub fn started_in(path: &Path) -> Option<String> {
+    records(path).take(40).find_map(|r| r.get("cwd").and_then(Value::as_str).map(String::from))
 }
 
 /// A transcript timestamp ("2026-09-28T18:40:24.309Z") as ms since the epoch.
@@ -649,5 +725,40 @@ mod tests {
         let mut found = vec![entry("/w/a", 3), entry("/w/b", 2), entry("/w/a", 1)];
         keep_newest_per_folder(&mut found);
         assert_eq!(found, vec![entry("/w/a", 3), entry("/w/b", 2)]);
+    }
+
+    #[test]
+    fn a_folder_resumed_after_a_move_is_recent_under_its_new_path() {
+        let root = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
+        let (new, old) = (work.path().join("new-app"), work.path().join("old-app"));
+        std::fs::create_dir_all(&new).unwrap();
+        let (new_s, old_s) = (new.to_string_lossy().into_owned(), old.to_string_lossy().into_owned());
+        // A session copied from the old folder's directory and continued here: its first record is the old folder's.
+        let dir = root.path().join(encode_folder(&new));
+        std::fs::create_dir_all(&dir).unwrap();
+        let body = [
+            rec(json!({"type": "user", "cwd": old_s, "entrypoint": "cli", "message": {"role": "user", "content": "old"}})),
+            rec(json!({"type": "user", "cwd": new_s, "entrypoint": "cli", "message": {"role": "user", "content": "more"}})),
+        ]
+        .join("\n");
+        let p = dir.join("moved.jsonl");
+        std::fs::write(&p, body).unwrap();
+        std::fs::File::options().write(true).open(&p).unwrap().set_modified(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(3_000)).unwrap();
+        let recent = recent_folders(root.path(), 10);
+        assert_eq!(recent.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(), vec![new_s.as_str()]);
+        // The old path is still known (it's gone), for the moved-folder check.
+        let all: Vec<String> = recent_user_folders(root.path()).into_iter().map(|r| r.path).collect();
+        assert_eq!(all, vec![new_s.clone()]);
+    }
+
+    #[test]
+    fn a_lantern_note_in_front_of_a_message_is_not_part_of_the_prompt() {
+        let typed = |text: &str| prompt_text(&json!({"type": "user", "message": {"role": "user", "content": text}}));
+        assert_eq!(typed("[Lantern note: this project moved from /a to /b. Paths in earlier messages are the old ones.]\n\nwhy?"), Some("why?".into()));
+        assert_eq!(typed("[Lantern note: since your last message the user reverted these files.]\n- /p/a.ts: put back.\n\nwhy?"), Some("why?".into()));
+        assert_eq!(typed("[Lantern note: only a note]"), Some("[Lantern note: only a note]".into()));
+        // The moved note and a revert note can both come first.
+        assert_eq!(typed("[Lantern note: this project moved from /a to /b.]\n\n[Lantern note: since your last message.]\n- /p/a.ts: put back.\n\nwhy?"), Some("why?".into()));
     }
 }

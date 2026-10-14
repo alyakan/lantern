@@ -16,6 +16,7 @@ pub mod skills;
 pub mod slots;
 pub mod offstream;
 pub mod outside;
+pub mod relocate;
 pub mod stream_parser;
 pub mod test_runs;
 pub mod titles;
@@ -40,6 +41,8 @@ pub struct AppState {
     renames: Arc<titles::TitleStore>,
     /// "Always allow" rules for folders, saved in app data and shared by every chat.
     folder_rules: Arc<permission::rules::FolderRules>,
+    /// Where each folder was before it moved (see relocate): its sessions are read from there too.
+    relocations: Arc<relocate::Relocations>,
     /// PRs looked up for the Changes pane, by repository and number, with when: fetching them takes a moment.
     prs: std::sync::Mutex<std::collections::HashMap<(std::path::PathBuf, u32), (std::time::Instant, pr::PrRange)>>,
 }
@@ -820,12 +823,22 @@ fn projects_root() -> Result<std::path::PathBuf, String> {
     Ok(base.join("projects"))
 }
 
+/// The paths a folder was at before it moved (see relocate), as the store has them. The folder is looked up by its real
+/// path, as it's recorded, then as it was given.
+fn aliases_for(state: &AppState, folder: &str) -> Vec<std::path::PathBuf> {
+    let real = std::fs::canonicalize(folder).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| folder.to_string());
+    let found = state.relocations.aliases_of(&real);
+    let found = if found.is_empty() { state.relocations.aliases_of(folder) } else { found };
+    found.into_iter().map(std::path::PathBuf::from).collect()
+}
+
 #[tauri::command]
 async fn list_sessions(state: State<'_, AppState>, folder: String) -> Result<Vec<history::SessionSummary>, String> {
     let root = projects_root()?;
     let titles = state.titles.all();
     let renamed = state.renames.all();
-    tauri::async_runtime::spawn_blocking(move || history::list_sessions(&root, std::path::Path::new(&folder), &titles, &renamed)).await.map_err(|e| e.to_string())
+    let aliases = aliases_for(&state, &folder);
+    tauri::async_runtime::spawn_blocking(move || history::list_sessions_with_aliases(&root, std::path::Path::new(&folder), &aliases, &titles, &renamed)).await.map_err(|e| e.to_string())
 }
 
 /// Names a past session in Lantern (the History menu's Rename). The name is kept apart from Claude Code's transcripts,
@@ -842,12 +855,13 @@ fn rename_session(state: State<'_, AppState>, session_id: String, title: String)
 
 /// A past session's events, read from its transcript without starting claude (for Export as Markdown).
 #[tauri::command]
-async fn session_events(folder: String, session_id: String) -> Result<Vec<ui_event::UiEvent>, String> {
+async fn session_events(state: State<'_, AppState>, folder: String, session_id: String) -> Result<Vec<ui_event::UiEvent>, String> {
     if !history::valid_id(&session_id) {
         return Err("Not a session id.".into());
     }
     let root = projects_root()?;
-    tauri::async_runtime::spawn_blocking(move || history::transcript_path(&root, std::path::Path::new(&folder), &session_id).map(|p| history::replay(&p).events))
+    let aliases = aliases_for(&state, &folder);
+    tauri::async_runtime::spawn_blocking(move || history::transcript_path_with_aliases(&root, std::path::Path::new(&folder), &aliases, &session_id).map(|p| history::replay(&p).events))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -861,7 +875,8 @@ async fn title_session(state: State<'_, AppState>, claude_path: String, folder: 
     }
     let root = projects_root()?;
     let id = session_id.clone();
-    let own = tauri::async_runtime::spawn_blocking(move || history::transcript_path(&root, std::path::Path::new(&folder), &id).ok().and_then(|p| history::transcript_title(&p)))
+    let aliases = aliases_for(&state, &folder);
+    let own = tauri::async_runtime::spawn_blocking(move || history::transcript_path_with_aliases(&root, std::path::Path::new(&folder), &aliases, &id).ok().and_then(|p| history::transcript_title(&p)))
         .await
         .map_err(|e| e.to_string())?;
     if let Some(title) = state.renames.get(&session_id).or(own).or_else(|| state.titles.get(&session_id)) {
@@ -882,7 +897,17 @@ async fn recent_folders() -> Result<Vec<history::RecentFolder>, String> {
     tauri::async_runtime::spawn_blocking(move || history::recent_folders(&root, 8)).await.map_err(|e| e.to_string())
 }
 
+/// What opening a past session brings back: its events; the folder it was started in, when that was a place this folder
+/// moved from (the chat tells Claude once); and why it isn't resumed, when it could only be read (its copy failed).
+#[derive(serde::Serialize)]
+pub struct OpenedSession {
+    events: Vec<ui_event::UiEvent>,
+    moved_from: Option<String>,
+    read_only: Option<String>,
+}
+
 /// Replays a past session into a chat, refills its change tracker from the session's edits, and continues it with `--resume`.
+/// A session that's only in a place the folder moved from is copied into the folder first (see relocate::ready_session).
 #[tauri::command]
 async fn open_session(
     app: AppHandle,
@@ -892,18 +917,69 @@ async fn open_session(
     folder: String,
     settings: Settings,
     session_id: String,
-) -> Result<Vec<ui_event::UiEvent>, String> {
+) -> Result<OpenedSession, String> {
     let s = slot_for(&app, &state, &slot)?;
     let cfg = new_config(&state, &s, claude_path, folder, settings, Some(session_id.clone())).await?;
     let root = projects_root()?;
     let folder = cfg.folder.clone();
-    let replayed = tauri::async_runtime::spawn_blocking(move || history::transcript_path(&root, &folder, &session_id).map(|p| history::replay(&p)))
-        .await
-        .map_err(|e| e.to_string())??;
-    launch(&app, &slot, &s, cfg, true).await?;
-    menu::refresh_recent(&app).await;
-    s.changes.lock().unwrap().restore(replayed.edits, replayed.edits_before_last_turn);
-    Ok(replayed.events)
+    let aliases = aliases_for(&state, &folder.to_string_lossy());
+    let (ready, moved_from) = tauri::async_runtime::spawn_blocking(move || {
+        let ready = relocate::ready_session(&root, &folder, &aliases, &session_id)?;
+        let moved_from = match ready {
+            relocate::Ready::Resumable(_) => relocate::moved_from(&root, &folder, &aliases, &session_id),
+            relocate::Ready::ReadOnly { .. } => None,
+        };
+        Ok::<_, String>((ready, moved_from))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    match ready {
+        relocate::Ready::ReadOnly { source, reason } => {
+            let events = tauri::async_runtime::spawn_blocking(move || history::replay(&source).events).await.map_err(|e| e.to_string())?;
+            Ok(OpenedSession { events, moved_from: None, read_only: Some(reason) })
+        }
+        relocate::Ready::Resumable(path) => {
+            let replayed = tauri::async_runtime::spawn_blocking(move || history::replay(&path)).await.map_err(|e| e.to_string())?;
+            launch(&app, &slot, &s, cfg, true).await?;
+            menu::refresh_recent(&app).await;
+            s.changes.lock().unwrap().restore(replayed.edits, replayed.edits_before_last_turn);
+            Ok(OpenedSession { events: replayed.events, moved_from, read_only: None })
+        }
+    }
+}
+
+/// Where each folder was before it moved, as Lantern recorded it.
+#[tauri::command]
+fn relocations_list(state: State<'_, AppState>) -> Vec<relocate::Entry> {
+    state.relocations.list()
+}
+
+/// The folders the user has used that are gone, each with the place it probably moved to (see relocate::moved_candidates).
+#[tauri::command]
+async fn moved_folder_candidates(state: State<'_, AppState>) -> Result<Vec<relocate::Moved>, String> {
+    let root = projects_root()?;
+    let aliases: Vec<String> = state.relocations.list().into_iter().flat_map(|e| e.aliases).collect();
+    tauri::async_runtime::spawn_blocking(move || relocate::moved_candidates(&history::recent_user_folders(&root), &aliases)).await.map_err(|e| e.to_string())
+}
+
+/// What moving `old` to `new` would bring over. Nothing is changed.
+#[tauri::command]
+async fn relocation_preview(state: State<'_, AppState>, old: String, new: String) -> Result<relocate::Preview, String> {
+    let (old, _) = relocate::validate_pair(&old, &new)?;
+    let root = projects_root()?;
+    let claude = claude_json_file()?;
+    let rules = state.folder_rules.clone();
+    tauri::async_runtime::spawn_blocking(move || relocate::preview(&root, &claude, &rules, &old)).await.map_err(|e| e.to_string())
+}
+
+/// Records that the folder at `old` is now at `new`, carrying over what `options` chooses (see relocate::relocate).
+#[tauri::command]
+async fn relocate_folder(state: State<'_, AppState>, old: String, new: String, options: relocate::Options) -> Result<relocate::Outcome, String> {
+    let (old, new) = relocate::validate_pair(&old, &new)?;
+    let root = projects_root()?;
+    let claude = claude_json_file()?;
+    let (rules, relocations) = (state.folder_rules.clone(), state.relocations.clone());
+    tauri::async_runtime::spawn_blocking(move || relocate::relocate(&root, &claude, &rules, &relocations, &old, &new, options)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -993,7 +1069,8 @@ pub fn run() {
             let titles = titles::TitleStore::load(app.path().app_data_dir().ok().map(|d| d.join("titles.json")));
             let renames = titles::TitleStore::load(app.path().app_data_dir().ok().map(|d| d.join("renames.json")));
             let folder_rules = permission::rules::FolderRules::load(app.path().app_data_dir().ok().map(|d| d.join("permission_rules.json")));
-            app.manage(AppState { slots: Slots::default(), login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), prs: Default::default() });
+            let relocations = relocate::Relocations::load(app.path().app_data_dir().ok().map(|d| d.join("relocations.json")));
+            app.manage(AppState { slots: Slots::default(), login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default() });
             app.manage(updates::Updates::default());
             if updates::checks_enabled() {
                 tauri::async_runtime::spawn(updates::watch(app.handle().clone()));
@@ -1074,6 +1151,10 @@ pub fn run() {
             session_events,
             title_session,
             open_session,
+            relocations_list,
+            moved_folder_candidates,
+            relocation_preview,
+            relocate_folder,
             update_status,
             update_state,
             check_for_updates,

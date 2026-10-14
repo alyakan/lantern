@@ -160,6 +160,8 @@ export interface State {
   /** Files reverted since the last message, which Claude is told about with the next one. */
   revertNotes: RevertNote[];
   revertSeq: number;
+  /** The folder this session was started in, when that was a place the folder moved from: Claude is told once. */
+  movedFrom: string | null;
 }
 
 export interface BackgroundRun {
@@ -216,6 +218,7 @@ export const initialState: State = {
   revertUndo: null,
   revertNotes: [],
   revertSeq: 0,
+  movedFrom: null,
 };
 
 export type Action =
@@ -224,7 +227,7 @@ export type Action =
   | { type: "claude_missing"; error: string }
   | { type: "folder_opened"; folder: string }
   | { type: "folder_cleared" }
-  | { type: "history_loaded"; sessionId: string; events: UiEvent[] }
+  | { type: "history_loaded"; sessionId: string; events: UiEvent[]; movedFrom?: string | null }
   | { type: "session_ready" }
   | { type: "user_sent"; text: string; switchedTo?: Flavour; draft?: string }
   | { type: "mode_changed"; mode: Mode; flavourStart?: Flavour | null }
@@ -313,7 +316,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [] };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -512,7 +515,7 @@ export function reducer(state: State, action: Action): State {
       // The backend keeps the replayed session's last turn as turn 0; earlier turns' changes aren't known.
       const last = replayed.items.map((it) => it.type).lastIndexOf("user");
       const items = replayed.items.map((it, i): ChatItem => (i === last && it.type === "user" ? { ...it, turn: 0 } : it));
-      return { ...replayed, status: "starting", thinking: false, items: settleRunning(withoutTimes(items)) };
+      return { ...replayed, status: "starting", thinking: false, items: settleRunning(withoutTimes(items)), movedFrom: action.movedFrom ?? null };
     }
     case "turn_numbered": {
       const at = state.items.map((it) => it.type === "user" && it.turn === undefined).lastIndexOf(true);
@@ -529,7 +532,9 @@ export function reducer(state: State, action: Action): State {
       const sent = takesShellContext(action.text) ? state.items.map((it): ChatItem => (it.type === "shell" && !it.shared ? { ...it, shared: true } : it)) : state.items;
       // The revert note went with this message (a slash command gets none, so the note waits for the next).
       const noted = takesShellContext(action.text) ? [] : state.revertNotes;
-      return { ...state, status: "running", thinking: true, stopRequested: false, seq, flavourPick: action.switchedTo ? null : state.flavourPick, items: [...sent, item], revertUndo: null, revertNotes: noted };
+      // The moved-folder note goes with the first message that isn't a slash command, like the revert notes.
+      const movedFrom = takesShellContext(action.text) ? null : state.movedFrom;
+      return { ...state, status: "running", thinking: true, stopRequested: false, seq, flavourPick: action.switchedTo ? null : state.flavourPick, items: [...sent, item], revertUndo: null, revertNotes: noted, movedFrom };
     }
     case "mode_changed":
       return { ...state, mode: action.mode, ...(action.flavourStart !== undefined ? { flavourStart: action.flavourStart } : {}) };

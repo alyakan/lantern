@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
-import type { DirEntry, FileDiff, FoundFile, McpServerSpec, Mode, NewRule, RecentFolder, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { DirEntry, FileDiff, FoundFile, McpServerSpec, MovedFolder, Mode, NewRule, OpenedSession, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -92,8 +92,17 @@ export const api = {
   /** A short title for the session (Claude Code's, one made before, or a new one from its first prompt); null if none. */
   titleSession: (claudePath: string, folder: string, sessionId: string, prompt: string) => invoke<string | null>("title_session", { claudePath, folder, sessionId, prompt }),
   recentFolders: () => invoke<RecentFolder[]>("recent_folders"),
+  /** Replays a past session into the chat and resumes it. A session only in a folder's old place is copied into the folder first. */
   openSession: (slot: string, claudePath: string, folder: string, settings: Settings, sessionId: string) =>
-    invoke<UiEvent[]>("open_session", { slot, claudePath, folder, settings, sessionId }),
+    invoke<OpenedSession>("open_session", { slot, claudePath, folder, settings, sessionId }),
+  /** Where each folder was before it moved, as Lantern recorded it. */
+  relocationsList: () => invoke<RelocationEntry[]>("relocations_list"),
+  /** The recent folders that are gone, each with the place it probably moved to. */
+  movedFolderCandidates: () => invoke<MovedFolder[]>("moved_folder_candidates"),
+  /** What moving `old` to `next` would bring over. Nothing is changed. */
+  relocationPreview: (old: string, next: string) => invoke<RelocationPreview>("relocation_preview", { old, new: next }),
+  /** Records that the folder at `old` is now at `next`, carrying over what `options` chooses. Nothing is deleted or overwritten. */
+  relocateFolder: (old: string, next: string, options: RelocateOptions) => invoke<RelocateOutcome>("relocate_folder", { old, new: next, options }),
   listDir: (slot: string, path: string) => invoke<DirEntry[]>("list_dir", { slot, path }),
   readFile: (slot: string, path: string) => invoke<string>("read_file", { slot, path }),
   /**

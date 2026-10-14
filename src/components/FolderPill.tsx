@@ -1,8 +1,17 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { RecentFolder } from "../types";
+import type { MovedFolder, RecentFolder } from "../types";
 import { basename } from "../lib/diff";
 import { FolderIcon } from "./icons";
 import { useMenuKeys } from "./useMenuKeys";
+
+/** The folder menu's relocation parts: the folders that seem to have moved, and what to do about them. */
+export interface RelocateMenu {
+  /** Folders whose path is gone and that aren't dismissed (see App). */
+  moved: MovedFolder[];
+  /** Relocate one of them (from it), or any folder (null). */
+  onRelocate: (from: MovedFolder | null) => void;
+  onDismiss: (old: string) => void;
+}
 
 interface Props {
   folder: string | null;
@@ -10,6 +19,7 @@ interface Props {
   onPick: (path: string) => void;
   onBrowse: () => void;
   disabled?: boolean;
+  relocate?: RelocateMenu;
 }
 
 function parentOf(path: string): string {
@@ -19,7 +29,7 @@ function parentOf(path: string): string {
 
 // The folder capsule above the composer: recent folders (from Claude Code's own projects), then "Open folder…",
 // like the Local list in VS Code's project menu.
-export function FolderPill({ folder, loadRecent, onPick, onBrowse, disabled }: Props) {
+export function FolderPill({ folder, loadRecent, onPick, onBrowse, disabled, relocate }: Props) {
   const [open, setOpen] = useState(false);
   const [recent, setRecent] = useState<RecentFolder[] | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -52,7 +62,7 @@ export function FolderPill({ folder, loadRecent, onPick, onBrowse, disabled }: P
         <span>{folder ? basename(folder) : "Open folder"}</span>
         <span className="chev down" aria-hidden />
       </button>
-      {open && <FolderMenu folder={folder} recent={recent} onPick={onPick} onBrowse={onBrowse} onClose={() => setOpen(false)} onKeyDown={keys.onKeyDown} />}
+      {open && <FolderMenu folder={folder} recent={recent} onPick={onPick} onBrowse={onBrowse} onClose={() => setOpen(false)} onKeyDown={keys.onKeyDown} relocate={relocate} />}
     </div>
   );
 }
@@ -61,13 +71,35 @@ export function FolderPill({ folder, loadRecent, onPick, onBrowse, disabled }: P
  * The dropdown itself, shared by this capsule and the title bar's folder pill. `recent` is null while loading. The arrow
  * keys are the caller's (`onKeyDown`), since focus goes back to whichever button opened the menu.
  */
-export function FolderMenu({ folder, recent, onPick, onBrowse, onClose, onKeyDown }: { folder: string | null; recent: RecentFolder[] | null; onPick: (path: string) => void; onBrowse: () => void; onClose: () => void; onKeyDown?: (e: ReactKeyboardEvent<HTMLElement>) => void }) {
+export function FolderMenu({ folder, recent, onPick, onBrowse, onClose, onKeyDown, relocate }: { folder: string | null; recent: RecentFolder[] | null; onPick: (path: string) => void; onBrowse: () => void; onClose: () => void; onKeyDown?: (e: ReactKeyboardEvent<HTMLElement>) => void; relocate?: RelocateMenu }) {
   const choose = (act: () => void) => {
     onClose();
     act();
   };
   return (
     <div className="menu folder-menu" role="menu" aria-label="Folders" onKeyDown={onKeyDown}>
+      {relocate && relocate.moved.length > 0 && (
+        <>
+          <div className="menu-heading">Moved?</div>
+          <ul className="menu-list moved-folders" aria-label="Folders that may have moved">
+            {relocate.moved.map((m) => (
+              <li key={m.old} className="moved-folder">
+                <button role="menuitem" className="menu-row" title={m.old} onClick={() => choose(() => relocate.onRelocate(m))}>
+                  <FolderIcon />
+                  <span className="menu-row-title">
+                    {`${basename(m.old)} moved?`}
+                    <span className="menu-row-path">{m.suggested ? `Relocate to ${m.suggested}…` : `Was ${parentOf(m.old)}`}</span>
+                  </span>
+                </button>
+                <button className="icon moved-folder-dismiss" aria-label={`Dismiss the moved notice for ${basename(m.old)}`} title="Dismiss" onClick={() => relocate.onDismiss(m.old)}>
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="menu-sep" />
+        </>
+      )}
       <div className="menu-heading">Recent</div>
       {recent === null ? (
         <div className="menu-empty">Loading…</div>
@@ -93,6 +125,11 @@ export function FolderMenu({ folder, recent, onPick, onBrowse, onClose, onKeyDow
       <button role="menuitem" className="menu-row" onClick={() => choose(onBrowse)}>
         <span className="menu-row-title">Open folder…</span>
       </button>
+      {relocate && (
+        <button role="menuitem" className="menu-row" onClick={() => choose(() => relocate.onRelocate(null))}>
+          <span className="menu-row-title">Relocate folder…</span>
+        </button>
+      )}
     </div>
   );
 }

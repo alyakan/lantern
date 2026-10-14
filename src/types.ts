@@ -81,6 +81,51 @@ export interface RecentFolder {
   updated_ms: number;
 }
 
+/** A folder that moved: the places it was before, most recent first. Its sessions are read from there too. */
+export interface RelocationEntry {
+  folder: string;
+  aliases: string[];
+}
+
+/** A recent folder that no longer exists, and the one place it probably moved to (null: none, or more than one). */
+export interface MovedFolder {
+  old: string;
+  suggested: string | null;
+}
+
+/** What moving a folder would bring over, read without changing anything. */
+export interface RelocationPreview {
+  sessions: number;
+  bytes: number;
+  project_entry: boolean;
+  memory_files: number;
+  rules: number;
+  /** Links among the transcripts and memory files: skipped, not copied. */
+  linked: number;
+}
+
+/** What to carry over with a move, besides its sessions and Lantern's own rules (always carried). */
+export interface RelocateOptions {
+  project_settings: boolean;
+  memory: boolean;
+}
+
+export interface RelocateOutcome {
+  project_keys: string[];
+  memory_files: number;
+  rules: number;
+}
+
+/**
+ * A past session as it opened: its events; the folder it was started in, when that was a place this folder moved from
+ * (null otherwise); and why it's only readable, when its copy into the folder failed (null: it can be resumed).
+ */
+export interface OpenedSession {
+  events: UiEvent[];
+  moved_from: string | null;
+  read_only: string | null;
+}
+
 export interface FileDiff {
   path: string;
   original: string;
