@@ -79,6 +79,21 @@ describe("chatsToSave for an orchestra", () => {
     expect(saved[0].orchestra).toBeUndefined();
   });
 
+  it("saves a worker the user hid as hidden, and one that is shown with nothing extra", () => {
+    const slots = { s1: { ...talked("main-session"), orchestrator: true }, w1: talked("hidden-session", "/wt/login"), w2: talked("shown-session", "/wt/other") };
+    const saved = chatsToSave(slots, "s1", {}, {}, { w1: { ...meta, hidden: true }, w2: meta });
+    expect(saved[1].orchestra).toMatchObject({ role: "worker", hidden: true });
+    expect(saved[2].orchestra).not.toHaveProperty("hidden");
+  });
+
+  it("loads what was saved before workers could be hidden: such a worker is shown", () => {
+    const old = { sessionId: "w", folder: "/wt/login", title: "Login form", draft: "", active: false, orchestra: { role: "worker", name: "Login form", parentSession: "m", branch: "lantern/login-form", base: "main", isolation: "worktree" } };
+    localStorage.setItem("session.openChats", JSON.stringify([old]));
+    const [loaded] = loadSaved();
+    expect(loaded.orchestra).toEqual(old.orchestra);
+    expect(loaded.orchestra && "hidden" in loaded.orchestra && loaded.orchestra.hidden).toBeFalsy();
+  });
+
   it("keeps the orchestra of chats that are still only offered", () => {
     const offered = [saved({ sessionId: "m", orchestra: { role: "main" } })];
     expect(withOffered([], offered)).toEqual(offered);

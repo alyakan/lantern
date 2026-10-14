@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { chatsReducer, initialChats, WAKE_LIMIT, type Chats } from "../sessions";
 import { initialState, type State } from "../store";
@@ -29,22 +29,23 @@ function team(workers = 2): Chats {
   return c;
 }
 
-const actions = (): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), draft: vi.fn(() => ""), setDraft: vi.fn() });
+const actions = (over: Partial<NodeActions> = {}): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), spawn: vi.fn(() => Promise.resolve()), closeCheck: vi.fn(() => Promise.resolve({ worktree: true, branch: null, uncommitted: 0, unmerged_commits: 0 })), closeWorker: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(), ...over });
 
-function setup(chats: Chats, extra: { attention?: string[]; layout?: ReturnType<typeof newLayout> } = {}) {
+function setup(chats: Chats, extra: { attention?: string[]; layout?: ReturnType<typeof newLayout>; actions?: Partial<NodeActions> } = {}) {
   const store = createChatStore();
   store.set(chats.slots);
   const layout = extra.layout ?? newLayout();
   const handlers = { onFocus: vi.fn(), onOpen: vi.fn() };
   const nodes = orchestraNodes(chats, () => "Main agent");
+  const acts = actions(extra.actions);
   const ui = (
     <ChatStoreContext.Provider value={store}>
-      <NodeActionsContext.Provider value={actions()}>
+      <NodeActionsContext.Provider value={acts}>
         <Canvas nodes={nodes} layout={layout} activeSlot="s1" attention={extra.attention ?? []} {...handlers} />
       </NodeActionsContext.Provider>
     </ChatStoreContext.Provider>
   );
-  return { ...render(ui), layout, store, ...handlers, nodes };
+  return { ...render(ui), layout, store, ...handlers, nodes, acts };
 }
 
 describe("placeNodes", () => {
@@ -466,5 +467,270 @@ describe("what the loop guard holds back, and what is typed", () => {
     expect(box.value).toBe("half a thought");
     fireEvent.change(box, { target: { value: "half a thought, and more" } });
     expect(a.setDraft).toHaveBeenLastCalledWith("w1", "half a thought, and more");
+  });
+});
+
+/** The team with the given workers taken off the canvas, as the user's Hide leaves it. */
+function hidden(chats: Chats, ...workers: string[]): Chats {
+  return workers.reduce((c, slot) => chatsReducer(c, { type: "set_hidden", slot, hidden: true }), chats);
+}
+
+const head = (name: string) => screen.getByLabelText(new RegExp(`^Worker Worker ${name},`)).querySelector(".node-head")!;
+
+describe("the menu of an agent's card", () => {
+  it("opens on a right-click on a worker's title or body, on its first item, and is a menu", () => {
+    setup(team(2));
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(fireEvent.contextMenu(head("1"), { clientX: 40, clientY: 30 })).toBe(false); // the browser's own menu is held back
+    const menu = screen.getByRole("menu", { name: "Worker 1 actions" });
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.querySelector(".menu-label")!.textContent)).toEqual(["Hide", "Clean up and close"]);
+    expect(document.activeElement).toBe(within(menu).getByRole("menuitem", { name: /Hide/ }));
+    // From the body too, and for another agent: the menu is that agent's.
+    fireEvent.contextMenu(screen.getByLabelText(/Worker Worker 2/).querySelector(".node-body")!, { clientX: 60, clientY: 60 });
+    expect(screen.getAllByRole("menu")).toHaveLength(1);
+    expect(screen.getByRole("menu", { name: "Worker 2 actions" })).toBeTruthy();
+  });
+
+  it("is not offered on the main agent", () => {
+    setup(team(1));
+    expect(fireEvent.contextMenu(screen.getByLabelText(/Main agent Main agent/).querySelector(".node-head")!)).toBe(true);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("leaves the browser's menu to the box where you type and to text you have selected", () => {
+    setup(team(1));
+    const box = within(screen.getByLabelText(/Worker Worker 1/)).getByLabelText("Message this agent");
+    expect(fireEvent.contextMenu(box)).toBe(true);
+    expect(screen.queryByRole("menu")).toBeNull();
+    const selection = vi.spyOn(window, "getSelection").mockReturnValue({ toString: () => "picked words" } as Selection);
+    expect(fireEvent.contextMenu(head("1"))).toBe(true);
+    expect(screen.queryByRole("menu")).toBeNull();
+    selection.mockRestore();
+  });
+
+  it("closes on Escape, on a press elsewhere, and on Tab, without doing anything", () => {
+    const { acts } = setup(team(1));
+    fireEvent.contextMenu(head("1"));
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: /Hide/ }), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.contextMenu(head("1"));
+    fireEvent.pointerDown(screen.getByTestId("canvas"), { button: 0, pointerId: 1 });
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.contextMenu(head("1"));
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: /Hide/ }), { key: "Tab" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(acts.hide).not.toHaveBeenCalled();
+  });
+
+  it("hides the worker it was opened on, and closes", () => {
+    const { acts } = setup(team(2));
+    fireEvent.contextMenu(head("2"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Hide/ }));
+    expect(acts.hide).toHaveBeenCalledWith("w2");
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("does not let a worker that needs you be hidden", () => {
+    const { acts } = setup(team(1), { attention: ["w1"] });
+    fireEvent.contextMenu(head("1"));
+    const item = screen.getByRole("menuitem", { name: /Hide/ }) as HTMLButtonElement;
+    expect(item.disabled).toBe(true);
+    expect(item.textContent).toContain("needs you");
+    fireEvent.click(item);
+    expect(acts.hide).not.toHaveBeenCalled();
+  });
+
+  it("does not pan, zoom or move anything: the right button is not a gesture", () => {
+    const { layout } = setup(team(1));
+    const canvas = screen.getByTestId("canvas");
+    const view = layout.view;
+    const box = { ...layout.boxes.w1 };
+    act(() => {
+      fireEvent.pointerDown(canvas, { button: 2, pointerId: 1, clientX: 50, clientY: 50 });
+      fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 150, clientY: 90 });
+      fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 150, clientY: 90 });
+      fireEvent.pointerDown(head("1"), { button: 2, pointerId: 2, clientX: 50, clientY: 50 });
+      fireEvent.pointerMove(head("1"), { pointerId: 2, clientX: 150, clientY: 90 });
+      fireEvent.pointerUp(head("1"), { pointerId: 2 });
+      // A control-click is a right-click on a Mac, and must not start a pan either.
+      fireEvent.pointerDown(canvas, { button: 0, ctrlKey: true, pointerId: 3, clientX: 50, clientY: 50 });
+      fireEvent.pointerMove(canvas, { pointerId: 3, clientX: 150, clientY: 90 });
+      fireEvent.pointerUp(canvas, { pointerId: 3, clientX: 150, clientY: 90 });
+      fireEvent.pointerDown(head("1"), { button: 0, ctrlKey: true, pointerId: 4, clientX: 50, clientY: 50 });
+      fireEvent.pointerMove(head("1"), { pointerId: 4, clientX: 150, clientY: 90 });
+      fireEvent.pointerUp(head("1"), { pointerId: 4 });
+    });
+    expect(layout.view).toEqual(view);
+    expect(layout.boxes.w1).toEqual(box);
+    expect(layout.touched).toBe(false);
+    // And the canvas still pans and zooms afterwards, with the menu open.
+    fireEvent.contextMenu(head("1"));
+    act(() => {
+      fireEvent.wheel(canvas, { deltaX: 0, deltaY: 40 });
+    });
+    expect(layout.view!.y).toBeCloseTo((view?.y ?? 0) - 40);
+  });
+});
+
+describe("agents taken off the canvas", () => {
+  it("are not drawn or tethered, keep their place, and are counted in a Hidden control", () => {
+    const { layout } = setup(hidden(team(2), "w1"));
+    expect(screen.getAllByRole("region").map((a) => a.getAttribute("aria-label"))).toEqual(["Main agent Main agent, Idle", "Worker Worker 2, Working"]);
+    expect(document.querySelectorAll("path.tether")).toHaveLength(1);
+    expect(layout.boxes.w1).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Hidden (1)" })).toBeTruthy();
+  });
+
+  it("show no Hidden control when there are none", () => {
+    setup(team(2));
+    expect(screen.queryByRole("button", { name: /Hidden/ })).toBeNull();
+  });
+
+  it("are listed by name and status, and each can be shown again", () => {
+    const { acts } = setup(hidden(team(2), "w1", "w2"));
+    fireEvent.click(screen.getByRole("button", { name: "Hidden (2)" }));
+    const list = screen.getByRole("dialog", { name: "Hidden agents" });
+    expect(within(list).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Show Worker 1, Working", "Show Worker 2, Working"]);
+    fireEvent.click(within(list).getByRole("button", { name: "Show Worker 2, Working" }));
+    expect(acts.show).toHaveBeenCalledWith("w2");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Hidden agents" })).toBeNull();
+  });
+
+  it("come back by themselves when they need the user, and not before", () => {
+    const quiet = setup(hidden(team(2), "w1", "w2"), { attention: ["w2"] });
+    expect(quiet.acts.show).toHaveBeenCalledTimes(1);
+    expect(quiet.acts.show).toHaveBeenCalledWith("w2");
+    cleanup();
+    const idle = setup(hidden(team(2), "w1"));
+    expect(idle.acts.show).not.toHaveBeenCalled();
+  });
+
+  it("are shown again when the user goes to one from the team list", () => {
+    const { acts } = setup(hidden(team(2), "w1"));
+    fireEvent.click(screen.getByRole("button", { name: "Team" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "Team" })).getByText("Worker 1"));
+    expect(acts.show).toHaveBeenCalledWith("w1");
+  });
+});
+
+describe("cleaning up and closing an agent", () => {
+  const lost = { worktree: true, branch: "lantern/w1", uncommitted: 3, unmerged_commits: 2 };
+  const none = { worktree: true, branch: "lantern/w1", uncommitted: 0, unmerged_commits: 0 };
+  const chooseClose = (name = "1") => {
+    fireEvent.contextMenu(head(name));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Clean up and close/ }));
+  };
+
+  it("closes at once when there is nothing to lose, after asking what there is", async () => {
+    const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.resolve(none)) } });
+    chooseClose();
+    await waitFor(() => expect(acts.closeWorker).toHaveBeenCalledWith("w1", undefined));
+    expect(acts.closeCheck).toHaveBeenCalledWith("w1");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("says exactly what would be lost and stops nothing until the user agrees", async () => {
+    const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.resolve(lost)) } });
+    chooseClose();
+    const dialog = await screen.findByRole("alertdialog", { name: "Close Worker 1?" });
+    expect(dialog.textContent).toContain("It has 3 uncommitted files and 2 commits that aren't merged.");
+    expect(dialog.textContent).toContain("lantern/w1");
+    // Cancel is the default: it has the focus, and a press of Enter there cancels.
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(acts.closeWorker).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(acts.closeWorker).not.toHaveBeenCalled();
+  });
+
+  it("cancels on Escape and on a press outside the box, and keeps Tab inside it", async () => {
+    const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.resolve(lost)) } });
+    chooseClose();
+    const dialog = await screen.findByRole("alertdialog");
+    const [cancel, discard] = within(dialog).getAllByRole("button");
+    fireEvent.keyDown(cancel, { key: "Tab" });
+    expect(document.activeElement).toBe(discard);
+    fireEvent.keyDown(discard, { key: "Tab" });
+    expect(document.activeElement).toBe(cancel);
+    fireEvent.keyDown(cancel, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(discard);
+    fireEvent.keyDown(discard, { key: "Escape" });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    chooseClose();
+    fireEvent.pointerDown(await screen.findByRole("alertdialog").then((d) => d.parentElement!), { button: 0, pointerId: 1 });
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(acts.closeWorker).not.toHaveBeenCalled();
+  });
+
+  it("throws the work away only on the destructive button, and closes", async () => {
+    const closeWorker = vi.fn(() => Promise.resolve());
+    setup(team(2), { actions: { closeCheck: vi.fn(() => Promise.resolve(lost)), closeWorker } });
+    chooseClose("2");
+    const dialog = await screen.findByRole("alertdialog", { name: "Close Worker 2?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard work and close" }));
+    expect(closeWorker).toHaveBeenCalledWith("w2", { uncommitted: 3, unmerged_commits: 2 });
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  });
+
+  it("says why when it can't be closed, instead of closing", async () => {
+    const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.reject("That worker's branch is being merged right now.")) } });
+    chooseClose();
+    expect((await screen.findByRole("alert")).textContent).toContain("being merged right now");
+    expect(acts.closeWorker).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("says why when closing failed after it was agreed", async () => {
+    setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.resolve(lost)), closeWorker: vi.fn(() => Promise.reject("git said no")) } });
+    chooseClose();
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Discard work and close" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("git said no");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("tells a worker in the shared folder that nothing is removed from it", () => {
+    let chats = initialChats(main);
+    chats = chatsReducer(chats, { type: "in", slot: "s1", action: { type: "ui_event", event: { kind: "agent_spawned", worker: "w1", name: "Reader", brief: "Read", folder: "/p", branch: null, base: null, isolation: "shared", mode: "auto" } } });
+    setup(chats);
+    fireEvent.contextMenu(screen.getByLabelText(/^Worker Reader,/).querySelector(".node-head")!);
+    expect(screen.getByRole("menuitem", { name: /Clean up and close/ }).textContent).toContain("shares your folder, so no files are removed");
+  });
+
+  it("is offered with Hide, with the destructive one marked", () => {
+    setup(team(1));
+    fireEvent.contextMenu(head("1"));
+    const items = screen.getAllByRole("menuitem");
+    expect(items.map((i) => i.querySelector(".menu-label")!.textContent)).toEqual(["Hide", "Clean up and close"]);
+    expect(items[1].className).toBe("danger");
+    // The arrow keys move between them, and wrap.
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0], { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(items[1], { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(items[0], { key: "End" });
+    expect(document.activeElement).toBe(items[1]);
+  });
+});
+
+describe("starting an agent from the canvas", () => {
+  it("offers + Agent for the main agent's team, and starts the worker under that main agent", async () => {
+    const { acts } = setup(team(1));
+    fireEvent.click(screen.getByRole("button", { name: "+ Agent" }));
+    fireEvent.change(within(screen.getByRole("dialog", { name: "New agent" })).getByLabelText("Task"), { target: { value: "Write the docs" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    expect(acts.spawn).toHaveBeenCalledWith("s1", { task: "Write the docs", name: null, isolation: "worktree", model: null });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "New agent" })).toBeNull());
+  });
+
+  it("is not offered where there is no main agent to start it for", () => {
+    const chats = team(1);
+    chats.slots.s1 = { ...chats.slots.s1, orchestrator: false };
+    setup(chats);
+    expect(screen.getAllByRole("region")).toHaveLength(1); // an orphaned worker
+    expect(screen.queryByRole("button", { name: "+ Agent" })).toBeNull();
   });
 });

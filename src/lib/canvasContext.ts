@@ -1,5 +1,6 @@
 import { createContext, useContext, useRef, useSyncExternalStore } from "react";
 import type { State } from "../store";
+import type { CloseAgreed, CloseCheck, NewWorker } from "../types";
 
 /**
  * Every open chat's state, for the canvas: each agent on it subscribes to its own chat, so a streaming reply in one agent
@@ -83,6 +84,15 @@ export interface NodeActions {
   setDraft(slot: string, text: string): void;
   /** Removes a merged worker's worktree; rejects with why it couldn't. */
   removeWorktree(worker: string): Promise<void>;
+  /** What closing a worker would throw away; rejects with why it can't be closed (its branch is being merged, say). */
+  closeCheck(worker: string): Promise<CloseCheck>;
+  /** Stops a worker, removes its worktree and branch, and takes it off the canvas. Work that would be thrown away needs `agreed`, what the user confirmed. */
+  closeWorker(worker: string, agreed?: CloseAgreed): Promise<void>;
+  /** Starts a worker for the main agent `main` at the user's own request; rejects with why it didn't start (the limit, no git). */
+  spawn(main: string, worker: NewWorker): Promise<void>;
+  /** Takes a worker's card off the canvas (it keeps working), or puts it back. */
+  hide(worker: string): void;
+  show(worker: string): void;
 }
 
 export const NodeActionsContext = createContext<NodeActions | null>(null);

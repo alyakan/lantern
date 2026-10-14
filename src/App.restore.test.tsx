@@ -94,6 +94,29 @@ describe("restoring a team at launch", () => {
     });
   });
 
+  it("keeps a worker the user hid hidden across a restart", async () => {
+    const hiddenWorker: SavedChat = { ...team[0], orchestra: { ...(team[0].orchestra as Extract<NonNullable<SavedChat["orchestra"]>, { role: "worker" }>), hidden: true } };
+    localStorage.setItem("session.openChats", JSON.stringify([hiddenWorker, team[1]]));
+    await launch();
+    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    await screen.findByRole("button", { name: "Show the canvas" });
+    await waitFor(() => {
+      const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
+      expect(saved.find((c) => c.sessionId === "aaaa11")?.orchestra).toMatchObject({ role: "worker", hidden: true });
+    });
+  });
+
+  it("restores what an older version saved, which has no such field, with the worker shown", async () => {
+    await launch();
+    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    await screen.findByRole("button", { name: "Show the canvas" });
+    await waitFor(() => {
+      const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
+      expect(saved.find((c) => c.sessionId === "aaaa11")?.orchestra).toMatchObject({ role: "worker", name: "Login form" });
+      expect(saved.find((c) => c.sessionId === "aaaa11")?.orchestra).not.toHaveProperty("hidden");
+    });
+  });
+
   it("brings a worker back as an ordinary chat when its main agent is not restored with it", async () => {
     localStorage.setItem("session.openChats", JSON.stringify([team[0], { ...team[1], sessionId: "cccc33", orchestra: undefined }]));
     await launch();

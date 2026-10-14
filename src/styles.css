@@ -1583,3 +1583,35 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .team-cost { font-variant-numeric: tabular-nums; }
 .team-ask { width: calc(100% - 12px); margin: 4px 6px 6px; height: 32px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field); color: var(--text); font-size: calc(12.5px * var(--font-scale)); font-weight: 600; }
 .team-ask:hover { background: var(--bg-hover); }
+
+/* What opens over the canvas (the agent menu, the questions and forms): in the viewport, not in the world that zooms. */
+.canvas-menu { position: absolute; z-index: 5; width: 260px; display: flex; flex-direction: column; padding: 4px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--field); box-shadow: var(--shadow); cursor: default; }
+.canvas-menu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 7px 10px; border: none; border-radius: 7px; background: none; color: var(--text); text-align: left; }
+.canvas-menu button:hover:not(:disabled), .canvas-menu button:focus-visible { background: var(--bg-hover); }
+.canvas-menu button:disabled { opacity: 0.55; }
+.canvas-menu .menu-label { font: 600 calc(13px * var(--font-scale)) var(--ui); }
+.canvas-menu .danger .menu-label { color: var(--del); }
+.canvas-menu .menu-hint { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); line-height: 1.35; }
+.canvas-modal { position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.28); cursor: default; }
+.confirm-dialog { width: min(420px, calc(100% - 32px)); padding: 16px 18px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--field); box-shadow: var(--shadow); color: var(--text); }
+.confirm-dialog h2 { margin: 0 0 8px; font: 600 calc(14.5px * var(--font-scale)) var(--ui); }
+.confirm-body p { margin: 0; font-size: calc(13px * var(--font-scale)); line-height: 1.5; color: var(--text-2); }
+.confirm-body code { font: calc(12px * var(--font-scale)) var(--mono); padding: 0 4px; border-radius: var(--radius-chip); background: var(--code-bg); }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.confirm-actions button { height: 30px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field); color: var(--text); font-size: calc(12.5px * var(--font-scale)); }
+.confirm-actions button.danger { border-color: transparent; background: var(--del); color: #fff; font-weight: 600; }
+.confirm-actions button:disabled { opacity: 0.55; }
+.canvas-problem { position: absolute; left: 50%; bottom: 56px; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100% - 32px)); padding: 8px 12px; border: 1px solid var(--del); border-radius: 10px; background: var(--field); box-shadow: var(--shadow); font-size: calc(12.5px * var(--font-scale)); line-height: 1.4; cursor: default; }
+.canvas-problem button { flex: none; height: 24px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
+.new-agent { position: absolute; right: 0; bottom: calc(100% + 12px); z-index: 5; width: 340px; display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--field); box-shadow: var(--shadow); font-size: calc(12.5px * var(--font-scale)); cursor: default; }
+.new-agent label, .new-agent legend { display: flex; flex-direction: column; gap: 4px; padding: 0; font-weight: 600; color: var(--text); }
+.new-agent label:has(> input[type="radio"]) { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }
+.new-agent fieldset { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; border: none; }
+.new-agent textarea, .new-agent input:not([type="radio"]), .new-agent select { width: 100%; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--bg); color: var(--text); font: 400 calc(12.5px * var(--font-scale)) var(--ui); }
+.new-agent textarea { resize: vertical; min-height: 64px; }
+.new-agent textarea[aria-invalid="true"] { border-color: var(--del); }
+.new-agent-optional { font-weight: 400; color: var(--muted-text); }
+.new-agent-hint { margin: 0; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); line-height: 1.4; }
+.new-agent-problem { margin: 0; color: var(--del); line-height: 1.4; }
+.new-agent-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.new-agent-actions button { height: 28px; padding: 0 13px; border-radius: 999px; font-size: calc(12.5px * var(--font-scale)); }

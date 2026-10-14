@@ -857,6 +857,8 @@ async function setMockUpdate(state: Record<string, unknown>) {
 
 /** The chat started as the main agent of an orchestra, once there is one. */
 let mockMain: string | null = null;
+/** Workers started so far in the mock orchestra, the scripted ones included. */
+let mockSpawned = MOCK_WORKERS.length;
 
 export function installMockBackend() {
   // In the browser console: `mockEmit("check-for-updates")` fires a backend event, as the app menu's item does.
@@ -934,6 +936,19 @@ export function installMockBackend() {
           return null;
         case "orchestra_discard":
           return null;
+        // Closing and starting workers from the canvas. Nothing is on disk in the mock: it says there is a little loose work to
+        // show the question, except for the one worker that shares the folder.
+        case "orchestra_close_check":
+          return a.worker === "w3" ? { worktree: false, branch: null, uncommitted: 0, unmerged_commits: 0 } : { worktree: true, branch: `lantern/${String(a.worker)}`, uncommitted: 2, unmerged_commits: 1 };
+        case "orchestra_close_worker":
+          return null;
+        case "orchestra_spawn": {
+          const id = `w${++mockSpawned}`;
+          const worktree = a.isolation === "worktree";
+          const name = String(a.name ?? "").trim() || String(a.task).split(/\s+/).slice(0, 5).join(" ");
+          void sendTo(String(a.main))({ kind: "agent_spawned", worker: id, name, brief: String(a.task), folder: worktree ? `/Users/you/Library/Application Support/lantern/worktrees/web-app/${id}` : FOLDER, branch: worktree ? `lantern/${id}` : null, base: worktree ? "main" : null, isolation: worktree ? "worktree" : "shared", mode: slotMode[String(a.main)] === "auto" ? "auto" : "ask" });
+          return id;
+        }
         case "run_shell":
           playShell(String(a.slot), String(a.id), String(a.command));
           return null;

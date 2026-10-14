@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
   bounds,
   centerOn,
@@ -18,8 +18,14 @@ import {
   type View,
 } from "../lib/canvas";
 import { useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
-import { money, nodeStatus, readyToMerge, STATUS_LABEL, summaryLine, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
+import { lostText, money, nodeStatus, readyToMerge, STATUS_LABEL, summaryLine, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
+import { useDismiss } from "../lib/useDismiss";
 import { totalCost, type State } from "../store";
+import type { CloseAgreed, CloseCheck } from "../types";
+import { AgentMenu, type AgentMenuItem } from "./AgentMenu";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { HiddenAgents } from "./HiddenAgents";
+import { NewAgent } from "./NewAgent";
 import { NodeBody } from "./NodeBody";
 import { BranchIcon, ChevronIcon, OpenOutIcon } from "./icons";
 
@@ -58,6 +64,9 @@ export function placeNodes(layout: CanvasLayout, nodes: { slot: string; role: "m
 
 /** A folded agent shows its title bar only. */
 const COLLAPSED_HEIGHT = 52;
+/** Room the agent menu needs, so one opened near an edge is moved in. */
+const MENU_SIZE = { w: 270, h: 120 };
+const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : "That didn't work.");
 const MODE_LABEL = { ask: "Ask", auto: "Auto", steps: "Step by step" } as const;
 
 interface Props {
@@ -91,6 +100,8 @@ interface FrameProps {
   onToggle: (slot: string) => void;
   onOpen: (slot: string) => void;
   onPress: (slot: string) => void;
+  /** The right button was pressed on a worker's card. */
+  onMenu: (e: ReactMouseEvent<HTMLElement>, slot: string) => void;
 }
 
 /** The agent's latest words and state, for the card that stands in for its chat when zoomed out or folded. */
@@ -106,7 +117,7 @@ function SummaryBody({ slot }: { slot: string }) {
   );
 }
 
-const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, focused, summary, collapsed, onGrab, onDrag, onRelease, onToggle, onOpen, onPress }: FrameProps) {
+const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, focused, summary, collapsed, onGrab, onDrag, onRelease, onToggle, onOpen, onPress, onMenu }: FrameProps) {
   const state = useChatState(slot);
   const owner = useChatState(parent ?? slot);
   const status: NodeStatus = state ? nodeStatus(state) : "ended";
@@ -122,6 +133,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
       aria-label={`${role === "main" ? "Main agent" : "Worker"} ${name}, ${label}`}
       style={{ transform: `translate(${box.x}px, ${box.y}px)`, width: box.w, height: folded ? COLLAPSED_HEIGHT : box.h, zIndex: z }}
       onPointerDownCapture={() => onPress(slot)}
+      onContextMenu={role === "worker" ? (e) => onMenu(e, slot) : undefined}
     >
       <header className="node-head" onPointerDown={(e) => onGrab(e, slot, "move")} onPointerMove={onDrag} onPointerUp={onRelease} onPointerCancel={onRelease} onDoubleClick={() => onToggle(slot)}>
         <span className={`node-dot ${status}`} aria-hidden />
@@ -191,17 +203,7 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
   };
 
   // Closes when you click anywhere else or press Escape.
-  useEffect(() => {
-    if (!open) return;
-    const away = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("pointerdown", away);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("pointerdown", away);
-      document.removeEventListener("keydown", esc);
-    };
-  }, [open]);
+  useDismiss(open, box, () => setOpen(false));
 
   return (
     <div className="canvas-team" ref={box}>
@@ -250,7 +252,7 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
   );
 }
 
-function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo }: { zoom: number; attention: number; nodes: OrchestraNode[]; onZoom: (factor: number) => void; onFit: () => void; onNext: () => void; onGoTo: (slot: string) => void }) {
+function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onShow, main }: { zoom: number; attention: number; nodes: OrchestraNode[]; onZoom: (factor: number) => void; onFit: () => void; onNext: () => void; onGoTo: (slot: string) => void; onShow: (slot: string) => void; main: string | undefined }) {
   return (
     <>
       {attention > 0 && (
@@ -273,6 +275,8 @@ function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo }: { z
           Fit
         </button>
         <Team nodes={nodes} onGoTo={onGoTo} />
+        <HiddenAgents nodes={nodes.filter((n) => n.hidden)} onShow={onShow} />
+        {main && <NewAgent main={main} />}
       </div>
     </>
   );
@@ -294,8 +298,13 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   const [zoomPct, setZoomPct] = useState(view.current.zoom);
   const [summary, setSummary] = useState(view.current.zoom < SUMMARY_ZOOM);
   const nextAttention = useRef(0);
+  const actions = useNodeActions();
 
+  // Hidden agents keep their place (so one comes back where it was) but are not drawn, tethered or framed.
   placeNodes(layout, nodes);
+  const visible = nodes.filter((n) => !n.hidden);
+  const shownSlots = useRef<string[]>([]);
+  shownSlots.current = visible.map((n) => n.slot);
 
   /** Frames the canvas at `v`: straight onto the elements (no React), animated when it's a jump rather than a gesture. */
   const apply = useCallback((v: View, animate = false) => {
@@ -319,7 +328,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   }, [layout]);
 
   const fit = useCallback((animate: boolean) => {
-    const boxes = Object.values(layout.boxes);
+    const boxes = shownSlots.current.map((s) => layout.boxes[s]).filter(Boolean);
     // Not while a gesture is in hand: re-framing under a pointer would move what it is moving.
     if (size.current.w === 0 || boxes.length === 0 || drag.current || pan.current) return;
     apply(fitView(boxes, size.current), animate);
@@ -345,7 +354,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   }, [apply, fit, layout]);
 
   // A new agent appears: until the user has framed the canvas, bring everyone into view.
-  const slotKey = nodes.map((n) => n.slot).join(",");
+  const slotKey = visible.map((n) => n.slot).join(",");
   useEffect(() => {
     if (!layout.touched) fit(true);
   }, [slotKey, fit, layout]);
@@ -368,7 +377,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
         return;
       }
       // Over an agent's chat the wheel scrolls it; anywhere else (a card, a title, the background) it pans.
-      if ((e.target as Element).closest(".node-chat")) return;
+      if ((e.target as Element).closest(".node-chat, .canvas-overlay")) return;
       e.preventDefault();
       touch();
       apply(panBy(view.current, -e.deltaX, -e.deltaY));
@@ -409,7 +418,8 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     const t = e.target as HTMLElement;
     const onBackground = t === e.currentTarget || t.classList.contains("canvas-world") || !!t.closest("svg.canvas-tethers");
     const card = summary && !onBackground && !t.closest("button") ? (t.closest("[data-node]") as HTMLElement | null)?.dataset.node ?? null : null;
-    if (e.button !== 0 || !(onBackground || (card && t.closest(".node-body")))) return;
+    // A control-click is a right-click on a Mac: it opens a menu, it doesn't start a pan.
+    if (e.button !== 0 || e.ctrlKey || !(onBackground || (card && t.closest(".node-body")))) return;
     e.currentTarget.setPointerCapture?.(e.pointerId);
     pan.current = { id: e.pointerId, x: e.clientX, y: e.clientY, from: e.clientX, fromY: e.clientY, moved: false, card: card && t.closest(".node-body") ? card : null };
   };
@@ -472,7 +482,8 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   }, [onFocus, bringToFront]);
 
   const onGrab = useCallback((e: ReactPointerEvent<HTMLElement>, slot: string, kind: "move" | "resize") => {
-    if (e.button !== 0 || (e.target as Element).closest("button")) return;
+    // A control-click is a right-click on a Mac: it opens the menu, it doesn't pick the card up.
+    if (e.button !== 0 || e.ctrlKey || (e.target as Element).closest("button")) return;
     // No text selection while dragging.
     e.preventDefault();
     e.currentTarget.setPointerCapture?.(e.pointerId);
@@ -503,6 +514,74 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     redraw();
   }, [layout]);
 
+  // The menu of a worker's card (right-click), placed where it was opened.
+  const [menu, setMenu] = useState<{ slot: string; x: number; y: number } | null>(null);
+  const onMenu = useCallback((e: ReactMouseEvent<HTMLElement>, slot: string) => {
+    // The box where the user types, and text they have picked, keep the browser's own menu (copy, paste).
+    if ((e.target as Element).closest("textarea, input") || window.getSelection()?.toString()) return;
+    e.preventDefault();
+    const at = viewport.current?.getBoundingClientRect();
+    if (!at) return;
+    // From the keyboard (the menu key) there is no pointer: it opens at the card's corner.
+    const from = e.clientX === 0 && e.clientY === 0 ? e.currentTarget.getBoundingClientRect() : { left: e.clientX, top: e.clientY };
+    const room = (at: number, edge: number, size: number) => (size > 0 ? Math.max(8, Math.min(at, size - edge)) : at);
+    setMenu({ slot, x: room(from.left - at.left, MENU_SIZE.w, size.current.w), y: room(from.top - at.top, MENU_SIZE.h, size.current.h) });
+  }, []);
+  // "Clean up and close": asked what would be lost first. Nothing to lose closes at once; otherwise the user is asked, and
+  // until they say yes nothing is stopped or removed.
+  const [closing, setClosing] = useState<{ slot: string; check: CloseCheck } | null>(null);
+  const [closeBusy, setCloseBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const closeAgent = (slot: string, agreed?: CloseAgreed) => {
+    setCloseBusy(true);
+    actions.closeWorker(slot, agreed).then(
+      () => setClosing(null),
+      (e) => {
+        setClosing(null);
+        setProblem(errText(e));
+      },
+    ).finally(() => setCloseBusy(false));
+  };
+  const askToClose = (slot: string) => {
+    setProblem(null);
+    actions.closeCheck(slot).then(
+      (check) => (lostText(check) ? setClosing({ slot, check }) : closeAgent(slot)),
+      (e) => setProblem(errText(e)),
+    );
+  };
+  const menuNode = menu ? nodes.find((n) => n.slot === menu.slot) : undefined;
+  const menuItems = (n: OrchestraNode): AgentMenuItem[] => {
+    const needsYou = attention.includes(n.slot);
+    return [
+      {
+        key: "hide",
+        label: "Hide",
+        hint: needsYou ? "It needs you now, so it stays" : "Takes the card off the canvas. It keeps working and reporting.",
+        disabled: needsYou,
+        run: () => {
+          setMenu(null);
+          actions.hide(n.slot);
+        },
+      },
+      {
+        key: "close",
+        label: "Clean up and close",
+        hint: n.isolation === "shared" ? "Stops it and removes its card. It shares your folder, so no files are removed." : "Stops it, deletes its worktree and branch, and removes its card.",
+        danger: true,
+        run: () => {
+          setMenu(null);
+          askToClose(n.slot);
+        },
+      },
+    ];
+  };
+
+  // A hidden agent that starts waiting on the user comes back by itself, so it can't sit blocked where nobody sees it.
+  const hiddenWaiting = attention.filter((slot) => nodes.some((n) => n.slot === slot && n.hidden)).join(",");
+  useEffect(() => {
+    for (const slot of hiddenWaiting.split(",").filter(Boolean)) actions.show(slot);
+  }, [hiddenWaiting, actions]);
+
   const zoomBy = (factor: number) => {
     touch();
     apply(zoomAt(view.current, factor, { x: size.current.w / 2, y: size.current.h / 2 }), true);
@@ -512,13 +591,15 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   const goTo = useCallback((slot: string) => {
     const box = layout.boxes[slot];
     if (!box) return;
+    // An agent that was hidden is put back first: there is nothing to go to otherwise.
+    if (nodes.some((n) => n.slot === slot && n.hidden)) actions.show(slot);
     layout.touched = true;
     // Big enough to read, but never past what fits: an agent taller than the canvas is shown whole, however small that is.
     const fits = size.current.w > 0 && size.current.h > 0 ? Math.min(1, (size.current.w - 48) / box.w, (size.current.h - 48) / shown(slot).h) : 1;
     apply(centerOn(shown(slot), size.current, clampZoom(Math.min(Math.max(view.current.zoom, SUMMARY_ZOOM + 0.2), fits))), true);
     onFocus(slot);
     bringToFront(slot);
-  }, [layout, apply, onFocus, bringToFront]);
+  }, [layout, nodes, actions, apply, onFocus, bringToFront]);
   const next = () => {
     if (attention.length === 0) return;
     goTo(attention[nextAttention.current++ % attention.length]);
@@ -538,13 +619,13 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     >
       <div className="canvas-world" ref={world} style={{ transform: `translate(${initial.x}px, ${initial.y}px) scale(${initial.zoom})` }}>
         <svg className="canvas-tethers" aria-hidden>
-          {nodes.map((n) => {
+          {visible.map((n) => {
             const parent = n.parent ? layout.boxes[n.parent] : undefined;
             const box = layout.boxes[n.slot];
             return parent && box ? <TetherLine key={n.slot} slot={n.slot} d={tether(shown(n.parent!), shown(n.slot)).d} /> : null;
           })}
         </svg>
-        {nodes.map((n) => (
+        {visible.map((n) => (
           <Frame
             key={n.slot}
             slot={n.slot}
@@ -563,10 +644,25 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
             onToggle={onToggle}
             onOpen={onOpen}
             onPress={onPress}
+            onMenu={onMenu}
           />
         ))}
       </div>
-      <Controls zoom={zoomPct} attention={attention.length} nodes={nodes} onZoom={zoomBy} onFit={() => { layout.touched = false; fit(true); }} onNext={next} onGoTo={goTo} />
+      <Controls zoom={zoomPct} attention={attention.length} nodes={nodes} onZoom={zoomBy} onFit={() => { layout.touched = false; fit(true); }} onNext={next} onGoTo={goTo} onShow={actions.show} main={nodes.find((n) => n.role === "main")?.slot} />
+      {problem && (
+        <div className="canvas-problem canvas-overlay" role="alert">
+          <span>{problem}</span>
+          <button onClick={() => setProblem(null)}>Dismiss</button>
+        </div>
+      )}
+      {closing && (
+        <ConfirmDialog title={`Close ${nodes.find((n) => n.slot === closing.slot)?.name ?? "this agent"}?`} confirmLabel="Discard work and close" busyLabel="Closing…" busy={closeBusy} onConfirm={() => closeAgent(closing.slot, { uncommitted: closing.check.uncommitted, unmerged_commits: closing.check.unmerged_commits })} onCancel={() => setClosing(null)}>
+          <p>
+            It has <strong>{lostText(closing.check)}</strong>. Closing it stops it and deletes its worktree{closing.check.branch ? <> and branch <code>{closing.check.branch}</code></> : null}, so that work is gone for good.
+          </p>
+        </ConfirmDialog>
+      )}
+      {menu && menuNode && <AgentMenu name={menuNode.name} items={menuItems(menuNode)} x={menu.x} y={menu.y} onDismiss={() => setMenu(null)} />}
     </div>
   );
 }
