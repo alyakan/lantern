@@ -163,6 +163,28 @@ export interface RelocateOutcome {
   rules: number;
 }
 
+/** What closing a worker would throw away (the backend's CloseCheck): asked before anything is stopped or removed. */
+export interface CloseCheck {
+  /** It has a worktree of its own; a worker in the shared folder only gets stopped. */
+  worktree: boolean;
+  branch: string | null;
+  /** Files changed in its worktree and not committed. */
+  uncommitted: number;
+  /** Commits on its branch that aren't in the branch it started from, or was proposed into. */
+  unmerged_commits: number;
+}
+
+/** What the user asks for when they start a worker from the canvas. */
+export interface NewWorker {
+  /** What the worker is asked to do: its brief. */
+  task: string;
+  /** Null: named from the task. */
+  name: string | null;
+  isolation: "worktree" | "shared";
+  /** Null: Claude Code's default. */
+  model: string | null;
+}
+
 /**
  * A past session as it opened: its events; the folder it was started in, when that was a place this folder moved from
  * (null otherwise); and why it's only readable, when its copy into the folder failed (null: it can be resumed).

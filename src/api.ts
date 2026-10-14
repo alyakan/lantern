@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
-import type { DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NewRule, OldLocation, OpenedSession, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NewRule, NewWorker, OldLocation, OpenedSession, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -40,6 +40,12 @@ export const api = {
   declineMerge: (worker: string) => invoke<void>("orchestra_decline_merge", { worker }),
   /** Removes a worker's worktree; loose work needs `force`, and an unmerged branch is kept either way. */
   discardWorktree: (worker: string, force: boolean) => invoke<void>("orchestra_discard", { worker, force }),
+  /** What closing a worker would throw away. Nothing is stopped or removed by asking. */
+  closeWorkerCheck: (worker: string) => invoke<CloseCheck>("orchestra_close_check", { worker }),
+  /** Stops a worker and removes its worktree and branch (and tells its main agent). What would be thrown away needs `force`. */
+  closeWorker: (worker: string, force: boolean) => invoke<void>("orchestra_close_worker", { worker, force }),
+  /** Starts a worker for the main agent `main`, as the user's own doing (the main agent is told). Resolves to the worker's id. */
+  spawnWorker: (main: string, w: NewWorker) => invoke<string>("orchestra_spawn", { main, task: w.task, name: w.name, isolation: w.isolation, model: w.model }),
   /** Runs a command the user typed after "!" in the chat's folder; its output comes as shell_output, then shell_done. */
   runShell: (slot: string, id: string, command: string) => invoke<void>("run_shell", { slot, id, command }),
   /** Asks the chat's claude something for Settings (MCP status and actions, reloading skills); resolves to its reply. */

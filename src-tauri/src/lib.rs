@@ -545,6 +545,25 @@ async fn orchestra_discard(state: State<'_, AppState>, worker: String, force: bo
     state.orchestra.discard(&worker, force).await
 }
 
+/// What closing a worker from its card would throw away: asked before anything is stopped or removed.
+#[tauri::command]
+async fn orchestra_close_check(state: State<'_, AppState>, worker: String) -> Result<orchestra::CloseCheck, String> {
+    state.orchestra.close_check(&worker).await
+}
+
+/// Closes a worker from its card: stops it, removes its worktree and branch, and tells its main agent. Work that would be
+/// thrown away needs `force`.
+#[tauri::command]
+async fn orchestra_close_worker(state: State<'_, AppState>, worker: String, force: bool) -> Result<(), String> {
+    state.orchestra.close_worker(&worker, force).await
+}
+
+/// Starts a worker the user asked for from the canvas (the main agent `main` is told). Returns the worker's id.
+#[tauri::command]
+async fn orchestra_spawn(state: State<'_, AppState>, main: String, task: String, name: Option<String>, isolation: String, model: Option<String>) -> Result<String, String> {
+    state.orchestra.spawn_for_user(&main, &task, name.as_deref(), &isolation, model.as_deref()).await
+}
+
 /// The control requests Settings may send to a chat's claude: MCP servers' status and actions, and reloading plugins
 /// (which is how claude picks up skills, commands and agents too). Anything else is refused.
 const SETTINGS_REQUESTS: &[&str] = &["mcp_status", "mcp_reconnect", "mcp_toggle", "mcp_authenticate", "mcp_oauth_callback_url", "mcp_clear_auth", "reload_plugins"];
@@ -1488,7 +1507,10 @@ pub fn run() {
             check_for_updates,
             app_version,
             restart_to_update,
-            copy_diagnostics
+            copy_diagnostics,
+            orchestra_close_check,
+            orchestra_close_worker,
+            orchestra_spawn
         ])
         .build(tauri::generate_context!())
         .expect("error while building Lantern")
