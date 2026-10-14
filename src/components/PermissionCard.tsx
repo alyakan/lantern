@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { api } from "../api";
+import { useSlot } from "../lib/slot";
 import { Md } from "./Md";
 import type { ChatItem } from "../store";
 import { QuestionCard } from "./QuestionCard";
@@ -13,6 +15,11 @@ export const PLAN_TOOL = "ExitPlanMode";
 /** Debug mode's request to reproduce the bug (from Lantern's own MCP tool). */
 export const REPRODUCE_TOOL = "Reproduce";
 
+/** The main agent's built-in tool for a helper that runs inline (named Agent, and Task before that). */
+const AGENT_TOOLS = ["Agent", "Task"];
+/** What the main agent reads when you send a helper to the canvas: the same words as CANVAS_REFUSAL in bridge.rs. */
+export const CANVAS_REFUSAL = 'Not run inline: the user wants helpers on the canvas, as workers with a chat of their own. Start this one with spawn_agent instead, using the same task as its brief (isolation "shared" if it only reads), then carry on or end your turn; you\'ll get a note when it finishes a turn.';
+
 /** `remember`: an "Always allow…" choice, saved as a rule before the request is answered. */
 type Decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => void;
 
@@ -20,6 +27,7 @@ export function PermissionCard({ item, onDecide }: { item: PermissionItem; onDec
   if (item.toolName === PLAN_TOOL) return <PlanCard item={item} onDecide={onDecide} />;
   if (item.toolName === REPRODUCE_TOOL) return <ReproduceCard item={item} onDecide={onDecide} />;
   if (item.toolName === QUESTION_TOOL) return <QuestionCard item={item} onDecide={onDecide} />;
+  if (AGENT_TOOLS.includes(item.toolName)) return <AgentCard item={item} onDecide={onDecide} />;
   return <ToolCard item={item} onDecide={onDecide} />;
 }
 
@@ -76,6 +84,51 @@ function ToolCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+const text = (input: unknown, key: string) => (input && typeof input === "object" && typeof (input as Record<string, unknown>)[key] === "string" ? ((input as Record<string, string>)[key] ?? "").trim() : "");
+
+// The main agent wants to run a helper inline. Helpers belong on the canvas, where they get a card, a chat and a worktree,
+// so you choose where this one goes (and, ticked, where they all go in this chat).
+function AgentCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }) {
+  const slot = useSlot();
+  const [same, setSame] = useState(true);
+  const what = text(item.input, "description") || "A helper";
+  const kind = text(item.input, "subagent_type");
+  if (item.decision !== null) {
+    return (
+      <div className={`permission-done ${item.decision}`}>
+        <span className="decision">{item.decision === "allowed" ? "✓ Ran inline" : "→ Sent to the canvas"}</span> {what}
+      </div>
+    );
+  }
+  const choose = (inline: boolean) => {
+    const answer = () => onDecide(item.id, inline, inline ? undefined : CANVAS_REFUSAL);
+    if (!same) return answer();
+    // Saved first, so the chat's next helper is answered by it; if it can't be saved this one is still answered.
+    api.setAgentChoice(slot, inline ? "inline" : "canvas").catch(() => {}).then(answer);
+  };
+  return (
+    <div className="permission">
+      <div className="permission-title">
+        Run this helper on the canvas? <strong>{what}</strong>
+        {kind && <span className="permission-kind">{kind}</span>}
+      </div>
+      {text(item.input, "prompt") && <pre className="permission-detail">{text(item.input, "prompt")}</pre>}
+      <div className="permission-actions">
+        <button className="primary" title="It becomes a worker with a card, a chat and, if it writes, a branch of its own" onClick={() => choose(false)}>
+          Run on canvas
+        </button>
+        <button title="It runs inside the main agent's chat, shown only in the Agents tab" onClick={() => choose(true)}>
+          Run inline
+        </button>
+      </div>
+      <label className="permission-same">
+        <input type="checkbox" checked={same} onChange={(e) => setSame(e.target.checked)} />
+        Same for the rest of this chat
+      </label>
     </div>
   );
 }

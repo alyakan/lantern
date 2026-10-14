@@ -365,6 +365,8 @@ button.edit-toggle:hover:not(:disabled) { color: var(--text); }
 .permission { border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px 12px; background: var(--bg-subtle); display: flex; flex-direction: column; gap: 8px; font-size: calc(13px * var(--font-scale)); }
 .permission-detail { margin: 0; padding: 6px 8px; background: var(--code-bg); border-radius: var(--radius-chip); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
 .permission-actions { display: flex; gap: 6px; }
+.permission-kind { margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--bg-active); color: var(--text-2); font-size: calc(11px * var(--font-scale)); font-weight: 400; }
+.permission-same { display: inline-flex; align-items: center; gap: 6px; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
 .permission-actions button { height: 24px; padding: 0 12px; font-size: calc(12px * var(--font-scale)); }
 .always-menu { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg-subtle); }
 .always-group { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }

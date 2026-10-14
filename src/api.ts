@@ -85,6 +85,8 @@ export const api = {
   /** `updatedInput`: on allow, the tool's input as it should run (AskUserQuestion's, with the user's answers). */
   respondPermission: (slot: string, requestId: string, allow: boolean, message: string | null = null, updatedInput: Record<string, unknown> | null = null) =>
     invoke<void>("respond_permission", { slot, requestId, allow, message, updatedInput }),
+  /** Where the main agent's helpers run from now on in this chat (null: ask each time again). */
+  setAgentChoice: (slot: string, choice: "canvas" | "inline" | null) => invoke<void>("set_agent_choice", { slot, choice }),
   /** Makes an "Always allow" rule from a card (the request itself is answered by respondPermission). */
   addPermissionRule: (slot: string, rule: NewRule) => invoke<void>("add_permission_rule", { slot, rule }),
   /** The rules Settings lists: this chat's (when `slot` is open) and every folder's. */
