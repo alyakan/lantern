@@ -159,8 +159,15 @@ struct Worker {
     /// Bumped whenever it stops waiting, so a notice timer set for an earlier wait finds out it is stale.
     wait_seq: u64,
     merge: Merge,
-    /// The branch the merge was proposed into, as the user saw it: approving merges into that and nothing else.
-    into: Option<String>,
+    /// The merge as it was last proposed: approving merges that and nothing else.
+    proposed: Option<Proposed>,
+}
+
+/// A merge as the user was shown it: the branch it goes into, and the commit and loose files it takes.
+#[derive(Debug, Clone, PartialEq)]
+struct Proposed {
+    into: String,
+    seen: git::Snapshot,
 }
 
 #[derive(Default)]
@@ -295,18 +302,21 @@ impl Orchestra {
     }
 
     /// A worker from an earlier run, brought back with its chat: it reports to `parent` again (an open main agent), and
-    /// its worktree is found where it was left. Idle until it does something, and the main agent hears of it from then.
-    pub async fn adopt(self: &Arc<Self>, slot: &str, parent: &str, name: &str, folder: &Path) -> Result<(), String> {
+    /// its worktree is found where it was left, on `branch` (the one Lantern saved for it; None from an older save). Idle
+    /// until it does something, and the main agent hears of it from then.
+    pub async fn adopt(self: &Arc<Self>, slot: &str, parent: &str, name: &str, folder: &Path, branch: Option<&str>) -> Result<(), String> {
         if !self.is_main(parent) {
             return Err("The main agent this worker belonged to isn't open.".into());
         }
-        let (f, env) = (folder.to_path_buf(), self.host.path_env().await);
+        let (f, env, branch) = (folder.to_path_buf(), self.host.path_env().await, branch.map(String::from));
         let main_folder = self.host.main_folder(parent).ok();
         let worktree = tokio::task::spawn_blocking(move || {
-            let wt = git::existing_worktree(&f, env.as_deref())?;
+            let main_folder = main_folder?;
+            // Only a worktree of the main agent's own repository, checked before git runs in it (see git::verify_worktree).
+            let wt = git::existing_worktree(&main_folder, &f, branch.as_deref(), env.as_deref())?;
             // A worker that shared the main folder (when that folder is itself a linked worktree) has no worktree of its own:
             // its "worktree" would be the user's checkout, which a merge or a clean-up must never touch.
-            let main_root = main_folder.and_then(|m| git::repo_root(&m, env.as_deref()));
+            let main_root = git::repo_root(&main_folder, env.as_deref());
             let same = |a: &Path, b: &Path| std::fs::canonicalize(a).ok().is_some_and(|a| std::fs::canonicalize(b).ok() == Some(a));
             (!main_root.as_deref().is_some_and(|r| same(&wt.root, r))).then_some(wt)
         })
@@ -337,7 +347,7 @@ impl Orchestra {
                 waiting_since: None,
                 wait_seq: 0,
                 merge: Merge::None,
-                into: None,
+                proposed: None,
             },
         );
         Ok(())
@@ -355,6 +365,11 @@ impl Orchestra {
 
     pub fn is_worker(&self, slot: &str) -> bool {
         self.inner.lock().unwrap().workers.contains_key(slot)
+    }
+
+    /// The main agent worker `slot` reports to, while it is part of an orchestra.
+    pub fn parent_of(&self, slot: &str) -> Option<String> {
+        self.inner.lock().unwrap().workers.get(slot).map(|w| w.parent.clone())
     }
 
     /// A chat was closed. A worker leaves the registry; its worktree stays on disk with whatever it holds. The workers of a
@@ -473,7 +488,7 @@ impl Orchestra {
                     waiting_since: None,
                     wait_seq: 0,
                     merge: Merge::None,
-                    into: None,
+                    proposed: None,
                 },
             );
             id
@@ -677,40 +692,48 @@ impl Orchestra {
         let repo = self.host.main_folder(main)?;
         let env = self.host.path_env().await;
         let (r, root, branch) = (repo.clone(), wt.root.clone(), wt.branch.clone());
-        let (into, stats, uncommitted) = tokio::task::spawn_blocking(move || -> Result<_, String> {
+        let (into, stats, seen) = tokio::task::spawn_blocking(move || -> Result<_, String> {
             // Where the merge would go, as git says (from any folder in the repository); a detached HEAD is nowhere.
             let into = git::branch_of(&r, env.as_deref()).ok_or("The main checkout isn't on a branch, so there is nothing to merge into.")?;
-            let stats = git::branch_summary(&r, &into, &branch, env.as_deref())?;
-            let uncommitted = git::dirty(&root, env.as_deref())?.len();
-            Ok((into, stats, uncommitted))
+            // What the user is shown is what approving takes: the branch's commit now, and the loose files by name.
+            let checked = git::verify_worktree(&r, &root, env.as_deref())?;
+            let seen = git::snapshot(&r, &checked, &branch, env.as_deref())?;
+            let stats = git::branch_summary(&r, &into, &seen.tip, env.as_deref())?;
+            Ok((into, stats, seen))
         })
         .await
         .map_err(|e| e.to_string())??;
-        if stats.commits == 0 && uncommitted == 0 {
+        if stats.commits == 0 && seen.loose.is_empty() {
             return Err(format!("{id} has nothing to merge yet: no commits on {} and nothing uncommitted.", wt.branch));
         }
+        let proposal = Proposed { into: into.clone(), seen };
         {
             let mut inner = self.inner.lock().unwrap();
-            if let Some(w) = inner.workers.get_mut(&id) {
-                if w.merge == Merge::Merging {
-                    return Err("That worker's branch is being merged right now.".into());
-                }
-                w.merge = Merge::Proposed;
-                w.into = Some(into.clone());
+            let w = inner.workers.get_mut(&id).ok_or(GONE)?;
+            if w.merge == Merge::Merging {
+                return Err("That worker's branch is being merged right now.".into());
             }
+            // Asked again with nothing changed: the card the user has is still the right one.
+            if w.merge == Merge::Proposed && w.proposed.as_ref() == Some(&proposal) {
+                return Ok(format!("Already waiting on the user for {id}'s merge."));
+            }
+            w.merge = Merge::Proposed;
+            w.proposed = Some(proposal.clone());
         }
+        let loose = proposal.seen.loose;
         self.host.emit(
             main,
-            UiEvent::MergeProposed { worker: id.clone(), name, branch: wt.branch.clone(), into: into.clone(), summary, commits: stats.commits, files: stats.files, uncommitted },
+            UiEvent::MergeProposed { worker: id.clone(), name, branch: wt.branch.clone(), into: into.clone(), summary, commits: stats.commits, files: stats.files, uncommitted: loose.len(), loose },
         );
         Ok(format!("Asked the user to merge {} into {into}. Only they can approve it; you'll get a note with their answer.", untrusted(&wt.branch, 120)))
     }
 
     /// The user approved a merge: the worker's loose work is committed so nothing is lost, then its branch is merged
-    /// into the main checkout. The main agent is told how it went.
+    /// into the main checkout, exactly as the user was shown it. A branch with commits since, or other loose files, isn't
+    /// merged: the proposal is gone, and the main agent is told why. The main agent is told how it went.
     pub async fn approve_merge(self: &Arc<Self>, worker: &str) -> Result<(), String> {
         // Only a merge the main agent proposed can be approved, and only once at a time.
-        let (main, name, wt, into) = self.begin_merge(worker)?;
+        let (main, name, wt, proposed) = self.begin_merge(worker)?;
         let repo = match self.host.main_folder(&main) {
             Ok(r) => r,
             Err(e) => {
@@ -720,10 +743,12 @@ impl Orchestra {
         };
         let env = self.host.path_env().await;
         let (root, branch, label) = (wt.root.clone(), wt.branch.clone(), name.clone());
-        let target = into.clone();
-        let outcome = match tokio::task::spawn_blocking(move || -> Result<git::Merged, String> {
-            git::commit_all(&root, &format!("Lantern: {label}, work not yet committed"), env.as_deref())?;
-            git::merge(&repo, &target, &branch, &format!("Merge {branch}: {label}"), env.as_deref())
+        let outcome = match tokio::task::spawn_blocking(move || -> Result<Approved, String> {
+            let checked = git::verify_worktree(&repo, &root, env.as_deref())?;
+            match git::commit_snapshot(&repo, &checked, &branch, &proposed.seen, &format!("Lantern: {label}, work not yet committed"), env.as_deref())? {
+                git::Pinned::Changed(why) => Ok(Approved::Changed(why)),
+                git::Pinned::Ready(commit) => git::merge(&repo, &proposed.into, &commit, &format!("Merge {branch}: {label}"), env.as_deref()).map(Approved::Merged),
+            }
         })
         .await
         {
@@ -733,13 +758,20 @@ impl Orchestra {
         };
         let branch_note = untrusted(&wt.branch, 120);
         match outcome {
-            Ok(git::Merged::Into(into)) => {
+            Ok(Approved::Changed(why)) => {
+                // Not what the user said yes to: the card goes, and the main agent can propose what is there now.
+                self.set_merge(worker, Merge::None);
+                self.host.emit(&main, UiEvent::MergeResolved { worker: worker.into(), outcome: "changed".into(), detail: why.clone() });
+                self.wake(&main, format!("[Lantern: the user approved merging {branch_note}, but it changed since you proposed it, so nothing was merged ({}). If it is ready, propose the merge again, so the user sees what is there now.]", untrusted(&why, 200)));
+                Ok(())
+            }
+            Ok(Approved::Merged(git::Merged::Into(into))) => {
                 self.set_merge(worker, Merge::Merged);
                 self.host.emit(&main, UiEvent::MergeResolved { worker: worker.into(), outcome: "merged".into(), detail: into.clone() });
                 self.wake(&main, format!("[Lantern: the user approved the merge: {branch_note} is now merged into {}.]", untrusted(&into, 80)));
                 Ok(())
             }
-            Ok(git::Merged::Conflicts(files)) => {
+            Ok(Approved::Merged(git::Merged::Conflicts(files))) => {
                 // Still proposed: they may resolve it in the main checkout and approve again.
                 self.set_merge(worker, Merge::Proposed);
                 let list = files.join(", ");
@@ -759,7 +791,7 @@ impl Orchestra {
 
     /// The proposal waiting for the user's answer, taken for merging: a worker with none (never proposed, already
     /// merged, declined, or being merged right now) has nothing to approve.
-    fn begin_merge(&self, worker: &str) -> Result<(String, String, git::Worktree, String), String> {
+    fn begin_merge(&self, worker: &str) -> Result<(String, String, git::Worktree, Proposed), String> {
         let mut inner = self.inner.lock().unwrap();
         let w = inner.workers.get_mut(worker).ok_or("That worker is no longer part of the orchestra.")?;
         if w.merge != Merge::Proposed {
@@ -770,9 +802,9 @@ impl Orchestra {
             return Err(format!("{} is {}. Wait until it has finished its turn, then approve the merge.", w.name, w.status.label()));
         }
         let wt = w.worktree.clone().ok_or("That worker shares the main folder, so it has no branch.")?;
-        let into = w.into.clone().ok_or("The merge has no branch to go into: ask the main agent to propose it again.")?;
+        let proposed = w.proposed.clone().ok_or("The merge has no branch to go into: ask the main agent to propose it again.")?;
         w.merge = Merge::Merging;
-        Ok((w.parent.clone(), w.name.clone(), wt, into))
+        Ok((w.parent.clone(), w.name.clone(), wt, proposed))
     }
 
     pub fn decline_merge(self: &Arc<Self>, worker: &str) -> Result<(), String> {
@@ -802,15 +834,17 @@ impl Orchestra {
         let repo = self.host.main_folder(&main)?;
         let env = self.host.path_env().await;
         if !force {
-            let (root, e) = (wt.root.clone(), env.clone());
-            let loose = tokio::task::spawn_blocking(move || git::dirty(&root, e.as_deref())).await.map_err(|e| e.to_string())??;
+            let (r, root, e) = (repo.clone(), wt.root.clone(), env.clone());
+            let loose = tokio::task::spawn_blocking(move || git::verify_worktree(&r, &root, e.as_deref()).and_then(|wt| git::loose_files(&wt, e.as_deref()))).await.map_err(|e| e.to_string())??;
             if !loose.is_empty() {
                 return Err(format!("Its worktree has {} uncommitted change{}, which removing it would throw away.", loose.len(), if loose.len() == 1 { "" } else { "s" }));
             }
         }
         self.host.stop(worker).await;
+        // A branch Lantern didn't make (an older save names what the worktree had checked out) stays, whatever happens.
         let (branch, e) = (wt.branch.clone(), env);
-        tokio::task::spawn_blocking(move || git::remove_worktree(&repo, &wt.root, &branch, merged || force, force, e.as_deref())).await.map_err(|e| e.to_string())??;
+        let delete = (merged || force) && git::is_workers_branch(&branch);
+        tokio::task::spawn_blocking(move || git::remove_worktree(&repo, &wt.root, &branch, delete, force, e.as_deref())).await.map_err(|e| e.to_string())??;
         // Gone from disk: not a worker that could still be told things, merged or counted against the limit.
         {
             let mut inner = self.inner.lock().unwrap();
@@ -830,7 +864,7 @@ impl Orchestra {
         let (main, wt, into, merging) = {
             let inner = self.inner.lock().unwrap();
             let w = inner.workers.get(worker).ok_or(GONE)?;
-            (w.parent.clone(), w.worktree.clone(), w.into.clone(), w.merge == Merge::Merging)
+            (w.parent.clone(), w.worktree.clone(), w.proposed.as_ref().map(|p| p.into.clone()), w.merge == Merge::Merging)
         };
         if merging {
             return Err("That worker's branch is being merged right now.".into());
@@ -840,7 +874,8 @@ impl Orchestra {
         let env = self.host.path_env().await;
         let (root, branch, base) = (wt.root.clone(), wt.branch.clone(), into.or(wt.base.clone()));
         let (uncommitted, unmerged_commits) = tokio::task::spawn_blocking(move || -> Result<_, String> {
-            let uncommitted = git::dirty(&root, env.as_deref())?.len();
+            let checked = git::verify_worktree(&repo, &root, env.as_deref())?;
+            let uncommitted = git::loose_files(&checked, env.as_deref())?.len();
             // Counted from where the merge was proposed, else where the worker started; a branch since deleted or renamed is no
             // place to count from, so the main checkout's own HEAD is. Not knowing is an error, never "nothing".
             let mut counted = Err(String::new());
@@ -880,11 +915,13 @@ impl Orchestra {
             }
             // Forced even when nothing is lost: the branch goes too (an unforced removal keeps one that was never proposed).
             self.discard(worker, true).await?;
-            let branch = untrusted(check.branch.as_deref().unwrap_or_default(), 120);
+            let raw = check.branch.as_deref().unwrap_or_default();
+            let branch = untrusted(raw, 120);
+            let cleaned = if git::is_workers_branch(raw) { format!("cleaned up its worktree and branch {branch}") } else { format!("cleaned up its worktree (its branch {branch} isn't one Lantern made, so it was kept)") };
             if check.lost() {
-                format!("cleaned up its worktree and branch {branch}, throwing away {}", check.lost_text())
+                format!("{cleaned}, throwing away {}", check.lost_text())
             } else {
-                format!("cleaned up its worktree and branch {branch}; nothing was lost")
+                format!("{cleaned}; nothing was lost")
             }
         } else {
             self.stop(&main, &serde_json::json!({ "id": worker })).await?;
@@ -1035,6 +1072,13 @@ impl Orchestra {
         };
         self.wake(&main, text);
     }
+}
+
+/// What approving a merge came to.
+enum Approved {
+    Merged(git::Merged),
+    /// The branch or its loose files aren't what the user was shown (why, in words); nothing was merged.
+    Changed(String),
 }
 
 /// Activity means a worker that was waiting on a prompt got its answer.
@@ -1712,9 +1756,9 @@ mod tests {
         o.forget("w1");
         assert_eq!(call(&o, "list_agents", json!({})).await.unwrap(), "No workers yet.");
         // Its main agent is not open yet.
-        assert!(o.adopt("w1", "s9", "Login", &wt.folder).await.unwrap_err().contains("isn't open"));
-        o.adopt("w1", "s1", "Login", &wt.folder).await.unwrap();
-        o.adopt("w1", "s1", "Login", &wt.folder).await.unwrap(); // idempotent
+        assert!(o.adopt("w1", "s9", "Login", &wt.folder, None).await.unwrap_err().contains("isn't open"));
+        o.adopt("w1", "s1", "Login", &wt.folder, None).await.unwrap();
+        o.adopt("w1", "s1", "Login", &wt.folder, None).await.unwrap(); // idempotent
         let list = call(&o, "list_agents", json!({})).await.unwrap();
         assert_eq!(list.lines().count(), 1, "{list}");
         assert!(list.contains("w1 \"Login\" — idle") && list.contains("branch lantern/login"), "{list}");
@@ -1852,7 +1896,7 @@ mod tests {
         let main_wt = wts.path().join("main-checkout");
         git(repo.path(), &["worktree", "add", "-q", "-b", "user-branch", main_wt.to_str().unwrap()]);
         *host.folder.lock().unwrap() = main_wt.clone();
-        o.adopt("w4", "s1", "Research", &main_wt).await.unwrap();
+        o.adopt("w4", "s1", "Research", &main_wt, None).await.unwrap();
         let err = call(&o, "propose_merge", json!({"id": "w4", "summary": "x"})).await.unwrap_err();
         assert!(err.contains("shares your folder"), "{err}");
         assert!(call(&o, "list_agents", json!({})).await.unwrap().contains("shared folder"));
@@ -1881,7 +1925,7 @@ mod tests {
     #[tokio::test]
     async fn a_restored_worker_that_shared_the_main_folder_has_no_branch_to_merge() {
         let (_h, o, repo, _wt) = setup();
-        o.adopt("w4", "s1", "Research", repo.path()).await.unwrap();
+        o.adopt("w4", "s1", "Research", repo.path(), None).await.unwrap();
         assert!(call(&o, "list_agents", json!({})).await.unwrap().contains("shared folder"));
         assert!(call(&o, "propose_merge", json!({"id": "w4", "summary": "x"})).await.unwrap_err().contains("shares your folder"));
     }
@@ -2156,5 +2200,96 @@ mod tests {
         let plain = tempfile::tempdir().unwrap();
         *host.folder.lock().unwrap() = plain.path().to_path_buf();
         assert!(o.spawn_for_user("s1", "y", None, "worktree", None).await.unwrap_err().contains("isolation \"shared\""));
+    }
+
+    fn proposals(host: &FakeHost) -> Vec<(u32, Vec<String>)> {
+        host.events_for("s1").into_iter().filter_map(|e| if let UiEvent::MergeProposed { commits, loose, .. } = e { Some((commits, loose)) } else { None }).collect()
+    }
+
+    #[tokio::test]
+    async fn the_card_names_the_loose_files_and_asking_again_with_nothing_changed_shows_no_second_card() {
+        let (host, o, _repo, _wt) = setup();
+        spawn_idle(&o, "login").await;
+        commit_in_worktree(&o, "w1", "b.txt", "b\n");
+        let (_, _, wt) = o.worktree_of("w1").unwrap();
+        std::fs::create_dir_all(wt.folder.join("notes")).unwrap();
+        std::fs::write(wt.folder.join("notes/todo.md"), "x\n").unwrap();
+        call(&o, "propose_merge", json!({"id": "w1", "summary": "x"})).await.unwrap();
+        assert_eq!(proposals(&host), vec![(1, vec!["notes/todo.md".to_string()])]);
+        let again = call(&o, "propose_merge", json!({"id": "w1", "summary": "y"})).await.unwrap();
+        assert_eq!(again, "Already waiting on the user for w1's merge.");
+        assert_eq!(proposals(&host).len(), 1);
+        // Something changed: the proposal is replaced by one that shows it.
+        std::fs::write(wt.folder.join("more.txt"), "x\n").unwrap();
+        call(&o, "propose_merge", json!({"id": "w1", "summary": "z"})).await.unwrap();
+        assert_eq!(proposals(&host).last().unwrap().1, ["more.txt", "notes/todo.md"]);
+    }
+
+    #[tokio::test]
+    async fn work_that_appeared_after_the_proposal_is_not_merged_and_the_main_agent_is_told_why() {
+        let (host, o, repo, _wt) = setup();
+        spawn_idle(&o, "login").await;
+        commit_in_worktree(&o, "w1", "b.txt", "b\n");
+        call(&o, "propose_merge", json!({"id": "w1", "summary": "x"})).await.unwrap();
+        // The worker takes another turn and commits more before the user answers.
+        o.observe("w1", &UiEvent::Thinking { parent: None });
+        commit_in_worktree(&o, "w1", "c.txt", "c\n");
+        o.observe("w1", &done("More."));
+        o.approve_merge("w1").await.unwrap();
+        assert!(!repo.path().join("b.txt").exists() && !repo.path().join("c.txt").exists(), "merged what the user wasn't shown");
+        assert!(host.events_for("s1").iter().any(|e| matches!(e, UiEvent::MergeResolved { outcome, detail, .. } if outcome == "changed" && detail.contains("commits it didn't have"))));
+        assert!(host.wakes().last().unwrap().contains("changed since you proposed it, so nothing was merged"), "{:?}", host.wakes());
+        // The proposal is gone: the old card approves nothing, and a new one can be asked for.
+        assert!(o.approve_merge("w1").await.unwrap_err().contains("no merge proposal"));
+        call(&o, "propose_merge", json!({"id": "w1", "summary": "x"})).await.unwrap();
+        o.approve_merge("w1").await.unwrap();
+        assert!(repo.path().join("c.txt").is_file());
+    }
+
+    #[tokio::test]
+    async fn a_loose_file_the_user_was_not_shown_is_not_merged() {
+        let (host, o, repo, _wt) = setup();
+        spawn_idle(&o, "login").await;
+        let (_, _, wt) = o.worktree_of("w1").unwrap();
+        std::fs::write(wt.folder.join("shown.txt"), "x\n").unwrap();
+        call(&o, "propose_merge", json!({"id": "w1", "summary": "x"})).await.unwrap();
+        std::fs::write(wt.folder.join("unseen.txt"), "x\n").unwrap();
+        o.approve_merge("w1").await.unwrap();
+        assert!(!repo.path().join("unseen.txt").exists() && !repo.path().join("shown.txt").exists());
+        assert!(host.events_for("s1").iter().any(|e| matches!(e, UiEvent::MergeResolved { outcome, .. } if outcome == "changed")));
+    }
+
+    #[tokio::test]
+    async fn a_worktree_whose_git_file_was_redirected_is_refused_before_git_runs_in_it() {
+        let (_h, o, repo, _wt) = setup();
+        spawn_idle(&o, "login").await;
+        commit_in_worktree(&o, "w1", "b.txt", "b\n");
+        let (_, _, wt) = o.worktree_of("w1").unwrap();
+        std::fs::create_dir_all(wt.root.join("x")).unwrap();
+        std::fs::write(wt.root.join(".git"), "gitdir: ./x\n").unwrap();
+        let err = call(&o, "propose_merge", json!({"id": "w1", "summary": "x"})).await.unwrap_err();
+        assert!(err.contains("won't run git"), "{err}");
+        assert!(o.close_check("w1").await.unwrap_err().contains("won't run git"));
+        assert!(o.discard("w1", false).await.unwrap_err().contains("won't run git"));
+        assert!(wt.root.exists() && !repo.path().join("b.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn a_restored_worker_whose_worktree_is_on_the_users_branch_never_deletes_it() {
+        let (host, o, repo, _wt) = setup();
+        spawn_idle(&o, "login").await;
+        let (_, _, wt) = o.worktree_of("w1").unwrap();
+        git(&wt.folder, &["checkout", "-q", "-b", "users-work"]);
+        o.forget("w1");
+        // Saved with its branch: that is the one it has, whatever its worktree has checked out.
+        o.adopt("w1", "s1", "Login", &wt.folder, Some("lantern/login")).await.unwrap();
+        assert!(call(&o, "list_agents", json!({})).await.unwrap().contains("branch lantern/login"));
+        o.forget("w1");
+        // An older save, without it: read from the worktree, and kept when the worker is closed.
+        o.adopt("w1", "s1", "Login", &wt.folder, None).await.unwrap();
+        o.close_worker("w1", None).await.unwrap();
+        assert!(!wt.root.exists());
+        assert_eq!(branches_like(repo.path(), "users-work"), "users-work");
+        assert!(host.wakes().last().unwrap().contains("isn't one Lantern made, so it was kept"), "{:?}", host.wakes());
     }
 }

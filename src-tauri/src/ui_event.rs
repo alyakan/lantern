@@ -164,10 +164,12 @@ pub enum UiEvent {
     AgentStopped { reason: Option<String> },
     /// On a worker's slot: it now runs on this mode ("ask"), because its main agent's mode was lowered.
     AgentMode { mode: String },
-    /// On the main agent's slot: it asks the user to merge a worker's branch into `into`.
-    MergeProposed { worker: String, name: String, branch: String, into: String, summary: String, commits: u32, files: Vec<crate::git::FileStat>, uncommitted: usize },
-    /// On the main agent's slot: how the proposal ended: "merged", "conflicts", "declined" or "failed", with the detail
-    /// (the branch merged into, the conflicting files, or why it failed).
+    /// On the main agent's slot: it asks the user to merge a worker's branch into `into`. `loose`: the names of the files
+    /// in its worktree that aren't committed, which approving commits first (`uncommitted` is how many).
+    MergeProposed { worker: String, name: String, branch: String, into: String, summary: String, commits: u32, files: Vec<crate::git::FileStat>, uncommitted: usize, loose: Vec<String> },
+    /// On the main agent's slot: how the proposal ended: "merged", "conflicts", "declined", "failed" or "changed" (the
+    /// branch or its loose files are no longer what the user was shown, so the proposal is gone), with the detail (the
+    /// branch merged into, the conflicting files, or why it failed or what changed).
     MergeResolved { worker: String, outcome: String, detail: String },
     Unknown { raw: Value },
     ParseError { line: String },

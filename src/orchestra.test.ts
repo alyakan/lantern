@@ -143,7 +143,7 @@ describe("notes for the main agent", () => {
 });
 
 describe("merge proposals", () => {
-  const proposed: UiEvent = { kind: "merge_proposed", worker: "w1", name: "Login form", branch: "lantern/login-form", into: "main", summary: "Adds the form", commits: 2, files: [{ path: "a.ts", added: 10, removed: 1 }], uncommitted: 0 };
+  const proposed: UiEvent = { kind: "merge_proposed", worker: "w1", name: "Login form", branch: "lantern/login-form", into: "main", summary: "Adds the form", commits: 2, files: [{ path: "a.ts", added: 10, removed: 1 }], uncommitted: 1, loose: ["notes.md"] };
 
   it("are kept on the main agent's chat, one per worker, newest proposal replacing an older one", () => {
     let s = ev(main, proposed);
@@ -159,6 +159,9 @@ describe("merge proposals", () => {
     expect(ev(open, { kind: "merge_resolved", worker: "w1", outcome: "declined", detail: "" }).proposals[0]).toMatchObject({ status: "declined" });
     expect(ev(open, { kind: "merge_resolved", worker: "w1", outcome: "conflicts", detail: "a.ts, b.ts" }).proposals[0]).toMatchObject({ status: "open", problem: "Conflicts with main in a.ts, b.ts." });
     expect(ev(open, { kind: "merge_resolved", worker: "w1", outcome: "failed", detail: "The main checkout has 1 uncommitted change" }).proposals[0]).toMatchObject({ status: "open", problem: "The main checkout has 1 uncommitted change" });
+    // Changed since it was proposed: the card is retired, saying why.
+    expect(ev(open, { kind: "merge_resolved", worker: "w1", outcome: "changed", detail: "Its loose files aren't the ones the merge was proposed with." }).proposals[0]).toMatchObject({ status: "declined", problem: "Its loose files aren't the ones the merge was proposed with." });
+    expect(open.proposals[0].loose).toEqual(["notes.md"]);
     // Another worker's resolution leaves it alone.
     expect(ev(open, { kind: "merge_resolved", worker: "w2", outcome: "merged", detail: "main" }).proposals).toEqual(open.proposals);
   });

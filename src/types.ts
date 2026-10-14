@@ -86,9 +86,10 @@ export type UiEvent =
   /** On a worker's chat: it now runs on this mode, because its main agent's was lowered. */
   | { kind: "agent_mode"; mode: Mode }
   /** On the main agent's chat: it asks the user to merge a worker's branch. */
-  | { kind: "merge_proposed"; worker: string; name: string; branch: string; into: string; summary: string; commits: number; files: { path: string; added: number; removed: number }[]; uncommitted: number }
-  /** How that ended: "merged" (detail: the branch merged into), "conflicts" (the files), "declined", "failed" (why). */
-  | { kind: "merge_resolved"; worker: string; outcome: "merged" | "conflicts" | "declined" | "failed"; detail: string }
+  | { kind: "merge_proposed"; worker: string; name: string; branch: string; into: string; summary: string; commits: number; files: { path: string; added: number; removed: number }[]; uncommitted: number; loose: string[] }
+  /** How that ended: "merged" (detail: the branch merged into), "conflicts" (the files), "declined", "failed" (why), or
+   * "changed" (what changed since it was proposed: nothing was merged and the proposal is gone). */
+  | { kind: "merge_resolved"; worker: string; outcome: "merged" | "conflicts" | "declined" | "failed" | "changed"; detail: string }
   | { kind: "unknown"; raw: unknown }
   | { kind: "parse_error"; line: string };
 
@@ -284,7 +285,8 @@ export interface Settings {
   /** Start the chat as the main agent of an orchestra: it can spawn workers. */
   orchestrator?: boolean;
   /** Reopen the chat as a worker of an open main agent (a team restored after Lantern was closed). */
-  worker?: { name: string; parent: string };
+  /** `branch`: the one Lantern made for it (null when it shares the folder); its worktree's HEAD is the worker's to switch. */
+  worker?: { name: string; parent: string; branch: string | null };
 }
 
 /** A file search result (see files::find): the file, and which characters of `rel` matched. */

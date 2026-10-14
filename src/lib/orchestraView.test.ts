@@ -136,7 +136,7 @@ describe("money", () => {
 });
 
 describe("a merge waiting for you", () => {
-  const proposal = (worker: string, status: "open" | "merged" | "declined" = "open") => ({ worker, name: worker, branch: `lantern/${worker}`, into: "main", summary: "", commits: 1, files: [], uncommitted: 0, status, problem: null, attempts: 0 });
+  const proposal = (worker: string, status: "open" | "merged" | "declined" = "open") => ({ worker, name: worker, branch: `lantern/${worker}`, into: "main", summary: "", commits: 1, files: [], uncommitted: 0, loose: [], status, problem: null, attempts: 0 });
 
   it("makes its worker one that needs you, even though the worker itself is idle", () => {
     let c = spawn(initialChats(main), "w1", "A");

@@ -321,7 +321,7 @@ describe("the canvas", () => {
 });
 
 describe("oversight", () => {
-  const proposal = { worker: "w1", name: "Worker 1", branch: "lantern/w1", into: "main", summary: "Adds it", commits: 2, files: [{ path: "a.ts", added: 3, removed: 1 }], uncommitted: 0, status: "open" as const, problem: null, attempts: 0 };
+  const proposal = { worker: "w1", name: "Worker 1", branch: "lantern/w1", into: "main", summary: "Adds it", commits: 2, files: [{ path: "a.ts", added: 3, removed: 1 }], uncommitted: 0, loose: [], status: "open" as const, problem: null, attempts: 0 };
   const withProposal = (): Chats => {
     const c = team(2);
     return { ...c, slots: { ...c.slots, s1: { ...c.slots.s1, proposals: [proposal] } } };

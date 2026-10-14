@@ -18,6 +18,7 @@ const proposal: MergeProposal = {
     { path: "src/App.tsx", added: 2, removed: 1 },
   ],
   uncommitted: 0,
+  loose: [],
   status: "open",
   problem: null,
   attempts: 0,
@@ -78,11 +79,22 @@ describe("the merge card", () => {
     expect(a.declineMerge).toHaveBeenCalledWith("w1");
   });
 
-  it("warns that loose work will be committed first", () => {
-    show({ ...proposal, uncommitted: 2 });
+  it("names the loose work that will be committed first", () => {
+    show({ ...proposal, uncommitted: 2, loose: ["notes/todo.md", "src/extra.ts"] });
     expect(screen.getByText(/2 files of loose work in its worktree will be committed first/)).toBeTruthy();
-    show({ ...proposal, uncommitted: 1 });
+    expect(screen.getByText("notes/todo.md")).toBeTruthy();
+    expect(screen.getByText("src/extra.ts")).toBeTruthy();
+    show({ ...proposal, uncommitted: 1, loose: ["a.ts"] });
     expect(screen.getAllByText(/1 file of loose work/).length).toBe(1);
+    const many = Array.from({ length: 9 }, (_, i) => `f${i}.ts`);
+    show({ ...proposal, uncommitted: 9, loose: many });
+    expect(screen.getByText("and 3 more")).toBeTruthy();
+  });
+
+  it("says why a proposal that changed under the user is gone", () => {
+    show({ ...proposal, status: "declined", problem: "lantern/login-form has commits it didn't have when the merge was proposed." });
+    expect(screen.getByRole("status").textContent).toBe("Not merged: lantern/login-form. lantern/login-form has commits it didn't have when the merge was proposed. The main agent can ask again.");
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("shows a declined proposal as a quiet line", () => {

@@ -556,7 +556,8 @@ async function playOrchestraWake(slot: string, text: string) {
       summary: "Adds the login form with inline validation. Its 6 tests pass.",
       commits: 3,
       files: [{ path: "src/auth/LoginForm.tsx", added: 84, removed: 0 }, { path: "src/auth/LoginForm.test.tsx", added: 61, removed: 0 }, { path: "src/App.tsx", added: 2, removed: 1 }],
-      uncommitted: 0,
+      uncommitted: 1,
+      loose: ["src/auth/strings.ts"],
     });
     await send({ kind: "tool_finished", parent: null, tool_use_id: "merge-1", is_error: false, output: "Asked the user to merge lantern/login-form into main." });
   }

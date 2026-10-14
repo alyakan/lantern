@@ -35,24 +35,65 @@ fn parse_head(head: &str) -> Option<String> {
 /// tool call (and the prompts queued behind it) for ever.
 const GIT_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// What every git command Lantern runs starts with. A repository's config is shared by its worktrees, so a worker can
+/// write to it from its own: nothing in it may run a program of its own while Lantern looks or commits. No filesystem
+/// monitor, no hooks, no pager. Filter and merge drivers still run: git-lfs is one, and without it a commit or a merge
+/// would take its pointer files for the content.
+const HARDENED: [&str; 6] = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat"];
+
+/// Variables that would point git at another repository, index or config than the one it is run in.
+const REDIRECTS: [&str; 6] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
+
+/// Where a git command runs.
+#[derive(Clone, Copy)]
+enum At<'a> {
+    /// A folder of the user's own checkout: git finds the repository from there.
+    Dir(&'a Path),
+    /// A worker's worktree, checked (see `verify_worktree`): git is told where its repository is, so the `.git` file in it,
+    /// which the worker can rewrite, is never read.
+    Worktree(&'a Checked),
+}
+
 /// Runs `git` in `dir` and returns its trimmed stdout; a failure is git's own message. Blocking: call it off the async
 /// threads. Never asks for a password or opens an editor, and is stopped after `GIT_TIMEOUT`.
 fn run(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, String> {
-    run_within(dir, args, path_env, GIT_TIMEOUT)
+    run_at(At::Dir(dir), args, path_env)
 }
 
+fn run_at(at: At, args: &[&str], path_env: Option<&str>) -> Result<String, String> {
+    run_raw_within(at, args, path_env, GIT_TIMEOUT).map(|out| out.trim().to_string())
+}
+
+#[cfg(test)]
 fn run_within(dir: &Path, args: &[&str], path_env: Option<&str>, limit: Duration) -> Result<String, String> {
-    run_raw_within(dir, args, path_env, limit).map(|out| out.trim().to_string())
+    run_raw_within(At::Dir(dir), args, path_env, limit).map(|out| out.trim().to_string())
 }
 
 /// What `run` returns, exactly as git wrote it: for lists of file names (`-z`), where a name's own spaces count.
 fn run_raw(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, String> {
-    run_raw_within(dir, args, path_env, GIT_TIMEOUT)
+    run_raw_within(At::Dir(dir), args, path_env, GIT_TIMEOUT)
 }
 
-fn run_raw_within(dir: &Path, args: &[&str], path_env: Option<&str>, limit: Duration) -> Result<String, String> {
+fn run_raw_within(at: At, args: &[&str], path_env: Option<&str>, limit: Duration) -> Result<String, String> {
     let mut cmd = Command::new("git");
-    cmd.args(args).current_dir(dir).env("GIT_TERMINAL_PROMPT", "0").env("GIT_EDITOR", "true").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.args(HARDENED);
+    match at {
+        At::Dir(dir) => {
+            cmd.current_dir(dir);
+        }
+        At::Worktree(wt) => {
+            let flag = |name: &str, path: &Path| {
+                let mut f = std::ffi::OsString::from(name);
+                f.push(path);
+                f
+            };
+            cmd.arg(flag("--git-dir=", &wt.admin)).arg(flag("--work-tree=", &wt.root)).current_dir(&wt.root);
+        }
+    }
+    for var in REDIRECTS {
+        cmd.env_remove(var);
+    }
+    cmd.args(args).env("GIT_TERMINAL_PROMPT", "0").env("GIT_EDITOR", "true").env("GIT_CONFIG_NOSYSTEM", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Some(p) = path_env {
         cmd.env("PATH", p);
     }
@@ -127,17 +168,6 @@ fn branch_exists(repo: &Path, branch: &str, path_env: Option<&str>) -> bool {
     run(repo, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{branch}")], path_env).is_ok()
 }
 
-/// The linked worktree `folder` is in (or is), as a restored worker's: None when it is a main checkout (its `.git` is a
-/// directory, not the file a linked worktree has) or no repository at all. The branch it started from is not known.
-pub fn existing_worktree(folder: &Path, path_env: Option<&str>) -> Option<Worktree> {
-    let root = repo_root(folder, path_env)?;
-    if !root.join(".git").is_file() {
-        return None;
-    }
-    let branch = current_branch(&root)?;
-    Some(Worktree { folder: folder.to_path_buf(), root, branch, base: None })
-}
-
 /// A linked worktree for a worker, on a branch of its own.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Worktree {
@@ -183,15 +213,152 @@ pub fn dirty(dir: &Path, path_env: Option<&str>) -> Result<Vec<String>, String> 
     Ok(run(dir, &["status", "--porcelain"], path_env)?.lines().map(String::from).collect())
 }
 
-/// Commits everything in `dir` (so a worker's loose work isn't lost to a merge or a cleanup). Hooks are skipped: this is
+/// Commits everything there is (so a worker's loose work isn't lost to a merge or a cleanup). Hooks are skipped: this is
 /// Lantern keeping the work safe, not the worker finishing it. False when there was nothing to commit.
-pub fn commit_all(dir: &Path, message: &str, path_env: Option<&str>) -> Result<bool, String> {
-    run(dir, &["add", "-A"], path_env)?;
-    if run(dir, &["diff", "--cached", "--quiet"], path_env).is_ok() {
+fn commit_all(at: At, message: &str, path_env: Option<&str>) -> Result<bool, String> {
+    run_at(at, &["add", "-A"], path_env)?;
+    if run_at(at, &["diff", "--no-ext-diff", "--cached", "--quiet"], path_env).is_ok() {
         return Ok(false);
     }
-    run(dir, &["commit", "--no-verify", "-m", message], path_env)?;
+    run_at(at, &["commit", "--no-verify", "-m", message], path_env)?;
     Ok(true)
+}
+
+/// The repository's own git directory (the one its linked worktrees share), as a real path.
+fn common_dir(repo: &Path, path_env: Option<&str>) -> Option<PathBuf> {
+    let out = run(repo, &["rev-parse", "--git-common-dir"], path_env).ok().filter(|p| !p.is_empty())?;
+    // Relative to the folder it was asked in, unless git says it whole.
+    std::fs::canonicalize(repo.join(out)).ok()
+}
+
+/// A worker's worktree that was checked to be one of the main repository's own (see `verify_worktree`). The only way to
+/// run git in a worktree.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Checked {
+    /// The worktree's directory in the repository's git directory (`.git/worktrees/<name>`).
+    admin: PathBuf,
+    root: PathBuf,
+}
+
+/// Checks that `root` is a linked worktree of the repository `repo` is in, before Lantern runs git there. A worktree's
+/// `.git` is a plain file in the worker's own folder, saying where its git directory is: rewritten to point at one the
+/// worker made, the config there would have git run the worker's commands for Lantern (a filesystem monitor, a hook).
+/// So the file has to point into the repository's own `worktrees`, and that directory has to say it belongs to this
+/// repository and to this worktree. All of it is read from disk: no git runs in the worktree before it is checked.
+pub fn verify_worktree(repo: &Path, root: &Path, path_env: Option<&str>) -> Result<Checked, String> {
+    let refuse = |why: &str| format!("Lantern won't run git in {}: {why}, so it isn't the worktree Lantern made for this repository.", root.display());
+    let common = common_dir(repo, path_env).ok_or("The main folder isn't in a git repository.")?;
+    let worktrees = std::fs::canonicalize(common.join("worktrees")).map_err(|_| refuse("the repository has no linked worktrees"))?;
+    let dot_git = root.join(".git");
+    if !std::fs::symlink_metadata(&dot_git).is_ok_and(|m| m.file_type().is_file()) {
+        return Err(refuse("its .git isn't a plain file"));
+    }
+    let pointer = std::fs::read_to_string(&dot_git).map_err(|_| refuse("its .git can't be read"))?;
+    let target = pointer.trim().strip_prefix("gitdir:").map(str::trim).ok_or_else(|| refuse("its .git doesn't say where its git directory is"))?;
+    let admin = std::fs::canonicalize(root.join(target)).map_err(|_| refuse("its .git points at nothing"))?;
+    if admin.parent() != Some(worktrees.as_path()) {
+        return Err(refuse("its .git points outside the repository's worktrees"));
+    }
+    let read = |name: &str| std::fs::read_to_string(admin.join(name)).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let back_to_repo = read("commondir").and_then(|c| std::fs::canonicalize(admin.join(c)).ok());
+    if back_to_repo.as_ref() != Some(&common) {
+        return Err(refuse("its git directory belongs to another repository"));
+    }
+    // And the repository's own record of where this worktree is names this very folder.
+    let back_to_root = read("gitdir").and_then(|g| std::fs::canonicalize(admin.join(g)).ok());
+    if back_to_root.is_none() || back_to_root != std::fs::canonicalize(&dot_git).ok() {
+        return Err(refuse("the repository's record of it names another folder"));
+    }
+    Ok(Checked { admin, root: std::fs::canonicalize(root).map_err(|e| e.to_string())? })
+}
+
+/// The linked worktree `folder` is in (or is), as a restored worker's, once it is checked to be one of `repo`'s (see
+/// `verify_worktree`): None when it is a main checkout, no repository at all, or a worktree that doesn't check out.
+/// `branch` is the one Lantern saved for the worker; without it (an older save) the branch is read from the worktree,
+/// which the worker can switch, so it is never deleted (see `remove_worktree`) unless it is one of Lantern's own. The
+/// branch it started from is not known.
+pub fn existing_worktree(repo: &Path, folder: &Path, branch: Option<&str>, path_env: Option<&str>) -> Option<Worktree> {
+    // Found on disk, not by asking git there: that is what the check is for.
+    let root = folder.ancestors().find(|d| d.join(".git").symlink_metadata().is_ok())?;
+    if root.join(".git").is_dir() {
+        return None;
+    }
+    verify_worktree(repo, root, path_env).ok()?;
+    let branch = match branch {
+        Some(b) => b.to_string(),
+        None => current_branch(root)?,
+    };
+    Some(Worktree { folder: folder.to_path_buf(), root: root.to_path_buf(), branch, base: None })
+}
+
+/// The files a checked worktree has changed but not committed, by name: each untracked one on its own (not its folder),
+/// and a rename as the two names it touches.
+pub fn loose_files(wt: &Checked, path_env: Option<&str>) -> Result<Vec<String>, String> {
+    let out = run_raw_within(At::Worktree(wt), &["status", "--porcelain", "-z", "--untracked-files=all", "--no-renames"], path_env, GIT_TIMEOUT)?;
+    // Each entry is "XY name".
+    let mut names: Vec<String> = out.split('\0').filter_map(|e| e.get(3..)).filter(|n| !n.is_empty()).map(String::from).collect();
+    names.sort();
+    names.dedup();
+    Ok(names)
+}
+
+/// What a merge is proposed on: the commit the branch is at, and the loose files that will be committed on top of it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Snapshot {
+    pub tip: String,
+    pub loose: Vec<String>,
+}
+
+/// The commit `branch` is at, from the main repository.
+fn tip_of(repo: &Path, branch: &str, path_env: Option<&str>) -> Result<String, String> {
+    run(repo, &["rev-parse", "--verify", "-q", &format!("refs/heads/{branch}^{{commit}}")], path_env).map_err(|_| format!("The branch {branch} is gone."))
+}
+
+/// What merging the worker's branch would take now. Its worktree has to be on that branch, or the loose files committed
+/// for the merge would go onto another one.
+pub fn snapshot(repo: &Path, wt: &Checked, branch: &str, path_env: Option<&str>) -> Result<Snapshot, String> {
+    let head = run_at(At::Worktree(wt), &["symbolic-ref", "-q", "HEAD"], path_env).unwrap_or_default();
+    if head != format!("refs/heads/{branch}") {
+        return Err(format!("Its worktree isn't on {branch} now, so there is no telling what a merge would take."));
+    }
+    Ok(Snapshot { tip: tip_of(repo, branch, path_env)?, loose: loose_files(wt, path_env)? })
+}
+
+/// What `commit_snapshot` found.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pinned {
+    /// The commit to merge: the branch as it was proposed, with the loose files the user was shown committed on top.
+    Ready(String),
+    /// Something changed since it was proposed (why, in words): nothing was committed, or what was committed is not what
+    /// the user saw, and either way nothing may be merged.
+    Changed(String),
+}
+
+/// Commits the worker's loose work, as long as the branch and its loose files are what the user was shown (`seen`), and
+/// returns the commit to merge. Checked again after the commit, since the worktree can change while it is made.
+pub fn commit_snapshot(repo: &Path, wt: &Checked, branch: &str, seen: &Snapshot, message: &str, path_env: Option<&str>) -> Result<Pinned, String> {
+    let now = match snapshot(repo, wt, branch, path_env) {
+        Ok(now) => now,
+        Err(e) => return Ok(Pinned::Changed(e)),
+    };
+    if now.tip != seen.tip {
+        return Ok(Pinned::Changed(format!("{branch} has commits it didn't have when the merge was proposed.")));
+    }
+    if now.loose != seen.loose {
+        return Ok(Pinned::Changed("Its loose files aren't the ones the merge was proposed with.".into()));
+    }
+    if seen.loose.is_empty() {
+        return Ok(Pinned::Ready(seen.tip.clone()));
+    }
+    commit_all(At::Worktree(wt), message, path_env)?;
+    let made = tip_of(repo, branch, path_env)?;
+    let parent = run(repo, &["rev-parse", "--verify", "-q", &format!("{made}^1")], path_env).unwrap_or_default();
+    let mut committed: Vec<String> = run_raw(repo, &["diff", "--no-ext-diff", "--name-only", "-z", "--no-renames", &seen.tip, &made], path_env)?.split('\0').filter(|n| !n.is_empty()).map(String::from).collect();
+    committed.sort();
+    if parent != seen.tip || committed != seen.loose {
+        return Ok(Pinned::Changed("Its loose files changed while they were being committed.".into()));
+    }
+    Ok(Pinned::Ready(made))
 }
 
 /// What a branch adds on top of `base`: the commits, and each changed file with its added and removed lines.
@@ -231,14 +398,14 @@ pub enum Merged {
     Conflicts(Vec<String>),
 }
 
-/// The files `branch` adds that the main checkout already has on disk but keeps out of git (ignored): a merge writes over
+/// The files `commit` adds that the main checkout already has on disk but keeps out of git (ignored): a merge writes over
 /// them, silently, and `status` never lists them, so the clean-checkout check can't see them.
-fn would_overwrite_ignored(repo: &Path, branch: &str, path_env: Option<&str>) -> Result<Vec<String>, String> {
+fn would_overwrite_ignored(repo: &Path, commit: &str, path_env: Option<&str>) -> Result<Vec<String>, String> {
     // Paths below are relative to the top of the repository, whichever folder inside it the main agent was opened in.
     let root = repo_root(repo, path_env).unwrap_or_else(|| repo.to_path_buf());
     // Names are read exactly as git writes them (NUL-separated, untrimmed) and handed back as literal paths: a name that
     // starts with ":" or holds `*` or `[` would otherwise be read by git as a pathspec pattern, and not match itself.
-    let added = run_raw(&root, &["--literal-pathspecs", "diff", "--name-only", "-z", "--diff-filter=AR", &format!("HEAD...{branch}")], path_env)?;
+    let added = run_raw(&root, &["--literal-pathspecs", "diff", "--name-only", "-z", "--diff-filter=AR", &format!("HEAD...{commit}")], path_env)?;
     let paths: Vec<&str> = added.split('\0').filter(|p| !p.is_empty()).collect();
     let mut tracked = std::collections::HashSet::new();
     for chunk in paths.chunks(200) {
@@ -254,11 +421,12 @@ fn would_overwrite_ignored(repo: &Path, branch: &str, path_env: Option<&str>) ->
     Ok(paths.iter().filter(|p| !tracked.contains(**p) && root.join(p).symlink_metadata().is_ok()).map(|p| p.to_string()).collect())
 }
 
-/// Merges `branch` into `into`, with a merge commit so the branch's own commits stay readable. `into` is the branch the
+/// Merges `commit` (a worker's branch, as the user was shown it: see `commit_snapshot`) into `into`, with a merge commit so
+/// the branch's own commits stay readable. `into` is the branch the
 /// user was shown when they were asked: the main checkout must still be on it, or nothing is merged. The checkout must be
 /// clean, and a file the user keeps out of git (ignored) is never overwritten by the merge. A conflict is undone, not left
 /// half-merged.
-pub fn merge(repo: &Path, into: &str, branch: &str, message: &str, path_env: Option<&str>) -> Result<Merged, String> {
+pub fn merge(repo: &Path, into: &str, commit: &str, message: &str, path_env: Option<&str>) -> Result<Merged, String> {
     match branch_of(repo, path_env) {
         Some(now) if now == into => {}
         Some(now) => return Err(format!("The main checkout is on {now} now, not {into}, which is where the merge was proposed. Switch it back to {into}, or ask for the merge again.")),
@@ -268,13 +436,13 @@ pub fn merge(repo: &Path, into: &str, branch: &str, message: &str, path_env: Opt
     if !dirty.is_empty() {
         return Err(format!("The main checkout has {} uncommitted change{}; commit or stash them first, then approve the merge again.", dirty.len(), if dirty.len() == 1 { "" } else { "s" }));
     }
-    let clobbered = would_overwrite_ignored(repo, branch, path_env)?;
+    let clobbered = would_overwrite_ignored(repo, commit, path_env)?;
     if !clobbered.is_empty() {
         let shown: Vec<&str> = clobbered.iter().take(5).map(String::as_str).collect();
         let more = if clobbered.len() > 5 { format!(" and {} more", clobbered.len() - 5) } else { String::new() };
         return Err(format!("The merge would overwrite files you keep out of git ({}{more}). Move them aside, then approve the merge again.", shown.join(", ")));
     }
-    match run(repo, &["merge", "--no-ff", "-m", message, branch], path_env) {
+    match run(repo, &["merge", "--no-ff", "-m", message, commit], path_env) {
         Ok(_) => Ok(Merged::Into(into.to_string())),
         Err(e) => {
             let conflicts: Vec<String> = run(repo, &["diff", "--name-only", "--diff-filter=U"], path_env).unwrap_or_default().lines().map(String::from).collect();
@@ -284,8 +452,17 @@ pub fn merge(repo: &Path, into: &str, branch: &str, message: &str, path_env: Opt
     }
 }
 
-/// Removes a worktree and, when asked, its branch. `force` throws away uncommitted work and an unmerged branch.
+/// Whether `branch` is one Lantern made for a worker (see `add_worktree`), which is the only kind it ever deletes.
+pub fn is_workers_branch(branch: &str) -> bool {
+    branch.strip_prefix("lantern/").is_some_and(|rest| !rest.is_empty())
+}
+
+/// Removes a worktree and, when asked, its branch. `force` throws away uncommitted work and an unmerged branch. A branch
+/// that isn't one of Lantern's own (see `is_workers_branch`) is never deleted: asked to, nothing is removed.
 pub fn remove_worktree(repo: &Path, root: &Path, branch: &str, delete_branch: bool, force: bool, path_env: Option<&str>) -> Result<(), String> {
+    if delete_branch && !is_workers_branch(branch) {
+        return Err(format!("{branch} isn't a branch Lantern made for a worker, so Lantern won't delete it."));
+    }
     let root_arg = root.to_string_lossy().to_string();
     let mut args = vec!["worktree", "remove"];
     if force {
@@ -388,13 +565,17 @@ mod tests {
         let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
         // git names the real path (on macOS /var is /private/var), so compare real paths.
         let real = |p: &Path| std::fs::canonicalize(p).unwrap();
-        let found = existing_worktree(&wt.folder, None).unwrap();
+        let found = existing_worktree(main.path(), &wt.folder, None, None).unwrap();
         assert_eq!((found.branch.as_str(), real(&found.root), found.base.as_deref()), ("lantern/w", real(&wt.root), None));
         // From a subfolder of it too, and the main checkout and a plain folder are not worktrees.
         std::fs::create_dir_all(wt.folder.join("sub")).unwrap();
-        assert_eq!(real(&existing_worktree(&wt.folder.join("sub"), None).unwrap().root), real(&wt.root));
-        assert_eq!(existing_worktree(main.path(), None), None);
-        assert_eq!(existing_worktree(tempfile::tempdir().unwrap().path(), None), None);
+        assert_eq!(real(&existing_worktree(main.path(), &wt.folder.join("sub"), None, None).unwrap().root), real(&wt.root));
+        assert_eq!(existing_worktree(main.path(), main.path(), None, None), None);
+        assert_eq!(existing_worktree(main.path(), tempfile::tempdir().unwrap().path(), None, None), None);
+        // Another repository's worktree is not this one's.
+        let other = repo();
+        let theirs = add_worktree(other.path(), &worktrees(), "w", "w1", None).unwrap();
+        assert_eq!(existing_worktree(main.path(), &theirs.folder, None, None), None);
     }
 
     #[test]
@@ -439,11 +620,11 @@ mod tests {
     fn loose_work_is_committed_and_summarised_against_the_base() {
         let main = repo();
         let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
-        assert_eq!(commit_all(&wt.folder, "nothing", None), Ok(false));
+        assert_eq!(commit_all(At::Dir(&wt.folder), "nothing", None), Ok(false));
         std::fs::write(wt.folder.join("b.txt"), "b1\nb2\n").unwrap();
         std::fs::write(wt.folder.join("a.txt"), "one\ntwo\n").unwrap();
         assert_eq!(dirty(&wt.folder, None).unwrap().len(), 2);
-        assert_eq!(commit_all(&wt.folder, "Lantern: w", None), Ok(true));
+        assert_eq!(commit_all(At::Dir(&wt.folder), "Lantern: w", None), Ok(true));
         assert!(dirty(&wt.folder, None).unwrap().is_empty());
         let s = branch_summary(main.path(), "main", &wt.branch, None).unwrap();
         assert_eq!(s.commits, 1);
@@ -455,7 +636,7 @@ mod tests {
         let main = repo();
         let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
         std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
-        commit_all(&wt.folder, "add b", None).unwrap();
+        commit_all(At::Dir(&wt.folder), "add b", None).unwrap();
         assert_eq!(merge(main.path(), "main", &wt.branch, "Merge w", None), Ok(Merged::Into("main".into())));
         assert!(main.path().join("b.txt").is_file());
         assert_eq!(run(main.path(), &["log", "-1", "--format=%s"], None).unwrap(), "Merge w");
@@ -466,7 +647,7 @@ mod tests {
         let main = repo();
         let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
         std::fs::write(wt.folder.join("a.txt"), "worker\n").unwrap();
-        commit_all(&wt.folder, "worker edit", None).unwrap();
+        commit_all(At::Dir(&wt.folder), "worker edit", None).unwrap();
         std::fs::write(main.path().join("a.txt"), "main\n").unwrap();
         run(main.path(), &["commit", "-q", "-am", "main edit"], None).unwrap();
         assert_eq!(merge(main.path(), "main", &wt.branch, "Merge w", None), Ok(Merged::Conflicts(vec!["a.txt".into()])));
@@ -479,7 +660,7 @@ mod tests {
         let main = repo();
         let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
         std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
-        commit_all(&wt.folder, "add b", None).unwrap();
+        commit_all(At::Dir(&wt.folder), "add b", None).unwrap();
         std::fs::write(main.path().join("a.txt"), "loose\n").unwrap();
         let err = merge(main.path(), "main", &wt.branch, "Merge w", None).unwrap_err();
         assert!(err.contains("1 uncommitted change"), "{err}");
@@ -491,7 +672,7 @@ mod tests {
         let main = repo();
         let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
         std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
-        commit_all(&wt.folder, "add b", None).unwrap();
+        commit_all(At::Dir(&wt.folder), "add b", None).unwrap();
         // Not merged: `branch -d` refuses, so the branch (with its commit) is kept, and the worktree is gone either way.
         assert!(remove_worktree(main.path(), &wt.root, &wt.branch, true, false, None).is_ok());
         assert!(!wt.root.exists());
@@ -504,7 +685,7 @@ mod tests {
         let main = repo();
         let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
         std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
-        commit_all(&wt.folder, "add b", None).unwrap();
+        commit_all(At::Dir(&wt.folder), "add b", None).unwrap();
         // The checkout was moved to another branch after the card was shown.
         run(main.path(), &["checkout", "-q", "-b", "other"], None).unwrap();
         let err = merge(main.path(), "main", &wt.branch, "Merge w", None).unwrap_err();
@@ -526,7 +707,7 @@ mod tests {
         std::fs::create_dir_all(main.path().join("packages/app")).unwrap();
         let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
         std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
-        commit_all(&wt.folder, "add b", None).unwrap();
+        commit_all(At::Dir(&wt.folder), "add b", None).unwrap();
         let sub = main.path().join("packages/app");
         assert_eq!(branch_of(&sub, None).as_deref(), Some("main"));
         assert_eq!(merge(&sub, "main", &wt.branch, "Merge w", None), Ok(Merged::Into("main".into())));
@@ -598,15 +779,11 @@ mod tests {
     fn a_git_command_that_takes_too_long_is_stopped() {
         let dir = tempfile::tempdir().unwrap();
         run(dir.path(), &["init", "-q"], None).unwrap();
-        // A hook that never finishes.
-        let hook = dir.path().join(".git/hooks/pre-commit");
-        std::fs::write(&hook, "#!/bin/sh\nsleep 30\n").unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A filter that never finishes (hooks don't run for Lantern, filters do).
+        std::fs::write(dir.path().join(".gitattributes"), "a filter=slow\n").unwrap();
         std::fs::write(dir.path().join("a"), "a").unwrap();
-        run(dir.path(), &["add", "-A"], None).unwrap();
         let started = Instant::now();
-        let err = run_within(dir.path(), &["-c", "user.email=a@b.c", "-c", "user.name=T", "commit", "-m", "x"], None, Duration::from_millis(400)).unwrap_err();
+        let err = run_within(dir.path(), &["-c", "filter.slow.clean=sleep 30", "add", "a"], None, Duration::from_millis(400)).unwrap_err();
         assert!(err.contains("took longer than"), "{err}");
         assert!(started.elapsed() < Duration::from_secs(5), "waited {:?}", started.elapsed());
     }
@@ -620,5 +797,138 @@ mod tests {
         assert!(wt.root.exists(), "unforced removal deleted uncommitted work");
         assert!(remove_worktree(main.path(), &wt.root, &wt.branch, true, true, None).is_ok());
         assert!(!wt.root.exists() && !branch_exists(main.path(), &wt.branch, None));
+    }
+
+    /// An executable script at `path` that leaves `marker` behind when it runs.
+    fn tripwire(path: &Path, marker: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn a_worktree_lantern_made_checks_out_and_its_loose_files_are_listed_one_by_one() {
+        let main = repo();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        let checked = verify_worktree(main.path(), &wt.root, None).unwrap();
+        std::fs::create_dir_all(wt.folder.join("new/deep")).unwrap();
+        std::fs::write(wt.folder.join("new/deep/x.txt"), "x\n").unwrap();
+        std::fs::write(wt.folder.join("new/y.txt"), "y\n").unwrap();
+        std::fs::write(wt.folder.join("a.txt"), "changed\n").unwrap();
+        assert_eq!(loose_files(&checked, None).unwrap(), ["a.txt", "new/deep/x.txt", "new/y.txt"]);
+        // A subfolder of the main checkout checks it just the same.
+        std::fs::create_dir_all(main.path().join("sub")).unwrap();
+        assert!(verify_worktree(&main.path().join("sub"), &wt.root, None).is_ok());
+    }
+
+    #[test]
+    fn a_worktree_whose_git_file_was_pointed_elsewhere_is_refused_and_nothing_in_it_runs() {
+        let main = repo();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        let marker = wt.root.join("ran");
+        // The worker makes a git directory of its own, whose config runs its program, and points .git at it.
+        let fake = wt.root.join("x");
+        std::fs::create_dir_all(fake.join("objects")).unwrap();
+        std::fs::create_dir_all(fake.join("refs")).unwrap();
+        std::fs::write(fake.join("HEAD"), "ref: refs/heads/lantern/w\n").unwrap();
+        tripwire(&wt.root.join("monitor.sh"), &marker);
+        std::fs::write(fake.join("config"), format!("[core]\n\trepositoryformatversion = 0\n\tfsmonitor = {}\n", wt.root.join("monitor.sh").display())).unwrap();
+        std::fs::write(fake.join("commondir"), format!("{}\n", main.path().join(".git").display())).unwrap();
+        std::fs::write(wt.root.join(".git"), "gitdir: ./x\n").unwrap();
+        let err = verify_worktree(main.path(), &wt.root, None).unwrap_err();
+        assert!(err.contains("points outside the repository's worktrees"), "{err}");
+        assert_eq!(existing_worktree(main.path(), &wt.folder, None, None), None);
+        // Inside the repository's worktrees, but a directory that belongs to another worktree.
+        let other = add_worktree(main.path(), &worktrees(), "o", "w2", None).unwrap();
+        let others = std::fs::read_to_string(other.root.join(".git")).unwrap();
+        std::fs::write(wt.root.join(".git"), &others).unwrap();
+        assert!(verify_worktree(main.path(), &wt.root, None).unwrap_err().contains("names another folder"));
+        // A symlink in place of the file.
+        std::fs::remove_file(wt.root.join(".git")).unwrap();
+        std::os::unix::fs::symlink(other.root.join(".git"), wt.root.join(".git")).unwrap();
+        assert!(verify_worktree(main.path(), &wt.root, None).unwrap_err().contains("isn't a plain file"));
+        assert!(!marker.exists(), "the worker's program ran");
+    }
+
+    #[test]
+    fn a_filesystem_monitor_or_hook_in_the_shared_config_never_runs_for_lantern() {
+        let main = repo();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        let marker = scratch.path().join("ran");
+        // The worker writes the repository's config from its worktree: it is shared.
+        tripwire(&scratch.path().join("monitor.sh"), &marker);
+        run(&wt.folder, &["config", "core.fsmonitor", &scratch.path().join("monitor.sh").display().to_string()], None).unwrap();
+        let hooks = scratch.path().join("hooks");
+        std::fs::create_dir_all(&hooks).unwrap();
+        for hook in ["pre-commit", "post-commit", "pre-merge-commit", "post-merge", "commit-msg"] {
+            tripwire(&hooks.join(hook), &marker);
+        }
+        run(&wt.folder, &["config", "core.hooksPath", &hooks.display().to_string()], None).unwrap();
+        std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
+        let checked = verify_worktree(main.path(), &wt.root, None).unwrap();
+        let seen = snapshot(main.path(), &checked, &wt.branch, None).unwrap();
+        let Pinned::Ready(commit) = commit_snapshot(main.path(), &checked, &wt.branch, &seen, "Lantern: w", None).unwrap() else { panic!() };
+        assert!(dirty(main.path(), None).unwrap().is_empty());
+        assert_eq!(merge(main.path(), "main", &commit, "Merge w", None), Ok(Merged::Into("main".into())));
+        assert!(!marker.exists(), "a program from the repository's config ran");
+    }
+
+    #[test]
+    fn a_merge_takes_the_branch_and_loose_files_the_user_was_shown_and_nothing_since() {
+        let main = repo();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        let checked = verify_worktree(main.path(), &wt.root, None).unwrap();
+        std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
+        commit_all(At::Dir(&wt.folder), "add b", None).unwrap();
+        std::fs::write(wt.folder.join("loose.txt"), "l\n").unwrap();
+        let seen = snapshot(main.path(), &checked, &wt.branch, None).unwrap();
+        assert_eq!(seen.loose, ["loose.txt"]);
+        // A loose file the user wasn't shown, even inside a folder that was already loose.
+        std::fs::write(wt.folder.join("late.txt"), "x\n").unwrap();
+        assert!(matches!(commit_snapshot(main.path(), &checked, &wt.branch, &seen, "m", None).unwrap(), Pinned::Changed(_)));
+        std::fs::remove_file(wt.folder.join("late.txt")).unwrap();
+        // A commit the user wasn't shown.
+        std::fs::write(wt.folder.join("c.txt"), "c\n").unwrap();
+        run(&wt.folder, &["add", "c.txt"], None).unwrap();
+        run(&wt.folder, &["commit", "-q", "-m", "c"], None).unwrap();
+        assert!(matches!(commit_snapshot(main.path(), &checked, &wt.branch, &seen, "m", None).unwrap(), Pinned::Changed(_)));
+        assert_eq!(dirty(&wt.folder, None).unwrap().len(), 1, "something was committed for a merge that can't happen");
+        // Shown as it is now, the loose file is committed on top and that commit is what gets merged.
+        let seen = snapshot(main.path(), &checked, &wt.branch, None).unwrap();
+        let Pinned::Ready(commit) = commit_snapshot(main.path(), &checked, &wt.branch, &seen, "m", None).unwrap() else { panic!() };
+        assert_eq!(run(main.path(), &["rev-parse", &format!("{commit}^1")], None).unwrap(), seen.tip);
+        assert_eq!(merge(main.path(), "main", &commit, "Merge w", None), Ok(Merged::Into("main".into())));
+        assert!(main.path().join("loose.txt").is_file() && main.path().join("c.txt").is_file());
+    }
+
+    #[test]
+    fn a_worktree_switched_to_another_branch_has_nothing_to_merge() {
+        let main = repo();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        let checked = verify_worktree(main.path(), &wt.root, None).unwrap();
+        let seen = snapshot(main.path(), &checked, &wt.branch, None).unwrap();
+        run(&wt.folder, &["checkout", "-q", "-b", "elsewhere"], None).unwrap();
+        assert!(snapshot(main.path(), &checked, &wt.branch, None).unwrap_err().contains("isn't on lantern/w"));
+        std::fs::write(wt.folder.join("x.txt"), "x\n").unwrap();
+        assert!(matches!(commit_snapshot(main.path(), &checked, &wt.branch, &seen, "m", None).unwrap(), Pinned::Changed(_)));
+    }
+
+    #[test]
+    fn a_restored_worker_keeps_the_branch_lantern_saved_and_only_lantern_branches_are_deleted() {
+        let main = repo();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        // The worker checked out the user's branch in its worktree.
+        run(&wt.folder, &["checkout", "-q", "-b", "users-own"], None).unwrap();
+        assert_eq!(existing_worktree(main.path(), &wt.folder, Some("lantern/w"), None).unwrap().branch, "lantern/w");
+        let read_from_head = existing_worktree(main.path(), &wt.folder, None, None).unwrap();
+        assert_eq!(read_from_head.branch, "users-own");
+        let err = remove_worktree(main.path(), &wt.root, &read_from_head.branch, true, true, None).unwrap_err();
+        assert!(err.contains("won't delete it"), "{err}");
+        assert!(wt.root.exists() && branch_exists(main.path(), "users-own", None), "something was removed");
+        assert!(remove_worktree(main.path(), &wt.root, "main", true, true, None).is_err());
+        assert!(!is_workers_branch("lantern/") && !is_workers_branch("main") && is_workers_branch("lantern/w-2"));
+        assert!(remove_worktree(main.path(), &wt.root, "lantern/w", true, true, None).is_ok());
+        assert!(branch_exists(main.path(), "users-own", None) && !branch_exists(main.path(), "lantern/w", None));
     }
 }

@@ -120,6 +120,8 @@ export interface MergeProposal {
   files: { path: string; added: number; removed: number }[];
   /** Loose work in the worker's worktree, which approving commits first. */
   uncommitted: number;
+  /** The loose files' names: what approving commits on top of the branch before it is merged. */
+  loose: string[];
   status: "open" | "merged" | "declined";
   /** Why the last approval didn't merge (conflicting files, a dirty checkout); the proposal stays open to try again. */
   problem: string | null;
@@ -563,7 +565,7 @@ function applyEvent(state: State, ev: UiEvent): State {
     case "agent_mode":
       return { ...state, mode: ev.mode };
     case "merge_proposed": {
-      const proposal: MergeProposal = { worker: ev.worker, name: ev.name, branch: ev.branch, into: ev.into, summary: ev.summary, commits: ev.commits, files: ev.files, uncommitted: ev.uncommitted, status: "open", problem: null, attempts: 0 };
+      const proposal: MergeProposal = { worker: ev.worker, name: ev.name, branch: ev.branch, into: ev.into, summary: ev.summary, commits: ev.commits, files: ev.files, uncommitted: ev.uncommitted, loose: ev.loose, status: "open", problem: null, attempts: 0 };
       return { ...state, proposals: [...state.proposals.filter((p) => p.worker !== ev.worker), proposal] };
     }
     case "merge_resolved":
@@ -574,6 +576,8 @@ function applyEvent(state: State, ev: UiEvent): State {
           const answered = { attempts: p.attempts + 1 };
           if (ev.outcome === "merged") return { ...p, ...answered, status: "merged", problem: null };
           if (ev.outcome === "declined") return { ...p, ...answered, status: "declined", problem: null };
+          // Not what the user was shown any more: the card goes, saying why.
+          if (ev.outcome === "changed") return { ...p, ...answered, status: "declined", problem: ev.detail };
           return { ...p, ...answered, problem: ev.outcome === "conflicts" ? `Conflicts with ${p.into} in ${ev.detail}.` : ev.detail };
         }),
       };

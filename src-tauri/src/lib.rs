@@ -125,6 +125,27 @@ fn ceiling_of(main: Option<(Mode, bool, ProviderId)>) -> Mode {
     main.map_or(Mode::Ask, |(mode, auto, provider)| args::worker_mode(mode, auto, &capabilities_of(provider)))
 }
 
+/// `cfg`'s mode and auto-approve, no freer than `ceiling` allows (None: no ceiling, the chat is no worker). True when that
+/// lowered them.
+fn cap_mode(cfg: &mut SessionConfig, ceiling: Option<Mode>) -> bool {
+    let Some(ceiling) = ceiling else { return false };
+    let (mode, auto) = args::capped_mode(cfg.mode, cfg.auto_approve, ceiling, &capabilities_of(cfg.provider));
+    let lowered = (mode, auto) != (cfg.mode, cfg.auto_approve);
+    cfg.mode = mode;
+    cfg.auto_approve = auto;
+    lowered
+}
+
+/// The ceiling for chat `slot` when it is a worker of an open main agent: what its main agent allows now.
+fn worker_ceiling(state: &AppState, slot: &str) -> Option<Mode> {
+    state.orchestra.parent_of(slot).map(|main| main_ceiling(state, &main))
+}
+
+/// Tells the window a worker runs on Ask: its mode was lowered under it.
+fn told_ask(app: &AppHandle, slot: &str) {
+    let _ = app.emit("ui-event", SlotEvent { slot: slot.to_string(), event: ui_event::UiEvent::AgentMode { mode: "ask".into() } });
+}
+
 /// How the worker `worker` runs once its main agent's mode allows no more than `ceiling`: lowered (its claude restarted on
 /// the same conversation, since the mode is a launch flag) when it was running with more freedom than that.
 async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: Mode) {
@@ -143,7 +164,7 @@ async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: 
         cfg.helper = helper;
     }
     if launch(app, worker, &s, cfg, false).await.is_ok() {
-        let _ = app.emit("ui-event", SlotEvent { slot: worker.to_string(), event: ui_event::UiEvent::AgentMode { mode: "ask".into() } });
+        told_ask(app, worker);
     }
 }
 
@@ -397,6 +418,10 @@ struct WorkerSettings {
     name: String,
     /// The main agent's slot, which has to be open already.
     parent: String,
+    /// The branch Lantern made for it, as the canvas saved it (None: a shared folder, or a save from before it was kept).
+    /// Its worktree's HEAD is the worker's to switch, so this is what says which branch is the worker's.
+    #[serde(default)]
+    branch: Option<String>,
 }
 
 fn checked_effort(effort: Option<String>) -> Result<Option<String>, String> {
@@ -406,11 +431,14 @@ fn checked_effort(effort: Option<String>) -> Result<Option<String>, String> {
     }
 }
 
+/// A chat's config from what the window sent. A worker's mode is no freer than its main agent allows now, whatever the
+/// window asked for (see `cap_mode`).
 async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: String, settings: Settings, resume: Option<String>) -> Result<SessionConfig, String> {
     if !std::path::Path::new(&folder).is_dir() {
         return Err(format!("{folder} no longer exists."));
     }
-    Ok(SessionConfig {
+    let ceiling = settings.worker.as_ref().map(|w| main_ceiling(state, &w.parent));
+    let mut cfg = SessionConfig {
         provider: settings.provider,
         binary: claude_path.into(),
         folder: folder.into(),
@@ -430,7 +458,9 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
             },
         )?,
         path_env: login_path(state).await,
-    })
+    };
+    cap_mode(&mut cfg, ceiling);
+    Ok(cfg)
 }
 
 /// The user's name for their messages: the macOS account's full name, else git's user.name, else the login name.
@@ -458,10 +488,15 @@ async fn locate_claude(path_override: Option<String>) -> Result<String, String> 
 #[tauri::command]
 async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String, claude_path: String, folder: String, settings: Settings) -> Result<ProviderInfo, String> {
     let s = slot_for(&app, &state, &slot)?;
+    let asked = settings.mode;
     let cfg = new_config(&state, &s, claude_path, folder, settings, None).await?;
     enroll(&state, &slot, &s, &cfg.helper.role);
     let provider = cfg.provider.info();
+    let lowered = cfg.mode != asked;
     launch(&app, &slot, &s, cfg, true).await?;
+    if lowered {
+        told_ask(&app, &slot);
+    }
     menu::refresh_recent(&app).await;
     Ok(provider)
 }
@@ -480,8 +515,13 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
     cfg.resume = running_id.or(cfg.resume);
     cfg.helper = helper_config(&s, cfg.helper.role.clone())?;
     cfg.path_env = login_path(&state).await;
+    // A worker asked for more freedom than its main agent allows gets what it allows (the window is told).
+    let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
     let (new_mode, new_auto, provider) = (cfg.mode, cfg.auto_approve, cfg.provider);
     launch(&app, &slot, &s, cfg, false).await?;
+    if lowered {
+        told_ask(&app, &slot);
+    }
     // A worker never has more freedom than its main agent: when the main agent's mode is lowered, so are its workers'.
     if state.orchestra.is_main(&slot) {
         let ceiling = args::worker_mode(new_mode, new_auto, &capabilities_of(provider));
@@ -505,7 +545,12 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
     cfg.resume = running_id.or(cfg.resume);
     cfg.helper = helper_config(&s, cfg.helper.role.clone())?;
     cfg.path_env = login_path(&state).await;
-    launch(&app, &slot, &s, cfg, false).await
+    let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
+    launch(&app, &slot, &s, cfg, false).await?;
+    if lowered {
+        told_ask(&app, &slot);
+    }
+    Ok(())
 }
 
 /// Stops a chat and forgets it. Closing one that doesn't exist is fine.
@@ -1325,7 +1370,7 @@ async fn open_session(
             let replayed = tauri::async_runtime::spawn_blocking(move || history::replay(&path)).await.map_err(|e| e.to_string())?;
             // Registered before it starts, so its first events are seen, and unregistered if it never does.
             if let Some(w) = worker {
-                state.orchestra.adopt(&slot, &w.parent, &w.name, &cfg.folder).await?;
+                state.orchestra.adopt(&slot, &w.parent, &w.name, &cfg.folder, w.branch.as_deref()).await?;
             }
             if let Err(e) = launch(&app, &slot, &s, cfg, true).await {
                 state.orchestra.forget(&slot);
@@ -1333,7 +1378,7 @@ async fn open_session(
             }
             // The window put the chat up with the mode it was saved in: told the one it runs in, when that is lower.
             if lowered {
-                let _ = app.emit("ui-event", SlotEvent { slot: slot.clone(), event: ui_event::UiEvent::AgentMode { mode: "ask".into() } });
+                told_ask(&app, &slot);
             }
             // Its main agent may have been lowered while this one was opening.
             if let Some(parent) = &parent_slot {
@@ -1654,6 +1699,50 @@ mod tests {
     fn a_worker_restored_before_its_main_agent_has_a_config_comes_back_on_ask() {
         assert_eq!(ceiling_of(None), Mode::Ask);
         assert_eq!(args::capped_mode(Mode::Auto, false, ceiling_of(None), &capabilities_of(ProviderId::Claude)), (Mode::Ask, false));
+    }
+
+    fn config(mode: Mode, auto_approve: bool) -> SessionConfig {
+        SessionConfig {
+            provider: ProviderId::Claude,
+            binary: "/bin/claude".into(),
+            folder: "/tmp".into(),
+            mode,
+            auto_approve,
+            resume: None,
+            model: None,
+            effort: None,
+            advisor: None,
+            subagent_model: None,
+            helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into() }, providers: vec![] },
+            path_env: None,
+        }
+    }
+
+    /// Restarting a worker, changing its harness or starting it from the window: whatever mode is asked for, it runs no
+    /// freer than its main agent allows, and a chat that is no worker is left as asked.
+    #[test]
+    fn a_worker_restarted_with_more_freedom_than_its_main_agent_allows_is_capped() {
+        let mut cfg = config(Mode::Auto, false);
+        assert!(cap_mode(&mut cfg, Some(Mode::Ask)));
+        assert_eq!((cfg.mode, cfg.auto_approve), (Mode::Ask, false));
+        let mut steps = config(Mode::Steps, true);
+        assert!(cap_mode(&mut steps, Some(Mode::Ask)));
+        assert_eq!((steps.mode, steps.auto_approve), (Mode::Ask, false));
+        let mut allowed = config(Mode::Auto, false);
+        assert!(!cap_mode(&mut allowed, Some(Mode::Auto)));
+        assert_eq!(allowed.mode, Mode::Auto);
+        let mut no_worker = config(Mode::Auto, false);
+        assert!(!cap_mode(&mut no_worker, None));
+        assert_eq!(no_worker.mode, Mode::Auto);
+    }
+
+    /// A restored worker's settings carry the branch the canvas saved, and older saves (without one) still read.
+    #[test]
+    fn a_restored_workers_settings_carry_its_saved_branch() {
+        let saved: Settings = serde_json::from_str(r#"{"mode":"auto","model":null,"effort":null,"worker":{"name":"w","parent":"s1","branch":"lantern/w"}}"#).unwrap();
+        assert_eq!(saved.worker.unwrap().branch.as_deref(), Some("lantern/w"));
+        let older: Settings = serde_json::from_str(r#"{"mode":"auto","model":null,"effort":null,"worker":{"name":"w","parent":"s1"}}"#).unwrap();
+        assert_eq!(older.worker.unwrap().branch, None);
     }
 
     #[test]

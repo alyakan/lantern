@@ -482,7 +482,7 @@ export default function App() {
         slot,
         claudePath,
         folder,
-        { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder), ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent } } : {}) },
+        { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder), ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch } } : {}) },
         sessionId,
       );
     // A worker waits for its main agent: if that one didn't open, this one comes back as an ordinary chat.
