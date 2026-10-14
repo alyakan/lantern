@@ -89,7 +89,9 @@ export function outline(value: unknown, max = 40): OutlineRow[] {
   return rows;
 }
 
-/** What the Summarize button asks Claude, naming the request so it reads that one. The query is left out: it can hold a token. */
+/** What the Summarize button asks Claude, naming the request so it reads that one. The URL goes without its query,
+ * fragment and user info: they can hold credentials. */
 export function summarizeRequest(item: NetworkItem): string {
-  return `Summarize the response of network request ${item.tx.id} (${item.tx.method} ${item.tx.url.split(/[?#]/)[0]}): read it with network_request, then save your summary with network_summarize.`;
+  const url = item.tx.url.split(/[?#]/)[0].replace(/^([a-z]+:\/\/)[^/@]*@/i, "$1");
+  return `Summarize the response of network request ${item.tx.id} (${item.tx.method} ${url}): read it with network_request, then save your summary with network_summarize.`;
 }

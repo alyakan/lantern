@@ -42,6 +42,7 @@ describe("network", () => {
     const ask = summarizeRequest({ tx: tx({ url: "https://api.x/v1/items?token=s3cret" }), watch: "Items", summary: null, has_response: true });
     expect(ask).toContain("network request abc (GET https://api.x/v1/items)");
     expect(ask).not.toContain("s3cret");
+    expect(summarizeRequest({ tx: tx({ url: "https://sam:pw@api.x/v1#access_token=t" }), watch: null, summary: null, has_response: true })).toContain("(GET https://api.x/v1)");
     expect(ask).toContain("network_summarize");
   });
 });

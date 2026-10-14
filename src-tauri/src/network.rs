@@ -686,15 +686,73 @@ fn secret_name(name: &str) -> bool {
         || ["token", "secret", "api_key", "apikey", "password", "session", "credential", "private_key"].iter().any(|w| n.contains(w))
 }
 
-/// The URL with credential query parameters (`?access_token=…`) redacted.
+/// The URL with its credentials redacted: a `user:password@` before the host, and credential parameters anywhere after
+/// the first `?` or `#` (the query, and the fragment, where OAuth puts tokens), whichever separator splits them.
 fn redact_url(url: &str) -> String {
-    let Some((base, query)) = url.split_once('?') else { return url.to_string() };
-    let (query, fragment) = query.split_once('#').map_or((query, None), |(q, f)| (q, Some(f)));
-    let query: Vec<String> = query.split('&').map(|pair| match pair.split_once('=') {
-        Some((k, v)) if secret_name(k) && !v.is_empty() => format!("{k}=<redacted>"),
-        _ => pair.to_string(),
-    }).collect();
-    format!("{base}?{}{}", query.join("&"), fragment.map(|f| format!("#{f}")).unwrap_or_default())
+    let url = match url.split_once("://") {
+        Some((scheme, rest)) => {
+            let authority = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
+            match authority.rfind('@') {
+                Some(at) => format!("{scheme}://<redacted>@{}", &rest[at + 1..]),
+                None => url.to_string(),
+            }
+        }
+        None => url.to_string(),
+    };
+    match url.find(['?', '#']) {
+        Some(i) => format!("{}{}", &url[..=i], redact_pairs(&url[i + 1..], &['&', ';', '?', '#'])),
+        None => url,
+    }
+}
+
+/// `name=value` pairs split on any of `separators`, with credential values redacted. A name is percent-decoded before
+/// it's judged, so `access%5Ftoken` is caught too.
+fn redact_pairs(text: &str, separators: &[char]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    loop {
+        let end = rest.find(separators).unwrap_or(rest.len());
+        let pair = &rest[..end];
+        match pair.split_once('=') {
+            Some((k, v)) if !v.is_empty() && secret_name(&percent_decode(k)) => out.push_str(&format!("{k}=<redacted>")),
+            _ => out.push_str(pair),
+        }
+        let Some(sep) = rest[end..].chars().next() else { break };
+        out.push(sep);
+        rest = &rest[end + sep.len_utf8()..];
+    }
+    out
+}
+
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = (bytes[i] == b'%' && i + 2 < bytes.len()).then(|| std::str::from_utf8(&bytes[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok())).flatten();
+        match (bytes[i], hex) {
+            (_, Some(b)) => {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+            (b'+', _) => out.push(b' '),
+            (b, _) => out.push(b),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Text that isn't JSON Lantern could read (plain text, JSON cut short, a form): `"name": value` and `name=value` with a
+/// credential name get their value redacted.
+fn redact_text(text: &str) -> String {
+    static JSON_PAIR: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static EQ_PAIR: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let json_pair = JSON_PAIR.get_or_init(|| regex::Regex::new(r#""((?:[^"\\]|\\.)*)"(\s*:\s*)("(?:[^"\\]|\\.)*"|[^,}\]\s]+)"#).unwrap());
+    let eq_pair = EQ_PAIR.get_or_init(|| regex::Regex::new(r#"([A-Za-z0-9_.%+\-]+)=([^&;\s"'<>]+)"#).unwrap());
+    let text = json_pair.replace_all(text, |c: &regex::Captures| if secret_name(&c[1]) { format!("\"{}\"{}\"<redacted>\"", &c[1], &c[2]) } else { c[0].to_string() });
+    eq_pair.replace_all(&text, |c: &regex::Captures| if secret_name(&percent_decode(&c[1])) { format!("{}=<redacted>", &c[1]) } else { c[0].to_string() }).into_owned()
 }
 
 /// JSON with the values of credential keys (`password`, `access_token`, `client_secret`…) redacted, at any depth.
@@ -702,10 +760,14 @@ fn redact_json(v: &mut Value) {
     match v {
         Value::Object(map) => {
             for (k, child) in map.iter_mut() {
-                match child {
-                    Value::String(s) if secret_name(k) => *child = Value::String(format!("<redacted, {} chars>", s.chars().count())),
-                    Value::Number(_) if secret_name(k) => *child = Value::String("<redacted>".into()),
-                    _ => redact_json(child),
+                // Whatever the value is: an object under `credentials` is credentials too.
+                if secret_name(k) && !child.is_null() && !child.is_boolean() {
+                    *child = Value::String(match child {
+                        Value::String(s) => format!("<redacted, {} chars>", s.chars().count()),
+                        _ => "<redacted>".into(),
+                    });
+                } else {
+                    redact_json(child);
                 }
             }
         }
@@ -727,7 +789,7 @@ fn request_body_text(b: &Body, content_type: Option<&str>, max: usize) -> String
         return json_text(&v, max);
     }
     match b.text() {
-        Some(text) if content_type.is_some_and(|c| c.contains("x-www-form-urlencoded")) => body_text(&Body { data: redact_url(&format!("?{text}"))[1..].to_string(), ..b.clone() }, max),
+        Some(text) if content_type.is_some_and(|c| c.contains("x-www-form-urlencoded")) => body_text(&Body { data: redact_pairs(text, &['&', ';']), ..b.clone() }, max),
         _ => body_text(b, max),
     }
 }
@@ -750,7 +812,7 @@ fn describe(d: &Detail, path: Option<&str>, max: usize) -> Result<String, String
     }
     out.push_str(&format!(", {}{}\n", size_text(d.response_body.size), t.response_content_type.as_deref().map(|c| format!(", {c}")).unwrap_or_default()));
     if let Some(e) = &t.error {
-        out.push_str(&format!("Failed: {e}\n"));
+        out.push_str(&format!("Failed: {}\n", redact_text(&redact_url(e))));
     }
     out.push_str(&format!("id {}\n\nRequest headers:\n{}", t.id, headers_text(&d.request_headers)));
     if d.request_body.size > 0 {
@@ -783,11 +845,14 @@ fn json_text(v: &Value, max: usize) -> String {
     format!("{}\n… cut at {max} of {} characters. Outline of the whole:\n{}\nRead a part with `path` (e.g. \"data.items[0]\"), or raise `max_chars`.", cut(&pretty, max), pretty.len(), outline(v, 4, 3_000))
 }
 
+/// A body that isn't readable JSON, for Claude: its credentials redacted as text, then cut short.
 fn body_text(b: &Body, max: usize) -> String {
     match b.text() {
         Some("") => "(empty)".into(),
-        Some(text) if text.len() > max => format!("{}\n… cut at {max} of {} characters.", cut(text, max), text.len()),
-        Some(text) => text.to_string(),
+        Some(text) => {
+            let text = redact_text(text);
+            if text.len() > max { format!("{}\n… cut at {max} of {} characters.", cut(&text, max), text.len()) } else { text }
+        }
         None => format!("(binary, {})", size_text(b.size)),
     }
 }
@@ -1166,6 +1231,26 @@ mod tests {
         }
         assert!(!m.call(None, "network_requests", &json!({})).unwrap().contains("abc123"));
         assert_eq!(redact_url("https://x/a"), "https://x/a");
+    }
+
+    #[test]
+    fn redaction_holds_however_the_credential_is_written() {
+        // In the URL: user info, a fragment, `;` and `#` as separators, an encoded name.
+        assert_eq!(redact_url("https://sam:pw@x/a?b=1;token=t1#access_token=t2&state=s"), "https://<redacted>@x/a?b=1;token=<redacted>#access_token=<redacted>&state=s");
+        assert_eq!(redact_url("https://x/a#id_token=t3"), "https://x/a#id_token=<redacted>");
+        assert_eq!(redact_url("https://x/a?access%5Ftoken=t4"), "https://x/a?access%5Ftoken=<redacted>");
+        assert_eq!(redact_url("https://x/a@b?q=1"), "https://x/a@b?q=1", "an @ in the path is no user info");
+        // A form with a stray # (not a fragment there) and ; separators.
+        assert_eq!(redact_pairs("user=a#&password=hunter2;pin=1234", &['&', ';']), "user=a#&password=<redacted>;pin=<redacted>");
+        // JSON: a credential key over an object or a number is redacted whole.
+        let mut v = json!({"credentials": {"user": "sam", "pass": "x"}, "api_key": 42, "ok": {"token": null}});
+        redact_json(&mut v);
+        assert_eq!(v, json!({"credentials": "<redacted>", "api_key": "<redacted>", "ok": {"token": null}}));
+        // Text that isn't readable JSON (cut short, or plain): pairs in it are still redacted.
+        let cut_json = r#"{"user": "sam", "access_token" : "t5\"x", "expires": 3600, "refresh_token": 99"#;
+        let out = redact_text(cut_json);
+        assert!(!out.contains("t5") && !out.contains("99") && out.contains(r#""user": "sam""#) && out.contains(r#""expires": 3600"#), "{out}");
+        assert_eq!(redact_text("callback?code=1&client_secret=s6 done"), "callback?code=1&client_secret=<redacted> done");
     }
 
     #[test]
