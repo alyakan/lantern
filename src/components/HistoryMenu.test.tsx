@@ -48,6 +48,23 @@ describe("HistoryMenu", () => {
     expect(past).toHaveTextContent("Add retries to fetchJson");
   });
 
+  it("leaves an orchestra's workers off the list of open chats, since the team's canvas is where they are", () => {
+    const open = [
+      { slot: "s2", title: "Other chat", state: "running" as const, sessionId: "x", elsewhere: null },
+      { slot: "w1", title: "Login form", state: "running" as const, sessionId: "w", elsewhere: null, worker: true },
+    ];
+    render(<HistoryMenu sessions={[]} currentId={null} onOpen={() => {}} onClose={() => {}} open={open} />);
+    const openList = screen.getByRole("list", { name: "Open chats" });
+    expect(openList).toHaveTextContent("Other chat");
+    expect(openList).not.toHaveTextContent("Login form");
+  });
+
+  it("shows no Open list at all when the only open chats are workers", () => {
+    const open = [{ slot: "w1", title: "Login form", state: "running" as const, sessionId: "w", elsewhere: null, worker: true }];
+    render(<HistoryMenu sessions={[]} currentId={null} onOpen={() => {}} onClose={() => {}} open={open} />);
+    expect(screen.queryByRole("list", { name: "Open chats" })).toBeNull();
+  });
+
   it("says when a finished chat still runs something in the background", () => {
     const open = [{ slot: "s2", title: "Start the dev server", state: "done" as const, background: 1, sessionId: "x", elsewhere: null }];
     render(<HistoryMenu sessions={[]} currentId={null} onOpen={() => {}} onClose={() => {}} open={open} />);

@@ -47,6 +47,22 @@ export function orchestraNodes(chats: Chats, mainName: (slot: string, s: State) 
   return nodes;
 }
 
+/**
+ * The main agent of the team the chat `slot` belongs to: itself when it is one, or the main agent a worker reports to. Null
+ * for any other chat (and for a worker whose main agent was closed), which has no canvas. The canvas shows one team: the
+ * chat on screen's.
+ */
+export function teamMain(chats: Chats, slot: string): string | null {
+  if (chats.slots[slot]?.orchestrator) return slot;
+  const parent = chats.agents[slot]?.parent;
+  return parent && chats.slots[parent]?.orchestrator ? parent : null;
+}
+
+/** The nodes of one team: its main agent and the workers it started. */
+export function teamNodes(nodes: OrchestraNode[], main: string): OrchestraNode[] {
+  return nodes.filter((n) => n.slot === main || n.parent === main);
+}
+
 /** The first line of the last thing an agent said at the top level of its chat. */
 function lastSaid(items: ChatItem[]): string | null {
   for (let i = items.length - 1; i >= 0; i--) {
