@@ -68,7 +68,7 @@ import { SplitPane } from "./components/SplitPane";
 import { TopBar } from "./components/TopBar";
 import { Canvas, newLayout } from "./components/Canvas";
 import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions } from "./lib/canvasContext";
-import { needingYou, orchestraNodes } from "./lib/orchestraView";
+import { needingYou, orchestraNodes, teamMain, teamNodes } from "./lib/orchestraView";
 import "./styles.css";
 
 /** How many `name` steps have finished, subagents' included. */
@@ -1073,7 +1073,8 @@ export default function App() {
       announced.current[slot] = key;
       // An agent of the orchestra on the canvas in front of you is already on screen with what it is doing: no pop-up for it.
       // Away from the window you still hear of it.
-      const onScreen = view === "canvas" && windowFocused() && (s.orchestrator || !!chats.agents[slot]);
+      const shown = teamMain(chats, chats.active);
+      const onScreen = view === "canvas" && windowFocused() && shown !== null && (slot === shown || chats.agents[slot]?.parent === shown);
       if (onScreen) continue;
       // Settings can have this kind of event off, or paused: then neither a notification nor a toast.
       const wanted = shouldNotify(notifyPrefs, a.kind);
@@ -1106,7 +1107,7 @@ export default function App() {
   const openChats: OpenChat[] = Object.entries(chats.slots)
     .filter(([slot]) => slot !== active)
     .sort(([a], [b]) => lastTouched(b) - lastTouched(a))
-    .map(([slot, s]) => ({ slot, title: chats.agents[slot]?.name ?? chatTitle(s, titles), state: chatState(s, drafts.current[slot]), unread: !!unread[slot], background: s.backgroundTasks.length, sessionId: s.sessionId, elsewhere: s.folder && s.folder !== state.folder ? basename(s.folder) : null }));
+    .map(([slot, s]) => ({ slot, title: chats.agents[slot]?.name ?? chatTitle(s, titles), state: chatState(s, drafts.current[slot]), unread: !!unread[slot], background: s.backgroundTasks.length, sessionId: s.sessionId, elsewhere: s.folder && s.folder !== state.folder ? basename(s.folder) : null, worker: !!chats.agents[slot] }));
 
   // For the title bar: steps that failed in the latest turn, and other chats waiting for an answer.
   const lastPrompt = state.items.map((it) => it.type).lastIndexOf("user");
@@ -1116,10 +1117,12 @@ export default function App() {
   const failed = clearedFailures[active] === failedKey ? 0 : failedCount(turnTools);
   const waiting = openChats.filter((c) => c.state === "waiting").length;
 
-  // Every agent of an orchestra, the ones waiting for you, and whether the canvas is what's shown.
+  // The team of the chat on screen (its main agent and workers), the ones waiting for you, and whether the canvas is what's
+  // shown. Another chat, outside any team, has no canvas, and neither does the toggle for it.
+  const team = teamMain(chats, active);
   const mains = Object.values(chats.slots).filter((s) => s.orchestrator).length;
-  const nodes = orchestraNodes(chats, (_slot, s) => (mains > 1 && s.folder ? `Main agent · ${basename(s.folder)}` : "Main agent"));
-  const inOrchestra = nodes.length > 0;
+  const nodes = team ? teamNodes(orchestraNodes(chats, (_slot, s) => (mains > 1 && s.folder ? `Main agent · ${basename(s.folder)}` : "Main agent")), team) : [];
+  const inOrchestra = team !== null;
   const showCanvas = view === "canvas" && inOrchestra;
   const attention = needingYou(nodes, chats.slots);
   useAction("toggle-canvas", () => setView((v) => (v === "canvas" ? "chat" : "canvas")), inOrchestra);

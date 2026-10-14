@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type State } from "../store";
 import { chatsReducer, initialChats, type Chats } from "../sessions";
-import { money, needingYou, nodeStatus, orchestraNodes, readyToMerge, summaryLine } from "./orchestraView";
+import { money, needingYou, nodeStatus, orchestraNodes, readyToMerge, summaryLine, teamMain, teamNodes } from "./orchestraView";
 
 const base: State = { ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/p" };
 const main: State = { ...base, orchestrator: true };
@@ -56,6 +56,40 @@ describe("orchestraNodes", () => {
     expect(orchestraNodes(c, name)).toEqual([{ slot: "w1", role: "worker", parent: null, name: "Login", branch: "lantern/w1", isolation: "worktree" }]);
     const gone = { ...c, slots: { s1: c.slots.s1 } };
     expect(orchestraNodes(gone, name)).toEqual([]);
+  });
+});
+
+describe("the team on screen", () => {
+  // s1 is a main agent with a worker, s2 is another main agent with its own, and s3 is an ordinary chat.
+  const world = (): Chats => {
+    let c = initialChats(main);
+    c = chatsReducer(c, { type: "add", slot: "s2" });
+    c = chatsReducer(c, { type: "in", slot: "s2", action: { type: "orchestrator_set", on: true } });
+    c = chatsReducer(c, { type: "add", slot: "s3" });
+    c = spawn(c, "w1", "A", "s1");
+    return spawn(c, "w2", "B", "s2");
+  };
+
+  it("is the main agent itself, or the one a worker reports to", () => {
+    const c = world();
+    expect(teamMain(c, "s1")).toBe("s1");
+    expect(teamMain(c, "w1")).toBe("s1");
+    expect(teamMain(c, "w2")).toBe("s2");
+  });
+
+  it("is none for an ordinary chat, a chat that isn't open, and a worker whose main agent was closed", () => {
+    let c = world();
+    expect(teamMain(c, "s3")).toBeNull();
+    expect(teamMain(c, "nope")).toBeNull();
+    c = chatsReducer(c, { type: "in", slot: "s1", action: { type: "orchestrator_set", on: false } });
+    expect(teamMain(c, "w1")).toBeNull();
+  });
+
+  it("keeps one team's agents and leaves the other team's off the canvas", () => {
+    const c = world();
+    const all = orchestraNodes(c, name);
+    expect(teamNodes(all, "s1").map((n) => n.slot)).toEqual(["s1", "w1"]);
+    expect(teamNodes(all, "s2").map((n) => n.slot)).toEqual(["s2", "w2"]);
   });
 });
 

@@ -18,6 +18,8 @@ export interface OpenChat {
   sessionId: string | null;
   /** The chat's folder name, when it's not the folder on screen. */
   elsewhere: string | null;
+  /** A worker of an orchestra: it is reached from its team's canvas, so the list of open chats leaves it out. */
+  worker?: boolean;
 }
 
 interface Props {
@@ -42,7 +44,7 @@ export function HistoryMenu({ sessions, currentId, onOpen, onClose, open = [], o
   const q = query.trim().toLowerCase();
   const matches = (title: string) => !q || title.toLowerCase().includes(q);
   const openIds = new Set(open.map((c) => c.sessionId));
-  const shownOpen = open.filter((c) => matches(c.title));
+  const shownOpen = open.filter((c) => !c.worker && matches(c.title));
   // The chat on screen is open too: it leads the Open list rather than sitting among past sessions.
   const current = sessions?.find((s) => s.id === currentId && matches(s.title)) ?? null;
   const actions = useContext(SessionActionsContext);
