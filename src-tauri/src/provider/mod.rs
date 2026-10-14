@@ -20,18 +20,76 @@ use std::path::PathBuf;
 pub enum ProviderId {
     #[default]
     Claude,
+    /// A stand-in with the capabilities of a CLI that has no auto mode, so tests can tell a provider's limits from Claude's.
+    #[cfg(test)]
+    Fake,
 }
 
 impl ProviderId {
     pub fn provider(self) -> &'static dyn Provider {
         match self {
             ProviderId::Claude => &claude::ClaudeProvider,
+            #[cfg(test)]
+            ProviderId::Fake => &FakeProvider,
         }
     }
+
+    /// Every provider this build knows, whether or not its CLI is installed.
+    pub fn all() -> Vec<ProviderId> {
+        #[allow(unused_mut)]
+        let mut all = vec![ProviderId::Claude];
+        #[cfg(test)]
+        all.push(ProviderId::Fake);
+        all
+    }
+
+    /// The name a user or the main agent calls it by (what the JSON form is).
+    pub fn name(self) -> &'static str {
+        match self {
+            ProviderId::Claude => "claude",
+            #[cfg(test)]
+            ProviderId::Fake => "fake",
+        }
+    }
+
+    pub fn info(self) -> ProviderInfo {
+        ProviderInfo { id: self, capabilities: self.provider().capabilities() }
+    }
+}
+
+/// What a provider can do, which the rest of the app asks instead of assuming it is Claude. Claude Code does all of it;
+/// a CLI that lacks one says so here, and what depends on it falls back (see args::worker_mode) or is hidden.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Capabilities {
+    /// It has an auto mode where the CLI itself decides what runs. Without one, a chat on it is never freer than Ask.
+    pub supports_auto_mode: bool,
+    /// It can consult an advisor model.
+    pub supports_advisor: bool,
+    /// Its turns report what they cost in dollars; otherwise only tokens are known.
+    pub reports_cost_usd: bool,
+    /// It has Claude Code's skills and slash commands.
+    pub supports_skills: bool,
+    /// It takes a thinking-effort level.
+    pub supports_effort: bool,
+    /// The model can be switched while the session runs; otherwise a change waits for the next start.
+    pub model_switchable: bool,
+}
+
+/// A provider and what it can do, as the window is told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ProviderInfo {
+    pub id: ProviderId,
+    pub capabilities: Capabilities,
 }
 
 pub trait Provider: Send + Sync {
     fn id(&self) -> ProviderId;
+
+    fn capabilities(&self) -> Capabilities;
+
+    /// The models it offers by the names the CLI takes, for telling the main agent what to pick from. Other names that are
+    /// the right shape are still accepted (a full model id, say).
+    fn models(&self) -> &'static [&'static str];
 
     /// The CLI's executable: `override_path` when the user gave one, else where it is usually installed or on their
     /// login-shell PATH.
@@ -46,6 +104,37 @@ pub trait Provider: Send + Sync {
     fn spawn(&self, cfg: &SessionConfig, sink: Sink, on_edit: EditHook) -> Result<Session, String>;
 }
 
+/// A CLI that is installed nowhere and does only what a Codex-like one would: no auto mode, advisor, dollar cost or skills.
+#[cfg(test)]
+pub struct FakeProvider;
+
+#[cfg(test)]
+impl Provider for FakeProvider {
+    fn id(&self) -> ProviderId {
+        ProviderId::Fake
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true }
+    }
+
+    fn models(&self) -> &'static [&'static str] {
+        &["fake-small", "fake-large"]
+    }
+
+    fn locate(&self, _: Option<&str>) -> Result<PathBuf, String> {
+        Err("the fake CLI is not installed".into())
+    }
+
+    fn version(&self, _: &str, _: Option<&str>) -> Option<String> {
+        None
+    }
+
+    fn spawn(&self, _: &SessionConfig, _: Sink, _: EditHook) -> Result<Session, String> {
+        Err("the fake CLI cannot start".into())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -56,5 +145,22 @@ mod tests {
         assert_eq!(serde_json::from_str::<ProviderId>("\"claude\"").unwrap(), ProviderId::Claude);
         assert_eq!(serde_json::to_string(&ProviderId::Claude).unwrap(), "\"claude\"");
         assert_eq!(ProviderId::default().provider().id(), ProviderId::Claude);
+    }
+
+    #[test]
+    fn a_provider_is_named_the_way_it_is_saved() {
+        for id in ProviderId::all() {
+            assert_eq!(serde_json::to_string(&id).unwrap(), format!("\"{}\"", id.name()));
+            assert_eq!(id.provider().id(), id);
+            assert_eq!(id.info().capabilities, id.provider().capabilities());
+        }
+    }
+
+    #[test]
+    fn what_a_provider_says_it_cannot_do_reaches_the_window_by_name() {
+        let v = serde_json::to_value(ProviderId::Fake.info()).unwrap();
+        assert_eq!(v["id"], "fake");
+        assert_eq!(v["capabilities"]["supports_auto_mode"], false);
+        assert_eq!(v["capabilities"]["supports_effort"], true);
     }
 }

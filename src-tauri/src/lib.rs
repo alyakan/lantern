@@ -30,7 +30,7 @@ pub mod updates;
 
 use args::{HelperConfig, Mode, Role};
 use changes::FileDiff;
-use provider::ProviderId;
+use provider::{ProviderId, ProviderInfo};
 use session::{EditHook, Session, SessionConfig};
 use slots::{Slot, SlotEvent, Slots};
 use std::sync::{Arc, OnceLock};
@@ -95,10 +95,26 @@ fn emitter(app: &AppHandle) -> impl Fn(SlotEvent) + Send + Sync + Clone + 'stati
     }
 }
 
+/// What a provider can do (see Capabilities).
+fn capabilities_of(provider: ProviderId) -> provider::Capabilities {
+    provider.provider().capabilities()
+}
+
+/// The providers a main agent on `own` may start workers on: its own, which is running, then every other whose CLI is found.
+async fn available_providers(own: ProviderId) -> Vec<ProviderId> {
+    let mut available = vec![own];
+    for id in ProviderId::all().into_iter().filter(|id| *id != own) {
+        if tauri::async_runtime::spawn_blocking(move || id.provider().locate(None)).await.is_ok_and(|found| found.is_ok()) {
+            available.push(id);
+        }
+    }
+    available
+}
+
 /// The most freedom the workers of main agent `main` may have, from its mode as it is now (Ask when it isn't open).
 fn main_ceiling(state: &AppState, main: &str) -> Mode {
     let cfg = state.slots.get(main).ok().and_then(|s| s.config.lock().unwrap().clone());
-    cfg.map_or(Mode::Ask, |c| args::worker_mode(c.mode, c.auto_approve))
+    cfg.map_or(Mode::Ask, |c| args::worker_mode(c.mode, c.auto_approve, &capabilities_of(c.provider)))
 }
 
 /// How the worker `worker` runs once its main agent's mode allows no more than `ceiling`: lowered (its claude restarted on
@@ -106,7 +122,7 @@ fn main_ceiling(state: &AppState, main: &str) -> Mode {
 async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: Mode) {
     let Ok(s) = state.slots.get(worker) else { return };
     let Some(mut cfg) = s.config.lock().unwrap().clone() else { return };
-    let (mode, auto) = args::capped_mode(cfg.mode, cfg.auto_approve, ceiling);
+    let (mode, auto) = args::capped_mode(cfg.mode, cfg.auto_approve, ceiling, &capabilities_of(cfg.provider));
     if (mode, auto) == (cfg.mode, cfg.auto_approve) {
         return;
     }
@@ -137,8 +153,20 @@ impl orchestra::Host for AppHost {
         self.app.state::<AppState>().slots.get(main)?.folder()
     }
 
-    fn worker_mode(&self, main: &str) -> Mode {
-        main_ceiling(&self.app.state::<AppState>(), main)
+    fn main_provider(&self, main: &str) -> ProviderId {
+        let state = self.app.state::<AppState>();
+        let cfg = state.slots.get(main).ok().and_then(|s| s.config.lock().unwrap().as_ref().map(|c| c.provider));
+        cfg.unwrap_or_default()
+    }
+
+    fn available_providers(&self, main: &str) -> orchestra::Fut<'_, Vec<ProviderId>> {
+        let own = self.main_provider(main);
+        Box::pin(available_providers(own))
+    }
+
+    fn worker_mode(&self, main: &str, provider: ProviderId) -> Mode {
+        let ceiling = main_ceiling(&self.app.state::<AppState>(), main);
+        args::capped_mode(ceiling, false, ceiling, &capabilities_of(provider)).0
     }
 
     fn worktree_root(&self) -> std::path::PathBuf {
@@ -154,8 +182,18 @@ impl orchestra::Host for AppHost {
             let state = self.app.state::<AppState>();
             let parent_slot = req.parent.clone();
             let parent = state.slots.get(&req.parent)?;
-            // The worker runs on its main agent's provider: it is cloned with the rest of the config.
+            // The worker runs on its main agent's provider unless another was asked for: it is cloned with the rest of the config.
             let mut cfg = parent.config.lock().unwrap().clone().ok_or("The main agent has no folder open.")?;
+            if req.provider != cfg.provider {
+                // Another provider's CLI is a program, models and settings of its own: none of the main agent's carry over.
+                let id = req.provider;
+                cfg.binary = tauri::async_runtime::spawn_blocking(move || id.provider().locate(None)).await.map_err(|e| e.to_string())??;
+                cfg.provider = id;
+                cfg.model = None;
+                cfg.effort = None;
+                cfg.advisor = None;
+                cfg.subagent_model = None;
+            }
             let s = slot_for(&self.app, &state, &req.slot)?;
             // On Auto a prompt only reaches the user when Claude Code's own classifier can't decide, which is what makes a
             // team of workers workable: but only when the main agent is on Auto too. Otherwise an Ask-mode main agent
@@ -247,11 +285,15 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
 
 fn helper_config(slot: &Slot, role: Role) -> Result<HelperConfig, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role })
+    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role, providers: vec![] })
 }
 
 /// Stops the slot's running session (denying its pending prompts) and starts `cfg` in it.
-async fn launch(app: &AppHandle, id: &str, slot: &Slot, cfg: SessionConfig, clear_changes: bool) -> Result<(), String> {
+async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, clear_changes: bool) -> Result<(), String> {
+    // Told to the main agent as it starts (and again whenever it restarts, which is when a CLI installed since shows up).
+    if cfg.helper.role == Role::Main {
+        cfg.helper.providers = available_providers(cfg.provider).await;
+    }
     let mut session = slot.session.lock().await;
     if let Some(old) = session.take() {
         slot.claude_pid.store(0, std::sync::atomic::Ordering::SeqCst);
@@ -368,13 +410,14 @@ async fn locate_claude(path_override: Option<String>) -> Result<String, String> 
 }
 
 #[tauri::command]
-async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String, claude_path: String, folder: String, settings: Settings) -> Result<(), String> {
+async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String, claude_path: String, folder: String, settings: Settings) -> Result<ProviderInfo, String> {
     let s = slot_for(&app, &state, &slot)?;
     let cfg = new_config(&state, &s, claude_path, folder, settings, None).await?;
     enroll(&state, &slot, &s, &cfg.helper.role);
+    let provider = cfg.provider.info();
     launch(&app, &slot, &s, cfg, true).await?;
     menu::refresh_recent(&app).await;
-    Ok(())
+    Ok(provider)
 }
 
 /// Restarts a chat's claude on the same session (`--resume`), e.g. with a new permission mode or effort.
@@ -391,11 +434,11 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
     cfg.resume = running_id.or(cfg.resume);
     cfg.helper = helper_config(&s, cfg.helper.role.clone())?;
     cfg.path_env = login_path(&state).await;
-    let (new_mode, new_auto) = (cfg.mode, cfg.auto_approve);
+    let (new_mode, new_auto, provider) = (cfg.mode, cfg.auto_approve, cfg.provider);
     launch(&app, &slot, &s, cfg, false).await?;
     // A worker never has more freedom than its main agent: when the main agent's mode is lowered, so are its workers'.
     if state.orchestra.is_main(&slot) {
-        let ceiling = args::worker_mode(new_mode, new_auto);
+        let ceiling = args::worker_mode(new_mode, new_auto, &capabilities_of(provider));
         for worker in state.orchestra.workers_of(&slot) {
             lower_worker(&app, &state, &worker, ceiling).await;
         }
@@ -441,12 +484,15 @@ fn checked_model(model: Option<String>) -> Result<Option<String>, String> {
 async fn set_model(state: State<'_, AppState>, slot: String, model: Option<String>) -> Result<(), String> {
     let model = checked_model(model)?;
     let Ok(s) = state.slots.get(&slot) else { return Ok(()) };
+    let mut live = true;
     if let Some(cfg) = s.config.lock().unwrap().as_mut() {
         cfg.model = model.clone();
+        // A provider whose model is fixed for the session takes it at the next start, which reads it from the config.
+        live = cfg.provider.provider().capabilities().model_switchable;
     }
     let mut session = s.session.lock().await;
     match session.as_mut() {
-        Some(x) if x.is_running() => x.set_model(model.as_deref()).await,
+        Some(x) if live && x.is_running() => x.set_model(model.as_deref()).await,
         _ => Ok(()),
     }
 }
@@ -593,6 +639,8 @@ async fn claude_mcp(state: &AppState, slot: &str, args: Vec<String>) -> Result<S
         // Claude Code's own command: another provider has no `mcp`, so adding one means saying what happens here.
         let binary = match cfg.provider {
             ProviderId::Claude => cfg.binary.clone(),
+            #[cfg(test)]
+            ProviderId::Fake => return Err("The fake CLI has no mcp command.".into()),
         };
         (binary, cfg.folder.clone())
     };
@@ -1128,12 +1176,14 @@ async fn recent_folders() -> Result<Vec<history::RecentFolder>, String> {
 }
 
 /// What opening a past session brings back: its events; the folder it was started in, when that was a place this folder
-/// moved from (the chat tells Claude once); and why it isn't resumed, when it could only be read (its copy failed).
+/// moved from (the chat tells Claude once); and why it isn't resumed, when it could only be read (its copy failed). `provider`
+/// is the CLI the chat runs on, and what that can do.
 #[derive(serde::Serialize)]
 pub struct OpenedSession {
     events: Vec<ui_event::UiEvent>,
     moved_from: Option<String>,
     read_only: Option<String>,
+    provider: ProviderInfo,
 }
 
 /// Replays a past session into a chat, refills its change tracker from the session's edits, and continues it with `--resume`.
@@ -1158,13 +1208,14 @@ async fn open_session(
     let parent_slot = settings.worker.as_ref().map(|w| w.parent.clone());
     if let Some(parent) = &parent_slot {
         let ceiling = main_ceiling(&state, parent);
-        let (mode, auto) = args::capped_mode(settings.mode, settings.auto_approve, ceiling);
+        let (mode, auto) = args::capped_mode(settings.mode, settings.auto_approve, ceiling, &capabilities_of(settings.provider));
         settings.mode = mode;
         settings.auto_approve = auto;
     }
     let worker = settings.worker.clone();
     let cfg = new_config(&state, &s, claude_path, folder, settings, Some(session_id.clone())).await?;
     enroll(&state, &slot, &s, &cfg.helper.role);
+    let provider = cfg.provider.info();
     let root = projects_root()?;
     let folder = cfg.folder.clone();
     let aliases = aliases_for(&state, &folder.to_string_lossy());
@@ -1181,7 +1232,7 @@ async fn open_session(
     match ready {
         relocate::Ready::ReadOnly { source, reason } => {
             let events = tauri::async_runtime::spawn_blocking(move || history::replay(&source).events).await.map_err(|e| e.to_string())?;
-            Ok(OpenedSession { events, moved_from: None, read_only: Some(reason) })
+            Ok(OpenedSession { events, moved_from: None, read_only: Some(reason), provider })
         }
         relocate::Ready::Resumable(path) => {
             let replayed = tauri::async_runtime::spawn_blocking(move || history::replay(&path)).await.map_err(|e| e.to_string())?;
@@ -1199,7 +1250,7 @@ async fn open_session(
             }
             menu::refresh_recent(&app).await;
             s.changes.lock().unwrap().restore(replayed.edits, replayed.edits_before_last_turn);
-            Ok(OpenedSession { events: replayed.events, moved_from, read_only: None })
+            Ok(OpenedSession { events: replayed.events, moved_from, read_only: None, provider })
         }
     }
 }

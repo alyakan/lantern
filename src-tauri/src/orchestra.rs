@@ -8,6 +8,7 @@
 use crate::git;
 use crate::permission::bridge::OrchestraHandler;
 use crate::permission::protocol::BridgeResponse;
+use crate::provider::ProviderId;
 use crate::ui_event::UiEvent;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -40,6 +41,8 @@ pub struct SpawnRequest {
     pub name: String,
     pub brief: String,
     pub folder: PathBuf,
+    /// The provider it runs on: its main agent's unless spawn_agent named another. `model` is that provider's.
+    pub provider: ProviderId,
     pub model: Option<String>,
     /// The mode it starts in (see args::worker_mode): never more autonomous than the main agent.
     pub mode: crate::args::Mode,
@@ -50,8 +53,12 @@ pub trait Host: Send + Sync + 'static {
     /// An event for one chat's slot in the UI.
     fn emit(&self, slot: &str, event: UiEvent);
     fn main_folder(&self, main: &str) -> Result<PathBuf, String>;
-    /// The mode workers of this main agent start in.
-    fn worker_mode(&self, main: &str) -> crate::args::Mode;
+    /// The provider the main agent's own chat runs on.
+    fn main_provider(&self, main: &str) -> ProviderId;
+    /// The providers a worker of this main agent may run on: the main agent's own, and every other whose CLI is installed.
+    fn available_providers(&self, main: &str) -> Fut<'_, Vec<ProviderId>>;
+    /// The mode workers of this main agent start in when they run on `provider`.
+    fn worker_mode(&self, main: &str, provider: ProviderId) -> crate::args::Mode;
     /// Where workers' worktrees go (outside the project, so they don't show up in it).
     fn worktree_root(&self) -> PathBuf;
     fn path_env(&self) -> Fut<'_, Option<String>>;
@@ -373,6 +380,23 @@ impl Orchestra {
         }
     }
 
+    /// The provider a worker runs on: the one `asked` names, else the main agent's own (which is always available, so it is
+    /// never looked for). One that is unknown, or whose CLI isn't installed, is an error that says which there are.
+    async fn worker_provider(&self, main: &str, asked: &Value) -> Result<ProviderId, String> {
+        let own = self.host.main_provider(main);
+        let name = match asked {
+            Value::Null => return Ok(own),
+            Value::String(s) if s.trim().is_empty() => return Ok(own),
+            Value::String(s) => s.trim(),
+            _ => return Err("`provider` is a provider's name.".into()),
+        };
+        let available = self.host.available_providers(main).await;
+        match available.iter().find(|p| p.name().eq_ignore_ascii_case(name)) {
+            Some(p) => Ok(*p),
+            None => Err(format!("{name:?} is not an available provider. Available: {}.", available.iter().map(|p| p.name()).collect::<Vec<_>>().join(", "))),
+        }
+    }
+
     async fn spawn(self: &Arc<Self>, main: &str, args: &Value) -> Result<String, String> {
         let name = untrusted(Self::text_arg(args, "name")?, 60);
         let brief = Self::text_arg(args, "brief")?.to_string();
@@ -388,6 +412,7 @@ impl Orchestra {
             Some(m) => return Err(format!("{m:?} is not a model name.")),
             None => None,
         };
+        let provider = self.worker_provider(main, &args["provider"]).await?;
         let folder = self.host.main_folder(main)?;
         // The place is taken under the same lock that counts the others, so two calls can't both find room for the last one.
         // Its worktree is filled in once there is one.
@@ -456,7 +481,7 @@ impl Orchestra {
                 w.worktree = worktree.clone();
             }
         }
-        let mode = self.host.worker_mode(main);
+        let mode = self.host.worker_mode(main, provider);
         // Told to the UI first: the worker's own events carry its slot, and the UI drops events for a chat it doesn't know.
         self.host.emit(
             main,
@@ -469,9 +494,10 @@ impl Orchestra {
                 base: worktree.as_ref().and_then(|w| w.base.clone()),
                 isolation: isolation.to_string(),
                 mode: if mode == crate::args::Mode::Auto { "auto".into() } else { "ask".into() },
+                provider: Some(provider.info()),
             },
         );
-        let req = SpawnRequest { parent: main.to_string(), slot: id.clone(), name: name.clone(), brief, folder: run_folder.clone(), model, mode };
+        let req = SpawnRequest { parent: main.to_string(), slot: id.clone(), name: name.clone(), brief, folder: run_folder.clone(), provider, model, mode };
         if let Err(e) = self.host.spawn_worker(req).await {
             release(self, &id);
             self.host.emit(&id, UiEvent::AgentStopped { reason: Some(format!("It didn't start: {e}")) });
@@ -481,8 +507,11 @@ impl Orchestra {
             }
             return Err(format!("The worker didn't start: {e}"));
         }
+        if provider != self.host.main_provider(main) {
+            note.push_str(&format!(" It runs on {}.", provider.name()));
+        }
         Ok(match &worktree {
-            Some(wt) => format!("Started worker {id} (\"{name}\") on branch {} in its own worktree. It runs on its own; you'll get a note when it finishes a turn.", wt.branch),
+            Some(wt) => format!("Started worker {id} (\"{name}\") on branch {} in its own worktree. It runs on its own; you'll get a note when it finishes a turn.{note}", wt.branch),
             None => format!("Started worker {id} (\"{name}\"). It runs on its own; you'll get a note when it finishes a turn.{note}"),
         })
     }
@@ -899,6 +928,9 @@ mod tests {
         transcript: Mutex<Vec<UiEvent>>,
         /// The mode the main agent runs in (the default is Ask, as in Mode's first variant).
         main_mode: Mutex<Option<crate::args::Mode>>,
+        /// The provider the main agent runs on (Claude by default) and the others whose CLI is installed.
+        main_provider: Mutex<ProviderId>,
+        installed: Mutex<Vec<ProviderId>>,
     }
 
     impl Host for FakeHost {
@@ -908,8 +940,19 @@ mod tests {
         fn main_folder(&self, _: &str) -> Result<PathBuf, String> {
             Ok(self.folder.lock().unwrap().clone())
         }
-        fn worker_mode(&self, _: &str) -> crate::args::Mode {
-            crate::args::worker_mode(self.main_mode.lock().unwrap().unwrap_or(crate::args::Mode::Auto), false)
+        fn main_provider(&self, _: &str) -> ProviderId {
+            *self.main_provider.lock().unwrap()
+        }
+        fn available_providers(&self, main: &str) -> Fut<'_, Vec<ProviderId>> {
+            let own = self.main_provider(main);
+            let mut all = vec![own];
+            all.extend(self.installed.lock().unwrap().iter().filter(|p| **p != own));
+            Box::pin(async move { all })
+        }
+        fn worker_mode(&self, _: &str, provider: ProviderId) -> crate::args::Mode {
+            // As the app does it: what the main agent allows, then what the worker's provider can run.
+            let ceiling = crate::args::worker_mode(self.main_mode.lock().unwrap().unwrap_or(crate::args::Mode::Auto), false, &self.main_provider.lock().unwrap().provider().capabilities());
+            crate::args::capped_mode(ceiling, false, ceiling, &provider.provider().capabilities()).0
         }
         fn worktree_root(&self) -> PathBuf {
             self.worktrees.lock().unwrap().clone()
@@ -1019,6 +1062,69 @@ mod tests {
         assert_eq!((spawned[0].mode, spawned[1].mode), (crate::args::Mode::Auto, crate::args::Mode::Ask));
         let modes: Vec<String> = host.events_for("s1").into_iter().filter_map(|e| if let UiEvent::AgentSpawned { mode, .. } = e { Some(mode) } else { None }).collect();
         assert_eq!(modes, ["auto", "ask"]);
+    }
+
+    #[tokio::test]
+    async fn a_worker_runs_on_its_main_agents_provider_unless_another_is_named() {
+        let (host, o, _repo, _wt) = setup();
+        let reply = spawn(&o, "default").await;
+        assert!(!reply.contains("It runs on claude"), "{reply}");
+        // The main agent's own provider can be named too, however it is cased, and an empty name is none.
+        call(&o, "spawn_agent", json!({"name": "named", "brief": "y", "provider": " Claude "})).await.unwrap();
+        call(&o, "spawn_agent", json!({"name": "empty", "brief": "y", "provider": ""})).await.unwrap();
+        let spawned = host.spawned.lock().unwrap().clone();
+        assert_eq!(spawned.iter().map(|r| r.provider).collect::<Vec<_>>(), [ProviderId::Claude; 3]);
+        // The window is told what the worker's provider can do, to show only what it has.
+        let told: Vec<_> = host.events_for("s1").into_iter().filter_map(|e| if let UiEvent::AgentSpawned { provider, .. } = e { provider } else { None }).collect();
+        assert_eq!(told, [ProviderId::Claude.info(); 3]);
+    }
+
+    #[tokio::test]
+    async fn another_provider_is_chosen_by_name_with_a_model_of_its_own_and_starts_on_ask() {
+        let (host, o, _repo, _wt) = setup();
+        *host.installed.lock().unwrap() = vec![ProviderId::Fake];
+        // The main agent is on Auto, which the other provider has none of.
+        let reply = call(&o, "spawn_agent", json!({"name": "other", "brief": "y", "provider": "fake", "model": "fake-large"})).await.unwrap();
+        assert!(reply.contains("It runs on fake."), "{reply}");
+        let spawned = host.spawned.lock().unwrap().clone();
+        assert_eq!((spawned[0].provider, spawned[0].model.as_deref(), spawned[0].mode), (ProviderId::Fake, Some("fake-large"), crate::args::Mode::Ask));
+        let modes: Vec<String> = host.events_for("s1").into_iter().filter_map(|e| if let UiEvent::AgentSpawned { mode, .. } = e { Some(mode) } else { None }).collect();
+        assert_eq!(modes, ["ask"]);
+        let told = host.events_for("s1").into_iter().find_map(|e| if let UiEvent::AgentSpawned { provider, .. } = e { provider } else { None });
+        assert_eq!(told, Some(ProviderId::Fake.info()));
+        // Claude's workers under the same main agent still get Auto.
+        spawn(&o, "own").await;
+        assert_eq!(host.spawned.lock().unwrap()[1].mode, crate::args::Mode::Auto);
+    }
+
+    #[tokio::test]
+    async fn a_provider_that_is_unknown_or_not_installed_is_refused_with_the_ones_there_are() {
+        let (host, o, _repo, _wt) = setup();
+        for asked in ["codex", "fake"] {
+            let err = call(&o, "spawn_agent", json!({"name": "x", "brief": "y", "provider": asked})).await.unwrap_err();
+            assert_eq!(err, format!("{asked:?} is not an available provider. Available: claude."));
+        }
+        assert!(call(&o, "spawn_agent", json!({"name": "x", "brief": "y", "provider": 7})).await.unwrap_err().contains("`provider`"));
+        // Nothing was started, nor left behind: no worker, no worktree.
+        assert!(host.spawned.lock().unwrap().is_empty() && !o.is_worker("w1"));
+        assert_eq!(call(&o, "list_agents", json!({})).await.unwrap(), "No workers yet.");
+        // Once its CLI is installed it is there, and listed after the main agent's own.
+        *host.installed.lock().unwrap() = vec![ProviderId::Fake];
+        let err = call(&o, "spawn_agent", json!({"name": "x", "brief": "y", "provider": "codex"})).await.unwrap_err();
+        assert_eq!(err, "\"codex\" is not an available provider. Available: claude, fake.");
+        assert!(call(&o, "spawn_agent", json!({"name": "x", "brief": "y", "provider": "fake"})).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn the_main_agents_own_provider_is_always_available_without_looking_for_it() {
+        let (host, o, _repo, _wt) = setup();
+        // Even a provider whose CLI can't be found is its own main agent's (it is running on it).
+        *host.main_provider.lock().unwrap() = ProviderId::Fake;
+        assert!(spawn(&o, "own").await.contains("w1"));
+        assert_eq!(host.spawned.lock().unwrap()[0].provider, ProviderId::Fake);
+        // And Claude is then another provider: not there until it is installed.
+        let err = call(&o, "spawn_agent", json!({"name": "x", "brief": "y", "provider": "claude"})).await.unwrap_err();
+        assert!(err.contains("Available: fake."), "{err}");
     }
 
     #[tokio::test]
