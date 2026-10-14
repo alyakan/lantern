@@ -45,6 +45,30 @@ export function tokenBefore(text: string, caret: number): { n: number; start: nu
   return tokens(text).find((t) => t.end === caret) ?? null;
 }
 
+/** A sent message as the box would have it: a big one comes back as its placeholder, with its text kept. */
+export function draftOf(text: string): string {
+  return isBigPaste(text) ? encodeDraft(placeholder(1, text), { 1: text }) : text;
+}
+
+/**
+ * `edit` (an encoded draft) put in front of what's in the box `draft`, a blank line between. Its pastes are renumbered
+ * past the box's, so the two never share a number.
+ */
+export function prependDraft(draft: string, edit: string): string {
+  const box = decodeDraft(draft);
+  const piece = decodeDraft(edit);
+  const base = nextNumber(box.text, box.pastes) - 1;
+  const renumber = new Map(
+    Object.keys(piece.pastes)
+      .map(Number)
+      .sort((a, b) => a - b)
+      .map((old, i) => [old, base + 1 + i] as const),
+  );
+  const pieceText = piece.text.replace(TOKEN, (whole, n) => (renumber.has(Number(n)) ? whole.replace(`#${n} `, `#${renumber.get(Number(n))} `) : whole));
+  const pastes: Pastes = { ...box.pastes, ...Object.fromEntries([...renumber].map(([old, n]) => [n, piece.pastes[old]])) };
+  return encodeDraft([pieceText, box.text].filter((t) => t.trim()).join("\n\n"), pastes);
+}
+
 // A draft is saved as one string. With pastes in it, they follow the text after this mark.
 const MARK = "⁣⁣pastes⁣⁣";
 

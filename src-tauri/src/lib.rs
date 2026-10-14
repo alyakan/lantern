@@ -36,6 +36,8 @@ pub struct AppState {
     slots: Slots,
     login_path: Arc<OnceLock<Option<String>>>,
     titles: Arc<titles::TitleStore>,
+    /// Names the user gave sessions in Lantern (Rename in the History menu): they beat every other title.
+    renames: Arc<titles::TitleStore>,
     /// "Always allow" rules for folders, saved in app data and shared by every chat.
     folder_rules: Arc<permission::rules::FolderRules>,
     /// PRs looked up for the Changes pane, by repository and number, with when: fetching them takes a moment.
@@ -822,7 +824,32 @@ fn projects_root() -> Result<std::path::PathBuf, String> {
 async fn list_sessions(state: State<'_, AppState>, folder: String) -> Result<Vec<history::SessionSummary>, String> {
     let root = projects_root()?;
     let titles = state.titles.all();
-    tauri::async_runtime::spawn_blocking(move || history::list_sessions(&root, std::path::Path::new(&folder), &titles)).await.map_err(|e| e.to_string())
+    let renamed = state.renames.all();
+    tauri::async_runtime::spawn_blocking(move || history::list_sessions(&root, std::path::Path::new(&folder), &titles, &renamed)).await.map_err(|e| e.to_string())
+}
+
+/// Names a past session in Lantern (the History menu's Rename). The name is kept apart from Claude Code's transcripts,
+/// and beats every title the session has.
+#[tauri::command]
+fn rename_session(state: State<'_, AppState>, session_id: String, title: String) -> Result<(), String> {
+    if !history::valid_id(&session_id) {
+        return Err("Not a session id.".into());
+    }
+    let name = titles::name(&title).ok_or("A session needs a name.")?;
+    state.renames.set(&session_id, &name);
+    Ok(())
+}
+
+/// A past session's events, read from its transcript without starting claude (for Export as Markdown).
+#[tauri::command]
+async fn session_events(folder: String, session_id: String) -> Result<Vec<ui_event::UiEvent>, String> {
+    if !history::valid_id(&session_id) {
+        return Err("Not a session id.".into());
+    }
+    let root = projects_root()?;
+    tauri::async_runtime::spawn_blocking(move || history::transcript_path(&root, std::path::Path::new(&folder), &session_id).map(|p| history::replay(&p).events))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// A short title for a session: Claude Code's own if it made one, else one Lantern made earlier, else a new one from
@@ -837,7 +864,7 @@ async fn title_session(state: State<'_, AppState>, claude_path: String, folder: 
     let own = tauri::async_runtime::spawn_blocking(move || history::transcript_path(&root, std::path::Path::new(&folder), &id).ok().and_then(|p| history::transcript_title(&p)))
         .await
         .map_err(|e| e.to_string())?;
-    if let Some(title) = own.or_else(|| state.titles.get(&session_id)) {
+    if let Some(title) = state.renames.get(&session_id).or(own).or_else(|| state.titles.get(&session_id)) {
         return Ok(Some(title));
     }
     let path_env = login_path(&state).await;
@@ -964,8 +991,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let titles = titles::TitleStore::load(app.path().app_data_dir().ok().map(|d| d.join("titles.json")));
+            let renames = titles::TitleStore::load(app.path().app_data_dir().ok().map(|d| d.join("renames.json")));
             let folder_rules = permission::rules::FolderRules::load(app.path().app_data_dir().ok().map(|d| d.join("permission_rules.json")));
-            app.manage(AppState { slots: Slots::default(), login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), folder_rules: Arc::new(folder_rules), prs: Default::default() });
+            app.manage(AppState { slots: Slots::default(), login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), prs: Default::default() });
             app.manage(updates::Updates::default());
             if updates::checks_enabled() {
                 tauri::async_runtime::spawn(updates::watch(app.handle().clone()));
@@ -1042,6 +1070,8 @@ pub fn run() {
             resolve_files,
             search_text,
             list_sessions,
+            rename_session,
+            session_events,
             title_session,
             open_session,
             update_status,

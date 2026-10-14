@@ -73,6 +73,12 @@ pub fn clean(reply: &str) -> Option<String> {
     Some(if line.chars().count() <= TITLE_MAX { line.to_string() } else { format!("{}…", line.chars().take(TITLE_MAX).collect::<String>().trim_end()) })
 }
 
+/// A name typed for a session: trimmed, cut to a sensible length; None if nothing is left.
+pub fn name(typed: &str) -> Option<String> {
+    let name = typed.trim();
+    (!name.is_empty()).then(|| name.chars().take(200).collect())
+}
+
 /// The `claude` arguments for a title: Haiku, no tools, MCP servers, settings (so no hooks) or saved session.
 pub fn args(prompt: &str) -> Vec<String> {
     let first: String = prompt.chars().take(2000).collect();
@@ -120,6 +126,13 @@ mod tests {
         assert_eq!(clean("Title: **Review PR 128**").as_deref(), Some("Review PR 128"));
         assert_eq!(clean("  \n  "), None);
         assert!(clean(&"word ".repeat(40)).unwrap().ends_with('…'));
+    }
+
+    #[test]
+    fn a_typed_name_is_trimmed_and_needs_some_text() {
+        assert_eq!(name("  Retry work  ").as_deref(), Some("Retry work"));
+        assert_eq!(name("   "), None);
+        assert_eq!(name(&"x".repeat(300)).unwrap().chars().count(), 200);
     }
 
     #[test]

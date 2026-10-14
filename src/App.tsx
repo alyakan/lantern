@@ -5,13 +5,16 @@ import { prNumberOf, reviewHints } from "./lib/review";
 import { openFind } from "./lib/editorFind";
 import { StepsIntro } from "./components/StepsIntro";
 import { windowFocused } from "./lib/windowFocus";
-import { initialState, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
+import { initialState, reducer, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
+import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend } from "./sessions";
 import type { Mode } from "./types";
 import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
 import { isTyping } from "./lib/typing";
 import { withShellContext } from "./lib/shell";
+import { prependDraft } from "./lib/paste";
+import { withPrompt } from "./lib/promptHistory";
 import { latestTurnOf, sinceLabel, withRevertNote, type RevertRequest } from "./lib/revert";
 import { withSkillNote } from "./lib/skillNote";
 import { agentTree, usesAgents } from "./lib/agents";
@@ -96,6 +99,8 @@ export default function App() {
   const [autoBy, setAutoBy] = usePersistentState<Record<string, boolean>>("settings.autoApproveByFolder", {});
   const autoFor = (folder: string | null) => (folder ? (autoBy[folder] ?? false) : false);
   const [lastFolder, setLastFolder] = usePersistentState<string | null>("settings.lastFolder", null);
+  // Each folder's sent prompts, for ↑ in the box (see MessageInput). Kept per folder, newest last.
+  const [promptsBy, setPromptsBy] = usePersistentState<Record<string, string[]>>("settings.promptHistory", {});
   const [model, setModel] = usePersistentState<string | null>("settings.model", null);
   // Thinking effort (--effort); null = Claude Code's default. App-wide, like the model.
   const [effort, setEffort] = usePersistentState<string | null>("settings.effort", null);
@@ -414,6 +419,15 @@ export default function App() {
   const [offer, setOffer] = useState<SavedChat[]>(loadSaved);
   // Bumped to remount the chat box when a restore puts unsent text back into the chat on screen.
   const [composerEpoch, setComposerEpoch] = useState(0);
+  // After Edit (or a restore) the box has the text: focus it, so the user can go on typing.
+  useEffect(() => {
+    if (composerEpoch > 0) document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
+  }, [composerEpoch]);
+  // Edit: the message goes back in the box to send as a new one, in front of anything typed. Nothing is sent or removed.
+  const editInBox = (draft: string) => {
+    drafts.current[active] = prependDraft(drafts.current[active] ?? "", draft);
+    setComposerEpoch((e) => e + 1);
+  };
 
   // A chat from last time, into `slot`: its conversation continued, or (typed but never sent) a new one in its folder;
   // either way with its unsent text back in the box.
@@ -516,9 +530,10 @@ export default function App() {
   }, [active, state.status, state.folder]);
 
   // A flavour picked since the chat's last message goes with this one, in a note telling Claude.
-  const sendIn = (slot: string, text: string) => {
+  // `draft`: the box's text as sent, with its paste placeholders (kept on the message so Edit can bring them back).
+  const sendIn = (slot: string, text: string, draft?: string) => {
     const pick = chats.slots[slot]?.flavourPick ?? null;
-    to(slot)({ type: "user_sent", text, ...(pick ? { switchedTo: pick } : {}) });
+    to(slot)({ type: "user_sent", text, ...(pick ? { switchedTo: pick } : {}), ...(draft ? { draft } : {}) });
     // Commands run since the last message go first, so Claude sees what they printed; skills named mid-message get
     // a note so Claude uses them.
     const items = chats.slots[slot]?.items ?? [];
@@ -575,6 +590,17 @@ export default function App() {
       if (!sure) return;
     }
     go();
+  };
+
+  // /clear drops the conversation (the files it changed stay), so it's asked about first.
+  const clearChat = async (slot: string) => {
+    const sure = await ask("Claude forgets this conversation. The files it changed stay as they are.", {
+      title: "Clear this conversation?",
+      kind: "warning",
+      okLabel: "Clear",
+      cancelLabel: "Keep it",
+    });
+    if (sure) sendIn(slot, "/clear");
   };
 
   const changeMode = (mode: Mode) =>
@@ -882,6 +908,9 @@ export default function App() {
       setReviewCollapsed(false);
     },
   };
+  // Edit, Retry and Regenerate: only in a chat that's idle (not mid-turn, not ended) and not Step by step, whose pages
+  // have their own flow.
+  const resendHandlers = state.status === "idle" && !stepsMode ? { onEdit: editInBox, onResend: (p: { text: string; draft?: string }) => sendIn(active, p.text, p.draft) } : undefined;
   const hero = state.items.length === 0 && !state.thinking;
   // The Agents tab: the latest turn's tree. It comes up by itself the first time a chat's turn uses a subagent or the
   // advisor; after that it's left where you put it.
@@ -944,6 +973,36 @@ export default function App() {
   });
   // Installs the downloaded update and relaunches. The window says so (the overlay) until it does: closing every chat
   // and reopening is otherwise just a window that vanishes. Started from Settings, that closes first.
+  // The History menu's actions on past sessions, for the folder on screen: pins are kept per folder, and a rename also
+  // renames the open chat of that session.
+  const [pinnedBy, setPinnedBy] = usePersistentState<Record<string, string[]>>("settings.pinnedSessions", {});
+  const sessionActions: SessionActions | null = state.folder
+    ? {
+        folder: state.folder,
+        pinned: pinnedBy[state.folder] ?? [],
+        onTogglePin: (id) => {
+          const folder = state.folder!;
+          const pinned = pinnedBy[folder] ?? [];
+          setPinnedBy({ ...pinnedBy, [folder]: pinned.includes(id) ? pinned.filter((p) => p !== id) : [...pinned, id] });
+        },
+        onRename: async (id, title) => {
+          await api.renameSession(id, title);
+          setTitles((all) => ({ ...all, [id]: title }));
+        },
+        onExport: (id, title) => {
+          const folder = state.folder!;
+          // The transcript as the chat would show it, read without starting claude: its prompts, replies and steps.
+          api
+            .sessionEvents(folder, id)
+            .then((events) => {
+              const replayed = reducer({ ...initialState, folder }, { type: "history_loaded", sessionId: id, events });
+              return api.exportText(exportFileName(title), sessionMarkdown(title, replayed.items, folder));
+            })
+            .catch((e) => dispatch({ type: "failed", text: errText(e) }));
+        },
+      }
+    : null;
+
   const restartToUpdate = () => {
     setInstallStarted(true);
     setSettingsAt(null);
@@ -959,10 +1018,10 @@ export default function App() {
     <MessageInput
       key={`input-${active}-${composerEpoch}`}
       status={state.status}
-      onSend={(text) => {
+      onSend={(text, draft) => {
         // Starting something new instead: the chats from last time aren't offered any more.
         if (hero) setOffer([]);
-        sendIn(active, text);
+        sendIn(active, text, draft);
       }}
       onStop={stop}
       onCancelStart={() => cancelStart(active)}
@@ -984,8 +1043,9 @@ export default function App() {
       models={{ chosen: settingsFor(active).model, onChoose: chooseModel, defaultModel, ids: modelIds, options: state.models }}
       effort={{ chosen: settingsFor(active).effort, onChoose: changeEffort }}
       harness={state.folder ? { presets, chosen: harnessOf(active).id, onChoose: (id) => switchHarness(findHarness(presets, id)), onEdit: () => setSettingsAt("harness") } : undefined}
-      usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs }}
+      usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs, session: { cost: state.sessionCost, tokens: state.sessionTokens }, actions: state.folder && !stepsMode ? { onCompact: () => sendIn(active, "/compact"), onClear: () => clearChat(active) } : undefined }}
       queue={{ items: state.queued, set: (items) => dispatch({ type: "queue_set", items }) }}
+      history={state.folder ? { entries: promptsBy[state.folder] ?? [], remember: (entry) => setPromptsBy({ ...promptsBy, [state.folder!]: withPrompt(promptsBy[state.folder!] ?? [], entry) }) } : undefined}
       commands={state.commands}
       skillIndex={skillIndex}
       findFiles={state.folder ? (query) => api.findFiles(active, query) : undefined}
@@ -1006,7 +1066,7 @@ export default function App() {
   if (state.status === "setup") return <SetupScreen error={state.setupError} onCheck={locate} />;
 
   return (
-    <SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}>
+    <SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}>
       <div className="app">
         <TopBar
           folder={state.folder}
@@ -1067,7 +1127,7 @@ export default function App() {
                             })
                           } onPage={setPageRange} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} />
                       ) : (
-                        <ChatView key={`chat-${active}`} state={state} {...streamHandlers} />
+                        <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} />
                       )}
                     </FileLinksProvider>
                   </ErrorBoundary>
@@ -1161,6 +1221,6 @@ export default function App() {
           onClose={() => setGuideAt(null)}
         />
       </div>
-    </ModeGuideContext.Provider></SlotContext.Provider>
+    </SessionActionsContext.Provider></ModeGuideContext.Provider></SlotContext.Provider>
   );
 }

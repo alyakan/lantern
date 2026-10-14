@@ -31,6 +31,7 @@
   --unread: #0a84ff;       /* a chat finished in the background, not opened yet */
   --add: #1a7f37;
   --del: #cf222e;
+  --warn: #9a6700;
   --info-bg: #f3f3f5;
   --error-bg: #fdefef;
   --auth-bg: #fdf6e6;
@@ -80,6 +81,7 @@
     --unread: #0a84ff;
     --add: #6bd488;
     --del: #ff8a93;
+    --warn: #e3b341;
     --info-bg: #2a2a30;
     --error-bg: #3a1f22;
     --auth-bg: #37301a;
@@ -115,6 +117,7 @@
   --unread: #0a84ff;
   --add: #6bd488;
   --del: #ff8a93;
+  --warn: #e3b341;
   --info-bg: #2a2a30;
   --error-bg: #3a1f22;
   --auth-bg: #37301a;
@@ -267,6 +270,12 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 button.code-block-copy { height: 20px; padding: 0 8px; border: none; border-radius: var(--radius-chip); background: none; color: var(--muted); font-size: calc(11px * var(--font-scale)); opacity: 0; transition: opacity 0.12s; }
 .code-block:hover .code-block-copy, .code-block-copy:focus-visible { opacity: 1; }
 button.code-block-copy:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+/* Under a message: Copy and the rest, there on hover or keyboard focus only. */
+.msg-actions { display: flex; gap: 2px; margin: 2px 0 8px; opacity: 0; transition: opacity 0.12s; }
+.msg-actions.end { justify-content: flex-end; }
+.msg:hover + .msg-actions, .msg-actions:hover, .msg-actions:focus-within { opacity: 1; }
+button.msg-action { height: 20px; padding: 0 8px; border: none; border-radius: var(--radius-chip); background: none; color: var(--muted-text); font-size: calc(11px * var(--font-scale)); }
+button.msg-action:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .msg.assistant .code-block pre { margin: 0; border-radius: 0; background: none; }
 .code-block-colored code { font-family: var(--mono); font-size: calc(12px * var(--font-scale)); line-height: 1.55; white-space: pre; }
 .code-block-colored code br:last-child { display: none; }
@@ -338,6 +347,13 @@ button.code-block-copy:hover:not(:disabled) { background: var(--bg-hover); color
 .step-children { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 8px 6px; padding: 8px 0 8px 12px; border-left: 1px solid var(--line-strong); }
 .edit-line { display: flex; align-items: center; gap: 8px; align-self: flex-start; max-width: 100%; border: 1px solid var(--line); background: var(--bg-subtle); padding: 3px 8px; font-size: calc(12px * var(--font-scale)); font-family: var(--mono); color: var(--text-2); border-radius: var(--radius-inner); }
 .edit-line:hover:not(:disabled) { border-color: var(--line-strong); background: var(--bg-hover); color: var(--text); }
+.edit-row { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; max-width: 100%; }
+.edit-head { display: flex; align-items: center; gap: 4px; max-width: 100%; }
+button.edit-toggle { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 20px; padding: 0; border: none; background: none; color: var(--muted); }
+button.edit-toggle:hover:not(:disabled) { color: var(--text); }
+.edit-hunks { align-self: stretch; }
+.edit-hunks pre { margin: 0; padding: 6px 12px; background: var(--code-bg); border-radius: var(--radius-inner); max-height: 320px; overflow: auto; }
+.edit-hunks .link-button { margin: 4px 0 0 12px; }
 .file-changes { display: flex; flex-direction: column; gap: 3px; margin: 2px 0 4px 5px; padding-left: 11px; border-left: 1px solid var(--line-strong); }
 .edit-icon { color: var(--muted); font-family: var(--ui); }
 .edit-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -441,7 +457,8 @@ button.slash-issue:hover:not(:disabled) { background: color-mix(in srgb, var(--w
 .queue { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .queue-item { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 4px 3px 10px; border: 1px dashed var(--line-strong); border-radius: var(--radius-inner); font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); }
 .queue-label { flex: none; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
-.queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.queue-text { flex: 1; min-width: 0; padding: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+button.link-button.queue-now { flex: none; font-size: calc(11px * var(--font-scale)); }
 button.icon.queue-remove { flex: none; width: 20px; height: 20px; font-size: calc(14px * var(--font-scale)); }
 .composer textarea { resize: none; border: none; outline: none; background: none; color: inherit; font: calc(13.5px * var(--font-scale))/1.5 var(--ui); padding: 0 4px 0 0; max-height: 200px; }
 .composer textarea::placeholder { color: var(--muted-text); }
@@ -450,6 +467,12 @@ button.icon.queue-remove { flex: none; width: 20px; height: 20px; font-size: cal
 .composer-item { display: inline-flex; align-items: center; gap: 5px; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
 .context-meter { display: inline-flex; align-items: center; gap: 10px; margin-right: 10px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted); font-variant-numeric: tabular-nums; cursor: default; }
 .context-used { display: inline-flex; align-items: center; gap: 6px; }
+button.context-used { padding: 0; border: none; background: none; color: inherit; font: inherit; cursor: pointer; }
+.context-meter.warn .context-used { color: var(--warn); }
+.context-meter.full .context-used { color: var(--del); }
+.context-note { font-weight: 500; }
+.context-actions { display: inline-flex; align-items: center; gap: 2px; }
+button.ghost.context-compact, button.ghost.context-clear { height: 20px; padding: 0 6px; font-size: calc(11.5px * var(--font-scale)); color: var(--text-2); }
 .model-picker { position: relative; }
 .model-button { height: 22px; margin-left: -6px; padding: 0 6px; border: none; background: none; border-radius: var(--radius-chip); }
 .model-button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-2); }
@@ -578,6 +601,13 @@ button.icon.open-chat-close { position: absolute; right: 4px; width: 22px; heigh
 .menu-row.current { background: var(--bg-active); }
 .menu-row-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .menu-row-meta { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
+/* A past session: its row, the ⋯ that opens its actions, and the actions and the name box under it. */
+.session-row { display: flex; align-items: center; gap: 2px; }
+.session-row .menu-row { flex: 1; min-width: 0; }
+button.icon.session-more { flex: none; width: 24px; height: 24px; margin-right: 4px; color: var(--muted); }
+.session-actions { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 2px 8px 8px 8px; font-size: calc(12px * var(--font-scale)); }
+.session-rename { display: flex; align-items: center; gap: 8px; padding: 4px 8px; }
+.session-rename input { flex: 1; min-width: 0; font-size: calc(12.5px * var(--font-scale)); }
 .menu-empty { padding: 14px 10px; font-size: calc(12.5px * var(--font-scale)); color: var(--muted); text-align: center; }
 /* The command palette (⇧⌘P): one search over everything Lantern can do, each line with its shortcut. */
 .palette { width: min(560px, calc(100vw - 48px)); max-height: min(460px, calc(100vh - 96px)); padding: 0; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--field); color: var(--text); box-shadow: var(--shadow); }

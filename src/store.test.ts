@@ -22,6 +22,17 @@ describe("reducer", () => {
     expect((s.items[0] as { at: number }).at).toBeGreaterThanOrEqual(before);
   });
 
+  it("keeps the box's draft on a sent message, so Edit can bring its paste placeholders back", () => {
+    const s = reducer({ ...initialState, status: "idle" }, { type: "user_sent", text: "hi", draft: "[Pasted text #1 · 9 lines]" });
+    expect(s.items[0]).toMatchObject({ type: "user", text: "hi", draft: "[Pasted text #1 · 9 lines]" });
+  });
+
+  it("keeps what each turn cost and used, and the session's running totals", () => {
+    const s = ev(running, { kind: "turn_done", is_error: false, result: null, cost_usd: 0.04, tokens: 12_000, session_cost_usd: 0.9, session_tokens: 400_000, duration_ms: 1000, auth_hint: false, denied: 0, context_window: null });
+    expect(s.items[s.items.length - 1]).toMatchObject({ type: "turn", cost: 0.04, tokens: 12_000 });
+    expect(s).toMatchObject({ sessionCost: 0.9, sessionTokens: 400_000 });
+  });
+
   it("keeps the background task list, with when each one started", () => {
     const ev = (tasks: { id: string; task_type: string; description: string }[]) => ({ type: "ui_event" as const, event: { kind: "background_tasks" as const, tasks } });
     const dev = { id: "b1", task_type: "local_bash", description: "npm run dev" };

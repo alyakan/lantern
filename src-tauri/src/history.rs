@@ -159,8 +159,9 @@ pub fn transcript_title(path: &Path) -> Option<String> {
     custom.or(ai)
 }
 
-/// `titles`: the ones Lantern made, for sessions Claude Code didn't title (those run with `-p`).
-fn summarize(path: &Path, folder: &str, titles: &HashMap<String, String>) -> Option<SessionSummary> {
+/// `titles`: the ones Lantern made, for sessions Claude Code didn't title (those run with `-p`). `renamed`: the names the
+/// user gave in Lantern, which beat every other title.
+fn summarize(path: &Path, folder: &str, titles: &HashMap<String, String>, renamed: &HashMap<String, String>) -> Option<SessionSummary> {
     let mut prompts = 0;
     let mut first = None;
     let mut cwd_ok = false;
@@ -194,15 +195,15 @@ fn summarize(path: &Path, folder: &str, titles: &HashMap<String, String>) -> Opt
     }
     let updated_ms = std::fs::metadata(path).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as u64);
     let id = path.file_stem()?.to_string_lossy().into_owned();
-    let title = custom.or(ai).or_else(|| titles.get(&id).cloned()).unwrap_or_else(|| title_of(&first));
+    let title = renamed.get(&id).cloned().or(custom).or(ai).or_else(|| titles.get(&id).cloned()).unwrap_or_else(|| title_of(&first));
     Some(SessionSummary { id, title, updated_ms, prompts })
 }
 
 /// Sessions for `folder`, newest first. Sessions with no typed prompt (e.g. plugin automation) are left out.
-pub fn list_sessions(projects_root: &Path, folder: &Path, titles: &HashMap<String, String>) -> Vec<SessionSummary> {
+pub fn list_sessions(projects_root: &Path, folder: &Path, titles: &HashMap<String, String>, renamed: &HashMap<String, String>) -> Vec<SessionSummary> {
     let Some(dir) = project_dir(projects_root, folder) else { return vec![] };
     let want = folder.to_string_lossy();
-    let mut sessions: Vec<SessionSummary> = jsonl_files(&dir).iter().filter_map(|f| summarize(f, &want, titles)).collect();
+    let mut sessions: Vec<SessionSummary> = jsonl_files(&dir).iter().filter_map(|f| summarize(f, &want, titles, renamed)).collect();
     sessions.sort_by_key(|s| std::cmp::Reverse(s.updated_ms));
     sessions
 }
@@ -435,7 +436,7 @@ mod tests {
         let empty = rec(json!({"type": "queue-operation"}));
         let other_folder = rec(json!({"type": "user", "cwd": "/elsewhere", "entrypoint": "cli", "uuid": "z", "message": {"role": "user", "content": "hi"}}));
         let root = setup(&[("aaaa-1", terminal_session()), ("bbbb-2", app), ("cccc-3", plugin), ("dddd-4", empty), ("eeee-5", other_folder)]);
-        let sessions = list_sessions(root.path(), Path::new(FOLDER), &HashMap::new());
+        let sessions = list_sessions(root.path(), Path::new(FOLDER), &HashMap::new(), &HashMap::new());
         let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
         assert_eq!(ids, vec!["bbbb-2", "aaaa-1"]);
         assert_eq!(sessions[0].title, "Fix the login redirect");
@@ -486,11 +487,11 @@ mod tests {
         let prompts: Vec<String> = replay(&path).events.into_iter().filter_map(|e| if let UiEvent::UserText { text, .. } = e { Some(text) } else { None }).collect();
         assert_eq!(prompts.last().map(String::as_str), Some("Carry on"));
         assert!(!prompts.iter().any(|p| p.contains("being continued")), "{prompts:?}");
-        assert_eq!(list_sessions(root.path(), Path::new(FOLDER), &HashMap::new())[0].prompts, 3);
+        assert_eq!(list_sessions(root.path(), Path::new(FOLDER), &HashMap::new(), &HashMap::new())[0].prompts, 3);
 
         // A session that starts from a summary (e.g. resumed after compaction) isn't titled by it.
         let root = setup(&[("bbbb-2", format!("{summary}\n{after}"))]);
-        assert_eq!(list_sessions(root.path(), Path::new(FOLDER), &HashMap::new())[0].title, "Carry on");
+        assert_eq!(list_sessions(root.path(), Path::new(FOLDER), &HashMap::new(), &HashMap::new())[0].title, "Carry on");
     }
 
     #[test]
@@ -507,7 +508,7 @@ mod tests {
     fn a_session_that_cds_into_a_subfolder_is_still_listed() {
         let moved = rec(json!({"type": "user", "cwd": format!("{FOLDER}/src"), "entrypoint": "cli", "uuid": "u7", "message": {"role": "user", "content": "And the docs"}}));
         let root = setup(&[("aaaa-1", format!("{}\n{moved}", terminal_session()))]);
-        let sessions = list_sessions(root.path(), Path::new(FOLDER), &HashMap::new());
+        let sessions = list_sessions(root.path(), Path::new(FOLDER), &HashMap::new(), &HashMap::new());
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].prompts, 3);
     }
@@ -518,11 +519,16 @@ mod tests {
         let renamed = rec(json!({"type": "custom-title", "customTitle": "Retries", "sessionId": "x"}));
         let root = setup(&[("aaaa-1", format!("{}\n{ai}", terminal_session())), ("bbbb-2", format!("{}\n{ai}\n{renamed}", terminal_session())), ("cccc-3", terminal_session())]);
         let ours = HashMap::from([("cccc-3".to_string(), "Made by Lantern".to_string()), ("aaaa-1".to_string(), "Not used".to_string())]);
-        let by_id = |id: &str| list_sessions(root.path(), Path::new(FOLDER), &ours).into_iter().find(|s| s.id == id).unwrap().title;
+        let by_id = |id: &str| list_sessions(root.path(), Path::new(FOLDER), &ours, &HashMap::new()).into_iter().find(|s| s.id == id).unwrap().title;
         assert_eq!(by_id("aaaa-1"), "Retry transient errors");
         assert_eq!(by_id("bbbb-2"), "Retries");
         assert_eq!(by_id("cccc-3"), "Made by Lantern");
-        assert_eq!(list_sessions(root.path(), Path::new(FOLDER), &HashMap::new()).into_iter().find(|s| s.id == "cccc-3").unwrap().title, "Add retries to fetchJson");
+        assert_eq!(list_sessions(root.path(), Path::new(FOLDER), &HashMap::new(), &HashMap::new()).into_iter().find(|s| s.id == "cccc-3").unwrap().title, "Add retries to fetchJson");
+        // A name the user gave in Lantern beats Claude Code's own titles, and the one Lantern made.
+        let renamed = HashMap::from([("aaaa-1".to_string(), "Our name".to_string()), ("bbbb-2".to_string(), "Our other name".to_string())]);
+        let by_renamed = |id: &str| list_sessions(root.path(), Path::new(FOLDER), &ours, &renamed).into_iter().find(|s| s.id == id).unwrap().title;
+        assert_eq!(by_renamed("aaaa-1"), "Our name");
+        assert_eq!(by_renamed("bbbb-2"), "Our other name");
         assert_eq!(transcript_title(&root.path().join(encode_folder(Path::new(FOLDER))).join("bbbb-2.jsonl")).as_deref(), Some("Retries"));
     }
 
@@ -539,7 +545,7 @@ mod tests {
         let long = "x".repeat(200);
         let body = rec(json!({"type": "user", "cwd": FOLDER, "entrypoint": "cli", "uuid": "u", "message": {"role": "user", "content": long}}));
         let root = setup(&[("aaaa", body)]);
-        let title = &list_sessions(root.path(), Path::new(FOLDER), &HashMap::new())[0].title;
+        let title = &list_sessions(root.path(), Path::new(FOLDER), &HashMap::new(), &HashMap::new())[0].title;
         assert_eq!(title.chars().count(), TITLE_MAX + 1);
         assert!(title.ends_with('…'));
     }
@@ -550,8 +556,8 @@ mod tests {
         let dir = root.path().join("some-other-name");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("abcd.jsonl"), terminal_session()).unwrap();
-        assert_eq!(list_sessions(root.path(), Path::new(FOLDER), &HashMap::new()).len(), 1);
-        assert!(list_sessions(root.path(), Path::new("/nowhere"), &HashMap::new()).is_empty());
+        assert_eq!(list_sessions(root.path(), Path::new(FOLDER), &HashMap::new(), &HashMap::new()).len(), 1);
+        assert!(list_sessions(root.path(), Path::new("/nowhere"), &HashMap::new(), &HashMap::new()).is_empty());
     }
 
     #[test]
@@ -578,7 +584,7 @@ mod tests {
     fn real_transcripts() {
         let folder = std::env::var("LANTERN_HISTORY_FOLDER").expect("set LANTERN_HISTORY_FOLDER");
         let root = PathBuf::from(std::env::var("HOME").unwrap()).join(".claude/projects");
-        let sessions = list_sessions(&root, Path::new(&folder), &HashMap::new());
+        let sessions = list_sessions(&root, Path::new(&folder), &HashMap::new(), &HashMap::new());
         for s in &sessions {
             let r = replay(&transcript_path(&root, Path::new(&folder), &s.id).unwrap());
             let unknown = r.events.iter().filter(|e| matches!(e, UiEvent::Unknown { .. } | UiEvent::ParseError { .. })).count();

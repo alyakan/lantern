@@ -1,4 +1,4 @@
-use crate::ui_event::{Hunk, UiEvent};
+use crate::ui_event::{Hunk, ModelCost, UiEvent};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -24,6 +24,68 @@ pub struct StreamParser {
     models: HashMap<String, String>,
     /// Advisor calls and results already reported (they arrive while streaming and again in the message).
     advisor_seen: std::collections::HashSet<String>,
+    /// The claude process's totals as its last result reported them; None until one has, since its start.
+    totals: Option<Totals>,
+}
+
+/// Cost and tokens as a result reports them: running totals for the whole claude process, not for the turn.
+#[derive(Clone)]
+struct Totals {
+    cost: Option<f64>,
+    models: Vec<ModelCost>,
+}
+
+/// What one turn added to the totals.
+struct Turn {
+    cost: Option<f64>,
+    tokens: u64,
+    models: Vec<ModelCost>,
+}
+
+impl Totals {
+    fn of(v: &Value) -> Totals {
+        let models = v["modelUsage"]
+            .as_object()
+            .map(|m| {
+                m.iter()
+                    .map(|(model, u)| ModelCost {
+                        model: model.clone(),
+                        cost_usd: u["costUSD"].as_f64().unwrap_or(0.0),
+                        input_tokens: u["inputTokens"].as_u64().unwrap_or(0) + u["cacheReadInputTokens"].as_u64().unwrap_or(0) + u["cacheCreationInputTokens"].as_u64().unwrap_or(0),
+                        output_tokens: u["outputTokens"].as_u64().unwrap_or(0),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Totals { cost: v["total_cost_usd"].as_f64(), models }
+    }
+
+    fn tokens(models: &[ModelCost]) -> u64 {
+        models.iter().map(|m| m.input_tokens + m.output_tokens).sum()
+    }
+
+    /// What a turn added to these totals (`self` is the later). None if a total went down, or a model dropped out:
+    /// the claude process didn't keep counting from where it was, so no share can be given. A made-up figure is worse.
+    fn turn_since(&self, before: &Totals) -> Option<Turn> {
+        if before.models.iter().any(|p| !self.models.iter().any(|m| m.model == p.model)) {
+            return None;
+        }
+        let cost = match (self.cost, before.cost) {
+            (Some(now), Some(was)) if now >= was => Some(now - was),
+            (Some(_), Some(_)) => return None,
+            _ => None,
+        };
+        let mut models = Vec::with_capacity(self.models.len());
+        for m in &self.models {
+            let (was_cost, was_in, was_out) = before.models.iter().find(|p| p.model == m.model).map_or((0.0, 0, 0), |p| (p.cost_usd, p.input_tokens, p.output_tokens));
+            let (input_tokens, output_tokens) = (m.input_tokens.checked_sub(was_in)?, m.output_tokens.checked_sub(was_out)?);
+            if m.cost_usd < was_cost {
+                return None;
+            }
+            models.push(ModelCost { model: m.model.clone(), cost_usd: m.cost_usd - was_cost, input_tokens, output_tokens });
+        }
+        Some(Turn { cost, tokens: Totals::tokens(&models), models })
+    }
 }
 
 impl StreamParser {
@@ -43,7 +105,7 @@ impl StreamParser {
             "stream_event" => self.stream_event(&v, parent),
             "assistant" => self.assistant(&v, parent),
             "user" => self.user(&v, parent),
-            "result" => vec![model_usage(&v), result_event(&v)],
+            "result" => self.result(&v),
             // Replies to our control requests; only `initialize`'s (the slash commands) carries anything to show.
             "control_response" => initialize_events(&v),
             // `/clear` started a fresh conversation in the same process.
@@ -57,6 +119,8 @@ impl StreamParser {
         let sub = str_of(v, "subtype");
         match sub.as_str() {
             "init" => {
+                // A new claude process: its totals start again (see Totals::turn_since).
+                self.totals = None;
                 let started = UiEvent::SessionStarted {
                     session_id: str_of(v, "session_id"),
                     model: str_of(v, "model"),
@@ -262,6 +326,16 @@ impl StreamParser {
         out
     }
 
+    /// A turn's end: what it cost per model (the share since the last result of this process), then the turn itself.
+    fn result(&mut self, v: &Value) -> Vec<UiEvent> {
+        let now = Totals::of(v);
+        let turn = self.totals.as_ref().and_then(|before| now.turn_since(before));
+        let models = turn.as_ref().map(|t| t.models.clone()).unwrap_or_default();
+        let done = result_event(v, turn.as_ref(), &now);
+        self.totals = Some(now);
+        vec![UiEvent::ModelUsage { models }, done]
+    }
+
     /// The position of the next block of `message_id` under `parent`, counting the blocks of earlier lines too.
     fn next_position(&mut self, parent: &Option<String>, message_id: &str) -> u64 {
         let entry = self.block_positions.entry(parent.clone()).or_insert_with(|| (message_id.to_string(), 0));
@@ -304,25 +378,7 @@ fn edit_applied(r: &Value, parent: Option<String>, id: &str) -> Option<UiEvent> 
     Some(UiEvent::EditApplied { parent, tool_use_id: id.to_string(), path, created, hunks, original })
 }
 
-/// What the turn cost per model, from the result's modelUsage (the advisor's model shows up here too).
-fn model_usage(v: &Value) -> UiEvent {
-    let models = v["modelUsage"]
-        .as_object()
-        .map(|m| {
-            m.iter()
-                .map(|(model, u)| crate::ui_event::ModelCost {
-                    model: model.clone(),
-                    cost_usd: u["costUSD"].as_f64().unwrap_or(0.0),
-                    input_tokens: u["inputTokens"].as_u64().unwrap_or(0) + u["cacheReadInputTokens"].as_u64().unwrap_or(0) + u["cacheCreationInputTokens"].as_u64().unwrap_or(0),
-                    output_tokens: u["outputTokens"].as_u64().unwrap_or(0),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    UiEvent::ModelUsage { models }
-}
-
-fn result_event(v: &Value) -> UiEvent {
+fn result_event(v: &Value, turn: Option<&Turn>, session: &Totals) -> UiEvent {
     let is_error = v["is_error"].as_bool().unwrap_or(false);
     let result = v["result"].as_str().map(String::from);
     let lower = result.as_deref().unwrap_or("").to_lowercase();
@@ -331,7 +387,10 @@ fn result_event(v: &Value) -> UiEvent {
         is_error,
         auth_hint: is_error && (auth_status || lower.contains("/login") || lower.contains("authentication")),
         result,
-        cost_usd: v["total_cost_usd"].as_f64(),
+        cost_usd: turn.and_then(|t| t.cost),
+        tokens: turn.map(|t| t.tokens),
+        session_cost_usd: session.cost,
+        session_tokens: Totals::tokens(&session.models),
         duration_ms: v["duration_ms"].as_u64(),
         denied: v["permission_denials"].as_array().map(|a| a.len()).unwrap_or(0),
         // Subagents may run on other models; the largest window is the main conversation's.
@@ -485,9 +544,10 @@ mod tests {
                 &UiEvent::AdvisorDone { parent: None, id: "srvtoolu_adv2".into(), outcome: "unavailable".into(), error_code: Some("overloaded".into()) },
             ]
         );
+        // The first result of its process: the per-model shares aren't known yet, but the session's total is.
         let usage = evs.iter().find_map(|e| if let UiEvent::ModelUsage { models } = e { Some(models.clone()) } else { None }).unwrap();
-        assert_eq!(usage.iter().map(|m| (m.model.as_str(), m.output_tokens)).collect::<Vec<_>>(), vec![("claude-haiku-5-5", 4491), ("claude-sonnet-5-5", 1708)]);
-        assert!(matches!(evs.last().unwrap(), UiEvent::TurnDone { .. }));
+        assert!(usage.is_empty());
+        assert!(matches!(evs.last().unwrap(), UiEvent::TurnDone { cost_usd: None, session_cost_usd: Some(c), .. } if (c - 0.186).abs() < 1e-9));
     }
 
     /// Shapes from a real Claude Code 2.1.293 session that ran a workflow.
@@ -653,6 +713,45 @@ mod tests {
     }
 
     #[test]
+    fn a_turn_is_what_the_running_totals_grew_by_within_one_process() {
+        let mut p = StreamParser::default();
+        p.parse_line(r#"{"type":"system","subtype":"init","session_id":"s"}"#);
+        // The first result of a process has no earlier total to take a share from: the session's totals only.
+        let first = p.parse_line(r#"{"type":"result","total_cost_usd":0.10,"modelUsage":{"opus":{"costUSD":0.10,"inputTokens":100,"cacheReadInputTokens":900,"cacheCreationInputTokens":0,"outputTokens":50}}}"#);
+        assert!(matches!(first.last(), Some(UiEvent::TurnDone { cost_usd: None, tokens: None, session_tokens: 1050, .. })));
+        assert_eq!(first[0], UiEvent::ModelUsage { models: vec![] });
+        // The second: what the totals grew by. Tokens count input (cached too) and output.
+        let second = p.parse_line(r#"{"type":"result","total_cost_usd":0.25,"modelUsage":{"opus":{"costUSD":0.22,"inputTokens":200,"cacheReadInputTokens":1500,"cacheCreationInputTokens":0,"outputTokens":120},"haiku":{"costUSD":0.03,"inputTokens":10,"outputTokens":5}}}"#);
+        let UiEvent::TurnDone { cost_usd, tokens, session_cost_usd, session_tokens, .. } = second.last().unwrap() else { panic!("{second:?}") };
+        assert!(cost_usd.is_some_and(|c| (c - 0.15).abs() < 1e-9));
+        assert_eq!((*tokens, *session_tokens), (Some(785), 1835));
+        assert!(session_cost_usd.is_some_and(|c| (c - 0.25).abs() < 1e-9));
+        let UiEvent::ModelUsage { models } = &second[0] else { panic!("{second:?}") };
+        assert_eq!(models.iter().map(|m| (m.model.as_str(), m.input_tokens, m.output_tokens)).collect::<Vec<_>>(), vec![("haiku", 10, 5), ("opus", 700, 70)]);
+        assert!(models.iter().map(|m| m.cost_usd).zip([0.03, 0.12]).all(|(c, want)| (c - want).abs() < 1e-9));
+        // A total that went down (a count this doesn't follow) gives no share, rather than a wrong one.
+        let reset = p.parse_line(r#"{"type":"result","total_cost_usd":0.05,"modelUsage":{}}"#);
+        assert!(matches!(reset.last(), Some(UiEvent::TurnDone { cost_usd: None, tokens: None, .. })));
+        assert_eq!(reset[0], UiEvent::ModelUsage { models: vec![] });
+        // A new process starts counting again.
+        p.parse_line(r#"{"type":"system","subtype":"init","session_id":"t"}"#);
+        let next = p.parse_line(r#"{"type":"result","total_cost_usd":0.08,"modelUsage":{}}"#);
+        assert!(matches!(next.last(), Some(UiEvent::TurnDone { cost_usd: None, .. })));
+    }
+
+    #[test]
+    fn compaction_lines_are_bookkeeping_the_chat_ignores() {
+        // /compact writes a compact_boundary (or a microcompact one) before its result; neither is a chat event.
+        let mut p = StreamParser::default();
+        let boundary = r#"{"type":"system","subtype":"compact_boundary","content":"Conversation compacted","compact_metadata":{"trigger":"manual","pre_tokens":150000}}"#;
+        assert!(p.parse_line(boundary).is_empty());
+        assert!(p.parse_line(r#"{"type":"system","subtype":"microcompact_boundary"}"#).is_empty());
+        // A compaction with nothing to compact still ends with a result, so the turn ends.
+        let done = p.parse_line(r#"{"type":"result","subtype":"success","is_error":false,"result":"","duration_ms":81,"total_cost_usd":0,"modelUsage":{}}"#);
+        assert!(matches!(done.last(), Some(UiEvent::TurnDone { is_error: false, .. })));
+    }
+
+    #[test]
     fn turn_done_is_last_and_stream_is_clean() {
         let evs = parse_all(WRITE_FIXTURE);
         assert_eq!(
@@ -660,7 +759,11 @@ mod tests {
             &UiEvent::TurnDone {
                 is_error: false,
                 result: Some("Done: hello.txt overwritten, new.txt created, and Python printed 42.".into()),
-                cost_usd: Some(0.0655884),
+                // The first result of its process: its cost is the session's total, with no earlier one to take a share from.
+                cost_usd: None,
+                tokens: None,
+                session_cost_usd: Some(0.0655884),
+                session_tokens: 0,
                 duration_ms: Some(13908),
                 auth_hint: false,
                 denied: 0,

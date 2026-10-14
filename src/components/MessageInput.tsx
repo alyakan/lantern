@@ -29,7 +29,8 @@ interface Props {
   idlePlaceholder?: string;
   /** On a Step-by-step page: ⌘Enter (or the button) sends the message and approves the step, moving on. */
   sendAndNext?: (text: string) => void;
-  onSend: (text: string) => void;
+  /** `draft`: the box as typed, encoded (see lib/paste.ts), so the message keeps its paste placeholders. */
+  onSend: (text: string, draft?: string) => void;
   onStop: () => void;
   /** While Claude starts, a way out: Cancel stops the start. */
   onCancelStart?: () => void;
@@ -52,7 +53,7 @@ interface Props {
   /** The chat's queued messages; without it the box keeps its own queue. */
   queue?: { items: string[]; set: (next: string[]) => void };
   /** Context use and timing for the footer meter. */
-  usage?: { used: number | null; window: number; lastTurnMs: number | null };
+  usage?: { used: number | null; window: number; lastTurnMs: number | null; actions?: { onCompact: () => void; onClear: () => void }; session?: { cost: number | null; tokens: number } };
   /** The model chip becomes a picker: what the user chose (null = default) and how to change it. */
   models?: { chosen: string | null; onChoose: (model: string | null) => void; defaultModel?: string | null; ids?: Record<string, string>; options?: ModelOption[] };
   /** Thinking effort: the chosen level (null = default) and how to change it. */
@@ -72,9 +73,11 @@ interface Props {
   draft?: { initial: string; save: (text: string) => void };
   /** A downloaded update of Lantern, shown under the box until it's taken or left for quitting. */
   update?: { version: string; busy: number; onRestart: () => void; onLater: () => void };
+  /** The folder's sent prompts, oldest first, as encoded drafts: ↑ and ↓ recall them. `remember` adds one when sent. */
+  history?: { entries: string[]; remember: (entry: string) => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, harness, update }: Props) {
+export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, harness, update, history }: Props) {
   // A draft with big pastes in it comes back as the box had it: their placeholders, and the text they stand for.
   const [restored] = useState(() => decodeDraft(draft?.initial ?? ""));
   const [text, setTextState] = useState(restored.text);
@@ -119,6 +122,29 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   useEffect(() => {
     for (const full of queuedBox.current.keys()) if (!queued.includes(full)) queuedBox.current.delete(full);
   }, [queued]);
+
+  // A queued message back in the box to edit: it leaves the queue, and goes in front of what's typed (as Stop does).
+  const editQueued = (i: number) => {
+    const full = queued[i];
+    const kept = queuedBox.current.get(full);
+    if (kept) pastes.current = { ...pastes.current, ...kept.pastes };
+    setText([kept?.box ?? full, text].filter((t) => t.trim()).join("\n\n"));
+    setQueued(queued.filter((_, j) => j !== i));
+    area.current?.focus();
+  };
+  // Send now: that message goes next. Claude's turn is stopped (App's stop, not the one below, which would empty the
+  // queue into the box); the queue goes out when the turn ends, with this message first.
+  const sendNow = (i: number) => {
+    const full = queued[i];
+    const rest = queued.filter((_, j) => j !== i);
+    if (running) {
+      setQueued([full, ...rest]);
+      onStop();
+    } else {
+      setQueued(rest);
+      onSend(full);
+    }
+  };
 
   // Stop means "not like that": queued messages go back into the box instead of being sent.
   const stop = () => {
@@ -166,11 +192,15 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   // While Claude works, a message waits in the queue instead of going out.
   const sendText = (t: string) => {
     const full = expand(t);
+    remember(t);
     if (running) {
       queuedBox.current.set(full, { box: t, pastes: inUse(t, pastes.current) });
       setQueued([...queued, full]);
-    } else onSend(full);
+    } else onSend(full, encodeDraft(t, inUse(t, pastes.current)));
   };
+
+  // A sent prompt joins the folder's history, kept as its draft so ↑ brings the paste placeholders back too.
+  const remember = (t: string) => history?.remember(encodeDraft(t, inUse(t, pastes.current)));
 
   const submit = () => {
     if (!canSend) return;
@@ -182,8 +212,30 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
 
   const submitAndNext = () => {
     if (!canSend || !sendAndNext || running || terminal) return;
+    remember(text.trim());
     sendAndNext(expand(text.trim()));
     setText("");
+  };
+
+  // ↑ and ↓ recall the folder's prompts: `at` is the one in the box (an index into `history.entries`), `typed` the draft
+  // of what was there before, which Escape or ↓ past the newest brings back. Typing or sending ends the recall.
+  const [recall, setRecall] = useState<{ at: number; shown: string; typed: string } | null>(null);
+  useEffect(() => {
+    if (recall && text !== recall.shown) setRecall(null);
+  }, [text]);
+  const showRecalled = (at: number, typed: string) => {
+    const kept = decodeDraft(history!.entries[at]);
+    pastes.current = kept.pastes;
+    caretTo.current = kept.text.length;
+    setRecall({ at, shown: kept.text, typed });
+    setText(kept.text);
+  };
+  const restoreTyped = (typed: string) => {
+    const kept = decodeDraft(typed);
+    pastes.current = kept.pastes;
+    caretTo.current = kept.text.length;
+    setRecall(null);
+    setText(kept.text);
   };
 
   // "/" or "@" starting the word at the caret, anywhere in the message, opens the menu for it; Escape hides it until
@@ -277,7 +329,10 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
     declined.current = Date.now();
     if (terminal) {
       if (value.slice(1).trim()) onRun!(value.slice(1).trim());
-    } else if (next && sendAndNext && !running) sendAndNext(expand(value));
+    } else if (next && sendAndNext && !running) {
+      remember(value);
+      sendAndNext(expand(value));
+    }
     else sendText(value);
     setText("");
     typed.current = "";
@@ -328,9 +383,12 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           {queued.map((q, i) => (
             <li key={i} className="queue-item">
               <span className="queue-label">Queued</span>
-              <span className="queue-text" title={q}>
+              <button className="queue-text" title="Edit: takes it back to the box" onClick={() => editQueued(i)}>
                 {queuedBox.current.get(q)?.box ?? q}
-              </span>
+              </button>
+              <button className="link-button queue-now" title="Stops Claude's turn and sends this next (anything queued after it goes with it)" onClick={() => sendNow(i)}>
+                Send now
+              </button>
               <button className="icon queue-remove" aria-label="Remove queued message" title="Remove" onClick={() => setQueued(queued.filter((_, j) => j !== i))}>
                 ×
               </button>
@@ -407,6 +465,29 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
                 return;
               }
               if (onMenuKey(e)) return;
+              // ↑ at the start of the box (or in an empty one) recalls the last prompt; ↓ goes forward again.
+              if (history && !terminal && !composingKey(e) && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+                const { selectionStart: from, selectionEnd: to } = e.currentTarget;
+                if (e.key === "ArrowUp" && (recall || (from === 0 && to === 0))) {
+                  const older = recall ? recall.at - 1 : history.entries.length - 1;
+                  if (older < 0) return;
+                  e.preventDefault();
+                  showRecalled(older, recall ? recall.typed : encodeDraft(text, inUse(text, pastes.current)));
+                  return;
+                }
+                if (e.key === "ArrowDown" && recall) {
+                  e.preventDefault();
+                  if (recall.at + 1 < history.entries.length) showRecalled(recall.at + 1, recall.typed);
+                  else restoreTyped(recall.typed);
+                  return;
+                }
+              }
+              // Escape takes back a recalled prompt, to what was being typed.
+              if (e.key === "Escape" && recall) {
+                e.preventDefault();
+                restoreTyped(recall.typed);
+                return;
+              }
               // Backspace right after a placeholder takes all of it away.
               if (e.key === "Backspace" && !terminal && e.currentTarget.selectionStart === e.currentTarget.selectionEnd) {
                 const token = tokenBefore(text, e.currentTarget.selectionStart);
@@ -450,7 +531,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           {!terminal && effort && effortLevels.length > 0 && <EffortPicker chosen={effort.chosen} levels={effortLevels} onChoose={effort.onChoose} disabled={busy} />}
           {!terminal && harness && <HarnessPicker {...harness} disabled={busy} />}
           <div className="spacer" />
-          {usage && <ContextMeter used={usage.used} window={usage.window} running={running} lastTurnMs={usage.lastTurnMs} />}
+          {usage && <ContextMeter used={usage.used} window={usage.window} running={running} lastTurnMs={usage.lastTurnMs} actions={usage.actions} session={usage.session} />}
           {terminal ? (
             <button className="send run" aria-label="Run" title="Run (Enter)" disabled={!canSend} onClick={submit}>
               <ArrowUpIcon />

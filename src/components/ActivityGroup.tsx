@@ -128,11 +128,29 @@ function StepRow({ step, folder, ...handlers }: { step: Step; folder: string | n
           <ChatStream items={step.children} folder={folder} live={step.status === "running"} {...handlers} />
         </div>
       )}
-      {open && !hasChildren && step.output && (
-        <pre className="step-output" role="region" aria-label="Step output" tabIndex={0}>
-          {step.output}
-        </pre>
-      )}
+      {open && !hasChildren && step.output && <StepOutput text={step.output} />}
     </div>
+  );
+}
+
+/** How many lines of a step's output show until "Show all". */
+export const SHOWN_OUTPUT_LINES = 40;
+
+/** A step's output: its first lines, then Show all, so a long one doesn't take over the chat. */
+function StepOutput({ text }: { text: string }) {
+  const [all, setAll] = useState(false);
+  const lines = text.split("\n");
+  const capped = !all && lines.length > SHOWN_OUTPUT_LINES;
+  return (
+    <>
+      <pre className="step-output" role="region" aria-label="Step output" tabIndex={0}>
+        {capped ? lines.slice(0, SHOWN_OUTPUT_LINES).join("\n") : text}
+      </pre>
+      {capped && (
+        <button className="link-button" onClick={() => setAll(true)}>
+          Show all {lines.length} lines
+        </button>
+      )}
+    </>
   );
 }
