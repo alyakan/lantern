@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { chatsReducer, initialChats } from "../sessions";
 import { initialState, type State } from "../store";
-import { chatsToSave, currentFolder, loadSaved, save, screenFirst, toCurrentFolders, withOffered, type SavedChat } from "./restore";
+import type { UiEvent } from "../types";
+import { chatsToSave, currentFolder, loadSaved, save, screenFirst, sessionModesToSave, toCurrentFolders, withOffered, type SavedChat } from "./restore";
 
 const chat = (over: Partial<State>): State => ({ ...initialState, status: "idle", ...over });
 const talked = (sessionId: string, folder = "/p"): State => chat({ folder, sessionId, items: [{ type: "user", id: "u1", text: `Fix ${sessionId}` }] });
@@ -120,5 +122,31 @@ describe("chatsToSave for an orchestra", () => {
     const offered = [saved({ sessionId: "m", orchestra: { role: "main" } })];
     expect(withOffered([], offered)).toEqual(offered);
     expect(withOffered([saved({ sessionId: "x" })], offered).find((c) => c.sessionId === "m")?.orchestra).toEqual({ role: "main" });
+  });
+});
+
+describe("sessionModesToSave", () => {
+  const spawned: UiEvent = { kind: "agent_spawned", worker: "w1", name: "Login form", brief: "Build it", folder: "/wt/login", branch: "lantern/login", base: "main", isolation: "worktree", mode: "auto" };
+  const started = (session_id: string): UiEvent => ({ kind: "session_started", session_id, model: "m", cwd: "/p", permission_mode: "auto", claude_version: "1" });
+  // The main agent is on screen on Auto; its worker runs in the background, and the user never opens it.
+  const team = () => {
+    let c = initialChats({ ...talked("main-1"), mode: "auto", orchestrator: true });
+    c = chatsReducer(c, { type: "in", slot: "s1", action: { type: "ui_event", event: spawned } });
+    return chatsReducer(c, { type: "in", slot: "w1", action: { type: "ui_event", event: started("worker-1") } });
+  };
+
+  it("keeps the mode of every open chat with a session, not just the one on screen", () => {
+    expect(sessionModesToSave(team().slots, {})).toEqual({ "main-1": "auto", "worker-1": "auto" });
+  });
+
+  it("keeps what was saved for other sessions, and follows a chat whose mode changed", () => {
+    let c = team();
+    c = chatsReducer(c, { type: "in", slot: "w1", action: { type: "ui_event", event: { kind: "agent_mode", mode: "ask" } } });
+    expect(sessionModesToSave(c.slots, { old: "steps", "worker-1": "auto" })).toEqual({ old: "steps", "main-1": "auto", "worker-1": "ask" });
+  });
+
+  it("saves nothing new when every mode is already there, and skips chats with no session yet", () => {
+    const slots = { ...team().slots, s2: chat({ folder: "/p", mode: "auto" }) };
+    expect(sessionModesToSave(slots, { "main-1": "auto", "worker-1": "auto" })).toBeNull();
   });
 });

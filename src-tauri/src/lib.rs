@@ -117,7 +117,12 @@ async fn available_providers(own: ProviderId) -> Vec<ProviderId> {
 /// The most freedom the workers of main agent `main` may have, from its mode as it is now (Ask when it isn't open).
 fn main_ceiling(state: &AppState, main: &str) -> Mode {
     let cfg = state.slots.get(main).ok().and_then(|s| s.config.lock().unwrap().clone());
-    cfg.map_or(Mode::Ask, |c| args::worker_mode(c.mode, c.auto_approve, &capabilities_of(c.provider)))
+    ceiling_of(cfg.map(|c| (c.mode, c.auto_approve, c.provider)))
+}
+
+/// The most freedom workers may have under a main agent running `(mode, auto_approve, provider)`: Ask when it isn't open.
+fn ceiling_of(main: Option<(Mode, bool, ProviderId)>) -> Mode {
+    main.map_or(Mode::Ask, |(mode, auto, provider)| args::worker_mode(mode, auto, &capabilities_of(provider)))
 }
 
 /// How the worker `worker` runs once its main agent's mode allows no more than `ceiling`: lowered (its claude restarted on
@@ -1286,9 +1291,11 @@ async fn open_session(
     // Whatever it was saved with, a worker comes back no freer than its main agent is now (a main agent reopened on Ask must
     // not get workers on Auto).
     let parent_slot = settings.worker.as_ref().map(|w| w.parent.clone());
+    let mut lowered = false;
     if let Some(parent) = &parent_slot {
         let ceiling = main_ceiling(&state, parent);
         let (mode, auto) = args::capped_mode(settings.mode, settings.auto_approve, ceiling, &capabilities_of(settings.provider));
+        lowered = (mode, auto) != (settings.mode, settings.auto_approve);
         settings.mode = mode;
         settings.auto_approve = auto;
     }
@@ -1323,6 +1330,10 @@ async fn open_session(
             if let Err(e) = launch(&app, &slot, &s, cfg, true).await {
                 state.orchestra.forget(&slot);
                 return Err(e);
+            }
+            // The window put the chat up with the mode it was saved in: told the one it runs in, when that is lower.
+            if lowered {
+                let _ = app.emit("ui-event", SlotEvent { slot: slot.clone(), event: ui_event::UiEvent::AgentMode { mode: "ask".into() } });
             }
             // Its main agent may have been lowered while this one was opening.
             if let Some(parent) = &parent_slot {
@@ -1623,6 +1634,26 @@ mod tests {
         let named: Settings = serde_json::from_str(r#"{"provider":"claude","mode":"auto","model":"opus","effort":null}"#).unwrap();
         assert_eq!(named.provider, ProviderId::Claude);
         assert!(serde_json::from_str::<Settings>(r#"{"provider":"nope","mode":"ask","model":null,"effort":null}"#).is_err());
+    }
+
+    /// A worker reopened from a saved chat: the mode it was saved in, no freer than its main agent's workers may be.
+    #[test]
+    fn a_restored_worker_keeps_its_mode_under_an_auto_main_agent_and_is_lowered_under_one_that_asks() {
+        let claude = ProviderId::Claude;
+        let caps = capabilities_of(claude);
+        let reopened = |main: Option<(Mode, bool, ProviderId)>, saved: Mode| args::capped_mode(saved, false, ceiling_of(main), &caps);
+        assert_eq!(reopened(Some((Mode::Auto, false, claude)), Mode::Auto), (Mode::Auto, false));
+        assert_eq!(reopened(Some((Mode::Steps, true, claude)), Mode::Auto), (Mode::Auto, false));
+        assert_eq!(reopened(Some((Mode::Auto, false, claude)), Mode::Ask), (Mode::Ask, false));
+        assert_eq!(reopened(Some((Mode::Ask, false, claude)), Mode::Auto), (Mode::Ask, false));
+        assert_eq!(reopened(Some((Mode::Steps, false, claude)), Mode::Auto), (Mode::Ask, false));
+    }
+
+    /// Opened before its main agent has a config (it is still opening, or was closed): nothing allows Auto yet.
+    #[test]
+    fn a_worker_restored_before_its_main_agent_has_a_config_comes_back_on_ask() {
+        assert_eq!(ceiling_of(None), Mode::Ask);
+        assert_eq!(args::capped_mode(Mode::Auto, false, ceiling_of(None), &capabilities_of(ProviderId::Claude)), (Mode::Ask, false));
     }
 
     #[test]

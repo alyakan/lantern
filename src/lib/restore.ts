@@ -42,6 +42,17 @@ export function chatsToSave(slots: Record<string, State>, active: string, drafts
 }
 
 /**
+ * `saved` (each session's mode) with the mode every open chat that has a session is in now, or null when that changes
+ * nothing. Every chat, not just the one on screen: a worker takes its mode from its main agent in the background, and
+ * one the user never opens would otherwise come back on Ask.
+ */
+export function sessionModesToSave(slots: Record<string, State>, saved: Record<string, string>): Record<string, string> | null {
+  const now = Object.values(slots).flatMap((s) => (s.sessionId ? [[s.sessionId, s.mode] as const] : []));
+  if (now.every(([id, mode]) => saved[id] === mode)) return null;
+  return { ...saved, ...Object.fromEntries(now) };
+}
+
+/**
  * What to save while chats from the last launch are still offered: the open chats, then the offered ones, so quitting
  * before choosing doesn't lose them. With nothing open yet, the offered ones are saved as they were.
  */
