@@ -170,7 +170,8 @@ mod tests {
         std::fs::write(&fake, body).unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
         let cfg = crate::session::SessionConfig {
-            claude: fake,
+            provider: crate::provider::ProviderId::Claude,
+            binary: fake,
             folder: dir.path().to_path_buf(),
             mode: crate::args::Mode::Ask,
             auto_approve: false,

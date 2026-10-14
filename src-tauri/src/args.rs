@@ -149,6 +149,7 @@ pub fn valid_effort(e: &str) -> bool {
     EFFORT_LEVELS.contains(&e)
 }
 
+/// Claude Code's command line (only the Claude provider calls this; Mode, Role and HelperConfig are every provider's).
 /// `auto_approve`: in Step by step, Claude Code's auto mode approves actions instead of the in-app prompts; each page is
 /// reviewed anyway. Other modes ignore it.
 /// `model`: an alias ("opus", "sonnet", "haiku") or full model id; None leaves Claude Code's own default.
@@ -230,7 +231,7 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
 }
 
 /// The harness's flags beyond model and effort: the advisor Claude consults (`--advisor`, which `claude --help` doesn't
-/// list). The subagents' model goes in the environment instead (see Session::spawn).
+/// list). The subagents' model goes in the environment instead (see ClaudeSession::spawn).
 pub fn harness_args(advisor: Option<&str>) -> Vec<String> {
     advisor.map(|a| vec!["--advisor".to_string(), a.to_string()]).unwrap_or_default()
 }
@@ -312,6 +313,48 @@ mod tests {
 
     fn value_after<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
         args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str())
+    }
+
+    /// The whole command line claude is started with, flag by flag and in order (the harness's flags come last, as
+    /// ClaudeSession::spawn appends them): moving where it is built must not change a byte of it.
+    #[test]
+    fn the_command_line_claude_is_started_with_is_pinned() {
+        let strs = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<String>>();
+        let mcp = |env: &str| format!(r#"{{"mcpServers":{{"lantern":{{"args":["--permission-helper"],"command":"/Apps/lantern","env":{env},"type":"stdio"}}}}}}"#);
+        let base = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--permission-mode"];
+
+        // Ask, an ordinary chat, nothing chosen.
+        let mut expected = strs(&base);
+        expected.extend(strs(&["acceptEdits", "--mcp-config"]));
+        expected.push(mcp(r#"{"LANTERN_SOCKET":"/tmp/a.sock"}"#));
+        expected.extend(strs(&["--permission-prompt-tool", "mcp__lantern__approve", "--append-system-prompt"]));
+        expected.push(lantern_prompt(Mode::Ask));
+        let mut got = build_args(Mode::Ask, false, None, None, None, &helper());
+        got.extend(harness_args(None));
+        assert_eq!(got, expected);
+
+        // Step by step with auto-approve, as the main agent, with everything chosen.
+        let main = HelperConfig { role: Role::Main, ..helper() };
+        let mut expected = strs(&base);
+        expected.extend(strs(&["auto", "--mcp-config"]));
+        expected.push(mcp(r#"{"LANTERN_ROLE":"main","LANTERN_SOCKET":"/tmp/a.sock"}"#));
+        expected.extend(strs(&["--permission-prompt-tool", "mcp__lantern__approve", "--append-system-prompt"]));
+        expected.push(format!("{}\n\n{STEPS_PROMPT}\n\n{ORCHESTRATOR_PROMPT}", lantern_prompt(Mode::Steps)));
+        expected.push("--allowedTools".into());
+        expected.push("mcp__lantern__reproduce,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
+        expected.extend(strs(&["--resume", "sess-9", "--model", "opus", "--effort", "high", "--advisor", "fable"]));
+        let mut got = build_args(Mode::Steps, true, Some("sess-9"), Some("opus"), Some("high"), &main);
+        got.extend(harness_args(Some("fable")));
+        assert_eq!(got, expected);
+
+        // Auto, as a worker.
+        let worker = HelperConfig { role: Role::Worker { name: "w".into() }, ..helper() };
+        let mut expected = strs(&base);
+        expected.extend(strs(&["auto", "--mcp-config"]));
+        expected.push(mcp(r#"{"LANTERN_SOCKET":"/tmp/a.sock"}"#));
+        expected.extend(strs(&["--permission-prompt-tool", "mcp__lantern__approve", "--append-system-prompt"]));
+        expected.push(format!("{}\n\n{}", lantern_prompt(Mode::Auto), worker_prompt("w")));
+        assert_eq!(build_args(Mode::Auto, false, None, None, None, &worker), expected);
     }
 
     #[test]

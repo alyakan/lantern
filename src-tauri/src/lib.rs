@@ -12,6 +12,7 @@ pub mod orchestra;
 pub mod permission;
 pub mod pr;
 pub mod process;
+pub mod provider;
 pub mod session;
 pub mod shell;
 pub mod skills;
@@ -29,6 +30,7 @@ pub mod updates;
 
 use args::{HelperConfig, Mode, Role};
 use changes::FileDiff;
+use provider::ProviderId;
 use session::{EditHook, Session, SessionConfig};
 use slots::{Slot, SlotEvent, Slots};
 use std::sync::{Arc, OnceLock};
@@ -152,6 +154,7 @@ impl orchestra::Host for AppHost {
             let state = self.app.state::<AppState>();
             let parent_slot = req.parent.clone();
             let parent = state.slots.get(&req.parent)?;
+            // The worker runs on its main agent's provider: it is cloned with the rest of the config.
             let mut cfg = parent.config.lock().unwrap().clone().ok_or("The main agent has no folder open.")?;
             let s = slot_for(&self.app, &state, &req.slot)?;
             // On Auto a prompt only reaches the user when Claude Code's own classifier can't decide, which is what makes a
@@ -278,6 +281,9 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, cfg: SessionConfig, clea
 /// How a chat's claude runs: permission mode, model and effort (None = Claude Code's default for either).
 #[derive(serde::Deserialize)]
 struct Settings {
+    /// Which agent CLI runs the chat. Chats saved before there was a choice don't say, and are Claude's.
+    #[serde(default)]
+    provider: ProviderId,
     mode: Mode,
     model: Option<String>,
     effort: Option<String>,
@@ -317,7 +323,8 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
         return Err(format!("{folder} no longer exists."));
     }
     Ok(SessionConfig {
-        claude: claude_path.into(),
+        provider: settings.provider,
+        binary: claude_path.into(),
         folder: folder.into(),
         mode: settings.mode,
         auto_approve: settings.auto_approve,
@@ -354,7 +361,8 @@ async fn user_name() -> Option<String> {
 
 #[tauri::command]
 async fn locate_claude(path_override: Option<String>) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || cli_locator::locate(path_override.as_deref()).map(|p| p.display().to_string()))
+    // The window only knows Claude Code for now: which provider's binary is wanted will come with its choice.
+    tauri::async_runtime::spawn_blocking(move || ProviderId::Claude.provider().locate(path_override.as_deref()).map(|p| p.display().to_string()))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -582,7 +590,11 @@ async fn claude_mcp(state: &AppState, slot: &str, args: Vec<String>) -> Result<S
     let (claude, folder) = {
         let cfg = s.config.lock().unwrap();
         let cfg = cfg.as_ref().ok_or("No folder is open")?;
-        (cfg.claude.clone(), cfg.folder.clone())
+        // Claude Code's own command: another provider has no `mcp`, so adding one means saying what happens here.
+        let binary = match cfg.provider {
+            ProviderId::Claude => cfg.binary.clone(),
+        };
+        (binary, cfg.folder.clone())
     };
     let mut cmd = tokio::process::Command::new(claude);
     // A timeout drops the wait below; kill_on_drop stops the process rather than leaving it running.
@@ -1274,7 +1286,7 @@ fn app_version(app: AppHandle) -> String {
 async fn copy_diagnostics(app: AppHandle, state: State<'_, AppState>, claude_path: Option<String>, model: Option<String>, last_error: Option<String>) -> Result<String, String> {
     let path_env = login_path(&state).await;
     let (macos, claude) = tauri::async_runtime::spawn_blocking(move || {
-        (diagnostics::macos_version(), claude_path.and_then(|path| diagnostics::claude_version(&path, path_env.as_deref())))
+        (diagnostics::macos_version(), claude_path.and_then(|path| ProviderId::Claude.provider().version(&path, path_env.as_deref())))
     })
     .await
     .map_err(|e| e.to_string())?;
@@ -1449,6 +1461,16 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// What the window sends comes from what it saved, and a chat saved before there was a choice of provider has none.
+    #[test]
+    fn settings_saved_without_a_provider_are_claudes() {
+        let old: Settings = serde_json::from_str(r#"{"mode":"ask","model":null,"effort":"high"}"#).unwrap();
+        assert_eq!(old.provider, ProviderId::Claude);
+        let named: Settings = serde_json::from_str(r#"{"provider":"claude","mode":"auto","model":"opus","effort":null}"#).unwrap();
+        assert_eq!(named.provider, ProviderId::Claude);
+        assert!(serde_json::from_str::<Settings>(r#"{"provider":"nope","mode":"ask","model":null,"effort":null}"#).is_err());
+    }
 
     #[test]
     fn the_window_keeps_where_it_was_how_big_and_full_screen_but_not_whether_it_was_hidden() {

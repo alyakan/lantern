@@ -101,7 +101,8 @@ pub fn args(prompt: &str) -> Vec<String> {
     .collect()
 }
 
-/// Asks Claude for a title; None if it fails or takes longer than 45s.
+/// Asks Claude for a title; None if it fails or takes longer than 45s. Claude Code does this whichever provider runs the
+/// chat: the window passes the path of the `claude` it located, and no session config is read.
 pub async fn generate(claude: &Path, path_env: Option<&str>, prompt: &str) -> Option<String> {
     let mut cmd = tokio::process::Command::new(claude);
     cmd.args(args(prompt)).current_dir(std::env::temp_dir()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
