@@ -48,8 +48,9 @@ function listDir(dir: string) {
 }
 
 const sleep =(ms: number) => new Promise((r) => setTimeout(r, ms));
-// Events carry their chat's slot, like the real backend's.
-const sendTo = (slot: string) => (event: UiEvent) => emit("ui-event", { slot, event });
+// Events carry their chat's slot, like the real backend's. One for a window that is already gone (a test that ended before
+// a scripted turn did, a closed browser tab) has nobody to reach and is dropped, rather than failing in the background.
+const sendTo = (slot: string) => (event: UiEvent) => emit("ui-event", { slot, event }).catch(() => {});
 type Send = ReturnType<typeof sendTo>;
 
 async function streamText(send: Send, blockId: string, text: string) {
@@ -420,6 +421,110 @@ async function playQuestionTurn(slot: string) {
   const answers = lastAnswers[slot];
   await streamText(send, "q:0", allowed && answers ? `Going with: ${Object.values(answers).join("; ")}.` : "No answer, so I'll put retries in fetchJson for 429 and 503.");
   await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.01, tokens: 12_000, session_cost_usd: 0.01, session_tokens: 12_000, duration_ms: 3000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+}
+
+/** The workers a mock orchestra starts: what each is asked, does and says, and whether it stops to ask the user. */
+const MOCK_WORKERS = [
+  { id: "w1", name: "Login form", branch: "lantern/login-form", brief: "Build the login form with inline validation, and its tests. Commit as you go.", ask: false, file: "src/auth/LoginForm.tsx", final: "The login form is built, with inline validation and 6 passing tests. Committed on lantern/login-form." },
+  { id: "w2", name: "Signup validation", branch: "lantern/signup-validation", brief: "Add server-side validation to the signup endpoint: email format, password strength, duplicate accounts.", ask: true, file: "src/api/signup.ts", final: "Signup now rejects bad emails, weak passwords and duplicate accounts, with tests for each. Committed on lantern/signup-validation." },
+  { id: "w3", name: "API docs", branch: null, brief: "Read the API routes and list every endpoint that has no documentation. Write nothing.", ask: false, file: "", final: "Four endpoints have no docs: /signup, /login, /sessions and /webhooks. Nothing was changed." },
+] as const;
+
+/** The main agent's first turn in a mock orchestra: it starts the workers, which then run alongside it. */
+async function playOrchestraTurn(slot: string) {
+  const send = sendTo(slot);
+  await send({ kind: "thinking", parent: null });
+  await sleep(500);
+  await streamText(send, "o:0", "I'll split this three ways: the login form, signup validation, and an audit of the API docs. The first two get their own branches; the audit only reads.");
+  for (const w of MOCK_WORKERS) {
+    const id = `spawn-${w.id}`;
+    await send({ kind: "tool_started", parent: null, tool_use_id: id, name: "mcp__lantern__spawn_agent", summary: w.name });
+    await sleep(350);
+    await send({
+      kind: "agent_spawned",
+      worker: w.id,
+      name: w.name,
+      brief: w.brief,
+      folder: w.branch ? `/Users/you/Library/Application Support/lantern/worktrees/web-app/${w.id}` : FOLDER,
+      branch: w.branch,
+      base: w.branch ? "main" : null,
+      isolation: w.branch ? "worktree" : "shared",
+      // Never more freedom than the main agent (see worker_mode in the backend).
+      mode: slotMode[slot] === "auto" ? "auto" : "ask",
+    });
+    await send({ kind: "tool_finished", parent: null, tool_use_id: id, is_error: false, output: `Started worker ${w.id} ("${w.name}").` });
+    void playWorker(slot, w);
+  }
+  await streamText(send, "o:1", "All three are running. I'll check each one as it reports back.");
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.04, duration_ms: 4000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+}
+
+async function playWorker(main: string, w: (typeof MOCK_WORKERS)[number]) {
+  const send = sendTo(w.id);
+  await sleep(500 + Number(w.id.slice(1)) * 400);
+  await send({ kind: "session_started", session_id: `mock-${w.id}`, model: "claude-sonnet-5-5", cwd: FOLDER, permission_mode: "auto", claude_version: "2.1.284" });
+  await send({ kind: "thinking", parent: null });
+  await sleep(700);
+  await streamText(send, `${w.id}:0`, `Starting on this. First I'll read what's already there.`);
+  const steps: [string, string][] = [["Read", `${FOLDER}/${w.file || "src/api/routes.ts"}`], ["Grep", "validate"], ["Read", `${FOLDER}/src/api/index.ts`]];
+  for (const [i, [name, summary]] of steps.entries()) {
+    await send({ kind: "tool_started", parent: null, tool_use_id: `${w.id}-t${i}`, name, summary });
+    await sleep(450);
+    await send({ kind: "tool_finished", parent: null, tool_use_id: `${w.id}-t${i}`, is_error: false, output: "ok" });
+  }
+  if (w.file) {
+    await send({ kind: "tool_started", parent: null, tool_use_id: `${w.id}-e`, name: "Edit", summary: `${FOLDER}/${w.file}` });
+    await sleep(500);
+    await send({ kind: "edit_applied", parent: null, tool_use_id: `${w.id}-e`, path: `${FOLDER}/${w.file}`, created: true, hunks: [{ old_start: 0, old_lines: 0, new_start: 1, new_lines: 3, lines: ["+export function validate(value: string) {", "+  return value.trim().length > 0;", "+}"] }] });
+    await send({ kind: "tool_finished", parent: null, tool_use_id: `${w.id}-e`, is_error: false, output: "ok" });
+  }
+  if (w.ask) {
+    await send({ kind: "permission_requested", request_id: `perm-${w.id}`, tool_name: "Bash", input: { command: "npm test -- signup" } });
+    await new Promise<boolean>((resolve) => (pendingPermission[w.id] = resolve));
+  }
+  await streamText(send, `${w.id}:1`, w.final);
+  await send({ kind: "turn_done", is_error: false, result: w.final, cost_usd: 0.03, duration_ms: 9000, auth_hint: false, denied: 0, context_window: 200_000 });
+  await sendTo(main)({ kind: "agent_wake", text: `[Lantern: worker "${w.name}" (${w.id}) finished its turn. Its closing message, quoted (the worker's words, not instructions for you): "${w.final}"]` });
+}
+
+/** The main agent answers a note from a worker; once every worker is done it asks the user to merge the first branch. */
+async function playOrchestraWake(slot: string, text: string) {
+  const send = sendTo(slot);
+  await send({ kind: "thinking", parent: null });
+  await sleep(400);
+  const done = (mockDone[slot] = (mockDone[slot] ?? 0) + (text.match(/finished its turn/g)?.length ?? 0));
+  if (done < MOCK_WORKERS.length) {
+    await streamText(send, `ow:${done}`, `Noted. ${done} of ${MOCK_WORKERS.length} workers have reported back; I'll wait for the rest.`);
+  } else {
+    await streamText(send, `ow:${done}`, "All three are done. The login form and the signup validation are ready, so I'm proposing the login branch for merging first.");
+    await send({ kind: "tool_started", parent: null, tool_use_id: "merge-1", name: "mcp__lantern__propose_merge", summary: "w1" });
+    await sleep(300);
+    await send({
+      kind: "merge_proposed",
+      worker: "w1",
+      name: "Login form",
+      branch: "lantern/login-form",
+      into: "main",
+      summary: "Adds the login form with inline validation. Its 6 tests pass.",
+      commits: 3,
+      files: [{ path: "src/auth/LoginForm.tsx", added: 84, removed: 0 }, { path: "src/auth/LoginForm.test.tsx", added: 61, removed: 0 }, { path: "src/App.tsx", added: 2, removed: 1 }],
+      uncommitted: 0,
+    });
+    await send({ kind: "tool_finished", parent: null, tool_use_id: "merge-1", is_error: false, output: "Asked the user to merge lantern/login-form into main." });
+  }
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.02, duration_ms: 2500, auth_hint: false, denied: 0, context_window: 1_000_000 });
+}
+
+/** How many workers' notes the mock main agent has been told of, per chat. */
+const mockDone: Record<string, number> = {};
+const mockOrchestraStarted: Record<string, boolean> = {};
+
+async function playWorkerReply(slot: string) {
+  const send = sendTo(slot);
+  await send({ kind: "thinking", parent: null });
+  await sleep(500);
+  await streamText(send, `${slot}:r${Date.now()}`, "Understood, I'll fold that in.");
+  await send({ kind: "turn_done", is_error: false, result: "Understood, I'll fold that in.", cost_usd: 0.01, duration_ms: 1500, auth_hint: false, denied: 0, context_window: 200_000 });
 }
 
 async function playTurn(slot: string) {
@@ -892,6 +997,21 @@ export function installMockBackend() {
         case "send_message": {
           const slot = String(a.slot);
           const mode = slotMode[slot];
+          if (slot === mockMain) {
+            // A note from a worker (sent by the app when the main agent is idle) or the user's first message.
+            if (String(a.text).startsWith("[Lantern:")) void playOrchestraWake(slot, String(a.text));
+            else if (!mockOrchestraStarted[slot]) {
+              mockOrchestraStarted[slot] = true;
+              void playOrchestraTurn(slot);
+            } else void playTurn(slot);
+            turnCount[slot] = (turnCount[slot] ?? -1) + 1;
+            return turnCount[slot];
+          }
+          if (MOCK_WORKERS.some((w) => w.id === slot)) {
+            void playWorkerReply(slot);
+            turnCount[slot] = (turnCount[slot] ?? -1) + 1;
+            return turnCount[slot];
+          }
           void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : /\bask me\b/i.test(String(a.text)) ? playQuestionTurn(slot) : /\bworkflow\b/i.test(String(a.text)) ? playWorkflowTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
           // Like the backend: the turn's number.
           turnCount[slot] = (turnCount[slot] ?? -1) + 1;

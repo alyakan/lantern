@@ -55,3 +55,33 @@ describe("saving", () => {
     expect(loadSaved()).toEqual([]);
   });
 });
+
+describe("chatsToSave for an orchestra", () => {
+  const meta = { parent: "s1", name: "Login form", brief: "x", folder: "/wt/login", branch: "lantern/login-form", base: "main", isolation: "worktree" as const };
+
+  it("saves a main agent as one, and a worker with its name, branch and its main agent's session", () => {
+    const slots = { s1: { ...talked("main-session"), orchestrator: true }, w1: talked("worker-session", "/wt/login"), s2: talked("plain") };
+    const saved = chatsToSave(slots, "s1", {}, {}, { w1: meta });
+    expect(saved.map((c) => [c.sessionId, c.orchestra])).toEqual([
+      ["main-session", { role: "main" }],
+      ["worker-session", { role: "worker", name: "Login form", parentSession: "main-session", branch: "lantern/login-form", base: "main", isolation: "worktree" }],
+      ["plain", undefined],
+    ]);
+    // A worker is named by its name, not by the brief it was given.
+    expect(saved[1].title).toBe("Login form");
+    expect("orchestra" in saved[2]).toBe(false);
+  });
+
+  it("saves a worker as an ordinary chat when its main agent has no session to name", () => {
+    const slots = { s1: { ...chat({ folder: "/p", sessionId: null, items: [] }), orchestrator: true }, w1: talked("worker-session", "/wt/login") };
+    const saved = chatsToSave(slots, "w1", {}, {}, { w1: meta });
+    expect(saved).toHaveLength(1);
+    expect(saved[0].orchestra).toBeUndefined();
+  });
+
+  it("keeps the orchestra of chats that are still only offered", () => {
+    const offered = [saved({ sessionId: "m", orchestra: { role: "main" } })];
+    expect(withOffered([], offered)).toEqual(offered);
+    expect(withOffered([saved({ sessionId: "x" })], offered).find((c) => c.sessionId === "m")?.orchestra).toEqual({ role: "main" });
+  });
+});

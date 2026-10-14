@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialState, reducer, type Action, type State } from "./store";
+import { initialState, reducer, totalCost, type Action, type State } from "./store";
 import { chatsReducer, initialChats, WAKE_LIMIT, wakesPaused, wakesToSend, type Chats } from "./sessions";
 import type { UiEvent } from "./types";
 
@@ -58,6 +58,18 @@ describe("a worker the main agent starts", () => {
     expect(w.status).toBe("running");
   });
 
+  it("a stop the user asked for earlier does not make the app restart a worker the main agent later stops", () => {
+    // The app restarts a chat that ended after the user pressed Stop; the main agent stopping it is its own decision.
+    const pressed = reducer({ ...main, status: "running" }, { type: "stop_requested" });
+    expect(pressed.stopRequested).toBe(true);
+    expect(ev(pressed, { kind: "agent_stopped", reason: null })).toMatchObject({ status: "ended", stopRequested: false });
+    expect(ev(pressed, { kind: "agent_message", from: "main agent", text: "x" }).stopRequested).toBe(false);
+  });
+
+  it("takes the mode its main agent's was lowered to", () => {
+    expect(ev({ ...main, mode: "auto" }, { kind: "agent_mode", mode: "ask" }).mode).toBe("ask");
+  });
+
   it("ends as stopped by the main agent, with a restart on offer, and never as a stop the app restarts on its own", () => {
     const stopped = ev({ ...main, status: "running", items: [{ type: "tool", id: "t", name: "Bash", summary: "", status: "running", output: null, edit: null, children: [] }] }, { kind: "agent_stopped", reason: null });
     expect(stopped.status).toBe("ended");
@@ -111,6 +123,14 @@ describe("notes for the main agent", () => {
     expect(wakesToSend({ s1: { ...user, status: "idle" } })).toEqual([{ slot: "s1", text: "one more" }]);
   });
 
+  it("are not sent to a chat that was just sent its queue in the same pass, which still reads idle", () => {
+    const s = ev({ ...main, status: "idle", queued: ["a message the user typed while it worked"] }, { kind: "agent_wake", text: "note" });
+    expect(wakesToSend({ s1: s })).toEqual([{ slot: "s1", text: "note" }]);
+    expect(wakesToSend({ s1: s }, new Set(["s1"]))).toEqual([]);
+    // Another chat in the same pass is not held back by it.
+    expect(wakesToSend({ s1: s, s2: s }, new Set(["s1"]))).toEqual([{ slot: "s2", text: "note" }]);
+  });
+
   it("are not paused when there is nothing waiting", () => {
     expect(wakesPaused({ ...main, autoStreak: WAKE_LIMIT })).toBe(false);
   });
@@ -142,6 +162,56 @@ describe("merge proposals", () => {
     // Another worker's resolution leaves it alone.
     expect(ev(open, { kind: "merge_resolved", worker: "w2", outcome: "merged", detail: "main" }).proposals).toEqual(open.proposals);
   });
+
+  it("count each answer from the backend, so an approval that fails the same way twice is still answered", () => {
+    let s = ev(main, proposed);
+    expect(s.proposals[0].attempts).toBe(0);
+    const conflict: UiEvent = { kind: "merge_resolved", worker: "w1", outcome: "conflicts", detail: "a.ts" };
+    s = ev(ev(s, conflict), conflict);
+    expect(s.proposals[0]).toMatchObject({ attempts: 2, problem: "Conflicts with main in a.ts.", status: "open" });
+    // A fresh proposal for the same worker starts over.
+    expect(ev(s, proposed).proposals[0].attempts).toBe(0);
+  });
+});
+
+describe("what a chat has cost", () => {
+  const done = (cost: number | null): UiEvent => ({ kind: "turn_done", is_error: false, result: null, cost_usd: cost, duration_ms: 1000, auth_hint: false, denied: 0, context_window: null });
+
+  it("is the running total claude reports, not a sum of totals", () => {
+    // claude's total_cost_usd counts its whole process: 0.007 after turn one, 0.014 after turn two.
+    let s = ev(main, done(0.007));
+    s = ev(s, done(0.014));
+    expect(totalCost(s)).toBeCloseTo(0.014);
+  });
+
+  it("carries what an earlier claude cost when a restart starts the count again", () => {
+    let s = ev(main, done(0.02));
+    s = ev(s, done(0.03));
+    // The chat was restarted (a new mode): the new process starts from nothing.
+    s = ev(s, done(0.005));
+    expect(totalCost(s)).toBeCloseTo(0.035);
+    s = ev(s, done(0.012));
+    expect(totalCost(s)).toBeCloseTo(0.042);
+  });
+
+  it("keeps what an earlier claude cost when the new one's first total is higher than the old one's", () => {
+    let s = ev(main, done(0.1));
+    // Restarted from the app: the old claude's cost is set aside before the new one counts.
+    s = reducer(s, { type: "restarting" });
+    expect(totalCost(s)).toBeCloseTo(0.1);
+    s = ev(s, done(0.3));
+    expect(totalCost(s)).toBeCloseTo(0.4);
+    s = ev(s, done(0.35));
+    expect(totalCost(s)).toBeCloseTo(0.45);
+  });
+
+  it("is left alone by a turn that reports no cost, and starts over with a new conversation", () => {
+    let s = ev(main, done(0.02));
+    s = ev(s, done(null));
+    expect(totalCost(s)).toBeCloseTo(0.02);
+    expect(totalCost(reducer(s, { type: "folder_opened", folder: "/q" }))).toBe(0);
+    expect(totalCost(initialState)).toBe(0);
+  });
 });
 
 describe("user_sent", () => {
@@ -152,5 +222,22 @@ describe("user_sent", () => {
     s = reducer({ ...s, status: "idle" }, { type: "user_sent", text: "hello" });
     expect(s.autoStreak).toBe(0);
     expect(s.items[s.items.length - 1]).not.toHaveProperty("auto");
+  });
+});
+
+describe("adopting a restored worker", () => {
+  const meta = { parent: "s1", name: "Login form", brief: "", folder: "/wt/login", branch: "lantern/login-form", base: "main", isolation: "worktree" as const };
+
+  it("makes a restored chat a worker of an open main agent again", () => {
+    let c = chatsReducer(initialChats(main), { type: "add", slot: "s2" });
+    c = chatsReducer(c, { type: "adopt", slot: "s2", meta });
+    expect(c.agents.s2).toEqual(meta);
+  });
+
+  it("does nothing for a chat that is not open, or a main agent that is not", () => {
+    const c = initialChats(main);
+    expect(chatsReducer(c, { type: "adopt", slot: "gone", meta })).toBe(c);
+    const orphan = chatsReducer(c, { type: "add", slot: "s2" });
+    expect(chatsReducer(orphan, { type: "adopt", slot: "s2", meta: { ...meta, parent: "nope" } })).toBe(orphan);
   });
 });

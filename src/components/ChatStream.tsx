@@ -7,6 +7,7 @@ import type { NewRule } from "../types";
 import { groupItems, type Row } from "../lib/activity";
 import { draftOf } from "../lib/paste";
 import { workingVerb } from "../lib/verbs";
+import { friendlyNotes } from "../lib/wakeNote";
 import { ActivityGroup } from "./ActivityGroup";
 import { PermissionCard } from "./PermissionCard";
 import { ShellBlock } from "./ShellBlock";
@@ -75,7 +76,8 @@ export function ChatStream({ items, folder, sections, live = false, resend, ...h
           return (
             <div key={row.id} className="auto-turn" role="note">
               <span className="auto-turn-dot" aria-hidden />
-              {row.text}
+              {/* Notes from an orchestra's workers read as what happened; anything else is shown as it was written. */}
+              <span>{friendlyNotes(row.text).map((line, i) => <span key={i} className="auto-turn-line">{line}</span>)}</span>
             </div>
           );
         return (

@@ -109,6 +109,17 @@ pub fn worker_mode(main: Mode, main_auto_approve: bool) -> Mode {
     }
 }
 
+/// `mode` (with `auto_approve`) as a worker may run it under a main agent whose workers may have no more than `ceiling`:
+/// unchanged when it is no freer than that, otherwise Ask. Only Auto, and Step by step with auto-approve, are "freer".
+pub fn capped_mode(mode: Mode, auto_approve: bool, ceiling: Mode) -> (Mode, bool) {
+    let free = mode == Mode::Auto || (mode == Mode::Steps && auto_approve);
+    if ceiling == Mode::Ask && free {
+        (Mode::Ask, false)
+    } else {
+        (mode, auto_approve)
+    }
+}
+
 /// What a worker is told: who it is, who may message it, and what to leave behind.
 pub fn worker_prompt(name: &str) -> String {
     format!(
@@ -266,6 +277,18 @@ mod tests {
         assert_eq!(worker_mode(Mode::Ask, false), Mode::Ask);
         // Auto-approve only means something in Step by step.
         assert_eq!(worker_mode(Mode::Ask, true), Mode::Ask);
+    }
+
+    #[test]
+    fn a_restored_or_running_worker_is_lowered_to_what_its_main_agent_allows() {
+        // Under a main agent on Ask, Auto (and auto-approved Step by step) become Ask; Ask and plain Steps stay.
+        assert_eq!(capped_mode(Mode::Auto, false, Mode::Ask), (Mode::Ask, false));
+        assert_eq!(capped_mode(Mode::Steps, true, Mode::Ask), (Mode::Ask, false));
+        assert_eq!(capped_mode(Mode::Steps, false, Mode::Ask), (Mode::Steps, false));
+        assert_eq!(capped_mode(Mode::Ask, false, Mode::Ask), (Mode::Ask, false));
+        // Under Auto nothing is lowered.
+        assert_eq!(capped_mode(Mode::Auto, false, Mode::Auto), (Mode::Auto, false));
+        assert_eq!(capped_mode(Mode::Ask, false, Mode::Auto), (Mode::Ask, false));
     }
 
     #[test]

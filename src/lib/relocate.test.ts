@@ -28,6 +28,7 @@ describe("migrateFolderState", () => {
       "settings.harnessByFolder": { [OLD]: "max" },
       "review.collapsedByFolder": { [OLD]: true },
       "settings.pinnedSessions": { [OLD]: ["s1"] },
+      "settings.orchestraModeByFolder": { [OLD]: "ask" },
     });
     const changed = migrateFolderState(store, OLD, NEXT);
     expect(Object.keys(changed).sort()).toEqual([...FOLDER_RECORDS].sort());
@@ -37,6 +38,7 @@ describe("migrateFolderState", () => {
     expect(read(store, "settings.harnessByFolder")).toEqual({ [OLD]: "max", [NEXT]: "max" });
     expect(read(store, "review.collapsedByFolder")).toEqual({ [OLD]: true, [NEXT]: true });
     expect(read(store, "settings.pinnedSessions")).toEqual({ [OLD]: ["s1"], [NEXT]: ["s1"] });
+    expect(read(store, "settings.orchestraModeByFolder")).toEqual({ [OLD]: "ask", [NEXT]: "ask" });
     // What was returned is what was written.
     expect(changed["settings.modeByFolder"]).toEqual(read(store, "settings.modeByFolder"));
   });

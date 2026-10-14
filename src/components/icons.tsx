@@ -178,6 +178,40 @@ export const ReviewIcon = () => (
   </svg>
 );
 
+// Three agents joined to one: the canvas of an orchestra.
+export const CanvasIcon = () => (
+  <svg width="15" height="14" viewBox="0 0 15 14" {...base}>
+    <rect x="0.8" y="4.9" width="4.4" height="4.2" rx="1.2" />
+    <rect x="9.8" y="0.8" width="4.4" height="4.2" rx="1.2" />
+    <rect x="9.8" y="9" width="4.4" height="4.2" rx="1.2" />
+    <path d="M5.2 7h1.6c1.6 0 1.6-4.1 3-4.1M5.2 7h1.6c1.6 0 1.6 4.1 3 4.1" />
+  </svg>
+);
+
+// A main agent with a worker branching off it: start an orchestra.
+export const OrchestraIcon = () => (
+  <svg width="15" height="14" viewBox="0 0 15 14" {...base}>
+    <rect x="0.8" y="4.9" width="4.4" height="4.2" rx="1.2" />
+    <rect x="9.8" y="2.6" width="4.4" height="4.2" rx="1.2" />
+    <path d="M5.2 7h1.6c1.2 0 1.2-2.3 3-2.3" />
+    <path d="M12 9.4v3.2M10.4 11h3.2" />
+  </svg>
+);
+
+// An arrow leaving a frame: open an agent full size.
+export const OpenOutIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" {...base}>
+    <path d="M5 2H2.6C1.7 2 1 2.7 1 3.6v5.8C1 10.3 1.7 11 2.6 11h5.8c.9 0 1.6-.7 1.6-1.6V7" />
+    <path d="M7 1h4v4M11 1 5.5 6.5" />
+  </svg>
+);
+
+export const ChevronIcon = ({ up = false }: { up?: boolean }) => (
+  <svg width="11" height="11" viewBox="0 0 11 11" {...base}>
+    <path d={up ? "M2.2 6.8 5.5 3.5l3.3 3.3" : "M2.2 4.2 5.5 7.5l3.3-3.3"} />
+  </svg>
+);
+
 // A cog: Settings.
 export const GearIcon = () => (
   <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
