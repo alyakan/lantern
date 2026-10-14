@@ -12,11 +12,15 @@ pub struct BridgeRequest {
     /// whether the call worked and its `message` is the result the model reads.
     #[serde(default)]
     pub orchestra: bool,
+    /// A network_* tool call (see network.rs), answered by the app like an orchestra call but open to every chat. Set by
+    /// the helper only.
+    #[serde(default)]
+    pub network: bool,
 }
 
 impl BridgeRequest {
     pub fn permission(tool_name: String, input: Value, tool_use_id: Option<String>) -> Self {
-        Self { tool_name, input, tool_use_id, orchestra: false }
+        Self { tool_name, input, tool_use_id, orchestra: false, network: false }
     }
 }
 

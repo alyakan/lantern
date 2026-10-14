@@ -2,7 +2,7 @@
 // It answers the app's Tauri commands and plays a scripted Claude turn. Never imported in production builds.
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
-import type { McpServer, SkillEntry, UiEvent } from "../types";
+import type { McpServer, NetworkDetail, NetworkItem, NetworkTx, NetworkView, SkillEntry, UiEvent } from "../types";
 import { version as APP_VERSION } from "../../package.json";
 
 // The next patch release, which the update checks find.
@@ -907,6 +907,42 @@ let mockMain: string | null = null;
 /** Workers started so far in the mock orchestra, the scripted ones included. */
 let mockSpawned = MOCK_WORKERS.length;
 
+// The Network tab: one watch, two matches from Network Monitor, one of them summarized by Claude.
+const mockTx = (id: string, ago: number, method: string, url: string, status: number | null, size: number): NetworkTx => ({
+  id, revision: 1, started_at: Date.now() - ago, method, url, host: new URL(url).host, path: new URL(url).pathname, status, duration_ms: 180 + ago / 1000,
+  state: status === null ? "pending" : "completed", error: null, request_content_type: null, response_content_type: "application/json; charset=utf-8", request_size: 0, response_size: size,
+});
+const MOCK_CHECKLISTS = {
+  data: [
+    { id: 4812, title: "Fire safety walk", status: "published", owner: { id: 7, name: "Dana Okafor" }, items: 24, last_audit: "2026-10-12T08:14:00Z", tags: ["safety", "weekly"] },
+    { id: 4813, title: "Forklift pre-use", status: "draft", owner: { id: 7, name: "Dana Okafor" }, items: 11, last_audit: null, tags: [] },
+    { id: 4815, title: "Kitchen hygiene", status: "published", owner: null, items: 32, last_audit: "2026-10-09T15:02:00Z", tags: ["food"] },
+  ],
+  meta: { page: 1, per_page: 3, total: 41, next_cursor: "eyJpZCI6NDgxNX0" },
+};
+let mockWatches = [{ label: "Checklists", method: "GET", url: "/v1/checklists" }];
+const mockItems = (): NetworkItem[] =>
+  mockWatches.length === 0
+    ? []
+    : [
+        { tx: mockTx("7f3a9c10-5b2e-4c11-9d0e-1a2b3c4d5e6f", 3_000, "GET", "https://api.acme.dev/v1/checklists?page=1&per_page=3", 200, 1843), watch: "Checklists", has_response: true,
+          summary: { id: "7f3a9c10-5b2e-4c11-9d0e-1a2b3c4d5e6f", method: "GET", url: "https://api.acme.dev/v1/checklists?page=1&per_page=3", status: 200, started_at: Date.now() - 3_000, written_at: Date.now() - 1_000,
+            text: "**Page 1 of the checklists: 3 of 41**, cursor-paginated (`meta.next_cursor` is set).\n\n| Checklist | Status | Items |\n|---|---|---|\n| Fire safety walk | published | 24 |\n| Forklift pre-use | draft | 11 |\n| Kitchen hygiene | published | 32 |\n\n**Worth a look**\n- *Kitchen hygiene* has `owner: null`, the only one with no owner.\n- *Forklift pre-use* has never been audited (`last_audit: null`) and no tags." } },
+        { tx: mockTx("0c9d8e7f-1a2b-4c3d-8e9f-0a1b2c3d4e5f", 12_000, "GET", "https://api.acme.dev/v1/checklists/4813", 404, 96), watch: "Checklists", has_response: true, summary: null },
+      ];
+const mockNetwork = (): NetworkView => ({ link: { status: "connected" }, watches: mockWatches, items: mockItems() });
+const mockResponse = (id: string): NetworkDetail => {
+  const item = mockItems().find((i) => i.tx.id === id)!;
+  const body = item.tx.status === 404 ? JSON.stringify({ error: { code: "not_found", message: "Checklist 4813 is a draft and can't be read by this role." } }) : JSON.stringify(MOCK_CHECKLISTS);
+  return {
+    transaction: item.tx,
+    request_headers: [{ name: "Accept", value: "application/json" }, { name: "Authorization", value: "Bearer eyJhbGciOi…" }, { name: "User-Agent", value: "Acme/5.2 (iPhone; iOS 26.0)" }],
+    request_body: { encoding: "utf8", data: "", size: 0, truncated: false },
+    response_headers: [{ name: "Content-Type", value: "application/json; charset=utf-8" }, { name: "X-Request-Id", value: "req_8f2c1d" }],
+    response_body: { encoding: "utf8", data: body, size: body.length, truncated: false },
+  };
+};
+
 export function installMockBackend() {
   // In the browser console: `mockEmit("check-for-updates")` fires a backend event, as the app menu's item does.
   (globalThis as unknown as { mockEmit: (event: string, payload?: unknown) => Promise<void> }).mockEmit = (event, payload) => emit(event, payload);
@@ -1113,6 +1149,14 @@ export function installMockBackend() {
           if (session) session.title = String(a.title);
           return undefined;
         }
+        case "network_state":
+          return mockNetwork();
+        case "network_response":
+          return mockResponse(a.id as string);
+        case "network_unwatch":
+          mockWatches = mockWatches.filter((w) => w.label !== a.label);
+          void emit("network-changed");
+          return true;
         case "session_events":
           return REPLAY;
         case "open_session":

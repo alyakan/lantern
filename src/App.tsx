@@ -4,6 +4,7 @@ import { api, type BranchReview, type ChangeScope, type RevertOutcome } from "./
 import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
 import { guidesByFlavour, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
+import { summarizeRequest } from "./lib/network";
 import { StepsIntro } from "./components/StepsIntro";
 import { windowFocused } from "./lib/windowFocus";
 import { initialState, reducer, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
@@ -1536,6 +1537,12 @@ export default function App() {
                 follow={state.follow}
                 refreshKey={state.editCount}
                 onSaved={() => syncChanges(active)}
+                // Sent now when Claude is free, queued behind the turn when it's working.
+                onSummarizeRequest={
+                  state.status === "idle" || state.status === "running"
+                    ? (item) => (state.status === "running" ? dispatch({ type: "queue_set", items: [...state.queued, summarizeRequest(item)] }) : sendIn(active, summarizeRequest(item)))
+                    : undefined
+                }
                 revert={{
                   slot: active,
                   blocked: state.status === "running" ? "Wait for Claude to finish before reverting." : null,

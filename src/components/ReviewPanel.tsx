@@ -4,6 +4,8 @@ import { relativeTime } from "../lib/time";
 import type { ChangedFile, TestRunItem } from "../store";
 import { parseLocation } from "../lib/testRuns";
 import { TestsTab } from "./TestsTab";
+import { NetworkTab, useNetworkView } from "./NetworkTab";
+import type { NetworkItem } from "../types";
 import { basename, dirOf, relativeTo } from "../lib/diff";
 import { usePersistentState } from "../lib/layout";
 import { Counts } from "./EditLine";
@@ -61,6 +63,8 @@ interface Props {
    * page's name, how to open one, and `openKey`, changed to bring the tab up.
    */
   architecture?: { map: ArchitectureMap; current: string[]; pageNames: Record<string, string>; onOpenPage: (page: string) => void; openKey: number };
+  /** The Network tab's Summarize: asks Claude in this chat about one request (absent: no chat to ask). */
+  onSummarizeRequest?: (item: NetworkItem) => void;
   /** Reverting Claude's edits: offered on the Changes views and the Summary's steps; the undo of the last one. */
   revert?: RevertControls;
   selected: string | null;
@@ -73,7 +77,7 @@ interface Props {
 const LAYOUT_LABEL: Record<DiffLayout, string> = { inline: "Unified", split: "Split" };
 const NEXT_LAYOUT: Record<DiffLayout, DiffLayout> = { inline: "split", split: "inline" };
 
-type Tab = "changes" | "files" | "tests" | "agents" | "summary" | "map";
+type Tab = "changes" | "files" | "tests" | "agents" | "summary" | "map" | "network";
 /** Each tab's button, which its panel is labelled by. */
 const tabId = (t: Tab) => `review-${t}-tab`;
 
@@ -81,8 +85,11 @@ export function ReviewPanel(props: Props) {
   const [savedTab, setTab] = usePersistentState<Tab>("review.tab", "changes");
   const count = props.files.length;
   const runs = props.testRuns ?? [];
+  // The folder's watched requests: the Network tab shows once there's a watch or a summary.
+  const network = useNetworkView(props.folder);
+  const hasNetwork = !!network && (network.watches.length > 0 || network.items.length > 0);
   // The saved tab is shared by every chat: one that has no tests, or no steps, opens on Changes instead.
-  const tab: Tab = (savedTab === "tests" && runs.length === 0) || (savedTab === "summary" && !props.summary) || (savedTab === "map" && !props.architecture) ? "changes" : savedTab;
+  const tab: Tab = (savedTab === "tests" && runs.length === 0) || (savedTab === "summary" && !props.summary) || (savedTab === "map" && !props.architecture) || (savedTab === "network" && !hasNetwork) ? "changes" : savedTab;
   const [shownRun, setShownRun] = useState<string | null>(null);
   const [reveal, setReveal] = useState<{ path: string; line: number | null; key: number } | null>(null);
   // A mention of a changed file at a line (a review finding): its diff scrolls there.
@@ -173,6 +180,12 @@ export function ReviewPanel(props: Props) {
               {latestRun?.outcome === "failed" && <span className="tab-count failed">{latestRun.failed || "!"}</span>}
             </button>
           )}
+          {hasNetwork && (
+            <button id={tabId("network")} role="tab" tabIndex={tab === "network" ? 0 : -1} aria-selected={tab === "network"} className={tab === "network" ? "active" : ""} title="Requests matching this folder's watches, from Network Monitor" onClick={() => setTab("network")}>
+              Network
+              {network.items.length > 0 && <span className="tab-count">{network.items.length}</span>}
+            </button>
+          )}
         </div>
         {tab === "changes" && props.onScope && <ScopeMenu {...props} onScope={props.onScope} />}
         {tab === "changes" && allRevert && rv && count > 0 && (
@@ -242,6 +255,11 @@ export function ReviewPanel(props: Props) {
       {tab === "tests" && (
         <div className="tab-body" role="tabpanel" aria-labelledby={tabId("tests")}>
           <TestsTab runs={runs} selected={shownRun} onSelect={setShownRun} onOpenLocation={openLocation} />
+        </div>
+      )}
+      {tab === "network" && network && props.folder && (
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("network")}>
+          <NetworkTab folder={props.folder} view={network} onSummarize={props.onSummarizeRequest ?? null} />
         </div>
       )}
       {/* Kept mounted while hidden so the tree keeps its expanded folders across tab switches. */}

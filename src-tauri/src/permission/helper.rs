@@ -78,6 +78,7 @@ pub fn handle_message_as(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeRespo
         }),
         "tools/list" => {
             let mut tools = base_tools();
+            tools.extend(crate::network::tool_list());
             if orchestrator {
                 tools.extend(orchestra_tool_list());
             }
@@ -87,7 +88,7 @@ pub fn handle_message_as(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeRespo
         "tools/call" if ORCHESTRA_TOOLS.contains(&msg["params"]["name"].as_str().unwrap_or("")) => {
             let tool = msg["params"]["name"].as_str().unwrap_or("");
             if orchestrator {
-                let resp = ask(BridgeRequest { tool_name: tool.into(), input: msg["params"]["arguments"].clone(), tool_use_id: None, orchestra: true });
+                let resp = ask(BridgeRequest { tool_name: tool.into(), input: msg["params"]["arguments"].clone(), tool_use_id: None, orchestra: true, network: false });
                 let text = resp.message.unwrap_or_else(|| if resp.allow { "Done.".into() } else { "That didn't work.".into() });
                 json!({"isError": !resp.allow, "content": [{"type": "text", "text": text}]})
             } else {
@@ -102,6 +103,13 @@ pub fn handle_message_as(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeRespo
             Ok(text) => json!({"content": [{"type": "text", "text": text}]}),
             Err(text) => json!({"isError": true, "content": [{"type": "text", "text": text}]}),
         },
+        // Answered by the app at once (it reads Network Monitor on loopback), for any chat.
+        "tools/call" if crate::network::TOOLS.contains(&msg["params"]["name"].as_str().unwrap_or("")) => {
+            let tool = msg["params"]["name"].as_str().unwrap_or("");
+            let resp = ask(BridgeRequest { tool_name: tool.into(), input: msg["params"]["arguments"].clone(), tool_use_id: None, orchestra: false, network: true });
+            let text = resp.message.unwrap_or_else(|| if resp.allow { "Done.".into() } else { "That didn't work.".into() });
+            json!({"isError": !resp.allow, "content": [{"type": "text", "text": text}]})
+        }
         "tools/call" if msg["params"]["name"] == "reproduce" => {
             let resp = ask(BridgeRequest::permission(REPRODUCE.into(), msg["params"]["arguments"].clone(), None));
             let note = resp.message.filter(|m| !m.trim().is_empty()).map(|m| format!(" Their note: {m}")).unwrap_or_default();
@@ -327,10 +335,26 @@ mod tests {
     #[test]
     fn only_the_main_agents_helper_lists_the_orchestra_tools() {
         let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
-        assert_eq!(tool_names(&handle_message_as(&list, &allow_all, false).unwrap()), ["approve", "steps_guide", "review_target", "reproduce"]);
+        let every_chats: Vec<&str> = ["approve", "steps_guide", "review_target", "reproduce"].into_iter().chain(crate::network::TOOLS.iter().copied()).collect();
+        assert_eq!(tool_names(&handle_message_as(&list, &allow_all, false).unwrap()), every_chats);
         let names = tool_names(&handle_message_as(&list, &allow_all, true).unwrap());
-        assert_eq!(&names[..4], ["approve", "steps_guide", "review_target", "reproduce"]);
-        assert_eq!(names[4..], *ORCHESTRA_TOOLS);
+        assert_eq!(names[..every_chats.len()], every_chats);
+        assert_eq!(names[every_chats.len()..], *ORCHESTRA_TOOLS);
+    }
+
+    #[test]
+    fn a_network_call_from_any_chat_goes_to_the_app_flagged_and_comes_back_as_the_tool_result() {
+        let seen = std::cell::RefCell::new(None);
+        let msg = json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "network_watch", "arguments": {"label": "Users", "url": "/users"}}});
+        let r = handle_message_as(&msg, &|req| {
+            *seen.borrow_mut() = Some(req);
+            BridgeResponse { allow: true, message: Some("Watching.".into()), updated_input: None }
+        }, false)
+        .unwrap();
+        assert_eq!((r["result"]["isError"].clone(), r["result"]["content"][0]["text"].clone()), (json!(false), json!("Watching.")));
+        let req = seen.borrow().clone().unwrap();
+        assert!(req.network && !req.orchestra);
+        assert_eq!((req.tool_name.as_str(), req.input["url"].as_str()), ("network_watch", Some("/users")));
     }
 
     #[test]
