@@ -54,6 +54,12 @@ export function nodeIdOf(elementId: string): string | null {
   return /(?:^|-)flowchart-(.+)-\d+$/.exec(elementId)?.[1] ?? null;
 }
 
+/** A drawn SVG's own size, from its viewBox. */
+export function svgSize(svg: string): { w: number; h: number } | null {
+  const m = /viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)\s*"/.exec(svg);
+  return m ? { w: Number(m[1]), h: Number(m[2]) } : null;
+}
+
 type Mermaid = (typeof import("mermaid"))["default"];
 
 let loaded: Promise<Mermaid> | null = null;

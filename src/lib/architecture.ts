@@ -1,5 +1,6 @@
 import { findingsOf, withoutCue, type Finding } from "./review";
 import { mermaidBlock } from "./mermaid";
+import { architectureBlock, parseArchitecture, type ArchSpec } from "./archGraph";
 import type { StepPage } from "./steps";
 
 /**
@@ -72,20 +73,26 @@ export function coversOf(page: StepPage): string[] {
   return m ? coveredIds(m[1]) : [];
 }
 
-/** The pinned map: the latest Overview's diagram, and which page each of its nodes opens. */
-export interface ArchitectureMap {
-  source: string;
-  /** The Overview's page, for the map's own title. */
-  page: string;
-  /** Node id → the part page that covers it. */
-  nodes: Record<string, string>;
-}
+/**
+ * The architecture map the Architecture tab draws: the latest Overview's boxes and arrows (its ```architecture block),
+ * and which page each box opens. An Overview written before that block existed has a Mermaid diagram instead, which is
+ * shown as it is; one whose block doesn't read says why.
+ */
+export type ArchitectureMap = { page: string; title: string; nodes: Record<string, string> } & (
+  | { kind: "native"; spec: ArchSpec }
+  | { kind: "mermaid"; source: string }
+  | { kind: "broken"; error: string; text: string }
+);
 
 /** The map the pages so far have drawn: null until an Overview with a diagram comes. */
 export function architectureMap(pages: StepPage[]): ArchitectureMap | null {
-  const overview = [...pages].reverse().find((p) => p.heading?.kind === "overview" && mermaidBlock(textOf(p)));
+  const overview = [...pages].reverse().find((p) => p.heading?.kind === "overview" && (architectureBlock(textOf(p)) !== null || mermaidBlock(textOf(p)) !== null));
   if (!overview) return null;
   const nodes: Record<string, string> = {};
   for (const p of pages) for (const id of coversOf(p)) nodes[id] ??= p.key;
-  return { source: mermaidBlock(textOf(overview))!, page: overview.key, nodes };
+  const base = { page: overview.key, title: overview.heading?.title ?? "", nodes };
+  const block = architectureBlock(textOf(overview));
+  if (block === null) return { ...base, kind: "mermaid", source: mermaidBlock(textOf(overview))! };
+  const read = parseArchitecture(block);
+  return "spec" in read ? { ...base, kind: "native", spec: read.spec } : { ...base, kind: "broken", error: read.error, text: block };
 }

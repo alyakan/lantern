@@ -117,9 +117,9 @@ export const GUIDE: Record<GuideKey, About> = {
       "For a PR or a fix it reads the code or the diff; for a feature that isn't built yet it proposes the design and says so",
     ],
     you: [
-      "The map stays beside the pages: the part you're on is lit, and clicking a box opens its page",
+      "The map is in the right pane's Map tab: the part you're on is lit, hovering a box says what it does, and clicking one opens its page",
       "Agree with or reject each concern; Next sends your verdicts with it",
-      "Open the map at full size to zoom, or slim it down to a handle when you need the room",
+      "Drag the map to move it, pinch or ⌘-scroll to zoom, and Fit to see all of it again",
     ],
     goodFor: "Agreeing on a design before building it, or understanding how a change fits into the system.",
     example: "Map the architecture of PR 128",

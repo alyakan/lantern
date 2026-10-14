@@ -6,7 +6,9 @@ import { blockLanguage, CALLOUT_LABEL, filePaths, languageHint, languageName, pa
 import { lineKind } from "../lib/diff";
 import { usePrefersDark } from "../lib/theme";
 import { DocIcon } from "./icons";
-import { useDiagram } from "./Diagram";
+import { DiagramLightbox, useDiagram } from "./Diagram";
+import { ArchitectureBlock } from "./ArchitectureTab";
+import { svgSize } from "../lib/mermaid";
 
 interface HNode {
   type: string;
@@ -65,6 +67,7 @@ function PlanStepCard({ step }: { step: PlanStep }) {
 /** A fenced code block with a header: its language and a Copy button. Plan steps become cards instead. */
 function Pre({ node, children, ...rest }: ComponentProps<"pre"> & { node?: HNode }) {
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const code = node?.children?.find((c) => c.type === "element" && c.tagName === "code");
   const cls = code?.properties?.className;
   const className = Array.isArray(cls) ? cls.join(" ") : cls;
@@ -76,8 +79,11 @@ function Pre({ node, children, ...rest }: ComponentProps<"pre"> & { node?: HNode
   const { id, label: lang } = blockLanguage(className, text, hint);
   // A mermaid block is drawn as a diagram once it can be; until then (and if it can't) it's the code.
   const diagram = useDiagram(named?.toLowerCase() === "mermaid" ? text : "");
-  const highlighted = useHighlight(step || id === "diff" || named?.toLowerCase() === "mermaid" ? "" : text, id);
+  const map = named?.toLowerCase() === "architecture";
+  const highlighted = useHighlight(step || id === "diff" || map || named?.toLowerCase() === "mermaid" ? "" : text, id);
   if (step) return <PlanStepCard step={step} />;
+  if (map) return <ArchitectureBlock text={text} />;
+  const size = diagram.svg ? svgSize(diagram.svg) : null;
   const copy = () =>
     navigator.clipboard?.writeText(text.replace(/\n$/, "")).then(() => {
       setCopied(true);
@@ -88,13 +94,21 @@ function Pre({ node, children, ...rest }: ComponentProps<"pre"> & { node?: HNode
       <div className="code-block-head">
         <span className="code-block-lang">{diagram.svg ? "Diagram" : (lang ?? "Code")}</span>
         {diagram.error && <span className="code-block-note">Couldn't draw this diagram</span>}
+        {size && (
+          <button className="code-block-copy" onClick={() => setExpanded(true)} aria-label="Expand diagram" title="Open it at full size, to zoom and move around">
+            Expand
+          </button>
+        )}
         <button className="code-block-copy" onClick={copy} aria-label={diagram.svg ? "Copy diagram source" : "Copy code"}>
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
       {diagram.svg ? (
         // Mermaid's own markup, drawn in its strict security level (scripts off, labels sanitised).
-        <div className="diagram" dangerouslySetInnerHTML={{ __html: diagram.svg }} />
+        <>
+          <div className="diagram" title={size ? "Click to open it at full size" : undefined} onClick={size ? () => setExpanded(true) : undefined} dangerouslySetInnerHTML={{ __html: diagram.svg }} />
+          {expanded && size && <DiagramLightbox svg={diagram.svg} size={size} onClose={() => setExpanded(false)} />}
+        </>
       ) : id === "diff" ? (
         // Monaco has no diff colouring: each line is tinted by what it does, as in the diff view.
         <pre {...rest} className="code-block-colored code-block-diff">
