@@ -67,7 +67,7 @@ import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { SetupScreen } from "./components/SetupScreen";
 import { RestoreCard } from "./components/RestoreCard";
-import { chatsToSave, currentFolder, loadSaved, save, screenFirst, toCurrentFolders, withOffered, type SavedChat } from "./lib/restore";
+import { chatsToSave, currentFolder, loadSaved, save, screenFirst, sessionModesToSave, toCurrentFolders, withOffered, type SavedChat } from "./lib/restore";
 import { SplitPane } from "./components/SplitPane";
 import { TopBar } from "./components/TopBar";
 import { Canvas, newLayout } from "./components/Canvas";
@@ -410,9 +410,12 @@ export default function App() {
     // An orchestra's mode, as the user last set it for its main agent, is what the project's next one starts on.
     if (state.folder && state.orchestrator && (state.mode === "auto" || state.mode === "ask") && orchestraModes[state.folder] !== state.mode) setOrchestraModes({ ...orchestraModes, [state.folder]: state.mode });
   }, [state.mode, state.folder]);
+  // Every open chat's, not just the one on screen: a worker's mode is set in the background (and may be lowered there).
+  const modesKey = Object.values(chats.slots).map((s) => `${s.sessionId}:${s.mode}`).join(" ");
   useEffect(() => {
-    if (state.sessionId && sessionModes[state.sessionId] !== state.mode) setSessionModes({ ...sessionModes, [state.sessionId]: state.mode });
-  }, [state.mode, state.sessionId]);
+    const next = sessionModesToSave(chats.slots, sessionModes);
+    if (next) setSessionModes(next);
+  }, [modesKey]);
   useEffect(() => {
     const id = harnessBySlot[active];
     if (state.sessionId && id && harnessBySession[state.sessionId] !== id) setHarnessBySession({ ...harnessBySession, [state.sessionId]: id });
