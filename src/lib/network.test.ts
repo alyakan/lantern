@@ -39,10 +39,12 @@ describe("network", () => {
   it("formats sizes and URLs, and asks Claude about the request by its id", () => {
     expect([formatBytes(0), formatBytes(512), formatBytes(2048), formatBytes(3 * 1024 * 1024)]).toEqual(["empty", "512 B", "2.0 KB", "3.0 MB"]);
     expect(shortUrl("https://api.x/v1/items?page=2")).toBe("api.x/v1/items?page=2");
-    const ask = summarizeRequest({ tx: tx({ url: "https://api.x/v1/items?token=s3cret" }), watch: "Items", summary: null, has_response: true });
-    expect(ask).toContain("network request abc (GET https://api.x/v1/items)");
-    expect(ask).not.toContain("s3cret");
-    expect(summarizeRequest({ tx: tx({ url: "https://sam:pw@api.x/v1#access_token=t" }), watch: null, summary: null, has_response: true })).toContain("(GET https://api.x/v1)");
+    // Host and path as Network Monitor parsed them; the URL itself (query, fragment, user info) never goes in.
+    const ask = summarizeRequest({ tx: tx({ url: "https://sam:pw@a@api.x/v1/items?token=s3cret#t2", path: "/v1/items?token=s3cret" }), watch: "Items", summary: null, has_response: true });
+    expect(ask).toContain("network request abc (GET api.x/v1/items):");
+    expect(ask).not.toMatch(/s3cret|sam|pw|t2/);
     expect(ask).toContain("network_summarize");
+    // A request known only from its summary: just its id.
+    expect(summarizeRequest({ tx: tx({ host: "", path: "" }), watch: null, summary: null, has_response: false })).toContain("network request abc: read it");
   });
 });

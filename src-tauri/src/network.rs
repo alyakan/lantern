@@ -452,7 +452,7 @@ impl Monitor {
         let mut taken: HashMap<&str, usize> = HashMap::new();
         for tx in txs {
             for (folder, ws) in &watches {
-                if let Some(w) = ws.iter().find(|w| w.matches(&tx.method, &tx.url)) {
+                if let Some(w) = ws.iter().find(|w| w.matches(&tx.method, &visible_url(&tx.url))) {
                     let n = taken.entry(folder.as_str()).or_default();
                     *n += 1;
                     if *n <= MAX_MATCHES {
@@ -556,7 +556,7 @@ impl Monitor {
                     .transactions
                     .iter()
                     .rev()
-                    .filter(|t| query.as_ref().is_none_or(|q| t.url.to_lowercase().contains(q)))
+                    .filter(|t| query.as_ref().is_none_or(|q| visible_url(&t.url).to_lowercase().contains(q)))
                     .filter(|t| method.is_none_or(|m| t.method.eq_ignore_ascii_case(m)))
                     .filter(|t| status.is_none_or(|st| t.status.is_some_and(|code| code.to_string().starts_with(st)) || (st == "failed" && t.state == "failed")))
                     .collect();
@@ -566,7 +566,7 @@ impl Monitor {
                 let now = now_ms() as f64;
                 let mut out = format!("{} of {} captured requests match, newest first{}:\n", found.len(), list.transactions.len(), if found.len() > limit { format!(" (showing {limit})") } else { String::new() });
                 for t in found.iter().take(limit) {
-                    out.push_str(&format!("{}  {}  {} {}  {}  ({}{})\n", t.id, ago(now - t.started_at), t.method, status_text(t), redact_url(&t.url), size_text(t.response_size), t.duration_ms.map(|d| format!(", {d:.0} ms")).unwrap_or_default()));
+                    out.push_str(&format!("{}  {}  {} {}  {}  ({}{})\n", t.id, ago(now - t.started_at), t.method, status_text(t), visible_url(&t.url), size_text(t.response_size), t.duration_ms.map(|d| format!(", {d:.0} ms")).unwrap_or_default()));
                 }
                 out.push_str("\nRead one with network_request and its id.");
                 Ok(out)
@@ -595,7 +595,7 @@ impl Monitor {
                 let what = format!("{} {}", method.as_deref().unwrap_or("any method"), url);
                 Ok(match listed {
                     Ok(list) => {
-                        let matched = list.transactions.iter().filter(|t| watch.matches(&t.method, &t.url)).count();
+                        let matched = list.transactions.iter().filter(|t| watch.matches(&t.method, &visible_url(&t.url))).count();
                         format!("Watching \"{label}\" ({what}). {matched} captured request{} match so far; they and new ones show up in the Network tab.", if matched == 1 { "" } else { "s" })
                     }
                     Err(_) => format!("Watching \"{label}\" ({what}), saved for this folder. Network Monitor isn't running, so nothing has matched yet; requests show up in the Network tab once it is."),
@@ -627,7 +627,7 @@ impl Monitor {
                 let tx = self.detail(Some(folder), &id).map(|d| d.transaction.clone()).or_else(|_| self.store.summaries(folder).into_iter().find(|s| s.id == id).map(|s| summary_tx(&s)).ok_or(Fault::NotFound)).map_err(|f| f.explain())?;
                 self.store.summarize(folder, Summary { id: tx.id.clone(), method: tx.method.clone(), url: tx.url.clone(), status: tx.status, started_at: tx.started_at, text: text.to_string(), written_at: now_ms() });
                 self.changed();
-                Ok(format!("Saved. The summary of {} {} shows in the Network tab.", tx.method, redact_url(&tx.url)))
+                Ok(format!("Saved. The summary of {} {} shows in the Network tab.", tx.method, visible_url(&tx.url)))
             }
             _ => Err(format!("Lantern has no tool called {tool}.")),
         }
@@ -744,15 +744,33 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Text that isn't JSON Lantern could read (plain text, JSON cut short, a form): `"name": value` and `name=value` with a
-/// credential name get their value redacted.
+/// Free text (a body Lantern can't read as JSON, a header value, an error, a string inside JSON), with what looks like a
+/// credential redacted: `"name": value`, `name=value` and `Name: value` lines with a credential name, `Bearer …` tokens,
+/// and the user info of any URL in it.
 fn redact_text(text: &str) -> String {
-    static JSON_PAIR: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    static EQ_PAIR: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    use std::sync::OnceLock;
+    static JSON_PAIR: OnceLock<regex::Regex> = OnceLock::new();
+    static EQ_PAIR: OnceLock<regex::Regex> = OnceLock::new();
+    static HEADER_LINE: OnceLock<regex::Regex> = OnceLock::new();
+    static SCHEME_TOKEN: OnceLock<regex::Regex> = OnceLock::new();
+    static USER_INFO: OnceLock<regex::Regex> = OnceLock::new();
     let json_pair = JSON_PAIR.get_or_init(|| regex::Regex::new(r#""((?:[^"\\]|\\.)*)"(\s*:\s*)("(?:[^"\\]|\\.)*"|[^,}\]\s]+)"#).unwrap());
-    let eq_pair = EQ_PAIR.get_or_init(|| regex::Regex::new(r#"([A-Za-z0-9_.%+\-]+)=([^&;\s"'<>]+)"#).unwrap());
-    let text = json_pair.replace_all(text, |c: &regex::Captures| if secret_name(&c[1]) { format!("\"{}\"{}\"<redacted>\"", &c[1], &c[2]) } else { c[0].to_string() });
+    let eq_pair = EQ_PAIR.get_or_init(|| regex::Regex::new(r#"([A-Za-z0-9_.%+\-]+)=([^&;#\s"'<>]+)"#).unwrap());
+    let header_line = HEADER_LINE.get_or_init(|| regex::Regex::new(r"(?m)^([ \t]*([A-Za-z0-9_\-]+)[ \t]*:[ \t]*)(\S.*)$").unwrap());
+    let scheme_token = SCHEME_TOKEN.get_or_init(|| regex::Regex::new(r"(?i)\b(bearer|basic|token|digest)(\s+)[A-Za-z0-9._~+/=\-]{8,}").unwrap());
+    // Greedy up to the last @ before the path, as redact_url reads user info.
+    let user_info = USER_INFO.get_or_init(|| regex::Regex::new(r"(?i)\b([a-z][a-z0-9+.\-]*://)[^\s/?#]*@").unwrap());
+    let text = user_info.replace_all(text, "${1}<redacted>@");
+    let text = scheme_token.replace_all(&text, "${1}${2}<redacted>");
+    let text = json_pair.replace_all(&text, |c: &regex::Captures| if secret_name(&c[1]) { format!("\"{}\"{}\"<redacted>\"", &c[1], &c[2]) } else { c[0].to_string() });
+    let text = header_line.replace_all(&text, |c: &regex::Captures| if secret_name(&c[2]) { format!("{}<redacted>", &c[1]) } else { c[0].to_string() });
     eq_pair.replace_all(&text, |c: &regex::Captures| if secret_name(&percent_decode(&c[1])) { format!("{}=<redacted>", &c[1]) } else { c[0].to_string() }).into_owned()
+}
+
+/// The URL as Claude may see it, and as searches and watches match it: matching the raw one would let a search for
+/// part of a hidden token say whether it's there.
+fn visible_url(url: &str) -> String {
+    redact_text(&redact_url(url))
 }
 
 /// JSON with the values of credential keys (`password`, `access_token`, `client_secret`…) redacted, at any depth.
@@ -772,6 +790,13 @@ fn redact_json(v: &mut Value) {
             }
         }
         Value::Array(items) => items.iter_mut().for_each(redact_json),
+        // A string can hold a URL with a token, or a whole Authorization header.
+        Value::String(s) => {
+            let redacted = redact_text(s);
+            if redacted != *s {
+                *s = redacted;
+            }
+        }
         _ => {}
     }
 }
@@ -798,7 +823,7 @@ fn headers_text(headers: &[Header]) -> String {
     if headers.is_empty() {
         return "  (none)\n".into();
     }
-    headers.iter().map(|h| if secret_name(&h.name) { format!("  {}: <redacted, {} chars>\n", h.name, h.value.len()) } else { format!("  {}: {}\n", h.name, h.value) }).collect()
+    headers.iter().map(|h| if secret_name(&h.name) { format!("  {}: <redacted, {} chars>\n", h.name, h.value.len()) } else { format!("  {}: {}\n", h.name, redact_text(&h.value)) }).collect()
 }
 
 /// One request for Claude: the request line and outcome, headers, the request body cut short, and the response body:
@@ -806,13 +831,13 @@ fn headers_text(headers: &[Header]) -> String {
 /// and JSON or form bodies are redacted.
 fn describe(d: &Detail, path: Option<&str>, max: usize) -> Result<String, String> {
     let t = &d.transaction;
-    let mut out = format!("{} {} → {}", t.method, redact_url(&t.url), status_text(t));
+    let mut out = format!("{} {} → {}", t.method, visible_url(&t.url), status_text(t));
     if let Some(ms) = t.duration_ms {
         out.push_str(&format!(" in {ms:.0} ms"));
     }
     out.push_str(&format!(", {}{}\n", size_text(d.response_body.size), t.response_content_type.as_deref().map(|c| format!(", {c}")).unwrap_or_default()));
     if let Some(e) = &t.error {
-        out.push_str(&format!("Failed: {}\n", redact_text(&redact_url(e))));
+        out.push_str(&format!("Failed: {}\n", redact_text(e)));
     }
     out.push_str(&format!("id {}\n\nRequest headers:\n{}", t.id, headers_text(&d.request_headers)));
     if d.request_body.size > 0 {
@@ -1231,6 +1256,28 @@ mod tests {
         }
         assert!(!m.call(None, "network_requests", &json!({})).unwrap().contains("abc123"));
         assert_eq!(redact_url("https://x/a"), "https://x/a");
+    }
+
+    #[test]
+    fn searches_and_watches_cannot_find_what_is_redacted() {
+        let (fake, m) = monitor();
+        fake.add(tx(A, 1, "GET", "https://x/cb?access_token=SECRETVALUE&page=2", "completed"), "{}");
+        assert!(m.call(None, "network_requests", &json!({"query": "SECRETV"})).unwrap().starts_with("None of the 1"));
+        assert!(m.call(None, "network_requests", &json!({"query": "page=2"})).unwrap().contains(A));
+        let reply = m.call(Some("/p"), "network_watch", &json!({"label": "t", "url": "access_token=SECRET"})).unwrap();
+        assert!(reply.contains("0 captured requests match"), "{reply}");
+    }
+
+    #[test]
+    fn header_values_strings_in_json_and_errors_are_redacted_too() {
+        let headers = vec![Header { name: "Location".into(), value: "https://x/cb#access_token=t1&state=s".into() }, Header { name: "X-Debug".into(), value: "Bearer abcdefghijk".into() }];
+        let text = headers_text(&headers);
+        assert!(!text.contains("t1") && !text.contains("abcdefghijk") && text.contains("state=s"), "{text}");
+        let mut v = json!({"next": "https://u:p@x/a?token=t2&page=3", "note": "Authorization: Basic dXNlcjpwYXNz"});
+        redact_json(&mut v);
+        assert_eq!(v, json!({"next": "https://<redacted>@x/a?token=<redacted>&page=3", "note": "Authorization: <redacted>"}));
+        let err = redact_text("failed for https://a@b@host/x and https://u:p@y/ with Bearer zzzzzzzzzz");
+        assert_eq!(err, "failed for https://<redacted>@host/x and https://<redacted>@y/ with Bearer <redacted>");
     }
 
     #[test]

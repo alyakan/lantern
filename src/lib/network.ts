@@ -89,9 +89,13 @@ export function outline(value: unknown, max = 40): OutlineRow[] {
   return rows;
 }
 
-/** What the Summarize button asks Claude, naming the request so it reads that one. The URL goes without its query,
- * fragment and user info: they can hold credentials. */
+/**
+ * What the Summarize button asks Claude, naming the request by its id so it reads that one. Only the host and path go
+ * with it, as Network Monitor parsed them: nothing here re-parses the URL, whose query, fragment and user info can hold
+ * credentials (Claude reads them redacted, through the tool).
+ */
 export function summarizeRequest(item: NetworkItem): string {
-  const url = item.tx.url.split(/[?#]/)[0].replace(/^([a-z]+:\/\/)[^/@]*@/i, "$1");
-  return `Summarize the response of network request ${item.tx.id} (${item.tx.method} ${url}): read it with network_request, then save your summary with network_summarize.`;
+  const path = item.tx.path.split(/[?#;]/)[0];
+  const where = item.tx.host ? ` (${item.tx.method} ${item.tx.host}${path})` : "";
+  return `Summarize the response of network request ${item.tx.id}${where}: read it with network_request, then save your summary with network_summarize.`;
 }
