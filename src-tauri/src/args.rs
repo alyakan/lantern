@@ -25,12 +25,12 @@ fn lantern_prompt(mode: Mode) -> String {
         Mode::Steps => "Step by step",
     };
     format!(
-        "You are running inside Lantern, a macOS desktop app for the user's `claude` CLI (github.com/alyakan/lantern). The user sees each turn as cards and diffs, with tabs for Changes (every file you touched, as diffs), Files (an editor: the user can change and save files themselves, so a file may differ from what you last read), Agents (you, your advisor and your subagents as a graph) and Tests. They pick the mode and the models (a harness preset sets which model you, your advisor and your subagents run on); you can't change either. Lantern has three modes:
+        "You are running inside Lantern, a macOS desktop app for the user's `claude` CLI (github.com/alyakan/lantern). The user sees each turn as cards and diffs, with tabs for Changes (every file you touched, as diffs), Files (an editor: the user can change and save files themselves, so a file may differ from what you last read), Agents (you, your advisor and your subagents as a graph), Tests and Network (requests captured by the user's Network Monitor proxy app that match watches you saved, with your summaries). They pick the mode and the models (a harness preset sets which model you, your advisor and your subagents run on); you can't change either. Lantern has three modes:
 - Ask: edits apply as you make them; anything else that needs permission shows the user an Allow/Deny card.
 - Auto: Claude Code's auto-mode classifier decides what runs.
 - Step by step: one page per message, in a flavour (Build, Learn, Review, Debug or Architecture), with Ask's permissions, or auto mode's if the user turned on auto-approve.
 This chat is in {current} mode. A message the user starts with `!` in Lantern's box is a shell command they ran themselves in this folder; its output reaches you with their next message as <bash-input> and <bash-stdout>. If they ask how Lantern works, its README lists what it does.
-Lantern's own tools, on its MCP server: mcp__lantern__steps_guide (how Step by step's flavours work: their headings and formats; read it whenever you're unsure of one), mcp__lantern__review_target (what the Changes pane compares in a review: a pull request, or the branch against its base) and, in Step by step, mcp__lantern__reproduce (Debug: has the user reproduce a bug). Lantern also reads your messages' format: the Step-by-step headings make your pages, and it will tell you when it couldn't read one."
+Lantern's own tools, on its MCP server: mcp__lantern__steps_guide (how Step by step's flavours work: their headings and formats; read it whenever you're unsure of one), mcp__lantern__review_target (what the Changes pane compares in a review: a pull request, or the branch against its base), the mcp__lantern__network_* tools (the user's app traffic, as their Network Monitor proxy app captured it: when they ask about network requests or API responses, read them with these; when they say which requests matter, save a watch with network_watch; to summarize a response, read it with network_request, then save your summary with network_summarize so it shows in the Network tab) and, in Step by step, mcp__lantern__reproduce (Debug: has the user reproduce a bug). Lantern also reads your messages' format: the Step-by-step headings make your pages, and it will tell you when it couldn't read one."
     )
 }
 
@@ -276,13 +276,16 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
     a.push("--append-system-prompt".into());
     a.push(prompt);
     // Tools that are their own confirmation shouldn't also need approving: the reproduce card, and the main agent's
-    // orchestra tools (the user already chose to run an orchestra; a merge still waits for their approval).
+    // orchestra tools (the user already chose to run an orchestra; a merge still waits for their approval). The network
+    // tools read the traffic the user captured themselves and change nothing outside Lantern.
     let mut allowed: Vec<String> = Vec::new();
     if steps {
         allowed.push("mcp__lantern__reproduce".into());
     }
     // Lantern's own read-only tools: what Step by step's flavours are, and what the Changes pane shows.
     allowed.extend(crate::permission::helper::LANTERN_TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
+    // The network tools read the traffic the user captured themselves and change nothing outside Lantern.
+    allowed.extend(crate::network::TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
     if helper.role == Role::Main {
         allowed.extend(crate::permission::helper::ORCHESTRA_TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
     }
@@ -416,7 +419,7 @@ mod tests {
         let a = build_args(Mode::Auto, false, None, None, None, &worker);
         let cfg: serde_json::Value = serde_json::from_str(value_after(&a, "--mcp-config").unwrap()).unwrap();
         assert!(cfg["mcpServers"]["lantern"]["env"].get("LANTERN_ROLE").is_none());
-        assert_eq!(value_after(&a, "--allowedTools"), Some("mcp__lantern__steps_guide,mcp__lantern__review_target"), "only Lantern's read-only tools");
+        assert_eq!(value_after(&a, "--allowedTools"), Some(format!("mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}").as_str()), "only Lantern's own tools, none of the orchestra's");
         let prompt = value_after(&a, "--append-system-prompt").unwrap();
         assert!(prompt.contains("named \"login-form\"") && prompt.contains("never merge, push or switch branches"));
         assert!(!prompt.contains("main agent of a Lantern orchestra"));
@@ -451,6 +454,9 @@ mod tests {
         assert!(!prompt.contains("orchestra") && !prompt.contains("worker agent"));
     }
 
+    /// Every chat's network tools, allowed without asking (see network.rs).
+    const NETWORK_TOOLS: &str = "mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize";
+
     fn value_after<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
         args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str())
     }
@@ -469,7 +475,7 @@ mod tests {
         expected.push(mcp(r#"{"LANTERN_SOCKET":"/tmp/a.sock"}"#));
         expected.extend(strs(&["--permission-prompt-tool", "mcp__lantern__approve", "--append-system-prompt"]));
         expected.push(lantern_prompt(Mode::Ask));
-        expected.extend(strs(&["--allowedTools", "mcp__lantern__steps_guide,mcp__lantern__review_target"]));
+        expected.extend(["--allowedTools".to_string(), format!("mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}")]);
         let mut got = build_args(Mode::Ask, false, None, None, None, &helper());
         got.extend(harness_args(None));
         assert_eq!(got, expected);
@@ -486,7 +492,7 @@ mod tests {
             lantern_prompt(Mode::Steps)
         ));
         expected.push("--allowedTools".into());
-        expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
+        expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
         expected.extend(strs(&["--resume", "sess-9", "--model", "opus", "--effort", "high", "--advisor", "fable"]));
         let mut got = build_args(Mode::Steps, true, Some("sess-9"), Some("opus"), Some("high"), &main);
         got.extend(harness_args(Some("fable")));
@@ -499,7 +505,7 @@ mod tests {
         expected.push(mcp(r#"{"LANTERN_SOCKET":"/tmp/a.sock"}"#));
         expected.extend(strs(&["--permission-prompt-tool", "mcp__lantern__approve", "--append-system-prompt"]));
         expected.push(format!("{}\n\n{}", lantern_prompt(Mode::Auto), worker_prompt("w")));
-        expected.extend(strs(&["--allowedTools", "mcp__lantern__steps_guide,mcp__lantern__review_target"]));
+        expected.extend(["--allowedTools".to_string(), format!("mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}")]);
         assert_eq!(build_args(Mode::Auto, false, None, None, None, &worker), expected);
     }
 
@@ -583,12 +589,12 @@ mod tests {
         let a = build_args(Mode::Steps, false, None, None, None, &helper());
         assert_eq!(value_after(&a, "--permission-mode"), Some("acceptEdits"));
         assert_eq!(value_after(&a, "--permission-prompt-tool"), Some("mcp__lantern__approve"));
-        assert_eq!(value_after(&a, "--allowedTools"), Some("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target"));
+        assert_eq!(value_after(&a, "--allowedTools"), Some(format!("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}").as_str()));
         let prompt = value_after(&a, "--append-system-prompt").unwrap();
         for part in ["# Switch to", "incremental-dev", "# Plan step N", "Learn:", "incremental-pr-review", "# File N of M", "Never post", "# Evidence N", "mcp__lantern__reproduce", "lantern-debug", "[Lantern: this chat switched to", "list what you changed as a numbered list", "# Plan update", "Lock this plan?", "nothing is locked", "Architecture:", "# Overview", "# Part N of M", "Covers:", "Base: <branch>", "gh pr view --json baseRefName", "```architecture block", "\"change\": \"new\"", "don't draw the Overview in Mermaid", "mcp__lantern__review_target", "right after you open a pull request", "no prefix of your own"] {
             assert!(prompt.contains(part), "{part}");
         }
-        assert_eq!(value_after(&build_args(Mode::Ask, false, None, None, None, &helper()), "--allowedTools"), Some("mcp__lantern__steps_guide,mcp__lantern__review_target"));
+        assert_eq!(value_after(&build_args(Mode::Ask, false, None, None, None, &helper()), "--allowedTools"), Some(format!("mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}").as_str()), "no reproduce card outside Step by step");
     }
 
     #[test]
@@ -612,7 +618,7 @@ mod tests {
             let a = build_args(mode, false, None, None, None, &helper());
             assert_eq!(a.iter().filter(|x| *x == "--append-system-prompt").count(), 1, "{name}: one prompt, not several");
             let prompt = value_after(&a, "--append-system-prompt").unwrap();
-            for part in ["running inside Lantern", "Ask:", "Auto:", "Step by step:", "Build, Learn, Review, Debug or Architecture", "<bash-input>", "This chat is in", "Lantern's own tools", "mcp__lantern__steps_guide", "mcp__lantern__review_target"] {
+            for part in ["running inside Lantern", "Ask:", "Auto:", "Step by step:", "Build, Learn, Review, Debug or Architecture", "<bash-input>", "This chat is in", "Lantern's own tools", "mcp__lantern__steps_guide", "mcp__lantern__review_target", "mcp__lantern__network_* tools", "network_summarize"] {
                 assert!(prompt.contains(part), "{name}: {part}");
             }
             assert!(prompt.contains(&format!("This chat is in {name}.")), "{name}");
@@ -638,7 +644,7 @@ mod tests {
         assert_eq!(value_after(&a, "--permission-mode"), Some("auto"));
         assert_eq!(value_after(&a, "--permission-prompt-tool"), Some("mcp__lantern__approve"));
         assert!(a.iter().any(|x| x == "--mcp-config"));
-        assert_eq!(value_after(&a, "--allowedTools"), Some("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target"));
+        assert_eq!(value_after(&a, "--allowedTools"), Some(format!("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,{NETWORK_TOOLS}").as_str()));
         let ask = build_args(Mode::Ask, true, None, None, None, &helper());
         assert_eq!(value_after(&ask, "--permission-mode"), Some("acceptEdits"));
         assert_eq!(value_after(&ask, "--permission-prompt-tool"), Some("mcp__lantern__approve"));

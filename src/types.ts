@@ -349,3 +349,77 @@ export type UpdateState =
   | { kind: "installing"; version: string }
   | { kind: "restarting" }
   | { kind: "failed"; error: string };
+
+/** One request Network Monitor captured, without its headers or bodies (see network.rs). */
+export interface NetworkTx {
+  id: string;
+  revision: number;
+  /** Milliseconds since 1970. */
+  started_at: number;
+  method: string;
+  url: string;
+  host: string;
+  path: string;
+  status: number | null;
+  duration_ms: number | null;
+  state: "pending" | "completed" | "failed";
+  error: string | null;
+  request_content_type: string | null;
+  response_content_type: string | null;
+  request_size: number;
+  response_size: number;
+}
+
+/** A kind of request the user said matters, in a folder: any URL containing `url` (`*` for anything). */
+export interface NetworkWatch {
+  label: string;
+  method: string | null;
+  url: string;
+}
+
+/** Claude's summary of one response (markdown), with enough of the request to show after Network Monitor forgets it. */
+export interface NetworkSummary {
+  id: string;
+  method: string;
+  url: string;
+  status: number | null;
+  started_at: number;
+  text: string;
+  written_at: number;
+}
+
+export interface NetworkItem {
+  tx: NetworkTx;
+  /** The watch it matched; null when only its summary is left. */
+  watch: string | null;
+  summary: NetworkSummary | null;
+  /** Lantern still has its response to show. */
+  has_response: boolean;
+}
+
+export type NetworkLink = { status: "unknown" } | { status: "connected" } | { status: "not_running" } | { status: "error"; message: string };
+
+/** What a folder's Network tab shows. */
+export interface NetworkView {
+  link: NetworkLink;
+  watches: NetworkWatch[];
+  /** Newest first. */
+  items: NetworkItem[];
+}
+
+export interface NetworkBody {
+  encoding: "utf8" | "base64";
+  data: string;
+  size: number;
+  /** Cut short by Lantern (it keeps the first 2 MB). */
+  truncated: boolean;
+}
+
+/** One request with its headers and bodies. */
+export interface NetworkDetail {
+  transaction: NetworkTx;
+  request_headers: { name: string; value: string }[];
+  request_body: NetworkBody;
+  response_headers: { name: string; value: string }[];
+  response_body: NetworkBody;
+}

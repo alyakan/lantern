@@ -112,7 +112,7 @@ function CaseList({ cases, fixed }: { cases: TestCase[]; fixed: Set<string> }) {
   );
 }
 
-function Fold({ title, count, open: initial = false, children }: { title: string; count?: number; open?: boolean; children: ReactNode }) {
+export function Fold({ title, count, open: initial = false, children }: { title: string; count?: number; open?: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(initial);
   useEffect(() => setOpen(initial), [initial]);
   return (

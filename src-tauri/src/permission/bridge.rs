@@ -20,6 +20,9 @@ const REQUEST_WAIT: Duration = Duration::from_secs(10);
 /// Serves the main agent's orchestra tool calls: (tool, arguments) in; whether it worked, and the text the model reads.
 pub type OrchestraHandler = Arc<dyn Fn(String, serde_json::Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = BridgeResponse> + Send>> + Send + Sync>;
 
+/// Serves the network_* tool calls of any chat: (the chat's folder key, tool, arguments) in, as OrchestraHandler answers.
+pub type NetworkHandler = Arc<dyn Fn(Option<String>, String, serde_json::Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = BridgeResponse> + Send>> + Send + Sync>;
+
 /// Where the user wants the main agent's helpers to run, once they have said so for the chat.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -49,6 +52,8 @@ pub struct PermissionBridge {
     folder_rules: Arc<FolderRules>,
     /// Set only on the main agent's chat: any other chat's orchestra calls are refused.
     orchestra: Mutex<Option<(OrchestraHandler, OrchestraAuth)>>,
+    /// Answers the network_* tools (see network.rs); set on every chat.
+    network: Mutex<Option<NetworkHandler>>,
     /// The main agent's answer to "where should this helper run?", kept for the chat (see `AgentChoice`).
     agent_choice: Mutex<Option<AgentChoice>>,
 }
@@ -77,6 +82,7 @@ impl PermissionBridge {
             folder: Mutex::new(None),
             folder_rules,
             orchestra: Mutex::new(None),
+            network: Mutex::new(None),
             agent_choice: Mutex::new(None),
         });
         let b = bridge.clone();
@@ -115,6 +121,18 @@ impl PermissionBridge {
                 Some((_, auth)) if !peer.is_some_and(|pid| auth(pid)) => BridgeResponse { allow: false, message: Some("Not authorized: only the main agent's own helper may call the orchestra tools.".into()), updated_input: None },
                 Some((handle, _)) => handle(req.tool_name, req.input).await,
                 None => BridgeResponse { allow: false, message: Some("This chat is not the main agent of an orchestra.".into()), updated_input: None },
+            };
+            if let Ok(json) = serde_json::to_string(&resp) {
+                let _ = write.write_all(format!("{json}\n").as_bytes()).await;
+            }
+            return;
+        }
+        // A network call reads Network Monitor for this chat's folder: no card either.
+        if req.network {
+            let handler = self.network.lock().unwrap().clone();
+            let resp = match handler {
+                Some(handle) => handle(self.folder(), req.tool_name, req.input).await,
+                None => BridgeResponse { allow: false, message: Some("Lantern's network tools aren't ready in this chat.".into()), updated_input: None },
             };
             if let Ok(json) = serde_json::to_string(&resp) {
                 let _ = write.write_all(format!("{json}\n").as_bytes()).await;
@@ -170,6 +188,11 @@ impl PermissionBridge {
                 sink(UiEvent::PermissionWithdrawn { request_id: id });
             }
         }
+    }
+
+    /// Lets this chat's network_* calls through to `handler`.
+    pub fn set_network(&self, handler: NetworkHandler) {
+        *self.network.lock().unwrap() = Some(handler);
     }
 
     /// Makes this the main agent's bridge: orchestra tool calls from a process `authorize` accepts go to `handler`.
@@ -365,7 +388,25 @@ mod tests {
     }
 
     fn orchestra_call() -> BridgeRequest {
-        BridgeRequest { tool_name: "list_agents".into(), input: json!({}), tool_use_id: None, orchestra: true }
+        BridgeRequest { tool_name: "list_agents".into(), input: json!({}), tool_use_id: None, orchestra: true, network: false }
+    }
+
+    #[tokio::test]
+    async fn a_network_call_is_answered_with_the_chats_folder_and_never_shows_a_card() {
+        let (bridge, mut rx, dir) = setup();
+        bridge.set_folder(dir.path());
+        let seen = Arc::new(Mutex::new(None));
+        let saw = seen.clone();
+        bridge.set_network(Arc::new(move |folder, tool, _| {
+            *saw.lock().unwrap() = Some((folder, tool));
+            Box::pin(async { BridgeResponse { allow: true, message: Some("3 requests".into()), updated_input: None } })
+        }));
+        let socket = bridge.socket_path.display().to_string();
+        let call = BridgeRequest { tool_name: "network_requests".into(), input: json!({}), tool_use_id: None, orchestra: false, network: true };
+        let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &call)).await.unwrap();
+        assert_eq!(reply.message.as_deref(), Some("3 requests"));
+        assert_eq!(seen.lock().unwrap().clone(), Some((Some(rules::folder_key(dir.path())), "network_requests".to_string())));
+        assert!(tokio::time::timeout(Duration::from_millis(100), rx.recv()).await.is_err(), "no card");
     }
 
     /// Accepts the test's own process (which is what connects in these tests) and whatever it started.

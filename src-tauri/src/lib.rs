@@ -8,6 +8,7 @@ pub mod history;
 pub mod mcp_config;
 pub mod menu;
 pub mod navigation;
+pub mod network;
 pub mod orchestra;
 pub mod permission;
 pub mod pr;
@@ -51,6 +52,8 @@ pub struct AppState {
     relocations: Arc<relocate::Relocations>,
     /// PRs looked up for the Changes pane, by repository and number, with when: fetching them takes a moment.
     prs: std::sync::Mutex<std::collections::HashMap<(std::path::PathBuf, u32), (std::time::Instant, pr::PrRange)>>,
+    /// Network Monitor's captured traffic, as the network_* tools and the Network tab read it (see network.rs).
+    network: Arc<network::Monitor>,
 }
 
 /// How long a looked-up PR is used before it's fetched again (it may have new commits).
@@ -280,7 +283,45 @@ fn enroll(state: &AppState, id: &str, slot: &Slot, role: &Role) {
 
 /// The chat's slot, created on first use.
 fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, String> {
-    state.slots.get_or_create(slot, &std::env::temp_dir(), emitter(app), state.folder_rules.clone())
+    let slot = state.slots.get_or_create(slot, &std::env::temp_dir(), emitter(app), state.folder_rules.clone())?;
+    // Every chat's helper offers the network_* tools; they're answered here, for the chat's folder.
+    let monitor = state.network.clone();
+    slot.bridge.set_network(Arc::new(move |folder, tool, input| {
+        let monitor = monitor.clone();
+        Box::pin(async move {
+            let result = tauri::async_runtime::spawn_blocking(move || monitor.call(folder.as_deref(), &tool, &input)).await.unwrap_or_else(|e| Err(e.to_string()));
+            let (allow, text) = match result {
+                Ok(text) => (true, text),
+                Err(text) => (false, text),
+            };
+            permission::protocol::BridgeResponse { allow, message: Some(text), updated_input: None }
+        })
+    }));
+    Ok(slot)
+}
+
+/// The Network tab's rows for a folder, with its watches and whether Network Monitor is running.
+#[tauri::command]
+async fn network_state(state: State<'_, AppState>, folder: String) -> Result<network::View, String> {
+    let monitor = state.network.clone();
+    tauri::async_runtime::spawn_blocking(move || monitor.view(&permission::rules::folder_key(std::path::Path::new(&folder)))).await.map_err(|e| e.to_string())
+}
+
+/// One request's headers and bodies, for the Network tab: the copy Lantern kept, else Network Monitor's.
+#[tauri::command]
+async fn network_response(state: State<'_, AppState>, folder: String, id: String) -> Result<network::Detail, String> {
+    let monitor = state.network.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = permission::rules::folder_key(std::path::Path::new(&folder));
+        monitor.detail(Some(&key), &id).map(|d| (*d).clone()).map_err(|f| f.explain())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn network_unwatch(state: State<'_, AppState>, folder: String, label: String) -> bool {
+    state.network.unwatch(&permission::rules::folder_key(std::path::Path::new(&folder)), &label)
 }
 
 fn helper_config(slot: &Slot, role: Role) -> Result<HelperConfig, String> {
@@ -1432,7 +1473,21 @@ pub fn run() {
             let folder_rules = permission::rules::FolderRules::load(app.path().app_data_dir().ok().map(|d| d.join("permission_rules.json")));
             let relocations = relocate::Relocations::load(app.path().app_data_dir().ok().map(|d| d.join("relocations.json")));
             let orchestra = orchestra::Orchestra::new(Arc::new(AppHost { app: app.handle().clone() }));
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default() });
+            let network = Arc::new(network::Monitor::new(
+                network::Store::load(app.path().app_data_dir().ok().map(|d| d.join("network.json"))),
+                Box::new(network::Api::new(network::Api::default_info().unwrap_or_default())),
+            ));
+            let handle = app.handle().clone();
+            network.set_on_change(move || {
+                let _ = handle.emit("network-changed", ());
+            });
+            // Follows Network Monitor while any folder has a watch (a poll with none reads nothing).
+            let following = network.clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                following.tick();
+            });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network });
             app.manage(updates::Updates::default());
             if updates::checks_enabled() {
                 tauri::async_runtime::spawn(updates::watch(app.handle().clone()));
@@ -1475,6 +1530,9 @@ pub fn run() {
             close_session,
             send_message,
             orchestra_approve_merge,
+            network_state,
+            network_response,
+            network_unwatch,
             orchestra_decline_merge,
             orchestra_discard,
             run_shell,

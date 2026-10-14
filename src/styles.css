@@ -808,6 +808,63 @@ button.background-task-stop:hover:not(:disabled) { background: var(--bg-hover); 
 .test-chip.failed { color: var(--del); }
 .test-chip.failed:hover:not(:disabled) { color: var(--del); }
 
+/* The Network tab: Network Monitor's requests that match the folder's watches, the picked one's summary and JSON below. */
+.network-link { display: inline-flex; align-items: center; gap: 6px; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
+.network-link-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
+.network-link.connected .network-link-dot { background: var(--add); }
+.network-link.error .network-link-dot { background: var(--del); }
+.network-link.not_running { color: var(--muted-text); }
+.network-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.network-watches { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex: none; }
+.network-watch { display: inline-flex; align-items: center; gap: 2px; height: 20px; padding: 0 2px 0 8px; border-radius: 10px; background: var(--bg-active); font-size: calc(11.5px * var(--font-scale)); color: var(--text); }
+button.network-watch-remove { width: 16px; height: 16px; padding: 0; border: none; border-radius: 50%; background: none; color: var(--muted); font-size: calc(12px * var(--font-scale)); line-height: 1; }
+button.network-watch-remove:hover { background: var(--bg-hover); color: var(--text); }
+.network-empty { padding: 16px 14px; }
+.network-list { list-style: none; margin: 0; padding: 4px 0; max-height: 36%; overflow-y: auto; flex: none; border-bottom: 1px solid var(--line); }
+button.network-row { display: flex; align-items: center; gap: 8px; width: 100%; height: 24px; padding: 0 12px; border: none; border-radius: 0; background: none; text-align: left; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
+button.network-row:hover { background: var(--bg-hover); }
+button.network-row.current { background: var(--bg-active); color: var(--text); }
+.network-status { flex: none; min-width: 30px; font-family: var(--mono); font-size: calc(11px * var(--font-scale)); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-2); }
+.network-status.ok { color: var(--add); }
+.network-status.redirect { color: var(--warn); }
+.network-status.error, .network-status.failed { color: var(--del); }
+.network-status.pending { color: var(--muted); font-weight: 400; }
+.network-method { flex: none; font-family: var(--mono); font-size: calc(11px * var(--font-scale)); color: var(--muted-text); }
+.network-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); }
+.network-summarized { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--text-2); }
+.network-time { flex: none; font-size: calc(11px * var(--font-scale)); color: var(--faint); font-variant-numeric: tabular-nums; }
+.network-detail { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px 18px; display: flex; flex-direction: column; gap: 10px; user-select: text; }
+.network-detail-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.network-detail-url { font-family: var(--mono); font-size: calc(12px * var(--font-scale)); color: var(--text); overflow-wrap: anywhere; }
+.network-detail-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: -4px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted); }
+.network-actions { display: flex; gap: 4px; margin-left: -8px; }
+.network-error { font-size: calc(12px * var(--font-scale)); color: var(--del); }
+.network-summary { padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--bg-subtle); font-size: calc(13px * var(--font-scale)); display: flex; flex-direction: column; gap: 6px; }
+.network-summary > :first-child > :first-child { margin-top: 0; }
+.network-outline { display: flex; flex-direction: column; gap: 4px; }
+.network-outline dl, .network-headers { margin: 0; display: grid; grid-template-columns: minmax(80px, max-content) 1fr; column-gap: 12px; row-gap: 2px; font-size: calc(11.5px * var(--font-scale)); }
+.network-outline dl > div, .network-headers > div { display: contents; }
+.network-outline dt, .network-headers dt { font-family: var(--mono); color: var(--muted-text); overflow-wrap: anywhere; }
+.network-outline dd, .network-headers dd { margin: 0; font-family: var(--mono); color: var(--text-2); overflow-wrap: anywhere; }
+.network-outline .odd dd { color: var(--warn); }
+.network-headers { padding-left: 14px; }
+.network-text { max-height: 420px; margin: 0; }
+.json-tree { font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); line-height: 1.6; padding: 6px 8px; border-radius: var(--radius-inner); background: var(--code-bg); overflow-x: auto; }
+.json-row { display: flex; align-items: center; min-height: 18px; white-space: nowrap; }
+button.json-toggle, button.json-more { width: 100%; height: auto; border: none; border-radius: 0; background: none; padding-top: 0; padding-bottom: 0; padding-right: 0; font: inherit; color: inherit; text-align: left; }
+button.json-toggle:hover { background: var(--bg-hover); }
+[aria-expanded="true"] > .json-toggle > .chev { transform: rotate(45deg); margin-top: -3px; }
+button.json-more { color: var(--muted); }
+button.json-more:hover { color: var(--text); }
+.json-toggle > .chev { margin-right: 6px; }
+.json-key { color: var(--text); }
+.json-colon { color: var(--muted); white-space: pre; }
+.json-size { color: var(--muted); }
+.json-peek { margin-left: 8px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; }
+.json-string { color: var(--add); white-space: pre-wrap; overflow-wrap: anywhere; }
+.json-number, .json-bool { color: var(--text); font-weight: 500; }
+.json-null { color: var(--warn); }
+
 /* Step-by-step mode: pages side by side, one on screen, sliding between them. */
 .steps { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* The flavour badge and the auto-approve switch always keep their full width. When the row is tight the page dots give

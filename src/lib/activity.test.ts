@@ -83,6 +83,12 @@ describe("MCP tools", () => {
     expect(describeStep(steps[2], "/p")).toBe("Using sentry: find errors");
     expect(stepLabel(tool("5", "mcp__lantern__reproduce"))).toBe("mcp__lantern__reproduce");
   });
+
+  it("Lantern's network tools read as Network Monitor", () => {
+    const steps = [tool("1", "mcp__lantern__network_requests"), tool("2", "mcp__lantern__network_summarize")];
+    expect(summarize(steps)).toBe("Used Network Monitor 2 times");
+    expect(stepLabel(steps[1])).toBe("Network Monitor · summarize");
+  });
 });
 
 describe("summarize", () => {
