@@ -445,10 +445,19 @@ impl Monitor {
                 list
             }
         };
-        for tx in &list.transactions {
+        // Newest first, and no further than the matches a folder keeps: a broad watch over a full Network Monitor reads
+        // the newest MAX_MATCHES responses, not thousands.
+        let mut txs: Vec<&Tx> = list.transactions.iter().collect();
+        txs.sort_by(|a, b| b.started_at.total_cmp(&a.started_at));
+        let mut taken: HashMap<&str, usize> = HashMap::new();
+        for tx in txs {
             for (folder, ws) in &watches {
                 if let Some(w) = ws.iter().find(|w| w.matches(&tx.method, &tx.url)) {
-                    changed |= self.record(folder, tx, &w.label);
+                    let n = taken.entry(folder.as_str()).or_default();
+                    *n += 1;
+                    if *n <= MAX_MATCHES {
+                        changed |= self.record(folder, tx, &w.label);
+                    }
                 }
             }
         }
@@ -482,10 +491,10 @@ impl Monitor {
         true
     }
 
-    /// Re-reads everything Network Monitor has, so a new watch finds the requests already captured.
+    /// Has the follower read everything Network Monitor has again on its next poll, so a new watch finds the requests
+    /// already captured (and a removed one's requests that another watch matches come back).
     fn rescan(&self) {
         self.live.lock().unwrap().cursor = 0;
-        self.poll();
         self.changed();
     }
 
@@ -525,7 +534,7 @@ impl Monitor {
                 ms.retain(|m| !m.watch.eq_ignore_ascii_case(label));
             }
             drop(live);
-            self.changed();
+            self.rescan();
         }
         found
     }
@@ -557,7 +566,7 @@ impl Monitor {
                 let now = now_ms() as f64;
                 let mut out = format!("{} of {} captured requests match, newest first{}:\n", found.len(), list.transactions.len(), if found.len() > limit { format!(" (showing {limit})") } else { String::new() });
                 for t in found.iter().take(limit) {
-                    out.push_str(&format!("{}  {}  {} {}  {}  ({}{})\n", t.id, ago(now - t.started_at), t.method, status_text(t), t.url, size_text(t.response_size), t.duration_ms.map(|d| format!(", {d:.0} ms")).unwrap_or_default()));
+                    out.push_str(&format!("{}  {}  {} {}  {}  ({}{})\n", t.id, ago(now - t.started_at), t.method, status_text(t), redact_url(&t.url), size_text(t.response_size), t.duration_ms.map(|d| format!(", {d:.0} ms")).unwrap_or_default()));
                 }
                 out.push_str("\nRead one with network_request and its id.");
                 Ok(out)
@@ -579,13 +588,17 @@ impl Monitor {
                 let method = s("method").map(str::to_uppercase);
                 let watch = Watch { label: label.to_string(), method: method.clone(), url: url.to_string() };
                 self.store.watch(folder, watch.clone());
+                // Counted from the list alone: the responses are read by the follower, not while Claude waits.
+                let listed = self.source.list(0);
+                self.set_link(listed.as_ref().map(|_| Link::Connected).unwrap_or_else(Link::from));
                 self.rescan();
-                let link = self.live.lock().unwrap().link.clone();
-                let matched = self.view(folder).items.iter().filter(|i| i.watch.as_deref() == Some(label)).count();
                 let what = format!("{} {}", method.as_deref().unwrap_or("any method"), url);
-                Ok(match link {
-                    Link::Connected => format!("Watching \"{label}\" ({what}). {matched} captured request{} match so far; new ones show up in the Network tab as they happen.", if matched == 1 { "" } else { "s" }),
-                    _ => format!("Watching \"{label}\" ({what}), saved for this folder. Network Monitor isn't running, so nothing has matched yet; requests show up in the Network tab once it is."),
+                Ok(match listed {
+                    Ok(list) => {
+                        let matched = list.transactions.iter().filter(|t| watch.matches(&t.method, &t.url)).count();
+                        format!("Watching \"{label}\" ({what}). {matched} captured request{} match so far; they and new ones show up in the Network tab.", if matched == 1 { "" } else { "s" })
+                    }
+                    Err(_) => format!("Watching \"{label}\" ({what}), saved for this folder. Network Monitor isn't running, so nothing has matched yet; requests show up in the Network tab once it is."),
                 })
             }
             "network_unwatch" => {
@@ -614,7 +627,7 @@ impl Monitor {
                 let tx = self.detail(Some(folder), &id).map(|d| d.transaction.clone()).or_else(|_| self.store.summaries(folder).into_iter().find(|s| s.id == id).map(|s| summary_tx(&s)).ok_or(Fault::NotFound)).map_err(|f| f.explain())?;
                 self.store.summarize(folder, Summary { id: tx.id.clone(), method: tx.method.clone(), url: tx.url.clone(), status: tx.status, started_at: tx.started_at, text: text.to_string(), written_at: now_ms() });
                 self.changed();
-                Ok(format!("Saved. The summary of {} {} shows in the Network tab.", tx.method, tx.url))
+                Ok(format!("Saved. The summary of {} {} shows in the Network tab.", tx.method, redact_url(&tx.url)))
             }
             _ => Err(format!("Lantern has no tool called {tool}.")),
         }
@@ -665,24 +678,73 @@ fn summary_tx(s: &Summary) -> Tx {
 
 // MARK: - What Claude reads
 
-/// Headers whose values are credentials: shown as redacted, so they don't land in the conversation.
-fn secret_header(name: &str) -> bool {
-    let n = name.to_ascii_lowercase();
-    matches!(n.as_str(), "authorization" | "proxy-authorization" | "cookie" | "set-cookie") || ["token", "secret", "api-key", "apikey", "password", "session"].iter().any(|w| n.contains(w))
+/// Names (of headers, query parameters and JSON keys) whose values are credentials: what Claude reads has them redacted,
+/// so they don't land in the conversation. The Network tab, which stays on this Mac, shows them as they are.
+fn secret_name(name: &str) -> bool {
+    let n = name.to_ascii_lowercase().replace('-', "_");
+    matches!(n.as_str(), "authorization" | "proxy_authorization" | "cookie" | "set_cookie" | "sig" | "signature" | "otp" | "pin" | "pwd" | "passwd" | "auth" | "jwt" | "bearer")
+        || ["token", "secret", "api_key", "apikey", "password", "session", "credential", "private_key"].iter().any(|w| n.contains(w))
+}
+
+/// The URL with credential query parameters (`?access_token=…`) redacted.
+fn redact_url(url: &str) -> String {
+    let Some((base, query)) = url.split_once('?') else { return url.to_string() };
+    let (query, fragment) = query.split_once('#').map_or((query, None), |(q, f)| (q, Some(f)));
+    let query: Vec<String> = query.split('&').map(|pair| match pair.split_once('=') {
+        Some((k, v)) if secret_name(k) && !v.is_empty() => format!("{k}=<redacted>"),
+        _ => pair.to_string(),
+    }).collect();
+    format!("{base}?{}{}", query.join("&"), fragment.map(|f| format!("#{f}")).unwrap_or_default())
+}
+
+/// JSON with the values of credential keys (`password`, `access_token`, `client_secret`…) redacted, at any depth.
+fn redact_json(v: &mut Value) {
+    match v {
+        Value::Object(map) => {
+            for (k, child) in map.iter_mut() {
+                match child {
+                    Value::String(s) if secret_name(k) => *child = Value::String(format!("<redacted, {} chars>", s.chars().count())),
+                    Value::Number(_) if secret_name(k) => *child = Value::String("<redacted>".into()),
+                    _ => redact_json(child),
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(redact_json),
+        _ => {}
+    }
+}
+
+/// A body's JSON with its credentials redacted, when it is JSON.
+fn redacted_json(b: &Body) -> Option<Value> {
+    let mut v = serde_json::from_str::<Value>(b.text()?).ok()?;
+    redact_json(&mut v);
+    Some(v)
+}
+
+/// A request body for Claude: JSON or a form with its credentials redacted, other text cut short.
+fn request_body_text(b: &Body, content_type: Option<&str>, max: usize) -> String {
+    if let Some(v) = redacted_json(b) {
+        return json_text(&v, max);
+    }
+    match b.text() {
+        Some(text) if content_type.is_some_and(|c| c.contains("x-www-form-urlencoded")) => body_text(&Body { data: redact_url(&format!("?{text}"))[1..].to_string(), ..b.clone() }, max),
+        _ => body_text(b, max),
+    }
 }
 
 fn headers_text(headers: &[Header]) -> String {
     if headers.is_empty() {
         return "  (none)\n".into();
     }
-    headers.iter().map(|h| if secret_header(&h.name) { format!("  {}: <redacted, {} chars>\n", h.name, h.value.len()) } else { format!("  {}: {}\n", h.name, h.value) }).collect()
+    headers.iter().map(|h| if secret_name(&h.name) { format!("  {}: <redacted, {} chars>\n", h.name, h.value.len()) } else { format!("  {}: {}\n", h.name, h.value) }).collect()
 }
 
-/// One request for Claude: the request line and outcome, headers (credentials redacted), the request body cut short,
-/// and the response body: JSON pretty-printed (or the part at `path`), cut at `max` characters with its outline.
+/// One request for Claude: the request line and outcome, headers, the request body cut short, and the response body:
+/// JSON pretty-printed (or the part at `path`), cut at `max` characters with its outline. Credentials in the URL, headers
+/// and JSON or form bodies are redacted.
 fn describe(d: &Detail, path: Option<&str>, max: usize) -> Result<String, String> {
     let t = &d.transaction;
-    let mut out = format!("{} {} → {}", t.method, t.url, status_text(t));
+    let mut out = format!("{} {} → {}", t.method, redact_url(&t.url), status_text(t));
     if let Some(ms) = t.duration_ms {
         out.push_str(&format!(" in {ms:.0} ms"));
     }
@@ -692,11 +754,11 @@ fn describe(d: &Detail, path: Option<&str>, max: usize) -> Result<String, String
     }
     out.push_str(&format!("id {}\n\nRequest headers:\n{}", t.id, headers_text(&d.request_headers)));
     if d.request_body.size > 0 {
-        out.push_str(&format!("\nRequest body ({}):\n{}\n", size_text(d.request_body.size), body_text(&d.request_body, 2_000)));
+        out.push_str(&format!("\nRequest body ({}):\n{}\n", size_text(d.request_body.size), request_body_text(&d.request_body, t.request_content_type.as_deref(), 2_000)));
     }
     out.push_str(&format!("\nResponse headers:\n{}", headers_text(&d.response_headers)));
     out.push_str(&format!("\nResponse body ({}):\n", size_text(d.response_body.size)));
-    let json = d.response_body.text().and_then(|s| serde_json::from_str::<Value>(s).ok());
+    let json = redacted_json(&d.response_body);
     match (json, path) {
         (Some(v), Some(p)) => {
             let part = at_path(&v, p).ok_or_else(|| format!("The response has nothing at {p:?}. Its outline:\n{}", outline(&v, 4, 3_000)))?;
@@ -967,7 +1029,10 @@ mod tests {
         fake.add(tx(A, 1, "GET", "https://api/v1/checklists", "completed"), r#"{"items":[1,2]}"#);
         assert!(!m.poll());
         assert_eq!(m.view("/p").link, Link::Unknown);
-        m.call(Some("/p"), "network_watch", &json!({"label": "Checklists", "url": "/v1/checklists"})).unwrap();
+        let reply = m.call(Some("/p"), "network_watch", &json!({"label": "Checklists", "url": "/v1/checklists"})).unwrap();
+        assert!(reply.contains("1 captured request match"), "{reply}");
+        assert_eq!(*fake.detail_reads.lock().unwrap(), 0, "the watch itself reads no responses");
+        assert!(m.poll());
         let view = m.view("/p");
         assert_eq!(view.link, Link::Connected);
         assert_eq!(view.items.len(), 1);
@@ -1016,6 +1081,7 @@ mod tests {
         let (fake, m) = monitor();
         fake.add(tx(A, 1, "GET", "https://x/c", "completed"), "{}");
         m.call(Some("/p"), "network_watch", &json!({"label": "c", "url": "/c"})).unwrap();
+        m.poll();
         let reply = m.call(Some("/p"), "network_summarize", &json!({"id": &A[..8], "summary": "**2 items**"})).unwrap();
         assert!(reply.contains("https://x/c"), "{reply}");
         assert_eq!(m.view("/p").items[0].summary.as_ref().unwrap().text, "**2 items**");
@@ -1025,6 +1091,34 @@ mod tests {
         assert_eq!(view.items.len(), 1);
         assert!(!view.items[0].has_response && view.items[0].watch.is_none());
         assert_eq!(view.items[0].tx.url, "https://x/c");
+    }
+
+    #[test]
+    fn a_broad_watch_reads_only_the_newest_responses_a_folder_keeps() {
+        let (fake, m) = monitor();
+        for i in 0..(MAX_MATCHES as u64 + 10) {
+            fake.add(tx(&format!("{i:08}-0000-0000-0000-000000000000"), i + 1, "GET", "https://api/x", "completed"), "{}");
+        }
+        m.store.watch("/p", Watch { label: "all".into(), method: None, url: "api".into() });
+        m.poll();
+        assert_eq!(*fake.detail_reads.lock().unwrap(), MAX_MATCHES);
+        let view = m.view("/p");
+        assert_eq!(view.items.len(), MAX_MATCHES);
+        assert_eq!(view.items[0].tx.revision, MAX_MATCHES as u64 + 10, "the newest are the ones kept");
+    }
+
+    #[test]
+    fn removing_a_watch_keeps_the_requests_another_watch_matches() {
+        let (fake, m) = monitor();
+        fake.add(tx(A, 1, "GET", "https://x/users/1", "completed"), "{}");
+        m.store.watch("/p", Watch { label: "users".into(), method: None, url: "/users".into() });
+        m.store.watch("/p", Watch { label: "one".into(), method: None, url: "/users/1".into() });
+        m.poll();
+        assert_eq!(m.view("/p").items[0].watch.as_deref(), Some("users"));
+        m.unwatch("/p", "users");
+        m.poll();
+        let view = m.view("/p");
+        assert_eq!((view.items.len(), view.items[0].watch.as_deref()), (1, Some("one")));
     }
 
     #[test]
@@ -1053,6 +1147,25 @@ mod tests {
         assert!(part.ends_with("\"Fire safety\""), "{part}");
         let missing = m.call(None, "network_request", &json!({"id": A, "path": "data.nope"})).unwrap_err();
         assert!(missing.contains("items: array of 1"), "{missing}");
+    }
+
+    #[test]
+    fn credentials_in_the_url_and_json_or_form_bodies_are_redacted_for_claude() {
+        let (fake, m) = monitor();
+        let t = Tx { request_content_type: Some("application/x-www-form-urlencoded".into()), request_size: 30, ..tx(A, 1, "POST", "https://x/login?next=/home&access_token=abc123#top", "completed") };
+        fake.add(t.clone(), r#"{"user":{"id":7,"refresh_token":"r-secret"},"items":[{"client_secret":"cs","name":"ok"}],"expires_in":3600}"#);
+        // The fake's request body is empty; give it a form one.
+        let mut d = fake.detail(A).unwrap();
+        d.request_body = Body { encoding: "utf8".into(), data: "username=sam&password=hunter2".into(), size: 29, truncated: false };
+        let out = describe(&d, None, 20_000).unwrap();
+        for secret in ["abc123", "r-secret", "\"cs\"", "hunter2"] {
+            assert!(!out.contains(secret), "{secret} leaked:\n{out}");
+        }
+        for kept in ["next=/home", "access_token=<redacted>", "#top", "username=sam", "password=<redacted>", "\"refresh_token\": \"<redacted, 8 chars>\"", "\"name\": \"ok\"", "\"expires_in\": 3600"] {
+            assert!(out.contains(kept), "{kept} missing:\n{out}");
+        }
+        assert!(!m.call(None, "network_requests", &json!({})).unwrap().contains("abc123"));
+        assert_eq!(redact_url("https://x/a"), "https://x/a");
     }
 
     #[test]

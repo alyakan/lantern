@@ -39,8 +39,9 @@ describe("network", () => {
   it("formats sizes and URLs, and asks Claude about the request by its id", () => {
     expect([formatBytes(0), formatBytes(512), formatBytes(2048), formatBytes(3 * 1024 * 1024)]).toEqual(["empty", "512 B", "2.0 KB", "3.0 MB"]);
     expect(shortUrl("https://api.x/v1/items?page=2")).toBe("api.x/v1/items?page=2");
-    const ask = summarizeRequest({ tx: tx(), watch: "Items", summary: null, has_response: true });
-    expect(ask).toContain("network request abc (GET https://api.x/v1/items?page=2)");
+    const ask = summarizeRequest({ tx: tx({ url: "https://api.x/v1/items?token=s3cret" }), watch: "Items", summary: null, has_response: true });
+    expect(ask).toContain("network request abc (GET https://api.x/v1/items)");
+    expect(ask).not.toContain("s3cret");
     expect(ask).toContain("network_summarize");
   });
 });

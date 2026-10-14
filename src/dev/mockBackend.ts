@@ -930,7 +930,9 @@ const mockItems = (): NetworkItem[] =>
             text: "**Page 1 of the checklists: 3 of 41**, cursor-paginated (`meta.next_cursor` is set).\n\n| Checklist | Status | Items |\n|---|---|---|\n| Fire safety walk | published | 24 |\n| Forklift pre-use | draft | 11 |\n| Kitchen hygiene | published | 32 |\n\n**Worth a look**\n- *Kitchen hygiene* has `owner: null`, the only one with no owner.\n- *Forklift pre-use* has never been audited (`last_audit: null`) and no tags." } },
         { tx: mockTx("0c9d8e7f-1a2b-4c3d-8e9f-0a1b2c3d4e5f", 12_000, "GET", "https://api.acme.dev/v1/checklists/4813", 404, 96), watch: "Checklists", has_response: true, summary: null },
       ];
-const mockNetwork = (): NetworkView => ({ link: { status: "connected" }, watches: mockWatches, items: mockItems() });
+// Only in the browser previews (?mock=ready, ?mock=demo): elsewhere, as in the app tests, no folder has a watch.
+const networkPreview = () => ["ready", "demo"].includes(new URLSearchParams(location.search).get("mock") ?? "");
+const mockNetwork = (): NetworkView => (networkPreview() ? { link: { status: "connected" }, watches: mockWatches, items: mockItems() } : { link: { status: "unknown" }, watches: [], items: [] });
 const mockResponse = (id: string): NetworkDetail => {
   const item = mockItems().find((i) => i.tx.id === id)!;
   const body = item.tx.status === 404 ? JSON.stringify({ error: { code: "not_found", message: "Checklist 4813 is a draft and can't be read by this role." } }) : JSON.stringify(MOCK_CHECKLISTS);

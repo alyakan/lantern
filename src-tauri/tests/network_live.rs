@@ -43,6 +43,8 @@ async fn claude_watches_reads_and_summarizes_a_captured_response() {
         .unwrap();
     eprintln!("claude said: {}", String::from_utf8_lossy(&out.stdout).trim());
 
+    // What the app's follower does every 2 seconds: read the responses of what the watch matched.
+    monitor.poll();
     let view = monitor.view(&folder_key(dir.path()));
     eprintln!("watches: {:?}", view.watches);
     let summarized: Vec<_> = view.items.iter().filter_map(|i| i.summary.as_ref()).collect();
