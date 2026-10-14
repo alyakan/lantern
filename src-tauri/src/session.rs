@@ -65,17 +65,23 @@ fn deliver(replies: &Replies, line: &str) -> bool {
     true
 }
 
+/// The claude command for `cfg`: program, arguments, environment and folder, before it is started.
+fn command(cfg: &SessionConfig) -> Command {
+    let mut cmd = Command::new(&cfg.claude);
+    cmd.args(build_args(cfg.mode, cfg.auto_approve, cfg.resume.as_deref(), cfg.model.as_deref(), cfg.effort.as_deref(), &cfg.helper)).current_dir(&cfg.folder);
+    cmd.args(harness_args(cfg.advisor.as_deref()));
+    if let Some(m) = &cfg.subagent_model {
+        cmd.env("CLAUDE_CODE_SUBAGENT_MODEL", m);
+    }
+    if let Some(p) = &cfg.path_env {
+        cmd.env("PATH", p);
+    }
+    cmd
+}
+
 impl Session {
     pub fn spawn(cfg: &SessionConfig, sink: Sink, on_edit: EditHook) -> Result<Session, String> {
-        let mut cmd = Command::new(&cfg.claude);
-        cmd.args(build_args(cfg.mode, cfg.auto_approve, cfg.resume.as_deref(), cfg.model.as_deref(), cfg.effort.as_deref(), &cfg.helper)).current_dir(&cfg.folder);
-        cmd.args(harness_args(cfg.advisor.as_deref()));
-        if let Some(m) = &cfg.subagent_model {
-            cmd.env("CLAUDE_CODE_SUBAGENT_MODEL", m);
-        }
-        if let Some(p) = &cfg.path_env {
-            cmd.env("PATH", p);
-        }
+        let mut cmd = command(cfg);
         // Its own session, so its own group (the pid is the group id): stopping claude signals the group, and the
         // background tasks it started go with it. A session rather than just a group, so no terminal Lantern was started
         // from is shared: a child that touches it from a background group is stopped there, where here it just fails.
@@ -406,6 +412,32 @@ mod tests {
         })
         .await
         .expect("timed out waiting for event")
+    }
+
+    /// What claude is started as, with nothing run: its path, arguments, environment (only what Lantern sets) and folder.
+    #[test]
+    fn claude_is_started_with_the_configured_arguments_environment_and_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config("/bin/claude".into(), dir.path(), Some("sess-1"));
+        cfg.model = Some("opus".into());
+        cfg.effort = Some("high".into());
+        cfg.advisor = Some("fable".into());
+        cfg.subagent_model = Some("haiku".into());
+        cfg.path_env = Some("/custom/bin:/usr/bin".into());
+        let cmd = command(&cfg);
+        let cmd = cmd.as_std();
+        assert_eq!(cmd.get_program(), "/bin/claude");
+        let mut expected = build_args(cfg.mode, cfg.auto_approve, Some("sess-1"), Some("opus"), Some("high"), &cfg.helper);
+        expected.extend(["--advisor".to_string(), "fable".to_string()]);
+        assert_eq!(cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>(), expected);
+        let env: Vec<(String, Option<String>)> = cmd.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        assert_eq!(env, vec![("CLAUDE_CODE_SUBAGENT_MODEL".to_string(), Some("haiku".to_string())), ("PATH".to_string(), Some("/custom/bin:/usr/bin".to_string()))]);
+        assert_eq!(cmd.get_current_dir(), Some(dir.path()));
+
+        // Nothing chosen: no environment of its own, no advisor.
+        let bare = command(&config("/bin/claude".into(), dir.path(), None));
+        assert_eq!(bare.as_std().get_envs().count(), 0);
+        assert!(!bare.as_std().get_args().any(|a| a == "--advisor" || a == "--resume"));
     }
 
     #[tokio::test]
