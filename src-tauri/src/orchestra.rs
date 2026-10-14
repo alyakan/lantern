@@ -950,7 +950,9 @@ mod tests {
             Box::pin(async move { all })
         }
         fn worker_mode(&self, _: &str, provider: ProviderId) -> crate::args::Mode {
-            crate::args::worker_mode(self.main_mode.lock().unwrap().unwrap_or(crate::args::Mode::Auto), false, &provider.provider().capabilities())
+            // As the app does it: what the main agent allows, then what the worker's provider can run.
+            let ceiling = crate::args::worker_mode(self.main_mode.lock().unwrap().unwrap_or(crate::args::Mode::Auto), false, &self.main_provider.lock().unwrap().provider().capabilities());
+            crate::args::capped_mode(ceiling, false, ceiling, &provider.provider().capabilities()).0
         }
         fn worktree_root(&self) -> PathBuf {
             self.worktrees.lock().unwrap().clone()
