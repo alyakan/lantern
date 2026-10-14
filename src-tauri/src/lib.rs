@@ -133,14 +133,14 @@ impl orchestra::Host for AppHost {
             cfg.helper = helper_config(&s, Role::Worker { name: req.name })?;
             cfg.path_env = login_path(&state).await;
             launch(&self.app, &req.slot, &s, cfg, true).await?;
-            send_text(&s, &req.brief).await.map(|_| ())
+            send_text(&self.app, &s, &req.brief).await.map(|_| ())
         })
     }
 
     fn send_to<'a>(&'a self, slot: &'a str, text: String) -> orchestra::Fut<'a, Result<(), String>> {
         Box::pin(async move {
             let s = self.app.state::<AppState>().slots.get(slot)?;
-            send_text(&s, &text).await.map(|_| ())
+            send_text(&self.app, &s, &text).await.map(|_| ())
         })
     }
 
@@ -362,14 +362,14 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
 async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
     let s = state.slots.get(&slot)?;
-    let turn = send_text(&s, &text).await?;
+    let turn = send_text(&app, &s, &text).await?;
     // Said to a worker by the user themselves: its main agent hears of it with its next wake-up.
     state.orchestra.note_user_message(&slot, &text);
     Ok(turn)
 }
 
 /// Sends `text` into the chat's claude as a new message and returns the turn's number.
-async fn send_text(s: &Slot, text: &str) -> Result<usize, String> {
+async fn send_text(app: &AppHandle, s: &Slot, text: &str) -> Result<usize, String> {
     let mut session = s.session.lock().await;
     let claude = session.as_mut().ok_or("No Claude session is running")?;
     // What "Last turn" in the Changes pane compares against. It's taken before the send, so Claude's edits come after it.
@@ -382,8 +382,8 @@ async fn send_text(s: &Slot, text: &str) -> Result<usize, String> {
     // The folder's history is first written with its first message: Open Recent lists it from then on.
     let folder = s.config.lock().unwrap().as_ref().map(|c| c.folder.display().to_string());
     drop(session);
-    if folder.is_some_and(|f| !menu::lists(&app, &f)) {
-        menu::refresh_recent(&app).await;
+    if folder.is_some_and(|f| !menu::lists(app, &f)) {
+        menu::refresh_recent(app).await;
     }
     Ok(turn)
 }

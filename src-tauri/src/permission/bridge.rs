@@ -254,7 +254,7 @@ mod tests {
 
     fn ask_tool_in_background(bridge: &PermissionBridge, tool: &str, input: Value) -> tokio::task::JoinHandle<BridgeResponse> {
         let socket = bridge.socket_path.display().to_string();
-        let req = BridgeRequest { tool_name: tool.into(), input, tool_use_id: None };
+        let req = BridgeRequest::permission(tool.into(), input, None);
         tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &req))
     }
 

@@ -851,7 +851,7 @@ mod tests {
     }
 
     fn done(text: &str) -> UiEvent {
-        UiEvent::TurnDone { is_error: false, result: Some(text.into()), cost_usd: None, duration_ms: None, auth_hint: false, denied: 0, context_window: None }
+        UiEvent::TurnDone { is_error: false, result: Some(text.into()), cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None }
     }
 
     #[tokio::test]
@@ -965,11 +965,11 @@ mod tests {
         let (host, o, _r, _w) = setup();
         spawn(&o, "login").await;
         o.observe("w1", &UiEvent::AssistantText { parent: None, block_id: "b".into(), text: "Done, see the branch".into() });
-        o.observe("w1", &UiEvent::TurnDone { is_error: false, result: None, cost_usd: None, duration_ms: None, auth_hint: false, denied: 0, context_window: None });
+        o.observe("w1", &UiEvent::TurnDone { is_error: false, result: None, cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None });
         assert!(host.wakes()[0].ends_with(": \"Done, see the branch\"]"), "{:?}", host.wakes());
         // A subagent's text is not the worker's.
         o.observe("w1", &UiEvent::AssistantText { parent: Some("toolu_1".into()), block_id: "c".into(), text: "inner".into() });
-        o.observe("w1", &UiEvent::TurnDone { is_error: false, result: None, cost_usd: None, duration_ms: None, auth_hint: false, denied: 0, context_window: None });
+        o.observe("w1", &UiEvent::TurnDone { is_error: false, result: None, cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None });
         assert!(host.wakes()[1].ends_with(": \"Done, see the branch\"]"), "{:?}", host.wakes());
     }
 
@@ -1337,7 +1337,7 @@ mod tests {
         let (host, o, _repo, _wt) = setup();
         let dir = tempfile::tempdir().unwrap();
         let sock = dir.path().join("b.sock");
-        let bridge = PermissionBridge::start(sock.clone(), Arc::new(|_| {})).unwrap();
+        let bridge = PermissionBridge::start(sock.clone(), Arc::new(|_| {}), Arc::new(crate::permission::rules::FolderRules::load(None))).unwrap();
         // The helper runs in this process here, so this process stands in for the main agent's claude.
         bridge.set_orchestra(o.handler("s1".into()), Arc::new(|pid| crate::process::descends_from(pid, std::process::id())));
         let lines = [
@@ -1373,7 +1373,7 @@ mod tests {
             UiEvent::ToolFinished { parent: None, tool_use_id: "t".into(), is_error: true, output: "error[E0432]: unresolved import".into() },
             UiEvent::EditApplied { parent: None, tool_use_id: "e".into(), path: "/w/a.rs".into(), created: false, hunks: vec![], original: None },
             UiEvent::EditApplied { parent: Some("sub".into()), tool_use_id: "e2".into(), path: "/w/inner.rs".into(), created: true, hunks: vec![], original: None },
-            UiEvent::TurnDone { is_error: true, result: None, cost_usd: None, duration_ms: None, auth_hint: false, denied: 0, context_window: None },
+            UiEvent::TurnDone { is_error: true, result: None, cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None },
         ];
         assert_eq!(condense(&events), vec!["tool Bash: cargo test", "tool error: error[E0432]: unresolved import", "edited /w/a.rs", "— turn ended with an error —"]);
     }
