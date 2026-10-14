@@ -892,7 +892,16 @@ export function installMockBackend() {
         case "session_events":
           return REPLAY;
         case "open_session":
-          return REPLAY;
+          return { events: REPLAY, moved_from: null, read_only: null };
+        case "relocations_list":
+          return [];
+        case "moved_folder_candidates":
+          // A folder from before it moved, and the one place it's at now (the same name, and the only such folder).
+          return [{ old: "/Users/you/Documents/Github/web-dashboard", suggested: "/Users/you/projects/web-dashboard" }];
+        case "relocation_preview":
+          return { sessions: 12, bytes: 4_300_000, project_entry: true, memory_files: 3, rules: 2 };
+        case "relocate_folder":
+          return { project_keys: ["allowedTools", "mcpServers"], memory_files: 3, rules: 2 };
         case "title_session":
           // Like the Haiku call: a moment later, a few words.
           return new Promise((r) => setTimeout(() => r(/review/i.test(String(a.prompt)) ? "Review retries PR" : /^Chat \w+/.test(String(a.prompt)) ? String(a.prompt).split(":")[0] : "Retry transient fetch errors"), 600));

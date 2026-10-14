@@ -405,10 +405,15 @@ export default function App() {
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
     api
       .openSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder) }, sessionId)
-      .then((events) => {
+      .then((opened) => {
         if (startGen.current[slot] !== gen) return;
+        // Not resumed (its copy into this folder failed): the transcript is shown, and Retry copies it again.
+        if (opened.read_only) {
+          to(slot)({ type: "history_loaded", sessionId, events: opened.events });
+          return to(slot)({ type: "failed", text: opened.read_only });
+        }
         delete relaunch.current[slot];
-        to(slot)({ type: "history_loaded", sessionId, events });
+        to(slot)({ type: "history_loaded", sessionId, events: opened.events });
         to(slot)({ type: "session_ready" });
       })
       .catch((e) => startGen.current[slot] === gen && to(slot)({ type: "failed", text: errText(e) }));
