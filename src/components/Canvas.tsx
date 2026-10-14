@@ -25,6 +25,7 @@ import type { CloseCheck } from "../types";
 import { AgentMenu, type AgentMenuItem } from "./AgentMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HiddenAgents } from "./HiddenAgents";
+import { NewAgent } from "./NewAgent";
 import { NodeBody } from "./NodeBody";
 import { BranchIcon, ChevronIcon, OpenOutIcon } from "./icons";
 
@@ -251,7 +252,7 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
   );
 }
 
-function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onShow }: { zoom: number; attention: number; nodes: OrchestraNode[]; onZoom: (factor: number) => void; onFit: () => void; onNext: () => void; onGoTo: (slot: string) => void; onShow: (slot: string) => void }) {
+function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onShow, main }: { zoom: number; attention: number; nodes: OrchestraNode[]; onZoom: (factor: number) => void; onFit: () => void; onNext: () => void; onGoTo: (slot: string) => void; onShow: (slot: string) => void; main: string | undefined }) {
   return (
     <>
       {attention > 0 && (
@@ -275,6 +276,7 @@ function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onSho
         </button>
         <Team nodes={nodes} onGoTo={onGoTo} />
         <HiddenAgents nodes={nodes.filter((n) => n.hidden)} onShow={onShow} />
+        {main && <NewAgent main={main} />}
       </div>
     </>
   );
@@ -645,7 +647,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
           />
         ))}
       </div>
-      <Controls zoom={zoomPct} attention={attention.length} nodes={nodes} onZoom={zoomBy} onFit={() => { layout.touched = false; fit(true); }} onNext={next} onGoTo={goTo} onShow={actions.show} />
+      <Controls zoom={zoomPct} attention={attention.length} nodes={nodes} onZoom={zoomBy} onFit={() => { layout.touched = false; fit(true); }} onNext={next} onGoTo={goTo} onShow={actions.show} main={nodes.find((n) => n.role === "main")?.slot} />
       {problem && (
         <div className="canvas-problem canvas-overlay" role="alert">
           <span>{problem}</span>

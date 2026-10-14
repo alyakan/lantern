@@ -23,7 +23,7 @@ import { agentGraph } from "./lib/agentGraph";
 import { BUILT_IN, CUSTOM_HARNESS, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
-import type { McpServer, MovedFolder, NewRule, SkillEntry, UpdateInfo } from "./types";
+import type { McpServer, MovedFolder, NewRule, NewWorker, SkillEntry, UpdateInfo } from "./types";
 import { LAST_FOLDER, OPEN_CHATS, migrateFolderState, withMovedNote, type Migrated } from "./lib/relocate";
 import { BringOldSessionsDialog } from "./components/BringOldSessionsDialog";
 import { stepFile, usePersistentState } from "./lib/layout";
@@ -988,6 +988,8 @@ export default function App() {
     closeCheck: (worker: string) => api.closeWorkerCheck(worker).catch((e) => Promise.reject(errText(e))),
     // The backend has stopped it and told the main agent by the time this resolves; the chat goes from the app now.
     closeWorker: (worker: string, force: boolean) => api.closeWorker(worker, force).then(() => forget(worker, true), (e) => Promise.reject(errText(e))),
+    // The card comes from the backend's agent_spawned, like any worker's.
+    spawn: (main: string, worker: NewWorker) => api.spawnWorker(main, worker).then(() => {}, (e) => Promise.reject(errText(e))),
     // Hiding the agent whose chat is on screen moves the rest of the app to its main agent, so it isn't about a card nobody sees.
     hide: (worker: string) => {
       const parent = chats.agents[worker]?.parent;
@@ -1019,6 +1021,7 @@ export default function App() {
       approveMerge: (worker) => doingRef.current.approveMerge(worker),
       declineMerge: (worker) => doingRef.current.declineMerge(worker),
       removeWorktree: (worker) => doingRef.current.removeWorktree(worker),
+      spawn: (main, worker) => doingRef.current.spawn(main, worker),
       closeCheck: (worker) => doingRef.current.closeCheck(worker),
       closeWorker: (worker, force) => doingRef.current.closeWorker(worker, force),
       hide: (worker) => doingRef.current.hide(worker),

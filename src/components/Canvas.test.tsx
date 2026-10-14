@@ -29,7 +29,7 @@ function team(workers = 2): Chats {
   return c;
 }
 
-const actions = (over: Partial<NodeActions> = {}): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), closeCheck: vi.fn(() => Promise.resolve({ worktree: true, branch: null, uncommitted: 0, unmerged_commits: 0 })), closeWorker: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(), ...over });
+const actions = (over: Partial<NodeActions> = {}): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), spawn: vi.fn(() => Promise.resolve()), closeCheck: vi.fn(() => Promise.resolve({ worktree: true, branch: null, uncommitted: 0, unmerged_commits: 0 })), closeWorker: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(), ...over });
 
 function setup(chats: Chats, extra: { attention?: string[]; layout?: ReturnType<typeof newLayout>; actions?: Partial<NodeActions> } = {}) {
   const store = createChatStore();
@@ -710,5 +710,24 @@ describe("cleaning up and closing an agent", () => {
     expect(document.activeElement).toBe(items[0]);
     fireEvent.keyDown(items[0], { key: "End" });
     expect(document.activeElement).toBe(items[1]);
+  });
+});
+
+describe("starting an agent from the canvas", () => {
+  it("offers + Agent for the main agent's team, and starts the worker under that main agent", async () => {
+    const { acts } = setup(team(1));
+    fireEvent.click(screen.getByRole("button", { name: "+ Agent" }));
+    fireEvent.change(within(screen.getByRole("dialog", { name: "New agent" })).getByLabelText("Task"), { target: { value: "Write the docs" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start agent" }));
+    expect(acts.spawn).toHaveBeenCalledWith("s1", { task: "Write the docs", name: null, isolation: "worktree", model: null });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "New agent" })).toBeNull());
+  });
+
+  it("is not offered where there is no main agent to start it for", () => {
+    const chats = team(1);
+    chats.slots.s1 = { ...chats.slots.s1, orchestrator: false };
+    setup(chats);
+    expect(screen.getAllByRole("region")).toHaveLength(1); // an orphaned worker
+    expect(screen.queryByRole("button", { name: "+ Agent" })).toBeNull();
   });
 });

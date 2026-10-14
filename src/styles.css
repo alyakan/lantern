@@ -1602,3 +1602,15 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .confirm-actions button:disabled { opacity: 0.55; }
 .canvas-problem { position: absolute; left: 50%; bottom: 56px; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 10px; max-width: min(560px, calc(100% - 32px)); padding: 8px 12px; border: 1px solid var(--del); border-radius: 10px; background: var(--field); box-shadow: var(--shadow); font-size: calc(12.5px * var(--font-scale)); line-height: 1.4; cursor: default; }
 .canvas-problem button { flex: none; height: 24px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
+.new-agent { position: absolute; right: 0; bottom: calc(100% + 12px); z-index: 5; width: 340px; display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--field); box-shadow: var(--shadow); font-size: calc(12.5px * var(--font-scale)); cursor: default; }
+.new-agent label, .new-agent legend { display: flex; flex-direction: column; gap: 4px; padding: 0; font-weight: 600; color: var(--text); }
+.new-agent label:has(> input[type="radio"]) { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }
+.new-agent fieldset { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; border: none; }
+.new-agent textarea, .new-agent input:not([type="radio"]), .new-agent select { width: 100%; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--bg); color: var(--text); font: 400 calc(12.5px * var(--font-scale)) var(--ui); }
+.new-agent textarea { resize: vertical; min-height: 64px; }
+.new-agent textarea[aria-invalid="true"] { border-color: var(--del); }
+.new-agent-optional { font-weight: 400; color: var(--muted-text); }
+.new-agent-hint { margin: 0; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); line-height: 1.4; }
+.new-agent-problem { margin: 0; color: var(--del); line-height: 1.4; }
+.new-agent-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.new-agent-actions button { height: 28px; padding: 0 13px; border-radius: 999px; font-size: calc(12.5px * var(--font-scale)); }
