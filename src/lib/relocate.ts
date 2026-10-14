@@ -25,6 +25,8 @@ export const NOT_FOLDER_KEYED = [
   "settings.defaultModel",
   "settings.modelIds",
   "settings.contextWindows",
+  // The folders whose "moved?" notice was dismissed: a list of old paths, not any one folder's state.
+  "relocate.dismissed",
   "settings.harnessPresets",
   "settings.appearance",
   "settings.textSize",

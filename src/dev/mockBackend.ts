@@ -899,7 +899,7 @@ export function installMockBackend() {
           // A folder from before it moved, and the one place it's at now (the same name, and the only such folder).
           return [{ old: "/Users/you/Documents/Github/web-dashboard", suggested: "/Users/you/projects/web-dashboard" }];
         case "relocation_preview":
-          return { sessions: 12, bytes: 4_300_000, project_entry: true, memory_files: 3, rules: 2 };
+          return { sessions: 12, bytes: 4_300_000, project_entry: true, memory_files: 3, rules: 2, linked: 0 };
         case "relocate_folder":
           return { project_keys: ["allowedTools", "mcpServers"], memory_files: 3, rules: 2 };
         case "title_session":

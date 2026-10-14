@@ -100,6 +100,8 @@ export interface RelocationPreview {
   project_entry: boolean;
   memory_files: number;
   rules: number;
+  /** Links among the transcripts and memory files: skipped, not copied. */
+  linked: number;
 }
 
 /** What to carry over with a move, besides its sessions and Lantern's own rules (always carried). */
