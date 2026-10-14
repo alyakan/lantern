@@ -35,27 +35,44 @@ describe("parseArchitecturePart", () => {
   });
 });
 
-describe("architectureMap", () => {
-  const chat = [u("u1", "map it"), a("a1", OVERVIEW), u("u2", "Next"), a("a2", PART), u("u3", "Next"), a("a3", "# Part 2 of 2 — Auth\n\nCovers: authSvc, tokenStore\n\n### Role\nx")];
+const NATIVE = '# Overview — auth behind a gateway\n\n```architecture\n{"nodes": [{"id": "gw", "label": "Gateway", "change": "new"}, {"id": "authSvc", "label": "Auth service"}, {"id": "tokenStore", "label": "Tokens"}], "edges": [{"from": "gw", "to": "authSvc"}]}\n```';
 
-  it("is the latest Overview's diagram, with the page each node opens", () => {
+describe("architectureMap", () => {
+  const parts = [u("u2", "Next"), a("a2", PART), u("u3", "Next"), a("a3", "# Part 2 of 2 — Auth\n\nCovers: authSvc, tokenStore\n\n### Role\nx")];
+  const chat = [u("u1", "map it"), a("a1", NATIVE), ...parts];
+
+  it("is the latest Overview's boxes and arrows, with the page each box opens", () => {
     const pages = pagesOf(chat);
     const map = architectureMap(pages)!;
-    expect(map.source).toContain("flowchart LR");
-    expect(map.source).toContain("gw[Gateway]:::new");
+    expect(map.kind).toBe("native");
+    if (map.kind !== "native") return;
+    expect(map.spec.nodes.map((n) => n.id)).toEqual(["gw", "authSvc", "tokenStore"]);
+    expect(map.title).toBe("auth behind a gateway");
     expect(map.page).toBe(pages[0].key);
     expect(map.nodes).toEqual({ gw: pages[1].key, authSvc: pages[2].key, tokenStore: pages[2].key });
     expect(coversOf(pages[2])).toEqual(["authSvc", "tokenStore"]);
     expect(coversOf(pages[0])).toEqual([]);
   });
 
-  it("is null until an Overview has a diagram", () => {
+  it("shows an Overview written in Mermaid (before Lantern drew maps) as that diagram", () => {
+    const map = architectureMap(pagesOf([u("u1", "map it"), a("a1", OVERVIEW), ...parts]))!;
+    expect(map.kind).toBe("mermaid");
+    if (map.kind === "mermaid") expect(map.source).toContain("gw[Gateway]:::new");
+  });
+
+  it("says why an Overview's block can't be drawn", () => {
+    const map = architectureMap(pagesOf([u("u1", "map it"), a("a1", "# Overview — x\n\n```architecture\n{nodes\n```")]))!;
+    expect(map).toMatchObject({ kind: "broken", error: "It isn't valid JSON.", text: "{nodes" });
+  });
+
+  it("is null until an Overview has a map", () => {
     expect(architectureMap(pagesOf([u("u1", "map it"), a("a1", "# Frame — x")]))).toBeNull();
     expect(architectureMap(pagesOf([u("u1", "map it"), a("a1", "# Overview — x\n\nNo diagram yet.")]))).toBeNull();
   });
 
   it("follows a rewritten Overview", () => {
-    const rewritten = [...chat, u("u4", "add a cache to the map"), a("a4", OVERVIEW.replace("authSvc --> tokenStore", "authSvc --> cache --> tokenStore"))];
-    expect(architectureMap(pagesOf(rewritten))!.source).toContain("cache");
+    const rewritten = [...chat, u("u4", "add a cache to the map"), a("a4", NATIVE.replace('{"id": "tokenStore", "label": "Tokens"}', '{"id": "cache", "label": "Cache", "change": "new"}'))];
+    const map = architectureMap(pagesOf(rewritten))!;
+    expect(map.kind === "native" && map.spec.nodes.map((n) => n.id)).toEqual(["gw", "authSvc", "cache"]);
   });
 });

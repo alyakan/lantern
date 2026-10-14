@@ -1,34 +1,35 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { initialState, type ChatItem, type State } from "../store";
 import { StepsView } from "./StepsView";
+import { ArchitectureTab } from "./ArchitectureTab";
+import { Md } from "./Md";
+import { ArchitecturePane } from "../lib/architecturePane";
+import { architectureMap } from "../lib/architecture";
+import { pagesOf } from "../lib/steps";
 
 vi.mock("../api", () => ({ api: { userName: () => Promise.resolve("Ada Lovelace") } }));
-// Mermaid needs a real browser's layout; the map's own behaviour is what's tested, on a diagram with two nodes.
+// Mermaid needs a real browser's layout: older maps and other diagrams are tested on a stand-in drawing.
 vi.mock("../lib/mermaid", async (original) => ({
   ...(await original<typeof import("../lib/mermaid")>()),
-  renderDiagram: vi.fn(() => Promise.resolve('<svg><g class="node" id="lantern-diagram-1-flowchart-gw-0"><rect/></g><g class="node" id="lantern-diagram-1-flowchart-authSvc-1"><rect/></g></svg>')),
+  renderDiagram: vi.fn(() => Promise.resolve('<svg viewBox="0 0 300 120"><g class="node" id="lantern-diagram-1-flowchart-gw-0"><rect/></g><g class="node" id="lantern-diagram-1-flowchart-authSvc-1"><rect/></g></svg>')),
 }));
 
 const turn = (n: number): ChatItem => ({ type: "turn", id: `t${n}`, isError: false, stopped: false, result: null, durationMs: 1, denied: 0 });
-const OVERVIEW = "# Overview — auth behind a gateway\n\n```mermaid\nflowchart LR\n  gw[Gateway]:::new --> authSvc[Auth service]\n```";
+const SPEC = { nodes: [{ id: "gw", label: "Gateway", change: "new", note: "Terminates TLS and forwards requests" }, { id: "authSvc", label: "Auth service", note: "Checks every token" }, { id: "logs", label: "Logs" }], edges: [{ from: "gw", to: "authSvc", label: "forwards" }, { from: "authSvc", to: "logs" }] };
+const OVERVIEW = `# Overview — auth behind a gateway\n\nThe gateway is new.\n\n\`\`\`architecture\n${JSON.stringify(SPEC)}\n\`\`\``;
 const PART1 = "# Part 1 of 2 — Gateway\n\nCovers: gw\n\n### Role\nTerminates TLS.\n\n### Concerns\n⚠ (should-fix): no timeout, so a slow auth service ties up every connection.";
 const PART2 = "# Part 2 of 2 — Auth service\n\nCovers: authSvc\n\n### Role\nChecks tokens.\n\n### Concerns\nNone.";
 const SUMMARY = "# Summary — 2 parts, 1 concern agreed";
 
 /** The chat up to and including the page at `pages` (1 = Frame, 2 = Overview, 3 = Part 1, …). */
-function chat(pages: number): ChatItem[] {
-  const texts = ["# Frame — map PR 12", OVERVIEW, PART1, PART2, SUMMARY].slice(0, pages);
+function chat(pages: number, overview = OVERVIEW): ChatItem[] {
+  const texts = ["# Frame — map PR 12", overview, PART1, PART2, SUMMARY].slice(0, pages);
   return texts.flatMap((text, i): ChatItem[] => [{ type: "user", id: `u${i}`, text: i === 0 ? "Map the architecture of PR 12" : "Next", turn: i }, { type: "assistant", id: `a${i}`, text }, turn(i)]);
 }
 const state = (pages: number): State => ({ ...initialState, folder: "/p", status: "idle", mode: "steps", items: chat(pages) });
 const handlers = () => ({ onDecide: () => {}, onOpenFile: () => {}, onNext: vi.fn(), onSend: vi.fn(), flavour: "architecture" as const, onPickFlavour: vi.fn(), onPage: vi.fn() });
 const current = () => document.querySelector('.step-page[aria-hidden="false"]')!;
-const map = () => screen.queryByRole("complementary", { name: "Architecture map" });
-// The Overview's own page draws the same diagram, so the map's nodes are looked up inside the map.
-const node = (id: string) => map()?.querySelector(`[id*="flowchart-${id}-"]`) ?? null;
-
-beforeEach(() => localStorage.clear());
 
 describe("Architecture in Step by step", () => {
   it("lays a part out in its sections, with the concerns to agree with or reject, and sends the verdicts with Next", () => {
@@ -54,57 +55,26 @@ describe("Architecture in Step by step", () => {
     expect(labels).toEqual(["Overview →", "First part →", "Next part →", "Summary →", "Done"]);
   });
 
-  it("pins the map beside the pages from the Overview on, lighting the part you're on", async () => {
-    render(<StepsView state={state(4)} {...handlers()} />);
-    expect(map()).toBeInTheDocument();
-    // The diagram is drawn a moment after the page (and its classes a moment after that), so each look waits for it.
-    await waitFor(() => {
-      expect(node("authSvc")).toHaveClass("covered", "opens");
-      expect(node("gw")).not.toHaveClass("covered");
-    });
-    // Going back lights the other part's node instead.
+  it("says which page is on screen, so the Map tab can light it", () => {
+    const onShown = vi.fn();
+    render(<StepsView state={state(4)} {...handlers()} onShown={onShown} />);
+    expect(onShown).toHaveBeenLastCalledWith("u3");
     fireEvent.click(screen.getByRole("button", { name: "← Previous" }));
-    await waitFor(() => {
-      expect(node("gw")).toHaveClass("covered");
-      expect(node("authSvc")).not.toHaveClass("covered");
-    });
+    fireEvent.transitionEnd(document.querySelector(".steps-track")!);
+    expect(onShown).toHaveBeenLastCalledWith("u2");
   });
 
-  it("has no map before there is a diagram, and doesn't repeat it on the Overview page", () => {
-    const frame = render(<StepsView state={state(1)} {...handlers()} />);
-    expect(map()).toBeNull();
-    frame.unmount();
-    render(<StepsView state={state(2)} {...handlers()} />);
-    expect(map()).toBeNull();
-    expect(current().querySelector(".diagram, .code-block")).not.toBeNull();
-  });
-
-  it("opens a part's page when its box is clicked on the map", async () => {
-    render(<StepsView state={state(4)} {...handlers()} />);
-    expect(current().querySelector(".step-title")).toHaveTextContent("Auth service");
-    await waitFor(() => expect(node("gw")).not.toBeNull());
-    fireEvent.click(node("gw")!.querySelector("rect")!);
-    expect(current().querySelector(".step-title")).toHaveTextContent("Gateway");
-  });
-
-  it("slims the map down to a bar and brings it back, and remembers which", async () => {
-    const view = render(<StepsView state={state(3)} {...handlers()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Hide the map" }));
-    expect(screen.getByRole("button", { name: "Show the architecture map" })).toBeInTheDocument();
-    expect(map()!.querySelector("svg")).toBeNull();
-    view.unmount();
-    // A chat opened again finds it as it was left.
-    render(<StepsView state={state(3)} {...handlers()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Show the architecture map" }));
-    await waitFor(() => expect(node("gw")).not.toBeNull());
-  });
-
-  it("opens the map at full size, with zoom", async () => {
-    render(<StepsView state={state(3)} {...handlers()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open the map at full size" }));
-    const big = within(await screen.findByRole("dialog", { name: "Architecture map", hidden: true }));
-    fireEvent.click(await big.findByRole("button", { name: "Zoom in", hidden: true }));
-    expect(big.getByRole("button", { name: "Actual size", hidden: true })).toHaveTextContent("125%");
+  it("draws the Overview page's map in the page, with a way to the pane", () => {
+    const open = vi.fn();
+    render(
+      <ArchitecturePane.Provider value={open}>
+        <StepsView state={state(2)} {...handlers()} />
+      </ArchitecturePane.Provider>,
+    );
+    const block = current().querySelector(".arch-block") as HTMLElement;
+    expect(within(block).getByRole("button", { name: /^Gateway, new/ })).toBeInTheDocument();
+    fireEvent.click(within(block).getByRole("button", { name: "Open in the pane" }));
+    expect(open).toHaveBeenCalled();
   });
 
   it("ends in a summary of the concerns, and starts a Build from it", () => {
@@ -114,5 +84,71 @@ describe("Architecture in Step by step", () => {
     expect(current().querySelector(".review-table")).toHaveTextContent("no timeout");
     fireEvent.click(screen.getByRole("button", { name: "Start Build" }));
     expect(h.onSend).toHaveBeenCalledWith("Start Build.");
+  });
+});
+
+describe("the Map tab", () => {
+  const pages = pagesOf(chat(4));
+  const map = architectureMap(pages)!;
+  const names = { [pages[2].key]: "Part 1 of 2 — Gateway", [pages[3].key]: "Part 2 of 2 — Auth service" };
+  const box = (name: RegExp) => screen.getByRole("button", { name });
+
+  it("draws every box as a button, says what the change does to it, and lights the part on screen", () => {
+    const { container } = render(<ArchitectureTab map={map} current={["authSvc"]} pageNames={names} onOpenPage={() => {}} />);
+    expect(screen.getByText("auth behind a gateway")).toBeInTheDocument();
+    expect(box(/^Gateway, new/)).toHaveClass("new");
+    expect(box(/^Auth service/)).toHaveClass("covered", "opens");
+    expect(box(/^Logs, no page of its own/)).not.toHaveClass("opens");
+    expect(container.querySelector(".arch-graph")).toHaveClass("focused");
+    expect(within(screen.getByLabelText("Legend")).getByText("New")).toBeInTheDocument();
+    expect(container.querySelectorAll(".arch-edge")).toHaveLength(2);
+    expect(screen.getByText("forwards")).toBeInTheDocument();
+  });
+
+  it("opens a box's page on a click or Enter, and tells what a box does on hover", () => {
+    const onOpenPage = vi.fn();
+    render(<ArchitectureTab map={map} current={[]} pageNames={names} onOpenPage={onOpenPage} />);
+    fireEvent.click(box(/^Gateway/));
+    expect(onOpenPage).toHaveBeenLastCalledWith(pages[2].key);
+    fireEvent.keyDown(box(/^Auth service/), { key: "Enter" });
+    expect(onOpenPage).toHaveBeenLastCalledWith(pages[3].key);
+    fireEvent.mouseEnter(box(/^Gateway/));
+    expect(screen.getByText("Terminates TLS and forwards requests")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Part 1 of 2 — Gateway →" }));
+    expect(onOpenPage).toHaveBeenLastCalledWith(pages[2].key);
+  });
+
+  it("zooms with its buttons and fits back", () => {
+    render(<ArchitectureTab map={map} current={[]} pageNames={names} onOpenPage={() => {}} />);
+    const level = screen.getByLabelText("Zoom level");
+    const before = level.textContent;
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(level.textContent).not.toBe(before);
+    fireEvent.click(screen.getByRole("button", { name: "Fit" }));
+    expect(level.textContent).toBe(before);
+  });
+
+  it("says why it can't draw an Overview whose block doesn't read", () => {
+    const broken = architectureMap(pagesOf(chat(2, "# Overview — x\n\n```architecture\n{nodes\n```")))!;
+    render(<ArchitectureTab map={broken} current={[]} pageNames={{}} onOpenPage={() => {}} />);
+    expect(screen.getByText(/couldn't be read: It isn't valid JSON/)).toBeInTheDocument();
+  });
+
+  it("still shows an Overview drawn in Mermaid, lit and clickable", async () => {
+    const old = architectureMap(pagesOf(chat(4, "# Overview — old\n\n```mermaid\nflowchart LR\n  gw --> authSvc\n```")))!;
+    const onOpenPage = vi.fn();
+    const { container } = render(<ArchitectureTab map={old} current={["authSvc"]} pageNames={{}} onOpenPage={onOpenPage} />);
+    await waitFor(() => expect(container.querySelector('[id*="flowchart-authSvc-"]')).toHaveClass("covered"));
+    fireEvent.click(container.querySelector('[id*="flowchart-gw-"] rect')!);
+    expect(onOpenPage).toHaveBeenCalled();
+  });
+});
+
+describe("a diagram in a message", () => {
+  it("opens at full size, to zoom and move around", async () => {
+    render(<Md>{"```mermaid\nsequenceDiagram\n  A->>B: hi\n```"}</Md>);
+    fireEvent.click(await screen.findByRole("button", { name: "Expand diagram" }));
+    const big = within(await screen.findByRole("dialog", { name: "Diagram", hidden: true }));
+    expect(big.getByRole("button", { name: "Fit", hidden: true })).toBeInTheDocument();
   });
 });

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { PanZoom } from "./PanZoom";
 import { nodeIdOf, renderDiagram, withChangeColours } from "../lib/mermaid";
 import { usePrefersDark } from "../lib/theme";
-import type { ArchitectureMap } from "../lib/architecture";
 
 /**
  * A mermaid source drawn as SVG: `svg` once it has been, `error` if mermaid couldn't read it, neither while it loads.
@@ -38,20 +38,21 @@ function nodeElements(root: HTMLElement): { id: string; el: Element }[] {
 }
 
 interface MapProps {
-  map: ArchitectureMap;
+  /** A map drawn in Mermaid: its source, and which page each of its nodes opens. */
+  map: { source: string; nodes: Record<string, string> };
   /** The nodes the page on screen covers, lit up. */
   current: string[];
   /** A node that has a page was clicked. */
   onOpen: (pageKey: string) => void;
-  /** Bigger than the dock: zoom buttons, and the diagram at its own size. */
-  large?: boolean;
 }
 
-/** The architecture map: the Overview's diagram, with the page on screen's nodes lit and the nodes that have a page clickable. */
-export function MapDiagram({ map, current, onOpen, large = false }: MapProps) {
+/**
+ * An architecture map drawn in Mermaid, as Overviews were before Lantern drew them itself: the diagram, with the page on
+ * screen's nodes lit and the nodes that have a page clickable. It sits on the Architecture tab's pan and zoom surface.
+ */
+export function MapDiagram({ map, current, onOpen }: MapProps) {
   const { svg, error } = useDiagram(map.source);
   const root = useRef<HTMLDivElement>(null);
-  const [zoom, setZoom] = useState(1);
   // Mermaid's markup is set directly; lighting nodes is classes on the elements it made.
   useEffect(() => {
     const el = root.current;
@@ -73,23 +74,33 @@ export function MapDiagram({ map, current, onOpen, large = false }: MapProps) {
 
   if (error) return <div className="map-empty">The map couldn't be drawn: {error.split("\n")[0]}</div>;
   if (!svg) return <div className="map-empty">Drawing the map…</div>;
+  // The SVG is mermaid's, drawn in its strict security level (scripts and click handlers off, labels sanitised).
+  return <div ref={root} className="map-svg" onClick={click} dangerouslySetInnerHTML={{ __html: svg }} />;
+}
+
+/** A drawn diagram at full size, on a surface you can zoom and move: from a diagram's Expand button in a message. */
+export function DiagramLightbox({ svg, size, onClose }: { svg: string; size: { w: number; h: number }; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    // jsdom has no showModal: there, the attribute alone opens it.
+    if (el.showModal) el.showModal();
+    else el.setAttribute("open", "");
+  }, []);
   return (
-    <div className={`map-diagram${large ? " large" : ""}`}>
-      {large && (
-        <div className="map-zoom" role="group" aria-label="Zoom">
-          <button onClick={() => setZoom((z) => Math.max(0.4, z / 1.25))} aria-label="Zoom out">
-            −
-          </button>
-          <button onClick={() => setZoom(1)} aria-label="Actual size">
-            {Math.round(zoom * 100)}%
-          </button>
-          <button onClick={() => setZoom((z) => Math.min(4, z * 1.25))} aria-label="Zoom in">
-            +
-          </button>
-        </div>
-      )}
-      {/* The SVG is mermaid's, drawn in its strict security level (scripts and click handlers off, labels sanitised). */}
-      <div ref={root} className="map-svg" style={large ? { zoom } : undefined} onClick={click} dangerouslySetInnerHTML={{ __html: svg }} />
-    </div>
+    <dialog ref={ref} className="arch-big" aria-label="Diagram" onClose={onClose} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="arch-big-head">
+        <span className="arch-tab-title">Diagram</span>
+        <span className="spacer" />
+        <button onClick={onClose}>Close</button>
+      </div>
+      <div className="arch-big-body">
+        <PanZoom width={size.w} height={size.h} label="Diagram">
+          {/* Mermaid's markup, as drawn in its strict security level. */}
+          <div className="map-svg" dangerouslySetInnerHTML={{ __html: svg }} />
+        </PanZoom>
+      </div>
+    </dialog>
   );
 }

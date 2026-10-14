@@ -18,9 +18,7 @@ import { ChatStream, type StreamHandlers } from "./ChatStream";
 import { isVerdictNext, parseReviewFile, splitFileTitle, verdictMessage, withoutCue, type ReviewFile, type Verdict } from "../lib/review";
 import { ReviewFileHeader, ReviewFileView, ReviewSummaryTable, type ReviewedFinding } from "./ReviewPages";
 import { ArchitecturePartView } from "./ArchitecturePages";
-import { ArchitectureDock, DEFAULT_DOCK, type DockState } from "./ArchitectureDock";
-import { architectureMap, coversOf, parseArchitecturePart, type ArchitecturePart } from "../lib/architecture";
-import { usePersistentState } from "../lib/layout";
+import { parseArchitecturePart, type ArchitecturePart } from "../lib/architecture";
 
 /** What "Update the step with this" sends. */
 export const UPDATE_STEP = "Update the step with this: write the whole step again under its heading, in the same format as before, with what we just discussed worked in and everything else kept.";
@@ -59,6 +57,8 @@ interface Props extends StreamHandlers {
   onAutoApprove?: (on: boolean) => void;
   /** The page on screen changed: the turns whose changes the Changes pane should show (null: not all known). */
   onPage: (range: { from: number; to: number } | null) => void;
+  /** The page that's on screen (once a slide has come to rest): the Map tab lights the boxes it covers. */
+  onShown?: (pageKey: string) => void;
   /** Review: the file of the page that's on screen, so the Changes pane can show it. */
   onReviewFile?: (path: string) => void;
   /** The Summary tab asked for this page; `key` changes with every request, so asking again for the same page works. */
@@ -70,7 +70,7 @@ const isTyping = (el: Element | null) => !!el && (el instanceof HTMLInputElement
 // Step-by-step mode's view of the conversation: a page per step, side by side, one on screen. Questions about a step
 // and changes to it stay on its page; Previous and Next (or ← →) slide between pages, and on the newest page Next
 // approves the step and Claude carries on.
-export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPage, onReviewFile, autoApprove = false, onAutoApprove, jump = null, ...handlers }: Props) {
+export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPage, onShown, onReviewFile, autoApprove = false, onAutoApprove, jump = null, ...handlers }: Props) {
   // A revision you undid: the page shows the version you went back to, until Claude revises the step again.
   const [kept, setKept] = useState<Record<string, { turn: number; over: number }>>({});
   const claudes = pagesOf(state.items);
@@ -120,6 +120,9 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
   const restingPage = pages[Math.min(settled, last)];
   const range = restingPage?.range ?? null;
   useEffect(() => onPage(range), [restingPage?.key, range?.from, range?.to]);
+  useEffect(() => {
+    if (restingPage) onShown?.(restingPage.key);
+  }, [restingPage?.key]);
   const restingFile = restingPage?.heading?.kind === "file" ? splitFileTitle(restingPage.heading.title).path : null;
   useEffect(() => {
     if (restingFile) onReviewFile?.(restingFile);
@@ -229,11 +232,6 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
       })
     : [];
 
-  // The architecture map stays above the pages from the Overview on; the Overview page is the diagram itself.
-  const map = architectureMap(pages);
-  const [dock, setDock] = usePersistentState<DockState>(`lantern.map.${slot}`, DEFAULT_DOCK);
-  const showMap = !!map && heading?.kind !== "overview" && heading?.kind !== "switch";
-  const openPage = (key: string) => go(pages.findIndex((p) => p.key === key));
 
   return (
     <div className="steps">
@@ -259,8 +257,6 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
         )}
       </div>
 
-      <div className="steps-body">
-      {showMap && <ArchitectureDock map={map} current={page ? coversOf(page) : []} onOpenPage={openPage} state={dock} onState={setDock} />}
       <div className="steps-viewport" ref={viewport}>
         <div className="steps-track" style={{ transform: `translate3d(${-at * 100}%, 0, 0)` }} onTransitionEnd={(e) => e.target === e.currentTarget && setSettled(at)}>
           {pages.map((p, i) => (
@@ -284,7 +280,6 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
                   teach={teach}
                   review={review}
                   arch={arch}
-                  onShowNode={map && !dock.open ? () => setDock({ ...dock, open: true }) : undefined}
                   suggestion={p.heading?.kind === "switch" ? { current: flavour, answer: pages[i + 1]?.turns[0].prompt.text ?? null, onAnswer: i === last && !running && onSend ? onSend : undefined } : null}
                   verdicts={verdicts[p.key]}
                   onVerdict={i === last && !running ? (index, v) => setVerdict(p.key, index, v) : undefined}
@@ -300,7 +295,6 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
           ))}
         </div>
         <JumpToLatest show={pageAway} onJump={jumpToEnd} label="Bottom" />
-      </div>
       </div>
 
       <div className="steps-nav">
@@ -343,8 +337,6 @@ interface PageProps extends StreamHandlers {
   teach: boolean;
   review: boolean;
   arch: boolean;
-  /** Architecture: show the map again (it was slimmed down), from a part's node chips. */
-  onShowNode?: () => void;
   /**
    * A switch page: the flavour the chat was in, how you answered (the next page's opening prompt), and how to answer
    * (only on the newest page, when idle).
@@ -366,7 +358,7 @@ interface PageProps extends StreamHandlers {
   onUpdate?: () => void;
 }
 
-function Page({ page, first, live, teach, review, arch, onShowNode, suggestion, verdicts, onVerdict, summary, folder, latest, runs, onKeep, onUpdate, ...handlers }: PageProps) {
+function Page({ page, first, live, teach, review, arch, suggestion, verdicts, onVerdict, summary, folder, latest, runs, onKeep, onUpdate, ...handlers }: PageProps) {
   const h = page.heading;
   const opening = page.turns[0];
   const asked = opening.prompt.auto ? null : first ? opening.prompt.text : justMovesOn(opening.prompt.text) ? null : promptText(opening.prompt.text);
@@ -431,7 +423,7 @@ function Page({ page, first, live, teach, review, arch, onShowNode, suggestion, 
       <div className="step-content">
         <ChatStream items={mainItems} folder={folder} live={live && page.main === page.turns.length - 1} {...handlers} />
         {reviewFile && <ReviewFileView file={reviewFile} verdicts={verdicts} onVerdict={onVerdict} />}
-        {part && <ArchitecturePartView part={part} verdicts={verdicts} onVerdict={onVerdict} onShowNode={onShowNode} />}
+        {part && <ArchitecturePartView part={part} verdicts={verdicts} onVerdict={onVerdict} />}
         {h?.kind === "switch" && h.flavour && suggestion && <SuggestionCard flavour={h.flavour} why={h.title} {...suggestion} />}
         {summary && <ReviewSummaryTable rows={summary.rows} onAction={summary.onAction} busy={summary.busy} architecture={summary.architecture} />}
       </div>

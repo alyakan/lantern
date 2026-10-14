@@ -5,7 +5,7 @@ import { Md } from "./Md";
 import { FindingCard } from "./ReviewPages";
 
 /** One piece of the architecture: what it's for, what it connects to, what changes in it, and the concerns about it. */
-export function ArchitecturePartView({ part, verdicts, onVerdict, onShowNode }: { part: ArchitecturePart; verdicts: Record<number, Verdict> | undefined; onVerdict?: (index: number, v: Verdict | null) => void; onShowNode?: (id: string) => void }) {
+export function ArchitecturePartView({ part, verdicts, onVerdict }: { part: ArchitecturePart; verdicts: Record<number, Verdict> | undefined; onVerdict?: (index: number, v: Verdict | null) => void }) {
   const section = (title: string, body: string, className: string) =>
     body && (
       <section className="review-section">
@@ -20,17 +20,11 @@ export function ArchitecturePartView({ part, verdicts, onVerdict, onShowNode }: 
       {part.covers.length > 0 && (
         <div className="arch-covers" aria-label="Covers">
           <span className="arch-covers-label">On the map</span>
-          {part.covers.map((id) =>
-            onShowNode ? (
-              <button key={id} className="arch-node" title="Show it on the map" onClick={() => onShowNode(id)}>
-                {id}
-              </button>
-            ) : (
-              <span key={id} className="arch-node">
-                {id}
-              </span>
-            ),
-          )}
+          {part.covers.map((id) => (
+            <span key={id} className="arch-node">
+              {id}
+            </span>
+          ))}
         </div>
       )}
       {part.preface && (

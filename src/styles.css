@@ -825,7 +825,6 @@ button.background-task-stop:hover:not(:disabled) { background: var(--bg-hover); 
 /* Still running in the background, beside the phase (the title bar's count, where you're looking). */
 .steps-background { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: 999px; background: color-mix(in srgb, var(--working) 12%, transparent); color: var(--working); font-size: calc(11px * var(--font-scale)); }
 .steps-background .spinner { width: 9px; height: 9px; border-color: color-mix(in srgb, var(--working) 30%, transparent); border-top-color: var(--working); }
-.steps-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .steps-viewport { position: relative; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
 .steps-track { display: flex; height: 100%; will-change: transform; transition: transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1); }
 @media (prefers-reduced-motion: reduce) { .steps-track, .steps-dot { transition: none; } .steps-rail { scroll-behavior: auto; } }
@@ -1621,41 +1620,19 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 
 /* Architecture: a diagram in a message, the part pages, and the map pinned beside the pages. */
 .code-block-note { margin-right: 8px; font-size: calc(11px * var(--font-scale)); color: var(--sev-should); }
-.diagram { padding: 12px; overflow-x: auto; }
+.diagram { padding: 12px; overflow-x: auto; cursor: zoom-in; }
 .diagram svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
 .arch-covers { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .arch-covers-label { font-size: calc(11px * var(--font-scale)); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
 .arch-node { padding: 1px 8px; border: none; border-radius: 999px; background: var(--bg-active); color: var(--text-2); font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); }
 button.arch-node:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .steps-intro-flavour:last-child:nth-child(odd) { grid-column: 1 / -1; }
-.arch-dock-title { font-size: calc(11px * var(--font-scale)); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
 .map-empty { padding: 14px 10px; font-size: calc(12.5px * var(--font-scale)); color: var(--muted); text-align: center; }
-.map-zoom { position: sticky; top: 0; z-index: 1; display: inline-flex; margin-bottom: 8px; gap: 2px; padding: 2px; border-radius: 999px; background: var(--seg-track); }
-.map-zoom button { min-width: 28px; height: 22px; padding: 0 8px; border: none; border-radius: 999px; background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); font-variant-numeric: tabular-nums; }
-.map-zoom button:hover:not(:disabled) { background: var(--bg-hover); }
 .arch-big { width: min(1100px, 92vw); height: min(780px, 88vh); padding: 0; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--pane); color: var(--text); }
 .arch-big[open] { display: flex; flex-direction: column; }
 .arch-big::backdrop { background: rgba(0, 0, 0, 0.35); }
 .arch-big-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .arch-big-body { flex: 1; min-height: 0; overflow: auto; padding: 14px; }
-.arch-dock { position: relative; flex: none; display: flex; flex-direction: column; min-height: 0; max-height: 55%; border-bottom: 1px solid var(--line); background: var(--bg-subtle); }
-.arch-dock.collapsed { height: 26px; }
-.arch-dock-tab { flex: 1; display: flex; align-items: center; gap: 6px; width: 100%; padding: 0 20px; border: none; border-radius: 0; background: none; color: var(--muted); }
-.arch-dock-tab:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-2); }
-.arch-dock-handle { position: absolute; z-index: 2; left: 0; right: 0; bottom: -3px; height: 6px; cursor: row-resize; }
-.arch-dock-handle:hover, .arch-dock-handle:focus-visible, .arch-dock.dragging .arch-dock-handle { background: var(--line-strong); }
-.arch-dock-head { flex: none; display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px 0 20px; }
-.arch-dock-hint { font-size: calc(11.5px * var(--font-scale)); color: var(--faint); }
-.arch-dock-btn { width: 24px; height: 24px; padding: 0; border: none; border-radius: var(--radius-chip); background: none; color: var(--muted); font-size: calc(14px * var(--font-scale)); line-height: 1; }
-.arch-dock-btn:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
-.arch-dock-body { flex: 1; min-height: 0; overflow: hidden; padding: 0 20px 8px; }
-.map-empty { padding: 14px 10px; font-size: calc(12.5px * var(--font-scale)); color: var(--muted); text-align: center; }
-.map-diagram { height: 100%; }
-.map-diagram .map-svg { height: 100%; }
-.map-diagram .map-svg svg { display: block; width: 100%; height: 100%; max-width: none !important; }
-.map-diagram.large { height: auto; }
-.map-diagram.large .map-svg { height: auto; }
-.map-diagram.large .map-svg svg { width: auto; height: auto; }
 .map-svg g.node { transition: opacity 0.2s; }
 .map-svg.focused g.node:not(.covered) { opacity: 0.4; }
 .map-svg g.node.opens { cursor: pointer; }
@@ -1663,3 +1640,61 @@ button.arch-node:hover:not(:disabled) { background: var(--bg-hover); color: var(
 .map-svg g.node.opens:hover :is(rect, polygon, circle, ellipse, path) { stroke-width: 2.5px !important; }
 .map-svg g.node.covered :is(rect, polygon, circle, ellipse, path) { stroke: var(--text) !important; stroke-width: 3px !important; }
 .map-svg g.node.covered { filter: drop-shadow(0 0 5px color-mix(in srgb, var(--text) 45%, transparent)); }
+.arch-big .map-svg svg { display: block; max-width: none !important; }
+
+/* Pan and zoom: the Map tab's surface, and a diagram opened at full size. */
+.pz { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pz-surface { position: relative; flex: 1; min-height: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: radial-gradient(circle, color-mix(in srgb, var(--faint) 45%, transparent) 1px, transparent 1.2px) 0 0 / 18px 18px, var(--bg-subtle); cursor: grab; touch-action: none; }
+.pz-surface:active { cursor: grabbing; }
+.pz-world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.pz-tools { position: absolute; right: 10px; bottom: 10px; display: inline-flex; align-items: center; gap: 2px; padding: 2px; border: 0.5px solid var(--glass-line); border-radius: 999px; background: var(--glass); box-shadow: var(--shadow); }
+.pz-tools button { min-width: 26px; height: 22px; padding: 0 8px; border: none; border-radius: 999px; background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
+.pz-tools button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.pz-level { min-width: 40px; text-align: center; font-size: calc(11.5px * var(--font-scale)); color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* The Map tab. */
+.arch-tab { display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 0; padding: 12px 16px; }
+.arch-tab-head { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.arch-tab-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(13px * var(--font-scale)); font-weight: 600; color: var(--text); }
+.arch-legend { flex: none; display: inline-flex; gap: 4px; }
+.arch-badge { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border-radius: 999px; font-size: calc(10.5px * var(--font-scale)); font-weight: 600; background: var(--bg-active); color: var(--text-2); }
+.arch-badge.new { background: color-mix(in srgb, var(--add) 16%, transparent); color: var(--add); }
+.arch-badge.changed { background: color-mix(in srgb, var(--sev-should) 18%, transparent); color: var(--sev-should); }
+.arch-badge.removed { background: color-mix(in srgb, var(--del) 14%, transparent); color: var(--del); }
+.arch-panel { flex: none; }
+.arch-tab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.arch-panel-name { color: var(--text); font-size: calc(12.5px * var(--font-scale)); }
+.arch-panel-open { margin-left: auto; font-size: calc(12px * var(--font-scale)); }
+.arch-panel-note { color: var(--text-2); line-height: 1.5; }
+.arch-broken { display: flex; flex-direction: column; gap: 8px; font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); }
+.arch-broken p { margin: 0; }
+
+/* The map's boxes and arrows, in the Agents graph's style. */
+.arch-graph { display: block; overflow: visible; }
+.arch-edge path { fill: none; stroke: color-mix(in srgb, var(--faint) 60%, var(--line-strong)); stroke-width: 1.5; transition: stroke 0.2s, opacity 0.2s; }
+.arch-arrowhead { fill: color-mix(in srgb, var(--faint) 60%, var(--line-strong)); }
+.arch-edge.lit path { stroke: var(--text-2); stroke-width: 1.8; }
+.arch-edge-label { text-anchor: middle; font: calc(10.5px * var(--font-scale)) var(--ui); fill: var(--muted); paint-order: stroke; stroke: var(--bg-subtle); stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
+.arch-box { outline: none; transition: opacity 0.2s; }
+.arch-box.opens { cursor: pointer; }
+.arch-rect { fill: var(--field); stroke: var(--line-strong); stroke-width: 1.3; transition: stroke 0.2s, stroke-width 0.2s; }
+.arch-ring { fill: none; stroke: transparent; stroke-width: 2; }
+.arch-stripe { fill: var(--faint); }
+.arch-label { text-anchor: middle; font: 600 calc(12px * var(--font-scale)) var(--ui); fill: var(--text); pointer-events: none; }
+.arch-box.new .arch-rect { stroke: color-mix(in srgb, var(--add) 70%, var(--line-strong)); fill: color-mix(in srgb, var(--add) 7%, var(--field)); }
+.arch-box.new .arch-stripe { fill: var(--add); }
+.arch-box.changed .arch-rect { stroke: color-mix(in srgb, var(--sev-should) 70%, var(--line-strong)); fill: color-mix(in srgb, var(--sev-should) 8%, var(--field)); }
+.arch-box.changed .arch-stripe { fill: var(--sev-should); }
+.arch-box.removed .arch-rect { stroke: color-mix(in srgb, var(--del) 70%, var(--line-strong)); stroke-dasharray: 5 4; fill: color-mix(in srgb, var(--del) 5%, var(--field)); }
+.arch-box.removed .arch-stripe { fill: var(--del); }
+.arch-box.removed .arch-label { fill: var(--muted); text-decoration: line-through; }
+.arch-box.opens:hover .arch-rect, .arch-box.shown .arch-rect, .arch-box:focus-visible .arch-rect { stroke-width: 2.2; }
+.arch-box:focus-visible .arch-ring { stroke: var(--focus, var(--text-2)); }
+.arch-ring { stroke-width: 1.75; }
+.arch-box.covered .arch-ring { stroke: color-mix(in srgb, var(--text) 80%, transparent); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--text) 30%, transparent)); }
+.arch-graph.focused .arch-box:not(.covered):not(.shown) { opacity: 0.45; }
+.arch-graph.focused .arch-edge:not(.lit) { opacity: 0.4; }
+
+/* The Overview page's own copy of the map. */
+.arch-block-body { padding: 10px 12px; overflow-x: auto; cursor: zoom-in; }
+.arch-block-body .arch-graph { max-width: 100%; height: auto; margin: 0 auto; }

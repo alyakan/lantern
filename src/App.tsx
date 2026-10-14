@@ -51,7 +51,9 @@ import { isInstalling, useUpdateState } from "./lib/updates";
 import { BannerView } from "./components/BannerView";
 import { ChatView } from "./components/ChatView";
 import { StepsView } from "./components/StepsView";
-import { andNext, pagesOf } from "./lib/steps";
+import { andNext, pageLabel, pagesOf, pageTitle } from "./lib/steps";
+import { architectureMap, coversOf } from "./lib/architecture";
+import { ArchitecturePane } from "./lib/architecturePane";
 import { summarize } from "./lib/stepsSummary";
 import { flavourOf, savedMode, withFlavourNote, type Flavour } from "./lib/flavour";
 import { FileLinksProvider } from "./lib/fileLinks";
@@ -1184,6 +1186,28 @@ export default function App() {
     return summary && summary.rows.length > 0 ? summary : null;
   }, [stepPages]);
   const [pageJump, setPageJump] = useState<{ slot: string; page: string; key: number } | null>(null);
+  const openPageIn = (slot: string) => (page: string) => setPageJump((j) => ({ slot, page, key: (j?.key ?? 0) + 1 }));
+  // The Map tab: the latest Architecture Overview's map, lit for the page on screen. A new Overview (not one already
+  // there when the chat was opened) brings the tab up.
+  const archMap = useMemo(() => (stepPages ? architectureMap(stepPages) : null), [stepPages]);
+  const [shownPage, setShownPage] = useState<{ slot: string; page: string } | null>(null);
+  const shownCovers = useMemo(() => {
+    const p = shownPage?.slot === active ? stepPages?.find((x) => x.key === shownPage.page) : undefined;
+    return p ? coversOf(p) : [];
+  }, [shownPage, active, stepPages]);
+  const archPageNames = useMemo(() => Object.fromEntries((stepPages ?? []).filter((p) => p.heading?.kind === "part").map((p) => [p.key, `${pageLabel(p.heading)}${pageTitle(p) ? ` — ${pageTitle(p)}` : ""}`])), [stepPages]);
+  const [archOpenKey, setArchOpenKey] = useState(0);
+  const archSeen = useRef<{ slot: string; page: string | null } | null>(null);
+  useEffect(() => {
+    const page = archMap?.page ?? null;
+    const seen = archSeen.current;
+    archSeen.current = { slot: active, page };
+    if (seen?.slot === active && page && page !== seen.page) setArchOpenKey((k) => k + 1);
+  }, [active, archMap?.page]);
+  const openArchitecture = () => {
+    setReviewCollapsed(false);
+    setArchOpenKey((k) => k + 1);
+  };
   const [agentsOpenKey, setAgentsOpenKey] = useState(0);
   const agentsShown = useRef<Set<string>>(new Set());
   const treeInUse = tree.live && usesAgents(tree);
@@ -1433,6 +1457,7 @@ export default function App() {
                 <>
                   {/* Keyed by chat: a crash in one chat's stream doesn't stay on screen when another chat is shown. */}
                   <ErrorBoundary key={active} name="chat">
+                    <ArchitecturePane.Provider value={state.folder ? openArchitecture : null}>
                     <FileLinksProvider key={active} slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention}>
                       {stepsView ? (
                         <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} onPickFlavour={pickFlavour} autoApprove={autoFor(state.folder)}
@@ -1443,11 +1468,12 @@ export default function App() {
                               to(active)({ type: "restarting" });
                               api.restartSession(active, state.mode, settingsFor(active).effort, on).then(() => to(active)({ type: "session_ready" })).catch((e) => to(active)({ type: "failed", text: errText(e) }));
                             })
-                          } onPage={setPageRange} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} />
+                          } onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} />
                       ) : (
                         <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} />
                       )}
                     </FileLinksProvider>
+                    </ArchitecturePane.Provider>
                   </ErrorBoundary>
                   {composer}
                 </>
@@ -1458,7 +1484,8 @@ export default function App() {
             <ErrorBoundary name="review pane">
               <ReviewPanel
                 agents={state.folder ? { tree, graph, usage: state.modelUsage, openKey: agentsOpenKey } : undefined}
-                summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: (page) => setPageJump((j) => ({ slot: active, page, key: (j?.key ?? 0) + 1 })), doc: { pages: stepPages ?? [], title: chatTitle(state, titles), folder: state.folder } } : undefined}
+                architecture={archMap ? { map: archMap, current: shownCovers, pageNames: archPageNames, onOpenPage: openPageIn(active), openKey: archOpenKey } : undefined}
+                summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: openPageIn(active), doc: { pages: stepPages ?? [], title: chatTitle(state, titles), folder: state.folder } } : undefined}
                 folder={state.folder}
                 ready={state.status !== "starting"}
                 files={shownFiles}

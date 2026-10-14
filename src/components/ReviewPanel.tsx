@@ -11,6 +11,8 @@ import { DocIcon } from "./icons";
 import { moveFocus, useMenuKeys } from "./useMenuKeys";
 import { FilesTab } from "./FilesTab";
 import { AgentsTab } from "./AgentsTab";
+import { ArchitectureTab } from "./ArchitectureTab";
+import type { ArchitectureMap } from "../lib/architecture";
 import { SummaryTab, type ExportDoc } from "./SummaryTab";
 import type { StepsSummary } from "../lib/stepsSummary";
 import type { AgentTree } from "../lib/agents";
@@ -54,6 +56,11 @@ interface Props {
   agents?: { tree: AgentTree; graph: AgentGraph; usage: ModelCost[]; openKey: number };
   /** The Summary tab, in a Step-by-step chat that has a step to show: the plan so far, and how to open a row's page. */
   summary?: { slot: string; data: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void; doc?: ExportDoc };
+  /**
+   * The Map tab, once a Step-by-step chat has an Architecture Overview: its map, the boxes the page on screen covers, each
+   * page's name, how to open one, and `openKey`, changed to bring the tab up.
+   */
+  architecture?: { map: ArchitectureMap; current: string[]; pageNames: Record<string, string>; onOpenPage: (page: string) => void; openKey: number };
   /** Reverting Claude's edits: offered on the Changes views and the Summary's steps; the undo of the last one. */
   revert?: RevertControls;
   selected: string | null;
@@ -66,7 +73,7 @@ interface Props {
 const LAYOUT_LABEL: Record<DiffLayout, string> = { inline: "Unified", split: "Split" };
 const NEXT_LAYOUT: Record<DiffLayout, DiffLayout> = { inline: "split", split: "inline" };
 
-type Tab = "changes" | "files" | "tests" | "agents" | "summary";
+type Tab = "changes" | "files" | "tests" | "agents" | "summary" | "map";
 /** Each tab's button, which its panel is labelled by. */
 const tabId = (t: Tab) => `review-${t}-tab`;
 
@@ -75,7 +82,7 @@ export function ReviewPanel(props: Props) {
   const count = props.files.length;
   const runs = props.testRuns ?? [];
   // The saved tab is shared by every chat: one that has no tests, or no steps, opens on Changes instead.
-  const tab: Tab = (savedTab === "tests" && runs.length === 0) || (savedTab === "summary" && !props.summary) ? "changes" : savedTab;
+  const tab: Tab = (savedTab === "tests" && runs.length === 0) || (savedTab === "summary" && !props.summary) || (savedTab === "map" && !props.architecture) ? "changes" : savedTab;
   const [shownRun, setShownRun] = useState<string | null>(null);
   const [reveal, setReveal] = useState<{ path: string; line: number | null; key: number } | null>(null);
   // A mention of a changed file at a line (a review finding): its diff scrolls there.
@@ -95,6 +102,9 @@ export function ReviewPanel(props: Props) {
   useEffect(() => {
     if (props.agents?.openKey) setTab("agents");
   }, [props.agents?.openKey]);
+  useEffect(() => {
+    if (props.architecture?.openKey) setTab("map");
+  }, [props.architecture?.openKey]);
   useEffect(() => {
     const req = props.openRequest;
     if (!req) return;
@@ -144,6 +154,11 @@ export function ReviewPanel(props: Props) {
           {props.summary && (
             <button id={tabId("summary")} role="tab" tabIndex={tab === "summary" ? 0 : -1} aria-selected={tab === "summary"} className={tab === "summary" ? "active" : ""} onClick={() => setTab("summary")}>
               Summary
+            </button>
+          )}
+          {props.architecture && (
+            <button id={tabId("map")} role="tab" tabIndex={tab === "map" ? 0 : -1} aria-selected={tab === "map"} className={tab === "map" ? "active" : ""} title="The architecture map" onClick={() => setTab("map")}>
+              Map
             </button>
           )}
           {props.agents && (
@@ -212,6 +227,11 @@ export function ReviewPanel(props: Props) {
       {tab === "summary" && props.summary && (
         <div className="tab-body" role="tabpanel" aria-labelledby={tabId("summary")}>
           <SummaryTab slot={props.summary.slot} summary={props.summary.data} changed={props.summary.changed} running={props.summary.running} onOpenPage={props.summary.onOpenPage} doc={props.summary.doc} revert={rv} />
+        </div>
+      )}
+      {tab === "map" && props.architecture && (
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("map")}>
+          <ArchitectureTab map={props.architecture.map} current={props.architecture.current} pageNames={props.architecture.pageNames} onOpenPage={props.architecture.onOpenPage} />
         </div>
       )}
       {tab === "agents" && props.agents && (
