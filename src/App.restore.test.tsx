@@ -94,6 +94,26 @@ describe("restoring a team at launch", () => {
     });
   });
 
+  it("brings the workers back on the mode they had, not just the ones the user had looked at", async () => {
+    localStorage.setItem("settings.modeBySession", JSON.stringify({ bbbb22: "auto", aaaa11: "auto" }));
+    await launch();
+    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show the canvas" }));
+    expect(await screen.findByText("Runs the team · Auto")).toBeInTheDocument();
+    expect(await screen.findByText("login-form · Auto")).toBeInTheDocument();
+    // Still saved under both sessions for the next restart.
+    expect(JSON.parse(localStorage.getItem("settings.modeBySession") ?? "{}")).toMatchObject({ bbbb22: "auto", aaaa11: "auto" });
+  });
+
+  it("brings a worker with no saved mode back on Ask, as before modes were kept for it", async () => {
+    localStorage.setItem("settings.modeBySession", JSON.stringify({ bbbb22: "auto" }));
+    await launch();
+    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show the canvas" }));
+    expect(await screen.findByText("Runs the team · Auto")).toBeInTheDocument();
+    expect(await screen.findByText("login-form · Ask")).toBeInTheDocument();
+  });
+
   it("keeps a worker the user hid hidden across a restart", async () => {
     const hiddenWorker: SavedChat = { ...team[0], orchestra: { ...(team[0].orchestra as Extract<NonNullable<SavedChat["orchestra"]>, { role: "worker" }>), hidden: true } };
     localStorage.setItem("session.openChats", JSON.stringify([hiddenWorker, team[1]]));
