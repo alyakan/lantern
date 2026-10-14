@@ -7,7 +7,10 @@
 //! and the approval path belong to each provider's session, not to this trait.
 
 pub mod claude;
+pub mod claude_session;
 
+use crate::session::{EditHook, Session, SessionConfig};
+use crate::ui_event::Sink;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -37,6 +40,10 @@ pub trait Provider: Send + Sync {
     /// The version the CLI at `binary` reports; None when it won't say. `path_env` is the PATH a login shell gives, which
     /// a launcher script may need.
     fn version(&self, binary: &str, path_env: Option<&str>) -> Option<String>;
+
+    /// Starts the CLI at `cfg.binary` on `cfg` and drives it from then on: its events go to `sink`, and every successful
+    /// edit to `on_edit`.
+    fn spawn(&self, cfg: &SessionConfig, sink: Sink, on_edit: EditHook) -> Result<Session, String>;
 }
 
 #[cfg(test)]

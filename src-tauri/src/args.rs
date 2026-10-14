@@ -149,6 +149,7 @@ pub fn valid_effort(e: &str) -> bool {
     EFFORT_LEVELS.contains(&e)
 }
 
+/// Claude Code's command line (only the Claude provider calls this; Mode, Role and HelperConfig are every provider's).
 /// `auto_approve`: in Step by step, Claude Code's auto mode approves actions instead of the in-app prompts; each page is
 /// reviewed anyway. Other modes ignore it.
 /// `model`: an alias ("opus", "sonnet", "haiku") or full model id; None leaves Claude Code's own default.
@@ -230,7 +231,7 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
 }
 
 /// The harness's flags beyond model and effort: the advisor Claude consults (`--advisor`, which `claude --help` doesn't
-/// list). The subagents' model goes in the environment instead (see Session::spawn).
+/// list). The subagents' model goes in the environment instead (see ClaudeSession::spawn).
 pub fn harness_args(advisor: Option<&str>) -> Vec<String> {
     advisor.map(|a| vec!["--advisor".to_string(), a.to_string()]).unwrap_or_default()
 }
@@ -315,7 +316,7 @@ mod tests {
     }
 
     /// The whole command line claude is started with, flag by flag and in order (the harness's flags come last, as
-    /// Session::spawn appends them): moving where it is built must not change a byte of it.
+    /// ClaudeSession::spawn appends them): moving where it is built must not change a byte of it.
     #[test]
     fn the_command_line_claude_is_started_with_is_pinned() {
         let strs = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<String>>();

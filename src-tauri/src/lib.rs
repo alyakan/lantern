@@ -319,7 +319,8 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
         return Err(format!("{folder} no longer exists."));
     }
     Ok(SessionConfig {
-        claude: claude_path.into(),
+        provider: ProviderId::Claude,
+        binary: claude_path.into(),
         folder: folder.into(),
         mode: settings.mode,
         auto_approve: settings.auto_approve,
@@ -585,7 +586,7 @@ async fn claude_mcp(state: &AppState, slot: &str, args: Vec<String>) -> Result<S
     let (claude, folder) = {
         let cfg = s.config.lock().unwrap();
         let cfg = cfg.as_ref().ok_or("No folder is open")?;
-        (cfg.claude.clone(), cfg.folder.clone())
+        (cfg.binary.clone(), cfg.folder.clone())
     };
     let mut cmd = tokio::process::Command::new(claude);
     // A timeout drops the wait below; kill_on_drop stops the process rather than leaving it running.
