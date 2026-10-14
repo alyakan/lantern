@@ -6,7 +6,9 @@ pub const OUTPUT_LIMIT: usize = 4000;
 const IGNORED_TYPES: &[&str] = &["rate_limit_event"];
 const EDIT_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit"];
 
-/// Turns claude's stream-json output, one line at a time, into UI events.
+/// Turns claude's stream-json output, one line at a time, into UI events. Claude Code's alone: it also reads Claude's
+/// transcripts (history, offstream, test_runs), which are in the same shape. Another provider's session turns its own
+/// protocol into UiEvents itself (see provider/).
 #[derive(Default)]
 pub struct StreamParser {
     /// parent_tool_use_id → (current message id, index of the latest content block)
