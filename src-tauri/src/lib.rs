@@ -95,10 +95,15 @@ fn emitter(app: &AppHandle) -> impl Fn(SlotEvent) + Send + Sync + Clone + 'stati
     }
 }
 
+/// What a provider can do (see Capabilities).
+fn capabilities_of(provider: ProviderId) -> provider::Capabilities {
+    provider.provider().capabilities()
+}
+
 /// The most freedom the workers of main agent `main` may have, from its mode as it is now (Ask when it isn't open).
 fn main_ceiling(state: &AppState, main: &str) -> Mode {
     let cfg = state.slots.get(main).ok().and_then(|s| s.config.lock().unwrap().clone());
-    cfg.map_or(Mode::Ask, |c| args::worker_mode(c.mode, c.auto_approve))
+    cfg.map_or(Mode::Ask, |c| args::worker_mode(c.mode, c.auto_approve, &capabilities_of(c.provider)))
 }
 
 /// How the worker `worker` runs once its main agent's mode allows no more than `ceiling`: lowered (its claude restarted on
@@ -106,7 +111,7 @@ fn main_ceiling(state: &AppState, main: &str) -> Mode {
 async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: Mode) {
     let Ok(s) = state.slots.get(worker) else { return };
     let Some(mut cfg) = s.config.lock().unwrap().clone() else { return };
-    let (mode, auto) = args::capped_mode(cfg.mode, cfg.auto_approve, ceiling);
+    let (mode, auto) = args::capped_mode(cfg.mode, cfg.auto_approve, ceiling, &capabilities_of(cfg.provider));
     if (mode, auto) == (cfg.mode, cfg.auto_approve) {
         return;
     }
@@ -391,11 +396,11 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
     cfg.resume = running_id.or(cfg.resume);
     cfg.helper = helper_config(&s, cfg.helper.role.clone())?;
     cfg.path_env = login_path(&state).await;
-    let (new_mode, new_auto) = (cfg.mode, cfg.auto_approve);
+    let (new_mode, new_auto, provider) = (cfg.mode, cfg.auto_approve, cfg.provider);
     launch(&app, &slot, &s, cfg, false).await?;
     // A worker never has more freedom than its main agent: when the main agent's mode is lowered, so are its workers'.
     if state.orchestra.is_main(&slot) {
-        let ceiling = args::worker_mode(new_mode, new_auto);
+        let ceiling = args::worker_mode(new_mode, new_auto, &capabilities_of(provider));
         for worker in state.orchestra.workers_of(&slot) {
             lower_worker(&app, &state, &worker, ceiling).await;
         }
@@ -1163,7 +1168,7 @@ async fn open_session(
     let parent_slot = settings.worker.as_ref().map(|w| w.parent.clone());
     if let Some(parent) = &parent_slot {
         let ceiling = main_ceiling(&state, parent);
-        let (mode, auto) = args::capped_mode(settings.mode, settings.auto_approve, ceiling);
+        let (mode, auto) = args::capped_mode(settings.mode, settings.auto_approve, ceiling, &capabilities_of(settings.provider));
         settings.mode = mode;
         settings.auto_approve = auto;
     }

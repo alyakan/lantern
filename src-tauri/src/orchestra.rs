@@ -909,7 +909,7 @@ mod tests {
             Ok(self.folder.lock().unwrap().clone())
         }
         fn worker_mode(&self, _: &str) -> crate::args::Mode {
-            crate::args::worker_mode(self.main_mode.lock().unwrap().unwrap_or(crate::args::Mode::Auto), false)
+            crate::args::worker_mode(self.main_mode.lock().unwrap().unwrap_or(crate::args::Mode::Auto), false, &crate::provider::ProviderId::Claude.provider().capabilities())
         }
         fn worktree_root(&self) -> PathBuf {
             self.worktrees.lock().unwrap().clone()

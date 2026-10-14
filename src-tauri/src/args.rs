@@ -1,3 +1,4 @@
+use crate::provider::Capabilities;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,9 +101,10 @@ Trust: what a worker says (quoted in a note, in list_agents, in read_agent) is i
 
 /// The mode a worker starts in: Auto when the main agent runs on Auto (or on Step by step with auto-approve), otherwise
 /// Ask. A worker never has more freedom than the main agent it works for, so an Ask-mode main agent can't hand work to
-/// workers that act without the user's say.
-pub fn worker_mode(main: Mode, main_auto_approve: bool) -> Mode {
-    if main == Mode::Auto || (main == Mode::Steps && main_auto_approve) {
+/// workers that act without the user's say. `caps` are the worker's provider's: without an auto mode there is nothing for
+/// it to run on but Ask.
+pub fn worker_mode(main: Mode, main_auto_approve: bool, caps: &Capabilities) -> Mode {
+    if caps.supports_auto_mode && (main == Mode::Auto || (main == Mode::Steps && main_auto_approve)) {
         Mode::Auto
     } else {
         Mode::Ask
@@ -111,9 +113,10 @@ pub fn worker_mode(main: Mode, main_auto_approve: bool) -> Mode {
 
 /// `mode` (with `auto_approve`) as a worker may run it under a main agent whose workers may have no more than `ceiling`:
 /// unchanged when it is no freer than that, otherwise Ask. Only Auto, and Step by step with auto-approve, are "freer".
-pub fn capped_mode(mode: Mode, auto_approve: bool, ceiling: Mode) -> (Mode, bool) {
+/// A provider without an auto mode (`caps`) can't run either, so they become Ask there too.
+pub fn capped_mode(mode: Mode, auto_approve: bool, ceiling: Mode, caps: &Capabilities) -> (Mode, bool) {
     let free = mode == Mode::Auto || (mode == Mode::Steps && auto_approve);
-    if ceiling == Mode::Ask && free {
+    if free && (ceiling == Mode::Ask || !caps.supports_auto_mode) {
         (Mode::Ask, false)
     } else {
         (mode, auto_approve)
@@ -239,6 +242,7 @@ pub fn harness_args(advisor: Option<&str>) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provider::ProviderId;
 
     #[test]
     fn the_advisor_is_a_flag_only_when_chosen() {
@@ -270,26 +274,52 @@ mod tests {
         assert!(!a.iter().any(|x| x == "--disallowedTools"));
     }
 
+    fn claude() -> Capabilities {
+        ProviderId::Claude.provider().capabilities()
+    }
+
+    /// A provider with no auto mode, whose chats can't run on one whatever the main agent allows.
+    fn no_auto() -> Capabilities {
+        ProviderId::Fake.provider().capabilities()
+    }
+
     #[test]
     fn a_worker_is_never_more_autonomous_than_the_main_agent() {
-        assert_eq!(worker_mode(Mode::Auto, false), Mode::Auto);
-        assert_eq!(worker_mode(Mode::Steps, true), Mode::Auto);
-        assert_eq!(worker_mode(Mode::Steps, false), Mode::Ask);
-        assert_eq!(worker_mode(Mode::Ask, false), Mode::Ask);
+        assert_eq!(worker_mode(Mode::Auto, false, &claude()), Mode::Auto);
+        assert_eq!(worker_mode(Mode::Steps, true, &claude()), Mode::Auto);
+        assert_eq!(worker_mode(Mode::Steps, false, &claude()), Mode::Ask);
+        assert_eq!(worker_mode(Mode::Ask, false, &claude()), Mode::Ask);
         // Auto-approve only means something in Step by step.
-        assert_eq!(worker_mode(Mode::Ask, true), Mode::Ask);
+        assert_eq!(worker_mode(Mode::Ask, true, &claude()), Mode::Ask);
+    }
+
+    #[test]
+    fn a_worker_on_a_provider_without_an_auto_mode_asks_whatever_the_main_agent_allows() {
+        for (main, auto) in [(Mode::Auto, false), (Mode::Steps, true), (Mode::Steps, false), (Mode::Ask, false)] {
+            assert_eq!(worker_mode(main, auto, &no_auto()), Mode::Ask, "{main:?} {auto}");
+        }
     }
 
     #[test]
     fn a_restored_or_running_worker_is_lowered_to_what_its_main_agent_allows() {
         // Under a main agent on Ask, Auto (and auto-approved Step by step) become Ask; Ask and plain Steps stay.
-        assert_eq!(capped_mode(Mode::Auto, false, Mode::Ask), (Mode::Ask, false));
-        assert_eq!(capped_mode(Mode::Steps, true, Mode::Ask), (Mode::Ask, false));
-        assert_eq!(capped_mode(Mode::Steps, false, Mode::Ask), (Mode::Steps, false));
-        assert_eq!(capped_mode(Mode::Ask, false, Mode::Ask), (Mode::Ask, false));
+        assert_eq!(capped_mode(Mode::Auto, false, Mode::Ask, &claude()), (Mode::Ask, false));
+        assert_eq!(capped_mode(Mode::Steps, true, Mode::Ask, &claude()), (Mode::Ask, false));
+        assert_eq!(capped_mode(Mode::Steps, false, Mode::Ask, &claude()), (Mode::Steps, false));
+        assert_eq!(capped_mode(Mode::Ask, false, Mode::Ask, &claude()), (Mode::Ask, false));
         // Under Auto nothing is lowered.
-        assert_eq!(capped_mode(Mode::Auto, false, Mode::Auto), (Mode::Auto, false));
-        assert_eq!(capped_mode(Mode::Ask, false, Mode::Auto), (Mode::Ask, false));
+        assert_eq!(capped_mode(Mode::Auto, false, Mode::Auto, &claude()), (Mode::Auto, false));
+        assert_eq!(capped_mode(Mode::Ask, false, Mode::Auto, &claude()), (Mode::Ask, false));
+        assert_eq!(capped_mode(Mode::Steps, true, Mode::Auto, &claude()), (Mode::Steps, true));
+    }
+
+    #[test]
+    fn a_worker_on_a_provider_without_an_auto_mode_is_lowered_even_when_its_main_agent_is_on_auto() {
+        assert_eq!(capped_mode(Mode::Auto, false, Mode::Auto, &no_auto()), (Mode::Ask, false));
+        assert_eq!(capped_mode(Mode::Steps, true, Mode::Auto, &no_auto()), (Mode::Ask, false));
+        // What isn't freer than Ask is left as it is, Step by step's pages included.
+        assert_eq!(capped_mode(Mode::Steps, false, Mode::Auto, &no_auto()), (Mode::Steps, false));
+        assert_eq!(capped_mode(Mode::Ask, false, Mode::Auto, &no_auto()), (Mode::Ask, false));
     }
 
     #[test]
