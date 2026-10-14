@@ -26,6 +26,17 @@ describe("the note a picked flavour goes with", () => {
   });
 });
 
+describe("Architecture", () => {
+  it("is read from its note and from its pages, and a Summary doesn't turn it into a Review", () => {
+    expect(readFlavourNote(withFlavourNote("architecture", "map PR 12"))).toEqual({ text: "map PR 12", flavour: "architecture" });
+    expect(flavourOf([u("u1", "map PR 12"), a("a1", "# Overview — x\n\n```mermaid\nflowchart LR\nA-->B\n```")])).toBe("architecture");
+    const parts = [u("u1", "map it"), a("a1", "# Overview — x"), u("u2", "Next"), a("a2", "# Part 1 of 1 — y"), u("u3", "Next"), a("a3", "# Summary — 1 part")];
+    expect(flavourOf(parts)).toBe("architecture");
+    // A Summary after files stays a review's.
+    expect(flavourOf([u("u1", "review"), a("a1", "# File 1 of 1 — a.ts (+1 −0)"), u("u2", "Next"), a("a2", "# Summary — done")])).toBe("review");
+  });
+});
+
 describe("flavourOf", () => {
   const suggestion = [u("u1", "Review PR 12"), a("a1", "# Switch to Review — you asked for a review\n\nOne file at a time.")];
 

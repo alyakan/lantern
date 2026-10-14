@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Mode } from "../types";
 import { FLAVOUR_LABEL, type Flavour } from "../lib/flavour";
-import { BoltIcon, BugIcon, BuildIcon, LearnIcon, ReviewIcon, ShieldIcon, StepsIcon } from "./icons";
+import { ArchitectureIcon, BoltIcon, BugIcon, BuildIcon, LearnIcon, ReviewIcon, ShieldIcon, StepsIcon } from "./icons";
 
 /** A page of the guide: a mode, or one of Step by step's flavours. */
 export type GuideKey = Mode | Flavour;
@@ -17,7 +17,7 @@ interface About {
   example?: string;
 }
 
-export const FLAVOUR_ICON: Record<Flavour, ReactNode> = { build: <BuildIcon />, learn: <LearnIcon />, review: <ReviewIcon />, debug: <BugIcon /> };
+export const FLAVOUR_ICON: Record<Flavour, ReactNode> = { build: <BuildIcon />, learn: <LearnIcon />, review: <ReviewIcon />, debug: <BugIcon />, architecture: <ArchitectureIcon /> };
 
 /** What each mode and flavour does, in more detail than the menus' one line. */
 export const GUIDE: Record<GuideKey, About> = {
@@ -40,7 +40,7 @@ export const GUIDE: Record<GuideKey, About> = {
   steps: {
     label: "Step by step",
     icon: <StepsIcon />,
-    summary: "Claude works one page at a time and stops after each one. It suggests how to work from your task: Build, Learn, Review or Debug.",
+    summary: "Claude works one page at a time and stops after each one. It suggests how to work from your task: Build, Learn, Review, Debug or Architecture.",
     claude: [
       "Reads your task and suggests a flavour, with why, then waits for you to start it",
       "Suggests another one when the work changes (a crash during a build is a debug)",
@@ -105,11 +105,30 @@ export const GUIDE: Record<GuideKey, About> = {
     goodFor: "Bugs whose cause isn't obvious.",
     example: "Saving a form crashes when the title is empty",
   },
+  architecture: {
+    label: "Architecture",
+    icon: <ArchitectureIcon />,
+    summary: "Claude maps how a feature, a fix or a pull request fits together, and you review the design before (or without) any code.",
+    claude: [
+      "Frames what is being mapped and where its edges are",
+      "Draws the whole picture as one diagram, with new, changed and removed parts coloured",
+      "One part per page: its role, what it connects to, what changes in it, and concerns about it",
+      "Ends with a summary of the concerns and your verdicts, and offers to Start Build",
+      "For a PR or a fix it reads the code or the diff; for a feature that isn't built yet it proposes the design and says so",
+    ],
+    you: [
+      "The map stays beside the pages: the part you're on is lit, and clicking a box opens its page",
+      "Agree with or reject each concern; Next sends your verdicts with it",
+      "Open the map at full size to zoom, or slim it down to a handle when you need the room",
+    ],
+    goodFor: "Agreeing on a design before building it, or understanding how a change fits into the system.",
+    example: "Map the architecture of PR 128",
+  },
 };
 
 const GROUPS: { title: string; keys: GuideKey[] }[] = [
   { title: "Modes", keys: ["ask", "auto", "steps"] },
-  { title: "Step by step's flavours", keys: ["build", "learn", "review", "debug"] },
+  { title: "Step by step's flavours", keys: ["build", "learn", "review", "debug", "architecture"] },
 ];
 
 const isFlavour = (k: GuideKey): k is Flavour => k in FLAVOUR_LABEL;

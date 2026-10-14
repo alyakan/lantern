@@ -6,6 +6,7 @@ import { blockLanguage, CALLOUT_LABEL, filePaths, languageHint, languageName, pa
 import { lineKind } from "../lib/diff";
 import { usePrefersDark } from "../lib/theme";
 import { DocIcon } from "./icons";
+import { useDiagram } from "./Diagram";
 
 interface HNode {
   type: string;
@@ -73,7 +74,9 @@ function Pre({ node, children, ...rest }: ComponentProps<"pre"> & { node?: HNode
   // A block with no language is coloured as what it looks like (a diff, JSON, shell, the message's own language).
   const hint = useContext(LanguageHint);
   const { id, label: lang } = blockLanguage(className, text, hint);
-  const highlighted = useHighlight(step || id === "diff" ? "" : text, id);
+  // A mermaid block is drawn as a diagram once it can be; until then (and if it can't) it's the code.
+  const diagram = useDiagram(named?.toLowerCase() === "mermaid" ? text : "");
+  const highlighted = useHighlight(step || id === "diff" || named?.toLowerCase() === "mermaid" ? "" : text, id);
   if (step) return <PlanStepCard step={step} />;
   const copy = () =>
     navigator.clipboard?.writeText(text.replace(/\n$/, "")).then(() => {
@@ -81,14 +84,18 @@ function Pre({ node, children, ...rest }: ComponentProps<"pre"> & { node?: HNode
       setTimeout(() => setCopied(false), 1500);
     });
   return (
-    <div className="code-block">
+    <div className={`code-block${diagram.svg ? " diagram-block" : ""}`}>
       <div className="code-block-head">
-        <span className="code-block-lang">{lang ?? "Code"}</span>
-        <button className="code-block-copy" onClick={copy} aria-label="Copy code">
+        <span className="code-block-lang">{diagram.svg ? "Diagram" : (lang ?? "Code")}</span>
+        {diagram.error && <span className="code-block-note">Couldn't draw this diagram</span>}
+        <button className="code-block-copy" onClick={copy} aria-label={diagram.svg ? "Copy diagram source" : "Copy code"}>
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      {id === "diff" ? (
+      {diagram.svg ? (
+        // Mermaid's own markup, drawn in its strict security level (scripts off, labels sanitised).
+        <div className="diagram" dangerouslySetInnerHTML={{ __html: diagram.svg }} />
+      ) : id === "diff" ? (
         // Monaco has no diff colouring: each line is tinted by what it does, as in the diff view.
         <pre {...rest} className="code-block-colored code-block-diff">
           <code>

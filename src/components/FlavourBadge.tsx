@@ -10,6 +10,7 @@ const HINT: Record<Flavour, string> = {
   learn: "Build, explaining the why of every step",
   review: "Review a pull request or branch, a file per page",
   debug: "Find the cause from evidence, then fix it",
+  architecture: "Map and review how a feature, fix or PR fits together",
 };
 
 /**

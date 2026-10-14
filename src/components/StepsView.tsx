@@ -17,6 +17,10 @@ import { workingVerb } from "../lib/verbs";
 import { ChatStream, type StreamHandlers } from "./ChatStream";
 import { isVerdictNext, parseReviewFile, splitFileTitle, verdictMessage, withoutCue, type ReviewFile, type Verdict } from "../lib/review";
 import { ReviewFileHeader, ReviewFileView, ReviewSummaryTable, type ReviewedFinding } from "./ReviewPages";
+import { ArchitecturePartView } from "./ArchitecturePages";
+import { ArchitectureDock, DEFAULT_DOCK, type DockState } from "./ArchitectureDock";
+import { architectureMap, coversOf, parseArchitecturePart, type ArchitecturePart } from "../lib/architecture";
+import { usePersistentState } from "../lib/layout";
 
 /** What "Update the step with this" sends. */
 export const UPDATE_STEP = "Update the step with this: write the whole step again under its heading, in the same format as before, with what we just discussed worked in and everything else kept.";
@@ -30,6 +34,14 @@ function reviewOf(page: StepPage): ReviewFile | null {
   const main = page.turns[page.main];
   const msg = main.items.find((it) => it.id === main.messageId);
   return msg?.type === "assistant" ? parseReviewFile(page.heading.title, msg.text) : null;
+}
+
+/** An Architecture part page's parts, if its message has the sections. */
+function partOf(page: StepPage): ArchitecturePart | null {
+  if (page.heading?.kind !== "part") return null;
+  const main = page.turns[page.main];
+  const msg = main.items.find((it) => it.id === main.messageId);
+  return msg?.type === "assistant" ? parseArchitecturePart(msg.text) : null;
 }
 
 interface Props extends StreamHandlers {
@@ -181,6 +193,7 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
 
   const heading = page?.heading;
   const review = flavour === "review";
+  const arch = flavour === "architecture";
   const newest = at === last;
   const teach = flavour === "learn";
   // Review: whether a file has come yet, so Next opens the first one or the next.
@@ -195,9 +208,9 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
       else delete page[index];
       return { ...all, [pageKey]: page };
     });
-  const currentReview = page ? reviewOf(page) : null;
+  const currentReview = page ? (reviewOf(page)?.findings ?? partOf(page)?.concerns ?? null) : null;
   const next = () => {
-    const message = currentReview ? verdictMessage(currentReview.findings, verdicts[page.key]) : "Next";
+    const message = currentReview ? verdictMessage(currentReview, verdicts[page.key]) : "Next";
     onNext(message === "Next." ? "Next" : message);
   };
   // Every finding across the reviewed files, for the summary page.
@@ -207,6 +220,20 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
         return r ? r.findings.map((f) => ({ path: r.path, finding: f, verdict: verdicts[p.key]?.[f.index] })) : [];
       })
     : [];
+
+  // Architecture: every concern across the parts, for the summary page.
+  const concerns: ReviewedFinding[] = arch
+    ? pages.flatMap((p) => {
+        const part = partOf(p);
+        return part ? part.concerns.map((f) => ({ path: pageTitle(p) ?? pageLabel(p.heading), finding: f, verdict: verdicts[p.key]?.[f.index] })) : [];
+      })
+    : [];
+
+  // The architecture map stays above the pages from the Overview on; the Overview page is the diagram itself.
+  const map = architectureMap(pages);
+  const [dock, setDock] = usePersistentState<DockState>(`lantern.map.${slot}`, DEFAULT_DOCK);
+  const showMap = !!map && heading?.kind !== "overview" && heading?.kind !== "switch";
+  const openPage = (key: string) => go(pages.findIndex((p) => p.key === key));
 
   return (
     <div className="steps">
@@ -232,6 +259,8 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
         )}
       </div>
 
+      <div className="steps-body">
+      {showMap && <ArchitectureDock map={map} current={page ? coversOf(page) : []} onOpenPage={openPage} state={dock} onState={setDock} />}
       <div className="steps-viewport" ref={viewport}>
         <div className="steps-track" style={{ transform: `translate3d(${-at * 100}%, 0, 0)` }} onTransitionEnd={(e) => e.target === e.currentTarget && setSettled(at)}>
           {pages.map((p, i) => (
@@ -254,10 +283,12 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
                   live={i === last && running}
                   teach={teach}
                   review={review}
+                  arch={arch}
+                  onShowNode={map && !dock.open ? () => setDock({ ...dock, open: true }) : undefined}
                   suggestion={p.heading?.kind === "switch" ? { current: flavour, answer: pages[i + 1]?.turns[0].prompt.text ?? null, onAnswer: i === last && !running && onSend ? onSend : undefined } : null}
                   verdicts={verdicts[p.key]}
                   onVerdict={i === last && !running ? (index, v) => setVerdict(p.key, index, v) : undefined}
-                  summary={p.heading?.kind === "summary" && onSend ? { rows: reviewed, onAction: onSend, busy: running } : null}
+                  summary={p.heading?.kind === "summary" && onSend ? { rows: arch ? concerns : reviewed, onAction: onSend, busy: running, architecture: arch } : null}
                   folder={state.folder}
                   runs={state.backgroundRuns}
                   latest={latestOf.get(p.key) ?? p.main}
@@ -269,6 +300,7 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
           ))}
         </div>
         <JumpToLatest show={pageAway} onJump={jumpToEnd} label="Bottom" />
+      </div>
       </div>
 
       <div className="steps-nav">
@@ -290,8 +322,8 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
             // The suggestion's card has the answers.
             <span className="steps-hint">Start it, or pick another</span>
           ) : (
-            <button className="primary" disabled={waiting || heading?.kind === "done" || heading?.kind === "summary"} title={review ? "Send your verdicts and go on to the next file" : heading?.kind === "plan-complete" ? "Lock the plan: Claude builds exactly these steps, and asks before changing them" : heading?.kind === "plan-update" ? "Approve this change to the locked plan" : "Approve this page and go on to the next"} onClick={next}>
-              {heading?.kind === "done" || heading?.kind === "summary" ? "Done" : heading?.kind === "plan-complete" ? "Lock plan →" : heading?.kind === "plan-update" ? "Approve update →" : review ? (heading?.kind === "file" && heading.n === heading.total ? "Summary →" : filesSoFar ? "Next file →" : "First file →") : flavour === "debug" ? "Next →" : "Next step →"}
+            <button className="primary" disabled={waiting || heading?.kind === "done" || heading?.kind === "summary"} title={review ? "Send your verdicts and go on to the next file" : arch ? "Send your verdicts and go on" : heading?.kind === "plan-complete" ? "Lock the plan: Claude builds exactly these steps, and asks before changing them" : heading?.kind === "plan-update" ? "Approve this change to the locked plan" : "Approve this page and go on to the next"} onClick={next}>
+              {heading?.kind === "done" || heading?.kind === "summary" ? "Done" : heading?.kind === "plan-complete" ? "Lock plan →" : heading?.kind === "plan-update" ? "Approve update →" : review ? (heading?.kind === "file" && heading.n === heading.total ? "Summary →" : filesSoFar ? "Next file →" : "First file →") : arch ? (heading?.kind === "frame" ? "Overview →" : heading?.kind === "overview" ? "First part →" : heading?.kind === "part" && heading.n === heading.total ? "Summary →" : "Next part →") : flavour === "debug" ? "Next →" : "Next step →"}
             </button>
           )
         ) : (
@@ -310,6 +342,9 @@ interface PageProps extends StreamHandlers {
   live: boolean;
   teach: boolean;
   review: boolean;
+  arch: boolean;
+  /** Architecture: show the map again (it was slimmed down), from a part's node chips. */
+  onShowNode?: () => void;
   /**
    * A switch page: the flavour the chat was in, how you answered (the next page's opening prompt), and how to answer
    * (only on the newest page, when idle).
@@ -319,7 +354,7 @@ interface PageProps extends StreamHandlers {
   verdicts?: Record<number, Verdict>;
   onVerdict?: (index: number, v: Verdict | null) => void;
   /** Review's summary page: every finding with its verdict, and the actions after the review. */
-  summary?: { rows: ReviewedFinding[]; onAction: (text: string) => void; busy: boolean } | null;
+  summary?: { rows: ReviewedFinding[]; onAction: (text: string) => void; busy: boolean; architecture?: boolean } | null;
   folder: string | null;
   /** Which turn holds Claude's latest version of the step, whichever one the page shows. */
   latest: number;
@@ -331,16 +366,17 @@ interface PageProps extends StreamHandlers {
   onUpdate?: () => void;
 }
 
-function Page({ page, first, live, teach, review, suggestion, verdicts, onVerdict, summary, folder, latest, runs, onKeep, onUpdate, ...handlers }: PageProps) {
+function Page({ page, first, live, teach, review, arch, onShowNode, suggestion, verdicts, onVerdict, summary, folder, latest, runs, onKeep, onUpdate, ...handlers }: PageProps) {
   const h = page.heading;
   const opening = page.turns[0];
   const asked = opening.prompt.auto ? null : first ? opening.prompt.text : justMovesOn(opening.prompt.text) ? null : promptText(opening.prompt.text);
   const main = page.turns[page.main];
   const reviewFile = reviewOf(page);
-  // Review pages: the file's parts are laid out below, and a closing "Say Next…" is dropped (the buttons say it).
+  const part = partOf(page);
+  // Review and Architecture pages: the parts are laid out below, and a closing "Say Next…" is dropped (the buttons say it).
   const mainItems = main.items
-    .filter((it) => !(reviewFile && it.id === main.messageId))
-    .map((it) => (review && it.type === "assistant" && it.id === main.messageId ? { ...it, text: withoutCue(it.text) } : it));
+    .filter((it) => !((reviewFile || part) && it.id === main.messageId))
+    .map((it) => ((review || arch) && it.type === "assistant" && it.id === main.messageId ? { ...it, text: withoutCue(it.text) } : it));
 
   // While Claude answers in the discussion, follow the end of it if you're there; a new step is read from its top.
   const root = useRef<HTMLDivElement>(null);
@@ -395,8 +431,9 @@ function Page({ page, first, live, teach, review, suggestion, verdicts, onVerdic
       <div className="step-content">
         <ChatStream items={mainItems} folder={folder} live={live && page.main === page.turns.length - 1} {...handlers} />
         {reviewFile && <ReviewFileView file={reviewFile} verdicts={verdicts} onVerdict={onVerdict} />}
+        {part && <ArchitecturePartView part={part} verdicts={verdicts} onVerdict={onVerdict} onShowNode={onShowNode} />}
         {h?.kind === "switch" && h.flavour && suggestion && <SuggestionCard flavour={h.flavour} why={h.title} {...suggestion} />}
-        {summary && <ReviewSummaryTable rows={summary.rows} onAction={summary.onAction} busy={summary.busy} />}
+        {summary && <ReviewSummaryTable rows={summary.rows} onAction={summary.onAction} busy={summary.busy} architecture={summary.architecture} />}
       </div>
       <StepCommands page={page} runs={runs} />
       {page.turns.length > 1 && (

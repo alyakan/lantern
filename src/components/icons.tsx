@@ -178,6 +178,16 @@ export const ReviewIcon = () => (
   </svg>
 );
 
+// Architecture: three boxes joined by lines.
+export const ArchitectureIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" {...base}>
+    <rect x="4.2" y="0.9" width="3.6" height="3" rx="0.8" />
+    <rect x="0.9" y="8.1" width="3.6" height="3" rx="0.8" />
+    <rect x="7.5" y="8.1" width="3.6" height="3" rx="0.8" />
+    <path d="M6 3.9v2M2.7 8.1v-2.1h6.6v2.1" />
+  </svg>
+);
+
 // Three agents joined to one: the canvas of an orchestra.
 export const CanvasIcon = () => (
   <svg width="15" height="14" viewBox="0 0 15 14" {...base}>
