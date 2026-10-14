@@ -19,6 +19,11 @@ export interface ArchitecturePart {
   /** Anything said before the sections. */
   preface: string;
   role: string;
+  /** What it depends on and what depends on it, across which layers. */
+  boundaries: string;
+  /** How it's built and why: its state, errors, concurrency, tests, what else it could have been. */
+  design: string;
+  /** Older pages' sections, from before Architecture reviewed design rather than code. */
   connects: string;
   changes: string;
   concerns: Finding[];
@@ -44,13 +49,15 @@ export function parseArchitecturePart(text: string): ArchitecturePart | null {
   if (parts.length < 3) return null;
   const sections = new Map<string, string>();
   for (let i = 1; i < parts.length; i += 2) sections.set(parts[i].trim().toLowerCase(), parts[i + 1] ?? "");
-  if (!["role", "connects to", "changes", "concerns"].some((s) => sections.has(s))) return null;
+  if (!["role", "boundaries", "design", "connects to", "changes", "concerns"].some((s) => sections.has(s))) return null;
   const covers = COVERS.exec(parts[0]);
   const { findings, clean } = findingsOf(sections.get("concerns") ?? "");
   return {
     covers: covers ? coveredIds(covers[1]) : [],
     preface: parts[0].replace(COVERS, "").trim(),
     role: (sections.get("role") ?? "").trim(),
+    boundaries: (sections.get("boundaries") ?? "").trim(),
+    design: (sections.get("design") ?? "").trim(),
     connects: (sections.get("connects to") ?? "").trim(),
     changes: (sections.get("changes") ?? "").trim(),
     concerns: findings,

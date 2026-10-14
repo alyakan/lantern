@@ -33,6 +33,8 @@ export function ArchitecturePartView({ part, verdicts, onVerdict }: { part: Arch
         </div>
       )}
       {section("Role", part.role, "review-changed")}
+      {section("Boundaries", part.boundaries, "review-changed")}
+      {section("Design", part.design, "review-changed")}
       {section("Connects to", part.connects, "review-changed")}
       {section("Changes", part.changes, "review-changed")}
       <section className="review-section">
