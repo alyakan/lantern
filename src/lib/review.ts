@@ -106,6 +106,21 @@ export function baseBranchOf(items: readonly { type: string; text?: string }[]):
 }
 
 /**
+ * What Claude last set the Changes pane to show with mcp__lantern__review_target (its card header says it, "pr=512
+ * base=auto", see stream_parser::summarize): a pull request, or the checked-out branch against a base (null: Lantern
+ * finds it). Null when it never called it; then the review's text is read instead (prNumberOf, baseBranchOf).
+ */
+export function reviewTargetOf(items: readonly ChatItem[]): { pr: number | null; base: string | null } | null {
+  let found: { pr: number | null; base: string | null } | null = null;
+  for (const it of items) {
+    if (it.type !== "tool" || it.name !== "mcp__lantern__review_target" || it.status === "error") continue;
+    const m = /^pr=(\d+|none) base=(\S+)$/.exec(it.summary.trim());
+    if (m) found = { pr: m[1] === "none" ? null : Number(m[1]), base: m[2] === "auto" ? null : m[2] };
+  }
+  return found;
+}
+
+/**
  * What says which repository a review is in, when the folder holds several: the reviewed files' paths (from their
  * pages), and absolute paths Claude used in its steps (`git -C /…/repo log`, a Read of a file).
  */

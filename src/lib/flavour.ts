@@ -36,21 +36,30 @@ export function savedMode(raw: string | undefined | null): { mode: Mode; flavour
   }
 }
 
+/** What ends a note Lantern puts before a message that carries text of its own (which may have brackets in it). */
+export const NOTE_END = "(end of Lantern's note)]";
+
 /**
  * Put before the first message sent after picking a flavour yourself: Claude starts it without asking (see
  * STEPS_PROMPT), and the chat remembers it (the note stays in the session, so reopening it brings the flavour back).
+ * `guide`: the flavour's own instructions, repeated in the note. A chat that switches partway through has a long way to
+ * look back for them, and it's in the middle of a long chat that Claude starts writing pages its own way.
  */
-export function flavourNote(flavour: Flavour): string {
-  return `[Lantern: this chat switched to ${FLAVOUR_LABEL[flavour]}. The user picked it: work in it from here on, starting each page with ${FLAVOUR_LABEL[flavour]}'s headings, not the format used earlier in this chat.]`;
+export function flavourNote(flavour: Flavour, guide?: string | null): string {
+  const label = FLAVOUR_LABEL[flavour];
+  const note = `[Lantern: this chat switched to ${label}. The user picked it: work in it from here on, starting each page with ${label}'s headings, not the format used earlier in this chat.`;
+  return guide ? `${note} How ${label} works, from Lantern's instructions:\n\n${guide}\n\n${NOTE_END}` : `${note}]`;
 }
-export const withFlavourNote = (flavour: Flavour, text: string) => `${flavourNote(flavour)}\n\n${text}`;
+export const withFlavourNote = (flavour: Flavour, text: string, guide?: string | null) => `${flavourNote(flavour, guide)}\n\n${text}`;
 
-// Older notes named a mode ("Step-by-step Review mode", "Teach mode"); they're read the same way.
+// A note with the flavour's instructions in it runs to its end mark. Older notes named a mode ("Step-by-step Review
+// mode", "Teach mode"); they're read the same way.
+const NOTE_WITH_GUIDE = /^\[Lantern: this chat switched to (Build|Learn|Review|Debug|Architecture)\b[\s\S]*?\(end of Lantern's note\)\]\s*/;
 const NOTE = /^\[Lantern: this chat switched to (?:Step-by-step )?(Build|Learn|Teach|Review|Debug|Architecture)\b[^\]]*\]\s*/;
 
 /** A prompt as you wrote it, and the flavour a note Lantern put before it picked. */
 export function readFlavourNote(text: string): { text: string; flavour: Flavour | null } {
-  const m = NOTE.exec(text);
+  const m = NOTE_WITH_GUIDE.exec(text) ?? NOTE.exec(text);
   if (!m) return { text, flavour: null };
   const word = m[1].toLowerCase();
   return { text: text.slice(m[0].length), flavour: word === "teach" ? "learn" : (word as Flavour) };

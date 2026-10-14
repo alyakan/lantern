@@ -12,11 +12,27 @@ export interface Heading {
   title: string;
   /** A switch page: the flavour Claude suggests. */
   flavour?: Flavour;
+  /** A lettered step ("Step 6b"): the letter, which tells it from step 6a. */
+  sub?: string;
 }
 
 type UserItem = Extract<ChatItem, { type: "user" }>;
 
-const HEADING = /^#{1,3}\s*(Frame|Plan step\s+(\d+)|Plan complete|Plan update|Step\s+(\d+)\s+of\s+(\d+)|File\s+(\d+)\s+of\s+(\d+)|Summary|Done|Evidence(?:\s+(\d+))?|Fix|Switch to\s+(Build|Learn|Review|Debug|Architecture)|Overview|Part\s+(\d+)\s+of\s+(\d+))\b\s*(?:[—–:-]+\s*(.*))?$/i;
+/**
+ * A heading's words, after what can come before them: a "#" heading's marks, or a line that is all bold (Claude writes
+ * `**Plan step 1: …**` too), and a flavour's name Claude puts in front ("## Review · File 2 of 9"). Then the words:
+ * a step may have a letter ("Step 6b") and an "of" that isn't a count ("Step 24 of LUM-2614"), and the title may follow a
+ * dash, a colon, "·" or "|".
+ */
+const HEADING = /^(Frame|Plan step\s+(\d+)([a-z])?|Plan complete|Plan update|Step\s+(\d+)([a-z])?(?:\s+of\s+(\d+|[\w.#-]+))?|File\s+(\d+)\s+of\s+(\d+)|Summary|Done|Evidence(?:\s+(\d+))?|Fix|Switch to\s+(Build|Learn|Review|Debug|Architecture)|Overview|Part\s+(\d+)\s+of\s+(\d+))\b\s*(?:[—–:·|-]+\s*(.*))?$/i;
+
+/** The words of a message's first line when it is set as a heading ("#" marks, or all bold); null when it isn't one. */
+export function headingWords(first: string): string | null {
+  const line = first.trim();
+  const bold = /^\*\*([^*]+?)\*\*:?$/.exec(line);
+  const words = /^#{1,3}\s/.test(line) ? line.replace(/^#{1,3}\s*/, "").replace(/^\*\*([^*]+)\*\*$/, "$1") : bold ? bold[1] : null;
+  return words === null ? null : words.trim().replace(/^(?:Build|Learn|Review|Debug|Architecture)\s*[·|:—–-]\s*/i, "");
+}
 
 /**
  * incremental-pr-review's own file line, when Claude writes the skill's format rather than a "# File N of M" heading:
@@ -36,27 +52,31 @@ export function parseHeading(text: string): Heading | null {
   if (file) return { kind: "file", n: null, total: null, title: fileTitle(file) };
   const summary = SUMMARY_LINE.exec(first);
   if (summary) return { kind: "summary", n: null, total: null, title: summary[1].replace(/\*\*/g, "").trim() };
-  const m = HEADING.exec(first);
+  const words = headingWords(first);
+  const m = words === null ? null : HEADING.exec(words);
   if (!m) return null;
   const word = m[1].toLowerCase();
-  const title = (m[11] ?? "").trim();
-  if (word.startsWith("switch to")) return { kind: "switch", n: null, total: null, title, flavour: m[8].toLowerCase() as Flavour };
-  if (word.startsWith("evidence")) return { kind: "evidence", n: m[7] ? Number(m[7]) : null, total: null, title };
+  const title = (m[13] ?? "").replace(/\*\*/g, "").trim();
+  const sub = (letter: string | undefined) => (letter ? { sub: letter.toLowerCase() } : {});
+  if (word.startsWith("switch to")) return { kind: "switch", n: null, total: null, title, flavour: m[10].toLowerCase() as Flavour };
+  if (word.startsWith("evidence")) return { kind: "evidence", n: m[9] ? Number(m[9]) : null, total: null, title };
   if (word === "fix") return { kind: "fix", n: null, total: null, title };
-  if (word.startsWith("file")) return { kind: "file", n: Number(m[5]), total: Number(m[6]), title };
+  if (word.startsWith("file")) return { kind: "file", n: Number(m[7]), total: Number(m[8]), title };
   if (word === "summary") return { kind: "summary", n: null, total: null, title };
   if (word === "frame") return { kind: "frame", n: null, total: null, title };
   if (word === "overview") return { kind: "overview", n: null, total: null, title };
-  if (word.startsWith("part")) return { kind: "part", n: Number(m[9]), total: Number(m[10]), title };
-  if (word.startsWith("plan step")) return { kind: "plan", n: Number(m[2]), total: null, title };
+  if (word.startsWith("part")) return { kind: "part", n: Number(m[11]), total: Number(m[12]), title };
+  if (word.startsWith("plan step")) return { kind: "plan", n: Number(m[2]), total: null, title, ...sub(m[3]) };
   if (word === "plan update") return { kind: "plan-update", n: null, total: null, title };
   if (word === "plan complete") return { kind: "plan-complete", n: null, total: Number(/(\d+)/.exec(title)?.[1] ?? NaN) || null, title };
   if (word.startsWith("step")) {
+    // "of 5" is the plan's length; "of LUM-2614" is a ticket, not a count.
+    const total = m[6] && /^\d+$/.test(m[6]) ? Number(m[6]) : null;
     // A review written under Build's headings (the chat was switched to Review and Claude kept the old format): a
     // "Step N of M" whose first line is the skill's file line is that file.
     const under = fileLineUnder(text);
-    if (under) return { kind: "file", n: Number(m[3]), total: Number(m[4]), title: fileTitle(under) };
-    return { kind: "step", n: Number(m[3]), total: Number(m[4]), title };
+    if (under) return { kind: "file", n: Number(m[4]), total, title: fileTitle(under) };
+    return { kind: "step", n: Number(m[4]), total, title, ...sub(m[5]) };
   }
   return { kind: "done", n: null, total: null, title };
 }
@@ -93,17 +113,16 @@ export interface StepPage {
   range: { from: number; to: number } | null;
 }
 
-// The heading line comes out of the message: a "#" heading, or the skill's bold file or summary line. A file line
-// right under a "#" heading says the same as the heading, so it goes too.
+// The heading line comes out of the message (it's the page's title): a "#" heading, a bold one, or the skill's bold file
+// or summary line. A file line right under a heading says the same as the heading, so it goes too.
 const withoutHeading = (text: string) => {
   const first = (text.split("\n").find((l) => l.trim()) ?? "").trim();
-  const isLine = FILE_LINE.test(first) || /^\*\*Summary\*\*\s*$/i.test(first);
-  const rest = (isLine ? text.replace(/^\s*[^\n]*\n?/, "") : text.replace(/^\s*#{1,3}[^\n]*\n?/, "")).replace(/^\s+/, "");
-  return !isLine && fileLineUnder(text) ? rest.replace(/^[^\n]*\n?/, "").replace(/^\s+/, "") : rest;
+  const rest = text.replace(/^\s*[^\n]*\n?/, "").replace(/^\s+/, "");
+  return !FILE_LINE.test(first) && fileLineUnder(text) ? rest.replace(/^[^\n]*\n?/, "").replace(/^\s+/, "") : rest;
 };
 
 // Files the skill's way (and Evidence pages without a number) are told apart by title; suggestions by flavour.
-const headingKey = (h: Heading | null) => (h ? `${h.kind}:${h.n ?? (h.kind === "file" || h.kind === "evidence" || h.kind === "plan-update" ? h.title : (h.flavour ?? ""))}` : null);
+const headingKey = (h: Heading | null) => (h ? `${h.kind}:${h.n ?? (h.kind === "file" || h.kind === "evidence" || h.kind === "plan-update" ? h.title : (h.flavour ?? ""))}${h.sub ?? ""}` : null);
 
 /** Added to a message sent with ⌘Enter on a Step-by-step page: do this, and count the step as approved. */
 export const NEXT_SUFFIX = "Once that's done, this step is approved: go on to the next step.";
@@ -199,13 +218,13 @@ export function pageLabel(h: Heading | null): string {
     case "frame":
       return "Frame";
     case "plan":
-      return `Plan step ${h.n}`;
+      return `Plan step ${h.n}${h.sub ?? ""}`;
     case "plan-complete":
       return "Plan complete";
     case "plan-update":
       return "Plan update";
     case "step":
-      return `Step ${h.n} of ${h.total}`;
+      return h.total ? `Step ${h.n}${h.sub ?? ""} of ${h.total}` : `Step ${h.n}${h.sub ?? ""}`;
     case "done":
       return "Done";
     case "file":

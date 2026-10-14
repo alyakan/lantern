@@ -991,6 +991,13 @@ fn set_agent_choice(state: State<'_, AppState>, slot: String, choice: Option<per
     Ok(())
 }
 
+/// Step by step's flavours as the prompt Claude runs with has them: each one's section and its headings. The window
+/// repeats them in its notes (switching flavour, a page it couldn't read), so they're never a copy that has drifted.
+#[tauri::command]
+fn steps_guide() -> Vec<args::FlavourGuide> {
+    args::FLAVOURS.iter().filter_map(|f| args::flavour_guide(f)).collect()
+}
+
 /// Makes an "Always allow" rule from a card (the request itself is answered by respond_permission).
 #[tauri::command]
 fn add_permission_rule(state: State<'_, AppState>, slot: String, rule: permission::rules::NewRule) -> Result<(), String> {
@@ -1491,6 +1498,7 @@ pub fn run() {
             get_file_diff,
             change_summary,
             respond_permission,
+            steps_guide,
             set_agent_choice,
             list_permission_rules,
             add_permission_rule,

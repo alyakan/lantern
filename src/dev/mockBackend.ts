@@ -1086,6 +1086,12 @@ export function installMockBackend() {
           return null;
         case "add_permission_rule":
         case "remove_permission_rule":
+        case "steps_guide":
+          // A short stand-in for the backend's own (args::flavour_guide): enough for the notes to show their headings.
+          return [
+            { flavour: "Build", text: "Build: plan one step per page, then build one step per page.", headings: ["# Frame — <the task in a few words>", "# Plan step N — <step title>", "# Plan complete — N steps", "# Step N of M — <step title>", "# Done — <what was built>"] },
+            { flavour: "Review", text: "Review: one changed file per page, then the summary.", headings: ["# Frame — <the PR's title>", "# File N of M — <path> (+added −removed)", "# Summary — <files reviewed, findings accepted, findings dropped>"] },
+          ];
         case "set_agent_choice":
           return null;
         case "list_permission_rules":
