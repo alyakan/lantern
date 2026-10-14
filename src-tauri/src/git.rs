@@ -42,6 +42,15 @@ fn run(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, Stri
 }
 
 fn run_within(dir: &Path, args: &[&str], path_env: Option<&str>, limit: Duration) -> Result<String, String> {
+    run_raw_within(dir, args, path_env, limit).map(|out| out.trim().to_string())
+}
+
+/// What `run` returns, exactly as git wrote it: for lists of file names (`-z`), where a name's own spaces count.
+fn run_raw(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, String> {
+    run_raw_within(dir, args, path_env, GIT_TIMEOUT)
+}
+
+fn run_raw_within(dir: &Path, args: &[&str], path_env: Option<&str>, limit: Duration) -> Result<String, String> {
     let mut cmd = Command::new("git");
     cmd.args(args).current_dir(dir).env("GIT_TERMINAL_PROMPT", "0").env("GIT_EDITOR", "true").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Some(p) = path_env {
@@ -73,12 +82,13 @@ fn run_within(dir: &Path, args: &[&str], path_env: Option<&str>, limit: Duration
             Err(e) => return Err(format!("Could not run git: {e}")),
         }
     };
-    let text = |b: Vec<u8>| String::from_utf8_lossy(&b).trim().to_string();
+    let text = |b: Vec<u8>| String::from_utf8_lossy(&b).to_string();
     let (stdout, stderr) = (text(out.join().unwrap_or_default()), text(err.join().unwrap_or_default()));
     if status.success() {
         Ok(stdout)
     } else {
-        Err(if stderr.is_empty() { stdout } else { stderr })
+        let (stdout, stderr) = (stdout.trim(), stderr.trim());
+        Err(if stderr.is_empty() { stdout } else { stderr }.to_string())
     }
 }
 
@@ -226,16 +236,22 @@ pub enum Merged {
 fn would_overwrite_ignored(repo: &Path, branch: &str, path_env: Option<&str>) -> Result<Vec<String>, String> {
     // Paths below are relative to the top of the repository, whichever folder inside it the main agent was opened in.
     let root = repo_root(repo, path_env).unwrap_or_else(|| repo.to_path_buf());
-    let added = run(&root, &["diff", "--name-only", "-z", "--diff-filter=AR", &format!("HEAD...{branch}")], path_env)?;
+    // Names are read exactly as git writes them (NUL-separated, untrimmed) and handed back as literal paths: a name that
+    // starts with ":" or holds `*` or `[` would otherwise be read by git as a pathspec pattern, and not match itself.
+    let added = run_raw(&root, &["--literal-pathspecs", "diff", "--name-only", "-z", "--diff-filter=AR", &format!("HEAD...{branch}")], path_env)?;
     let paths: Vec<&str> = added.split('\0').filter(|p| !p.is_empty()).collect();
-    let mut found = Vec::new();
+    let mut tracked = std::collections::HashSet::new();
     for chunk in paths.chunks(200) {
-        let mut args = vec!["ls-files", "-o", "-i", "--exclude-standard", "-z", "--"];
+        let mut args = vec!["--literal-pathspecs", "ls-files", "-z", "--"];
         args.extend(chunk);
-        let hit = run(&root, &args, path_env)?;
-        found.extend(hit.split('\0').filter(|p| !p.is_empty()).map(String::from));
+        for p in run_raw(&root, &args, path_env)?.split('\0').filter(|p| !p.is_empty()) {
+            tracked.insert(p.to_string());
+        }
     }
-    Ok(found)
+    // What the branch adds that the checkout already has on disk without tracking it: since the clean-checkout check already
+    // covers untracked files that aren't ignored, these are ignored ones. Asked of the disk rather than of git's ignore
+    // rules, so a different spelling of the same file (the filesystem here ignores case) is found too.
+    Ok(paths.iter().filter(|p| !tracked.contains(**p) && root.join(p).symlink_metadata().is_ok()).map(|p| p.to_string()).collect())
 }
 
 /// Merges `branch` into `into`, with a merge commit so the branch's own commits stay readable. `into` is the branch the
@@ -535,6 +551,47 @@ mod tests {
         assert_eq!(std::fs::read_to_string(main.path().join("config.local")).unwrap(), "my-secret-token\n", "{result:?}");
         assert!(result.is_err() || matches!(result, Ok(Merged::Conflicts(_))), "{result:?}");
         assert!(dirty(main.path(), None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn names_with_pattern_characters_or_odd_spacing_are_checked_as_the_literal_files_they_are() {
+        let main = repo();
+        std::fs::write(main.path().join(".gitignore"), "*.local\n:*\n[ab]*\n *\n").unwrap();
+        run(main.path(), &["add", "-A"], None).unwrap();
+        run(main.path(), &["commit", "-q", "-m", "ignore"], None).unwrap();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        // Names git would read as pathspec magic or patterns, or that begin with a space.
+        let names = [":(exclude)x.local", ":plain.local", "[ab].local", "a*.local", " lead.local"];
+        for n in names {
+            std::fs::write(wt.folder.join(n), "from worker\n").unwrap();
+            run(&wt.folder, &["--literal-pathspecs", "add", "-f", "--", n], None).unwrap();
+        }
+        run(&wt.folder, &["commit", "-q", "-m", "odd names"], None).unwrap();
+        for n in names {
+            std::fs::write(main.path().join(n), "mine\n").unwrap();
+        }
+        let hit = would_overwrite_ignored(main.path(), &wt.branch, None).unwrap();
+        for n in names {
+            assert!(hit.iter().any(|h| h == n), "{n:?} was missed: {hit:?}");
+        }
+        assert!(merge(main.path(), "main", &wt.branch, "Merge w", None).is_err());
+        for n in names {
+            assert_eq!(std::fs::read_to_string(main.path().join(n)).unwrap(), "mine\n", "{n:?}");
+        }
+    }
+
+    #[test]
+    fn a_different_spelling_of_a_file_on_a_case_insensitive_disk_is_still_found() {
+        let main = repo();
+        std::fs::write(main.path().join("Notes.LOCAL"), "mine\n").unwrap();
+        let on_disk_is_case_blind = main.path().join("notes.local").symlink_metadata().is_ok();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        std::fs::write(wt.folder.join("notes.local"), "theirs\n").unwrap();
+        run(&wt.folder, &["add", "-f", "notes.local"], None).unwrap();
+        run(&wt.folder, &["commit", "-q", "-m", "add"], None).unwrap();
+        let hit = would_overwrite_ignored(main.path(), &wt.branch, None).unwrap();
+        // Where the disk treats the two spellings as one file (the default on a Mac), the merge would write over it.
+        assert_eq!(!hit.is_empty(), on_disk_is_case_blind, "{hit:?}");
     }
 
     #[test]

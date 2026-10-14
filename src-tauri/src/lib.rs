@@ -93,6 +93,12 @@ fn emitter(app: &AppHandle) -> impl Fn(SlotEvent) + Send + Sync + Clone + 'stati
     }
 }
 
+/// The most freedom the workers of main agent `main` may have, from its mode as it is now (Ask when it isn't open).
+fn main_ceiling(state: &AppState, main: &str) -> Mode {
+    let cfg = state.slots.get(main).ok().and_then(|s| s.config.lock().unwrap().clone());
+    cfg.map_or(Mode::Ask, |c| args::worker_mode(c.mode, c.auto_approve))
+}
+
 /// How the worker `worker` runs once its main agent's mode allows no more than `ceiling`: lowered (its claude restarted on
 /// the same conversation, since the mode is a launch flag) when it was running with more freedom than that.
 async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: Mode) {
@@ -130,8 +136,7 @@ impl orchestra::Host for AppHost {
     }
 
     fn worker_mode(&self, main: &str) -> Mode {
-        let cfg = self.app.state::<AppState>().slots.get(main).ok().and_then(|s| s.config.lock().unwrap().clone());
-        cfg.map_or(Mode::Ask, |c| args::worker_mode(c.mode, c.auto_approve))
+        main_ceiling(&self.app.state::<AppState>(), main)
     }
 
     fn worktree_root(&self) -> std::path::PathBuf {
@@ -145,6 +150,7 @@ impl orchestra::Host for AppHost {
     fn spawn_worker(&self, req: orchestra::SpawnRequest) -> orchestra::Fut<'_, Result<(), String>> {
         Box::pin(async move {
             let state = self.app.state::<AppState>();
+            let parent_slot = req.parent.clone();
             let parent = state.slots.get(&req.parent)?;
             let mut cfg = parent.config.lock().unwrap().clone().ok_or("The main agent has no folder open.")?;
             let s = slot_for(&self.app, &state, &req.slot)?;
@@ -161,6 +167,9 @@ impl orchestra::Host for AppHost {
             cfg.helper = helper_config(&s, Role::Worker { name: req.name })?;
             cfg.path_env = login_path(&state).await;
             launch(&self.app, &req.slot, &s, cfg, true).await?;
+            // The main agent's mode may have been lowered while this one started (the mode it was given was read before):
+            // checked again now that it runs, so a restart that missed it can't leave it freer than its main agent.
+            lower_worker(&self.app, &state, &req.slot, main_ceiling(&state, &parent_slot)).await;
             send_text(&self.app, &s, &req.brief).await.map(|_| ())
         })
     }
@@ -183,7 +192,9 @@ impl orchestra::Host for AppHost {
                 Ok(mut guard) => guard.take(),
                 Err(_) => {
                     let pid = s.claude_pid.swap(0, std::sync::atomic::Ordering::SeqCst);
-                    if pid > 1 {
+                    // Only if that pid is still a process this app started: one that has exited may have had its number
+                    // given to something else, and a group signal would reach that.
+                    if pid > 1 && process::is_child_of(pid, std::process::id()) {
                         // Its own session and group (the pid is the group id), as Session::stop signals it.
                         unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) };
                     }
@@ -211,13 +222,14 @@ impl orchestra::Host for AppHost {
 fn enroll(state: &AppState, id: &str, slot: &Slot, role: &Role) {
     if *role == Role::Main {
         state.orchestra.register_main(id);
-        // A call is the main agent's only when the process making it was started directly by its own claude (its helper):
-        // the OS says who is on the other end of the socket. A command the main agent ran in a shell (code a worker wrote,
-        // say) is further down the tree, and doesn't pass for it.
+        // A call is the main agent's only when the process making it is this app's own helper, started directly by the
+        // chat's own claude: the OS says who is on the other end of the socket. A command the main agent ran (code a worker
+        // wrote, say) is another program, and a shell's single command can sit as close as a direct child, so both are
+        // required. Nothing in the process list or environment can pass for it.
         let claude = slot.claude_pid.clone();
         let from_this_chats_claude: permission::bridge::OrchestraAuth = Arc::new(move |caller| {
             let main = claude.load(std::sync::atomic::Ordering::SeqCst);
-            main != 0 && process::is_child_of(caller, main)
+            main != 0 && process::is_child_of(caller, main) && process::runs_this_program(caller)
         });
         slot.bridge.set_orchestra(state.orchestra.handler(id.to_string()), from_this_chats_claude);
     } else {
@@ -1131,9 +1143,9 @@ async fn open_session(
     }
     // Whatever it was saved with, a worker comes back no freer than its main agent is now (a main agent reopened on Ask must
     // not get workers on Auto).
-    if let Some(parent) = settings.worker.as_ref().map(|w| w.parent.clone()) {
-        let main = state.slots.get(&parent).ok().and_then(|p| p.config.lock().unwrap().clone());
-        let ceiling = main.map_or(Mode::Ask, |c| args::worker_mode(c.mode, c.auto_approve));
+    let parent_slot = settings.worker.as_ref().map(|w| w.parent.clone());
+    if let Some(parent) = &parent_slot {
+        let ceiling = main_ceiling(&state, parent);
         let (mode, auto) = args::capped_mode(settings.mode, settings.auto_approve, ceiling);
         settings.mode = mode;
         settings.auto_approve = auto;
@@ -1168,6 +1180,10 @@ async fn open_session(
             if let Err(e) = launch(&app, &slot, &s, cfg, true).await {
                 state.orchestra.forget(&slot);
                 return Err(e);
+            }
+            // Its main agent may have been lowered while this one was opening.
+            if let Some(parent) = &parent_slot {
+                lower_worker(&app, &state, &slot, main_ceiling(&state, parent)).await;
             }
             menu::refresh_recent(&app).await;
             s.changes.lock().unwrap().restore(replayed.edits, replayed.edits_before_last_turn);
