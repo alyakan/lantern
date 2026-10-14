@@ -2119,6 +2119,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_worker_the_user_starts_runs_on_the_main_agents_own_provider_and_mode_cap() {
+        let (host, o, _r, _w) = setup();
+        *host.main_provider.lock().unwrap() = ProviderId::Fake;
+        o.spawn_for_user("s1", "Read the code", None, "shared", None).await.unwrap();
+        let spawned = host.spawned.lock().unwrap().clone();
+        // The fake provider has no Auto mode, so as for spawn_agent the worker starts on Ask.
+        assert_eq!((spawned[0].provider, spawned[0].mode), (ProviderId::Fake, crate::args::Mode::Ask));
+    }
+
+    #[tokio::test]
     async fn a_name_given_by_the_user_is_used_and_a_shared_worker_says_so() {
         let (host, o, repo, _w) = setup();
         o.spawn_for_user("s1", "Read the code", Some(" Research "), "shared", None).await.unwrap();
