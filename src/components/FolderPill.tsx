@@ -87,8 +87,8 @@ export function FolderMenu({ folder, recent, onPick, onBrowse, onClose, onKeyDow
                 <button role="menuitem" className="menu-row" title={m.old} onClick={() => choose(() => relocate.onRelocate(m))}>
                   <FolderIcon />
                   <span className="menu-row-title">
-                    {`${basename(m.old)} moved?`}
-                    <span className="menu-row-path">{m.suggested ? `Relocate to ${m.suggested}…` : `Was ${parentOf(m.old)}`}</span>
+                    {`${basename(m.old)} was moved? Bring its sessions to ${m.suggested ? basename(m.suggested) : "a folder"}…`}
+                    <span className="menu-row-path">{m.suggested ?? `Was in ${parentOf(m.old)}`}</span>
                   </span>
                 </button>
                 <button className="icon moved-folder-dismiss" aria-label={`Dismiss the moved notice for ${basename(m.old)}`} title="Dismiss" onClick={() => relocate.onDismiss(m.old)}>
@@ -127,7 +127,7 @@ export function FolderMenu({ folder, recent, onPick, onBrowse, onClose, onKeyDow
       </button>
       {relocate && (
         <button role="menuitem" className="menu-row" onClick={() => choose(() => relocate.onRelocate(null))}>
-          <span className="menu-row-title">Relocate folder…</span>
+          <span className="menu-row-title">Bring old sessions here…</span>
         </button>
       )}
     </div>

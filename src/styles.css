@@ -1422,10 +1422,25 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .revert-body { display: flex; flex-direction: column; gap: 10px; width: min(480px, calc(100vw - 48px)); max-height: min(560px, calc(100vh - 80px)); padding: 20px 22px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--pane); box-shadow: var(--shadow); font-size: calc(13px * var(--font-scale)); }
 .revert-title { font-size: calc(15px * var(--font-scale)); font-weight: 600; }
 .revert-text { margin: 0; line-height: 1.45; color: var(--text-2); }
-/* Relocating a folder reuses the revert dialog: its option rows, the path under a folder name, and a list that scrolls. */
-.relocate-option { display: flex; align-items: flex-start; gap: 8px; line-height: 1.4; color: var(--text-2); }
-.relocate-option input { flex: none; margin-top: 3px; }
-.relocate-dialog .menu-list { max-height: 180px; overflow-y: auto; }
+/* Bringing old sessions reuses the revert dialog: the project's name and path, rows of places with a checkbox each, the
+   Details choices, and a list that scrolls. */
+.bring-dialog .menu-list { max-height: 200px; overflow-y: auto; }
+.bring-dest { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bring-dest-name { font-weight: 600; }
+.bring-heading { margin: 4px 0 0; font-weight: 600; }
+.bring-row { display: flex; align-items: flex-start; gap: 8px; min-width: 0; padding: 6px 8px; border-radius: 8px; }
+.bring-row:hover { background: var(--bg-subtle); }
+.bring-row input { flex: none; margin-top: 3px; }
+.bring-row.done { color: var(--muted-text); }
+.bring-row-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.bring-row-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12.5px * var(--font-scale)); }
+.bring-row-meta { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.bring-gone { margin-left: 8px; padding: 0 5px; border: 1px solid var(--line-strong); border-radius: 4px; }
+.bring-details summary { cursor: pointer; color: var(--text-2); }
+.bring-option { display: flex; align-items: flex-start; gap: 8px; line-height: 1.4; color: var(--text-2); }
+.bring-option input { flex: none; margin-top: 3px; }
+.bring-none { font-style: italic; color: var(--muted-text); }
+.bring-failures { margin: 4px 0 0; padding-left: 18px; }
 .menu-row-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .revert-warning { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--bg-subtle); border: 1px solid var(--line-strong); line-height: 1.45; }
 .revert-files { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 4px; list-style: none; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }

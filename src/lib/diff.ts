@@ -1,4 +1,5 @@
 import type { Hunk } from "../types";
+import { homeOf } from "./paths";
 
 export type LineKind = "add" | "del" | "ctx" | "meta";
 
@@ -52,7 +53,7 @@ export function relativeTo(path: string, folder: string | null): string {
   if (!folder || !path.startsWith("/")) return path;
   const base = folder.replace(/\/$/, "");
   if (path.startsWith(base + "/")) return path.slice(base.length + 1);
-  const home = /^\/(?:Users|home)\/[^/]+/.exec(base)?.[0];
+  const home = homeOf(base);
   if (home && path.startsWith(home + "/")) return `~${path.slice(home.length)}`;
   const parts = path.split("/").filter(Boolean);
   return parts.length > 3 ? `…/${parts.slice(-3).join("/")}` : path;

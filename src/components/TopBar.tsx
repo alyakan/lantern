@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { BackgroundTask, Status } from "../store";
 import { elapsed } from "../lib/time";
-import type { RecentFolder, SessionSummary } from "../types";
+import type { OldLocation, RecentFolder, SessionSummary } from "../types";
 import { basename } from "../lib/diff";
 import { useAction } from "../lib/actions";
 import { FolderMenu, type RelocateMenu } from "./FolderPill";
@@ -46,6 +46,8 @@ interface Props {
   onClearFailures?: () => void;
   /** The folder menu's relocation parts (see FolderPill). */
   relocate?: RelocateMenu;
+  /** The places this folder's sessions came from that aren't brought over (loaded when History opens), and opens the dialog for them. */
+  bringOld?: { load: () => Promise<OldLocation[]>; onOpen: () => void };
 }
 
 /** How long a stopped task may stay listed before its Stop comes back. */
@@ -62,7 +64,7 @@ function taskKind(type: string): string {
 // No native title bar: the traffic lights sit in the left gutter and the bar drags the window. In the centre, like
 // Xcode's activity viewer: the folder and branch on the left (it opens the folder menu, like Xcode's scheme), what
 // Claude is doing on the right, and a progress bar along its bottom edge while it works.
-export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, sessionId = null, loadSessions, onOpenSession, onNewSession, loadRecent, onPickFolder, openChats = [], onSwitchChat, onCloseChat, branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, relocate }: Props) {
+export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, sessionId = null, loadSessions, onOpenSession, onNewSession, loadRecent, onPickFolder, openChats = [], onSwitchChat, onCloseChat, branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, relocate, bringOld }: Props) {
   // A working chat keeps running in the background when you switch away, so only a starting one blocks switching.
   const busy = status === "starting";
   const backgroundRunning = openChats.some((c) => c.state === "running" || c.state === "waiting" || !!c.background);
@@ -73,6 +75,7 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
   const [menu, setMenu] = useState<"history" | "folders" | "background" | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const [recent, setRecent] = useState<RecentFolder[] | null>(null);
+  const [oldPlaces, setOldPlaces] = useState<OldLocation[] | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const close = () => setMenu(null);
   // The button that opened the menu: closing it (Escape, a pick) puts focus back there, not on the page.
@@ -135,9 +138,13 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
     if (menu === "history") return close();
     opener.current = historyButton.current;
     setSessions(null);
+    setOldPlaces(null);
     setMenu("history");
     loadSessions?.().then(setSessions, () => setSessions([]));
+    bringOld?.load().then(setOldPlaces, () => setOldPlaces([]));
   };
+  // The old sessions the History offers to bring over: those of places not brought over yet.
+  const toBring = (oldPlaces ?? []).filter((p) => !p.already).reduce((n, p) => n + p.sessions, 0);
 
   useAction("new-session", () => onNewSession?.(), canUseSessions && !!onNewSession);
   useAction("session-history", toggleHistory, canUseSessions && !!loadSessions);
@@ -270,6 +277,7 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
               onSwitchChat?.(slot);
             }}
             onCloseChat={onCloseChat}
+            oldSessions={bringOld && toBring > 0 ? { count: toBring, onOpen: () => { close(); bringOld.onOpen(); } } : null}
           />
         )}
         {menu === "folders" && onPickFolder && <FolderMenu folder={folder} recent={recent} onPick={onPickFolder} onBrowse={onOpenFolder} onClose={close} onKeyDown={folderKeys.onKeyDown} relocate={relocate} />}

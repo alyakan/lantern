@@ -18,6 +18,24 @@ describe("HistoryMenu", () => {
     expect(onOpen).toHaveBeenCalledWith("a");
   });
 
+  it("offers the old sessions to bring over, above the list, when there are some", () => {
+    const onOpen = vi.fn();
+    render(<HistoryMenu sessions={sessions} currentId={null} onOpen={() => {}} onClose={() => {}} oldSessions={{ count: 12, onOpen }} />);
+    const row = screen.getByRole("button", { name: "12 sessions from before you moved this project: Bring them here" });
+    expect(row.compareDocumentPosition(screen.getByRole("list", { name: "Past sessions" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(row);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the singular for one session, and shows no row when there's nothing to bring", () => {
+    const { rerender } = render(<HistoryMenu sessions={sessions} currentId={null} onOpen={() => {}} onClose={() => {}} oldSessions={{ count: 1, onOpen: () => {} }} />);
+    expect(screen.getByRole("button", { name: "1 session from before you moved this project: Bring them here" })).toBeInTheDocument();
+    rerender(<HistoryMenu sessions={sessions} currentId={null} onOpen={() => {}} onClose={() => {}} oldSessions={{ count: 0, onOpen: () => {} }} />);
+    expect(screen.queryByText(/from before you moved/)).not.toBeInTheDocument();
+    rerender(<HistoryMenu sessions={sessions} currentId={null} onOpen={() => {}} onClose={() => {}} oldSessions={null} />);
+    expect(screen.queryByText(/from before you moved/)).not.toBeInTheDocument();
+  });
+
   it("lists the chat on screen under Open, not among past sessions", () => {
     const open = [{ slot: "s2", title: "Other project chat", state: "done" as const, sessionId: "x", elsewhere: "web" }];
     render(<HistoryMenu sessions={sessions} currentId="b" onOpen={() => {}} onClose={() => {}} open={open} />);

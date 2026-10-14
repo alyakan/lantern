@@ -534,6 +534,28 @@ const SESSIONS = [
   { id: "c0ffee", title: "Refactor the settings screen into smaller components", updated_ms: Date.now() - 4 * 24 * HOUR, prompts: 11 },
 ];
 
+// The places the demo project's sessions came from, as old_locations finds them: one still there, one gone, one already
+// brought over (so its sessions are in History), and one whose copy fails the first time (so a retry shows).
+const DAY = 24 * HOUR;
+const CODE_OLD = "/Users/you/Documents/Github/acme-api";
+const LAPTOP_OLD = "/Users/you/old-laptop/acme-api";
+const SRC_DONE = "/Users/you/src/acme-api";
+const DOWNLOADS_OLD = "/Users/you/Downloads/acme-api";
+const OLD_LOCATIONS = [
+  { path: CODE_OLD, exists: true, sessions: 7, updated_ms: Date.now() - 2 * DAY, already: false },
+  { path: LAPTOP_OLD, exists: false, sessions: 5, updated_ms: Date.now() - 9 * DAY, already: false },
+  { path: DOWNLOADS_OLD, exists: true, sessions: 2, updated_ms: Date.now() - 20 * DAY, already: false },
+  { path: SRC_DONE, exists: true, sessions: 4, updated_ms: Date.now() - 40 * DAY, already: true },
+];
+const KNOWN_FOLDERS = [
+  { path: FOLDER, exists: true, sessions: 12, updated_ms: Date.now() - 2 * HOUR },
+  ...OLD_LOCATIONS.map(({ already: _already, ...folder }) => folder),
+  { path: "/Users/you/notes", exists: true, sessions: 3, updated_ms: Date.now() - 5 * DAY },
+  { path: "/Users/you/Documents/Github/web-dashboard", exists: false, sessions: 9, updated_ms: Date.now() - 12 * DAY },
+];
+/** The places whose first relocate_folder call has failed, so the retry goes through. */
+const failedOnce = new Set<string>();
+
 // Long enough that a turn needs scrolling, so the pinned prompt header can be seen.
 const LONG_REPLY = Array.from({ length: 8 }, (_, i) => `**Step ${i + 1}.** Retrying only idempotent requests keeps side effects safe; the delay doubles each attempt and is capped so a slow upstream can't stall the UI for long. Tests cover 429, 502, 503 and 504, and assert that 4xx errors other than 429 fail immediately.`).join("\n\n");
 
@@ -898,10 +920,22 @@ export function installMockBackend() {
         case "moved_folder_candidates":
           // A folder from before it moved, and the one place it's at now (the same name, and the only such folder).
           return [{ old: "/Users/you/Documents/Github/web-dashboard", suggested: "/Users/you/projects/web-dashboard" }];
-        case "relocation_preview":
-          return { sessions: 12, bytes: 4_300_000, project_entry: true, memory_files: 3, rules: 2, linked: 0 };
-        case "relocate_folder":
-          return { project_keys: ["allowedTools", "mcpServers"], memory_files: 3, rules: 2 };
+        case "old_locations":
+          return a.folder === FOLDER ? OLD_LOCATIONS : [];
+        case "known_folders":
+          return KNOWN_FOLDERS;
+        case "relocation_preview": {
+          const gone = String(a.old) === LAPTOP_OLD;
+          return { sessions: 5, bytes: 4_300_000, project_entry: !gone, memory_files: gone ? 0 : 3, rules: 2, linked: 0 };
+        }
+        case "relocate_folder": {
+          const old = String(a.old);
+          if (old === DOWNLOADS_OLD && !failedOnce.has(old)) {
+            failedOnce.add(old);
+            return Promise.reject("~/.claude.json changed while Lantern was copying it, so nothing was written. Try again.");
+          }
+          return new Promise((r) => setTimeout(() => r({ project_keys: ["allowedTools", "mcpServers"], memory_files: 3, rules: 2 }), 400));
+        }
         case "title_session":
           // Like the Haiku call: a moment later, a few words.
           return new Promise((r) => setTimeout(() => r(/review/i.test(String(a.prompt)) ? "Review retries PR" : /^Chat \w+/.test(String(a.prompt)) ? String(a.prompt).split(":")[0] : "Retry transient fetch errors"), 600));

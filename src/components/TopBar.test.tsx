@@ -217,6 +217,27 @@ describe("TopBar", () => {
     }
   });
 
+  it("offers the old sessions in History when opened, and opens the dialog from its row", async () => {
+    const onOpen = vi.fn();
+    const load = vi.fn().mockResolvedValue([
+      { path: "/old/acme-api", exists: true, sessions: 7, updated_ms: Date.now(), already: false },
+      { path: "/src/acme-api", exists: true, sessions: 4, updated_ms: Date.now(), already: true },
+    ]);
+    render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadSessions={async () => []} onOpenSession={() => {}} bringOld={{ load, onOpen }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Session history" }));
+    fireEvent.click(await screen.findByRole("button", { name: "7 sessions from before you moved this project: Bring them here" }));
+    expect(load).toHaveBeenCalled();
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows no old sessions row when they are all brought over already", async () => {
+    const load = vi.fn().mockResolvedValue([{ path: "/src/acme-api", exists: true, sessions: 4, updated_ms: Date.now(), already: true }]);
+    render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadSessions={async () => []} onOpenSession={() => {}} bringOld={{ load, onOpen: () => {} }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Session history" }));
+    await screen.findByText("No past sessions in this folder");
+    expect(screen.queryByText(/from before you moved/)).not.toBeInTheDocument();
+  });
+
   it("hides an open review panel", () => {
     const onToggleReview = vi.fn();
     render(<TopBar {...base} reviewCollapsed={false} onToggleReview={onToggleReview} />);

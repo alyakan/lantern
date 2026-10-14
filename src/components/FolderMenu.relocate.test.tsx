@@ -15,43 +15,43 @@ function menu(relocate?: Partial<RelocateMenu>, props: { onClose?: () => void; o
 }
 
 describe("the folder menu's moved folders", () => {
-  it("offers a moved folder, with where it probably went, and relocates it when picked", () => {
+  it("offers a moved folder, with the place its sessions go to, and brings them over when picked", () => {
     const { onClose, onRelocate } = menu({});
     expect(screen.getByText("Moved?")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("menuitem", { name: /web-dashboard moved\?/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /web-dashboard was moved\? Bring its sessions to web-dashboard/ }));
     expect(onClose).toHaveBeenCalled();
     expect(onRelocate).toHaveBeenCalledWith({ old: OLD, suggested: NEW });
   });
 
-  it("says where it was when nothing matches it", () => {
+  it("says where it was, and that its sessions go to a folder to choose, when nothing matches it", () => {
     menu({ moved: [{ old: OLD, suggested: null }] });
-    expect(screen.getByRole("menuitem", { name: /web-dashboard moved\?/ })).toHaveTextContent("Was /Users/you/Documents/Github");
+    expect(screen.getByRole("menuitem", { name: /web-dashboard was moved\? Bring its sessions to a folder/ })).toHaveTextContent("Was in /Users/you/Documents/Github");
   });
 
-  it("dismisses a notice without relocating", () => {
+  it("dismisses a notice without bringing anything over", () => {
     const { onRelocate, onDismiss } = menu({});
     fireEvent.click(screen.getByRole("button", { name: "Dismiss the moved notice for web-dashboard" }));
     expect(onDismiss).toHaveBeenCalledWith(OLD);
     expect(onRelocate).not.toHaveBeenCalled();
   });
 
-  it("opens the Relocate dialog from the folder menu, for any folder", () => {
+  it("opens the Bring old sessions dialog from the folder menu, for the open folder", () => {
     const { onClose, onRelocate } = menu({});
-    fireEvent.click(screen.getByRole("menuitem", { name: "Relocate folder…" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Bring old sessions here…" }));
     expect(onClose).toHaveBeenCalled();
     expect(onRelocate).toHaveBeenCalledWith(null);
   });
 
-  it("shows no moved section, and no relocate item, without the relocation parts", () => {
+  it("shows no moved section, and no bring item, without the moved parts", () => {
     menu(undefined);
     expect(screen.queryByText("Moved?")).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Relocate folder…" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Bring old sessions here…" })).not.toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Open folder…" })).toBeInTheDocument();
   });
 
   it("shows no moved section when nothing is left to offer", () => {
     menu({ moved: [] });
     expect(screen.queryByText("Moved?")).not.toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Relocate folder…" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Bring old sessions here…" })).toBeInTheDocument();
   });
 });

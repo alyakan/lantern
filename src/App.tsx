@@ -24,7 +24,7 @@ import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
 import type { McpServer, MovedFolder, NewRule, SkillEntry, UpdateInfo } from "./types";
 import { LAST_FOLDER, OPEN_CHATS, migrateFolderState, withMovedNote, type Migrated } from "./lib/relocate";
-import { RelocateDialog } from "./components/RelocateDialog";
+import { BringOldSessionsDialog } from "./components/BringOldSessionsDialog";
 import { stepFile, usePersistentState } from "./lib/layout";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyAppearance, type Appearance, type TextSize } from "./lib/theme";
@@ -987,18 +987,20 @@ export default function App() {
   const [pinnedBy, setPinnedBy] = usePersistentState<Record<string, string[]>>("settings.pinnedSessions", {});
 
   // Folders that seem to have moved (their path is gone), and the "moved?" notices the user dismissed. They're found from
-  // the folder menu and at launch; nothing is relocated without the user asking in the Relocate dialog.
+  // the folder menu and at launch; nothing is brought over without the user asking in the dialog.
   const [moved, setMoved] = useState<MovedFolder[]>([]);
   const [dismissedMoves, setDismissedMoves] = usePersistentState<string[]>("relocate.dismissed", []);
-  const [relocating, setRelocating] = useState<{ start: { old: string; suggested: string | null } | null } | null>(null);
+  // The project the old sessions go to (null: not chosen yet), and the place a "moved?" notice was for, if any.
+  const [bringing, setBringing] = useState<{ destination: string | null; from: string | null } | null>(null);
   const refreshMoved = () => api.movedFolderCandidates().then(setMoved, () => setMoved([]));
   useEffect(() => {
     refreshMoved();
   }, []);
-  useAction("relocate-folder", () => setRelocating({ start: null }), true);
+  const bringHere = () => setBringing({ destination: state.folder, from: null });
+  useAction("relocate-folder", bringHere, true);
   const relocateMenu = {
     moved: moved.filter((m) => !dismissedMoves.includes(m.old)),
-    onRelocate: (from: MovedFolder | null) => setRelocating({ start: from ? { old: from.old, suggested: from.suggested } : null }),
+    onRelocate: (from: MovedFolder | null) => (from ? setBringing({ destination: from.suggested, from: from.old }) : bringHere()),
     onDismiss: (old: string) => setDismissedMoves([...dismissedMoves, old]),
   };
   const loadRecentFolders = () => {
@@ -1026,9 +1028,9 @@ export default function App() {
     if (last) setLastFolder(last);
     if (changed[OPEN_CHATS]) setOffer((chats) => chats.map((c) => (c.folder === old ? { ...c, folder: next } : c)));
   };
+  // One place's sessions came over. The dialog stays open for the others, so only the saved state moves here.
   const relocated = (old: string, next: string) => {
     carryFolderState(old, next);
-    setRelocating(null);
     refreshMoved();
   };
   const sessionActions: SessionActions | null = state.folder
@@ -1138,6 +1140,7 @@ export default function App() {
           loadRecent={loadRecentFolders}
           onPickFolder={(path) => startFresh(path)}
           relocate={relocateMenu}
+          bringOld={{ load: () => (state.folder ? api.oldLocations(state.folder) : Promise.resolve([])), onOpen: bringHere }}
           openChats={openChats}
           onSwitchChat={switchTo}
           onCloseChat={closeChat}
@@ -1265,13 +1268,14 @@ export default function App() {
         {palette && <CommandPalette entries={palette} onClose={() => setPalette(null)} />}
         {shortcutsOpen && <ShortcutSheet available={availableActions().map((a) => a.id)} onClose={() => setShortcutsOpen(false)} />}
         {whatsNew && <WhatsNew version={whatsNew.version} notes={whatsNew.notes} onClose={() => setWhatsNew(null)} />}
-        {relocating && (
-          <RelocateDialog
-            current={state.folder}
-            start={relocating.start}
+        {bringing && (
+          <BringOldSessionsDialog
+            destination={bringing.destination}
+            from={bringing.from}
             pickFolder={() => open({ directory: true, multiple: false }).then((picked) => (typeof picked === "string" ? picked : null))}
-            onCancel={() => setRelocating(null)}
-            onDone={relocated}
+            onClose={() => setBringing(null)}
+            onRelocated={relocated}
+            onOpenHistory={state.folder && bringing.destination === state.folder ? () => { setBringing(null); runAction("session-history"); } : undefined}
           />
         )}
         <ModeGuide

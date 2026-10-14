@@ -171,6 +171,45 @@ pub fn moved_candidates(recent: &[RecentFolder], aliases: &[String]) -> Vec<Move
         .collect()
 }
 
+/// A place a folder's sessions were started in, for bringing them over.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OldLocation {
+    pub path: String,
+    pub exists: bool,
+    pub sessions: usize,
+    pub updated_ms: u64,
+    /// A place the folder was already brought over from (one of its aliases): its sessions are in History already.
+    pub already: bool,
+}
+
+/// Whether two paths are the same folder: equal, or the same real path when both exist (a link to it, say).
+pub fn same_place(a: &str, b: &str) -> bool {
+    a == b || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(x), Ok(y)) if x == y)
+}
+
+/// The last component of a path, lowercased: how folders are matched by name.
+fn name_key(path: &str) -> String {
+    Path::new(path).file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default()
+}
+
+/// The places `dest` may have been before: each folder with sessions (see history::session_folders) whose last name is
+/// `dest`'s, ignoring case, and each of `dest`'s aliases. `dest` itself is never listed. Newest first.
+/// (moved_candidates only suggests a folder with the same last name, so a gone folder it suggests for `dest` is one of
+/// these already.)
+pub fn old_locations(folders: &[history::FolderSessions], dest: &str, aliases: &[String]) -> Vec<OldLocation> {
+    let mut found: Vec<OldLocation> = folders
+        .iter()
+        .filter(|f| !same_place(&f.path, dest))
+        .filter_map(|f| {
+            let already = aliases.iter().any(|a| same_place(a, &f.path));
+            let named_alike = name_key(&f.path) == name_key(dest);
+            (already || named_alike).then(|| OldLocation { path: f.path.clone(), exists: f.exists, sessions: f.sessions, updated_ms: f.updated_ms, already })
+        })
+        .collect();
+    found.sort_by(|a, b| b.updated_ms.cmp(&a.updated_ms).then_with(|| a.path.cmp(&b.path)));
+    found
+}
+
 /// What a move would bring, read without changing anything.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Preview {
@@ -187,7 +226,7 @@ pub struct Preview {
 
 pub fn preview(projects_root: &Path, claude_json: &Path, rules: &FolderRules, old: &str) -> Preview {
     let (sessions, bytes, linked) = match history::project_dir(projects_root, Path::new(old)) {
-        Some(dir) => session_files(&dir),
+        Some(dir) => session_files(&dir, old),
         None => (0, 0, 0),
     };
     let (memory, memory_linked) = memory_files(projects_root, old);
@@ -206,23 +245,20 @@ fn is_link(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
 }
 
-/// The transcripts in a project directory, the bytes they and their `<id>/` directories take, and the links skipped.
-fn session_files(dir: &Path) -> (usize, u64, usize) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return (0, 0, 0) };
-    let (mut sessions, mut bytes, mut linked) = (0, 0, 0);
-    for entry in entries.filter_map(Result::ok) {
-        let path = entry.path();
-        if path.extension().is_none_or(|x| x != "jsonl") {
-            continue;
-        }
-        if is_link(&path) {
-            linked += 1;
-        } else if history::is_regular_file(&path) {
+/// The sessions of `folder` in a project directory, the bytes they and their `<id>/` directories take, and the links
+/// skipped. Sessions are the ones the history lists for the folder (a typed prompt, started in it).
+fn session_files(dir: &Path, folder: &str) -> (usize, u64, usize) {
+    let (mut sessions, mut bytes) = (0, 0);
+    for (started_in, found) in history::user_sessions_in(dir) {
+        if started_in == folder {
             sessions += 1;
-            bytes += std::fs::metadata(&path).map_or(0, |m| m.len());
-            bytes += tree_bytes(&path.with_extension(""));
+            bytes += std::fs::metadata(&found.path).map_or(0, |m| m.len());
+            bytes += tree_bytes(&found.path.with_extension(""));
         }
     }
+    let linked = std::fs::read_dir(dir).map_or(0, |entries| {
+        entries.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "jsonl") && is_link(p)).count()
+    });
     (sessions, bytes, linked)
 }
 
@@ -487,7 +523,8 @@ fn rebase(rule: Rule, from: &str, to: &str) -> Rule {
     }
 }
 
-/// Which of the optional parts of a move to carry over. Permission rules and the alias always are.
+/// Which of the optional parts of a move to carry over. The alias always is. `project_settings` covers every kind of
+/// permission: Claude Code's entry for the folder and Lantern's own "Always allow" rules, so unchecking it brings none.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
 pub struct Options {
     #[serde(default)]
@@ -508,7 +545,8 @@ pub struct Outcome {
 pub fn relocate(projects_root: &Path, claude_json: &Path, rules: &FolderRules, relocations: &Relocations, old: &str, new: &str, options: Options) -> Result<Outcome, String> {
     let project_keys = if options.project_settings { carry_project_entry(claude_json, old, new)? } else { vec![] };
     let memory_files = if options.memory { carry_memory(projects_root, old, new)? } else { 0 };
-    let rules = carry_rules(rules, old, new);
+    // Allowing things without asking is part of a project's permissions: it follows the same choice.
+    let rules = if options.project_settings { carry_rules(rules, old, new) } else { 0 };
     relocations.register(old, new);
     Ok(Outcome { project_keys, memory_files, rules })
 }
@@ -888,6 +926,102 @@ mod tests {
     }
 
     #[test]
+    fn a_preview_counts_the_sessions_the_history_lists_for_the_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let projects = root.path().join("projects");
+        let old = root.path().join("old-app");
+        let old_s = old.to_string_lossy().into_owned();
+        let claude = claude_json(root.path(), "{}");
+        session(&projects, &old, "p1", &old_s, "hi");
+        // Automation with no typed prompt, in the same directory: not one of the folder's sessions.
+        let line = json!({"type": "user", "cwd": old_s, "entrypoint": "cli", "isMeta": true, "message": {"role": "user", "content": "meta"}});
+        std::fs::write(projects.join(encode_folder(&old)).join("bot.jsonl"), line.to_string()).unwrap();
+        assert_eq!(preview(&projects, &claude, &FolderRules::load(None), &old_s).sessions, 1);
+    }
+
+    fn folder_sessions(path: &Path, sessions: usize, updated_ms: u64) -> history::FolderSessions {
+        history::FolderSessions { path: path.to_string_lossy().into_owned(), exists: path.is_dir(), sessions, updated_ms }
+    }
+
+    #[test]
+    fn the_same_named_folder_is_found_in_every_place_it_was_newest_first() {
+        // Inside the crate's target dir: a temp dir's path is a scratch place, which the listing leaves out.
+        let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
+        let w = work.path();
+        let (dest, old, laptop, upper, unrelated) = (w.join("projects/acme-api"), w.join("old/acme-api"), w.join("laptop/acme-api"), w.join("src/ACME-API"), w.join("src/web"));
+        for d in [&dest, &old, &upper, &unrelated] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let folders = [folder_sessions(&unrelated, 4, 50), folder_sessions(&upper, 2, 30), folder_sessions(&laptop, 5, 40), folder_sessions(&old, 3, 10), folder_sessions(&dest, 9, 90)];
+        let found = old_locations(&folders, &dest.to_string_lossy(), &[]);
+        let shape: Vec<(String, bool, usize, bool)> = found.iter().map(|l| (l.path.clone(), l.exists, l.sessions, l.already)).collect();
+        assert_eq!(
+            shape,
+            vec![
+                (laptop.to_string_lossy().into_owned(), false, 5, false),
+                (upper.to_string_lossy().into_owned(), true, 2, false),
+                (old.to_string_lossy().into_owned(), true, 3, false),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_place_already_brought_over_is_listed_as_done_even_with_another_name() {
+        let w = std::path::PathBuf::from("/Users/me/code");
+        let (dest, alias) = (w.join("acme-api"), w.join("acme-old"));
+        let found = old_locations(&[folder_sessions(&alias, 4, 20)], &dest.to_string_lossy(), &[alias.to_string_lossy().into_owned()]);
+        assert_eq!(found, vec![OldLocation { path: alias.to_string_lossy().into_owned(), exists: false, sessions: 4, updated_ms: 20, already: true }]);
+        // Without the alias, the same folder isn't a candidate: its name differs.
+        assert!(old_locations(&[folder_sessions(&alias, 4, 20)], &dest.to_string_lossy(), &[]).is_empty());
+    }
+
+    #[test]
+    fn the_places_are_found_from_real_transcripts_and_a_copy_counts_once() {
+        let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
+        let (w, projects) = (work.path(), work.path().join("projects"));
+        let (dest, same_case, gone, alias, web) = (w.join("now/acme-api"), w.join("src/ACME-API"), w.join("laptop/acme-api"), w.join("before/old-name"), w.join("src/web"));
+        for d in [&dest, &same_case, &web] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        session(&projects, &dest, "d1", &s(&dest), "mine");
+        session(&projects, &same_case, "u1", &s(&same_case), "one");
+        session(&projects, &gone, "g1", &s(&gone), "two");
+        session(&projects, &gone, "g2", &s(&gone), "three");
+        session(&projects, &alias, "a1", &s(&alias), "four");
+        session(&projects, &web, "w1", &s(&web), "five");
+        session(&projects, Path::new("/tmp/acme-api"), "t1", "/tmp/acme-api", "probe");
+        // Automation with no typed prompt, in the gone folder's directory.
+        let bot = json!({"type": "user", "cwd": s(&gone), "entrypoint": "cli", "isMeta": true, "message": {"role": "user", "content": "meta"}});
+        std::fs::write(projects.join(encode_folder(&gone)).join("bot.jsonl"), bot.to_string()).unwrap();
+        // Copy-on-open: g1 was copied into the destination's directory, keeping its first cwd (the gone folder).
+        std::fs::copy(projects.join(encode_folder(&gone)).join("g1.jsonl"), projects.join(encode_folder(&dest)).join("g1.jsonl")).unwrap();
+
+        let folders = history::session_folders(&projects);
+        let found = old_locations(&folders, &s(&dest), &[s(&alias)]);
+        let mut shape: Vec<(String, bool, usize, bool)> = found.iter().map(|l| (l.path.clone(), l.exists, l.sessions, l.already)).collect();
+        shape.sort();
+        assert_eq!(
+            shape,
+            vec![(s(&alias), false, 1, true), (s(&gone), false, 2, false), (s(&same_case), true, 1, false)],
+            "the destination, the web folder and the temp folder are left out; the copy of g1 counts once, for the gone folder"
+        );
+        // The destination's own sessions: its one prompted session, not the copy of g1 that's in its directory.
+        assert_eq!(folders.iter().find(|f| f.path == s(&dest)).map(|f| f.sessions), Some(1));
+    }
+
+    #[test]
+    fn the_destination_is_never_listed_not_even_through_a_link() {
+        let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
+        let (dest, link) = (work.path().join("projects/acme-api"), work.path().join("links/acme-api"));
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&dest, &link).unwrap();
+        let found = old_locations(&[folder_sessions(&dest, 9, 90), folder_sessions(&link, 3, 10)], &dest.to_string_lossy(), &[]);
+        assert!(found.is_empty(), "{found:?}");
+    }
+
+    #[test]
     fn a_move_records_the_alias_and_carries_only_what_was_chosen() {
         let root = tempfile::tempdir().unwrap();
         let projects = root.path().join("projects");
@@ -906,6 +1040,29 @@ mod tests {
         let all = relocate(&projects, &claude, &rules, &relocations, &old.to_string_lossy(), &new.to_string_lossy(), Options { project_settings: true, memory: true }).unwrap();
         assert_eq!(all.project_keys, vec!["allowedTools"]);
         assert_eq!(all.memory_files, 1);
+    }
+
+    #[test]
+    fn always_allow_rules_follow_the_permissions_choice() {
+        let root = tempfile::tempdir().unwrap();
+        let projects = root.path().join("projects");
+        let (old, new) = (root.path().join("old-app"), root.path().join("new-app"));
+        std::fs::create_dir_all(&new).unwrap();
+        let claude = claude_json(root.path(), &json!({"projects": {}}).to_string());
+        let rules = FolderRules::load(None);
+        let (old_key, new_key) = (rules::folder_key(&old), rules::folder_key(&new));
+        rules.add(&old_key, Rule { tool: "Bash".into(), matcher: Matcher::Exact { text: "npm run build".into() } });
+        let relocations = Relocations::load(None);
+        let (old_s, new_s) = (old.to_string_lossy(), new.to_string_lossy());
+        // Permissions unchecked: no "Always allow" is brought over, though the move itself is still recorded.
+        let without = relocate(&projects, &claude, &rules, &relocations, &old_s, &new_s, Options { project_settings: false, memory: true }).unwrap();
+        assert_eq!(without.rules, 0);
+        assert!(rules.for_folder(&new_key).is_empty());
+        assert_eq!(relocations.aliases_of(&new_s), vec![old_s.clone().into_owned()]);
+        // Checked: they come along.
+        let with = relocate(&projects, &claude, &rules, &relocations, &old_s, &new_s, Options { project_settings: true, memory: false }).unwrap();
+        assert_eq!(with.rules, 1);
+        assert_eq!(rules.for_folder(&new_key).len(), 1);
     }
 
     /// A folder with a secret outside it, and the old folder's transcript directory (`root/projects`).
