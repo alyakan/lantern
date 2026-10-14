@@ -14,7 +14,7 @@ const CATALOGUE = [
   { id: "new-session", title: "New Session", group: "File", key: "n", menu: true, native: true },
   { id: "open-folder", title: "Open Folder…", group: "File", key: "o", menu: true, native: true },
   // In the palette and the shortcut sheet only: no native menu item, so the webview's keydown runs it.
-  { id: "relocate-folder", title: "Relocate Folder…", group: "File", key: "r", shift: true },
+  { id: "relocate-folder", title: "Bring old sessions here…", group: "File", key: "r", shift: true },
   { id: "session-history", title: "Session History", group: "View", key: "k", menu: true, skipInEditor: true },
   { id: "find-file", title: "Find File…", group: "Search", key: "p", menu: true, native: true },
   { id: "search-files", title: "Search in Files…", group: "Search", key: "f", shift: true, menu: true, native: true },

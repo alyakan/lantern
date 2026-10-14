@@ -30,12 +30,14 @@ interface Props {
   onSwitch?: (slot: string) => void;
   /** Closes an open chat. Not offered while it's working or waiting for you: stop it or answer first. */
   onCloseChat?: (slot: string) => void;
+  /** Sessions from places this folder was before that aren't brought over yet, and the way to bring them. */
+  oldSessions?: { count: number; onOpen: () => void } | null;
 }
 
-// The dropdown under the title bar's History button: search, then the open chats (the one on screen first), then past
-// sessions for this folder, pinned ones first and the rest newest first. Each past session has its own actions, when
-// there's a folder to act in (see SessionActionsContext).
-export function HistoryMenu({ sessions, currentId, onOpen, onClose, open = [], onSwitch, onCloseChat }: Props) {
+// The dropdown under the title bar's History button: search, then the old sessions to bring over (when there are any),
+// then the open chats (the one on screen first), then past sessions for this folder, pinned ones first and the rest
+// newest first. Each past session has its own actions, when there's a folder to act in (see SessionActionsContext).
+export function HistoryMenu({ sessions, currentId, onOpen, onClose, open = [], onSwitch, onCloseChat, oldSessions = null }: Props) {
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
   const matches = (title: string) => !q || title.toLowerCase().includes(q);
@@ -64,6 +66,11 @@ export function HistoryMenu({ sessions, currentId, onOpen, onClose, open = [], o
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => e.key === "Escape" && onClose()}
       />
+      {oldSessions && oldSessions.count > 0 && (
+        <button className="menu-row bring-old" onClick={oldSessions.onOpen}>
+          <span className="menu-row-title">{`${oldSessions.count} ${oldSessions.count === 1 ? "session" : "sessions"} from before you moved this project: Bring them here`}</span>
+        </button>
+      )}
       {(current || shownOpen.length > 0) && (
         <>
           <div className="menu-heading">Open</div>

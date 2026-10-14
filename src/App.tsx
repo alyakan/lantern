@@ -996,10 +996,11 @@ export default function App() {
   useEffect(() => {
     refreshMoved();
   }, []);
-  useAction("relocate-folder", () => setBringing({ destination: state.folder, from: null }), true);
+  const bringHere = () => setBringing({ destination: state.folder, from: null });
+  useAction("relocate-folder", bringHere, true);
   const relocateMenu = {
     moved: moved.filter((m) => !dismissedMoves.includes(m.old)),
-    onRelocate: (from: MovedFolder | null) => setBringing(from ? { destination: from.suggested, from: from.old } : { destination: state.folder, from: null }),
+    onRelocate: (from: MovedFolder | null) => (from ? setBringing({ destination: from.suggested, from: from.old }) : bringHere()),
     onDismiss: (old: string) => setDismissedMoves([...dismissedMoves, old]),
   };
   const loadRecentFolders = () => {
@@ -1139,6 +1140,7 @@ export default function App() {
           loadRecent={loadRecentFolders}
           onPickFolder={(path) => startFresh(path)}
           relocate={relocateMenu}
+          bringOld={{ load: () => (state.folder ? api.oldLocations(state.folder) : Promise.resolve([])), onOpen: bringHere }}
           openChats={openChats}
           onSwitchChat={switchTo}
           onCloseChat={closeChat}
