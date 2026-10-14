@@ -441,12 +441,15 @@ fn checked_model(model: Option<String>) -> Result<Option<String>, String> {
 async fn set_model(state: State<'_, AppState>, slot: String, model: Option<String>) -> Result<(), String> {
     let model = checked_model(model)?;
     let Ok(s) = state.slots.get(&slot) else { return Ok(()) };
+    let mut live = true;
     if let Some(cfg) = s.config.lock().unwrap().as_mut() {
         cfg.model = model.clone();
+        // A provider whose model is fixed for the session takes it at the next start, which reads it from the config.
+        live = cfg.provider.provider().capabilities().model_switchable;
     }
     let mut session = s.session.lock().await;
     match session.as_mut() {
-        Some(x) if x.is_running() => x.set_model(model.as_deref()).await,
+        Some(x) if live && x.is_running() => x.set_model(model.as_deref()).await,
         _ => Ok(()),
     }
 }
@@ -593,6 +596,8 @@ async fn claude_mcp(state: &AppState, slot: &str, args: Vec<String>) -> Result<S
         // Claude Code's own command: another provider has no `mcp`, so adding one means saying what happens here.
         let binary = match cfg.provider {
             ProviderId::Claude => cfg.binary.clone(),
+            #[cfg(test)]
+            ProviderId::Fake => return Err("The fake CLI has no mcp command.".into()),
         };
         (binary, cfg.folder.clone())
     };
