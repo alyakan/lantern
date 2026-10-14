@@ -405,13 +405,25 @@ fn carry_project_entry_with(claude_json: &Path, old: &str, new: &str, between_re
     Ok(copied)
 }
 
+/// Writes `bytes` to `path`, made with `mode` from the start rather than changed afterwards: ~/.claude.json can hold
+/// secrets (MCP env values), so a copy of it is never readable by others, not even for a moment.
+fn write_with_mode(path: &Path, bytes: &[u8], mode: u32) -> io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(mode).open(path)?;
+    // A file that was already there keeps its old mode when opened, so the mode is set before anything goes in.
+    file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+    file.write_all(bytes)
+}
+
 /// Backs the file up, then writes `doc` in its place: through a temporary file, with the original's permissions. Nothing is
 /// written if the file changed since `original` was read (Claude Code writes it often).
 fn write_claude_json(path: &Path, original: &[u8], doc: &Value, between_read_and_write: impl FnOnce()) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
     let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| ".claude.json".into());
-    let perms = std::fs::metadata(path).map_err(|e| e.to_string())?.permissions();
+    let mode = std::fs::metadata(path).map_err(|e| e.to_string())?.permissions().mode() & 0o777;
     let backup = path.with_file_name(format!("{name}.lantern-backup"));
-    std::fs::write(&backup, original).and_then(|()| std::fs::set_permissions(&backup, perms.clone())).map_err(|e| format!("Couldn't back up {} first, so nothing was changed: {e}", path.display()))?;
+    write_with_mode(&backup, original, mode).map_err(|e| format!("Couldn't back up {} first, so nothing was changed: {e}", path.display()))?;
     between_read_and_write();
     let now = std::fs::read(path).map_err(|e| format!("Couldn't read {} again: {e}", path.display()))?;
     if now != original {
@@ -420,7 +432,7 @@ fn write_claude_json(path: &Path, original: &[u8], doc: &Value, between_read_and
     let mut text = serde_json::to_string_pretty(doc).map_err(|e| e.to_string())?;
     text.push('\n');
     let tmp = path.with_file_name(format!("{name}.lantern-tmp"));
-    let written = std::fs::write(&tmp, text).and_then(|()| std::fs::set_permissions(&tmp, perms)).and_then(|()| std::fs::rename(&tmp, path));
+    let written = write_with_mode(&tmp, text.as_bytes(), mode).and_then(|()| std::fs::rename(&tmp, path));
     if let Err(e) = written {
         let _ = std::fs::remove_file(&tmp);
         return Err(format!("Couldn't write {}: {e}. The copy before the change is {}.", path.display(), backup.display()));
@@ -771,6 +783,24 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         carry_project_entry(&path, "/w/old", "/w/new").unwrap();
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_backup_is_private_even_when_an_open_old_one_was_not() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = claude_json(dir.path(), r#"{"projects": {"/w/old": {"allowedTools": []}}}"#);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        // A backup left by an earlier run, readable by others: it must not stay that way with the new content in it.
+        let backup = dir.path().join(".claude.json.lantern-backup");
+        std::fs::write(&backup, "old").unwrap();
+        std::fs::set_permissions(&backup, std::fs::Permissions::from_mode(0o644)).unwrap();
+        carry_project_entry(&path, "/w/old", "/w/new").unwrap();
+        assert_eq!(std::fs::metadata(&backup).unwrap().permissions().mode() & 0o777, 0o600);
+        assert!(std::fs::read_to_string(&backup).unwrap().contains("allowedTools"));
+        // And no temporary file is left behind.
+        assert!(!dir.path().join(".claude.json.lantern-tmp").exists());
     }
 
     #[test]
