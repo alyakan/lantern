@@ -30,7 +30,7 @@ pub mod updates;
 
 use args::{HelperConfig, Mode, Role};
 use changes::FileDiff;
-use provider::ProviderId;
+use provider::{ProviderId, ProviderInfo};
 use session::{EditHook, Session, SessionConfig};
 use slots::{Slot, SlotEvent, Slots};
 use std::sync::{Arc, OnceLock};
@@ -410,13 +410,14 @@ async fn locate_claude(path_override: Option<String>) -> Result<String, String> 
 }
 
 #[tauri::command]
-async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String, claude_path: String, folder: String, settings: Settings) -> Result<(), String> {
+async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String, claude_path: String, folder: String, settings: Settings) -> Result<ProviderInfo, String> {
     let s = slot_for(&app, &state, &slot)?;
     let cfg = new_config(&state, &s, claude_path, folder, settings, None).await?;
     enroll(&state, &slot, &s, &cfg.helper.role);
+    let provider = cfg.provider.info();
     launch(&app, &slot, &s, cfg, true).await?;
     menu::refresh_recent(&app).await;
-    Ok(())
+    Ok(provider)
 }
 
 /// Restarts a chat's claude on the same session (`--resume`), e.g. with a new permission mode or effort.
@@ -1175,12 +1176,14 @@ async fn recent_folders() -> Result<Vec<history::RecentFolder>, String> {
 }
 
 /// What opening a past session brings back: its events; the folder it was started in, when that was a place this folder
-/// moved from (the chat tells Claude once); and why it isn't resumed, when it could only be read (its copy failed).
+/// moved from (the chat tells Claude once); and why it isn't resumed, when it could only be read (its copy failed). `provider`
+/// is the CLI the chat runs on, and what that can do.
 #[derive(serde::Serialize)]
 pub struct OpenedSession {
     events: Vec<ui_event::UiEvent>,
     moved_from: Option<String>,
     read_only: Option<String>,
+    provider: ProviderInfo,
 }
 
 /// Replays a past session into a chat, refills its change tracker from the session's edits, and continues it with `--resume`.
@@ -1212,6 +1215,7 @@ async fn open_session(
     let worker = settings.worker.clone();
     let cfg = new_config(&state, &s, claude_path, folder, settings, Some(session_id.clone())).await?;
     enroll(&state, &slot, &s, &cfg.helper.role);
+    let provider = cfg.provider.info();
     let root = projects_root()?;
     let folder = cfg.folder.clone();
     let aliases = aliases_for(&state, &folder.to_string_lossy());
@@ -1228,7 +1232,7 @@ async fn open_session(
     match ready {
         relocate::Ready::ReadOnly { source, reason } => {
             let events = tauri::async_runtime::spawn_blocking(move || history::replay(&source).events).await.map_err(|e| e.to_string())?;
-            Ok(OpenedSession { events, moved_from: None, read_only: Some(reason) })
+            Ok(OpenedSession { events, moved_from: None, read_only: Some(reason), provider })
         }
         relocate::Ready::Resumable(path) => {
             let replayed = tauri::async_runtime::spawn_blocking(move || history::replay(&path)).await.map_err(|e| e.to_string())?;
@@ -1246,7 +1250,7 @@ async fn open_session(
             }
             menu::refresh_recent(&app).await;
             s.changes.lock().unwrap().restore(replayed.edits, replayed.edits_before_last_turn);
-            Ok(OpenedSession { events: replayed.events, moved_from, read_only: None })
+            Ok(OpenedSession { events: replayed.events, moved_from, read_only: None, provider })
         }
     }
 }

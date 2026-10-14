@@ -27,6 +27,21 @@ export interface Hunk {
   lines: string[];
 }
 
+/** What an agent provider (the CLI behind a chat) can do (src-tauri/src/provider/mod.rs): the window hides what it can't. */
+export interface Capabilities {
+  supports_auto_mode: boolean;
+  supports_advisor: boolean;
+  reports_cost_usd: boolean;
+  supports_skills: boolean;
+  supports_effort: boolean;
+  model_switchable: boolean;
+}
+
+export interface ProviderInfo {
+  id: string;
+  capabilities: Capabilities;
+}
+
 export type UiEvent =
   | { kind: "session_started"; session_id: string; model: string; cwd: string; permission_mode: string; claude_version: string }
   | { kind: "user_text"; text: string; at?: number }
@@ -61,7 +76,7 @@ export type UiEvent =
   | { kind: "shell_done"; id: string; code: number | null; stopped: boolean }
   | { kind: "shell_secret"; id: string; secret: boolean }
   /** On the main agent's chat: it started a worker, whose chat is the slot `worker` (open before its first event). */
-  | { kind: "agent_spawned"; worker: string; name: string; brief: string; folder: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; mode: Mode }
+  | { kind: "agent_spawned"; worker: string; name: string; brief: string; folder: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; mode: Mode; provider?: ProviderInfo }
   /** On the main agent's chat: a note from Lantern for it (a worker finished, crashed or waits on the user). */
   | { kind: "agent_wake"; text: string }
   /** On a worker's chat: the main agent sent it this. */
@@ -156,6 +171,8 @@ export interface OpenedSession {
   events: UiEvent[];
   moved_from: string | null;
   read_only: string | null;
+  /** The CLI the chat runs on, and what it can do. */
+  provider?: ProviderInfo;
 }
 
 export interface FileDiff {

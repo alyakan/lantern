@@ -142,7 +142,19 @@ pub enum UiEvent {
     ShellSecret { id: String, secret: bool },
     /// On the main agent's slot: it started a worker, whose chat is the slot `worker`. Sent before the worker's claude
     /// starts, so the UI has the chat open when its first event arrives.
-    AgentSpawned { worker: String, name: String, brief: String, folder: String, branch: Option<String>, base: Option<String>, isolation: String, mode: String },
+    /// `provider`: the CLI it runs on and what that can do, for hiding what it can't (see provider::Capabilities).
+    AgentSpawned {
+        worker: String,
+        name: String,
+        brief: String,
+        folder: String,
+        branch: Option<String>,
+        base: Option<String>,
+        isolation: String,
+        mode: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        provider: Option<crate::provider::ProviderInfo>,
+    },
     /// On the main agent's slot: a note from Lantern for it (a worker finished, crashed or waits on the user), to be sent
     /// as a message when the main agent is idle. Several are joined into one.
     AgentWake { text: String },
@@ -164,6 +176,15 @@ pub enum UiEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_spawned_worker_carries_its_provider_when_it_is_known_and_the_field_is_absent_otherwise() {
+        let ev = |provider| UiEvent::AgentSpawned { worker: "w1".into(), name: "n".into(), brief: "b".into(), folder: "/f".into(), branch: None, base: None, isolation: "shared".into(), mode: "ask".into(), provider };
+        let with = serde_json::to_value(ev(Some(crate::provider::ProviderId::Claude.info()))).unwrap();
+        assert_eq!(with["provider"]["id"], "claude");
+        assert_eq!(with["provider"]["capabilities"]["supports_auto_mode"], true);
+        assert!(serde_json::to_value(ev(None)).unwrap().get("provider").is_none());
+    }
 
     #[test]
     fn serializes_with_kind_tag_and_without_original() {

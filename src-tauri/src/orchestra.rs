@@ -494,6 +494,7 @@ impl Orchestra {
                 base: worktree.as_ref().and_then(|w| w.base.clone()),
                 isolation: isolation.to_string(),
                 mode: if mode == crate::args::Mode::Auto { "auto".into() } else { "ask".into() },
+                provider: Some(provider.info()),
             },
         );
         let req = SpawnRequest { parent: main.to_string(), slot: id.clone(), name: name.clone(), brief, folder: run_folder.clone(), provider, model, mode };
@@ -1071,6 +1072,9 @@ mod tests {
         call(&o, "spawn_agent", json!({"name": "empty", "brief": "y", "provider": ""})).await.unwrap();
         let spawned = host.spawned.lock().unwrap().clone();
         assert_eq!(spawned.iter().map(|r| r.provider).collect::<Vec<_>>(), [ProviderId::Claude; 3]);
+        // The window is told what the worker's provider can do, to show only what it has.
+        let told: Vec<_> = host.events_for("s1").into_iter().filter_map(|e| if let UiEvent::AgentSpawned { provider, .. } = e { provider } else { None }).collect();
+        assert_eq!(told, [ProviderId::Claude.info(); 3]);
     }
 
     #[tokio::test]
@@ -1084,6 +1088,8 @@ mod tests {
         assert_eq!((spawned[0].provider, spawned[0].model.as_deref(), spawned[0].mode), (ProviderId::Fake, Some("fake-large"), crate::args::Mode::Ask));
         let modes: Vec<String> = host.events_for("s1").into_iter().filter_map(|e| if let UiEvent::AgentSpawned { mode, .. } = e { Some(mode) } else { None }).collect();
         assert_eq!(modes, ["ask"]);
+        let told = host.events_for("s1").into_iter().find_map(|e| if let UiEvent::AgentSpawned { provider, .. } = e { provider } else { None });
+        assert_eq!(told, Some(ProviderId::Fake.info()));
         // Claude's workers under the same main agent still get Auto.
         spawn(&o, "own").await;
         assert_eq!(host.spawned.lock().unwrap()[1].mode, crate::args::Mode::Auto);
