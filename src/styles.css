@@ -1498,7 +1498,8 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .canvas-node.waiting .node-status { color: var(--attn); font-weight: 600; }
 .node-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .node-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.node-chat .chat { padding: 0 14px 8px; }
+/* A node is narrow, so anything wider than it (a long unbroken line) would give the chat a sideways scrollbar; code blocks and tables scroll on their own. */
+.node-chat .chat { padding: 0 14px 8px; overflow-x: hidden; }
 .node-resize { position: absolute; right: 0; bottom: 0; width: 20px; height: 20px; cursor: nwse-resize; background: linear-gradient(135deg, transparent 0 55%, var(--line-strong) 55% 62%, transparent 62% 72%, var(--line-strong) 72% 79%, transparent 79%); border-bottom-right-radius: 12px; opacity: 0.8; }
 .node-resize:hover { opacity: 1; }
 

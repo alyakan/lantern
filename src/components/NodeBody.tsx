@@ -9,8 +9,9 @@ import { MergeCard } from "./MergeCard";
 import { NodeComposer } from "./NodeComposer";
 
 /**
- * The merges to show for an agent: open ones, and the latest answered one for each worker (as a quiet line). A main
- * agent shows every worker's; a worker shows its own.
+ * The merges to show for an agent: open ones, and the latest merged one for each worker (as a quiet line, with its
+ * clear-the-worktree button). A declined one leaves nothing: the main agent can ask again, and its "Not merged" line
+ * would otherwise sit above the composer for good. A main agent shows every worker's; a worker shows its own.
  */
 export function visibleProposals(all: MergeProposal[], worker: string | null): MergeProposal[] {
   const mine = worker ? all.filter((p) => p.worker === worker) : all;
@@ -19,6 +20,7 @@ export function visibleProposals(all: MergeProposal[], worker: string | null): M
     .reverse()
     .filter((p) => {
       if (p.status === "open") return true;
+      if (p.status === "declined") return false;
       if (seen.has(p.worker)) return false;
       seen.add(p.worker);
       return !mine.some((q) => q.worker === p.worker && q.status === "open");
