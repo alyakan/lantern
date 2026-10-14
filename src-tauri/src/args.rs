@@ -52,7 +52,7 @@ The plan gets locked: end the `# Plan complete` page by asking the user to lock 
 
 Learn: Build's pages and headings, for a user who is learning from this. In every page, explain the why as well as the what: the concept or pattern behind the change, how it fits the code around it, and what you considered instead and why you didn't choose it. Use short sections and small code excerpts. It is still one step per page.
 
-Review: follow the user's incremental-pr-review skill exactly (load it with the Skill tool, `incremental-pr-review`): frame the review, then one changed file per page, then the summary. Fetch GitHub pull requests with the gh CLI (gh pr view, gh pr diff); the PR does not need to be checked out. Never post anything to GitHub. Headings:
+Review: follow the user's incremental-pr-review skill exactly (load it with the Skill tool, `incremental-pr-review`): frame the review, then one changed file per page, then the summary. Fetch GitHub pull requests with the gh CLI (gh pr view, gh pr diff); the PR does not need to be checked out. Never post anything to GitHub. A local branch (no PR number) may be stacked on another branch rather than cut from the default one: find what it was built on (its pull request's base, gh pr view --json baseRefName, when it has one; otherwise the nearest branch below it, git log --oneline --decorate), review only the commits it adds on top of that, and put a line of exactly Base: <branch> near the top of the Frame. Lantern compares the branch with it in the Changes pane; without that line it guesses. Headings:
 # Frame — <the PR's title>
 # File N of M — <path> (+added −removed)
 # Summary — <files reviewed, findings accepted, findings dropped>
@@ -551,7 +551,7 @@ mod tests {
         assert_eq!(value_after(&a, "--permission-prompt-tool"), Some("mcp__lantern__approve"));
         assert_eq!(value_after(&a, "--allowedTools"), Some("mcp__lantern__reproduce"));
         let prompt = value_after(&a, "--append-system-prompt").unwrap();
-        for part in ["# Switch to", "incremental-dev", "# Plan step N", "Learn:", "incremental-pr-review", "# File N of M", "Never post", "# Evidence N", "mcp__lantern__reproduce", "lantern-debug", "[Lantern: this chat switched to", "list what you changed as a numbered list", "# Plan update", "Lock this plan?", "nothing is locked", "Architecture:", "# Overview", "# Part N of M", "Covers:", "```architecture block", "\"change\": \"new\"", "don't draw the Overview in Mermaid"] {
+        for part in ["# Switch to", "incremental-dev", "# Plan step N", "Learn:", "incremental-pr-review", "# File N of M", "Never post", "# Evidence N", "mcp__lantern__reproduce", "lantern-debug", "[Lantern: this chat switched to", "list what you changed as a numbered list", "# Plan update", "Lock this plan?", "nothing is locked", "Architecture:", "# Overview", "# Part N of M", "Covers:", "Base: <branch>", "gh pr view --json baseRefName", "```architecture block", "\"change\": \"new\"", "don't draw the Overview in Mermaid"] {
             assert!(prompt.contains(part), "{part}");
         }
         assert!(!build_args(Mode::Ask, false, None, None, None, &helper()).iter().any(|x| x == "--allowedTools"));

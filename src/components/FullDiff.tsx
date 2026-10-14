@@ -14,7 +14,7 @@ export type DiffLayout = "inline" | "split";
 /** A line to scroll to and flash in the new version; `key` changes for every request. */
 export type Reveal = { line: number; key: number } | null;
 
-export default function FullDiff({ path, refreshKey, layout, scope = "session", turn = null, toTurn = null, pr = null, reveal = null }: { path: string; refreshKey: number; layout: DiffLayout; scope?: ChangeScope; turn?: number | null; toTurn?: number | null; pr?: number | null; reveal?: Reveal }) {
+export default function FullDiff({ path, refreshKey, layout, scope = "session", turn = null, toTurn = null, pr = null, base = null, reveal = null }: { path: string; refreshKey: number; layout: DiffLayout; scope?: ChangeScope; turn?: number | null; toTurn?: number | null; pr?: number | null; base?: string | null; reveal?: Reveal }) {
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dark = usePrefersDark();
@@ -22,7 +22,7 @@ export default function FullDiff({ path, refreshKey, layout, scope = "session", 
 
   useEffect(() => {
     let live = true;
-    api.getFileDiff(slot, path, scope, turn, toTurn, pr).then(
+    api.getFileDiff(slot, path, scope, turn, toTurn, pr, base).then(
       (d) => {
         if (live) {
           setDiff(d);
@@ -34,7 +34,7 @@ export default function FullDiff({ path, refreshKey, layout, scope = "session", 
     return () => {
       live = false;
     };
-  }, [path, refreshKey, slot, scope, turn, toTurn, pr]);
+  }, [path, refreshKey, slot, scope, turn, toTurn, pr, base]);
 
   if (error) return <div className="empty">{error}</div>;
   if (!diff) return <div className="empty">Loading…</div>;

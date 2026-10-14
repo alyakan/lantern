@@ -94,12 +94,15 @@ pub fn between(folder: &Path, base_tip: &str, head: &str) -> Result<PrRange, Str
     Ok(PrRange { base, head: head.to_string(), root })
 }
 
-/// A local branch under review: its commits since it left the default branch, and the range they span.
+/// A local branch under review: its commits since it left its base, and the range they span.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct BranchReview {
     pub branch: String,
-    /// What it's compared with: "origin/main", "main", …
+    /// What it's compared with: the branch it is stacked on ("feat/core"), or the default branch ("origin/main", "main").
     pub base: String,
+    /// Why it isn't the base the reviewer named, when it couldn't be used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
     /// Newest first.
     pub commits: Vec<Commit>,
 }
@@ -126,13 +129,78 @@ fn default_base(folder: &Path) -> Result<String, String> {
     Err("No main or master branch to compare this branch with.".into())
 }
 
-/// The checked-out branch against where it left the default branch: the range, and the branch's commits.
-pub fn branch(folder: &Path, hints: &[String]) -> Result<(PrRange, BranchReview), String> {
+/// A branch name the reviewer gave that can be handed to git: no option, no range, nothing but a ref's characters.
+fn ref_name(name: &str) -> Option<&str> {
+    let name = name.trim().trim_matches('`');
+    let ok = !name.is_empty() && name.len() <= 200 && !name.starts_with('-') && !name.contains("..") && name.chars().all(|c| c.is_ascii_alphanumeric() || "._/-".contains(c));
+    ok.then_some(name)
+}
+
+/// Whether `name` is a commit-ish here.
+fn exists(folder: &Path, name: &str) -> bool {
+    git(folder, &["rev-parse", "--verify", "--quiet", &format!("{name}^{{commit}}")]).is_ok()
+}
+
+/**
+ * The branch HEAD is stacked on: the nearest branch tip in HEAD's own (first-parent) history, before it reaches where
+ * it left the default branch. None when it was cut straight from the default branch. The branch itself (and its own
+ * copy on the remote) doesn't count, nor does a branch at HEAD's own commit.
+ */
+fn stacked_on(folder: &Path, name: &str, head: &str, default: &str) -> Option<String> {
+    let stop = git(folder, &["merge-base", default, head]).ok()?;
+    // Every branch whose tip is in HEAD's history, by its commit.
+    let refs = git(folder, &["for-each-ref", "--merged", head, "--format=%(objectname) %(refname:short)", "refs/heads", "refs/remotes"]).ok()?;
+    let own = |r: &str| r == name || r.split_once('/').is_some_and(|(_, rest)| rest == name) || r.ends_with("/HEAD") || r == default;
+    let mut at: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+    for line in refs.lines() {
+        if let Some((sha, r)) = line.split_once(' ') {
+            if sha != head && !own(r) {
+                at.entry(sha).or_default().push(r);
+            }
+        }
+    }
+    if at.is_empty() {
+        return None;
+    }
+    let walk = git(folder, &["rev-list", "--first-parent", "--max-count=2000", head]).ok()?;
+    for sha in walk.lines().skip(1) {
+        if sha == stop {
+            return None;
+        }
+        if let Some(names) = at.get(sha) {
+            // A local branch before its copy on a remote.
+            let mut names = names.clone();
+            names.sort_by_key(|r| (r.contains('/') && !exists(folder, &format!("refs/heads/{r}")), r.len()));
+            return names.first().map(|r| r.to_string());
+        }
+    }
+    None
+}
+
+/**
+ * The checked-out branch against where it left its base, with the branch's commits. The base is `asked` when the
+ * reviewer named one that is a branch here (or on origin); otherwise the branch it is stacked on; otherwise the default
+ * branch.
+ */
+pub fn branch(folder: &Path, hints: &[String], asked: Option<&str>) -> Result<(PrRange, BranchReview), String> {
     let repo = repo_for(folder, hints)?;
     let folder = repo.as_path();
     let name = git(folder, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-    let base = default_base(folder)?;
     let head = git(folder, &["rev-parse", "HEAD"])?;
+    let default = default_base(folder)?;
+    let mut note = None;
+    let named = asked.map(str::trim).filter(|a| !a.is_empty());
+    let base = match named {
+        Some(a) => match ref_name(a).and_then(|r| [r.to_string(), format!("origin/{r}")].into_iter().find(|c| exists(folder, c))) {
+            Some(found) => found,
+            None => {
+                let fallback = stacked_on(folder, &name, &head, &default).unwrap_or_else(|| default.clone());
+                note = Some(format!("Couldn't find the base {a:?}; comparing with {fallback}."));
+                fallback
+            }
+        },
+        None => stacked_on(folder, &name, &head, &default).unwrap_or_else(|| default.clone()),
+    };
     let range = between(folder, &base, &head)?;
     if range.base == head {
         return Err(format!("{name} has no commits of its own since {base}."));
@@ -145,7 +213,7 @@ pub fn branch(folder: &Path, hints: &[String]) -> Result<(PrRange, BranchReview)
             Some(Commit { sha: f.next()?.into(), subject: f.next()?.into(), author: f.next()?.into(), at: f.next()?.parse::<u64>().ok()? * 1000 })
         })
         .collect();
-    Ok((range, BranchReview { branch: name, base, commits }))
+    Ok((range, BranchReview { branch: name, base, note, commits }))
 }
 
 /// The PR's files: (absolute path, created, deleted, lines added, lines removed), by path.
@@ -214,12 +282,12 @@ mod tests {
 
         // The same branch checked out, reviewed as a local branch against main.
         sh(d, &["checkout", "-q", "pr"]);
-        let (local, review) = branch(d, &[]).unwrap();
+        let (local, review) = branch(d, &[], None).unwrap();
         assert_eq!((review.branch.as_str(), review.base.as_str()), ("pr", "main"));
         assert_eq!(review.commits.iter().map(|c| c.subject.as_str()).collect::<Vec<_>>(), ["pr"]);
         assert_eq!(summary(&local).unwrap().len(), 3);
         sh(d, &["checkout", "-q", "main"]);
-        assert!(branch(d, &[]).unwrap_err().contains("no commits of its own"));
+        assert!(branch(d, &[], None).unwrap_err().contains("no commits of its own"));
         sh(d, &["checkout", "-q", "pr"]);
 
         // A workspace folder holding this repo and another: the branch is found in the repo with the reviewed file.
@@ -232,7 +300,7 @@ mod tests {
         assert_eq!(repo_for(ws.path(), &[]).unwrap(), ws.path().join("app"), "the repo whose branch has commits");
         let used = ws.path().join("other").join("src").display().to_string();
         assert_eq!(repo_for(ws.path(), &[used]).unwrap(), other, "an absolute path Claude used");
-        assert_eq!(branch(ws.path(), &["new.txt".into()]).unwrap().1.branch, "pr");
+        assert_eq!(branch(ws.path(), &["new.txt".into()], None).unwrap().1.branch, "pr");
         sh(d, &["checkout", "-q", "main"]);
 
         let range = between(d, "main", &head).unwrap();
@@ -244,6 +312,78 @@ mod tests {
         assert_eq!((a.original.as_str(), a.current.as_str()), ("one\n", "one\ntwo\n"));
         assert!(file(&range, &root.join("new.txt").display().to_string()).unwrap().created);
         assert!(file(&range, "/elsewhere/x.txt").is_err());
+    }
+
+    /// main ← core (2 commits) ← ui (1 commit), with main moving on after core left it.
+    fn stack() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        let commit = |file: &str, msg: &str| {
+            std::fs::write(d.join(file), msg).unwrap();
+            sh(d, &["add", "."]);
+            sh(d, &["commit", "-qm", msg]);
+        };
+        sh(d, &["init", "-q", "-b", "main"]);
+        sh(d, &["config", "user.email", "t@t"]);
+        sh(d, &["config", "user.name", "t"]);
+        commit("a.txt", "init");
+        sh(d, &["checkout", "-qb", "feat/core"]);
+        commit("core1.txt", "core one");
+        commit("core2.txt", "core two");
+        sh(d, &["checkout", "-qb", "feat/ui"]);
+        commit("ui.txt", "ui");
+        sh(d, &["checkout", "-q", "main"]);
+        commit("later.txt", "later on main");
+        sh(d, &["checkout", "-q", "feat/ui"]);
+        dir
+    }
+    fn subjects(r: &BranchReview) -> Vec<String> {
+        r.commits.iter().map(|c| c.subject.clone()).collect()
+    }
+
+    #[test]
+    fn a_stacked_branch_is_compared_with_the_branch_it_was_built_on() {
+        let dir = stack();
+        let (range, review) = branch(dir.path(), &[], None).unwrap();
+        assert_eq!((review.base.as_str(), review.note.as_deref()), ("feat/core", None));
+        assert_eq!(subjects(&review), ["ui"]);
+        let files: Vec<_> = summary(&range).unwrap().into_iter().map(|f| f.path.rsplit('/').next().unwrap().to_string()).collect();
+        assert_eq!(files, ["ui.txt"]);
+        // The branch below it, cut straight from main, is compared with main.
+        sh(dir.path(), &["checkout", "-q", "feat/core"]);
+        let (_, core) = branch(dir.path(), &[], None).unwrap();
+        assert_eq!((core.base.as_str(), subjects(&core)), ("main", vec!["core two".to_string(), "core one".to_string()]));
+    }
+
+    #[test]
+    fn the_base_the_reviewer_names_wins_and_one_that_isnt_there_says_so() {
+        let dir = stack();
+        // Named: main, so the whole stack is the review.
+        let (_, review) = branch(dir.path(), &[], Some("main")).unwrap();
+        assert_eq!((review.base.as_str(), review.commits.len(), review.note.as_deref()), ("main", 3, None));
+        // In backticks, as Claude may write it.
+        assert_eq!(branch(dir.path(), &[], Some("`feat/core`")).unwrap().1.base, "feat/core");
+        // A branch that isn't there, or isn't a branch name at all: the stack's own base, and a note.
+        for bad in ["feat/gone", "--output=/tmp/x", "main..feat/ui"] {
+            let (_, r) = branch(dir.path(), &[], Some(bad)).unwrap();
+            assert_eq!(r.base, "feat/core", "{bad}");
+            assert!(r.note.as_deref().unwrap().contains("Couldn't find the base"), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_branch_on_the_remote_counts_and_the_branch_itself_does_not() {
+        let dir = stack();
+        let d = dir.path();
+        // Only the remote copy of the parent is there: it is the base.
+        sh(d, &["update-ref", "refs/remotes/origin/feat/core", "feat/core"]);
+        sh(d, &["update-ref", "refs/remotes/origin/feat/ui", "feat/ui~0"]);
+        sh(d, &["branch", "-qD", "feat/core"]);
+        assert_eq!(branch(d, &[], None).unwrap().1.base, "origin/feat/core");
+        // Its own copy on the remote, a step behind, isn't its base.
+        sh(d, &["update-ref", "refs/remotes/origin/feat/ui", "feat/ui~1"]);
+        sh(d, &["update-ref", "-d", "refs/remotes/origin/feat/core"]);
+        assert_eq!(branch(d, &[], None).unwrap().1.base, "main");
     }
 
     #[test]
@@ -283,7 +423,7 @@ mod tests {
     #[ignore]
     fn real_branch() {
         let folder = std::env::var("LANTERN_BRANCH").unwrap();
-        let (range, review) = branch(Path::new(&folder), &[]).unwrap();
+        let (range, review) = branch(Path::new(&folder), &[], std::env::var("LANTERN_BASE").ok().as_deref()).unwrap();
         println!("{} vs {}: {:?}", review.branch, review.base, review.commits);
         for r in summary(&range).unwrap() {
             println!("{} +{} -{}", r.path, r.added, r.removed);
