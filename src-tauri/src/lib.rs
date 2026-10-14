@@ -4,6 +4,7 @@ pub mod cli_locator;
 pub mod files;
 pub mod git;
 pub mod history;
+pub mod mcp_config;
 pub mod navigation;
 pub mod permission;
 pub mod pr;
@@ -16,6 +17,7 @@ pub mod outside;
 pub mod stream_parser;
 pub mod test_runs;
 pub mod titles;
+pub mod trash;
 pub mod ui_event;
 pub mod updates;
 
@@ -250,9 +252,9 @@ async fn send_message(state: State<'_, AppState>, slot: String, text: String) ->
     Ok(turn)
 }
 
-/// The control requests Settings may send to a chat's claude: MCP servers' status and actions, and reloading
-/// skills and plugins. Anything else is refused.
-const SETTINGS_REQUESTS: &[&str] = &["mcp_status", "mcp_reconnect", "mcp_toggle", "mcp_authenticate", "mcp_oauth_callback_url", "mcp_clear_auth", "reload_skills", "reload_plugins"];
+/// The control requests Settings may send to a chat's claude: MCP servers' status and actions, and reloading plugins
+/// (which is how claude picks up skills, commands and agents too). Anything else is refused.
+const SETTINGS_REQUESTS: &[&str] = &["mcp_status", "mcp_reconnect", "mcp_toggle", "mcp_authenticate", "mcp_oauth_callback_url", "mcp_clear_auth", "reload_plugins"];
 
 /// Sends one of SETTINGS_REQUESTS to the chat's claude and returns its reply.
 #[tauri::command]
@@ -289,6 +291,30 @@ async fn read_skill(state: State<'_, AppState>, slot: Option<String>, path: Stri
     let folder = slot.and_then(|id| state.slots.get(&id).ok()).and_then(|s| s.folder().ok());
     let config = skills::config_dir().ok_or("HOME is not set")?;
     tauri::async_runtime::spawn_blocking(move || skills::read(&config, folder.as_deref(), std::path::Path::new(&path))).await.map_err(|e| e.to_string())?
+}
+
+/// Makes a skill or command in yours or the chat folder's project (see skills::create). Returns its file.
+#[tauri::command]
+async fn skill_create(state: State<'_, AppState>, slot: Option<String>, kind: String, scope: String, name: String, description: String) -> Result<String, String> {
+    let folder = slot.and_then(|id| state.slots.get(&id).ok()).and_then(|s| s.folder().ok());
+    let config = skills::config_dir().ok_or("HOME is not set")?;
+    tauri::async_runtime::spawn_blocking(move || skills::create(&config, folder.as_deref(), &kind, &scope, &name, &description).map(|p| p.display().to_string())).await.map_err(|e| e.to_string())?
+}
+
+/// Moves a skill's folder or a command's file to the Trash (see skills::delete). Returns where it went.
+#[tauri::command]
+async fn skill_delete(state: State<'_, AppState>, slot: Option<String>, path: String) -> Result<String, String> {
+    let folder = slot.and_then(|id| state.slots.get(&id).ok()).and_then(|s| s.folder().ok());
+    let config = skills::config_dir().ok_or("HOME is not set")?;
+    tauri::async_runtime::spawn_blocking(move || skills::delete(&config, folder.as_deref(), std::path::Path::new(&path)).map(|p| p.display().to_string())).await.map_err(|e| e.to_string())?
+}
+
+/// Saves a skill or command file's text, if it's still what Settings read (see skills::save).
+#[tauri::command]
+async fn skill_save(state: State<'_, AppState>, slot: Option<String>, path: String, text: String, expected: String) -> Result<files::Written, String> {
+    let folder = slot.and_then(|id| state.slots.get(&id).ok()).and_then(|s| s.folder().ok());
+    let config = skills::config_dir().ok_or("HOME is not set")?;
+    tauri::async_runtime::spawn_blocking(move || skills::save(&config, folder.as_deref(), std::path::Path::new(&path), &text, &expected)).await.map_err(|e| e.to_string())?
 }
 
 /// A server to add with `claude mcp add`.
@@ -417,6 +443,10 @@ mod mcp_add_tests {
 #[tauri::command]
 async fn mcp_add(state: State<'_, AppState>, slot: String, spec: McpServerSpec) -> Result<String, String> {
     let args = mcp_add_args(&spec)?;
+    // The project's .mcp.json is committed: a literal secret stays out of it (only ${NAME} references go in).
+    if spec.scope == "project" {
+        mcp_config::check_committed(&mcp_config::to_config(&spec, &serde_json::Value::Null)?, "project", None)?;
+    }
     claude_mcp(&state, &slot, args).await
 }
 
@@ -428,6 +458,66 @@ async fn mcp_remove(state: State<'_, AppState>, slot: String, name: String, scop
     }
     args.extend(["--".into(), name]);
     claude_mcp(&state, &slot, args).await
+}
+
+/// Claude Code's own settings file: ~/.claude.json, or inside CLAUDE_CONFIG_DIR when that's set.
+fn claude_json_file() -> Result<std::path::PathBuf, String> {
+    match std::env::var_os("CLAUDE_CONFIG_DIR") {
+        Some(dir) => Ok(std::path::PathBuf::from(dir).join(".claude.json")),
+        None => Ok(std::path::PathBuf::from(std::env::var_os("HOME").ok_or("HOME is not set")?).join(".claude.json")),
+    }
+}
+
+/// A server's stored settings for the edit form, with its secret values masked (see mcp_config).
+#[tauri::command]
+async fn mcp_form(state: State<'_, AppState>, slot: String, name: String, scope: String) -> Result<mcp_config::Form, String> {
+    let folder = state.slots.get(&slot)?.folder()?;
+    let stored = mcp_config::read_entry(&claude_json_file()?, &folder, &name, &scope)?.ok_or_else(|| format!("{name} isn't there any more. Reload the list."))?;
+    mcp_config::to_form(&name, &scope, &stored)
+}
+
+fn add_json_args(scope: &str, name: &str, json: &str) -> Vec<String> {
+    ["mcp", "add-json", "-s", scope, "--", name, json].map(String::from).to_vec()
+}
+
+fn remove_args(scope: &str, name: &str) -> Vec<String> {
+    ["mcp", "remove", "-s", scope, "--", name].map(String::from).to_vec()
+}
+
+/// Runs one step of an edit with `claude mcp`.
+async fn run_step(state: &AppState, slot: &str, step: mcp_config::Step) -> Result<String, String> {
+    let args = match step {
+        mcp_config::Step::Add { scope, name, json } => add_json_args(&scope, &name, &json),
+        mcp_config::Step::Remove { scope, name } => remove_args(&scope, &name),
+    };
+    claude_mcp(state, slot, args).await
+}
+
+/// Saves an edited server: `from_name` and `from_scope` are where it is now, `spec` where it should be. The new entry is
+/// added before the old one is removed, so a failure never loses the server. The exception is a server that keeps its
+/// name in its scope: that name can't be added twice, so the old entry is removed and put back if the new one fails.
+#[tauri::command]
+async fn mcp_edit(state: State<'_, AppState>, slot: String, from_name: String, from_scope: String, spec: McpServerSpec) -> Result<String, String> {
+    // The same checks as adding, on the new name, scope, type and address.
+    mcp_add_args(&spec)?;
+    let folder = state.slots.get(&slot)?.folder()?;
+    let stored = mcp_config::read_entry(&claude_json_file()?, &folder, &from_name, &from_scope)?.ok_or_else(|| format!("{from_name} isn't there any more. Reload the list."))?;
+    let config = mcp_config::to_config(&spec, &stored)?;
+    let name = spec.name.trim().to_string();
+    // Only an entry already in the project's file may keep its secret values as they are there.
+    let kept = (from_scope == "project" && spec.scope == "project").then_some(&stored);
+    mcp_config::check_committed(&config, &spec.scope, kept)?;
+    let plan = mcp_config::edit_plan((&from_name, &from_scope), (&name, &spec.scope), config.to_string(), stored.to_string());
+    let mcp_config::Plan { steps: [first, second], undo } = plan;
+    // Nothing has changed yet when the first step fails.
+    run_step(&state, &slot, first).await?;
+    if let Err(e) = run_step(&state, &slot, second).await {
+        return Err(match run_step(&state, &slot, undo).await {
+            Ok(_) => format!("{e} Nothing changed."),
+            Err(again) => format!("{e} Taking the change back failed too ({again}): check the list of servers."),
+        });
+    }
+    Ok(format!("Saved {name}."))
 }
 
 /// Runs a command the user typed after "!" in the chat's folder; its output arrives as ui-events.
@@ -845,8 +935,13 @@ pub fn run() {
             claude_request,
             skill_index,
             read_skill,
+            skill_create,
+            skill_delete,
+            skill_save,
             mcp_add,
             mcp_remove,
+            mcp_form,
+            mcp_edit,
             shell_input,
             stop_shell,
             interrupt,

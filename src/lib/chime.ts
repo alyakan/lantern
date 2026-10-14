@@ -1,6 +1,10 @@
+import { useEffect, useState } from "react";
+
 /** A soft two-note chime for toasts, made with Web Audio (no sound files). Off unless the user turns it on. */
 
 const KEY = "toast.sound";
+// Its own event, so every switch (the toast's speaker, Settings' General tab) shows the same state at once.
+const CHANGED = "lantern:chime";
 
 export const chimeOn = (): boolean => {
   try {
@@ -16,6 +20,18 @@ export function setChime(on: boolean): void {
   } catch {
     // storage unavailable: it just won't be remembered
   }
+  window.dispatchEvent(new Event(CHANGED));
+}
+
+/** Whether toast sounds are on, kept in step with every place that turns them on or off. */
+export function useChimeOn(): boolean {
+  const [on, setOn] = useState(chimeOn);
+  useEffect(() => {
+    const sync = () => setOn(chimeOn());
+    window.addEventListener(CHANGED, sync);
+    return () => window.removeEventListener(CHANGED, sync);
+  }, []);
+  return on;
 }
 
 let ctx: AudioContext | null = null;

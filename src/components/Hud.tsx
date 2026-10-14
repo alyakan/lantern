@@ -1,7 +1,7 @@
 import { useEffect, useState, type KeyboardEvent, type ReactElement } from "react";
 import { HudCheckIcon, HudFailIcon, HudStopIcon, WaitIcon } from "./icons";
 import { whenFocused } from "../lib/windowFocus";
-import { chimeOn, playChime, setChime } from "../lib/chime";
+import { playChime, setChime, useChimeOn } from "../lib/chime";
 
 export type HudKind = "finished" | "stopped" | "failed" | "waiting";
 /** `key` changes for every turn that ends, so the same kind twice in a row still shows. */
@@ -31,7 +31,7 @@ const LOOK: Record<HudKind, { label: string; icon: ReactElement }> = {
  */
 export function Hud({ event, onOpenChat }: { event: HudEvent | null; onOpenChat?: (slot: string) => void }) {
   const [shown, setShown] = useState<HudEvent | null>(null);
-  const [sound, setSound] = useState(chimeOn);
+  const sound = useChimeOn();
   useEffect(() => {
     // Taken back (e.g. the chat waiting for you was answered).
     if (!event) return setShown(null);
@@ -99,7 +99,6 @@ export function Hud({ event, onOpenChat }: { event: HudEvent | null; onOpenChat?
         onClick={(e) => {
           e.stopPropagation();
           setChime(!sound);
-          setSound(!sound);
         }}
       >
         <SpeakerIcon on={sound} />

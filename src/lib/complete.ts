@@ -48,7 +48,8 @@ const SOURCE_SUFFIX = /\s*\((user|project|bundled|plugin[^)]*|MCP)\)$/;
 
 /** Claude's commands, told apart with what's on disk: skills, commands (built-in or custom) and MCP prompts. */
 export function describeCommands(commands: SlashCommand[], index: SkillEntry[]): MenuCommand[] {
-  const byName = new Map(index.map((e) => [e.name, e]));
+  // Agents aren't slash commands: one that shares a name with a skill must not stand in for it.
+  const byName = new Map(index.filter((e) => e.kind !== "agent").map((e) => [e.name, e]));
   return commands.map((c): MenuCommand => {
     const description = c.description.replace(SOURCE_SUFFIX, "");
     const suffix = SOURCE_SUFFIX.exec(c.description)?.[1];
@@ -57,7 +58,7 @@ export function describeCommands(commands: SlashCommand[], index: SkillEntry[]):
       return { ...c, description, kind: "mcp", source: serverLabel(server) };
     }
     const found = byName.get(c.name);
-    if (found) return { ...c, description, kind: found.kind, source: found.source === "user" ? "Yours" : found.source === "project" ? "Project" : (found.plugin ?? "Plugin") };
+    if (found) return { ...c, description, kind: found.kind === "skill" ? "skill" : "command", source: found.source === "user" ? "Yours" : found.source === "project" ? "Project" : found.source === "synced" ? "claude.ai" : (found.plugin ?? "Plugin") };
     if (suffix === "user" || suffix === "project") return { ...c, description, kind: "command", source: suffix === "user" ? "Yours" : "Project" };
     const plugin = c.name.includes(":") ? c.name.split(":")[0] : null;
     return { ...c, description, kind: plugin ? "skill" : "command", source: plugin ?? "Built-in" };

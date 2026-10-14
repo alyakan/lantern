@@ -20,6 +20,8 @@ import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
 import type { McpServer, SkillEntry } from "./types";
 import { stepFile, usePersistentState } from "./lib/layout";
+import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
+import { applyAppearance, type Appearance, type TextSize } from "./lib/theme";
 import { notify } from "./lib/notify";
 import { useShortcut } from "./lib/shortcuts";
 import { activityStatus } from "./lib/status";
@@ -98,6 +100,11 @@ export default function App() {
   const presets = presetsOf(savedPresets);
   const [harnessByFolder, setHarnessByFolder] = usePersistentState<Record<string, string>>("settings.harnessByFolder", {});
   const [harnessBySession, setHarnessBySession] = usePersistentState<Record<string, string>>("settings.harnessBySession", {});
+  // General: which events are told about (and paused), the theme and the text size.
+  const [notifyPrefs, setNotifyPrefs] = usePersistentState<NotifyPrefs>(NOTIFY_KEY, NOTIFY_DEFAULTS);
+  const [appearance, setAppearance] = usePersistentState<Appearance>("settings.appearance", "system");
+  const [textSize, setTextSize] = usePersistentState<TextSize>("settings.textSize", "default");
+  useEffect(() => applyAppearance(appearance, textSize), [appearance, textSize]);
   // Each open chat's preset.
   const [harnessBySlot, setHarnessBySlot] = useState<Record<string, string>>({});
   // Every open chat. The one on screen is `active`; the others keep running in the background.
@@ -755,12 +762,14 @@ export default function App() {
       const key = a && `${s.sessionId}:${a.key}`;
       if (!a || !key || key === announced.current[slot]) continue;
       announced.current[slot] = key;
-      if (!windowFocused() || slot !== chats.active) notify(a.title, a.body);
+      // Settings can have this kind of event off, or paused: then neither a notification nor a toast.
+      const wanted = shouldNotify(notifyPrefs, a.kind);
+      if (wanted && (!windowFocused() || slot !== chats.active)) notify(a.title, a.body, a.kind);
       // Another chat finished or needs an answer: say so in the window too, and let the toast take you there.
       if (slot !== chats.active) {
         if (a.kind === "finished" || a.kind === "failed") setUnread((u) => ({ ...u, [slot]: true }));
         const project = s.folder && s.folder !== state.folder ? basename(s.folder) : null;
-        setHud({ key: Date.now(), kind: a.kind, body: a.body, chat: { slot, title: chatTitle(s, titles), project } });
+        if (wanted) setHud({ key: Date.now(), kind: a.kind, body: a.body, chat: { slot, title: chatTitle(s, titles), project } });
       }
     }
   }, [chats.slots]);
@@ -841,7 +850,7 @@ export default function App() {
   // "How the modes work", open on a mode's page.
   const [guideAt, setGuideAt] = useState<GuideKey | null>(null);
   const [settingsAt, setSettingsAt] = useState<SettingsTab | null>(null);
-  useShortcut(",", () => setSettingsAt(settingsAt ?? "mcp"));
+  useShortcut(",", () => setSettingsAt(settingsAt ?? "general"));
   // Installs the downloaded update and relaunches. The window says so (the overlay) until it does: closing every chat
   // and reopening is otherwise just a window that vanishes. Started from Settings, that closes first.
   const restartToUpdate = () => {
@@ -915,7 +924,7 @@ export default function App() {
           reviewCollapsed={reviewCollapsed}
           onOpenFolder={openFolder}
           onToggleReview={() => setReviewCollapsed(!reviewCollapsed)}
-          onOpenSettings={() => setSettingsAt("mcp")}
+          onOpenSettings={() => setSettingsAt("general")}
           sessionId={state.sessionId}
           loadSessions={loadSessions}
           onOpenSession={openSession}
@@ -1014,6 +1023,7 @@ export default function App() {
           commands={state.commands}
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
+          general={{ notify: notifyPrefs, onNotify: setNotifyPrefs, appearance, onAppearance: setAppearance, textSize, onTextSize: setTextSize }}
           updates={{ version: updates.version, state: updates.state, onCheck: updates.check, ready: updateOffer ?? null }}
           harness={{
             saved: presets.slice(1),

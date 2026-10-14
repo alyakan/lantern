@@ -7,7 +7,21 @@ const skillIndex = vi.fn();
 const readSkill = vi.fn();
 const mcpAdd = vi.fn();
 const mcpRemove = vi.fn();
-vi.mock("../api", () => ({ api: { claudeRequest: (...a: unknown[]) => claudeRequest(...a), skillIndex: (...a: unknown[]) => skillIndex(...a), readSkill: (...a: unknown[]) => readSkill(...a), mcpAdd: (...a: unknown[]) => mcpAdd(...a), mcpRemove: (...a: unknown[]) => mcpRemove(...a) } }));
+const skillCreate = vi.fn();
+const skillDelete = vi.fn();
+const skillSave = vi.fn();
+vi.mock("../api", () => ({
+  api: {
+    claudeRequest: (...a: unknown[]) => claudeRequest(...a),
+    skillIndex: (...a: unknown[]) => skillIndex(...a),
+    readSkill: (...a: unknown[]) => readSkill(...a),
+    mcpAdd: (...a: unknown[]) => mcpAdd(...a),
+    mcpRemove: (...a: unknown[]) => mcpRemove(...a),
+    skillCreate: (...a: unknown[]) => skillCreate(...a),
+    skillDelete: (...a: unknown[]) => skillDelete(...a),
+    skillSave: (...a: unknown[]) => skillSave(...a),
+  },
+}));
 const openUrl = vi.fn();
 const revealItemInDir = vi.fn();
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: (...a: unknown[]) => openUrl(...a), revealItemInDir: (...a: unknown[]) => revealItemInDir(...a) }));
@@ -20,15 +34,17 @@ const SERVERS: McpServer[] = [
   { name: "postgres", status: "failed", error: "ECONNREFUSED", config: { type: "stdio", command: "npx", args: ["pg"] }, scope: "local" },
 ];
 const SKILLS: SkillEntry[] = [
-  { name: "grill-me", kind: "skill", source: "user", plugin: null, path: "/h/.claude/skills/grill-me/SKILL.md", description: "Interview the user" },
-  { name: "superpowers:brainstorming", kind: "skill", source: "plugin", plugin: "superpowers", path: "/h/p/SKILL.md", description: "Explore first" },
+  { name: "grill-me", kind: "skill", source: "user", plugin: null, path: "/h/.claude/skills/grill-me/SKILL.md", description: "Interview the user", disabled: false },
+  { name: "superpowers:brainstorming", kind: "skill", source: "plugin", plugin: "superpowers", path: "/h/p/SKILL.md", description: "Explore first", disabled: false },
+  { name: "figma:scout", kind: "agent", source: "plugin", plugin: "figma", path: "/h/plugins/figma/agents/scout.md", description: "Scouts a file", disabled: true },
+  { name: "reviewer", kind: "agent", source: "user", plugin: null, path: "/h/.claude/agents/reviewer.md", description: "Reviews code", disabled: false },
 ];
 
 const props = { onClose: () => {}, slot: "s1", live: true, mcpTools: ["mcp__claude_ai_Linear__create_issue"], commands: [{ name: "grill-me", description: "", argument_hint: "" }] };
 
 describe("SettingsView", () => {
   beforeEach(() => {
-    for (const f of [claudeRequest, skillIndex, readSkill, mcpAdd, mcpRemove, openUrl, revealItemInDir]) f.mockReset();
+    for (const f of [claudeRequest, skillIndex, readSkill, mcpAdd, mcpRemove, skillCreate, skillDelete, skillSave, openUrl, revealItemInDir]) f.mockReset();
     claudeRequest.mockImplementation((_slot: string, r: { subtype: string }) => Promise.resolve(r.subtype === "mcp_status" ? { mcpServers: SERVERS.map((s) => ({ ...s })) } : r.subtype === "mcp_authenticate" ? { authUrl: "https://auth.example/x" } : {}));
     skillIndex.mockResolvedValue(SKILLS);
     readSkill.mockResolvedValue("---\nname: grill-me\n---\n# Grill me\n\nAsk one question at a time.");
@@ -47,7 +63,8 @@ describe("SettingsView", () => {
   it("logs in through the browser, reconnects and turns servers off", async () => {
     render(<SettingsView open="mcp" {...props} />);
     const list = await screen.findByRole("list", { name: "MCP servers" });
-    fireEvent.click(within(list).getByRole("button", { name: "Log in" }));
+    // The list is there before the servers arrive: wait for the row's button, not the list.
+    fireEvent.click(await within(list).findByRole("button", { name: "Log in" }));
     await waitFor(() => expect(openUrl).toHaveBeenCalledWith("https://auth.example/x"));
     expect(claudeRequest).toHaveBeenCalledWith("s1", { subtype: "mcp_authenticate", serverName: "sentry" });
     const postgres = within(list).getAllByRole("listitem")[1];
@@ -102,6 +119,87 @@ describe("SettingsView", () => {
     expect(revealItemInDir).toHaveBeenCalledWith("/h/.claude/skills/grill-me/SKILL.md");
     fireEvent.change(screen.getByLabelText("Filter skills and commands"), { target: { value: "explore" } });
     expect(screen.queryByText("Yours")).not.toBeInTheDocument();
+  });
+
+  it("lists agents as their own group and marks a plugin that's turned off", async () => {
+    render(<SettingsView open="skills" {...props} />);
+    expect(await screen.findByText("Agents")).toBeInTheDocument();
+    expect(screen.getByText("/figma:scout").closest("button")).toHaveTextContent("turned off");
+    // An agent isn't a slash command, so claude's list can't mark it "not loaded".
+    expect(screen.getByText("/reviewer").closest("button")).not.toHaveTextContent("not loaded");
+    expect(screen.getAllByText("not loaded")).toHaveLength(1);
+  });
+
+  it("edits a skill's whole file and saves it only against what was read", async () => {
+    const raw = "---\nname: grill-me\n---\n# Grill me\n\nAsk one question at a time.";
+    const edited = raw.replace("one question", "two questions");
+    render(<SettingsView open="skills" {...props} />);
+    fireEvent.click(await screen.findByText("/grill-me"));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    const editor = screen.getByRole("textbox", { name: "Edit /grill-me" });
+    expect(editor).toHaveValue(raw);
+    fireEvent.change(editor, { target: { value: edited } });
+    skillSave.mockResolvedValueOnce({ status: "saved", changed: true });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(skillSave).toHaveBeenCalledWith("s1", "/h/.claude/skills/grill-me/SKILL.md", edited, raw));
+    expect(await screen.findByText("Ask two questions at a time.")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Edit /grill-me" })).toBeNull();
+  });
+
+  it("keeps an edit when the file changed on disk, and discards it only on request", async () => {
+    render(<SettingsView open="skills" {...props} />);
+    fireEvent.click(await screen.findByText("/grill-me"));
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Edit /grill-me" }), { target: { value: "mine" } });
+    skillSave.mockResolvedValueOnce({ status: "conflict", current: "theirs" });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("It changed on disk since you opened it");
+    expect(screen.getByRole("textbox", { name: "Edit /grill-me" })).toHaveValue("mine");
+    readSkill.mockResolvedValueOnce("theirs");
+    fireEvent.click(screen.getByRole("button", { name: "Discard my text" }));
+    expect(await screen.findByText("theirs")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Edit /grill-me" })).toBeNull();
+  });
+
+  it("names the folder in the delete confirmation and deletes only after it's confirmed", async () => {
+    render(<SettingsView open="skills" {...props} />);
+    fireEvent.click(await screen.findByText("/grill-me"));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    const confirm = screen.getByRole("alertdialog", { name: "Delete /grill-me" });
+    expect(confirm).toHaveTextContent("/h/.claude/skills/grill-me goes to the Trash");
+    expect(confirm).toHaveTextContent(/put it back from there/);
+    expect(skillDelete).not.toHaveBeenCalled();
+    skillDelete.mockResolvedValueOnce("/Users/you/.Trash/grill-me");
+    fireEvent.click(screen.getByRole("button", { name: "Move to Trash" }));
+    await waitFor(() => expect(skillDelete).toHaveBeenCalledWith("s1", "/h/.claude/skills/grill-me/SKILL.md"));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("offers no edit or delete for a plugin's skill, or for an agent", async () => {
+    render(<SettingsView open="skills" {...props} />);
+    fireEvent.click(await screen.findByText("/superpowers:brainstorming"));
+    expect(await screen.findByText("From plugin superpowers, read-only")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    fireEvent.click(screen.getByText("/reviewer"));
+    expect(await screen.findByText("An agent, read-only")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+  });
+
+  it("makes a new skill from a name and a line, then selects it", async () => {
+    const made: SkillEntry = { name: "daily-notes", kind: "skill", source: "user", plugin: null, path: "/h/.claude/skills/daily-notes/SKILL.md", description: "Keeps notes", disabled: false };
+    render(<SettingsView open="skills" {...props} />);
+    await screen.findByText("Yours");
+    fireEvent.click(screen.getByRole("button", { name: "New skill" }));
+    const form = screen.getByRole("form", { name: "New skill" });
+    skillCreate.mockResolvedValueOnce("/h/.claude/skills/daily-notes/SKILL.md");
+    skillIndex.mockResolvedValue([...SKILLS, made]);
+    fireEvent.change(within(form).getByPlaceholderText("daily-notes"), { target: { value: "daily-notes" } });
+    fireEvent.change(within(form).getByPlaceholderText("Keeps my meeting notes tidy"), { target: { value: "Keeps notes" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Make skill" }));
+    await waitFor(() => expect(skillCreate).toHaveBeenCalledWith("s1", "skill", "user", "daily-notes", "Keeps notes"));
+    expect(await screen.findByLabelText("/daily-notes")).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "New skill" })).toBeNull();
   });
 
   it("doesn't show the last chat's servers in a new one, and drops a late answer from the chat before", async () => {

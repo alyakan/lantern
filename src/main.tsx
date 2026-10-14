@@ -3,6 +3,8 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { guardWindowClose } from "./lib/editStash";
+import { readStored } from "./lib/layout";
+import { applyAppearance, type Appearance, type TextSize } from "./lib/theme";
 
 async function boot() {
   // `npm run dev` then open /?mock to design the UI in a browser against a fake backend (dev builds only).
@@ -11,6 +13,8 @@ async function boot() {
   }
   // Once for the app, not per component: closing the window asks about unsaved edits in any file.
   guardWindowClose();
+  // Before the first paint, so a forced theme or a bigger text size doesn't flash the default.
+  applyAppearance(readStored<Appearance>("settings.appearance", "system"), readStored<TextSize>("settings.textSize", "default"));
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
       <ErrorBoundary name="window" reloadWindow>

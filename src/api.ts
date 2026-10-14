@@ -33,9 +33,20 @@ export const api = {
   /** The skills and custom commands on disk: yours, the chat folder's, plugins'. */
   skillIndex: (slot: string | null) => invoke<SkillEntry[]>("skill_index", { slot }),
   readSkill: (slot: string | null, path: string) => invoke<string>("read_skill", { slot, path }),
+  /** Makes a skill (a folder with a SKILL.md) or a command (a .md file) in yours (`user`) or the project's; resolves to its file. */
+  skillCreate: (slot: string | null, kind: "skill" | "command", scope: "user" | "project", name: string, description: string) =>
+    invoke<string>("skill_create", { slot, kind, scope, name, description }),
+  /** Moves a skill's folder or a command's file to the Trash, where it can be put back; resolves to where it went. */
+  skillDelete: (slot: string | null, path: string) => invoke<string>("skill_delete", { slot, path }),
+  /** Saves a skill or command file's full text if the file is still `expected` (what was read); otherwise a conflict, nothing written. */
+  skillSave: (slot: string | null, path: string, text: string, expected: string) => invoke<WriteResult>("skill_save", { slot, path, text, expected }),
   mcpAdd: (slot: string, spec: McpServerSpec) => invoke<string>("mcp_add", { slot, spec }),
   /** `scope` null: whichever scope it's in. */
   mcpRemove: (slot: string, name: string, scope: string | null) => invoke<string>("mcp_remove", { slot, name, scope }),
+  /** A server's stored settings for the edit form: its secret values come back as "•••" (kept as they are when saved). */
+  mcpForm: (slot: string, name: string, scope: string) => invoke<McpServerSpec>("mcp_form", { slot, name, scope }),
+  /** Saves an edited server from where it is (`from`) to `spec`: the new entry is added before the old one is removed. */
+  mcpEdit: (slot: string, from: { name: string; scope: string }, spec: McpServerSpec) => invoke<string>("mcp_edit", { slot, fromName: from.name, fromScope: from.scope, spec }),
   /** Types into a running command: a reply ending in "\r", or "\u0004" to end its input. */
   shellInput: (slot: string, id: string, text: string) => invoke<void>("shell_input", { slot, id, text }),
   stopShell: (slot: string, id: string) => invoke<void>("stop_shell", { slot, id }),
