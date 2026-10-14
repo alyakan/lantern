@@ -978,6 +978,14 @@ fn list_permission_rules(state: State<'_, AppState>, slot: Option<String>) -> Ve
     chat.chain(folders).collect()
 }
 
+/// Where the main agent's helpers run from now on in this chat, after the user ticked "same for the rest of this chat" on
+/// the helper card (the request itself is answered by respond_permission). None asks each time again.
+#[tauri::command]
+fn set_agent_choice(state: State<'_, AppState>, slot: String, choice: Option<permission::bridge::AgentChoice>) -> Result<(), String> {
+    state.slots.get(&slot)?.bridge.set_agent_choice(choice);
+    Ok(())
+}
+
 /// Makes an "Always allow" rule from a card (the request itself is answered by respond_permission).
 #[tauri::command]
 fn add_permission_rule(state: State<'_, AppState>, slot: String, rule: permission::rules::NewRule) -> Result<(), String> {
@@ -1478,6 +1486,7 @@ pub fn run() {
             get_file_diff,
             change_summary,
             respond_permission,
+            set_agent_choice,
             list_permission_rules,
             add_permission_rule,
             remove_permission_rule,

@@ -480,6 +480,32 @@ async function playOrchestraTurn(slot: string) {
   await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.04, duration_ms: 4000, auth_hint: false, denied: 0, context_window: 1_000_000 });
 }
 
+/**
+ * A later message to the mock main agent that mentions a helper: it tries the built-in Agent tool, which asks where the
+ * helper should run. On the canvas it starts a worker (as it would be told to with spawn_agent); inline it just reports.
+ */
+async function playHelperTurn(slot: string) {
+  const send = sendTo(slot);
+  await send({ kind: "thinking", parent: null });
+  await sleep(400);
+  await streamText(send, "h:0", "I'll have a helper find every caller of `fetchJson` before I change its signature.");
+  await send({ kind: "tool_started", parent: null, tool_use_id: "h-agent", name: "Agent", summary: "Find the callers" });
+  await send({ kind: "permission_requested", request_id: `perm-helper-${slot}`, tool_name: "Agent", input: { description: "Find the callers", prompt: "List every caller of fetchJson in src/, with file and line, and say which ones pass a second argument. Change nothing.", subagent_type: "Explore" } });
+  const inline = await new Promise<boolean>((resolve) => (pendingPermission[slot] = resolve));
+  if (inline) {
+    await send({ kind: "tool_finished", parent: null, tool_use_id: "h-agent", is_error: false, output: "3 callers: src/client/index.ts:12, src/server/routes.ts:40, src/server/app.ts:7." });
+    await streamText(send, "h:1", "Three callers, none passing a second argument, so the new optional one is safe.");
+  } else {
+    await send({ kind: "tool_finished", parent: null, tool_use_id: "h-agent", is_error: true, output: "Not run inline: the user wants helpers on the canvas." });
+    await send({ kind: "tool_started", parent: null, tool_use_id: "h-spawn", name: "mcp__lantern__spawn_agent", summary: "Find the callers" });
+    await sleep(350);
+    await send({ kind: "agent_spawned", worker: "w4", name: "Find the callers", brief: "List every caller of fetchJson in src/, with file and line, and say which ones pass a second argument. Change nothing.", folder: FOLDER, branch: null, base: null, isolation: "shared", mode: slotMode[slot] === "auto" ? "auto" : "ask" });
+    await send({ kind: "tool_finished", parent: null, tool_use_id: "h-spawn", is_error: false, output: 'Started worker w4 ("Find the callers").' });
+    await streamText(send, "h:1", "That one's on the canvas now. I'll hear when it reports back.");
+  }
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.02, duration_ms: 3000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+}
+
 async function playWorker(main: string, w: (typeof MOCK_WORKERS)[number]) {
   const send = sendTo(w.id);
   await sleep(500 + Number(w.id.slice(1)) * 400);
@@ -1039,7 +1065,7 @@ export function installMockBackend() {
             else if (!mockOrchestraStarted[slot]) {
               mockOrchestraStarted[slot] = true;
               void playOrchestraTurn(slot);
-            } else void playTurn(slot);
+            } else void (/\bhelper\b/i.test(String(a.text)) ? playHelperTurn(slot) : playTurn(slot));
             turnCount[slot] = (turnCount[slot] ?? -1) + 1;
             return turnCount[slot];
           }
@@ -1060,6 +1086,7 @@ export function installMockBackend() {
           return null;
         case "add_permission_rule":
         case "remove_permission_rule":
+        case "set_agent_choice":
           return null;
         case "list_permission_rules":
           // A couple of rules, so Settings has something to show in the browser preview.
