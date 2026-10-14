@@ -523,7 +523,8 @@ fn rebase(rule: Rule, from: &str, to: &str) -> Rule {
     }
 }
 
-/// Which of the optional parts of a move to carry over. Permission rules and the alias always are.
+/// Which of the optional parts of a move to carry over. The alias always is. `project_settings` covers every kind of
+/// permission: Claude Code's entry for the folder and Lantern's own "Always allow" rules, so unchecking it brings none.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
 pub struct Options {
     #[serde(default)]
@@ -544,7 +545,8 @@ pub struct Outcome {
 pub fn relocate(projects_root: &Path, claude_json: &Path, rules: &FolderRules, relocations: &Relocations, old: &str, new: &str, options: Options) -> Result<Outcome, String> {
     let project_keys = if options.project_settings { carry_project_entry(claude_json, old, new)? } else { vec![] };
     let memory_files = if options.memory { carry_memory(projects_root, old, new)? } else { 0 };
-    let rules = carry_rules(rules, old, new);
+    // Allowing things without asking is part of a project's permissions: it follows the same choice.
+    let rules = if options.project_settings { carry_rules(rules, old, new) } else { 0 };
     relocations.register(old, new);
     Ok(Outcome { project_keys, memory_files, rules })
 }
@@ -1038,6 +1040,29 @@ mod tests {
         let all = relocate(&projects, &claude, &rules, &relocations, &old.to_string_lossy(), &new.to_string_lossy(), Options { project_settings: true, memory: true }).unwrap();
         assert_eq!(all.project_keys, vec!["allowedTools"]);
         assert_eq!(all.memory_files, 1);
+    }
+
+    #[test]
+    fn always_allow_rules_follow_the_permissions_choice() {
+        let root = tempfile::tempdir().unwrap();
+        let projects = root.path().join("projects");
+        let (old, new) = (root.path().join("old-app"), root.path().join("new-app"));
+        std::fs::create_dir_all(&new).unwrap();
+        let claude = claude_json(root.path(), &json!({"projects": {}}).to_string());
+        let rules = FolderRules::load(None);
+        let (old_key, new_key) = (rules::folder_key(&old), rules::folder_key(&new));
+        rules.add(&old_key, Rule { tool: "Bash".into(), matcher: Matcher::Exact { text: "npm run build".into() } });
+        let relocations = Relocations::load(None);
+        let (old_s, new_s) = (old.to_string_lossy(), new.to_string_lossy());
+        // Permissions unchecked: no "Always allow" is brought over, though the move itself is still recorded.
+        let without = relocate(&projects, &claude, &rules, &relocations, &old_s, &new_s, Options { project_settings: false, memory: true }).unwrap();
+        assert_eq!(without.rules, 0);
+        assert!(rules.for_folder(&new_key).is_empty());
+        assert_eq!(relocations.aliases_of(&new_s), vec![old_s.clone().into_owned()]);
+        // Checked: they come along.
+        let with = relocate(&projects, &claude, &rules, &relocations, &old_s, &new_s, Options { project_settings: true, memory: false }).unwrap();
+        assert_eq!(with.rules, 1);
+        assert_eq!(rules.for_folder(&new_key).len(), 1);
     }
 
     /// A folder with a secret outside it, and the old folder's transcript directory (`root/projects`).

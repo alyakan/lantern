@@ -132,7 +132,7 @@ export function BringOldSessionsDialog({ destination, from = null, pickFolder, o
   }, [dest, pathsKey]);
   const checkedPreviews = bringing.map((r) => previews[r.path]).filter((p): p is RelocationPreview => !!p);
   const previewsReady = bringing.length > 0 && checkedPreviews.length === bringing.length;
-  const settingsFound = checkedPreviews.some((p) => p.project_entry);
+  const settingsFound = checkedPreviews.some((p) => p.project_entry || p.rules > 0);
   const memoryFound = checkedPreviews.some((p) => p.memory_files > 0);
 
   useEffect(() => {
@@ -311,7 +311,7 @@ export function BringOldSessionsDialog({ destination, from = null, pickFolder, o
                   <label className="bring-option">
                     <input type="checkbox" checked={options.project_settings} disabled={busy} onChange={(e) => setOptions({ ...options, project_settings: e.target.checked })} />
                     <span>
-                      Also bring this project's MCP servers and permissions (Claude Code keeps these per folder)
+                      Also bring this project's MCP servers and permissions, including your "Always allow" choices (Claude Code keeps these per folder)
                       {previewsReady && !settingsFound && <span className="bring-none"> none found</span>}
                     </span>
                   </label>

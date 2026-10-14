@@ -190,7 +190,7 @@ describe("bringing the sessions", () => {
   });
 
   it("the Details choices go to the move, and say 'none found' when the preview has nothing", async () => {
-    preview.mockImplementation(async (old) => (old === LAPTOP.path ? { ...FOUND, project_entry: false, memory_files: 0 } : FOUND));
+    preview.mockImplementation(async (old) => (old === LAPTOP.path ? { ...FOUND, project_entry: false, memory_files: 0, rules: 0 } : FOUND));
     open();
     await screen.findByRole("button", { name: "Bring 12 sessions here" });
     fireEvent.click(screen.getByRole("checkbox", { name: /~\/Documents\/Github\/acme-api/ }));
@@ -204,7 +204,7 @@ describe("bringing the sessions", () => {
   it("the Details checkboxes are on by default, with plain wording", async () => {
     open();
     await screen.findByRole("button", { name: "Bring 12 sessions here" });
-    expect(screen.getByRole("checkbox", { name: /MCP servers and permissions \(Claude Code keeps these per folder\)/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /MCP servers and permissions, including your "Always allow" choices \(Claude Code keeps these per folder\)/ })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /its memory \(notes Claude saved about this project\)/ })).toBeChecked();
   });
 });
