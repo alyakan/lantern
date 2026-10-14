@@ -100,6 +100,17 @@ fn capabilities_of(provider: ProviderId) -> provider::Capabilities {
     provider.provider().capabilities()
 }
 
+/// The providers a main agent on `own` may start workers on: its own, which is running, then every other whose CLI is found.
+async fn available_providers(own: ProviderId) -> Vec<ProviderId> {
+    let mut available = vec![own];
+    for id in ProviderId::all().into_iter().filter(|id| *id != own) {
+        if tauri::async_runtime::spawn_blocking(move || id.provider().locate(None)).await.is_ok_and(|found| found.is_ok()) {
+            available.push(id);
+        }
+    }
+    available
+}
+
 /// The most freedom the workers of main agent `main` may have, from its mode as it is now (Ask when it isn't open).
 fn main_ceiling(state: &AppState, main: &str) -> Mode {
     let cfg = state.slots.get(main).ok().and_then(|s| s.config.lock().unwrap().clone());
@@ -150,15 +161,7 @@ impl orchestra::Host for AppHost {
 
     fn available_providers(&self, main: &str) -> orchestra::Fut<'_, Vec<ProviderId>> {
         let own = self.main_provider(main);
-        Box::pin(async move {
-            let mut available = vec![own];
-            for id in ProviderId::all().into_iter().filter(|id| *id != own) {
-                if tauri::async_runtime::spawn_blocking(move || id.provider().locate(None)).await.is_ok_and(|found| found.is_ok()) {
-                    available.push(id);
-                }
-            }
-            available
-        })
+        Box::pin(available_providers(own))
     }
 
     fn worker_mode(&self, main: &str, provider: ProviderId) -> Mode {
@@ -282,11 +285,15 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
 
 fn helper_config(slot: &Slot, role: Role) -> Result<HelperConfig, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role })
+    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role, providers: vec![] })
 }
 
 /// Stops the slot's running session (denying its pending prompts) and starts `cfg` in it.
-async fn launch(app: &AppHandle, id: &str, slot: &Slot, cfg: SessionConfig, clear_changes: bool) -> Result<(), String> {
+async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, clear_changes: bool) -> Result<(), String> {
+    // Told to the main agent as it starts (and again whenever it restarts, which is when a CLI installed since shows up).
+    if cfg.helper.role == Role::Main {
+        cfg.helper.providers = available_providers(cfg.provider).await;
+    }
     let mut session = slot.session.lock().await;
     if let Some(old) = session.take() {
         slot.claude_pid.store(0, std::sync::atomic::Ordering::SeqCst);
