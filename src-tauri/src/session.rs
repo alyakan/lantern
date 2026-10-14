@@ -475,7 +475,7 @@ done"#,
         let d = dir.path().display();
         let fake = script(
             dir.path(),
-            &format!("printf '%s\\n' \"$@\" > {d}/args.txt\nwhile IFS= read -r line; do\n  printf '%s\\n' \"$line\" >> {d}/stdin.txt\n  cat {FIXTURE}\ndone"),
+            &format!("printf '%s\\n' \"$@\" > {d}/args.txt\nwhile IFS= read -r line; do\n  printf '%s\\n' \"$line\" >> {d}/stdin.txt\n  cat '{FIXTURE}'\ndone"),
         );
         let (sink, mut rx) = channel_sink();
         let edits = Arc::new(Mutex::new(Vec::new()));
