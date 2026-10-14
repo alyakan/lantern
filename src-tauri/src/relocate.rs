@@ -974,6 +974,41 @@ mod tests {
     }
 
     #[test]
+    fn the_places_are_found_from_real_transcripts_and_a_copy_counts_once() {
+        let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
+        let (w, projects) = (work.path(), work.path().join("projects"));
+        let (dest, same_case, gone, alias, web) = (w.join("now/acme-api"), w.join("src/ACME-API"), w.join("laptop/acme-api"), w.join("before/old-name"), w.join("src/web"));
+        for d in [&dest, &same_case, &web] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let s = |p: &Path| p.to_string_lossy().into_owned();
+        session(&projects, &dest, "d1", &s(&dest), "mine");
+        session(&projects, &same_case, "u1", &s(&same_case), "one");
+        session(&projects, &gone, "g1", &s(&gone), "two");
+        session(&projects, &gone, "g2", &s(&gone), "three");
+        session(&projects, &alias, "a1", &s(&alias), "four");
+        session(&projects, &web, "w1", &s(&web), "five");
+        session(&projects, Path::new("/tmp/acme-api"), "t1", "/tmp/acme-api", "probe");
+        // Automation with no typed prompt, in the gone folder's directory.
+        let bot = json!({"type": "user", "cwd": s(&gone), "entrypoint": "cli", "isMeta": true, "message": {"role": "user", "content": "meta"}});
+        std::fs::write(projects.join(encode_folder(&gone)).join("bot.jsonl"), bot.to_string()).unwrap();
+        // Copy-on-open: g1 was copied into the destination's directory, keeping its first cwd (the gone folder).
+        std::fs::copy(projects.join(encode_folder(&gone)).join("g1.jsonl"), projects.join(encode_folder(&dest)).join("g1.jsonl")).unwrap();
+
+        let folders = history::session_folders(&projects);
+        let found = old_locations(&folders, &s(&dest), &[s(&alias)]);
+        let mut shape: Vec<(String, bool, usize, bool)> = found.iter().map(|l| (l.path.clone(), l.exists, l.sessions, l.already)).collect();
+        shape.sort();
+        assert_eq!(
+            shape,
+            vec![(s(&alias), false, 1, true), (s(&gone), false, 2, false), (s(&same_case), true, 1, false)],
+            "the destination, the web folder and the temp folder are left out; the copy of g1 counts once, for the gone folder"
+        );
+        // The destination's own sessions: its one prompted session, not the copy of g1 that's in its directory.
+        assert_eq!(folders.iter().find(|f| f.path == s(&dest)).map(|f| f.sessions), Some(1));
+    }
+
+    #[test]
     fn the_destination_is_never_listed_not_even_through_a_link() {
         let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
         let (dest, link) = (work.path().join("projects/acme-api"), work.path().join("links/acme-api"));
