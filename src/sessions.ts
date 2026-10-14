@@ -96,11 +96,12 @@ export const WAKE_LIMIT = 8;
 /**
  * The notes to send now: each main agent's pending ones, joined into one message, once it is idle. A main agent that has
  * already taken `WAKE_LIMIT` automatic turns without the user saying anything keeps them waiting instead, so a worker and
- * the main agent answering each other can't run on unwatched (see `wakesPaused`).
+ * the main agent answering each other can't run on unwatched (see `wakesPaused`). `justSent`: chats that were sent something
+ * in this same pass (their queue), which `slots` still shows idle: a second message would start a second turn on top of it.
  */
-export function wakesToSend(slots: Record<string, State>): { slot: string; text: string }[] {
+export function wakesToSend(slots: Record<string, State>, justSent: ReadonlySet<string> = new Set()): { slot: string; text: string }[] {
   return Object.entries(slots)
-    .filter(([, s]) => s.wakes.length > 0 && s.status === "idle" && s.autoStreak < WAKE_LIMIT)
+    .filter(([slot, s]) => !justSent.has(slot) && s.wakes.length > 0 && s.status === "idle" && s.autoStreak < WAKE_LIMIT)
     .map(([slot, s]) => ({ slot, text: s.wakes.join("\n\n") }));
 }
 

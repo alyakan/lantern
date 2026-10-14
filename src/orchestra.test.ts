@@ -58,6 +58,18 @@ describe("a worker the main agent starts", () => {
     expect(w.status).toBe("running");
   });
 
+  it("a stop the user asked for earlier does not make the app restart a worker the main agent later stops", () => {
+    // The app restarts a chat that ended after the user pressed Stop; the main agent stopping it is its own decision.
+    const pressed = reducer({ ...main, status: "running" }, { type: "stop_requested" });
+    expect(pressed.stopRequested).toBe(true);
+    expect(ev(pressed, { kind: "agent_stopped", reason: null })).toMatchObject({ status: "ended", stopRequested: false });
+    expect(ev(pressed, { kind: "agent_message", from: "main agent", text: "x" }).stopRequested).toBe(false);
+  });
+
+  it("takes the mode its main agent's was lowered to", () => {
+    expect(ev({ ...main, mode: "auto" }, { kind: "agent_mode", mode: "ask" }).mode).toBe("ask");
+  });
+
   it("ends as stopped by the main agent, with a restart on offer, and never as a stop the app restarts on its own", () => {
     const stopped = ev({ ...main, status: "running", items: [{ type: "tool", id: "t", name: "Bash", summary: "", status: "running", output: null, edit: null, children: [] }] }, { kind: "agent_stopped", reason: null });
     expect(stopped.status).toBe("ended");
@@ -109,6 +121,14 @@ describe("notes for the main agent", () => {
     expect(user.autoStreak).toBe(0);
     expect(wakesPaused({ ...user, status: "idle" })).toBe(false);
     expect(wakesToSend({ s1: { ...user, status: "idle" } })).toEqual([{ slot: "s1", text: "one more" }]);
+  });
+
+  it("are not sent to a chat that was just sent its queue in the same pass, which still reads idle", () => {
+    const s = ev({ ...main, status: "idle", queued: ["a message the user typed while it worked"] }, { kind: "agent_wake", text: "note" });
+    expect(wakesToSend({ s1: s })).toEqual([{ slot: "s1", text: "note" }]);
+    expect(wakesToSend({ s1: s }, new Set(["s1"]))).toEqual([]);
+    // Another chat in the same pass is not held back by it.
+    expect(wakesToSend({ s1: s, s2: s }, new Set(["s1"]))).toEqual([{ slot: "s2", text: "note" }]);
   });
 
   it("are not paused when there is nothing waiting", () => {
@@ -172,6 +192,17 @@ describe("what a chat has cost", () => {
     expect(totalCost(s)).toBeCloseTo(0.035);
     s = ev(s, done(0.012));
     expect(totalCost(s)).toBeCloseTo(0.042);
+  });
+
+  it("keeps what an earlier claude cost when the new one's first total is higher than the old one's", () => {
+    let s = ev(main, done(0.1));
+    // Restarted from the app: the old claude's cost is set aside before the new one counts.
+    s = reducer(s, { type: "restarting" });
+    expect(totalCost(s)).toBeCloseTo(0.1);
+    s = ev(s, done(0.3));
+    expect(totalCost(s)).toBeCloseTo(0.4);
+    s = ev(s, done(0.35));
+    expect(totalCost(s)).toBeCloseTo(0.45);
   });
 
   it("is left alone by a turn that reports no cost, and starts over with a new conversation", () => {

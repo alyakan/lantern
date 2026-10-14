@@ -1,9 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { chatsReducer, initialChats, type Chats } from "../sessions";
+import { chatsReducer, initialChats, WAKE_LIMIT, type Chats } from "../sessions";
 import { initialState, type State } from "../store";
 import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions } from "../lib/canvasContext";
-import { orchestraNodes } from "../lib/orchestraView";
+import { needingYou, orchestraNodes } from "../lib/orchestraView";
 import { GAP, MAIN_SIZE, overlaps, SUMMARY_ZOOM, WORKER_SIZE } from "../lib/canvas";
 import { Canvas, newLayout, placeNodes, UPDATE_REQUEST } from "./Canvas";
 
@@ -29,7 +29,7 @@ function team(workers = 2): Chats {
   return c;
 }
 
-const actions = (): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()) });
+const actions = (): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), draft: vi.fn(() => ""), setDraft: vi.fn() });
 
 function setup(chats: Chats, extra: { attention?: string[]; layout?: ReturnType<typeof newLayout> } = {}) {
   const store = createChatStore();
@@ -159,11 +159,69 @@ describe("the canvas", () => {
     });
     expect(canvas.classList.contains("summary")).toBe(true);
     const card = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-body")!;
+    // A press that doesn't move is a click.
     act(() => {
-      fireEvent.click(card);
+      fireEvent.pointerDown(card, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+      fireEvent.pointerUp(card, { pointerId: 1, clientX: 101, clientY: 100 });
     });
     expect(layout.view!.zoom).toBeGreaterThanOrEqual(SUMMARY_ZOOM);
     expect(canvas.classList.contains("summary")).toBe(false);
+  });
+
+  it("pans when a card is dragged, instead of zooming in on it", () => {
+    const { layout } = setup(team(1));
+    const canvas = screen.getByTestId("canvas");
+    act(() => {
+      fireEvent.wheel(canvas, { ctrlKey: true, deltaY: 300 });
+    });
+    expect(canvas.classList.contains("summary")).toBe(true);
+    const before = { ...layout.view! };
+    const card = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-body")!;
+    act(() => {
+      fireEvent.pointerDown(card, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+      fireEvent.pointerMove(card, { pointerId: 1, clientX: 160, clientY: 130 });
+      fireEvent.pointerUp(card, { pointerId: 1, clientX: 160, clientY: 130 });
+    });
+    expect(layout.view!.zoom).toBe(before.zoom);
+    expect(layout.view!.x).toBeCloseTo(before.x + 60);
+    expect(layout.view!.y).toBeCloseTo(before.y + 30);
+    expect(canvas.classList.contains("summary")).toBe(true);
+  });
+
+  it("does not treat a click on the background as framing the view itself", () => {
+    const { layout } = setup(team(1));
+    const canvas = screen.getByTestId("canvas");
+    expect(layout.touched).toBe(false);
+    act(() => {
+      fireEvent.pointerDown(canvas, { button: 0, pointerId: 1, clientX: 50, clientY: 50 });
+      fireEvent.pointerMove(canvas, { pointerId: 1, clientX: 52, clientY: 51 });
+      fireEvent.pointerUp(canvas, { pointerId: 1, clientX: 52, clientY: 51 });
+    });
+    // So an agent that arrives next still gets the view re-framed to show it.
+    expect(layout.touched).toBe(false);
+    act(() => {
+      fireEvent.pointerDown(canvas, { button: 0, pointerId: 2, clientX: 50, clientY: 50 });
+      fireEvent.pointerMove(canvas, { pointerId: 2, clientX: 90, clientY: 80 });
+      fireEvent.pointerUp(canvas, { pointerId: 2, clientX: 90, clientY: 80 });
+    });
+    expect(layout.touched).toBe(true);
+  });
+
+  it("keeps an agent where the pointer is when the zoom changes in the middle of dragging it", () => {
+    const { layout } = setup(team(1));
+    const canvas = screen.getByTestId("canvas");
+    const zoom = layout.view?.zoom ?? 1;
+    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    const start = { ...layout.boxes.w1 };
+    const head = w1.querySelector(".node-head")!;
+    fireEvent.pointerDown(head, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
+    act(() => {
+      fireEvent.wheel(canvas, { ctrlKey: true, deltaY: -200 }); // zoomed in mid-drag
+    });
+    expect(layout.view!.zoom).not.toBe(zoom);
+    fireEvent.pointerMove(head, { pointerId: 1, clientX: 150, clientY: 100 });
+    fireEvent.pointerUp(head, { pointerId: 1 });
+    expect(layout.boxes.w1.x).toBeCloseTo(start.x + 50 / zoom);
   });
 
   it("pans with the wheel on the background but lets a chat scroll under it", () => {
@@ -175,12 +233,31 @@ describe("the canvas", () => {
       fireEvent.wheel(canvas, { deltaX: 30, deltaY: 50 });
     });
     expect(layout.view).toMatchObject({ x: x0 - 30, y: y0 - 50 });
-    const body = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-body")!;
+    const chat = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-chat")!;
     const before = { ...layout.view! };
     act(() => {
-      fireEvent.wheel(body, { deltaX: 0, deltaY: 80 });
+      fireEvent.wheel(chat, { deltaX: 0, deltaY: 80 });
     });
     expect(layout.view).toEqual(before);
+    // A title is not a chat: the wheel pans there.
+    act(() => {
+      fireEvent.wheel(screen.getByLabelText(/Worker Worker 1/).querySelector(".node-head")!, { deltaX: 0, deltaY: 20 });
+    });
+    expect(layout.view!.y).toBeCloseTo(before.y - 20);
+  });
+
+  it("meets a folded agent's tether at its title bar, not at the space its full height would have taken", () => {
+    const { layout } = setup(team(1));
+    const full = document.querySelector("path.tether")!.getAttribute("d")!;
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Worker 1" }));
+    const folded = document.querySelector("path.tether")!.getAttribute("d")!;
+    expect(layout.collapsed.w1).toBe(true);
+    expect(folded).not.toBe(full);
+    // The last point is on the agent's left edge, within its 52px title bar.
+    const y = Number(folded.trim().split(" ").pop());
+    const box = layout.boxes.w1;
+    expect(y).toBeGreaterThanOrEqual(box.y);
+    expect(y).toBeLessThanOrEqual(box.y + 52);
   });
 
   it("moves an agent by dragging its title and resizes it from its corner, at any zoom", () => {
@@ -341,5 +418,53 @@ describe("asking for an update", () => {
     stopped.slots.s1 = { ...stopped.slots.s1, status: "ended" };
     mount(stopped, actions());
     expect(screen.queryByRole("button", { name: "Ask the main agent for an update" })).toBeNull();
+  });
+});
+
+describe("what the loop guard holds back, and what is typed", () => {
+  it("says when a main agent's updates are held back, counts it as needing you, and passes them on when asked", () => {
+    const chats = team(1);
+    chats.slots.s1 = { ...chats.slots.s1, wakes: ["a", "b"], autoStreak: WAKE_LIMIT };
+    const a = actions();
+    const store = createChatStore();
+    store.set(chats.slots);
+    const nodes = orchestraNodes(chats, () => "Main agent");
+    render(
+      <ChatStoreContext.Provider value={store}>
+        <NodeActionsContext.Provider value={a}>
+          <Canvas nodes={nodes} layout={newLayout()} activeSlot="s1" attention={needingYou(nodes, chats.slots)} onFocus={vi.fn()} onOpen={vi.fn()} />
+        </NodeActionsContext.Provider>
+      </ChatStoreContext.Provider>,
+    );
+    const banner = within(screen.getByLabelText(/Main agent Main agent/)).getByText(/2 updates from the workers are held back/);
+    expect(banner.textContent).toContain(`${WAKE_LIMIT} replies in a row`);
+    expect(screen.getByRole("button", { name: /1 agent needs you/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Pass them on" }));
+    // The user's own message is what lets the held notes go out after it.
+    expect(a.send).toHaveBeenCalledWith("s1", expect.stringContaining("Carry on"));
+  });
+
+  it("says nothing when nothing is held", () => {
+    setup(team(1));
+    expect(screen.queryByText(/held back/)).toBeNull();
+  });
+
+  it("keeps what is typed in an agent's box in the app, and puts it back when the box is shown again", () => {
+    const a = actions();
+    (a.draft as ReturnType<typeof vi.fn>).mockImplementation((slot: string) => (slot === "w1" ? "half a thought" : ""));
+    const chats = team(1);
+    const store = createChatStore();
+    store.set(chats.slots);
+    render(
+      <ChatStoreContext.Provider value={store}>
+        <NodeActionsContext.Provider value={a}>
+          <Canvas nodes={orchestraNodes(chats, () => "Main agent")} layout={newLayout()} activeSlot="s1" attention={[]} onFocus={vi.fn()} onOpen={vi.fn()} />
+        </NodeActionsContext.Provider>
+      </ChatStoreContext.Provider>,
+    );
+    const box = within(screen.getByLabelText(/Worker Worker 1/)).getByLabelText("Message this agent") as HTMLTextAreaElement;
+    expect(box.value).toBe("half a thought");
+    fireEvent.change(box, { target: { value: "half a thought, and more" } });
+    expect(a.setDraft).toHaveBeenLastCalledWith("w1", "half a thought, and more");
   });
 });

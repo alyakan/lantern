@@ -1,6 +1,7 @@
 import { memo, useMemo, useRef } from "react";
 import { useChatState, useNodeActions } from "../lib/canvasContext";
 import { SlotContext } from "../lib/slot";
+import { WAKE_LIMIT, wakesPaused } from "../sessions";
 import type { MergeProposal } from "../store";
 import { ChatView } from "./ChatView";
 import type { StreamHandlers } from "./ChatStream";
@@ -60,6 +61,14 @@ export const NodeBody = memo(function NodeBody({ slot, parent }: { slot: string;
           {proposals.map((p) => (
             <MergeCard key={p.worker} proposal={p} />
           ))}
+        </div>
+      )}
+      {wakesPaused(state) && (
+        <div className="node-banner info" role="status">
+          <span>
+            {state.wakes.length === 1 ? "1 update from the workers is" : `${state.wakes.length} updates from the workers are`} held back: {WAKE_LIMIT} replies in a row went out without you, and this keeps the team from running on unwatched.
+          </span>
+          <button onClick={() => actions.send(slot, "Carry on with the latest updates from the workers.")}>Pass them on</button>
         </div>
       )}
       {state.banner && (

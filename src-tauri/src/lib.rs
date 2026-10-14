@@ -82,8 +82,36 @@ fn emitter(app: &AppHandle) -> impl Fn(SlotEvent) + Send + Sync + Clone + 'stati
     move |ev| {
         let _ = app.emit("ui-event", &ev);
         if let Some(state) = app.try_state::<AppState>() {
+            // Its claude is gone: the pid it had could be given to some other process, which must not pass for it.
+            if matches!(ev.event, ui_event::UiEvent::SessionEnded { .. }) {
+                if let Ok(slot) = state.slots.get(&ev.slot) {
+                    slot.claude_pid.store(0, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
             state.orchestra.observe(&ev.slot, &ev.event);
         }
+    }
+}
+
+/// How the worker `worker` runs once its main agent's mode allows no more than `ceiling`: lowered (its claude restarted on
+/// the same conversation, since the mode is a launch flag) when it was running with more freedom than that.
+async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: Mode) {
+    let Ok(s) = state.slots.get(worker) else { return };
+    let Some(mut cfg) = s.config.lock().unwrap().clone() else { return };
+    let (mode, auto) = args::capped_mode(cfg.mode, cfg.auto_approve, ceiling);
+    if (mode, auto) == (cfg.mode, cfg.auto_approve) {
+        return;
+    }
+    let running = s.session.lock().await.as_ref().and_then(|x| x.session_id());
+    cfg.mode = mode;
+    cfg.auto_approve = auto;
+    cfg.resume = running.or(cfg.resume);
+    cfg.path_env = login_path(state).await;
+    if let Ok(helper) = helper_config(&s, cfg.helper.role.clone()) {
+        cfg.helper = helper;
+    }
+    if launch(app, worker, &s, cfg, false).await.is_ok() {
+        let _ = app.emit("ui-event", SlotEvent { slot: worker.to_string(), event: ui_event::UiEvent::AgentMode { mode: "ask".into() } });
     }
 }
 
@@ -149,8 +177,20 @@ impl orchestra::Host for AppHost {
             let Ok(s) = self.app.state::<AppState>().slots.get(slot) else { return };
             s.bridge.cancel_all();
             s.shells.stop_all();
-            // Taken out before stopping: the lock would otherwise be held while claude stops.
-            let session = s.session.lock().await.take();
+            // Taken out before stopping: the lock would otherwise be held while claude stops. A write to a claude that isn't
+            // reading can hold it, so after a moment claude is signalled directly rather than waited for.
+            let session = match tokio::time::timeout(std::time::Duration::from_secs(2), s.session.lock()).await {
+                Ok(mut guard) => guard.take(),
+                Err(_) => {
+                    let pid = s.claude_pid.swap(0, std::sync::atomic::Ordering::SeqCst);
+                    if pid > 1 {
+                        // Its own session and group (the pid is the group id), as Session::stop signals it.
+                        unsafe { libc::kill(-(pid as libc::pid_t), libc::SIGKILL) };
+                    }
+                    return;
+                }
+            };
+            s.claude_pid.store(0, std::sync::atomic::Ordering::SeqCst);
             if let Some(session) = session {
                 // Remembered, so restarting the chat carries on the same conversation rather than starting another.
                 if let (Some(id), Some(cfg)) = (session.session_id(), s.config.lock().unwrap().as_mut()) {
@@ -171,12 +211,13 @@ impl orchestra::Host for AppHost {
 fn enroll(state: &AppState, id: &str, slot: &Slot, role: &Role) {
     if *role == Role::Main {
         state.orchestra.register_main(id);
-        // A call is the main agent's only when the process making it is one its own claude started (its helper): the OS
-        // says who is on the other end of the socket, and a worker's shell can't pass for it.
+        // A call is the main agent's only when the process making it was started directly by its own claude (its helper):
+        // the OS says who is on the other end of the socket. A command the main agent ran in a shell (code a worker wrote,
+        // say) is further down the tree, and doesn't pass for it.
         let claude = slot.claude_pid.clone();
         let from_this_chats_claude: permission::bridge::OrchestraAuth = Arc::new(move |caller| {
             let main = claude.load(std::sync::atomic::Ordering::SeqCst);
-            main != 0 && process::descends_from(caller, main)
+            main != 0 && process::is_child_of(caller, main)
         });
         slot.bridge.set_orchestra(state.orchestra.handler(id.to_string()), from_this_chats_claude);
     } else {
@@ -198,6 +239,7 @@ fn helper_config(slot: &Slot, role: Role) -> Result<HelperConfig, String> {
 async fn launch(app: &AppHandle, id: &str, slot: &Slot, cfg: SessionConfig, clear_changes: bool) -> Result<(), String> {
     let mut session = slot.session.lock().await;
     if let Some(old) = session.take() {
+        slot.claude_pid.store(0, std::sync::atomic::Ordering::SeqCst);
         slot.bridge.cancel_all();
         old.stop().await;
     }
@@ -329,7 +371,16 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
     cfg.resume = running_id.or(cfg.resume);
     cfg.helper = helper_config(&s, cfg.helper.role.clone())?;
     cfg.path_env = login_path(&state).await;
-    launch(&app, &slot, &s, cfg, false).await
+    let (new_mode, new_auto) = (cfg.mode, cfg.auto_approve);
+    launch(&app, &slot, &s, cfg, false).await?;
+    // A worker never has more freedom than its main agent: when the main agent's mode is lowered, so are its workers'.
+    if state.orchestra.is_main(&slot) {
+        let ceiling = args::worker_mode(new_mode, new_auto);
+        for worker in state.orchestra.workers_of(&slot) {
+            lower_worker(&app, &state, &worker, ceiling).await;
+        }
+    }
+    Ok(())
 }
 
 /// Restarts a chat's claude on the same session with another harness: main model and effort, advisor, subagents' model.
@@ -1078,12 +1129,18 @@ async fn open_session(
     if settings.worker.as_ref().is_some_and(|w| !state.orchestra.is_main(&w.parent)) {
         settings.worker = None;
     }
+    // Whatever it was saved with, a worker comes back no freer than its main agent is now (a main agent reopened on Ask must
+    // not get workers on Auto).
+    if let Some(parent) = settings.worker.as_ref().map(|w| w.parent.clone()) {
+        let main = state.slots.get(&parent).ok().and_then(|p| p.config.lock().unwrap().clone());
+        let ceiling = main.map_or(Mode::Ask, |c| args::worker_mode(c.mode, c.auto_approve));
+        let (mode, auto) = args::capped_mode(settings.mode, settings.auto_approve, ceiling);
+        settings.mode = mode;
+        settings.auto_approve = auto;
+    }
     let worker = settings.worker.clone();
     let cfg = new_config(&state, &s, claude_path, folder, settings, Some(session_id.clone())).await?;
     enroll(&state, &slot, &s, &cfg.helper.role);
-    if let Some(w) = worker {
-        state.orchestra.adopt(&slot, &w.parent, &w.name, &cfg.folder).await?;
-    }
     let root = projects_root()?;
     let folder = cfg.folder.clone();
     let aliases = aliases_for(&state, &folder.to_string_lossy());
@@ -1104,7 +1161,14 @@ async fn open_session(
         }
         relocate::Ready::Resumable(path) => {
             let replayed = tauri::async_runtime::spawn_blocking(move || history::replay(&path)).await.map_err(|e| e.to_string())?;
-            launch(&app, &slot, &s, cfg, true).await?;
+            // Registered before it starts, so its first events are seen, and unregistered if it never does.
+            if let Some(w) = worker {
+                state.orchestra.adopt(&slot, &w.parent, &w.name, &cfg.folder).await?;
+            }
+            if let Err(e) = launch(&app, &slot, &s, cfg, true).await {
+                state.orchestra.forget(&slot);
+                return Err(e);
+            }
             menu::refresh_recent(&app).await;
             s.changes.lock().unwrap().restore(replayed.edits, replayed.edits_before_last_turn);
             Ok(OpenedSession { events: replayed.events, moved_from, read_only: None })

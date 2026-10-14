@@ -1,4 +1,4 @@
-import type { Chats } from "../sessions";
+import { wakesPaused, type Chats } from "../sessions";
 import type { ChatItem, State } from "../store";
 
 /** What an agent on the canvas is doing, in the words a product owner would use. */
@@ -78,7 +78,8 @@ export function readyToMerge(nodes: OrchestraNode[], slots: Record<string, State
 /** The agents that are waiting on the user (a permission prompt, or a merge to approve), in canvas order. */
 export function needingYou(nodes: OrchestraNode[], slots: Record<string, State>): string[] {
   const merges = readyToMerge(nodes, slots);
-  return nodes.filter((n) => slots[n.slot] && (nodeStatus(slots[n.slot]) === "waiting" || merges.has(n.slot))).map((n) => n.slot);
+  // A main agent whose workers' updates are held back by the loop guard is waiting for the user to say go on.
+  return nodes.filter((n) => slots[n.slot] && (nodeStatus(slots[n.slot]) === "waiting" || merges.has(n.slot) || wakesPaused(slots[n.slot]))).map((n) => n.slot);
 }
 
 /** Dollars for a screen: "$0.42", "$12.30", "<$0.01" for something that cost a little, nothing for nothing. */

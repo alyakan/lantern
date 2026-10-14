@@ -91,8 +91,6 @@ interface FrameProps {
   onToggle: (slot: string) => void;
   onOpen: (slot: string) => void;
   onPress: (slot: string) => void;
-  /** A card was clicked: zoom in on that agent. */
-  onZoomTo: (slot: string) => void;
 }
 
 /** The agent's latest words and state, for the card that stands in for its chat when zoomed out or folded. */
@@ -108,7 +106,7 @@ function SummaryBody({ slot }: { slot: string }) {
   );
 }
 
-const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, focused, summary, collapsed, onGrab, onDrag, onRelease, onToggle, onOpen, onPress, onZoomTo }: FrameProps) {
+const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, focused, summary, collapsed, onGrab, onDrag, onRelease, onToggle, onOpen, onPress }: FrameProps) {
   const state = useChatState(slot);
   const owner = useChatState(parent ?? slot);
   const status: NodeStatus = state ? nodeStatus(state) : "ended";
@@ -145,7 +143,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
         </button>
       </header>
       {!folded && (
-        <div className="node-body" onClick={summary ? () => onZoomTo(slot) : undefined} title={summary ? "Zoom in on this agent" : undefined}>
+        <div className="node-body" title={summary ? "Click to zoom in on this agent" : undefined}>
           {summary ? <SummaryBody slot={slot} /> : <NodeBody slot={slot} parent={parent} />}
         </div>
       )}
@@ -322,7 +320,8 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
 
   const fit = useCallback((animate: boolean) => {
     const boxes = Object.values(layout.boxes);
-    if (size.current.w === 0 || boxes.length === 0) return;
+    // Not while a gesture is in hand: re-framing under a pointer would move what it is moving.
+    if (size.current.w === 0 || boxes.length === 0 || drag.current || pan.current) return;
     apply(fitView(boxes, size.current), animate);
   }, [apply, layout]);
 
@@ -368,8 +367,8 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
         apply(zoomAt(view.current, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.004)), at));
         return;
       }
-      // Over an agent the wheel scrolls its chat; anywhere else it pans.
-      if ((e.target as Element).closest(".node-body")) return;
+      // Over an agent's chat the wheel scrolls it; anywhere else (a card, a title, the background) it pans.
+      if ((e.target as Element).closest(".node-chat")) return;
       e.preventDefault();
       touch();
       apply(panBy(view.current, -e.deltaX, -e.deltaY));
@@ -402,31 +401,47 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     };
   }, [apply, layout]);
 
-  // Panning: drag the background.
-  const pan = useRef<{ id: number; x: number; y: number } | null>(null);
+  // Panning: drag the background, or (zoomed out, where cards cover most of it) a card. A press on a card that doesn't move
+  // is a click, which zooms in on it. Pointer capture would send that click to the canvas, so the pan keeps hold of the
+  // pointer itself (it is on the canvas element, which sees every move).
+  const pan = useRef<{ id: number; x: number; y: number; from: number; fromY: number; moved: boolean; card: string | null } | null>(null);
   const onBackgroundDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     const t = e.target as HTMLElement;
-    if (e.button !== 0 || !(t === e.currentTarget || t.classList.contains("canvas-world") || t.closest("svg.canvas-tethers"))) return;
+    const onBackground = t === e.currentTarget || t.classList.contains("canvas-world") || !!t.closest("svg.canvas-tethers");
+    const card = summary && !onBackground && !t.closest("button") ? (t.closest("[data-node]") as HTMLElement | null)?.dataset.node ?? null : null;
+    if (e.button !== 0 || !(onBackground || (card && t.closest(".node-body")))) return;
     e.currentTarget.setPointerCapture?.(e.pointerId);
-    pan.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
-    e.currentTarget.classList.add("panning");
-    touch();
+    pan.current = { id: e.pointerId, x: e.clientX, y: e.clientY, from: e.clientX, fromY: e.clientY, moved: false, card: card && t.closest(".node-body") ? card : null };
   };
   const onBackgroundMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const p = pan.current;
     if (!p || p.id !== e.pointerId) return;
+    // A few pixels of wobble in a click is not a pan: the view stays framed as it was, and the click still counts.
+    if (!p.moved && Math.hypot(e.clientX - p.from, e.clientY - p.fromY) < 4) return;
+    if (!p.moved) {
+      p.moved = true;
+      layout.touched = true;
+      e.currentTarget.classList.add("panning");
+    }
     apply(panBy(view.current, e.clientX - p.x, e.clientY - p.y));
     p.x = e.clientX;
     p.y = e.clientY;
   };
   const onBackgroundUp = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (pan.current?.id !== e.pointerId) return;
+    const p = pan.current;
+    if (p?.id !== e.pointerId) return;
     pan.current = null;
     e.currentTarget.classList.remove("panning");
+    if (!p.moved && p.card && e.type === "pointerup") goTo(p.card);
   };
 
   // Moving and resizing agents: painted onto the elements each frame, committed when released.
-  const drag = useRef<{ id: number; kind: "move" | "resize"; slot: string; x: number; y: number; box: Box } | null>(null);
+  const drag = useRef<{ id: number; kind: "move" | "resize"; slot: string; x: number; y: number; box: Box; zoom: number } | null>(null);
+  /** An agent as the canvas shows it: a folded one is only its title bar tall, and its tether meets that. */
+  const shown = (slot: string): Box => {
+    const b = layout.boxes[slot];
+    return layout.collapsed[slot] ? { ...b, h: COLLAPSED_HEIGHT } : b;
+  };
   const frame = useRef(0);
   const paint = useCallback(() => {
     frame.current = 0;
@@ -441,7 +456,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       if (!layout.collapsed[n.slot]) el.style.height = `${box.h}px`;
       const parent = n.parent ? layout.boxes[n.parent] : undefined;
       const line = parent && w.querySelector(`[data-tether="${n.slot}"]`);
-      if (parent && line) line.setAttribute("d", tether(parent, box).d);
+      if (parent && line) line.setAttribute("d", tether(layout.collapsed[n.parent!] ? { ...parent, h: COLLAPSED_HEIGHT } : parent, layout.collapsed[n.slot] ? { ...box, h: COLLAPSED_HEIGHT } : box).d);
     }
   }, [layout, nodes]);
 
@@ -461,7 +476,9 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     // No text selection while dragging.
     e.preventDefault();
     e.currentTarget.setPointerCapture?.(e.pointerId);
-    drag.current = { id: e.pointerId, kind, slot, x: e.clientX, y: e.clientY, box: { ...layout.boxes[slot] } };
+    // The zoom is taken now and kept for the whole drag: the movement is measured from here, in screen pixels, so a zoom
+    // that changes meanwhile (a wheel tick, an agent arriving and the view re-framing) must not change what they mean.
+    drag.current = { id: e.pointerId, kind, slot, x: e.clientX, y: e.clientY, box: { ...layout.boxes[slot] }, zoom: view.current.zoom };
   }, [layout]);
 
   const onDrag = useCallback((e: ReactPointerEvent<HTMLElement>) => {
@@ -469,7 +486,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     if (!d || d.id !== e.pointerId) return;
     const dx = e.clientX - d.x;
     const dy = e.clientY - d.y;
-    layout.boxes[d.slot] = d.kind === "move" ? moveBox(d.box, dx, dy, view.current.zoom) : resizeBox(d.box, dx, dy, view.current.zoom);
+    layout.boxes[d.slot] = d.kind === "move" ? moveBox(d.box, dx, dy, d.zoom) : resizeBox(d.box, dx, dy, d.zoom);
     if (!frame.current) frame.current = requestAnimationFrame(paint);
   }, [layout, paint]);
 
@@ -496,9 +513,9 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     const box = layout.boxes[slot];
     if (!box) return;
     layout.touched = true;
-    // Big enough to read, but never past what fits: an agent taller than the canvas is shown whole.
-    const fits = Math.min(1, (size.current.w - 48) / box.w, (size.current.h - 48) / box.h);
-    apply(centerOn(box, size.current, clampZoom(Math.max(view.current.zoom, SUMMARY_ZOOM + 0.2, Math.min(1, fits)))), true);
+    // Big enough to read, but never past what fits: an agent taller than the canvas is shown whole, however small that is.
+    const fits = size.current.w > 0 && size.current.h > 0 ? Math.min(1, (size.current.w - 48) / box.w, (size.current.h - 48) / shown(slot).h) : 1;
+    apply(centerOn(shown(slot), size.current, clampZoom(Math.min(Math.max(view.current.zoom, SUMMARY_ZOOM + 0.2), fits))), true);
     onFocus(slot);
     bringToFront(slot);
   }, [layout, apply, onFocus, bringToFront]);
@@ -524,7 +541,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
           {nodes.map((n) => {
             const parent = n.parent ? layout.boxes[n.parent] : undefined;
             const box = layout.boxes[n.slot];
-            return parent && box ? <TetherLine key={n.slot} slot={n.slot} d={tether(parent, box).d} /> : null;
+            return parent && box ? <TetherLine key={n.slot} slot={n.slot} d={tether(shown(n.parent!), shown(n.slot)).d} /> : null;
           })}
         </svg>
         {nodes.map((n) => (
@@ -546,7 +563,6 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
             onToggle={onToggle}
             onOpen={onOpen}
             onPress={onPress}
-            onZoomTo={goTo}
           />
         ))}
       </div>

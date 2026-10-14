@@ -88,6 +88,11 @@ const HERO_PLACEHOLDER: Record<Flavour | "none", string> = {
   debug: "What's going wrong, and when?",
 };
 
+/** The chat whose merge cards include `worker`'s: its main agent's, even if the worker's own chat has been closed. */
+function mergeOwner(chats: { slots: Record<string, { proposals: { worker: string }[] }> }, worker: string): string | undefined {
+  return Object.keys(chats.slots).find((slot) => chats.slots[slot].proposals.some((p) => p.worker === worker));
+}
+
 /** An orchestra's main agent starts on the mode the user chose for it. */
 interface OrchestraStart {
   mode: Mode;
@@ -679,8 +684,9 @@ export default function App() {
       sendIn(slot, text);
     }
     // Notes from an orchestra's workers go to the main agent as soon as it is idle (not only when a turn ends: it is
-    // usually idle when a worker finishes), joined into one message.
-    for (const { slot, text } of wakesToSend(chats.slots)) {
+    // usually idle when a worker finishes), joined into one message. Not to a chat that was just sent its queue above: this
+    // render still has it idle, and a second message would start a second turn on top of that one.
+    for (const { slot, text } of wakesToSend(chats.slots, new Set(due.map((d) => d.slot)))) {
       to(slot)({ type: "wakes_taken" });
       sendIn(slot, text, undefined, true);
     }
@@ -915,6 +921,14 @@ export default function App() {
     focusAgent(slot);
     setView("chat");
   };
+  // The canvas gets these two fixed, calling through to this render's: a new function each render would make every agent on
+  // it redraw for every event of every chat, which is what its per-agent subscriptions are there to avoid.
+  const focusRef = useRef(focusAgent);
+  focusRef.current = focusAgent;
+  const showRef = useRef(showAgent);
+  showRef.current = showAgent;
+  const canvasFocus = useMemo(() => (slot: string) => focusRef.current(slot), []);
+  const canvasOpen = useMemo(() => (slot: string) => showRef.current(slot), []);
   // How a project's orchestras run, once chosen. Starting a team is not the same as consenting to agents that act without
   // asking, so the first time it is asked, and the answer is kept for that project (changed in the main agent's mode menu).
   const newOrchestra = async () => {
@@ -960,15 +974,23 @@ export default function App() {
     },
     // The answer to a merge the main agent asked for. The backend says how it went (merge_resolved); an answer that never
     // got that far (nothing waiting, no such worker) is told to the main agent's chat, where the card is.
+    // The main agent whose chat holds the card: found from the proposal itself, because the worker's chat may be closed by now
+    // (and with it its place among the agents).
     approveMerge: (worker: string) => {
-      const main = chats.agents[worker]?.parent;
+      const main = mergeOwner(chats, worker);
       api.approveMerge(worker).catch((e) => main && to(main)({ type: "ui_event", event: { kind: "merge_resolved", worker, outcome: "failed", detail: errText(e) } }));
     },
     declineMerge: (worker: string) => {
-      const main = chats.agents[worker]?.parent;
+      const main = mergeOwner(chats, worker);
       api.declineMerge(worker).catch((e) => main && to(main)({ type: "ui_event", event: { kind: "merge_resolved", worker, outcome: "failed", detail: errText(e) } }));
     },
     removeWorktree: (worker: string) => api.discardWorktree(worker, false).catch((e) => Promise.reject(errText(e))),
+    draft: (slot: string) => drafts.current[slot] ?? "",
+    setDraft: (slot: string, text: string) => {
+      if (text) drafts.current[slot] = text;
+      else delete drafts.current[slot];
+      saveOpen();
+    },
   };
   // Agents are handed one set of actions for good and call through it to whatever this render has, so they never redraw for it.
   const doingRef = useRef(doing);
@@ -987,6 +1009,8 @@ export default function App() {
       approveMerge: (worker) => doingRef.current.approveMerge(worker),
       declineMerge: (worker) => doingRef.current.declineMerge(worker),
       removeWorktree: (worker) => doingRef.current.removeWorktree(worker),
+      draft: (slot) => doingRef.current.draft(slot),
+      setDraft: (slot, text) => doingRef.current.setDraft(slot, text),
     }),
     [],
   );
@@ -1363,7 +1387,7 @@ export default function App() {
           <ChatStoreContext.Provider value={chatStore}>
             <NodeActionsContext.Provider value={nodeActions}>
               <ErrorBoundary name="canvas">
-                <Canvas nodes={nodes} layout={canvasLayout.current} activeSlot={active} attention={attention} onFocus={focusAgent} onOpen={showAgent} />
+                <Canvas nodes={nodes} layout={canvasLayout.current} activeSlot={active} attention={attention} onFocus={canvasFocus} onOpen={canvasOpen} />
               </ErrorBoundary>
             </NodeActionsContext.Provider>
           </ChatStoreContext.Provider>

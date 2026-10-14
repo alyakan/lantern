@@ -545,16 +545,22 @@ function applyEvent(state: State, ev: UiEvent): State {
     // The main agent wrote to this worker: it shows as a message from it, and the worker is at work on it.
     case "agent_message": {
       const seq = state.seq + 1;
-      return { ...state, seq, status: state.status === "idle" ? "running" : state.status, thinking: state.status === "idle" || state.thinking, items: [...state.items, { type: "user", id: `u${seq}`, text: ev.text, at: Date.now(), from: ev.from }] };
+      return { ...state, seq, stopRequested: false, status: state.status === "idle" ? "running" : state.status, thinking: state.status === "idle" || state.thinking, items: [...state.items, { type: "user", id: `u${seq}`, text: ev.text, at: Date.now(), from: ev.from }] };
     }
+    // Stopped by the main agent, which is a decision of its own: the user's earlier Stop (if any) must not turn it into a
+    // restart (the app restarts a chat that ended after the user pressed Stop).
     case "agent_stopped":
       return {
         ...state,
         status: "ended",
         thinking: false,
+        stopRequested: false,
         items: denyPending(failRunning(state.items)),
         banner: ev.reason ? { kind: "error", text: ev.reason, action: null } : { kind: "info", text: "The main agent stopped this worker. Restart it to carry on.", action: "restart" },
       };
+    // The main agent's mode was lowered, so this worker's was too (its claude restarted on the same conversation).
+    case "agent_mode":
+      return { ...state, mode: ev.mode };
     case "merge_proposed": {
       const proposal: MergeProposal = { worker: ev.worker, name: ev.name, branch: ev.branch, into: ev.into, summary: ev.summary, commits: ev.commits, files: ev.files, uncommitted: ev.uncommitted, status: "open", problem: null, attempts: 0 };
       return { ...state, proposals: [...state.proposals.filter((p) => p.worker !== ev.worker), proposal] };
@@ -639,12 +645,15 @@ export function reducer(state: State, action: Action): State {
         stopRequested: true,
         items: denyPending(state.items),
       };
+    // The old claude's cost is kept: the new one counts from nothing, and its first total may be more than the old one's.
     case "restarting":
       return {
         ...state,
         status: "starting",
         banner: null,
         stopRequested: false,
+        costBase: state.costBase + state.costSeen,
+        costSeen: 0,
         items: denyPending(state.items),
       };
     case "select_file":

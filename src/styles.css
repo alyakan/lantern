@@ -1461,7 +1461,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .summary-revert { margin-left: 4px; }
 
 /* The orchestra's canvas: agents as floating chats on a pannable, zoomable surface, tethered to the main agent. */
-.canvas { position: relative; flex: 1; min-height: 0; margin: 0 var(--edge) var(--edge); overflow: hidden; border-radius: 10px; box-shadow: var(--card-shadow); cursor: grab; touch-action: none; overscroll-behavior: none;
+.canvas { position: relative; flex: 1; min-height: 0; margin: 0 var(--edge) var(--edge); overflow: hidden; overflow: clip; border-radius: 10px; box-shadow: var(--card-shadow); cursor: grab; touch-action: none; overscroll-behavior: none;
   background-color: var(--bg-subtle);
   background-image: radial-gradient(circle, color-mix(in srgb, var(--text) 16%, transparent) 1px, transparent 1.3px);
   background-size: calc(28px * var(--zoom, 1)) calc(28px * var(--zoom, 1));

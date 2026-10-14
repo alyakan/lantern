@@ -68,6 +68,8 @@ export type UiEvent =
   | { kind: "agent_message"; from: string; text: string }
   /** On a worker's chat: its claude was stopped on purpose, or never started (`reason`). */
   | { kind: "agent_stopped"; reason: string | null }
+  /** On a worker's chat: it now runs on this mode, because its main agent's was lowered. */
+  | { kind: "agent_mode"; mode: Mode }
   /** On the main agent's chat: it asks the user to merge a worker's branch. */
   | { kind: "merge_proposed"; worker: string; name: string; branch: string; into: string; summary: string; commits: number; files: { path: string; added: number; removed: number }[]; uncommitted: number }
   /** How that ended: "merged" (detail: the branch merged into), "conflicts" (the files), "declined", "failed" (why). */

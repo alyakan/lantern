@@ -78,6 +78,9 @@ export interface NodeActions {
   /** The user's answer to a worker's merge proposal: merge its branch into the main checkout, or not yet. */
   approveMerge(worker: string): void;
   declineMerge(worker: string): void;
+  /** What was typed in the agent's box and not sent, which the app keeps (the full-size chat box reads the same). */
+  draft(slot: string): string;
+  setDraft(slot: string, text: string): void;
   /** Removes a merged worker's worktree; rejects with why it couldn't. */
   removeWorktree(worker: string): Promise<void>;
 }
