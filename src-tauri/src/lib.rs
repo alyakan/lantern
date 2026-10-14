@@ -552,10 +552,10 @@ async fn orchestra_close_check(state: State<'_, AppState>, worker: String) -> Re
 }
 
 /// Closes a worker from its card: stops it, removes its worktree and branch, and tells its main agent. Work that would be
-/// thrown away needs `force`.
+/// thrown away needs `agreed`: what the user was asked about, which the worker must not have outgrown since.
 #[tauri::command]
-async fn orchestra_close_worker(state: State<'_, AppState>, worker: String, force: bool) -> Result<(), String> {
-    state.orchestra.close_worker(&worker, force).await
+async fn orchestra_close_worker(state: State<'_, AppState>, worker: String, agreed: Option<orchestra::Agreed>) -> Result<(), String> {
+    state.orchestra.close_worker(&worker, agreed).await
 }
 
 /// Starts a worker the user asked for from the canvas (the main agent `main` is told). Returns the worker's id.

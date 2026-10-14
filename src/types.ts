@@ -174,6 +174,9 @@ export interface CloseCheck {
   unmerged_commits: number;
 }
 
+/** What the user agreed to lose by closing a worker: the numbers in the question they confirmed. */
+export type CloseAgreed = Pick<CloseCheck, "uncommitted" | "unmerged_commits">;
+
 /** What the user asks for when they start a worker from the canvas. */
 export interface NewWorker {
   /** What the worker is asked to do: its brief. */

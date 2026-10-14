@@ -48,6 +48,13 @@ pub struct SpawnRequest {
     pub mode: crate::args::Mode,
 }
 
+/// What the user agreed to lose when they confirmed closing a worker (see `Orchestra::close_worker`).
+#[derive(Debug, Clone, Copy, PartialEq, serde::Deserialize)]
+pub struct Agreed {
+    pub uncommitted: usize,
+    pub unmerged_commits: u32,
+}
+
 /// What closing a worker would throw away (see `Orchestra::close_check`).
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct CloseCheck {
@@ -851,18 +858,25 @@ impl Orchestra {
     }
 
     /// The user closed a worker from its card: it is stopped, its worktree and branch removed, and it leaves the team. What
-    /// would be thrown away needs `force` (the user was asked, see `close_check`): it is measured again here, because the
-    /// worker kept going while they read the question. The main agent is told what happened.
-    pub async fn close_worker(self: &Arc<Self>, worker: &str, force: bool) -> Result<(), String> {
-        let (main, name, wt) = {
+    /// would be thrown away needs the user's say-so (`agreed`: what they were asked about, see `close_check`). It is measured
+    /// again here, because the worker kept going while they read the question: more than they agreed to lose is refused,
+    /// and the next question has the new numbers. The main agent is told what happened.
+    pub async fn close_worker(self: &Arc<Self>, worker: &str, agreed: Option<Agreed>) -> Result<(), String> {
+        let (main, name, wt, folder) = {
             let inner = self.inner.lock().unwrap();
             let w = inner.workers.get(worker).ok_or(GONE)?;
-            (w.parent.clone(), w.name.clone(), w.worktree.clone())
+            (w.parent.clone(), w.name.clone(), w.worktree.clone(), w.folder.clone())
         };
         let outcome = if wt.is_some() {
             let check = self.close_check(worker).await?;
-            if check.lost() && !force {
-                return Err(format!("It has {}, which closing it would throw away.", check.lost_text()));
+            if check.lost() {
+                match agreed {
+                    None => return Err(format!("It has {}, which closing it would throw away.", check.lost_text())),
+                    Some(a) if check.uncommitted > a.uncommitted || check.unmerged_commits > a.unmerged_commits => {
+                        return Err(format!("It now has {}, which is more than you agreed to lose. Close it again to see what is there.", check.lost_text()));
+                    }
+                    Some(_) => {}
+                }
             }
             // Forced even when nothing is lost: the branch goes too (an unforced removal keeps one that was never proposed).
             self.discard(worker, true).await?;
@@ -874,7 +888,12 @@ impl Orchestra {
             }
         } else {
             self.stop(&main, &serde_json::json!({ "id": worker })).await?;
-            "stopped it; it shared your folder, so nothing was removed".to_string()
+            // No worktree is either a worker in the shared folder, or one whose worktree was removed already (after its merge).
+            if self.host.main_folder(&main).is_ok_and(|m| m == folder) {
+                "stopped it; it shared your folder, so nothing was removed".to_string()
+            } else {
+                "stopped it; its worktree was already removed".to_string()
+            }
         };
         // A merge it had proposed can't be answered now.
         let withdrawn = self.inner.lock().unwrap().workers.get_mut(worker).is_some_and(|w| std::mem::replace(&mut w.merge, Merge::Declined) == Merge::Proposed);
@@ -1962,7 +1981,7 @@ mod tests {
         let (host, o, repo, _wt) = setup();
         spawn_idle(&o, "login").await;
         let (_, _, wt) = o.worktree_of("w1").unwrap();
-        o.close_worker("w1", false).await.unwrap();
+        o.close_worker("w1", None).await.unwrap();
         assert!(!wt.root.exists(), "the worktree is still there");
         assert_eq!(branches_like(repo.path(), "lantern/login"), "", "the branch is still there");
         assert!(host.stopped.lock().unwrap().contains(&"w1".to_string()));
@@ -1974,7 +1993,7 @@ mod tests {
         o.observe("w1", &UiEvent::SessionEnded { code: Some(1), stderr_tail: String::new() });
         o.note_user_message("w1", "anyone there?");
         assert_eq!(host.wakes().len(), 1);
-        assert!(o.close_worker("w1", false).await.unwrap_err().contains("no longer part"));
+        assert!(o.close_worker("w1", None).await.unwrap_err().contains("no longer part"));
     }
 
     #[tokio::test]
@@ -1984,12 +2003,12 @@ mod tests {
         commit_in_worktree(&o, "w1", "b.txt", "b\n");
         let (_, _, wt) = o.worktree_of("w1").unwrap();
         std::fs::write(wt.folder.join("loose.txt"), "x\n").unwrap();
-        let err = o.close_worker("w1", false).await.unwrap_err();
+        let err = o.close_worker("w1", None).await.unwrap_err();
         assert!(err.contains("1 uncommitted file and 1 commit that isn't merged"), "{err}");
         assert!(wt.root.exists() && o.is_worker("w1"));
         assert!(host.stopped.lock().unwrap().is_empty(), "stopped before the user said yes");
         assert!(host.wakes().is_empty());
-        o.close_worker("w1", true).await.unwrap();
+        o.close_worker("w1", Some(Agreed { uncommitted: 1, unmerged_commits: 1 })).await.unwrap();
         assert!(!wt.root.exists());
         assert_eq!(branches_like(repo.path(), "lantern/login"), "");
         assert_eq!(host.wakes(), vec!["[Lantern: the user closed worker \"login\" (w1) and cleaned up its worktree and branch lantern/login, throwing away 1 uncommitted file and 1 commit that isn't merged.]"]);
@@ -2002,8 +2021,45 @@ mod tests {
         assert!(!o.close_check("w1").await.unwrap().lost());
         let (_, _, wt) = o.worktree_of("w1").unwrap();
         std::fs::write(wt.folder.join("late.txt"), "x\n").unwrap();
-        assert!(o.close_worker("w1", false).await.unwrap_err().contains("1 uncommitted file"));
+        assert!(o.close_worker("w1", None).await.unwrap_err().contains("1 uncommitted file"));
         assert!(wt.root.exists());
+    }
+
+    #[tokio::test]
+    async fn work_that_grew_while_the_user_read_the_question_is_not_thrown_away_on_their_yes() {
+        let (host, o, _r, _w) = setup();
+        spawn_idle(&o, "login").await;
+        let (_, _, wt) = o.worktree_of("w1").unwrap();
+        std::fs::write(wt.folder.join("one.txt"), "x\n").unwrap();
+        let asked = o.close_check("w1").await.unwrap();
+        let agreed = Agreed { uncommitted: asked.uncommitted, unmerged_commits: asked.unmerged_commits };
+        std::fs::write(wt.folder.join("two.txt"), "x\n").unwrap();
+        std::fs::write(wt.folder.join("three.txt"), "x\n").unwrap();
+        let err = o.close_worker("w1", Some(agreed)).await.unwrap_err();
+        assert!(err.contains("It now has 3 uncommitted files, which is more than you agreed"), "{err}");
+        // Committing it all leaves no loose files, but a commit that wasn't there.
+        commit_in_worktree(&o, "w1", "four.txt", "x\n");
+        let err = o.close_worker("w1", Some(agreed)).await.unwrap_err();
+        assert!(err.contains("It now has 1 commit that isn't merged, which is more than you agreed"), "{err}");
+        assert!(wt.root.exists() && o.is_worker("w1") && host.stopped.lock().unwrap().is_empty() && host.wakes().is_empty());
+        // Asked again, with what is there, the yes goes through.
+        let now = o.close_check("w1").await.unwrap();
+        o.close_worker("w1", Some(Agreed { uncommitted: now.uncommitted, unmerged_commits: now.unmerged_commits })).await.unwrap();
+        assert!(!wt.root.exists());
+    }
+
+    #[tokio::test]
+    async fn a_worker_whose_worktree_was_already_removed_is_not_said_to_have_shared_the_folder() {
+        let (host, o, _r, _w) = setup();
+        spawn_idle(&o, "login").await;
+        commit_in_worktree(&o, "w1", "b.txt", "b\n");
+        call(&o, "propose_merge", json!({"id": "w1", "summary": "x"})).await.unwrap();
+        o.approve_merge("w1").await.unwrap();
+        o.discard("w1", false).await.unwrap();
+        assert!(!o.close_check("w1").await.unwrap().worktree);
+        o.close_worker("w1", None).await.unwrap();
+        assert_eq!(host.wakes().last().unwrap(), "[Lantern: the user closed worker \"login\" (w1) and stopped it; its worktree was already removed.]");
+        assert!(!o.is_worker("w1"));
     }
 
     #[tokio::test]
@@ -2011,7 +2067,7 @@ mod tests {
         let (host, o, repo, _wt) = setup();
         call(&o, "spawn_agent", json!({"name": "research", "brief": "Read the code", "isolation": "shared"})).await.unwrap();
         assert_eq!(o.close_check("w1").await.unwrap(), CloseCheck { worktree: false, branch: None, uncommitted: 0, unmerged_commits: 0 });
-        o.close_worker("w1", false).await.unwrap();
+        o.close_worker("w1", None).await.unwrap();
         assert!(repo.path().join("a.txt").is_file(), "the shared folder was touched");
         assert!(host.stopped.lock().unwrap().contains(&"w1".to_string()));
         assert_eq!(host.wakes(), vec!["[Lantern: the user closed worker \"research\" (w1) and stopped it; it shared your folder, so nothing was removed.]"]);
@@ -2024,7 +2080,7 @@ mod tests {
         spawn_idle(&o, "login").await;
         o.set_merge("w1", Merge::Merging);
         assert!(o.close_check("w1").await.unwrap_err().contains("being merged"));
-        assert!(o.close_worker("w1", true).await.unwrap_err().contains("being merged"));
+        assert!(o.close_worker("w1", Some(Agreed { uncommitted: 0, unmerged_commits: 0 })).await.unwrap_err().contains("being merged"));
         assert!(host.stopped.lock().unwrap().is_empty() && host.wakes().is_empty() && o.is_worker("w1"));
     }
 
@@ -2037,7 +2093,7 @@ mod tests {
         commit_in_worktree(&o, "w1", "b.txt", "b\n");
         call(&o, "propose_merge", json!({"id": "w1", "summary": "x"})).await.unwrap();
         assert!(call(&o, "spawn_agent", json!({"name": "one too many", "brief": "y"})).await.is_err());
-        o.close_worker("w1", true).await.unwrap();
+        o.close_worker("w1", Some(Agreed { uncommitted: 0, unmerged_commits: 1 })).await.unwrap();
         assert!(host.events_for("s1").iter().any(|e| matches!(e, UiEvent::MergeResolved { worker, outcome, .. } if worker == "w1" && outcome == "declined")));
         assert!(o.approve_merge("w1").await.unwrap_err().contains("no longer part"));
         assert!(call(&o, "spawn_agent", json!({"name": "fits now", "brief": "y"})).await.is_ok());
@@ -2086,7 +2142,7 @@ mod tests {
         assert!(err.contains("the most is 6") && err.contains("or close one") && !err.contains("stop_agent"), "{err}");
         assert_eq!(host.wakes().len(), wakes, "the main agent was told of a worker that never started");
         // Where a worktree can't be made, the user is told so, as the main agent is.
-        o.close_worker("w1", true).await.unwrap();
+        o.close_worker("w1", None).await.unwrap();
         let plain = tempfile::tempdir().unwrap();
         *host.folder.lock().unwrap() = plain.path().to_path_buf();
         assert!(o.spawn_for_user("s1", "y", None, "worktree", None).await.unwrap_err().contains("isolation \"shared\""));

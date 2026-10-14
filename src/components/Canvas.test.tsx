@@ -556,6 +556,9 @@ describe("the menu of an agent's card", () => {
       fireEvent.pointerDown(canvas, { button: 0, ctrlKey: true, pointerId: 3, clientX: 50, clientY: 50 });
       fireEvent.pointerMove(canvas, { pointerId: 3, clientX: 150, clientY: 90 });
       fireEvent.pointerUp(canvas, { pointerId: 3, clientX: 150, clientY: 90 });
+      fireEvent.pointerDown(head("1"), { button: 0, ctrlKey: true, pointerId: 4, clientX: 50, clientY: 50 });
+      fireEvent.pointerMove(head("1"), { pointerId: 4, clientX: 150, clientY: 90 });
+      fireEvent.pointerUp(head("1"), { pointerId: 4 });
     });
     expect(layout.view).toEqual(view);
     expect(layout.boxes.w1).toEqual(box);
@@ -622,7 +625,7 @@ describe("cleaning up and closing an agent", () => {
   it("closes at once when there is nothing to lose, after asking what there is", async () => {
     const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.resolve(none)) } });
     chooseClose();
-    await waitFor(() => expect(acts.closeWorker).toHaveBeenCalledWith("w1", false));
+    await waitFor(() => expect(acts.closeWorker).toHaveBeenCalledWith("w1", undefined));
     expect(acts.closeCheck).toHaveBeenCalledWith("w1");
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(screen.queryByRole("menu")).toBeNull();
@@ -667,7 +670,7 @@ describe("cleaning up and closing an agent", () => {
     chooseClose("2");
     const dialog = await screen.findByRole("alertdialog", { name: "Close Worker 2?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Discard work and close" }));
-    expect(closeWorker).toHaveBeenCalledWith("w2", true);
+    expect(closeWorker).toHaveBeenCalledWith("w2", { uncommitted: 3, unmerged_commits: 2 });
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
   });
 

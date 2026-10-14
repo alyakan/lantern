@@ -21,7 +21,7 @@ import { useChatState, useChatStates, useNodeActions } from "../lib/canvasContex
 import { lostText, money, nodeStatus, readyToMerge, STATUS_LABEL, summaryLine, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
 import { useDismiss } from "../lib/useDismiss";
 import { totalCost, type State } from "../store";
-import type { CloseCheck } from "../types";
+import type { CloseAgreed, CloseCheck } from "../types";
 import { AgentMenu, type AgentMenuItem } from "./AgentMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HiddenAgents } from "./HiddenAgents";
@@ -482,7 +482,8 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   }, [onFocus, bringToFront]);
 
   const onGrab = useCallback((e: ReactPointerEvent<HTMLElement>, slot: string, kind: "move" | "resize") => {
-    if (e.button !== 0 || (e.target as Element).closest("button")) return;
+    // A control-click is a right-click on a Mac: it opens the menu, it doesn't pick the card up.
+    if (e.button !== 0 || e.ctrlKey || (e.target as Element).closest("button")) return;
     // No text selection while dragging.
     e.preventDefault();
     e.currentTarget.setPointerCapture?.(e.pointerId);
@@ -531,9 +532,9 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   const [closing, setClosing] = useState<{ slot: string; check: CloseCheck } | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const closeAgent = (slot: string, force: boolean) => {
+  const closeAgent = (slot: string, agreed?: CloseAgreed) => {
     setCloseBusy(true);
-    actions.closeWorker(slot, force).then(
+    actions.closeWorker(slot, agreed).then(
       () => setClosing(null),
       (e) => {
         setClosing(null);
@@ -544,7 +545,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   const askToClose = (slot: string) => {
     setProblem(null);
     actions.closeCheck(slot).then(
-      (check) => (lostText(check) ? setClosing({ slot, check }) : closeAgent(slot, false)),
+      (check) => (lostText(check) ? setClosing({ slot, check }) : closeAgent(slot)),
       (e) => setProblem(errText(e)),
     );
   };
@@ -655,7 +656,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
         </div>
       )}
       {closing && (
-        <ConfirmDialog title={`Close ${nodes.find((n) => n.slot === closing.slot)?.name ?? "this agent"}?`} confirmLabel="Discard work and close" busyLabel="Closing…" busy={closeBusy} onConfirm={() => closeAgent(closing.slot, true)} onCancel={() => setClosing(null)}>
+        <ConfirmDialog title={`Close ${nodes.find((n) => n.slot === closing.slot)?.name ?? "this agent"}?`} confirmLabel="Discard work and close" busyLabel="Closing…" busy={closeBusy} onConfirm={() => closeAgent(closing.slot, { uncommitted: closing.check.uncommitted, unmerged_commits: closing.check.unmerged_commits })} onCancel={() => setClosing(null)}>
           <p>
             It has <strong>{lostText(closing.check)}</strong>. Closing it stops it and deletes its worktree{closing.check.branch ? <> and branch <code>{closing.check.branch}</code></> : null}, so that work is gone for good.
           </p>

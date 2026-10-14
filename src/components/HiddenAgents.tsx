@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useChatStates } from "../lib/canvasContext";
 import { nodeStatus, STATUS_LABEL, type OrchestraNode } from "../lib/orchestraView";
 import { useDismiss } from "../lib/useDismiss";
@@ -9,6 +9,10 @@ export function HiddenAgents({ nodes, onShow }: { nodes: OrchestraNode[]; onShow
   const box = useRef<HTMLDivElement>(null);
   const states = useChatStates(nodes.map((n) => n.slot));
   useDismiss(open, box, () => setOpen(false));
+  // The last one coming back (by itself, say) leaves nothing to list: the next one hidden starts closed.
+  useEffect(() => {
+    if (nodes.length === 0) setOpen(false);
+  }, [nodes.length]);
   if (nodes.length === 0) return null;
 
   return (
