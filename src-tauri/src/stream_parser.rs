@@ -523,6 +523,27 @@ mod tests {
     /// Shapes from a real CLI 2.1.293 run with --advisor and an Explore subagent (trimmed, paths changed).
     const ADVISOR_FIXTURE: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/stream/advisor_subagents.jsonl"));
 
+    /// Every event a fixture parses into, as (how many, FNV-1a of their JSON, one per line): the events the UI gets for
+    /// a real claude run are pinned in full, so moving the parser (or whoever owns it) can't change one. A deliberate
+    /// change to the parser changes these numbers; the failure message prints the new ones.
+    #[test]
+    fn what_the_fixtures_parse_into_is_pinned_in_full() {
+        fn digest(text: &str) -> (usize, u64) {
+            let events = parse_all(text);
+            let mut hash: u64 = 0xcbf29ce484222325;
+            for e in &events {
+                for b in serde_json::to_string(e).unwrap().bytes().chain(std::iter::once(b'\n')) {
+                    hash = (hash ^ b as u64).wrapping_mul(0x100000001b3);
+                }
+            }
+            (events.len(), hash)
+        }
+        assert_eq!(
+            (digest(WRITE_FIXTURE), digest(MISC_FIXTURE), digest(ADVISOR_FIXTURE)),
+            ((36, 3199770593244069388), (15, 9499260730725383363), (19, 13729193804893342302))
+        );
+    }
+
     #[test]
     fn says_who_runs_on_which_model_and_when_the_advisor_is_consulted() {
         let evs = parse_all(ADVISOR_FIXTURE);
