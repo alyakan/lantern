@@ -66,9 +66,20 @@ pub fn project_dirs(projects_root: &Path, folder: &Path, aliases: &[PathBuf]) ->
     dirs
 }
 
+/// A file that is itself a file, not a link to one: a link in a project directory can point anywhere (the home folder, a
+/// secret), so only real files are sessions.
+pub fn is_regular_file(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_file())
+}
+
+/// A directory that is itself a directory, not a link to one (see is_regular_file).
+pub fn is_real_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_dir())
+}
+
 fn jsonl_files(dir: &Path) -> Vec<PathBuf> {
     std::fs::read_dir(dir)
-        .map(|rd| rd.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "jsonl")).collect())
+        .map(|rd| rd.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "jsonl") && is_regular_file(p)).collect())
         .unwrap_or_default()
 }
 
@@ -335,7 +346,7 @@ pub fn transcript_path_with_aliases(projects_root: &Path, folder: &Path, aliases
     if dirs.is_empty() {
         return Err("No past sessions exist for this folder.".into());
     }
-    dirs.iter().map(|dir| dir.join(format!("{id}.jsonl"))).find(|p| p.is_file()).ok_or_else(|| "That session's transcript no longer exists.".into())
+    dirs.iter().map(|dir| dir.join(format!("{id}.jsonl"))).find(|p| is_regular_file(p)).ok_or_else(|| "That session's transcript no longer exists.".into())
 }
 
 /// The folder a transcript was started in: the first `cwd` it records (a `cd` later on doesn't change it).

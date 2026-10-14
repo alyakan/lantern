@@ -181,40 +181,56 @@ pub struct Preview {
     pub project_entry: bool,
     pub memory_files: usize,
     pub rules: usize,
+    /// Links among the transcripts and memory files, which are skipped rather than copied.
+    pub linked: usize,
 }
 
 pub fn preview(projects_root: &Path, claude_json: &Path, rules: &FolderRules, old: &str) -> Preview {
-    let (sessions, bytes) = match history::project_dir(projects_root, Path::new(old)) {
+    let (sessions, bytes, linked) = match history::project_dir(projects_root, Path::new(old)) {
         Some(dir) => session_files(&dir),
-        None => (0, 0),
+        None => (0, 0, 0),
     };
+    let (memory, memory_linked) = memory_files(projects_root, old);
     Preview {
         sessions,
         bytes,
         project_entry: project_entry(claude_json, old).is_some(),
-        memory_files: memory_files(projects_root, old).len(),
+        memory_files: memory.len(),
         rules: rules.for_folder(&rules::folder_key(Path::new(old))).len(),
+        linked: linked + memory_linked,
     }
 }
 
-/// The transcripts in a project directory, and the bytes they and their `<id>/` directories take.
-fn session_files(dir: &Path) -> (usize, u64) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return (0, 0) };
-    let mut sessions = 0;
-    let mut bytes = 0;
+/// Whether a directory entry is a link (of any kind). Links are never copied.
+fn is_link(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
+}
+
+/// The transcripts in a project directory, the bytes they and their `<id>/` directories take, and the links skipped.
+fn session_files(dir: &Path) -> (usize, u64, usize) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return (0, 0, 0) };
+    let (mut sessions, mut bytes, mut linked) = (0, 0, 0);
     for entry in entries.filter_map(Result::ok) {
         let path = entry.path();
-        if path.extension().is_some_and(|x| x == "jsonl") && path.is_file() {
+        if path.extension().is_none_or(|x| x != "jsonl") {
+            continue;
+        }
+        if is_link(&path) {
+            linked += 1;
+        } else if history::is_regular_file(&path) {
             sessions += 1;
             bytes += std::fs::metadata(&path).map_or(0, |m| m.len());
             bytes += tree_bytes(&path.with_extension(""));
         }
     }
-    (sessions, bytes)
+    (sessions, bytes, linked)
 }
 
-/// The size of everything under `path` (0 if it isn't a directory). Links aren't followed.
+/// The size of everything under `path` (0 if it isn't a real directory). Links aren't followed.
 fn tree_bytes(path: &Path) -> u64 {
+    if !history::is_real_dir(path) {
+        return 0;
+    }
     let Ok(entries) = std::fs::read_dir(path) else { return 0 };
     entries
         .filter_map(Result::ok)
@@ -236,10 +252,23 @@ fn memory_dir(projects_root: &Path, folder: &str) -> PathBuf {
     projects_root.join(encode_folder(Path::new(folder))).join("memory")
 }
 
-/// The files in a folder's auto-memory directory.
-fn memory_files(projects_root: &Path, folder: &str) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(memory_dir(projects_root, folder)) else { return vec![] };
-    entries.filter_map(Result::ok).filter(|e| e.path().is_file()).map(|e| e.file_name().to_string_lossy().into_owned()).collect()
+/// The real files in a folder's auto-memory directory, and how many links there were (skipped).
+fn memory_files(projects_root: &Path, folder: &str) -> (Vec<String>, usize) {
+    let dir = memory_dir(projects_root, folder);
+    if !history::is_real_dir(&dir) {
+        return (vec![], 0);
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else { return (vec![], 0) };
+    let (mut files, mut linked) = (Vec::new(), 0);
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if is_link(&path) {
+            linked += 1;
+        } else if history::is_regular_file(&path) {
+            files.push(entry.file_name().to_string_lossy().into_owned());
+        }
+    }
+    (files, linked)
 }
 
 /// The suffix of the temporary file a copy is made in before it's linked into place.
@@ -248,9 +277,16 @@ const COPY_TMP: &str = ".lantern-copy";
 /// Copies `src` to `dst` unless `dst` exists. The copy is made beside `dst` and checked by size, then hard-linked into
 /// place: a link fails rather than replacing a file, so nothing is overwritten. False when `dst` was already there.
 fn copy_new(src: &Path, dst: &Path) -> io::Result<bool> {
+    if !history::is_regular_file(src) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "it is not a regular file"));
+    }
     let name = dst.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let tmp = dst.with_file_name(format!("{name}{COPY_TMP}"));
-    let linked = std::fs::copy(src, &tmp).and_then(|_| {
+    // Created new and never followed: a file or link already at that name is an error, and nothing is written through it.
+    let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+    let copied = std::fs::File::open(src).and_then(|mut from| io::copy(&mut from, &mut out));
+    drop(out);
+    let linked = copied.and_then(|_| {
         if std::fs::metadata(src)?.len() != std::fs::metadata(&tmp)?.len() {
             return Err(io::Error::other("the copy is not the size of the original"));
         }
@@ -264,8 +300,12 @@ fn copy_new(src: &Path, dst: &Path) -> io::Result<bool> {
     }
 }
 
-/// Copies a directory tree with `copy_new` for each file: what's already there is kept.
+/// Copies a directory tree with `copy_new` for each file: what's already there is kept. Links are left out, and so is
+/// anything where the copy's directory would be a link (it would lead the copy wherever it points).
 fn copy_tree_new(src: &Path, dst: &Path) -> io::Result<()> {
+    if std::fs::symlink_metadata(dst).is_ok() && !history::is_real_dir(dst) {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "a link is where the copy goes"));
+    }
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
@@ -297,8 +337,8 @@ pub fn ready_session(projects_root: &Path, folder: &Path, aliases: &[PathBuf], i
     }
     let own_dir = projects_root.join(encode_folder(folder));
     let own = own_dir.join(format!("{id}.jsonl"));
-    if own.is_file() {
-        return Ok(Ready::Resumable(own));
+    if std::fs::symlink_metadata(&own).is_ok() {
+        return if history::is_regular_file(&own) { Ok(Ready::Resumable(own)) } else { Err("That session's file in this folder is a link, not a transcript.".into()) };
     }
     let source = history::transcript_path_with_aliases(projects_root, folder, aliases, id)?;
     match copy_session(&source, &own_dir, id) {
@@ -317,7 +357,7 @@ pub fn ready_session(projects_root: &Path, folder: &Path, aliases: &[PathBuf], i
 fn copy_session(source: &Path, own_dir: &Path, id: &str) -> io::Result<()> {
     std::fs::create_dir_all(own_dir)?;
     let siblings = source.with_extension("");
-    if siblings.is_dir() {
+    if history::is_real_dir(&siblings) {
         copy_tree_new(&siblings, &own_dir.join(id))?;
     }
     copy_new(source, &own_dir.join(format!("{id}.jsonl")))?;
@@ -390,11 +430,14 @@ fn write_claude_json(path: &Path, original: &[u8], doc: &Value, between_read_and
 
 /// Copies the auto-memory files of `old` into `new`'s, keeping any file `new` already has. Returns how many were copied.
 pub fn carry_memory(projects_root: &Path, old: &str, new: &str) -> Result<usize, String> {
-    let files = memory_files(projects_root, old);
+    let (files, _) = memory_files(projects_root, old);
     if files.is_empty() {
         return Ok(0);
     }
     let (from, to) = (memory_dir(projects_root, old), memory_dir(projects_root, new));
+    if std::fs::symlink_metadata(&to).is_ok() && !history::is_real_dir(&to) {
+        return Err("The new folder's memory directory is a link, so nothing was copied.".into());
+    }
     std::fs::create_dir_all(&to).map_err(|e| e.to_string())?;
     let mut copied = 0;
     for name in files {
@@ -811,7 +854,7 @@ mod tests {
         assert_eq!(p.memory_files, 1);
         assert_eq!(p.rules, 0);
         let none = preview(&projects, &root.path().join("missing.json"), &rules, "/nowhere");
-        assert_eq!(none, Preview { sessions: 0, bytes: 0, project_entry: false, memory_files: 0, rules: 0 });
+        assert_eq!(none, Preview { sessions: 0, bytes: 0, project_entry: false, memory_files: 0, rules: 0, linked: 0 });
     }
 
     #[test]
@@ -833,6 +876,121 @@ mod tests {
         let all = relocate(&projects, &claude, &rules, &relocations, &old.to_string_lossy(), &new.to_string_lossy(), Options { project_settings: true, memory: true }).unwrap();
         assert_eq!(all.project_keys, vec!["allowedTools"]);
         assert_eq!(all.memory_files, 1);
+    }
+
+    /// A folder with a secret outside it, and the old folder's transcript directory (`root/projects`).
+    #[cfg(unix)]
+    fn with_secret() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
+        let root = tempfile::tempdir().unwrap();
+        let projects = root.path().join("projects");
+        let (old, new) = (root.path().join("old-app"), root.path().join("new-app"));
+        std::fs::create_dir_all(&new).unwrap();
+        std::fs::create_dir_all(&projects).unwrap();
+        (root, projects, old, new)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_sibling_directory_is_not_copied() {
+        let (root, projects, old, new) = with_secret();
+        let old_s = old.to_string_lossy().into_owned();
+        session(&projects, &old, "cafe-7", &old_s, "old work");
+        let secrets = root.path().join("home-secrets");
+        std::fs::create_dir_all(&secrets).unwrap();
+        std::fs::write(secrets.join("token.txt"), "secret").unwrap();
+        let old_dir = projects.join(encode_folder(&old));
+        std::os::unix::fs::symlink(&secrets, old_dir.join("cafe-7")).unwrap();
+        let new_dir = projects.join(encode_folder(&new));
+        let ready = ready_session(&projects, &new, std::slice::from_ref(&old), "cafe-7").unwrap();
+        assert_eq!(ready, Ready::Resumable(new_dir.join("cafe-7.jsonl")));
+        assert!(new_dir.join("cafe-7.jsonl").is_file(), "the transcript itself is still copied");
+        assert!(!new_dir.join("cafe-7").exists(), "a linked sibling directory is not copied");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_transcript_is_not_a_session_of_the_folder() {
+        let (root, projects, old, new) = with_secret();
+        let real = root.path().join("elsewhere.jsonl");
+        std::fs::write(&real, json!({"type": "user", "cwd": old.to_string_lossy(), "entrypoint": "cli", "message": {"role": "user", "content": "x"}}).to_string()).unwrap();
+        let old_dir = projects.join(encode_folder(&old));
+        std::fs::create_dir_all(&old_dir).unwrap();
+        std::os::unix::fs::symlink(&real, old_dir.join("beef-8.jsonl")).unwrap();
+        let new_dir = projects.join(encode_folder(&new));
+        assert!(ready_session(&projects, &new, std::slice::from_ref(&old), "beef-8").is_err());
+        assert!(!new_dir.join("beef-8.jsonl").exists());
+        assert!(history::list_sessions_with_aliases(&projects, &new, std::slice::from_ref(&old), &Default::default(), &Default::default()).is_empty());
+        // Nor does a link in the folder's own directory count as the session being there.
+        std::fs::create_dir_all(&new_dir).unwrap();
+        std::os::unix::fs::symlink(&real, new_dir.join("dead-9.jsonl")).unwrap();
+        assert!(ready_session(&projects, &new, &[], "dead-9").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_memory_file_is_not_copied_and_the_preview_says_so() {
+        let (root, projects, old, new) = with_secret();
+        let (old_s, new_s) = (old.to_string_lossy().into_owned(), new.to_string_lossy().into_owned());
+        let secret = root.path().join("secret.md");
+        std::fs::write(&secret, "secret").unwrap();
+        let old_mem = memory_dir(&projects, &old_s);
+        std::fs::create_dir_all(&old_mem).unwrap();
+        std::fs::write(old_mem.join("m.md"), "m").unwrap();
+        std::os::unix::fs::symlink(&secret, old_mem.join("linked.md")).unwrap();
+        assert_eq!(carry_memory(&projects, &old_s, &new_s).unwrap(), 1);
+        assert!(!memory_dir(&projects, &new_s).join("linked.md").exists());
+        let claude = root.path().join("none.json");
+        let p = preview(&projects, &claude, &FolderRules::load(None), &old_s);
+        assert_eq!((p.memory_files, p.linked), (1, 1));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_planted_at_the_temporary_name_is_not_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let (src, dst, target) = (dir.path().join("src.jsonl"), dir.path().join("dst.jsonl"), dir.path().join("target.txt"));
+        std::fs::write(&src, "data").unwrap();
+        std::fs::write(&target, "keep").unwrap();
+        std::os::unix::fs::symlink(&target, dir.path().join("dst.jsonl.lantern-copy")).unwrap();
+        assert!(copy_new(&src, &dst).is_err());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep");
+        assert!(!dst.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_where_a_sibling_directory_would_be_copied_is_not_followed() {
+        let (root, projects, old, new) = with_secret();
+        let old_s = old.to_string_lossy().into_owned();
+        session(&projects, &old, "face-10", &old_s, "old work");
+        let old_dir = projects.join(encode_folder(&old));
+        std::fs::create_dir_all(old_dir.join("face-10/subagents")).unwrap();
+        std::fs::write(old_dir.join("face-10/subagents/a.jsonl"), "sub").unwrap();
+        // The new directory's sibling is a link to somewhere else: nothing may be written through it.
+        let elsewhere = root.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let new_dir = projects.join(encode_folder(&new));
+        std::fs::create_dir_all(&new_dir).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, new_dir.join("face-10")).unwrap();
+        let ready = ready_session(&projects, &new, std::slice::from_ref(&old), "face-10").unwrap();
+        assert!(matches!(ready, Ready::ReadOnly { .. }), "{ready:?}");
+        assert!(std::fs::read_dir(&elsewhere).unwrap().next().is_none(), "nothing was written through the link");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_entry_in_a_sibling_tree_is_left_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let (tree, out, secret) = (dir.path().join("tree"), dir.path().join("out"), dir.path().join("secret.txt"));
+        std::fs::create_dir_all(tree.join("sub")).unwrap();
+        std::fs::write(tree.join("a.txt"), "a").unwrap();
+        std::fs::write(&secret, "secret").unwrap();
+        std::os::unix::fs::symlink(&secret, tree.join("sub").join("link.txt")).unwrap();
+        std::os::unix::fs::symlink(dir.path(), tree.join("linkdir")).unwrap();
+        copy_tree_new(&tree, &out).unwrap();
+        assert_eq!(std::fs::read_to_string(out.join("a.txt")).unwrap(), "a");
+        assert!(!out.join("sub").join("link.txt").exists());
+        assert!(!out.join("linkdir").exists());
     }
 
     #[test]
