@@ -4,6 +4,21 @@
  */
 export type Mode = "ask" | "auto" | "steps";
 
+/** Where an "Always allow" rule applies: this chat only, or every chat in the folder. */
+export type RuleScope = "chat" | "folder";
+
+/** What a rule matches within its tool's input (src-tauri/src/permission/rules.rs). */
+export type RuleMatcher = { kind: "any" } | { kind: "exact"; text: string } | { kind: "prefix"; text: string } | { kind: "dir"; path: string };
+
+/** An "Always allow" rule: a tool and what of its calls it covers. */
+export type Rule = { tool: string } & RuleMatcher;
+
+/** A rule made from a card, and where it applies. */
+export type NewRule = { scope: RuleScope } & Rule;
+
+/** A rule as Settings lists it: `folder` is the folder a folder rule is for (null for a chat rule). */
+export type RuleEntry = { scope: RuleScope; folder: string | null } & Rule;
+
 export interface Hunk {
   old_start: number;
   old_lines: number;
@@ -40,6 +55,7 @@ export type UiEvent =
   | { kind: "conversation_reset" }
   | { kind: "permission_requested"; request_id: string; tool_name: string; input: unknown }
   | { kind: "permission_withdrawn"; request_id: string }
+  | { kind: "permission_auto_allowed"; request_id: string; tool_name: string; input: unknown; scope: RuleScope; rule: Rule }
   | { kind: "session_ended"; code: number | null; stderr_tail: string }
   | { kind: "shell_output"; id: string; text: string }
   | { kind: "shell_done"; id: string; code: number | null; stopped: boolean }

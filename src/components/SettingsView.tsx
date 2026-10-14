@@ -10,9 +10,10 @@ import { Md } from "./Md";
 import { NewSkillForm } from "./SkillForm";
 import { HarnessSettings, type HarnessSettingsProps } from "./HarnessSettings";
 import { UpdatesPage, type UpdatesPageProps } from "./UpdatesPage";
+import { PermissionRules } from "./PermissionRules";
 
-export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates";
-const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Harness", updates: "Updates" };
+export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions";
+const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Harness", updates: "Updates", permissions: "Permissions" };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -66,7 +67,7 @@ export function SettingsView({ open, onClose, harness, updates, general, ...page
           <nav className="mode-guide-nav" aria-label="Settings">
             <div className="mode-guide-group">
               <div className="mode-guide-group-title">Settings</div>
-              {(["general", "harness", "mcp", "skills", "updates"] as const)
+              {(["general", "harness", "mcp", "skills", "permissions", "updates"] as const)
                 .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "updates" || updates))
                 .map((t) => (
                   <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} onClick={() => setTab(t)}>
@@ -84,6 +85,8 @@ export function SettingsView({ open, onClose, harness, updates, general, ...page
               <UpdatesPage {...updates} />
             ) : tab === "skills" ? (
               <SkillsPage {...page} />
+            ) : tab === "permissions" ? (
+              <PermissionRules slot={page.slot} />
             ) : (
               <McpPage {...page} />
             )}

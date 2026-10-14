@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { CollapsibleText } from "./CollapsibleText";
 import { Md } from "./Md";
 import type { ChatItem, TestRunItem } from "../store";
+import type { NewRule } from "../types";
 import { groupItems, type Row } from "../lib/activity";
 import { workingVerb } from "../lib/verbs";
 import { ActivityGroup } from "./ActivityGroup";
@@ -10,8 +11,8 @@ import { ShellBlock } from "./ShellBlock";
 import { TurnNote } from "./TurnNote";
 
 export interface StreamHandlers {
-  /** `note`: what the user typed on a reproduce card, passed back to Claude; `answered`: AskUserQuestion's input with the answers. */
-  onDecide: (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>) => void;
+  /** `note`: what the user typed on a reproduce card, passed back to Claude; `answered`: AskUserQuestion's input with the answers; `remember`: an "Always allow…" rule to save. */
+  onDecide: (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => void;
   onOpenFile: (path: string) => void;
   /** The test run a Bash step produced, if any, and how to show it in the Tests tab. */
   testRunFor?: (toolUseId: string) => TestRunItem | undefined;

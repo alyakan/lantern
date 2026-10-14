@@ -17,6 +17,8 @@ import type { AgentTree } from "../lib/agents";
 import type { AgentGraph } from "../lib/agentGraph";
 import type { ModelCost } from "../types";
 import type { DiffLayout, Reveal } from "./FullDiff";
+import { RevertDialog } from "./RevertDialog";
+import { revertFor, type RevertControls, type RevertRequest } from "../lib/revert";
 
 const FullDiff = lazy(() => import("./FullDiff"));
 
@@ -52,6 +54,8 @@ interface Props {
   agents?: { tree: AgentTree; graph: AgentGraph; usage: ModelCost[]; openKey: number };
   /** The Summary tab, in a Step-by-step chat that has a step to show: the plan so far, and how to open a row's page. */
   summary?: { slot: string; data: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void; doc?: ExportDoc };
+  /** Reverting Claude's edits: offered on the Changes views and the Summary's steps; the undo of the last one. */
+  revert?: RevertControls;
   selected: string | null;
   follow: boolean;
   refreshKey: number;
@@ -108,6 +112,14 @@ export function ReviewPanel(props: Props) {
     setReveal({ path, line, key: Date.now() });
     setTab("files");
   };
+  // A revert waiting on its dialog: the files it would put back, and what it does.
+  const [reverting, setReverting] = useState<{ title: string; files: ChangedFile[]; request: RevertRequest } | null>(null);
+  const rv = props.revert;
+  const scopeRevert = revertFor(props.scope ?? "session", props.stepRange);
+  // "Revert all" is for the chat's changes or the last message's, not a step's (which the Summary offers).
+  const allRevert = scopeRevert !== null && scopeRevert !== "unknown" && !(scopeRevert.scope === "turn" && scopeRevert.turn !== null) ? scopeRevert : null;
+  const revertOff = scopeRevert === "unknown" ? "This step's changes aren't known: the session was reopened after it." : (rv?.blocked ?? null);
+  const fileRevert = rv && scopeRevert !== null ? { off: revertOff, onFile: (file: ChangedFile) => scopeRevert !== "unknown" && setReverting({ title: `Revert ${basename(relativeTo(file.path, props.folder))}?`, files: [file], request: scopeRevert }) } : undefined;
   return (
     <aside className="review">
       <div className="pane-tabs">
@@ -148,12 +160,48 @@ export function ReviewPanel(props: Props) {
           )}
         </div>
         {tab === "changes" && props.onScope && <ScopeMenu {...props} onScope={props.onScope} />}
+        {tab === "changes" && allRevert && rv && count > 0 && (
+          <button
+            className="ghost revert-all"
+            disabled={!!revertOff}
+            title={revertOff ?? (allRevert.scope === "session" ? "Put every file this chat changed back to how it was before the chat began" : "Put the files your last message changed back to how they were before it")}
+            onClick={() => setReverting({ title: allRevert.scope === "session" ? "Revert all of this chat's changes?" : "Revert the last message's changes?", files: props.files, request: allRevert })}
+          >
+            Revert all
+          </button>
+        )}
       </div>
+      {rv?.undo && (
+        <div className="revert-undo" role="status">
+          <span className="revert-undo-text">{rv.undo.summary}</span>
+          <span className="revert-undo-note">Undo lasts until your next message or until you quit Lantern.</span>
+          <button className="ghost" onClick={rv.onUndo}>
+            Undo
+          </button>
+        </div>
+      )}
+      {reverting && rv && (
+        <RevertDialog
+          slot={rv.slot}
+          folder={props.folder}
+          title={reverting.title}
+          files={reverting.files}
+          request={reverting.request}
+          latestTurn={rv.latestTurn}
+          onCancel={() => setReverting(null)}
+          onDone={(outcomes) => {
+            const request = reverting.request;
+            setReverting(null);
+            rv.onReverted(request, outcomes);
+          }}
+        />
+      )}
       {tab === "changes" && (
         <div className="tab-body" role="tabpanel" aria-labelledby={tabId("changes")}>
           <ChangesTab
             {...props}
             diffLine={diffLine}
+            fileRevert={fileRevert}
             onEdit={(path) => {
               setReveal({ path, line: null, key: Date.now() });
               setTab("files");
@@ -163,7 +211,7 @@ export function ReviewPanel(props: Props) {
       )}
       {tab === "summary" && props.summary && (
         <div className="tab-body" role="tabpanel" aria-labelledby={tabId("summary")}>
-          <SummaryTab slot={props.summary.slot} summary={props.summary.data} changed={props.summary.changed} running={props.summary.running} onOpenPage={props.summary.onOpenPage} doc={props.summary.doc} />
+          <SummaryTab slot={props.summary.slot} summary={props.summary.data} changed={props.summary.changed} running={props.summary.running} onOpenPage={props.summary.onOpenPage} doc={props.summary.doc} revert={rv} />
         </div>
       )}
       {tab === "agents" && props.agents && (
@@ -196,7 +244,7 @@ export function ReviewPanel(props: Props) {
   );
 }
 
-function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr, branch, selected, follow, refreshKey, onSelect, onFollow, onEdit, diffLine }: Props & { diffLine: { path: string; line: number; key: number } | null; onEdit: (path: string) => void }) {
+function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr, branch, selected, follow, refreshKey, onSelect, onFollow, onEdit, diffLine, fileRevert }: Props & { diffLine: { path: string; line: number; key: number } | null; onEdit: (path: string) => void; fileRevert?: { off: string | null; onFile: (file: ChangedFile) => void } }) {
   const [layout, setLayout] = usePersistentState<DiffLayout>("review.diffLayout", "inline");
   const found = files.findIndex((f) => f.path === selected);
   const index = found === -1 ? files.length - 1 : found;
@@ -235,6 +283,11 @@ function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr,
         {!current.deleted && scope !== "pr" && scope !== "branch" && (
           <button className="ghost" title="Edit this file" onClick={() => onEdit(current.path)}>
             Edit
+          </button>
+        )}
+        {fileRevert && (
+          <button className="ghost" disabled={!!fileRevert.off} title={fileRevert.off ?? "Put this file back to how it was before these changes"} onClick={() => fileRevert.onFile(current)}>
+            Revert
           </button>
         )}
         <button className="ghost layout" title={layout === "inline" ? "Showing removals and additions together. Click for side by side." : "Showing old and new side by side. Click to show them together."} onClick={() => setLayout(NEXT_LAYOUT[layout])}>

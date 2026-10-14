@@ -347,6 +347,10 @@ button.code-block-copy:hover:not(:disabled) { background: var(--bg-hover); color
 .permission-detail { margin: 0; padding: 6px 8px; background: var(--code-bg); border-radius: var(--radius-chip); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
 .permission-actions { display: flex; gap: 6px; }
 .permission-actions button { height: 24px; padding: 0 12px; font-size: calc(12px * var(--font-scale)); }
+.always-menu { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg-subtle); }
+.always-group { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.always-heading { font-size: calc(10.5px * var(--font-scale)); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.always-group button { height: 22px; padding: 0 8px; font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); }
 /* Plan mode: the plan itself, readable, and scrollable when long. */
 .plan-body { max-height: 420px; overflow-y: auto; padding: 2px 2px 4px; font-size: calc(13px * var(--font-scale)); line-height: 1.6; }
 .plan-body > :first-child { margin-top: 0; }
@@ -1347,3 +1351,22 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .updating-title { font-size: calc(15px * var(--font-scale)); font-weight: 600; }
 .updating-step { font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); }
 .updating-note { margin-top: 6px; font-size: calc(12px * var(--font-scale)); line-height: 1.45; color: var(--muted); }
+
+/* Reverting Claude's edits: the confirm dialog, the Undo bar above the Changes and Summary tabs, and the buttons. */
+.revert-dialog { padding: 0; border: none; outline: none; background: transparent; color: var(--text); max-width: none; }
+.revert-dialog::backdrop { background: color-mix(in srgb, var(--bg) 60%, transparent); }
+.revert-body { display: flex; flex-direction: column; gap: 10px; width: min(480px, calc(100vw - 48px)); max-height: min(560px, calc(100vh - 80px)); padding: 20px 22px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--pane); box-shadow: var(--shadow); font-size: calc(13px * var(--font-scale)); }
+.revert-title { font-size: calc(15px * var(--font-scale)); font-weight: 600; }
+.revert-text { margin: 0; line-height: 1.45; color: var(--text-2); }
+.revert-warning { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--bg-subtle); border: 1px solid var(--line-strong); line-height: 1.45; }
+.revert-files { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 4px; list-style: none; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.revert-file { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 6px; font-size: calc(12.5px * var(--font-scale)); }
+.revert-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.revert-file-error { flex-basis: 100%; font-size: calc(11.5px * var(--font-scale)); color: var(--muted); }
+.revert-error { color: var(--del); }
+.revert-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.revert-undo { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: calc(12px * var(--font-scale)); }
+.revert-undo-text { min-width: 0; }
+.revert-undo-note { flex: 1; color: var(--muted); font-size: calc(11.5px * var(--font-scale)); }
+.revert-all { margin-left: 4px; }
+.summary-revert { margin-left: 4px; }

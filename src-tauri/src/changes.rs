@@ -34,11 +34,11 @@ pub enum Scope {
 /// Bigger files aren't read into the tracker or diffed: what stands for one is a stamp of its size and time, which
 /// changes with the file, so turn snapshots of it cost a metadata call. (An original recorded as text, for a file that
 /// was small when Claude edited it, never equals a stamp, so such a file shows as changed.)
-const MAX_TRACKED_BYTES: u64 = 2 * 1024 * 1024;
+pub(crate) const MAX_TRACKED_BYTES: u64 = 2 * 1024 * 1024;
 const STAMP: &str = "\0lantern-too-large:";
 const TOO_LARGE: &str = "This file is too large to show its changes.";
 
-fn is_stamp(text: Option<&str>) -> bool {
+pub(crate) fn is_stamp(text: Option<&str>) -> bool {
     text.is_some_and(|t| t.starts_with(STAMP))
 }
 
@@ -163,6 +163,14 @@ impl ChangeTracker {
                 Some(Cow::Owned(merged))
             }
         }
+    }
+
+    /// A file's text when the scope's range began (None inside: the file didn't exist then). The outer None: the file
+    /// isn't changed in that range. Errors when the range's baseline isn't known (a reopened session keeps only its last
+    /// turn), which is when a revert can't be offered.
+    pub fn original(&self, path: &str, scope: Scope, turn: Option<usize>, to_turn: Option<usize>) -> Result<Option<Option<String>>, String> {
+        let baseline = self.baseline(scope, turn, to_turn).ok_or("This step's changes aren't known: the session was reopened after it.")?;
+        Ok(baseline.get(path).cloned())
     }
 
     /// A file as it was when `turn` ended: at the next turn's start, or on disk now if `turn` is the latest.

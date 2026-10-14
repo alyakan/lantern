@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { api } from "./api";
-import type { McpServerSpec, Settings, TextQuery } from "./types";
+import type { McpServerSpec, RuleEntry, Settings, TextQuery } from "./types";
 import libRs from "../src-tauri/src/lib.rs?raw";
 import mockSource from "./dev/mockBackend.ts?raw";
 
@@ -17,6 +17,7 @@ beforeEach(() => {
 const settings = {} as Settings;
 const spec = {} as McpServerSpec;
 const query = {} as TextQuery;
+const folderRule: RuleEntry = { scope: "folder", folder: "/repo", tool: "Bash", kind: "prefix", text: "npm test" };
 
 const wrappers: [string, () => unknown, unknown[]][] = [
   ["locateClaude", () => api.locateClaude(null), ["locate_claude", { pathOverride: null }]],
@@ -76,6 +77,13 @@ const wrappers: [string, () => unknown, unknown[]][] = [
     () => api.respondPermission("s1", "req-1", true, null, { answers: { Codes: "503" } }),
     ["respond_permission", { slot: "s1", requestId: "req-1", allow: true, message: null, updatedInput: { answers: { Codes: "503" } } }],
   ],
+  [
+    "addPermissionRule",
+    () => api.addPermissionRule("s1", { scope: "folder", tool: "Bash", kind: "prefix", text: "npm test" }),
+    ["add_permission_rule", { slot: "s1", rule: { scope: "folder", tool: "Bash", kind: "prefix", text: "npm test" } }],
+  ],
+  ["listPermissionRules", () => api.listPermissionRules(null), ["list_permission_rules", { slot: null }]],
+  ["removePermissionRule", () => api.removePermissionRule("s1", folderRule), ["remove_permission_rule", { slot: "s1", entry: folderRule }]],
   ["gitBranch", () => api.gitBranch("/repo"), ["git_branch", { folder: "/repo" }]],
   ["userName", () => api.userName(), ["user_name"]],
   ["stopTask", () => api.stopTask("s1", "t1"), ["stop_task", { slot: "s1", taskId: "t1" }]],
@@ -94,6 +102,12 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ["listDir", () => api.listDir("s1", "/repo/src"), ["list_dir", { slot: "s1", path: "/repo/src" }]],
   ["readFile", () => api.readFile("s1", "a.ts"), ["read_file", { slot: "s1", path: "a.ts" }]],
   ["writeFile", () => api.writeFile("s1", "a.ts", "x", null), ["write_file", { slot: "s1", path: "a.ts", text: "x", expected: null }]],
+  [
+    "revertFiles",
+    () => api.revertFiles("s1", "turn", 2, 4, [{ path: "a.ts", expected: "x" }]),
+    ["revert_files", { slot: "s1", scope: "turn", turn: 2, toTurn: 4, files: [{ path: "a.ts", expected: "x" }] }],
+  ],
+  ["undoRevert", () => api.undoRevert("s1", [{ path: "a.ts", target: null, expected: "x" }]), ["undo_revert", { slot: "s1", files: [{ path: "a.ts", target: null, expected: "x" }] }]],
   ["exportText", () => api.exportText("out.md", "# Doc"), ["export_text", { fileName: "out.md", text: "# Doc" }]],
   ["findFiles", () => api.findFiles("s1", "retry"), ["find_files", { slot: "s1", query: "retry" }]],
   ["searchText", () => api.searchText("s1", query), ["search_text", { slot: "s1", query }]],

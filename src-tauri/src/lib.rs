@@ -18,6 +18,7 @@ pub mod stream_parser;
 pub mod test_runs;
 pub mod titles;
 pub mod trash;
+pub mod revert;
 pub mod ui_event;
 pub mod updates;
 
@@ -33,6 +34,8 @@ pub struct AppState {
     slots: Slots,
     login_path: Arc<OnceLock<Option<String>>>,
     titles: Arc<titles::TitleStore>,
+    /// "Always allow" rules for folders, saved in app data and shared by every chat.
+    folder_rules: Arc<permission::rules::FolderRules>,
     /// PRs looked up for the Changes pane, by repository and number, with when: fetching them takes a moment.
     prs: std::sync::Mutex<std::collections::HashMap<(std::path::PathBuf, u32), (std::time::Instant, pr::PrRange)>>,
 }
@@ -71,7 +74,7 @@ fn emitter(app: &AppHandle) -> impl Fn(SlotEvent) + Send + Sync + Clone + 'stati
 
 /// The chat's slot, created on first use.
 fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, String> {
-    state.slots.get_or_create(slot, &std::env::temp_dir(), emitter(app))
+    state.slots.get_or_create(slot, &std::env::temp_dir(), emitter(app), state.folder_rules.clone())
 }
 
 fn helper_config(slot: &Slot) -> Result<HelperConfig, String> {
@@ -86,7 +89,10 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, cfg: SessionConfig, clea
         slot.bridge.cancel_all();
         old.stop().await;
     }
+    slot.bridge.set_folder(&cfg.folder);
     if clear_changes {
+        // A new conversation in this chat: the rules it made for its old one go. (A restart keeps them.)
+        slot.bridge.clear_chat_rules();
         let folder = cfg.folder.clone();
         let baseline = tauri::async_runtime::spawn_blocking(move || outside::Baseline::take(&folder)).await.map_err(|e| e.to_string())?;
         let mut changes = slot.changes.lock().unwrap();
@@ -650,6 +656,33 @@ fn respond_permission(state: State<'_, AppState>, slot: String, request_id: Stri
     }
 }
 
+/// The "Always allow" rules Settings lists: this chat's (when it's open), then every folder's.
+#[tauri::command]
+fn list_permission_rules(state: State<'_, AppState>, slot: Option<String>) -> Vec<permission::rules::RuleEntry> {
+    use permission::rules::{RuleEntry, Scope};
+    let chat = slot.and_then(|id| state.slots.get(&id).ok()).map(|s| s.bridge.chat_rules()).unwrap_or_default();
+    let chat = chat.into_iter().map(|rule| RuleEntry { scope: Scope::Chat, folder: None, rule });
+    let folders = state.folder_rules.all().into_iter().flat_map(|(folder, rules)| rules.into_iter().map(move |rule| RuleEntry { scope: Scope::Folder, folder: Some(folder.clone()), rule }));
+    chat.chain(folders).collect()
+}
+
+/// Makes an "Always allow" rule from a card (the request itself is answered by respond_permission).
+#[tauri::command]
+fn add_permission_rule(state: State<'_, AppState>, slot: String, rule: permission::rules::NewRule) -> Result<(), String> {
+    state.slots.get(&slot)?.bridge.add_rule(rule.scope, rule.rule)
+}
+
+/// Removes a rule Settings lists. A chat rule goes with its chat, so that chat has to be open.
+#[tauri::command]
+fn remove_permission_rule(state: State<'_, AppState>, slot: Option<String>, entry: permission::rules::RuleEntry) -> Result<(), String> {
+    use permission::rules::Scope;
+    match entry.scope {
+        Scope::Chat => slot.and_then(|id| state.slots.get(&id).ok()).ok_or("That chat is no longer open.")?.bridge.remove_chat_rule(&entry.rule),
+        Scope::Folder => state.folder_rules.remove(&entry.folder.ok_or("A folder rule needs its folder.")?, &entry.rule),
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn git_branch(folder: String) -> Option<String> {
     git::current_branch(std::path::Path::new(&folder))
@@ -733,6 +766,25 @@ async fn write_file(state: State<'_, AppState>, slot: String, path: String, text
     let root = s.folder()?;
     let changes = s.changes.clone();
     tauri::async_runtime::spawn_blocking(move || save_tracked(&root, &changes, &path, &text, expected.as_deref())).await.map_err(|e| e.to_string())?
+}
+
+/// Puts the chosen files back to how they stood before a turn, a range of turns, or the chat (see revert.rs). Each comes
+/// with the text the user was shown, so a newer edit is reported as a conflict rather than overwritten.
+#[tauri::command]
+async fn revert_files(state: State<'_, AppState>, slot: String, scope: changes::Scope, turn: Option<usize>, to_turn: Option<usize>, files: Vec<revert::Shown>) -> Result<Vec<revert::Outcome>, String> {
+    let s = state.slots.get(&slot)?;
+    let root = s.folder()?;
+    let changes = s.changes.clone();
+    tauri::async_runtime::spawn_blocking(move || revert::revert_files(&root, &changes, scope, turn, to_turn, &files, &trash::move_to_trash))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Undoes a revert: each file goes back to the text it had before, or is taken away if the revert brought it back.
+#[tauri::command]
+async fn undo_revert(state: State<'_, AppState>, slot: String, files: Vec<revert::Undo>) -> Result<Vec<revert::Outcome>, String> {
+    let root = state.slots.get(&slot)?.folder()?;
+    tauri::async_runtime::spawn_blocking(move || revert::undo(&root, &files, &trash::move_to_trash)).await.map_err(|e| e.to_string())
 }
 
 /// Saves an exported document (a plan as markdown). The save dialog is opened here rather than by the webview, and only
@@ -880,7 +932,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let titles = titles::TitleStore::load(app.path().app_data_dir().ok().map(|d| d.join("titles.json")));
-            app.manage(AppState { slots: Slots::default(), login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), prs: Default::default() });
+            let folder_rules = permission::rules::FolderRules::load(app.path().app_data_dir().ok().map(|d| d.join("permission_rules.json")));
+            app.manage(AppState { slots: Slots::default(), login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), folder_rules: Arc::new(folder_rules), prs: Default::default() });
             app.manage(updates::Updates::default());
             if updates::checks_enabled() {
                 tauri::async_runtime::spawn(updates::watch(app.handle().clone()));
@@ -952,10 +1005,15 @@ pub fn run() {
             get_file_diff,
             change_summary,
             respond_permission,
+            list_permission_rules,
+            add_permission_rule,
+            remove_permission_rule,
             git_branch,
             list_dir,
             read_file,
             write_file,
+            revert_files,
+            undo_revert,
             export_text,
             find_files,
             resolve_files,

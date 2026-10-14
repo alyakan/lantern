@@ -1,3 +1,4 @@
+use crate::permission::rules::{Rule, Scope};
 use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
@@ -117,6 +118,8 @@ pub enum UiEvent {
     PermissionRequested { request_id: String, tool_name: String, input: Value },
     /// A prompt that can no longer be answered: the helper asking for it went away.
     PermissionWithdrawn { request_id: String },
+    /// A request a rule allowed, with no card: the chat notes it in place of one. `scope` and `rule` say which rule.
+    PermissionAutoAllowed { request_id: String, tool_name: String, input: Value, scope: Scope, rule: Rule },
     SessionEnded { code: Option<i32>, stderr_tail: String },
     /// Output from a command the user ran from the chat box (see shell.rs).
     ShellOutput { id: String, text: String },

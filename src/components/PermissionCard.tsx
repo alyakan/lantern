@@ -3,6 +3,8 @@ import { Md } from "./Md";
 import type { ChatItem } from "../store";
 import { QuestionCard } from "./QuestionCard";
 import { QUESTION_TOOL } from "../lib/questions";
+import { describeRule, newRule, RULE_SCOPES, ruleChoices } from "../lib/permissionRules";
+import type { NewRule } from "../types";
 
 type PermissionItem = Extract<ChatItem, { type: "permission" }>;
 
@@ -11,13 +13,28 @@ export const PLAN_TOOL = "ExitPlanMode";
 /** Debug mode's request to reproduce the bug (from Lantern's own MCP tool). */
 export const REPRODUCE_TOOL = "Reproduce";
 
-type Decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>) => void;
+/** `remember`: an "Always allow…" choice, saved as a rule before the request is answered. */
+type Decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => void;
 
 export function PermissionCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }) {
   if (item.toolName === PLAN_TOOL) return <PlanCard item={item} onDecide={onDecide} />;
   if (item.toolName === REPRODUCE_TOOL) return <ReproduceCard item={item} onDecide={onDecide} />;
   if (item.toolName === QUESTION_TOOL) return <QuestionCard item={item} onDecide={onDecide} />;
+  return <ToolCard item={item} onDecide={onDecide} />;
+}
+
+// Any other tool: Allow or Deny, and Always allow… for a rule that covers this kind of call from now on.
+function ToolCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }) {
+  const [menuOpen, setMenuOpen] = useState(false);
   const detail = describeInput(item.input);
+  if (item.decision !== null && item.autoRule) {
+    return (
+      <div className="permission-done allowed auto">
+        <span className="decision">Allowed by your rule:</span> {describeRule(item.autoRule.rule)}
+        <span className="permission-done-detail"> · {detail.split("\n")[0]}</span>
+      </div>
+    );
+  }
   if (item.decision !== null) {
     const allowed = item.decision === "allowed";
     return (
@@ -27,6 +44,7 @@ export function PermissionCard({ item, onDecide }: { item: PermissionItem; onDec
       </div>
     );
   }
+  const choices = ruleChoices(item.toolName, item.input);
   return (
     <div className="permission">
       <div className="permission-title">
@@ -37,8 +55,27 @@ export function PermissionCard({ item, onDecide }: { item: PermissionItem; onDec
         <button className="primary" onClick={() => onDecide(item.id, true)}>
           Allow
         </button>
+        {choices.length > 0 && (
+          <button aria-expanded={menuOpen} onClick={() => setMenuOpen(!menuOpen)}>
+            Always allow…
+          </button>
+        )}
         <button onClick={() => onDecide(item.id, false)}>Deny</button>
       </div>
+      {menuOpen && (
+        <div className="always-menu">
+          {RULE_SCOPES.map(([scope, heading]) => (
+            <div key={scope} role="group" aria-label={heading} className="always-group">
+              <div className="always-heading">{heading}</div>
+              {choices.map((rule) => (
+                <button key={describeRule(rule)} onClick={() => onDecide(item.id, true, undefined, undefined, newRule(scope, rule))}>
+                  {describeRule(rule)}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

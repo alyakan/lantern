@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { api, type BranchReview, type ChangeScope } from "./api";
+import { api, type BranchReview, type ChangeScope, type RevertOutcome } from "./api";
 import { prNumberOf, reviewHints } from "./lib/review";
 import { openFind } from "./lib/editorFind";
 import { StepsIntro } from "./components/StepsIntro";
@@ -12,13 +12,14 @@ import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
 import { isTyping } from "./lib/typing";
 import { withShellContext } from "./lib/shell";
+import { latestTurnOf, sinceLabel, withRevertNote, type RevertRequest } from "./lib/revert";
 import { withSkillNote } from "./lib/skillNote";
 import { agentTree, usesAgents } from "./lib/agents";
 import { agentGraph } from "./lib/agentGraph";
 import { BUILT_IN, CUSTOM_HARNESS, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
-import type { McpServer, SkillEntry } from "./types";
+import type { McpServer, NewRule, SkillEntry } from "./types";
 import { stepFile, usePersistentState } from "./lib/layout";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyAppearance, type Appearance, type TextSize } from "./lib/theme";
@@ -413,6 +414,23 @@ export default function App() {
   const syncChanges = (slot: string) =>
     api.changeSummary(slot).then((files) => to(slot)({ type: "changes_synced", files }), () => {});
 
+  // A revert finished: the chat says what it did, keeps Undo for it and tells Claude with the next message.
+  const revertDone = (slot: string, req: RevertRequest, outcomes: RevertOutcome[]) => {
+    to(slot)({ type: "revert_done", since: sinceLabel(chats.slots[slot]?.items ?? [], req.scope, req.turn), outcomes });
+    syncChanges(slot);
+  };
+  const undoRevert = (slot: string) => {
+    const undo = chats.slots[slot]?.revertUndo;
+    if (!undo) return;
+    api.undoRevert(slot, undo.files).then(
+      (outcomes) => {
+        to(slot)({ type: "revert_undone", id: undo.id, outcomes });
+        syncChanges(slot);
+      },
+      (e) => to(slot)({ type: "failed", text: errText(e) }),
+    );
+  };
+
   // A command can create or change files without an edit (cp, mv, a generator): re-check once each one finishes.
   const commandsDone = countFinished(state.items, "Bash") + shellsDone(state.items);
   useEffect(() => {
@@ -467,7 +485,9 @@ export default function App() {
     // a note so Claude uses them.
     const items = chats.slots[slot]?.items ?? [];
     const noted = withSkillNote(text, skillNames(slot));
-    api.sendMessage(slot, withShellContext(items, pick ? withFlavourNote(pick, noted) : noted)).then(
+    // Files reverted since the last message: Claude is told, so it doesn't act on what it last wrote.
+    const reverted = withRevertNote(pick ? withFlavourNote(pick, noted) : noted, chats.slots[slot]?.revertNotes ?? []);
+    api.sendMessage(slot, withShellContext(items, reverted)).then(
       (turn) => typeof turn === "number" && to(slot)({ type: "turn_numbered", turn }),
       (e) => to(slot)({ type: "turn_failed", text: errText(e) }),
     );
@@ -590,10 +610,14 @@ export default function App() {
 
   // `note`: what the user wrote on a reproduce card; it goes back to Claude with the answer.
   // `answered`: the tool's input with what the user chose in it (AskUserQuestion's answers).
-  const decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>) => {
+  // `remember`: an "Always allow…" rule. It's saved first, so the chat's next matching request is answered by it; if it
+  // can't be saved, this request is still answered and the error is shown.
+  const decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => {
     const slot = active;
     to(slot)({ type: "permission_decided", id, allow, note });
-    api.respondPermission(slot, id, allow, note ?? null, answered ?? null).catch((e) => to(slot)({ type: "turn_failed", text: errText(e) }));
+    const answer = () => api.respondPermission(slot, id, allow, note ?? null, answered ?? null).catch((e) => to(slot)({ type: "turn_failed", text: errText(e) }));
+    if (!remember) return answer();
+    api.addPermissionRule(slot, remember).catch((e) => to(slot)({ type: "turn_failed", text: errText(e) })).then(answer);
   };
 
   // From the title bar's failure count: bring the latest failed step's activity into view, opened.
@@ -1008,6 +1032,14 @@ export default function App() {
                 follow={state.follow}
                 refreshKey={state.editCount}
                 onSaved={() => syncChanges(active)}
+                revert={{
+                  slot: active,
+                  blocked: state.status === "running" ? "Wait for Claude to finish before reverting." : null,
+                  latestTurn: latestTurnOf(state.items),
+                  undo: state.revertUndo,
+                  onUndo: () => undoRevert(active),
+                  onReverted: (req, outcomes) => revertDone(active, req, outcomes),
+                }}
                 onSelect={selectFile}
                 onFollow={() => dispatch({ type: "follow_latest" })}
               />
