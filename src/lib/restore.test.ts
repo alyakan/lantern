@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { initialState, type State } from "../store";
-import { chatsToSave, loadSaved, save, screenFirst, withOffered, type SavedChat } from "./restore";
+import { chatsToSave, currentFolder, loadSaved, save, screenFirst, toCurrentFolders, withOffered, type SavedChat } from "./restore";
 
 const chat = (over: Partial<State>): State => ({ ...initialState, status: "idle", ...over });
 const talked = (sessionId: string, folder = "/p"): State => chat({ folder, sessionId, items: [{ type: "user", id: "u1", text: `Fix ${sessionId}` }] });
@@ -41,6 +41,28 @@ describe("screenFirst", () => {
     expect(screenFirst([a, b, c])).toEqual([b, a, c]);
     expect(screenFirst([a, c])).toEqual([a, c]);
     expect(screenFirst([])).toEqual([]);
+  });
+});
+
+describe("toCurrentFolders", () => {
+  const moves = [{ folder: "/dev/rayak", aliases: ["/Documents/rayak", "/older/rayak"] }];
+
+  it("names a moved folder as it is now, and leaves the rest as they were", () => {
+    const [a, b, c] = [saved({ sessionId: "a", folder: "/Documents/rayak" }), saved({ sessionId: "b", folder: "/older/rayak/" }), saved({ sessionId: "c", folder: "/elsewhere" })];
+    expect(toCurrentFolders([a, b, c], moves)).toEqual([{ ...a, folder: "/dev/rayak" }, { ...b, folder: "/dev/rayak" }, c]);
+    expect(currentFolder("/Documents/rayak", moves)).toBe("/dev/rayak");
+    expect(currentFolder("/Documents/rayak-two", moves)).toBe("/Documents/rayak-two");
+  });
+
+  it("keeps a chat saved in both places once, under the new folder", () => {
+    const now = saved({ sessionId: "a", folder: "/dev/rayak", active: true });
+    const typed = [saved({ sessionId: null, folder: "/Documents/rayak", draft: "one" }), saved({ sessionId: null, folder: "/dev/rayak", draft: "two" })];
+    expect(toCurrentFolders([saved({ sessionId: "a", folder: "/Documents/rayak" }), now, ...typed], moves)).toEqual([now, { ...typed[0], folder: "/dev/rayak" }, typed[1]]);
+  });
+
+  it("changes nothing when no folder has moved", () => {
+    const chats = [saved({ folder: "/Documents/rayak" })];
+    expect(toCurrentFolders(chats, [])).toBe(chats);
   });
 });
 

@@ -24,7 +24,7 @@ import { agentGraph } from "./lib/agentGraph";
 import { BUILT_IN, CUSTOM_HARNESS, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
-import type { CloseAgreed, McpServer, MovedFolder, NewRule, NewWorker, SkillEntry, UpdateInfo } from "./types";
+import type { CloseAgreed, McpServer, MovedFolder, NewRule, NewWorker, RelocationEntry, SkillEntry, UpdateInfo } from "./types";
 import { LAST_FOLDER, OPEN_CHATS, migrateFolderState, withMovedNote, type Migrated } from "./lib/relocate";
 import { BringOldSessionsDialog } from "./components/BringOldSessionsDialog";
 import { stepFile, usePersistentState } from "./lib/layout";
@@ -66,7 +66,7 @@ import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { SetupScreen } from "./components/SetupScreen";
 import { RestoreCard } from "./components/RestoreCard";
-import { chatsToSave, loadSaved, save, screenFirst, withOffered, type SavedChat } from "./lib/restore";
+import { chatsToSave, currentFolder, loadSaved, save, screenFirst, toCurrentFolders, withOffered, type SavedChat } from "./lib/restore";
 import { SplitPane } from "./components/SplitPane";
 import { TopBar } from "./components/TopBar";
 import { Canvas, newLayout } from "./components/Canvas";
@@ -129,6 +129,13 @@ export default function App() {
   const [orchestraModes, setOrchestraModes] = usePersistentState<Record<string, "auto" | "ask">>("settings.orchestraModeByFolder", {});
   const autoFor = (folder: string | null) => (folder ? (autoBy[folder] ?? false) : false);
   const [lastFolder, setLastFolder] = usePersistentState<string | null>("settings.lastFolder", null);
+  // The folders recorded as moved (null until read): a chat saved in the old place reopens in the new one.
+  const [moves, setMoves] = useState<RelocationEntry[] | null>(null);
+  const refreshMoves = () => api.relocationsList().then(setMoves, () => setMoves((m) => m ?? []));
+  useEffect(() => {
+    refreshMoves();
+  }, []);
+  const here = (folder: string) => currentFolder(folder, moves ?? []);
   // Each folder's sent prompts, for ↑ in the box (see MessageInput). Kept per folder, newest last.
   const [promptsBy, setPromptsBy] = usePersistentState<Record<string, string[]>>("settings.promptHistory", {});
   const [model, setModel] = usePersistentState<string | null>("settings.model", null);
@@ -367,6 +374,8 @@ export default function App() {
   const startIn = (slot: string, folder: string, quiet = false, orchestra?: OrchestraStart) => {
     const { claudePath } = state;
     if (!claudePath) return;
+    // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
+    reopened.current = true;
     // An orchestra runs on the mode the user chose for it (asked the first time, see newOrchestra), which its workers never
     // exceed. It doesn't change the project's own mode (see the effect below).
     const mode: Mode = orchestra ? orchestra.mode : modeFor(folder);
@@ -415,12 +424,12 @@ export default function App() {
     else if (model && state.model?.includes(model) && modelIds[model] !== state.model) setModelIds({ ...modelIds, [model]: state.model });
   }, [model, state.model]);
 
-  // Reopen the last project once claude has been found.
+  // Reopen the last project once claude has been found (where it is now, if it moved).
   useEffect(() => {
-    if (reopened.current || state.status !== "no_folder" || !state.claudePath) return;
+    if (reopened.current || state.status !== "no_folder" || !state.claudePath || !moves) return;
     reopened.current = true;
-    if (lastFolder) startFresh(lastFolder, true);
-  }, [state.status, state.claudePath]);
+    if (lastFolder) startFresh(here(lastFolder), true);
+  }, [state.status, state.claudePath, moves]);
 
   const openFolder = async () => {
     const folder = await open({ directory: true, multiple: false });
@@ -450,6 +459,7 @@ export default function App() {
   const resumeIn = (slot: string, folder: string, sessionId: string, reuse = false, team?: TeamRole): Promise<boolean> => {
     const { claudePath } = state;
     if (!claudePath) return Promise.resolve(false);
+    reopened.current = true;
     // The mode it was last in (and for an older Debug, Teach or Review session, that flavour of Step by step); one from
     // before modes were kept per session reopens as a plain chat, not as whatever this folder's newest chat is doing.
     const { mode, flavour: flavourStart } = savedMode(sessionModes[sessionId]);
@@ -498,6 +508,10 @@ export default function App() {
   // The chats that were open when Lantern last closed, offered back at launch until restored, dismissed, or a message
   // is sent in a new chat instead.
   const [offer, setOffer] = useState<SavedChat[]>(loadSaved);
+  // Offered where their folders are now, once the moves are known.
+  useEffect(() => {
+    if (moves) setOffer((o) => toCurrentFolders(o, moves));
+  }, [moves]);
   // Bumped to remount the chat box when a restore puts unsent text back into the chat on screen.
   const [composerEpoch, setComposerEpoch] = useState(0);
   // After Edit (or a restore) the box has the text: focus it, so the user can go on typing.
@@ -536,8 +550,10 @@ export default function App() {
   };
 
   // One chat, on screen (in the empty chat on screen if there is one).
-  const restoreOne = (c: SavedChat) => {
-    setOffer((o) => o.filter((x) => x !== c));
+  const restoreOne = (offered: SavedChat) => {
+    setOffer((o) => o.filter((x) => x !== offered));
+    // Chosen before the moves were read, it still goes where its folder is now.
+    const c = { ...offered, folder: here(offered.folder) };
     const already = openAlready(c);
     if (already) return switchTo(already);
     if (!state.claudePath) return;
@@ -549,9 +565,9 @@ export default function App() {
   // Every chat: the one that was on screen comes back on screen, the others open behind it. Main agents of an orchestra
   // are opened first, so their workers can be put back under them.
   const restoreAll = () => {
-    const [first] = screenFirst(offer);
+    const ordered = screenFirst(toCurrentFolders(offer, moves ?? []));
+    const [first] = ordered;
     if (!first || !state.claudePath) return;
-    const ordered = screenFirst(offer);
     const isMain = (c: SavedChat) => c.orchestra?.role === "main";
     const inOrder = [...ordered.filter(isMain), ...ordered.filter((c) => !isMain(c))];
     setOffer([]);
@@ -1090,8 +1106,9 @@ export default function App() {
   }, [chats.slots]);
 
   // Saved as they change, so a crash or force-quit leaves them to restore too.
-  const saveOpen = () => save(withOffered(chatsToSave(chats.slots, active, drafts.current, titles, chats.agents), offer));
-  useEffect(saveOpen, [chats.slots, chats.agents, active, titles, offer]);
+  // A chat still open in a folder that has since moved is saved where the folder is now.
+  const saveOpen = () => save(toCurrentFolders(withOffered(chatsToSave(chats.slots, active, drafts.current, titles, chats.agents), offer), moves ?? []));
+  useEffect(saveOpen, [chats.slots, chats.agents, active, titles, offer, moves]);
 
   const announced = useRef<Record<string, string>>({});
   // Chats that finished in the background and haven't been looked at since: a blue dot, like an unread message.
@@ -1319,6 +1336,7 @@ export default function App() {
   const relocated = (old: string, next: string) => {
     carryFolderState(old, next);
     refreshMoved();
+    refreshMoves();
   };
   const sessionActions: SessionActions | null = state.folder
     ? {

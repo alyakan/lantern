@@ -1,5 +1,6 @@
 import { chatTitle, type AgentMeta } from "../sessions";
 import type { State } from "../store";
+import type { RelocationEntry } from "../types";
 
 /**
  * What a saved chat was in an orchestra. A worker names its main agent by that chat's session, which is still the same
@@ -54,6 +55,25 @@ export function withOffered(open: SavedChat[], offered: SavedChat[]): SavedChat[
 export function screenFirst(chats: SavedChat[]): SavedChat[] {
   const i = Math.max(chats.findIndex((c) => c.active), 0);
   return chats.length ? [chats[i], ...chats.slice(0, i), ...chats.slice(i + 1)] : [];
+}
+
+/** Where `folder` is now: the folder it was recorded as moving to, else itself. */
+export function currentFolder(folder: string, moves: RelocationEntry[]): string {
+  const trimmed = folder.replace(/\/+$/, "");
+  return moves.find((m) => m.aliases.some((a) => a.replace(/\/+$/, "") === trimmed))?.folder ?? folder;
+}
+
+/**
+ * The saved chats with each folder that has moved named as it is now (a chat open in the old place when it moved is
+ * saved with that place). One saved in both places is the same chat, so it's kept once, under the new one.
+ */
+export function toCurrentFolders(chats: SavedChat[], moves: RelocationEntry[]): SavedChat[] {
+  if (moves.length === 0) return chats;
+  const moved = chats.map((c) => ({ c, folder: currentFolder(c.folder, moves) }));
+  const here = new Set(moved.filter(({ c, folder }) => c.folder === folder && c.sessionId).map(({ c }) => `${c.folder}\n${c.sessionId}`));
+  return moved
+    .filter(({ c, folder }) => c.folder === folder || !c.sessionId || !here.has(`${folder}\n${c.sessionId}`))
+    .map(({ c, folder }) => (c.folder === folder ? c : { ...c, folder }));
 }
 
 export function loadSaved(): SavedChat[] {
