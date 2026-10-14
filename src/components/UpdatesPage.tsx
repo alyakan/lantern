@@ -10,10 +10,13 @@ export interface UpdatesPageProps {
   onCheck: () => void;
   /** A downloaded update that's waiting, and how to take it: the same as the button under the chat box. */
   ready: { version: string; busy: number; onRestart: () => void; onLater: () => void } | null;
+  /** Versions whose "What's new" can be shown: the running one (just updated to) or the waiting one. */
+  whatsNew?: string[];
+  onWhatsNew?: (version: string) => void;
 }
 
 /** Settings ▸ Updates: the running version, a button to look for a newer one, and how that's going. */
-export function UpdatesPage({ version, state, onCheck, ready }: UpdatesPageProps) {
+export function UpdatesPage({ version, state, onCheck, ready, whatsNew = [], onWhatsNew }: UpdatesPageProps) {
   const checking = state.kind === "checking";
   const downloading = state.kind === "downloading";
   const percent = downloadPercent(state);
@@ -63,6 +66,15 @@ export function UpdatesPage({ version, state, onCheck, ready }: UpdatesPageProps
             </div>
           )}
         </div>
+        {onWhatsNew && whatsNew.length > 0 && (
+          <div className="updates-whats-new">
+            {whatsNew.map((v) => (
+              <button key={v} className="link-button" onClick={() => onWhatsNew(v)}>
+                What's new in {v}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </>
   );

@@ -3,7 +3,7 @@ import type { BackgroundTask, Status } from "../store";
 import { elapsed } from "../lib/time";
 import type { RecentFolder, SessionSummary } from "../types";
 import { basename } from "../lib/diff";
-import { useShortcut } from "../lib/shortcuts";
+import { useAction } from "../lib/actions";
 import { FolderMenu } from "./FolderPill";
 import { useMenuKeys } from "./useMenuKeys";
 import { HistoryMenu, type OpenChat } from "./HistoryMenu";
@@ -137,12 +137,16 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
     loadSessions?.().then(setSessions, () => setSessions([]));
   };
 
-  useShortcut("n", () => onNewSession?.(), canUseSessions && !!onNewSession);
-  useShortcut("k", toggleHistory, canUseSessions && !!loadSessions);
-  useShortcut("o", () => {
-    close();
-    onOpenFolder();
-  }, !busy);
+  useAction("new-session", () => onNewSession?.(), canUseSessions && !!onNewSession);
+  useAction("session-history", toggleHistory, canUseSessions && !!loadSessions);
+  useAction(
+    "open-folder",
+    () => {
+      close();
+      onOpenFolder();
+    },
+    !busy,
+  );
 
   const toggleFolders = () => {
     if (!loadRecent || !onPickFolder) return onOpenFolder();

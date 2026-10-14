@@ -30,6 +30,7 @@ tauri-plugin-notification = "2"
 similar = "2"
 regex = "1"
 tauri-plugin-updater = "2"
+tauri-plugin-window-state = "2"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -42,3 +43,5 @@ strip = true
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# The menu's accelerators are checked with the parser the menu itself uses (tauri's own copy of it).
+muda = "0.20"
