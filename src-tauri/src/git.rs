@@ -37,13 +37,15 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// What every git command Lantern runs starts with. A repository's config is shared by its worktrees, so a worker can
 /// write to it from its own: nothing in it may run a program of its own while Lantern looks or commits. No filesystem
-/// monitor, no hooks, no pager, no signing (`gpg.program` is a program the config names), and no going into submodules
-/// (a submodule's own git directory is the worker's to point anywhere). git hands these on to the git commands it runs
-/// itself. Filter and merge drivers still run: git-lfs is one, and without it a commit or a merge would take its pointer
-/// files for the content.
-const HARDENED: [&str; 12] = [
+/// monitor, no hooks, no pager, no going into submodules (a submodule's own git directory is the worker's to point
+/// anywhere), and neither signing nor checking signatures: each runs a program the config names, so those programs are
+/// pinned to `false` as well. git hands these on to the git commands it runs itself. Filter and merge drivers still
+/// run: git-lfs is one, and without it a commit or a merge would take its pointer files for the content.
+const HARDENED: [&str; 24] = [
     "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat", "-c", "submodule.recurse=false",
-    "-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false",
+    "-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false", "-c", "merge.verifySignatures=false", "-c", "log.showSignature=false",
+    "-c", "gpg.program=/usr/bin/false", "-c", "gpg.ssh.program=/usr/bin/false", "-c", "gpg.x509.program=/usr/bin/false",
+    "-c", "gpg.ssh.defaultKeyCommand=/usr/bin/false",
 ];
 
 /// Variables that would point git at another repository, index or config than the one it is run in.
@@ -455,7 +457,7 @@ pub fn merge(repo: &Path, into: &str, commit: &str, message: &str, path_env: Opt
         let more = if clobbered.len() > 5 { format!(" and {} more", clobbered.len() - 5) } else { String::new() };
         return Err(format!("The merge would overwrite files you keep out of git ({}{more}). Move them aside, then approve the merge again.", shown.join(", ")));
     }
-    match run(repo, &["merge", "--no-ff", "--no-gpg-sign", "-m", message, commit], path_env) {
+    match run(repo, &["merge", "--no-ff", "--no-gpg-sign", "--no-verify-signatures", "-m", message, commit], path_env) {
         Ok(_) => Ok(Merged::Into(into.to_string())),
         Err(e) => {
             let conflicts: Vec<String> = run(repo, &["diff", "--name-only", "--diff-filter=U"], path_env).unwrap_or_default().lines().map(String::from).collect();
@@ -889,6 +891,33 @@ mod tests {
         assert!(dirty(main.path(), None).unwrap().is_empty());
         assert_eq!(merge(main.path(), "main", &commit, "Merge w", None), Ok(Merged::Into("main".into())));
         assert!(!marker.exists(), "a program from the repository's config ran");
+    }
+
+    #[test]
+    fn a_signed_worker_commit_never_gets_its_signature_checked_by_a_program_from_the_config() {
+        use std::os::unix::fs::PermissionsExt;
+        let main = repo();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        let marker = scratch.path().join("ran");
+        // The worker signs its tip with a made-up signature, then asks for signatures to be checked with its program.
+        let signer = scratch.path().join("fake-sign.sh");
+        std::fs::write(&signer, "#!/bin/sh\ncat >/dev/null\nprintf '\\n[GNUPG:] SIG_CREATED D 1 8 00 0 X\\n' >&2\nprintf -- '-----BEGIN PGP SIGNATURE-----\\nfake\\n-----END PGP SIGNATURE-----\\n'\n").unwrap();
+        std::fs::set_permissions(&signer, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
+        run(&wt.folder, &["add", "b.txt"], None).unwrap();
+        let program = format!("gpg.program={}", signer.display());
+        run(&wt.folder, &["-c", "commit.gpgSign=true", "-c", "gpg.format=openpgp", "-c", &program, "commit", "-q", "-m", "signed"], None).unwrap();
+        assert!(run(&wt.folder, &["cat-file", "commit", "HEAD"], None).unwrap().contains("gpgsig"));
+        tripwire(&scratch.path().join("verify.sh"), &marker);
+        run(&wt.folder, &["config", "merge.verifySignatures", "true"], None).unwrap();
+        run(&wt.folder, &["config", "gpg.format", "openpgp"], None).unwrap();
+        run(&wt.folder, &["config", "gpg.program", &scratch.path().join("verify.sh").display().to_string()], None).unwrap();
+        let checked = verify_worktree(main.path(), &wt.root, None).unwrap();
+        let seen = snapshot(main.path(), &checked, &wt.branch, None).unwrap();
+        let Pinned::Ready(commit) = commit_snapshot(main.path(), &checked, &wt.branch, &seen, "Lantern: w", None).unwrap() else { panic!() };
+        assert_eq!(merge(main.path(), "main", &commit, "Merge w", None), Ok(Merged::Into("main".into())));
+        assert!(!marker.exists(), "a program from the repository's config checked the signature");
     }
 
     #[test]
