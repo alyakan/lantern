@@ -234,8 +234,10 @@ fn cancels(msg: &Value, id: &Value) -> bool {
 /// `offer`: which tools this helper's chat has (`LANTERN_ROLE`, `LANTERN_STEPS`: see `Offer::from_env`).
 ///
 /// Its input is read on a thread of its own, so a request that waits on the user (a card) still hears its client: when
-/// the client calls that request off (it gave up waiting) or goes away, the helper hangs up on the app, which takes the
-/// card down (see PermissionBridge), and the request gets no reply, as MCP asks. Everything else is answered in order.
+/// the client calls a request off (it gave up waiting), the helper hangs up on the app, which takes the card down (see
+/// PermissionBridge), or drops it unasked if it was still queued, and it gets no reply, as MCP asks. When the client goes
+/// away, a waiting card is taken down the same way and no new one is shown; what the app answers at once still is.
+/// Everything else is answered in order.
 pub fn run_helper_as(mut input: impl BufRead + Send, mut output: impl Write, socket: Option<&str>, offer: Offer) -> io::Result<()> {
     let (tx, rx) = mpsc::channel::<Heard>();
     std::thread::scope(|scope| {
@@ -266,6 +268,12 @@ pub fn run_helper_as(mut input: impl BufRead + Send, mut output: impl Write, soc
         let called_off = Cell::new(false);
         let closed = Cell::new(false);
         let ask = |req: BridgeRequest| -> BridgeResponse {
+            // A card waits on the user; the rest the app answers at once.
+            let card = !(req.orchestra || req.network || req.review);
+            if card && closed.get() {
+                called_off.set(true);
+                return failed(&io::Error::new(io::ErrorKind::BrokenPipe, "Claude Code has gone"));
+            }
             let stream = match connect_bridge(socket, &req) {
                 Ok(stream) => stream,
                 Err(e) => return failed(&e),
@@ -286,11 +294,18 @@ pub fn run_helper_as(mut input: impl BufRead + Send, mut output: impl Write, soc
                         called_off.set(true);
                         let _ = stream.shutdown(Shutdown::Both);
                     }
+                    // A request still queued that is called off is dropped before it is ever shown.
+                    Ok(Heard::Message(msg)) if msg["method"] == "notifications/cancelled" => {
+                        let id = &msg["params"]["requestId"];
+                        backlog.borrow_mut().retain(|queued| queued.get("id") != Some(id));
+                    }
                     Ok(Heard::Message(msg)) => backlog.borrow_mut().push_back(msg),
                     Ok(Heard::Closed) | Err(_) => {
                         closed.set(true);
-                        called_off.set(true);
-                        let _ = stream.shutdown(Shutdown::Both);
+                        if card {
+                            called_off.set(true);
+                            let _ = stream.shutdown(Shutdown::Both);
+                        }
                     }
                 }
             }
@@ -682,14 +697,41 @@ mod tests {
         assert_eq!(decision(&replies[0])["behavior"], "allow");
     }
 
+    /// A permission prompt with its own request id.
+    fn call_as(id: u64, tool: &str) -> Value {
+        let mut msg = call(tool, json!({}));
+        msg["id"] = json!(id);
+        msg
+    }
+
     #[test]
-    fn a_card_whose_client_goes_away_is_taken_down() {
+    fn a_card_still_queued_that_the_client_calls_off_is_never_shown() {
+        let app = fake_app("queued", Some(BridgeResponse { allow: true, message: None, updated_input: None, failed: false }));
+        let (mut client, helper) = helper_on(app.socket.clone());
+        writeln!(client, "{}", call("Bash", json!({"command": "ls"}))).unwrap();
+        app.got.recv().unwrap();
+        // A second prompt queues behind the first, and times out before the first is answered.
+        writeln!(client, "{}", call_as(4, "Write")).unwrap();
+        writeln!(client, r#"{{"jsonrpc":"2.0","method":"notifications/cancelled","params":{{"requestId":4}}}}"#).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        app.release.send(()).unwrap();
+        // The app was asked once: the called-off one never reached it (it takes one request, then is gone).
+        assert_eq!(app.done.join().unwrap().0.tool_name, "Bash");
+        drop(client);
+        assert_eq!(ids(&helper.join().unwrap()), vec![json!(2)]);
+    }
+
+    #[test]
+    fn a_card_whose_client_goes_away_is_taken_down_and_no_new_one_is_shown() {
         let app = fake_app("gone", None);
         let (mut client, helper) = helper_on(app.socket.clone());
         writeln!(client, "{}", call("Bash", json!({"command": "ls"}))).unwrap();
         app.got.recv().unwrap();
+        writeln!(client, "{}", call_as(4, "Write")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
         drop(client);
         assert!(app.done.join().unwrap().1);
+        // Neither prompt is answered, and the queued one isn't shown to anyone.
         assert!(helper.join().unwrap().is_empty());
     }
 
