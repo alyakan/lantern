@@ -41,6 +41,7 @@ import HtmlWorker from "monaco-editor/language/html/html.worker?worker";
 import { loader } from "@monaco-editor/react";
 import { onThemeChange, pageIsDark, readColors } from "./lib/theme";
 import { EDITOR_TOKENS, FALLBACK_TOKENS, monacoTheme, syntaxFor } from "./lib/monacoTheme";
+import { STOCK_DARK, STOCK_LIGHT } from "./lib/stockMonacoTheme";
 import type { ThemeId } from "./lib/themes";
 
 // A worker per language service, made when a file of that language first opens.
@@ -107,18 +108,24 @@ export const LIGHT_THEME = "lantern-light";
 export const DARK_THEME = "lantern-dark";
 
 /**
- * Defines the editor theme for the light or dark that's on, from the page's own colour tokens (see lib/monacoTheme.ts),
- * so every app theme has its editor, and puts it on. Defining a theme again restyles the editors that show it.
+ * Follow macOS, Light and Dark have fixed editor colours (lib/stockMonacoTheme.ts), defined once as ever. Every other
+ * theme's come from the page's colour tokens (lib/monacoTheme.ts): they replace the light or dark definition for as long
+ * as that theme is on. Defining a theme again restyles the editors that show it.
  */
-function defineEditorTheme(): void {
+function defineEditorTheme(apply: boolean): void {
   const dark = pageIsDark();
-  const colors = { ...FALLBACK_TOKENS[dark ? "dark" : "light"], ...readColors(EDITOR_TOKENS) };
   const name = dark ? DARK_THEME : LIGHT_THEME;
-  monaco.editor.defineTheme(name, monacoTheme(colors, dark, syntaxFor(document.documentElement.dataset.theme as ThemeId | undefined, dark)));
-  monaco.editor.setTheme(name);
+  const theme = document.documentElement.dataset.theme as ThemeId | undefined;
+  const stock = !theme || theme === "system" || theme === "light" || theme === "dark";
+  const colors = { ...FALLBACK_TOKENS[dark ? "dark" : "light"], ...readColors(EDITOR_TOKENS) };
+  monaco.editor.defineTheme(LIGHT_THEME, STOCK_LIGHT);
+  monaco.editor.defineTheme(DARK_THEME, STOCK_DARK);
+  if (!stock) monaco.editor.defineTheme(name, monacoTheme(colors, dark, syntaxFor(theme, dark)));
+  // An editor already showing another theme's name has to be told to look again.
+  if (apply) monaco.editor.setTheme(name);
 }
-defineEditorTheme();
-onThemeChange(defineEditorTheme);
+defineEditorTheme(false);
+onThemeChange(() => defineEditorTheme(true));
 
 /** Code as highlighted HTML (Monaco's own escaping), in the theme's source colours; for code blocks in Claude's text. */
 export async function colorize(code: string, language: string, dark: boolean): Promise<string> {

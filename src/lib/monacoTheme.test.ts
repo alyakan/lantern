@@ -50,3 +50,15 @@ describe("monacoTheme", () => {
     expect(syntaxFor(undefined, false)).toBe(syntaxFor("light", false));
   });
 });
+
+describe("the stock editor themes", () => {
+  it("are fixed colours for Light and Dark, not derived from tokens, so those themes look as they always have", async () => {
+    const { STOCK_DARK, STOCK_LIGHT } = await import("./stockMonacoTheme");
+    expect(STOCK_LIGHT.base).toBe("vs");
+    expect(STOCK_DARK.base).toBe("vs-dark");
+    expect(STOCK_LIGHT.colors["editor.background"]).toBe("#ffffff");
+    expect(STOCK_DARK.colors["editor.background"]).toBe("#1f1f24");
+    expect(STOCK_DARK.colors["diffEditor.insertedLineBackground"]).toBe("#3fb95014");
+    expect(STOCK_LIGHT.colors["diffEditor.removedLineBackground"]).toBe("#cf222e0d");
+  });
+});
