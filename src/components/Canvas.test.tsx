@@ -428,6 +428,36 @@ describe("oversight", () => {
     expect(screen.queryByRole("dialog", { name: "Team" })).toBeNull();
   });
 
+  it("shows how full the fullest agent's context is, whose it is when not the Lead's, and warns in words and colour", () => {
+    const chats = team(2);
+    chats.slots.s1 = { ...chats.slots.s1, contextUsed: 50_000, contextWindow: 200_000 };
+    chats.slots.w1 = { ...chats.slots.w1, contextUsed: 100_000, contextWindow: 200_000 };
+    chats.slots.w2 = { ...chats.slots.w2, contextUsed: 190_000, contextWindow: 200_000 };
+    const { onFocus } = setup(chats);
+    const chip = screen.getByRole("button", { name: /^Context:/ });
+    expect(chip.textContent).toBe("Context 95% · Worker 2");
+    expect(chip).toHaveAccessibleName("Context: Worker 2 95% used, nearly full");
+    expect(chip).toHaveClass("full");
+    expect(chip.getAttribute("title")).toContain("Lead: 25% (50,000 of 200,000 tokens)");
+    expect(chip.getAttribute("title")).toContain("Worker 1: 50% (100,000 of 200,000 tokens)");
+    fireEvent.click(chip);
+    expect(onFocus).toHaveBeenCalledWith("w2");
+  });
+
+  it("shows the Lead's context on its own while it is the fullest, and nothing before any agent has used any", () => {
+    const quiet = setup(team(1));
+    expect(screen.queryByRole("button", { name: /^Context:/ })).toBeNull();
+    quiet.unmount();
+    const chats = team(1);
+    chats.slots.s1 = { ...chats.slots.s1, contextUsed: 156_000, contextWindow: 200_000 };
+    chats.slots.w1 = { ...chats.slots.w1, contextUsed: 20_000 };
+    setup(chats);
+    const chip = screen.getByRole("button", { name: /^Context:/ });
+    expect(chip.textContent).toBe("Context 78%");
+    expect(chip).toHaveClass("warn");
+    expect(chip).toHaveAccessibleName("Context: Lead 78% used, getting full");
+  });
+
   it("shows no cost until something has cost anything", () => {
     setup(team(1));
     expect(screen.getByRole("button", { name: "Team" }).textContent).toBe("Team");
