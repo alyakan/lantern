@@ -39,6 +39,9 @@ import JsonWorker from "monaco-editor/language/json/json.worker?worker";
 import CssWorker from "monaco-editor/language/css/css.worker?worker";
 import HtmlWorker from "monaco-editor/language/html/html.worker?worker";
 import { loader } from "@monaco-editor/react";
+import { onThemeChange, pageIsDark, readColors } from "./lib/theme";
+import { EDITOR_TOKENS, FALLBACK_TOKENS, monacoTheme, syntaxFor } from "./lib/monacoTheme";
+import type { ThemeId } from "./lib/themes";
 
 // A worker per language service, made when a file of that language first opens.
 (globalThis as unknown as { MonacoEnvironment: { getWorker: (id: string, label: string) => Worker } }).MonacoEnvironment = {
@@ -103,152 +106,21 @@ export function addProjectLibs(language: string, libs: { path: string; text: str
 export const LIGHT_THEME = "lantern-light";
 export const DARK_THEME = "lantern-dark";
 
-// Xcode's Default (Light) and Default (Dark) source colours.
-const XCODE_LIGHT = [
-  { token: "", foreground: "1d1d1f" },
-  { token: "keyword", foreground: "9b2393", fontStyle: "bold" },
-  { token: "string", foreground: "c41a16" },
-  { token: "number", foreground: "1c00cf" },
-  { token: "comment", foreground: "5d6c79" },
-  { token: "type", foreground: "0b4f79" },
-  { token: "type.identifier", foreground: "0b4f79" },
-  { token: "regexp", foreground: "c41a16" },
-  { token: "tag", foreground: "9b2393" },
-  { token: "attribute.name", foreground: "815f03" },
-  { token: "attribute.value", foreground: "c41a16" },
-  { token: "delimiter", foreground: "1d1d1f" },
-];
-const XCODE_DARK = [
-  { token: "", foreground: "dfdfe0" },
-  { token: "keyword", foreground: "fc5fa3", fontStyle: "bold" },
-  { token: "string", foreground: "fc6a5d" },
-  { token: "number", foreground: "d0bf69" },
-  { token: "comment", foreground: "7f8c98" },
-  { token: "type", foreground: "5dd8ff" },
-  { token: "type.identifier", foreground: "5dd8ff" },
-  { token: "regexp", foreground: "fc6a5d" },
-  { token: "tag", foreground: "fc5fa3" },
-  { token: "attribute.name", foreground: "bf8555" },
-  { token: "attribute.value", foreground: "fc6a5d" },
-  { token: "delimiter", foreground: "dfdfe0" },
-];
+/**
+ * Defines the editor theme for the light or dark that's on, from the page's own colour tokens (see lib/monacoTheme.ts),
+ * so every app theme has its editor, and puts it on. Defining a theme again restyles the editors that show it.
+ */
+function defineEditorTheme(): void {
+  const dark = pageIsDark();
+  const colors = { ...FALLBACK_TOKENS[dark ? "dark" : "light"], ...readColors(EDITOR_TOKENS) };
+  const name = dark ? DARK_THEME : LIGHT_THEME;
+  monaco.editor.defineTheme(name, monacoTheme(colors, dark, syntaxFor(document.documentElement.dataset.theme as ThemeId | undefined, dark)));
+  monaco.editor.setTheme(name);
+}
+defineEditorTheme();
+onThemeChange(defineEditorTheme);
 
-// Matches the editor surface in styles.css. Diff tints stay faint so the code, not the colour, carries the change.
-monaco.editor.defineTheme(LIGHT_THEME, {
-  base: "vs",
-  inherit: true,
-  rules: XCODE_LIGHT,
-  colors: {
-    "editor.background": "#ffffff",
-    "editorGutter.background": "#ffffff",
-    "editor.lineHighlightBackground": "#00000000",
-    "editor.lineHighlightBorder": "#00000000",
-    "editorLineNumber.foreground": "#aeaeb2",
-    "editorLineNumber.activeForeground": "#8c9199",
-    "diffEditor.insertedLineBackground": "#1a7f370f",
-    "diffEditor.removedLineBackground": "#cf222e0d",
-    "diffEditor.insertedTextBackground": "#1a7f3714",
-    "diffEditor.removedTextBackground": "#cf222e14",
-    "diffEditorGutter.insertedLineBackground": "#00000000",
-    "diffEditorGutter.removedLineBackground": "#00000000",
-    "diffEditor.border": "#eceef0",
-    "diffEditor.unchangedRegionBackground": "#f5f5f7",
-    "diffEditor.unchangedRegionForeground": "#8c9199",
-    "scrollbarSlider.background": "#00000014",
-    "scrollbarSlider.hoverBackground": "#00000022",
-    // Neutral selection/focus instead of Monaco's default blue.
-    "editor.selectionBackground": "#0000001f",
-    "editor.inactiveSelectionBackground": "#00000014",
-    "editor.selectionHighlightBackground": "#00000000",
-    "editorCursor.foreground": "#1f1f21",
-    // Brackets take the plain text colour, like Xcode.
-    "editorBracketHighlight.foreground1": "#1d1d1f",
-    "editorBracketHighlight.foreground2": "#1d1d1f",
-    "editorBracketHighlight.foreground3": "#1d1d1f",
-    "editorBracketHighlight.foreground4": "#1d1d1f",
-    "editorBracketHighlight.foreground5": "#1d1d1f",
-    "editorBracketHighlight.foreground6": "#1d1d1f",
-    "focusBorder": "#00000000",
-    // Find (⌘F): matches in the review yellow, not Monaco's orange (orange means Claude is working).
-    "editor.findMatchBackground": "#b5890055",
-    "editor.findMatchHighlightBackground": "#b5890026",
-    "editor.findMatchBorder": "#b58900",
-    "editor.rangeHighlightBackground": "#0000000a",
-    // The suggestion list, hover and parameter hints: the app's neutral greys, not Monaco's blue selection.
-    "editorWidget.background": "#ffffff",
-    "editorWidget.border": "#d9dbdf",
-    "editorSuggestWidget.background": "#ffffff",
-    "editorSuggestWidget.border": "#d9dbdf",
-    "editorSuggestWidget.selectedBackground": "#0000001a",
-    "editorSuggestWidget.highlightForeground": "#1d1d1f",
-    "editorSuggestWidget.focusHighlightForeground": "#1d1d1f",
-    "editorHoverWidget.background": "#ffffff",
-    "editorHoverWidget.border": "#d9dbdf",
-    "list.hoverBackground": "#0000000d",
-    "list.activeSelectionBackground": "#0000001a",
-    "list.activeSelectionForeground": "#1d1d1f",
-    "list.focusBackground": "#0000001a",
-    "list.highlightForeground": "#1d1d1f",
-  },
-});
-
-monaco.editor.defineTheme(DARK_THEME, {
-  base: "vs-dark",
-  inherit: true,
-  rules: XCODE_DARK,
-  colors: {
-    "editor.background": "#1f1f24",
-    "editorGutter.background": "#1f1f24",
-    "editor.lineHighlightBackground": "#00000000",
-    "editor.lineHighlightBorder": "#00000000",
-    "editorLineNumber.foreground": "#5d5d63",
-    "editorLineNumber.activeForeground": "#8e8e93",
-    "diffEditor.insertedLineBackground": "#3fb95014",
-    "diffEditor.removedLineBackground": "#f8514912",
-    "diffEditor.insertedTextBackground": "#3fb95016",
-    "diffEditor.removedTextBackground": "#f8514916",
-    "diffEditorGutter.insertedLineBackground": "#00000000",
-    "diffEditorGutter.removedLineBackground": "#00000000",
-    "diffEditor.border": "#313137",
-    "diffEditor.unchangedRegionBackground": "#29292e",
-    "diffEditor.unchangedRegionForeground": "#767c85",
-    "scrollbarSlider.background": "#ffffff14",
-    "scrollbarSlider.hoverBackground": "#ffffff22",
-    // Neutral selection/focus instead of Monaco's default blue.
-    "editor.selectionBackground": "#ffffff26",
-    "editor.inactiveSelectionBackground": "#ffffff14",
-    "editor.selectionHighlightBackground": "#00000000",
-    "editorCursor.foreground": "#dfdfe0",
-    // Brackets take the plain text colour, like Xcode.
-    "editorBracketHighlight.foreground1": "#dfdfe0",
-    "editorBracketHighlight.foreground2": "#dfdfe0",
-    "editorBracketHighlight.foreground3": "#dfdfe0",
-    "editorBracketHighlight.foreground4": "#dfdfe0",
-    "editorBracketHighlight.foreground5": "#dfdfe0",
-    "editorBracketHighlight.foreground6": "#dfdfe0",
-    "focusBorder": "#00000000",
-    "editor.findMatchBackground": "#e3b34166",
-    "editor.findMatchHighlightBackground": "#e3b3412e",
-    "editor.findMatchBorder": "#e3b341",
-    "editor.rangeHighlightBackground": "#ffffff0a",
-    "editorWidget.background": "#29292e",
-    "editorWidget.border": "#3a3a40",
-    "editorSuggestWidget.background": "#29292e",
-    "editorSuggestWidget.border": "#3a3a40",
-    "editorSuggestWidget.selectedBackground": "#ffffff1f",
-    "editorSuggestWidget.highlightForeground": "#ffffff",
-    "editorSuggestWidget.focusHighlightForeground": "#ffffff",
-    "editorHoverWidget.background": "#29292e",
-    "editorHoverWidget.border": "#3a3a40",
-    "list.hoverBackground": "#ffffff14",
-    "list.activeSelectionBackground": "#ffffff1f",
-    "list.activeSelectionForeground": "#ffffff",
-    "list.focusBackground": "#ffffff1f",
-    "list.highlightForeground": "#ffffff",
-  },
-});
-
-/** Code as highlighted HTML (Monaco's own escaping), in the app's Xcode colours; for code blocks in Claude's text. */
+/** Code as highlighted HTML (Monaco's own escaping), in the theme's source colours; for code blocks in Claude's text. */
 export async function colorize(code: string, language: string, dark: boolean): Promise<string> {
   // The token colours come from the current theme's stylesheet; the app shows one theme at a time.
   monaco.editor.setTheme(dark ? DARK_THEME : LIGHT_THEME);

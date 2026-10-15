@@ -1,40 +1,167 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { applyAppearance, usePrefersDark } from "./theme";
+import { applySaved, applyTheme, cssToHex, onThemeChange, readCustomTheme, readTheme, usePrefersDark, useThemeVersion } from "./theme";
+import { CUSTOM_DEFAULT, deriveTokens } from "./themes";
 
-describe("applyAppearance", () => {
-  afterEach(() => applyAppearance("system", "default"));
+const root = document.documentElement;
+const reset = () => {
+  applyTheme("system", "default");
+  localStorage.clear();
+};
+
+describe("applyTheme", () => {
+  afterEach(reset);
 
   it("puts the theme on <html> and the text size's scale in --font-scale", () => {
-    applyAppearance("dark", "large");
-    expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(document.documentElement.style.getPropertyValue("--font-scale")).toBe("1.15");
-    applyAppearance("light", "small");
-    expect(document.documentElement.dataset.theme).toBe("light");
-    expect(document.documentElement.style.getPropertyValue("--font-scale")).toBe("0.9");
+    applyTheme("dark", "large");
+    expect(root.dataset.theme).toBe("dark");
+    expect(root.style.getPropertyValue("--font-scale")).toBe("1.15");
+    applyTheme("light", "small");
+    expect(root.dataset.theme).toBe("light");
+    expect(root.style.getPropertyValue("--font-scale")).toBe("0.9");
+  });
+
+  it("puts a preset's id on <html> and no colours of its own: they're in styles.css", () => {
+    applyTheme("terminal", "default");
+    expect(root.dataset.theme).toBe("terminal");
+    expect(root.style.getPropertyValue("--bg")).toBe("");
+  });
+
+  it("sets every derived token of a custom theme on <html>, and takes them off for the next theme", () => {
+    const custom = { ...CUSTOM_DEFAULT, bg: "#fafafa", panel: "#eeeeee", text: "#111111", text2: "#444444", mono: true };
+    applyTheme("custom", "default", custom);
+    const tokens = deriveTokens(custom);
+    expect(root.dataset.theme).toBe("custom");
+    expect(root.dataset.scheme).toBe("light");
+    expect(root.style.getPropertyValue("--bg")).toBe("#fafafa");
+    expect(root.style.getPropertyValue("--sidebar")).toBe("#eeeeee");
+    expect(root.style.getPropertyValue("--ui")).toBe("var(--mono)");
+    expect(root.style.getPropertyValue("--code-bg")).toBe(tokens["--code-bg"]);
+    applyTheme("dark", "default");
+    expect(root.style.getPropertyValue("--bg")).toBe("");
+    expect(root.style.getPropertyValue("--ui")).toBe("");
+    expect(root.dataset.scheme).toBeUndefined();
+    expect(root.style.getPropertyValue("--font-scale")).toBe("1");
+  });
+});
+
+describe("the saved theme", () => {
+  afterEach(reset);
+
+  it("is system until one is chosen", () => {
+    expect(readTheme()).toBe("system");
+  });
+
+  it("reads settings.theme, and the older settings.appearance when there's no settings.theme", () => {
+    localStorage.setItem("settings.appearance", JSON.stringify("dark"));
+    expect(readTheme()).toBe("dark");
+    localStorage.setItem("settings.theme", JSON.stringify("nord"));
+    expect(readTheme()).toBe("nord");
+  });
+
+  it("ignores a theme that isn't one", () => {
+    localStorage.setItem("settings.theme", JSON.stringify("neon"));
+    expect(readTheme()).toBe("system");
+  });
+
+  it("reads the custom theme, with anything that isn't a colour replaced by the default's", () => {
+    localStorage.setItem("settings.customTheme", JSON.stringify({ ...CUSTOM_DEFAULT, bg: "#123456", text: "red; background: url(x)", mono: true }));
+    expect(readCustomTheme()).toEqual({ ...CUSTOM_DEFAULT, bg: "#123456", mono: true });
+  });
+
+  it("applySaved puts the saved custom theme on the page, as main.tsx does before the first paint", () => {
+    localStorage.setItem("settings.theme", JSON.stringify("custom"));
+    localStorage.setItem("settings.customTheme", JSON.stringify({ ...CUSTOM_DEFAULT, bg: "#ffffff", panel: "#f0f0f0", text: "#000000", text2: "#333333", square: true }));
+    localStorage.setItem("settings.textSize", JSON.stringify("large"));
+    applySaved();
+    expect(root.dataset.theme).toBe("custom");
+    expect(root.style.getPropertyValue("--bg")).toBe("#ffffff");
+    expect(root.style.getPropertyValue("--radius")).toBe("0");
+    expect(root.style.getPropertyValue("--font-scale")).toBe("1.15");
   });
 });
 
 describe("usePrefersDark", () => {
-  afterEach(() => applyAppearance("system", "default"));
+  afterEach(reset);
 
   it("follows a forced theme, whatever macOS says", () => {
-    applyAppearance("dark", "default");
+    applyTheme("dark", "default");
     expect(renderHook(() => usePrefersDark()).result.current).toBe(true);
-    applyAppearance("light", "default");
+    applyTheme("light", "default");
+    expect(renderHook(() => usePrefersDark()).result.current).toBe(false);
+  });
+
+  it("knows which of the other themes are dark and which are light", () => {
+    for (const [theme, dark] of [["terminal", true], ["solarized", true], ["nord", true], ["paper", false]] as const) {
+      applyTheme(theme, "default");
+      expect(renderHook(() => usePrefersDark()).result.current, theme).toBe(dark);
+    }
+  });
+
+  it("takes a custom theme's from its background", () => {
+    applyTheme("custom", "default", { ...CUSTOM_DEFAULT, bg: "#101010" });
+    expect(renderHook(() => usePrefersDark()).result.current).toBe(true);
+    applyTheme("custom", "default", { ...CUSTOM_DEFAULT, bg: "#f4f4f4", panel: "#e8e8e8", text: "#111111", text2: "#444444" });
     expect(renderHook(() => usePrefersDark()).result.current).toBe(false);
   });
 
   it("updates when Settings changes the theme while it's shown", async () => {
-    applyAppearance("light", "default");
+    applyTheme("light", "default");
     const { result } = renderHook(() => usePrefersDark());
     expect(result.current).toBe(false);
-    act(() => applyAppearance("dark", "default"));
+    act(() => applyTheme("dark", "default"));
     await waitFor(() => expect(result.current).toBe(true));
   });
 
   it("is light under \"system\" where the page can't ask macOS (tests)", () => {
-    applyAppearance("system", "default");
+    applyTheme("system", "default");
     expect(renderHook(() => usePrefersDark()).result.current).toBe(false);
+  });
+});
+
+describe("telling the editor and diagrams that the colours changed", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    reset();
+  });
+
+  it("calls a listener once the theme settles, however many steps a colour picker took", () => {
+    const listener = vi.fn();
+    const stop = onThemeChange(listener);
+    applyTheme("custom", "default", { ...CUSTOM_DEFAULT, accent: "#111111" });
+    applyTheme("custom", "default", { ...CUSTOM_DEFAULT, accent: "#222222" });
+    applyTheme("custom", "default", { ...CUSTOM_DEFAULT, accent: "#333333" });
+    expect(listener).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(100);
+    expect(listener).toHaveBeenCalledTimes(1);
+    stop();
+    applyTheme("dark", "default");
+    vi.advanceTimersByTime(100);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives effects a number that goes up with each change", () => {
+    const { result } = renderHook(() => useThemeVersion());
+    const before = result.current;
+    act(() => {
+      applyTheme("nord", "default");
+      vi.advanceTimersByTime(100);
+    });
+    expect(result.current).toBe(before + 1);
+  });
+});
+
+describe("cssToHex", () => {
+  it("reads the colours a browser computes", () => {
+    expect(cssToHex("rgb(31, 31, 36)")).toBe("#1f1f24");
+    expect(cssToHex("rgba(255, 255, 255, 0.05)")).toBe("#ffffff0d");
+    expect(cssToHex("color(srgb 0.5 0 1 / 0.5)")).toBe("#8000ff80");
+    expect(cssToHex("color(srgb 1 1 1)")).toBe("#ffffff");
+  });
+
+  it("returns null for what isn't a colour", () => {
+    expect(cssToHex("")).toBeNull();
+    expect(cssToHex("var(--x)")).toBeNull();
   });
 });

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { PanZoom } from "./PanZoom";
 import { nodeIdOf, renderDiagram, withChangeColours } from "../lib/mermaid";
-import { usePrefersDark } from "../lib/theme";
+import { usePrefersDark, useThemeVersion } from "../lib/theme";
 
 /**
  * A mermaid source drawn as SVG: `svg` once it has been, `error` if mermaid couldn't read it, neither while it loads.
@@ -9,22 +9,24 @@ import { usePrefersDark } from "../lib/theme";
  */
 export function useDiagram(source: string): { svg: string | null; error: string | null } {
   const dark = usePrefersDark();
-  const [state, setState] = useState<{ source: string; dark: boolean; svg: string | null; error: string | null } | null>(null);
+  // The diagram takes the theme's colours, so it's drawn again when the theme changes.
+  const look = useThemeVersion();
+  const [state, setState] = useState<{ source: string; dark: boolean; look: number; svg: string | null; error: string | null } | null>(null);
   useEffect(() => {
     if (!source.trim()) return;
     let live = true;
     const wait = setTimeout(() => {
       renderDiagram(withChangeColours(source), dark).then(
-        (svg) => live && setState({ source, dark, svg, error: null }),
-        (e) => live && setState({ source, dark, svg: null, error: e instanceof Error ? e.message : String(e) }),
+        (svg) => live && setState({ source, dark, look, svg, error: null }),
+        (e) => live && setState({ source, dark, look, svg: null, error: e instanceof Error ? e.message : String(e) }),
       );
     }, 350);
     return () => {
       live = false;
       clearTimeout(wait);
     };
-  }, [source, dark]);
-  return state && state.source === source && state.dark === dark ? { svg: state.svg, error: state.error } : { svg: null, error: null };
+  }, [source, dark, look]);
+  return state && state.source === source && state.dark === dark && state.look === look ? { svg: state.svg, error: state.error } : { svg: null, error: null };
 }
 
 /** The part of a rendered diagram the map can act on: its flowchart nodes, by the id they were written with. */

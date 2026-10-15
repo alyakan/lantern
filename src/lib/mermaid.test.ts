@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isFlowchart, mermaidBlock, nodeIdOf, withChangeColours } from "./mermaid";
+import { diagramVariables, isFlowchart, mermaidBlock, nodeIdOf, withChangeColours } from "./mermaid";
 
 describe("withChangeColours", () => {
   it("adds the colours for new, changed and removed to a flowchart", () => {
@@ -39,5 +39,19 @@ describe("nodeIdOf", () => {
     // As drawn: the diagram's id comes first.
     expect(nodeIdOf("lantern-diagram-3-flowchart-authSvc-12")).toBe("authSvc");
     expect(nodeIdOf("edge-4")).toBeNull();
+  });
+});
+
+describe("diagramVariables", () => {
+  const tokens = { pane: "#2e3440", sidebar: "#3b4252", "bg-subtle": "#363d4b", text: "#eceff4", "text-2": "#d8dee9", "line-strong": "#4c566a" };
+
+  it("draws nodes in the chat card's colour, with the theme's text and lines", () => {
+    const v = diagramVariables(tokens);
+    expect(v).toMatchObject({ background: "#2e3440", primaryColor: "#3b4252", primaryTextColor: "#eceff4", primaryBorderColor: "#4c566a", lineColor: "#d8dee9" });
+  });
+
+  it("leaves mermaid's own light or dark alone when the theme's colours can't be read", () => {
+    expect(diagramVariables({})).toEqual({});
+    expect(diagramVariables({ ...tokens, text: "" })).toEqual({});
   });
 });

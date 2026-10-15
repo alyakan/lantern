@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, renderHook, screen, act, within } from "@testing-library/react";
 import { NOTIFY_DEFAULTS, type NotifyPrefs } from "../lib/notifyPrefs";
 import { chimeOn, setChime, useChimeOn } from "../lib/chime";
+import { CUSTOM_DEFAULT, THEMES } from "../lib/themes";
 
 vi.mock("../api", () => ({ api: {} }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(), revealItemInDir: vi.fn() }));
@@ -17,8 +18,10 @@ describe("Settings' General page", () => {
     general = {
       notify,
       onNotify: vi.fn(),
-      appearance: "system",
-      onAppearance: vi.fn(),
+      theme: "system",
+      customTheme: CUSTOM_DEFAULT,
+      onTheme: vi.fn(),
+      onCustomTheme: vi.fn(),
       textSize: "default",
       onTextSize: vi.fn(),
     };
@@ -80,9 +83,72 @@ describe("Settings' General page", () => {
   it("chooses the theme and the text size", () => {
     view();
     fireEvent.click(screen.getByLabelText("Dark"));
-    expect(general.onAppearance).toHaveBeenCalledWith("dark");
+    expect(general.onTheme).toHaveBeenCalledWith("dark");
     fireEvent.click(screen.getByLabelText("Large"));
     expect(general.onTextSize).toHaveBeenCalledWith("large");
+  });
+
+  it("offers every preset theme, Follow macOS and Custom", () => {
+    view();
+    const names = within(screen.getByRole("group", { name: "Theme" })).getAllByRole("radio").map((r) => r.closest("label")?.textContent);
+    expect(names).toEqual(["Follow macOS", "Light", "Dark", "Terminal", "Solarized Dark", "Nord", "Paper", "Custom"]);
+    fireEvent.click(screen.getByLabelText("Terminal"));
+    expect(general.onTheme).toHaveBeenCalledWith("terminal");
+  });
+
+  describe("Customize…", () => {
+    it("starts from the theme that's on, switching to Custom so the app shows the colours as they're picked", () => {
+      general.theme = "paper";
+      view();
+      fireEvent.click(screen.getByRole("button", { name: "Customize…" }));
+      expect(general.onCustomTheme).toHaveBeenCalledWith({ ...THEMES.find((t) => t.id === "paper")!.picks, mono: false, square: false });
+      expect(general.onTheme).toHaveBeenCalledWith("custom");
+      expect(screen.getByRole("group", { name: "Custom theme" })).toBeInTheDocument();
+    });
+
+    it("starts from Terminal's monospace, square look when that's the theme", () => {
+      general.theme = "terminal";
+      view();
+      fireEvent.click(screen.getByRole("button", { name: "Customize…" }));
+      expect(general.onCustomTheme).toHaveBeenCalledWith(expect.objectContaining({ mono: true, square: true }));
+    });
+
+    it("saves each colour, the monospace switch and the corners as they're changed", () => {
+      general.theme = "custom";
+      general.customTheme = { ...CUSTOM_DEFAULT, bg: "#101010" };
+      view();
+      fireEvent.click(screen.getByRole("button", { name: "Customize…" }));
+      const onCustom = general.onCustomTheme as ReturnType<typeof vi.fn>;
+      onCustom.mockClear();
+      fireEvent.change(screen.getByLabelText("Accent"), { target: { value: "#ff0000" } });
+      expect(onCustom).toHaveBeenLastCalledWith({ ...general.customTheme, accent: "#ff0000" });
+      fireEvent.click(screen.getByLabelText("Monospace everywhere"));
+      expect(onCustom).toHaveBeenLastCalledWith({ ...general.customTheme, mono: true });
+      fireEvent.click(screen.getByLabelText("Square"));
+      expect(onCustom).toHaveBeenLastCalledWith({ ...general.customTheme, square: true });
+    });
+
+    it("warns when the text doesn't read on the background, and not when it does", () => {
+      general.theme = "custom";
+      general.customTheme = { ...CUSTOM_DEFAULT, bg: "#808080", panel: "#808080", text: "#8a8a8a" };
+      const { unmount } = view();
+      fireEvent.click(screen.getByRole("button", { name: "Customize…" }));
+      expect(screen.getByRole("status")).toHaveTextContent(/below|4\.5:1/);
+      unmount();
+      general.customTheme = CUSTOM_DEFAULT;
+      view();
+      fireEvent.click(screen.getByRole("button", { name: "Customize…" }));
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+
+    it("goes back to the earlier theme when cancelled", () => {
+      general.theme = "nord";
+      view();
+      fireEvent.click(screen.getByRole("button", { name: "Customize…" }));
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(general.onTheme).toHaveBeenLastCalledWith("nord");
+      expect(screen.queryByRole("group", { name: "Custom theme" })).toBeNull();
+    });
   });
 });
 
