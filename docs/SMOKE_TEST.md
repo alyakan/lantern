@@ -18,7 +18,7 @@ Run against the built `Lantern.app` (launched from Finder, not a terminal, so PA
 
 Teams (use a scratch git repo with at least one commit):
 
-- Start a team (the icon beside New chat, ⇧⌘N, or the Start a team card on an empty chat) asks nothing: the team's Lead starts on the project's last Permissions. The canvas shows one agent, the Lead, with Permissions and Workflow (Team) chips on its title bar, and a "Subagents: On the canvas" control. Choosing Team under Workflow in an ordinary chat does the same, on that conversation.
+- Start a team (New ▾ ▸ Team in the sidebar, ⇧⌘N, or the Start a team card on an empty chat) asks nothing: the team's Lead starts on the project's last Permissions. The canvas shows one agent, the Lead, with Permissions and Workflow (Team) chips on its title bar, and a "Subagents: On the canvas" control. Choosing Team under Workflow in an ordinary chat does the same, on that conversation.
 - Switch Permissions on the Lead's title bar: the Lead restarts and its agents (on their own title bars) follow, lowered to Ask if the Lead is on Ask. Switch Subagents to Inline: the Lead's built-in Agent tool now runs inline, with no card.
 - Ask it: "Add a file a.txt in one agent and b.txt in another, each on its own branch." Two agents appear, tethered, each in a worktree under Lantern's app data (`~/Library/Application Support/…/worktrees`), each on a `lantern/…` branch. The Lead's chat names each agent it started.
 - An agent that needs permission (on Ask) pulses amber, the pill says "1 agent needs you", and the prompt is in that agent's own window. Answering it there lets the worker carry on.
@@ -26,6 +26,16 @@ Teams (use a scratch git repo with at least one commit):
 - When an agent finishes, the Lead gets a note and replies without you typing. When it asks to merge, the agent reads "Ready to merge". Approve merges its branch into the main checkout (check `git log`); a dirty main checkout says so and offers Try again; Not yet leaves it unmerged.
 - Quit and reopen Lantern, then Restore all: the Lead and its agents come back as a team, with the tethers and the canvas, and the Lead can message them again.
 - Pan, zoom and drag stay smooth with four agents streaming at once. Zoomed out, agents are cards and a click zooms in.
+Sidebar:
+
+- The left sidebar has a group per project: projects with a chat open first and expanded, the other recent folders folded. Open chats show a dot (orange while working, amber when they need you, blue when they finished while you were elsewhere); a chat that needs you is at the top of its group. Fold a project that has a waiting chat: its row shows a count and an amber dot.
+- Click an open chat (switches), a past chat (resumes it, in its own project even when that isn't the one on screen), a team (opens its canvas) and one of its agents (focuses it). Agents are listed under their team only.
+- Hover a project: **+** starts a chat there, **⋯** has New team, Bring old chats here…, Reveal in Finder (Finder opens on the folder) and Remove from recents (it goes; opening the folder again brings it back).
+- **Show all…** opens that project's History: past chats only (the open ones are in the sidebar), with search, pin, rename, export. ⌘K opens History for the project on screen.
+- **New ▾** has Chat (⌘N), Team (⇧⌘N) and Review a PR…. The title bar has no History clock, no New buttons and no "waiting" count.
+- ⌃⌘S (View ▸ Show/Hide Sidebar) shrinks it to a rail of project initials: badges show what needs you, a click on a project with a waiting chat goes to that chat. Drag the sidebar's edge to resize it; quit and reopen: the width and the rail are as left.
+- With many projects, the first launch doesn't stall: a project's past chats are read only once it is expanded.
+
 Starting work:
 
 - An empty chat, in every Workflow, shows the start screen: the box, and cards for Build, Review a PR, Debug, Design and Start a team. Build, Debug and Design pick Step by step in that flavour (Build and Debug offer Explain as you go); Start a team makes the chat a Lead.

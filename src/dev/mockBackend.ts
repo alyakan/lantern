@@ -688,7 +688,17 @@ const SESSIONS = [
   { id: "3f1c2a", title: "Fix the login redirect after OAuth callback", updated_ms: Date.now() - 2 * HOUR, prompts: 6 },
   { id: "9b7e01", title: "Add retries with backoff to fetchJson", updated_ms: Date.now() - 26 * HOUR, prompts: 3 },
   { id: "c0ffee", title: "Refactor the settings screen into smaller components", updated_ms: Date.now() - 4 * 24 * HOUR, prompts: 11 },
+  { id: "a11ce5", title: "Why does the build fail on CI but not locally?", updated_ms: Date.now() - 6 * 24 * HOUR, prompts: 4 },
+  { id: "b0b0b0", title: "Release flow notes", updated_ms: Date.now() - 9 * 24 * HOUR, prompts: 8 },
 ];
+// The other recent projects' chats, for the sidebar (which reads a project's chats when it is expanded).
+const OTHER_SESSIONS: Record<string, { id: string; title: string; updated_ms: number; prompts: number }[]> = {
+  "/Users/you/projects/web-dashboard": [
+    { id: "d4a501", title: "Chart tooltips clip at the edge", updated_ms: Date.now() - 3 * HOUR, prompts: 3 },
+    { id: "d4a502", title: "Dark mode for the settings page", updated_ms: Date.now() - 2 * 24 * HOUR, prompts: 5 },
+  ],
+  "/Users/you/src/infra": [{ id: "1f0a01", title: "Rotate the staging credentials", updated_ms: Date.now() - 5 * 24 * HOUR, prompts: 2 }],
+};
 
 // The places the demo project's sessions came from, as old_locations finds them: one still there, one gone, one already
 // brought over (so its sessions are in History), and one whose copy fails the first time (so a retry shows).
@@ -1159,9 +1169,9 @@ export function installMockBackend() {
         case "set_model":
           return null;
         case "recent_folders":
-          return new Promise((r) => setTimeout(() => r([FOLDER, "/Users/you/projects/web-dashboard", "/Users/you/src/infra", "/Users/you/notes"].map((path, i) => ({ path, updated_ms: Date.now() - i * 3_600_000 }))), 100));
+          return new Promise((r) => setTimeout(() => r([FOLDER, "/Users/you/projects/web-dashboard", "/Users/you/src/infra", "/Users/you/notes", "/Users/you/Documents/Github/web-dashboard"].map((path, i) => ({ path, updated_ms: Date.now() - i * 3_600_000 }))), 100));
         case "list_sessions":
-          return new Promise((r) => setTimeout(() => r(SESSIONS), 150));
+          return new Promise((r) => setTimeout(() => r(a.folder === FOLDER ? SESSIONS : (OTHER_SESSIONS[String(a.folder)] ?? [])), 150));
         case "rename_session": {
           const session = SESSIONS.find((s) => s.id === a.sessionId);
           if (session) session.title = String(a.title);

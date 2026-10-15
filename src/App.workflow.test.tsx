@@ -109,7 +109,8 @@ describe("a new team", () => {
   it("is not asked how it should run: it takes the chat's Permissions, and the card for where subagents run is gone", async () => {
     localStorage.setItem("settings.permissionsByFolder", JSON.stringify({ [FOLDER]: "auto" }));
     const calls = await launch();
-    fireEvent.click(await screen.findByRole("button", { name: "Start a team" }));
+    fireEvent.click(await screen.findByRole("button", { name: "New" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Team/ }));
     await waitFor(() => expect(calls.filter(([c]) => c === "start_session").length).toBeGreaterThan(1));
     const started = calls.filter(([c]) => c === "start_session").pop()![1] as { settings: Record<string, unknown> };
     expect(started.settings).toMatchObject({ mode: "auto", orchestrator: true });

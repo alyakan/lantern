@@ -16,7 +16,6 @@ import type { Flavour } from "../lib/flavour";
 import type { Permissions, Workflow } from "../lib/workflow";
 import { ModelsPicker } from "./ModelsPicker";
 import type { Harness } from "../lib/harness";
-import type { OpenChat } from "./HistoryMenu";
 import { SessionPill } from "./SessionPill";
 import { UpdateButton } from "./UpdateButton";
 
@@ -52,7 +51,7 @@ interface Props {
   folder?: string | null;
   onOpenFolder?: () => void;
   /** Shown next to the folder pill in the empty state: pick a past session to continue. */
-  sessions?: { load: () => Promise<SessionSummary[]>; currentId: string | null; onOpen: (id: string) => void; open?: OpenChat[]; onSwitch?: (slot: string) => void };
+  sessions?: { load: () => Promise<SessionSummary[]>; exclude: string[]; onOpen: (id: string) => void };
   /** The folder capsule's menu: recent folders to switch to. */
   folders?: { load: () => Promise<RecentFolder[]>; onPick: (path: string) => void; relocate?: RelocateMenu };
   /** The chat's queued messages; without it the box keeps its own queue. */
@@ -380,7 +379,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               <span>{folder ? basename(folder) : "Open folder"}</span>
             </button>
           )}
-          {sessions && folder && <SessionPill loadSessions={sessions.load} currentId={sessions.currentId} onOpen={sessions.onOpen} openChats={sessions.open} onSwitch={sessions.onSwitch} disabled={status === "starting"} />}
+          {sessions && folder && <SessionPill loadSessions={sessions.load} exclude={sessions.exclude} onOpen={sessions.onOpen} disabled={status === "starting"} />}
         </div>
       )}
       {queued.length > 0 && (

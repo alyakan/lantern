@@ -1885,3 +1885,95 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .plan-toggle:hover:not(.active) { background: var(--bg-hover); color: var(--text-2); }
 .plan-toggle.active { background: var(--seg-thumb); color: var(--text); box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.18), 0 0 0 0.5px rgba(0, 0, 0, 0.06); }
 .customize-menu { max-height: min(560px, calc(100vh - 140px)); }
+
+/* The window below the title bar: the sidebar of projects (or its rail), then the chat and the side panel. */
+.app-body { flex: 1; display: flex; min-height: 0; }
+.app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+/* Sidebar. It sits on the window like Xcode's navigator, with no card; the edge is a drag handle. Its width never takes the room
+   the chat and the side panel need (the window's minimum width is the sum of the three). */
+.sidebar { position: relative; flex: none; display: flex; flex-direction: column; min-width: 200px; max-width: max(200px, calc(100vw - 840px)); padding: 2px 0 8px var(--edge); font-size: calc(12.5px * var(--font-scale)); }
+.sidebar.dragging { user-select: none; cursor: col-resize; }
+.sb-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 6px 8px 2px; }
+.sb-new { position: relative; }
+.sb-new-button { display: inline-flex; align-items: center; gap: 6px; height: var(--pill-m); padding: 0 11px 0 9px; border: 0.5px solid var(--glass-line); border-radius: 999px; background: var(--glass); color: var(--text); font-size: calc(12.5px * var(--font-scale)); font-weight: 500; }
+.sb-new-button:hover:not(:disabled), .sb-new-button[aria-expanded="true"] { background: var(--bg-active); }
+.sb-new-button.compact { width: 34px; justify-content: center; padding: 0; }
+.sb-new-button .chev { color: var(--muted); }
+.sb-toggle, .sb-open-folder { color: var(--muted); }
+.sb-toggle:hover, .sb-open-folder:hover { color: var(--text); }
+.sb-menu { top: calc(100% + 4px); left: 0; min-width: 200px; }
+.sb-menu .menu-row { align-items: center; }
+.project-menu { left: auto; right: 4px; }
+.sb-list { flex: 1; min-height: 0; overflow-y: auto; padding-right: 6px; }
+.sb-project { margin-bottom: 2px; }
+.sb-project-row { position: relative; display: flex; align-items: center; }
+.sb-project-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; height: 26px; padding: 0 6px 0 2px; border: none; background: none; border-radius: var(--radius-chip); color: var(--text); font-weight: 600; text-align: left; }
+.sb-project-toggle:hover { background: var(--bg-hover); }
+.sb-project.current .sb-name { color: var(--text); }
+.sb-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-chev { flex: none; display: grid; place-items: center; width: 14px; color: var(--muted); transform: rotate(-90deg); transition: transform 0.12s; }
+.sb-chev.open { transform: none; }
+.sb-branch { flex: none; margin-left: auto; padding-left: 8px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; color: var(--muted-text); }
+.sb-badge { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 5px; padding-left: 8px; font-size: calc(11.5px * var(--font-scale)); font-weight: 600; color: var(--attn-text); }
+.sb-badge-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--attn); }
+/* + and ⋯ show over the branch or badge while the pointer (or focus) is on the project. */
+.sb-project-actions { position: absolute; right: 2px; top: 0; bottom: 0; display: none; align-items: center; gap: 1px; padding-left: 14px; background: linear-gradient(90deg, transparent, var(--bg) 14px); }
+.sb-project-row:hover .sb-project-actions, .sb-project-row:focus-within .sb-project-actions { display: flex; }
+.sb-project-actions button.icon { width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--radius-chip); color: var(--muted); font-size: calc(14px * var(--font-scale)); line-height: 1; }
+.sb-project-actions button.icon:hover { background: var(--bg-hover); color: var(--text); }
+.sb-moved { display: flex; align-items: center; gap: 4px; margin: 0 0 2px 16px; font-size: calc(11.5px * var(--font-scale)); color: var(--attn-text); }
+.sb-moved .link-button { flex: 1; min-width: 0; text-align: left; color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-moved button.icon { flex: none; width: 20px; height: 20px; border: none; background: none; color: var(--muted); }
+.sb-items { list-style: none; margin: 0 0 6px; padding: 0 0 0 14px; }
+.sb-item { position: relative; display: flex; align-items: center; }
+.sb-row { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; height: 24px; padding: 0 6px; border: none; background: none; border-radius: var(--radius-chip); color: var(--text-2); text-align: left; }
+.sb-row:hover { background: var(--bg-hover); }
+.sb-row.current { background: var(--bg-active); color: var(--text); }
+.sb-row.unread .sb-title { font-weight: 600; color: var(--text); }
+.sb-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-meta { flex: none; font-size: calc(11px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.sb-row.past { color: var(--muted-text); }
+.sb-row.past:hover { color: var(--text-2); }
+.sb-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid var(--faint); }
+.sb-dot.running { border: none; background: var(--working); animation: sb-pulse 1.4s ease-in-out infinite; }
+.sb-dot.waiting { border: none; background: var(--attn); box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--attn) 28%, transparent); }
+.sb-dot.unread { border: none; background: var(--unread); }
+.sb-dot.none { border-color: transparent; }
+@keyframes sb-pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .sb-dot.running { animation: none; } }
+.sb-team { flex: none; display: grid; place-items: center; width: 8px; color: var(--faint); }
+.sb-team svg { width: 10px; height: 10px; fill: currentColor; }
+.sb-team.running { color: var(--working); }
+.sb-team.waiting { color: var(--attn); }
+.sb-team.unread { color: var(--unread); }
+.sb-pin { flex: none; display: grid; place-items: center; color: var(--muted); }
+.sb-pin.lead { width: 8px; }
+.sb-agents-wrap { list-style: none; }
+.sb-agents { list-style: none; margin: 0; padding: 0 0 0 14px; }
+.sb-close { position: absolute; right: 2px; width: 20px; height: 20px; display: none; place-items: center; border: none; border-radius: var(--radius-chip); background: var(--bg); color: var(--muted); font-size: calc(14px * var(--font-scale)); line-height: 1; }
+.sb-item.closable:hover .sb-close, .sb-close:focus-visible { display: grid; }
+.sb-close:hover { color: var(--text); }
+.sb-more { flex: 1; height: 22px; padding: 0 6px 0 21px; border: none; background: none; text-align: left; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); }
+.sb-more:hover { color: var(--text); }
+.sb-note { padding: 3px 6px 3px 21px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+nav > .sb-note { padding-left: 8px; }
+.sb-foot { flex: none; display: flex; align-items: center; gap: 7px; height: 28px; margin: 4px 6px 0 0; padding: 0 8px; border: none; background: none; border-radius: var(--radius-chip); color: var(--muted-text); text-align: left; }
+.sb-foot:hover { background: var(--bg-hover); color: var(--text); }
+.sb-resize { position: absolute; top: 0; bottom: 0; right: -3px; width: 7px; cursor: col-resize; touch-action: none; z-index: 3; }
+.sb-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; transition: background 0.12s; }
+.sb-resize:hover::after, .sidebar.dragging .sb-resize::after, .sb-resize:focus-visible::after { background: var(--line-strong); }
+.sb-resize:focus-visible { outline: none; }
+
+/* Minimized: a narrow rail with each project's initials, and a badge for what needs you there. */
+.sidebar.rail { width: 52px; min-width: 52px; max-width: 52px; align-items: center; gap: 8px; padding: 2px 0 8px 0; }
+.rail-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; margin: 0; padding: 4px 0; list-style: none; }
+.rail-project { position: relative; width: 34px; height: 34px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--glass); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); font-weight: 600; }
+.rail-project:not(.open) { color: var(--muted-text); border-style: dashed; }
+.rail-project:hover { background: var(--bg-active); }
+.rail-project.current { border-color: var(--muted); background: var(--bg-active); color: var(--text); }
+.rail-badge { position: absolute; top: -5px; right: -5px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--attn); color: #1f1f24; font-size: calc(10px * var(--font-scale)); font-weight: 700; line-height: 15px; text-align: center; }
+
+/* History: one project's past chats, under the title bar. */
+.history-popover { position: fixed; z-index: 30; top: 52px; left: 50%; width: min(560px, calc(100vw - 48px)); transform: translateX(-50%); display: flex; }
+.history-popover .history-menu { position: static; flex: 1; min-width: 0; }

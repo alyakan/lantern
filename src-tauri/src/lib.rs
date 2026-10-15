@@ -1856,7 +1856,7 @@ mod tests {
     fn the_window_keeps_the_minimum_size_it_is_built_with_so_a_restored_size_cannot_go_below_it() {
         let config: serde_json::Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         let window = &config["app"]["windows"][0];
-        assert_eq!(window["minWidth"], 900);
+        assert_eq!(window["minWidth"], 1040);
         assert_eq!(window["minHeight"], 600);
     }
 

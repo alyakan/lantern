@@ -24,139 +24,77 @@ describe("TopBar", () => {
     expect(document.querySelector(".viewer-progress")).toBeNull();
   });
 
-  it("counts failed steps and waiting chats in the viewer; the failure count shows the failure", () => {
+  it("counts failed steps in the viewer, and the count shows the failure; there is no waiting badge (the sidebar has it)", () => {
     const onShowFailure = vi.fn();
-    const { rerender } = render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} issues={{ failed: 0, waiting: 0 }} />);
+    const { rerender } = render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} issues={{ failed: 0 }} />);
     expect(screen.queryByTitle(/failed/)).toBeNull();
-    rerender(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} issues={{ failed: 2, waiting: 1 }} onShowFailure={onShowFailure} />);
-    expect(screen.getByTitle("1 other chat is waiting for you")).toHaveTextContent("1");
+    rerender(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} issues={{ failed: 2 }} onShowFailure={onShowFailure} />);
+    expect(screen.queryByTitle(/waiting for you/)).toBeNull();
     fireEvent.click(screen.getByTitle(/2 steps failed/));
     expect(onShowFailure).toHaveBeenCalled();
     const onClearFailures = vi.fn();
-    rerender(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} issues={{ failed: 2, waiting: 0 }} onClearFailures={onClearFailures} />);
+    rerender(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} issues={{ failed: 2 }} onClearFailures={onClearFailures} />);
     fireEvent.click(screen.getByRole("button", { name: "Clear failures" }));
     expect(onClearFailures).toHaveBeenCalled();
   });
 
-  it("loads past sessions into the history menu and opens a pick", async () => {
-    const onOpenSession = vi.fn();
-    const loadSessions = vi.fn().mockResolvedValue([{ id: "s1", title: "Fix the login redirect", updated_ms: Date.now(), prompts: 2 }]);
-    render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadSessions={loadSessions} onOpenSession={onOpenSession} onNewSession={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "Chat history" }));
-    fireEvent.click(await screen.findByText("Fix the login redirect"));
-    expect(onOpenSession).toHaveBeenCalledWith("s1");
-    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
+  it("is slimmer: no History clock, New chat or Start a team buttons (the sidebar has them)", () => {
+    render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} onOpenSettings={() => {}} orchestra={{ view: "chat", exists: false, attention: 0, onView: () => {} }} />);
+    expect(screen.queryByRole("button", { name: "Chat history" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New chat" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start a team" })).toBeNull();
+    // What stays: the folder and branch, Settings and the side panel.
+    expect(screen.getByRole("button", { name: /^p$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide side panel" })).toBeInTheDocument();
   });
 
-  it("opens the recent-folders menu from the folder pill, one menu at a time", async () => {
-    const onPickFolder = vi.fn();
+  it("opens a folder menu without the Recent list: Open folder… and Bring old chats here…", () => {
     const onOpenFolder = vi.fn();
-    const loadRecent = async () => [{ path: "/p", updated_ms: 2 }, { path: "/work/web", updated_ms: 1 }];
-    render(
-      <TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} onOpenFolder={onOpenFolder} loadRecent={loadRecent} onPickFolder={onPickFolder}
-        loadSessions={async () => []} onOpenSession={() => {}} />,
-    );
+    const onBringOld = vi.fn();
+    render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} onOpenFolder={onOpenFolder} onBringOld={onBringOld} />);
     fireEvent.click(screen.getByRole("button", { name: /^p$/ }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: /web/ }));
-    expect(onPickFolder).toHaveBeenCalledWith("/work/web");
-    expect(screen.queryByRole("menu", { name: "Folders" })).toBeNull();
-
-    // Opening history closes the folder menu, and "Open folder…" still reaches the dialog.
-    fireEvent.click(screen.getByRole("button", { name: /^p$/ }));
-    await screen.findByRole("menu", { name: "Folders" });
-    fireEvent.click(screen.getByRole("button", { name: "Chat history" }));
+    const menu = screen.getByRole("menu", { name: "Folders" });
+    expect(menu).not.toHaveTextContent("Recent");
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Open folder…", "Bring old chats here…"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Bring old chats here…" }));
+    expect(onBringOld).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("menu", { name: "Folders" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /^p$/ }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Open folder…" }));
-    expect(onOpenFolder).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open folder…" }));
+    expect(onOpenFolder).toHaveBeenCalledTimes(1);
   });
 
-  it("moves through the recent folders with the arrow keys, and gives focus back to the folder pill", async () => {
-    const loadRecent = async () => [{ path: "/p", updated_ms: 2 }, { path: "/work/web", updated_ms: 1 }];
-    render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadRecent={loadRecent} onPickFolder={() => {}} />);
+  it("with no folder, the folder button opens the folder dialog straight away", () => {
+    const onOpenFolder = vi.fn();
+    render(<TopBar {...base} reviewCollapsed={false} onToggleReview={() => {}} onOpenFolder={onOpenFolder} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open folder…" }));
+    expect(onOpenFolder).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("moves through the menu with the arrow keys, and gives focus back to the folder button", () => {
+    render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} onBringOld={() => {}} />);
     const pill = screen.getByRole("button", { name: /^p$/ });
     fireEvent.click(pill);
-    const first = await screen.findByRole("menuitem", { name: /^p/ });
+    const first = screen.getByRole("menuitem", { name: "Open folder…" });
     expect(first).toHaveFocus();
     fireEvent.keyDown(first, { key: "ArrowDown" });
-    expect(screen.getByRole("menuitem", { name: /web/ })).toHaveFocus();
-    fireEvent.keyDown(screen.getByRole("menuitem", { name: /web/ }), { key: "Escape" });
+    expect(screen.getByRole("menuitem", { name: "Bring old chats here…" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Bring old chats here…" }), { key: "Escape" });
     expect(screen.queryByRole("menu", { name: "Folders" })).toBeNull();
     expect(pill).toHaveFocus();
   });
 
-  it("has ⌘N, ⌘K and ⌘O, which are off while a chat is starting", async () => {
-    const cmd = (key: string) => fireEvent.keyDown(window, { key, metaKey: true });
-    const onNewSession = vi.fn();
+  it("has ⌘O, which is off while a chat is starting (⌘N and ⌘K are the app's now)", () => {
     const onOpenFolder = vi.fn();
-    const props = { ...base, folder: "/p", reviewCollapsed: false, onToggleReview: () => {}, onOpenFolder, onNewSession, loadSessions: async () => [], onOpenSession: () => {} };
+    const props = { ...base, folder: "/p", reviewCollapsed: false, onToggleReview: () => {}, onOpenFolder };
     const { rerender } = render(<TopBar {...props} />);
-    cmd("n");
-    expect(onNewSession).toHaveBeenCalledOnce();
-    cmd("k");
-    expect(await screen.findByRole("dialog", { name: "Chat history" })).toBeInTheDocument();
-    cmd("o");
+    fireEvent.keyDown(window, { key: "o", metaKey: true });
     expect(onOpenFolder).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
-
     rerender(<TopBar {...props} status="starting" />);
-    cmd("n");
-    cmd("o");
-    expect(onNewSession).toHaveBeenCalledOnce();
+    fireEvent.keyDown(window, { key: "o", metaKey: true });
     expect(onOpenFolder).toHaveBeenCalledOnce();
-    // A plain letter, or ⌘ with another modifier, is not a shortcut.
-    rerender(<TopBar {...props} />);
-    fireEvent.keyDown(window, { key: "n" });
-    fireEvent.keyDown(window, { key: "n", metaKey: true, shiftKey: true });
-    expect(onNewSession).toHaveBeenCalledOnce();
-  });
-
-  it("keeps new session and history available while Claude works, so you can switch away", () => {
-    const props = { ...base, folder: "/p", reviewCollapsed: false, onToggleReview: () => {}, loadSessions: async () => [], onOpenSession: () => {}, onNewSession: () => {} };
-    const { rerender } = render(<TopBar {...props} status="running" />);
-    expect(screen.getByRole("button", { name: "Chat history" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "New chat" })).toBeEnabled();
-    rerender(<TopBar {...props} status="starting" />);
-    expect(screen.getByRole("button", { name: "Chat history" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "New chat" })).toBeDisabled();
-  });
-
-  it("lists chats open in the background and switches to one", async () => {
-    const onSwitchChat = vi.fn();
-    const onOpenSession = vi.fn();
-    const loadSessions = async () => [
-      { id: "abc", title: "Add retries", updated_ms: Date.now(), prompts: 1 },
-      { id: "old", title: "Older work", updated_ms: Date.now() - 86_400_000, prompts: 3 },
-    ];
-    const openChats = [{ slot: "s2", title: "Add retries", state: "running" as const, sessionId: "abc", elsewhere: null }];
-    render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadSessions={loadSessions} onOpenSession={onOpenSession} openChats={openChats} onSwitchChat={onSwitchChat} />);
-    const history = screen.getByRole("button", { name: "Chat history" });
-    expect(history.querySelector(".dot")).not.toBeNull();
-    fireEvent.click(history);
-    const open = await screen.findByRole("list", { name: "Open chats" });
-    expect(open).toHaveTextContent("Add retriesRunning");
-    // The same session isn't listed again under past sessions.
-    expect(await screen.findByRole("list", { name: "Past chats" })).not.toHaveTextContent("Add retries");
-    fireEvent.click(screen.getByRole("button", { name: /Add retries/ }));
-    expect(onSwitchChat).toHaveBeenCalledWith("s2");
-    expect(onOpenSession).not.toHaveBeenCalled();
-  });
-
-  it("shows a blue dot for a chat that finished in the background until it's opened", async () => {
-    const props = { ...base, folder: "/p", reviewCollapsed: false, onToggleReview: () => {}, loadSessions: async () => [], onOpenSession: () => {} };
-    const chat = { slot: "s2", title: "Add retries", state: "done" as const, sessionId: "abc", elsewhere: null };
-    const { rerender } = render(<TopBar {...props} openChats={[{ ...chat, unread: true }]} />);
-    const history = screen.getByRole("button", { name: "Chat history" });
-    expect(history.querySelector(".dot.unread")).not.toBeNull();
-    fireEvent.click(history);
-    expect(await screen.findByLabelText("Unread")).toBeInTheDocument();
-    // Seen: no dot at all, since nothing runs.
-    rerender(<TopBar {...props} openChats={[chat]} />);
-    expect(history.querySelector(".dot")).toBeNull();
-    expect(screen.queryByLabelText("Unread")).toBeNull();
-    // Running elsewhere stays orange.
-    rerender(<TopBar {...props} openChats={[{ ...chat, state: "running" }]} />);
-    expect(history.querySelector(".dot:not(.unread)")).not.toBeNull();
   });
 
   it("counts what still runs in the background and lists it", () => {
@@ -187,16 +125,6 @@ describe("TopBar", () => {
     expect(screen.getByRole("button", { name: "Stop npm run dev" })).toHaveTextContent("Stopping…");
   });
 
-  it("gives focus back to the History button when its menu closes", async () => {
-    render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadSessions={() => Promise.resolve([])} onOpenSession={() => {}} />);
-    const history = screen.getByRole("button", { name: "Chat history" });
-    fireEvent.click(history);
-    await screen.findByRole("dialog", { name: "Chat history" });
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
-    expect(history).toHaveFocus();
-  });
-
   it("brings Stop back for a task that's still listed a while after it was asked to stop", async () => {
     vi.useFakeTimers();
     try {
@@ -217,30 +145,9 @@ describe("TopBar", () => {
     }
   });
 
-  it("offers the old sessions in History when opened, and opens the dialog from its row", async () => {
-    const onOpen = vi.fn();
-    const load = vi.fn().mockResolvedValue([
-      { path: "/old/acme-api", exists: true, sessions: 7, updated_ms: Date.now(), already: false },
-      { path: "/src/acme-api", exists: true, sessions: 4, updated_ms: Date.now(), already: true },
-    ]);
-    render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadSessions={async () => []} onOpenSession={() => {}} bringOld={{ load, onOpen }} />);
-    fireEvent.click(screen.getByRole("button", { name: "Chat history" }));
-    fireEvent.click(await screen.findByRole("button", { name: "7 chats from before you moved this project: Bring them here" }));
-    expect(load).toHaveBeenCalled();
-    expect(onOpen).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows no old sessions row when they are all brought over already", async () => {
-    const load = vi.fn().mockResolvedValue([{ path: "/src/acme-api", exists: true, sessions: 4, updated_ms: Date.now(), already: true }]);
-    render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadSessions={async () => []} onOpenSession={() => {}} bringOld={{ load, onOpen: () => {} }} />);
-    fireEvent.click(screen.getByRole("button", { name: "Chat history" }));
-    await screen.findByText("No past chats in this folder");
-    expect(screen.queryByText(/from before you moved/)).not.toBeInTheDocument();
-  });
-
   it("has a canvas toggle that is always called Canvas, says whether it is on, and counts the agents that need you", () => {
     const onView = vi.fn();
-    const orchestra = { view: "chat" as const, exists: true, attention: 0, onView, onNew: () => {} };
+    const orchestra = { view: "chat" as const, exists: true, attention: 0, onView };
     const { rerender } = render(<TopBar {...base} reviewCollapsed={false} onToggleReview={() => {}} orchestra={orchestra} />);
     const toggle = screen.getByRole("button", { name: "Canvas" });
     expect(toggle).toHaveAttribute("aria-pressed", "false");

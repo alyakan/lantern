@@ -26,6 +26,7 @@ describe("the shortcut labels", () => {
     expect(shortcutLabel({ key: "\\" })).toBe("⌘\\");
     expect(shortcutLabel({ key: "," })).toBe("⌘,");
     expect(shortcutLabel({})).toBeNull();
+    expect(shortcutLabel({ key: "s", ctrl: true })).toBe("⌃⌘S");
   });
 });
 
@@ -47,11 +48,25 @@ describe("which action a keystroke names", () => {
     expect(ACTIONS.find((d) => d.id === "toggle-changes")?.title).toBe("Show/Hide Side Panel");
   });
 
+  it("has Show/Hide Sidebar on ⌃⌘S (macOS's own), and ⌘S and ⌘0 stay the editor's save and the canvas's Fit", () => {
+    expect(actionForKey(key("s", { ctrlKey: true }))?.id).toBe("toggle-sidebar");
+    expect(ACTIONS.find((d) => d.id === "toggle-sidebar")).toMatchObject({ title: "Show/Hide Sidebar", group: "View", menu: true, native: true });
+    // ⌘S alone is the editor's save, and ⌘0 is the canvas's Fit.
+    expect(actionForKey(key("s"))).toBeUndefined();
+    expect(actionForKey(key("0"))?.id).toBe("canvas-fit");
+    expect(() => actionIdForKey("s")).toThrow(/⌘S/);
+  });
+
+  it("no longer has a shortcut for Bring old chats here… (⇧⌘R): it is in the folder menu, a project's ⋯ menu and the palette", () => {
+    expect(ACTIONS.find((d) => d.id === "relocate-folder")?.key).toBeUndefined();
+    expect(actionForKey(key("r", { shiftKey: true }))).toBeUndefined();
+  });
+
   it("gives every shortcut to one action only", () => {
     const seen = new Map<string, string>();
     for (const def of ACTIONS) {
       if (!def.key) continue;
-      const k = `${def.shift ? "shift+" : ""}${def.key}`;
+      const k = `${def.ctrl ? "ctrl+" : ""}${def.shift ? "shift+" : ""}${def.key}`;
       expect(seen.get(k), `${def.id} and ${seen.get(k)} share ${k}`).toBeUndefined();
       seen.set(k, def.id);
     }

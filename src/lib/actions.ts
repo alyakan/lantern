@@ -5,7 +5,7 @@ import type { PaletteEntry } from "./palette";
  * Every action Lantern offers by name: the macOS menu bar, the keyboard shortcuts, the command palette and the cheat
  * sheet all read this list. Each line is one action, so src-tauri's tests can check the menu against it line by line.
  *
- * `key` (with `shift`) is the ⌘ shortcut. `menu`: the action is in the menu bar. `native`: the menu bar owns the key
+ * `key` (with `shift`, and `ctrl` for ⌃⌘ ones) is the ⌘ shortcut. `menu`: the action is in the menu bar. `native`: the menu bar owns the key
  * (its accelerator runs the action even when the webview has focus); otherwise the webview's keydown does, and the menu
  * item shows the shortcut as its label. `skipInEditor`: while focus is in Monaco, the key is Monaco's (⌘/ comments,
  * ⌘K starts its chords), so the action doesn't run.
@@ -13,8 +13,10 @@ import type { PaletteEntry } from "./palette";
 const CATALOGUE = [
   { id: "new-session", title: "New Chat", group: "File", key: "n", menu: true, native: true },
   { id: "open-folder", title: "Open Folder…", group: "File", key: "o", menu: true, native: true },
-  // In the palette and the shortcut sheet only: no native menu item, so the webview's keydown runs it.
-  { id: "relocate-folder", title: "Bring old chats here…", group: "File", key: "r", shift: true },
+  // In the palette (and the folder menu and a project's ⋯ menu): no shortcut and no native menu item.
+  { id: "relocate-folder", title: "Bring old chats here…", group: "File" },
+  // The left sidebar of every project, and its narrow rail: macOS's own ⌃⌘S (⌘0 is the canvas's Fit).
+  { id: "toggle-sidebar", title: "Show/Hide Sidebar", group: "View", key: "s", ctrl: true, menu: true, native: true },
   // Only while there is a team: switches between its canvas and the chat view.
   { id: "toggle-canvas", title: "Switch Canvas and Chat View", group: "View", key: "c", shift: true },
   // Only while the canvas has focus (see Canvas.tsx).
@@ -54,6 +56,8 @@ export interface ActionDef {
   group: ActionGroup;
   key?: string;
   shift?: boolean;
+  /** ⌃ as well as ⌘. */
+  ctrl?: boolean;
   menu?: boolean;
   native?: boolean;
   skipInEditor?: boolean;
@@ -61,10 +65,10 @@ export interface ActionDef {
 
 export type ActionId = (typeof CATALOGUE)[number]["id"];
 
-/** The shortcut as macOS writes it: ⇧ before ⌘, the key in capitals. */
-export function shortcutLabel(def: Pick<ActionDef, "key" | "shift">): string | null {
+/** The shortcut as macOS writes it: ⌃ and ⇧ before ⌘, the key in capitals. */
+export function shortcutLabel(def: Pick<ActionDef, "key" | "shift" | "ctrl">): string | null {
   if (!def.key) return null;
-  return `${def.shift ? "⇧" : ""}⌘${def.key.length === 1 && /[a-z]/.test(def.key) ? def.key.toUpperCase() : def.key}`;
+  return `${def.ctrl ? "⌃" : ""}${def.shift ? "⇧" : ""}⌘${def.key.length === 1 && /[a-z]/.test(def.key) ? def.key.toUpperCase() : def.key}`;
 }
 
 interface Handler {
@@ -92,11 +96,11 @@ export function runAction(id: string): boolean {
   return true;
 }
 
-/** The catalogue action a ⌘ keystroke names, if any. Ctrl and Option keys are left to the page. */
+/** The catalogue action a ⌘ keystroke names, if any. Option keys are left to the page, and so is Ctrl unless the action is a ⌃⌘ one. */
 export function actionForKey(e: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean; shiftKey?: boolean }): ActionDef | undefined {
-  if (!e.metaKey || e.ctrlKey || e.altKey) return undefined;
+  if (!e.metaKey || e.altKey) return undefined;
   const key = e.key.toLowerCase();
-  return ACTIONS.find((a) => a.key === key && !!a.shift === !!e.shiftKey);
+  return ACTIONS.find((a) => a.key === key && !!a.shift === !!e.shiftKey && !!a.ctrl === !!e.ctrlKey);
 }
 
 function onKeyDown(e: KeyboardEvent) {
@@ -143,7 +147,7 @@ export function availableActions(): PaletteEntry[] {
 
 /** The catalogue entry for a shortcut of a component (`useShortcut`), by its key. */
 export function actionIdForKey(key: string, shift = false): ActionId {
-  const def = ACTIONS.find((a) => a.key === key && !!a.shift === shift);
+  const def = ACTIONS.find((a) => a.key === key && !!a.shift === shift && !a.ctrl);
   if (!def) throw new Error(`No action has the shortcut ${shortcutLabel({ key, shift })}`);
   return def.id as ActionId;
 }

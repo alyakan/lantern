@@ -39,7 +39,7 @@ import { availableActions, runAction, useAction } from "./lib/actions";
 import type { PaletteEntry } from "./lib/palette";
 import { newVersionToShow, notesFor, rememberNotes, versionsWithNotes } from "./lib/whatsNew";
 import { NEW_ISSUE_URL } from "./lib/bugReport";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { WhatsNew } from "./components/WhatsNew";
 import { CommandPalette } from "./components/CommandPalette";
 import { ShortcutSheet } from "./components/ShortcutSheet";
@@ -65,7 +65,9 @@ import { launchOf, migrateModeSettings, permissionsOf, PERMISSIONS_LABEL, WORKFL
 import { FileLinksProvider } from "./lib/fileLinks";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Hud, type HudEvent } from "./components/Hud";
-import type { OpenChat } from "./components/HistoryMenu";
+import { HistoryPopover } from "./components/HistoryPopover";
+import { Sidebar, SIDEBAR_DEFAULT } from "./components/Sidebar";
+import { openProjects } from "./lib/sidebar";
 import { MessageInput } from "./components/MessageInput";
 import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
@@ -458,21 +460,28 @@ export default function App() {
 
   const openFolder = async () => {
     const folder = await open({ directory: true, multiple: false });
-    if (typeof folder === "string") startFresh(folder);
+    if (typeof folder !== "string") return;
+    // A folder removed from the recents comes back when it is opened on purpose.
+    if (hiddenFolders.includes(folder)) setHiddenFolders(hiddenFolders.filter((f) => f !== folder));
+    startFresh(folder);
   };
 
   const loadSessions = () => (state.folder ? api.listSessions(state.folder) : Promise.resolve([]));
 
   // Replays a past session into a chat, then continues it with `claude --resume`. A session that's already open
   // in a chat is switched to instead.
-  const openSession = (sessionId: string) => {
+  // `folder`: the project it belongs to, which may not be the one on screen (the sidebar lists every project's chats).
+  const openSession = (sessionId: string, inFolder: string | null = state.folder) => {
     const already = Object.entries(chats.slots).find(([, s]) => s.sessionId === sessionId);
     if (already) return switchTo(already[0]);
-    const { claudePath, folder } = state;
+    const { claudePath } = state;
+    const folder = inFolder;
     if (!claudePath || !folder) return;
-    const reuse = state.items.length === 0 && !isBusy(state);
+    // An empty chat is reused; if it was in another project it starts over in this one.
+    const empty = state.items.length === 0 && !isBusy(state);
+    const reuse = empty && state.folder === folder;
     // A second open into the chat that's still loading would load another session into it: ignored.
-    if (reuse && state.status === "starting") return;
+    if (empty && state.status === "starting") return;
     resumeIn(takeSlot(), folder, sessionId, reuse);
   };
 
@@ -1055,8 +1064,8 @@ export default function App() {
   const canvasOpen = useMemo(() => (slot: string) => showRef.current(slot), []);
   // A new team: a Lead chat on the project's last Permissions, which its agents never exceed (change them from any window's
   // title bar, or under the box).
-  const newOrchestra = () => {
-    const folder = state.folder;
+  const newOrchestra = (inFolder: string | null = state.folder) => {
+    const folder = inFolder;
     if (!folder) return;
     startFresh(folder, false, true);
     setView("canvas");
@@ -1243,14 +1252,6 @@ export default function App() {
     }
   }, [chats.slots]);
 
-  // When each chat was last opened or last had something happen in it (a message, a reply), for the Open list.
-  const touched = useRef<Record<string, { at: number; seq: number }>>({});
-  for (const [slot, s] of Object.entries(chats.slots)) {
-    const t = touched.current[slot];
-    // The chat on screen counts as opened now; another one when its conversation moves on (seq: messages, turn ends).
-    if (!t || t.seq !== s.seq || slot === active) touched.current[slot] = { at: Date.now(), seq: s.seq };
-  }
-  const lastTouched = (slot: string) => touched.current[slot]?.at ?? 0;
   // A toast about a chat goes once you're in that chat; "Needs you" also once it isn't waiting any more.
   useEffect(() => {
     const slot = hud?.chat?.slot;
@@ -1259,18 +1260,12 @@ export default function App() {
     if (active === slot || !s || (hud.kind === "waiting" && chatState(s, drafts.current[slot]) !== "waiting")) setHud(null);
   }, [hud, active, chats.slots]);
 
-  const openChats: OpenChat[] = Object.entries(chats.slots)
-    .filter(([slot]) => slot !== active)
-    .sort(([a], [b]) => lastTouched(b) - lastTouched(a))
-    .map(([slot, s]) => ({ slot, title: chats.agents[slot]?.name ?? chatTitle(s, titles), state: chatState(s, drafts.current[slot]), unread: !!unread[slot], background: s.backgroundTasks.length, sessionId: s.sessionId, elsewhere: s.folder && s.folder !== state.folder ? basename(s.folder) : null, worker: !!chats.agents[slot] }));
-
-  // For the title bar: steps that failed in the latest turn, and other chats waiting for an answer.
+  // For the title bar: steps that failed in the latest turn.
   const lastPrompt = state.items.map((it) => it.type).lastIndexOf("user");
   const turnTools = state.items.slice(lastPrompt + 1).flatMap((it) => (it.type === "tool" ? [it] : []));
   // Cleared from the title bar: hidden until a different set of steps has failed.
   const failedKey = turnTools.filter((t) => t.status === "error").map((t) => t.id).join(",");
   const failed = clearedFailures[active] === failedKey ? 0 : failedCount(turnTools);
-  const waiting = openChats.filter((c) => c.state === "waiting").length;
 
   // The team of the chat on screen (its main agent and workers), the ones waiting for you, and whether the canvas is what's
   // shown. Another chat, outside any team, has no canvas, and neither does the toggle for it.
@@ -1479,32 +1474,73 @@ export default function App() {
     refreshMoved();
     refreshMoves();
   };
-  const sessionActions: SessionActions | null = state.folder
-    ? {
-        folder: state.folder,
-        pinned: pinnedBy[state.folder] ?? [],
-        onTogglePin: (id) => {
-          const folder = state.folder!;
-          const pinned = pinnedBy[folder] ?? [];
-          setPinnedBy({ ...pinnedBy, [folder]: pinned.includes(id) ? pinned.filter((p) => p !== id) : [...pinned, id] });
-        },
-        onRename: async (id, title) => {
-          await api.renameSession(id, title);
-          setTitles((all) => ({ ...all, [id]: title }));
-        },
-        onExport: (id, title) => {
-          const folder = state.folder!;
-          // The transcript as the chat would show it, read without starting claude: its prompts, replies and steps.
-          api
-            .sessionEvents(folder, id)
-            .then((events) => {
-              const replayed = reducer({ ...initialState, folder }, { type: "history_loaded", sessionId: id, events });
-              return api.exportText(exportFileName(title), sessionMarkdown(title, replayed.items, folder));
-            })
-            .catch((e) => dispatch({ type: "failed", text: errText(e) }));
-        },
-      }
-    : null;
+  // The actions on a folder's past chats: for the one on screen, and for the project a History is open for.
+  const actionsFor = (folder: string | null): SessionActions | null =>
+    folder
+      ? {
+          folder,
+          pinned: pinnedBy[folder] ?? [],
+          onTogglePin: (id) => {
+            const pinned = pinnedBy[folder] ?? [];
+            setPinnedBy({ ...pinnedBy, [folder]: pinned.includes(id) ? pinned.filter((p) => p !== id) : [...pinned, id] });
+          },
+          onRename: async (id, title) => {
+            await api.renameSession(id, title);
+            setTitles((all) => ({ ...all, [id]: title }));
+          },
+          onExport: (id, title) => {
+            // The transcript as the chat would show it, read without starting claude: its prompts, replies and steps.
+            api
+              .sessionEvents(folder, id)
+              .then((events) => {
+                const replayed = reducer({ ...initialState, folder }, { type: "history_loaded", sessionId: id, events });
+                return api.exportText(exportFileName(title), sessionMarkdown(title, replayed.items, folder));
+              })
+              .catch((e) => dispatch({ type: "failed", text: errText(e) }));
+          },
+        }
+      : null;
+  const sessionActions = actionsFor(state.folder);
+
+  // The sidebar: every project, and the chats open in each. The sidebar and its rail are one setting, saved; so is its width.
+  const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState("sidebar.collapsed", false);
+  const [sidebarWidth, setSidebarWidth] = usePersistentState("sidebar.width", SIDEBAR_DEFAULT);
+  // Projects removed from the recents here (Claude Code keeps their chats; one with a chat open is listed regardless).
+  const [hiddenFolders, setHiddenFolders] = usePersistentState<string[]>("sidebar.hidden", []);
+  const openByProject = openProjects(chats, { titles, drafts: drafts.current, unread, pinned: pinnedBy });
+  useAction("toggle-sidebar", () => setSidebarCollapsed(!sidebarCollapsed));
+  // History: one project's past chats, from "Show all…" or ⌘K (the project on screen).
+  const [history, setHistory] = useState<{ folder: string } | null>(null);
+  const canStart = !!state.folder && state.status !== "starting";
+  useAction("session-history", () => state.folder && setHistory(history ? null : { folder: state.folder }), canStart);
+  useAction("new-session", () => state.folder && startFresh(state.folder), canStart);
+  const openChatIds = Object.values(chats.slots).flatMap((s) => (s.sessionId ? [s.sessionId] : []));
+  const inTeam = (team: string) => teamMain(chats, active) === team;
+  const sidebarHandlers = {
+    onChat: switchTo,
+    onTeam: (slot: string) => {
+      switchTo(slot);
+      setView("canvas");
+    },
+    // An agent is focused on its team's canvas, leaving the team's Lead where it is.
+    onAgent: (slot: string, team: string) => {
+      if (!inTeam(team)) switchTo(team);
+      focusAgent(slot);
+      setView("canvas");
+    },
+    onPast: (folder: string, id: string) => openSession(id, folder),
+    onCloseChat: closeChat,
+    onHistory: (folder: string) => setHistory({ folder }),
+    onNewChatIn: (folder: string) => startFresh(folder),
+    onNewTeamIn: (folder: string) => newOrchestra(folder),
+    onBringOld: (folder: string) => setBringing({ destination: folder, from: null }),
+    onReveal: (folder: string) => void revealItemInDir(folder).catch(() => {}),
+    onRemove: (folder: string) => setHiddenFolders([...hiddenFolders.filter((f) => f !== folder), folder]),
+    onOpenFolder: openFolder,
+    onNewChat: () => state.folder && startFresh(state.folder),
+    onNewTeam: () => newOrchestra(),
+    onReviewPr: () => setPrPicker(true),
+  };
 
   const restartToUpdate = () => {
     setInstallStarted(true);
@@ -1544,7 +1580,7 @@ export default function App() {
       hero={hero}
       folder={state.folder}
       onOpenFolder={openFolder}
-      sessions={{ load: loadSessions, currentId: state.sessionId, onOpen: openSession, open: openChats, onSwitch: switchTo }}
+      sessions={{ load: loadSessions, exclude: openChatIds, onOpen: (id) => openSession(id) }}
       folders={{ load: loadRecentFolders, onPick: (path) => startFresh(path), relocate: relocateMenu }}
       models={{ chosen: settingsFor(active).model, onChoose: chooseModel, defaultModel, ids: modelIds, options: state.models }}
       effort={{ chosen: settingsFor(active).effort, onChoose: changeEffort }}
@@ -1582,27 +1618,38 @@ export default function App() {
           onOpenFolder={openFolder}
           onToggleReview={() => setReviewCollapsed(!reviewCollapsed)}
           onOpenSettings={() => setSettingsAt("general")}
-          sessionId={state.sessionId}
-          loadSessions={loadSessions}
-          onOpenSession={openSession}
-          onNewSession={() => state.folder && startFresh(state.folder)}
-          loadRecent={loadRecentFolders}
-          onPickFolder={(path) => startFresh(path)}
-          relocate={relocateMenu}
-          bringOld={{ load: () => (state.folder ? api.oldLocations(state.folder) : Promise.resolve([])), onOpen: bringHere }}
-          openChats={openChats}
-          onSwitchChat={switchTo}
-          onCloseChat={closeChat}
+          onBringOld={bringHere}
           branch={branch}
           activity={activityStatus(state, finishedAt[active] ?? null)}
-          issues={{ failed, waiting }}
+          issues={{ failed }}
           background={state.backgroundTasks}
           onStopTask={(id) => api.stopTask(active, id)}
           onClearFailures={() => setClearedFailures({ ...clearedFailures, [active]: failedKey })}
           onShowFailure={showFailure}
-          orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView, onNew: newOrchestra }}
+          orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
         />
         <Hud event={hud} onOpenChat={switchTo} />
+        <div className="app-body">
+        <Sidebar
+          {...sidebarHandlers}
+          collapsed={sidebarCollapsed}
+          onCollapsed={setSidebarCollapsed}
+          width={sidebarWidth}
+          onWidth={setSidebarWidth}
+          open={openByProject}
+          currentFolder={state.folder}
+          branch={branch}
+          canNew={canStart}
+          loadRecent={loadRecentFolders}
+          loadSessions={api.listSessions}
+          pinned={pinnedBy}
+          titles={titles}
+          hidden={hiddenFolders}
+          moved={relocateMenu.moved}
+          onRelocate={(from) => relocateMenu.onRelocate(from)}
+          onDismissMoved={relocateMenu.onDismiss}
+        />
+        <div className="app-main">
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
         <SplitPane
           ratio={splitRatio}
@@ -1695,6 +1742,8 @@ export default function App() {
             </ErrorBoundary>
           }
         />
+        </div>
+        </div>
         <SettingsView
           open={settingsAt}
           onClose={() => setSettingsAt(null)}
@@ -1738,8 +1787,21 @@ export default function App() {
             pickFolder={() => open({ directory: true, multiple: false }).then((picked) => (typeof picked === "string" ? picked : null))}
             onClose={() => setBringing(null)}
             onRelocated={relocated}
-            onOpenHistory={state.folder && bringing.destination === state.folder ? () => { setBringing(null); runAction("session-history"); } : undefined}
+            onOpenHistory={bringing.destination ? () => { const folder = bringing.destination!; setBringing(null); setHistory({ folder }); } : undefined}
           />
+        )}
+        {history && (
+          <SessionActionsContext.Provider value={actionsFor(history.folder)}>
+            <HistoryPopover
+              folder={history.folder}
+              exclude={openChatIds}
+              load={() => api.listSessions(history.folder)}
+              loadOld={() => api.oldLocations(history.folder)}
+              onBring={() => { const folder = history.folder; setHistory(null); setBringing({ destination: folder, from: null }); }}
+              onOpen={(id) => { const folder = history.folder; setHistory(null); openSession(id, folder); }}
+              onClose={() => setHistory(null)}
+            />
+          </SessionActionsContext.Provider>
         )}
         {prPicker && state.folder && <ReviewPrDialog folder={state.folder} onPick={startReviewOf} onClose={() => setPrPicker(false)} />}
         <ModeGuide

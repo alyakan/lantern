@@ -26,6 +26,7 @@ pub const ACTIONS: &[(&str, &str, Option<&str>)] = &[
     ("find-file", "Find File…", Some("CmdOrCtrl+P")),
     ("search-files", "Search in Files…", Some("Shift+CmdOrCtrl+F")),
     ("find-in-file", "Find in File   ⌘F", None),
+    ("toggle-sidebar", "Show/Hide Sidebar", Some("Ctrl+CmdOrCtrl+S")),
     ("toggle-changes", "Show/Hide Side Panel", Some("CmdOrCtrl+Backslash")),
     ("command-palette", "Command Palette…", Some("Shift+CmdOrCtrl+P")),
     ("settings", "Settings…", Some("CmdOrCtrl+Comma")),
@@ -141,6 +142,7 @@ fn build(app: &AppHandle, recent: &[String]) -> tauri::Result<Menu<Wry>> {
             &action("search-files")?,
             &action("find-in-file")?,
             &separator()?,
+            &action("toggle-sidebar")?,
             &action("toggle-changes")?,
             &action("command-palette")?,
             &separator()?,
@@ -220,6 +222,7 @@ mod tests {
         id: String,
         key: Option<String>,
         shift: bool,
+        ctrl: bool,
         menu: bool,
         native: bool,
     }
@@ -231,7 +234,7 @@ mod tests {
             .filter_map(|line| {
                 let id = between(line, "id: \"")?;
                 let key = between(line, "key: \"").map(|k| if k == "\\\\" { "\\".to_string() } else { k });
-                Some(Def { id, key, shift: line.contains("shift: true"), menu: line.contains("menu: true"), native: line.contains("native: true") })
+                Some(Def { id, key, shift: line.contains("shift: true"), ctrl: line.contains("ctrl: true"), menu: line.contains("menu: true"), native: line.contains("native: true") })
             })
             .collect()
     }
@@ -252,7 +255,7 @@ mod tests {
             "/" => "Slash".to_string(),
             other => other.to_uppercase(),
         };
-        format!("{}CmdOrCtrl+{name}", if def.shift { "Shift+" } else { "" })
+        format!("{}{}CmdOrCtrl+{name}", if def.ctrl { "Ctrl+" } else { "" }, if def.shift { "Shift+" } else { "" })
     }
 
     #[test]
@@ -294,8 +297,9 @@ mod tests {
         let line = r#"  { id: "toggle-changes", title: "Toggle Changes Pane", group: "View", key: "\\", menu: true, native: true },"#;
         assert_eq!(between(line, "id: \""), Some("toggle-changes".into()));
         assert_eq!(between(line, "key: \""), Some("\\\\".into()));
-        assert_eq!(accelerator_for(&Def { id: "x".into(), key: Some("\\".into()), shift: false, menu: true, native: true }), "CmdOrCtrl+Backslash");
-        assert_eq!(accelerator_for(&Def { id: "x".into(), key: Some("p".into()), shift: true, menu: true, native: true }), "Shift+CmdOrCtrl+P");
+        assert_eq!(accelerator_for(&Def { id: "x".into(), key: Some("\\".into()), shift: false, ctrl: false, menu: true, native: true }), "CmdOrCtrl+Backslash");
+        assert_eq!(accelerator_for(&Def { id: "x".into(), key: Some("p".into()), shift: true, ctrl: false, menu: true, native: true }), "Shift+CmdOrCtrl+P");
+        assert_eq!(accelerator_for(&Def { id: "x".into(), key: Some("s".into()), shift: false, ctrl: true, menu: true, native: true }), "Ctrl+CmdOrCtrl+S");
     }
 
     #[test]
