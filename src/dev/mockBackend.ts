@@ -1160,6 +1160,7 @@ export function installMockBackend() {
           ];
         case "set_subagents":
         case "set_agent_limit":
+        case "keep_awake":
         case "sidebar_menu":
           return null;
         case "list_permission_rules":

@@ -225,6 +225,14 @@ The expanded sidebar is in most of the other screenshots on this page; the team 
 
 After you move a repository, Claude Code leaves its chats under the old path. **Bring old chats here…** (the folder menu in the title bar, a project's ⋯ menu, or the palette) finds the places the project was before and copies the chats you check into its History. Nothing is moved or overwritten, and nothing happens until you confirm.
 
+## Away
+
+People start work and walk away, so two things help while you are gone.
+
+**What needs you.** The tray button at the top right of the title bar (always there, whether the sidebar is full, compact or hidden; also **What Needs You…** in the command palette) opens a list of everything waiting on you across every open project and team: permission requests and questions, plans to approve, merges to approve, a team held back until you say go on, and chats that finished while you were elsewhere. Each row shows the chat or agent, its project (and team), what it needs in plain words and how long it has waited. **Go** takes you there; a plain permission request also has **Allow** and **Deny** right in the list. What needs an answer comes first, longest waiting first, then what only finished. The button's badge counts what needs an answer; a small blue dot means only unread finishes. Arrow keys move between rows (Left and Right between a row's buttons) and Esc closes it. macOS notifications are separate (see Settings).
+
+**Keeping the Mac awake.** While any chat or agent is working, or paused on a question for you, Lantern stops the Mac from going to sleep on its own, so a long turn finishes while you are away (it holds macOS's `caffeinate` for as long as that lasts, and lets go when nothing is working or Lantern quits). Only idle sleep is prevented: the screen may still turn off, and closing the lid still sleeps the Mac. Turn it off in Settings ▸ General ▸ **Keep my Mac awake while Claude works**.
+
 ## The side panel
 
 The side panel (⌘\ shows or hides it) always has six tabs, in this order. A tab with nothing to show yet says what will show there.
@@ -262,7 +270,7 @@ A few things to know:
 
 ![Settings, on the General tab](images/settings.png)
 
-- **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, the theme (see below), the text size, and **Agents running at once** for teams.
+- **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, keeping the Mac awake while Claude works, the theme (see below), the text size, and **Agents running at once** for teams.
 - **Harness**: the model presets (who is the Lead, the advisor and the subagents) that the Models chip offers.
 - **MCP servers**: your servers with their status. Log in, reconnect, turn off, add, edit or remove them (through Claude Code's own settings). A secret never goes into the project's committed `.mcp.json`.
 - **Skills**: the project's and plugins' skills, each with a preview of its file.

@@ -18,6 +18,8 @@ const CATALOGUE = [
   // The left sidebar of every project, hidden or shown: macOS's own ⌃⌘S (⌘0 is the canvas's Fit). Compact is the slim
   // column of open chats; both say what they do now (Hide or Show, Compact or Full) in the palette and the menu.
   { id: "toggle-sidebar", title: "Hide Sidebar", group: "View", key: "s", ctrl: true, menu: true, native: true },
+  // The title bar's inbox of what waits on you, across every project and team.
+  { id: "show-inbox", title: "What Needs You…", group: "View" },
   { id: "toggle-compact", title: "Compact Sidebar", group: "View", menu: true },
   // Only while there is a team: switches between its canvas and the chat view.
   { id: "toggle-canvas", title: "Switch Canvas and Chat View", group: "View", key: "c", shift: true },
