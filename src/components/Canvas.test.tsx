@@ -729,7 +729,7 @@ describe("cleaning up and closing an agent", () => {
     expect(dialog.textContent).toContain("It has 3 uncommitted files and 2 commits that aren't merged.");
     expect(dialog.textContent).toContain("lantern/w1");
     // Cancel is the default: it has the focus, and a press of Enter there cancels.
-    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" })));
     expect(acts.closeWorker).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("alertdialog")).toBeNull();
