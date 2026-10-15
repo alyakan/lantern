@@ -68,6 +68,7 @@ import { Hud, type HudEvent } from "./components/Hud";
 import { HistoryPopover } from "./components/HistoryPopover";
 import { Sidebar, SIDEBAR_DEFAULT } from "./components/Sidebar";
 import { needsYou, openProjects } from "./lib/sidebar";
+import { SidebarCompact } from "./components/SidebarCompact";
 import { usePeek } from "./lib/peek";
 import { MessageInput } from "./components/MessageInput";
 import { describeInput } from "./components/PermissionCard";
@@ -1541,16 +1542,27 @@ export default function App() {
       : null;
   const sessionActions = actionsFor(state.folder);
 
-  // The sidebar: every project, and the chats open in each. Whether it is hidden is saved, and so is its width (apart, so
-  // showing it again restores it). The key is the one that once said "minimized to the rail": that is hidden now.
+  // The sidebar: every project, and the chats open in each. It is full, compact (a slim column of the open chats) or hidden:
+  // whether it is hidden and whether it is compact are saved apart (so showing it again returns to whichever it was), and so
+  // is its width. The first key is the one that once said "minimized to the rail": that is hidden now.
   const [sidebarHidden, setSidebarHidden] = usePersistentState("sidebar.collapsed", false);
+  const [sidebarCompact, setSidebarCompact] = usePersistentState("sidebar.compact", false);
   const [sidebarWidth, setSidebarWidth] = usePersistentState("sidebar.width", SIDEBAR_DEFAULT);
   // Projects removed from the recents here (Claude Code keeps their chats; one with a chat open is listed regardless).
   const [hiddenFolders, setHiddenFolders] = usePersistentState<string[]>("sidebar.hidden", []);
   const openByProject = openProjects(chats, { titles, drafts: drafts.current, unread, pinned: pinnedBy });
-  useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden));
-  // Hidden, it slides in over the chat when the pointer rests on the window's left edge.
-  const sidebarPeek = usePeek(sidebarHidden);
+  useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden), true, sidebarHidden ? "Show Sidebar" : "Hide Sidebar");
+  useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Full Sidebar" : "Compact Sidebar");
+  useEffect(() => {
+    api.sidebarMenu(sidebarHidden, sidebarCompact).catch(() => {});
+  }, [sidebarHidden, sidebarCompact]);
+  // Compact, it opens over the chat when the pointer rests on it; hidden, when it rests on the window's left edge.
+  const sidebarPeek = usePeek(sidebarHidden || sidebarCompact);
+  // The peek's own button keeps the sidebar open: shown in full.
+  const keepSidebarOpen = () => {
+    setSidebarHidden(false);
+    setSidebarCompact(false);
+  };
   // History: one project's past chats, from "Show all…" or ⌘K (the project on screen).
   const [history, setHistory] = useState<{ folder: string } | null>(null);
   const canStart = !!state.folder && state.status !== "starting";
@@ -1709,17 +1721,31 @@ export default function App() {
         />
         <Hud event={hud} onOpenChat={switchTo} />
         <div className="app-body">
-        {sidebarHidden ? (
+        {sidebarHidden || sidebarCompact ? (
           <>
-            {sidebarPeek.phase !== "in" && <div className="sidebar-edge" aria-hidden onPointerEnter={(e) => !e.buttons && sidebarPeek.hover()} onPointerLeave={sidebarPeek.unhover} />}
+            {sidebarHidden ? (
+              sidebarPeek.phase !== "in" && <div className="sidebar-edge" aria-hidden onPointerEnter={(e) => !e.buttons && sidebarPeek.hover()} onPointerLeave={sidebarPeek.unhover} />
+            ) : (
+              <SidebarCompact
+                open={openByProject}
+                loadRecent={loadRecentFolders}
+                canNew={canStart}
+                onNewChat={sidebarHandlers.onNewChat}
+                onChat={sidebarHandlers.onChat}
+                onTeam={sidebarHandlers.onTeam}
+                onToggle={() => setSidebarCompact(false)}
+                onPointerEnter={(e) => !e.buttons && sidebarPeek.hover()}
+                onPointerLeave={sidebarPeek.unhover}
+              />
+            )}
             {sidebarPeek.phase !== "off" && (
               <div className="sidebar-peek" data-phase={sidebarPeek.phase} onPointerLeave={sidebarPeek.close}>
-                <Sidebar {...peekHandlers} {...sidebarProps} peek onToggle={() => setSidebarHidden(false)} />
+                <Sidebar {...peekHandlers} {...sidebarProps} peek onToggle={keepSidebarOpen} />
               </div>
             )}
           </>
         ) : (
-          <Sidebar {...sidebarHandlers} {...sidebarProps} onToggle={() => setSidebarHidden(true)} />
+          <Sidebar {...sidebarHandlers} {...sidebarProps} onToggle={() => setSidebarCompact(true)} />
         )}
         <div className="app-main">
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}

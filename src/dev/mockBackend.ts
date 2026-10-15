@@ -1157,6 +1157,7 @@ export function installMockBackend() {
           ];
         case "set_subagents":
         case "set_agent_limit":
+        case "sidebar_menu":
           return null;
         case "list_permission_rules":
           // A couple of rules, so Settings has something to show in the browser preview.

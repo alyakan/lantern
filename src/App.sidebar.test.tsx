@@ -158,13 +158,19 @@ describe("the sidebar in the app", () => {
     expect(within(bar).queryByRole("button", { name: /^Show sidebar/ })).toBeNull();
   });
 
-  it("hides from its own button, and the title bar's button shows it again", async () => {
-    await launch();
+  it("the title bar's button shows it again, and the menu and palette name what ⌃⌘S does", async () => {
+    const calls = await launch();
     await project("acme-api");
-    fireEvent.click(screen.getByRole("button", { name: "Hide sidebar" }));
+    fireEvent.keyDown(window, { key: "s", metaKey: true, ctrlKey: true });
     fireEvent.click(await screen.findByRole("button", { name: "Show sidebar" }));
     expect(await project("acme-api")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Show sidebar" })).toBeNull();
+    // The menu bar is told (hidden, compact) each time it changes.
+    expect(calledWith(calls, "sidebar_menu")).toEqual([
+      { hidden: false, compact: false },
+      { hidden: true, compact: false },
+      { hidden: false, compact: false },
+    ]);
   });
 
   it("starts hidden when it was left minimized (the old rail), and reads no past chats until it is shown", async () => {
@@ -282,11 +288,124 @@ describe("the hidden sidebar", () => {
     fireEvent.keyDown(box, { key: "Enter" });
     await screen.findByText("Where should retries live?");
     // Waiting in the sidebar's list too, so hide it and the count moves to the button.
-    fireEvent.click(screen.getByRole("button", { name: "Hide sidebar" }));
+    fireEvent.keyDown(window, { key: "s", metaKey: true, ctrlKey: true });
     const show = await screen.findByRole("button", { name: "Show sidebar, 1 chat needs you" });
     expect(show).toHaveTextContent("1");
     fireEvent.click(show);
     expect(await project("acme-api")).toBeInTheDocument();
+  });
+});
+
+describe("the compact sidebar", () => {
+  const column = () => screen.findByRole("complementary", { name: "Open chats" });
+  const full = () => screen.queryByRole("complementary", { name: "Projects" });
+  // Whole-app tests run in real time: the pointer rests on the column for the peek's delay.
+  const rest = () => new Promise((r) => setTimeout(r, 320));
+
+  it("is the sidebar's own button: a slim column of the open chats instead of the full sidebar, and the same button at its top goes back; it is remembered", async () => {
+    await launch();
+    await project("acme-api");
+    fireEvent.click(screen.getByRole("button", { name: "Compact sidebar" }));
+    const slim = await column();
+    expect(full()).toBeNull();
+    expect(localStorage.getItem("sidebar.compact")).toBe("true");
+    // The empty chat on screen is its one square, lit.
+    expect(within(slim).getByRole("button", { name: /^New chat, acme-api/ })).toHaveAttribute("aria-current", "true");
+    fireEvent.click(within(slim).getByRole("button", { name: "Full sidebar" }));
+    expect(await project("acme-api")).toBeInTheDocument();
+    expect(localStorage.getItem("sidebar.compact")).toBe("false");
+  });
+
+  it("starts compact when it was left that way, and reads no past chats until it is full", async () => {
+    localStorage.setItem("sidebar.compact", "true");
+    const calls = await launch();
+    await column();
+    expect(calledWith(calls, "list_sessions")).toEqual([]);
+  });
+
+  it("⌃⌘S hides it and brings it back as compact: hidden and compact are kept apart", async () => {
+    localStorage.setItem("sidebar.compact", "true");
+    await launch();
+    await column();
+    fireEvent.keyDown(window, { key: "s", metaKey: true, ctrlKey: true });
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "Open chats" })).toBeNull());
+    expect(localStorage.getItem("sidebar.collapsed")).toBe("true");
+    expect(localStorage.getItem("sidebar.compact")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Show sidebar" }));
+    await column();
+    expect(full()).toBeNull();
+    expect(localStorage.getItem("sidebar.collapsed")).toBe("false");
+  });
+
+  it("an old saved 'collapsed' still means hidden, whatever the compact setting", async () => {
+    localStorage.setItem("sidebar.collapsed", "true");
+    localStorage.setItem("sidebar.compact", "true");
+    await launch();
+    await screen.findByRole("button", { name: "Show sidebar" });
+    expect(screen.queryByRole("complementary", { name: "Open chats" })).toBeNull();
+  });
+
+  it("tells the menu bar what its two sidebar items do now", async () => {
+    localStorage.setItem("sidebar.compact", "true");
+    const calls = await launch();
+    await column();
+    expect(calledWith(calls, "sidebar_menu").slice(-1)[0]).toEqual({ hidden: false, compact: true });
+  });
+
+  describe("peek", () => {
+    beforeEach(() => localStorage.setItem("sidebar.compact", "true"));
+
+    it("opens the full sidebar over the chat when the pointer rests on the column, and away when it leaves", async () => {
+      await launch();
+      const slim = await column();
+      fireEvent.pointerEnter(slim);
+      expect(full()).toBeNull();
+      await rest();
+      const peeked = await screen.findByRole("complementary", { name: "Projects" });
+      expect(peeked).toHaveClass("peek");
+      expect(localStorage.getItem("sidebar.compact")).toBe("true");
+      fireEvent.pointerLeave(peeked.parentElement!);
+      await waitFor(() => expect(full()).toBeNull());
+    });
+
+    it("does not open for a pointer that only crosses the column", async () => {
+      await launch();
+      const slim = await column();
+      fireEvent.pointerEnter(slim);
+      fireEvent.pointerLeave(slim);
+      await rest();
+      expect(full()).toBeNull();
+    });
+
+    it("closes on Escape", async () => {
+      await launch();
+      fireEvent.pointerEnter(await column());
+      await rest();
+      await screen.findByRole("complementary", { name: "Projects" });
+      fireEvent.keyDown(document, { key: "Escape" });
+      await waitFor(() => expect(full()).toBeNull());
+    });
+
+    it("goes to a chat picked in it, and puts itself away, still compact", async () => {
+      const calls = await launch();
+      fireEvent.pointerEnter(await column());
+      await rest();
+      const acme = await project("acme-api");
+      fireEvent.click(await within(acme).findByRole("button", { name: /Release flow notes|Fix the login redirect after OAuth callback/ }));
+      await waitFor(() => expect(calledWith(calls, "open_session").length).toBe(1));
+      await waitFor(() => expect(full()).toBeNull());
+      expect(localStorage.getItem("sidebar.compact")).toBe("true");
+    });
+
+    it("is kept open from its own button: the full sidebar again", async () => {
+      await launch();
+      fireEvent.pointerEnter(await column());
+      await rest();
+      fireEvent.click(await screen.findByRole("button", { name: "Keep sidebar open" }));
+      expect(await project("acme-api")).toBeInTheDocument();
+      expect(full()).not.toHaveClass("peek");
+      expect(localStorage.getItem("sidebar.compact")).toBe("false");
+    });
   });
 });
 

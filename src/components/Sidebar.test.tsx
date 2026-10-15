@@ -253,17 +253,17 @@ describe("New ▾", () => {
   });
 });
 
-describe("hiding", () => {
-  it("hides from the button in the sidebar", () => {
+describe("compacting", () => {
+  it("goes compact from the button in the sidebar", () => {
     const { h } = setup();
-    fireEvent.click(screen.getByRole("button", { name: "Hide sidebar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compact sidebar" }));
     expect(h.onToggle).toHaveBeenCalledTimes(1);
   });
 
   it("offers to keep it open while it only peeks in over the chat", () => {
     const { h } = setup({ peek: true });
     expect(screen.getByRole("complementary", { name: "Projects" })).toHaveClass("peek");
-    expect(screen.queryByRole("button", { name: "Hide sidebar" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Compact sidebar" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Keep sidebar open" }));
     expect(h.onToggle).toHaveBeenCalledTimes(1);
   });

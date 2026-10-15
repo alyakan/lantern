@@ -57,6 +57,72 @@ export interface SidebarProject {
   past: { pinned: PastRow[]; recent: PastRow[]; total: number } | null;
 }
 
+/** How a state reads, as words. */
+export const DOT_LABEL: Record<ChatDot, string> = { running: "Working", waiting: "Needs you", draft: "Draft", done: "Done" };
+
+/** What a chat shows: needing you beats an unread finish, which beats the plain state. */
+export function markOf(chat: Pick<SidebarChat, "state" | "unread">): ChatDot | "unread" {
+  return chat.unread && chat.state !== "waiting" ? "unread" : chat.state;
+}
+
+/** One open chat or team as the compact sidebar's square (a team is its Lead, with the team's combined state). */
+export interface CompactChip {
+  slot: string;
+  team: boolean;
+  title: string;
+  state: ChatDot;
+  unread: boolean;
+  /** On screen: the chat, or for a team its canvas or an agent focused on it. */
+  active: boolean;
+  /** "Working", "Needs you", "Unread"… */
+  status: string;
+}
+
+export interface CompactGroup {
+  folder: string;
+  /** The project's name (with its parent's when another open project has the same one). */
+  label: string;
+  /** One or two capitals for the square. */
+  initials: string;
+  chips: CompactChip[];
+}
+
+/** A project's initials: the first letters of its first two words (my-app: MA), or the first letter of a single word. */
+export function initials(label: string): string {
+  const words = label.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const letters = words.length > 1 ? words.slice(0, 2).map((w) => w[0]) : [...(words[0] ?? "?")].slice(0, 1);
+  return letters.join("").toUpperCase();
+}
+
+/**
+ * What is open, as the compact sidebar lists it: the projects with something open, in the order the full sidebar lists
+ * them (the recent list's), each with its chats and teams. An agent is never listed on its own, only inside its team.
+ */
+export function compactGroups(open: Record<string, ProjectOpen>, recent: RecentFolder[]): CompactGroup[] {
+  const rank = (folder: string) => recent.findIndex((r) => r.path === folder);
+  const folders = Object.keys(open)
+    .filter((f) => open[f].items.length > 0)
+    .sort((a, b) => rank(a) - rank(b));
+  const names = folders.map(basename);
+  return folders.map((folder, i) => {
+    const parent = basename(folder.slice(0, Math.max(folder.lastIndexOf("/"), 0)) || "/");
+    const label = names.filter((n) => n === names[i]).length > 1 ? `${names[i]} · ${parent}` : names[i];
+    const chips = open[folder].items.map((item): CompactChip => {
+      const mark = markOf(item);
+      return {
+        slot: item.slot,
+        team: item.kind === "team",
+        title: item.title,
+        state: item.state,
+        unread: item.unread,
+        active: item.active || (item.kind === "team" && item.agents.some((a) => a.active)),
+        status: mark === "unread" ? "Unread" : DOT_LABEL[mark],
+      };
+    });
+    return { folder, label, initials: initials(names[i]), chips };
+  });
+}
+
 /** The latest past chats a project lists before "Show all…". */
 export const RECENT_PAST = 3;
 

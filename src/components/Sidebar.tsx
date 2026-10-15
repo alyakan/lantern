@@ -3,7 +3,7 @@ import type { MovedFolder, RecentFolder, SessionSummary } from "../types";
 import { usePersistentState } from "../lib/layout";
 import { ACTIONS, shortcutLabel } from "../lib/actions";
 import { relativeTime } from "../lib/time";
-import { sidebarProjects, type ProjectOpen, type SidebarChat, type SidebarItem, type SidebarProject } from "../lib/sidebar";
+import { DOT_LABEL, markOf, sidebarProjects, type ProjectOpen, type SidebarChat, type SidebarItem, type SidebarProject } from "../lib/sidebar";
 import { ChevronIcon, FolderOpenIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
 import { MovedNotice } from "./MovedFolders";
 import { moveFocus } from "./useMenuKeys";
@@ -14,7 +14,6 @@ export const SIDEBAR_MAX = 420;
 export const SIDEBAR_DEFAULT = 248;
 const clampWidth = (w: number) => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Math.round(w)));
 
-const DOT_LABEL = { running: "Working", waiting: "Needs you", draft: "Draft", done: "Done" } as const;
 const shortcut = (id: string) => {
   const def = ACTIONS.find((a) => a.id === id);
   return def ? shortcutLabel(def) : null;
@@ -43,7 +42,7 @@ export interface SidebarHandlers {
 }
 
 interface Props extends SidebarHandlers {
-  /** Its button at the top: hides the sidebar, or (while it only peeks in over the chat) keeps it open. */
+  /** Its button at the top: makes the sidebar compact, or (while it only peeks in over the chat) keeps it open. */
   onToggle: () => void;
   /** It slid in over the chat from the window's edge, rather than being shown. */
   peek?: boolean;
@@ -124,10 +123,8 @@ function NewMenu({ canNew, onNewChat, onNewTeam, onReviewPr }: Pick<Props, "canN
 
 /** A state dot, for a chat that is working, needs you, finished unread, or is just open. */
 function Dot({ chat }: { chat: SidebarChat }) {
-  // Needing you beats an unread finish.
-  const unread = chat.unread && chat.state !== "waiting";
-  const kind = unread ? "unread" : chat.state;
-  const label = unread ? "Unread" : DOT_LABEL[chat.state];
+  const kind = markOf(chat);
+  const label = kind === "unread" ? "Unread" : DOT_LABEL[kind];
   return <span className={`sb-dot ${kind}`} role="img" aria-label={label} />;
 }
 
@@ -135,7 +132,7 @@ function ChatRow({ chat, onClick, onClose, team = false, label }: { chat: Sideba
   return (
     <li className={`sb-item${chat.closable && onClose ? " closable" : ""}`}>
       <button className={`sb-row${chat.active ? " current" : ""}${chat.unread ? " unread" : ""}`} aria-current={chat.active ? "true" : undefined} title={chat.title} onClick={onClick}>
-        {team ? <span className={`sb-team ${chat.unread && chat.state !== "waiting" ? "unread" : chat.state}`} role="img" aria-label={`${DOT_LABEL[chat.state]} team`}><TeamIcon /></span> : <Dot chat={chat} />}
+        {team ? <span className={`sb-team ${markOf(chat)}`} role="img" aria-label={`${DOT_LABEL[chat.state]} team`}><TeamIcon /></span> : <Dot chat={chat} />}
         <span className="sb-title">{label ?? chat.title}</span>
         {chat.pinned && <span className="sb-pin" role="img" aria-label="Pinned"><PinIcon /></span>}
         {chat.background > 0 && <span className="spinner" role="img" aria-label={`${chat.background} running in the background`} />}
@@ -267,8 +264,9 @@ function Project({ project, expanded, onToggle, current, branch, moved, onReloca
 /**
  * The left sidebar: one group per project (the ones with a chat open first, then the other recent folders), each with its
  * open chats and teams (agents nested under their team), pinned past chats and the latest few, and "Show all…". What
- * needs you rises to the top of its group and shows as a badge when the project is collapsed. Hidden, it isn't rendered
- * (the title bar says what needs you); the app may show it over the chat for a moment, as a peek. Past chats are read
+ * needs you rises to the top of its group and shows as a badge when the project is collapsed. Compact or hidden, it isn't
+ * rendered in full (the compact column or the title bar says what needs you); the app may show it over the chat for a moment,
+ * as a peek. Past chats are read
  * only for an expanded project.
  */
 export function Sidebar(props: Props) {
@@ -340,13 +338,13 @@ export function Sidebar(props: Props) {
   };
 
   const newMenu = { canNew, onNewChat: h.onNewChat, onNewTeam: h.onNewTeam, onReviewPr: h.onReviewPr };
-  const shortcutHint = shortcut("toggle-sidebar") ? ` (${shortcut("toggle-sidebar")})` : "";
+  const toggleLabel = peek ? "Keep sidebar open" : "Compact sidebar";
 
   return (
     <aside className={`sidebar${peek ? " peek" : ""}${dragWidth !== null ? " dragging" : ""}`} aria-label="Projects" style={{ width: dragWidth ?? width }}>
       <div className="sb-head">
         <NewMenu {...newMenu} />
-        <button className="icon sb-toggle" aria-label={peek ? "Keep sidebar open" : "Hide sidebar"} title={`${peek ? "Keep sidebar open" : "Hide sidebar"}${shortcutHint}`} onClick={onToggle}>
+        <button className="icon sb-toggle" aria-label={toggleLabel} title={toggleLabel} onClick={onToggle}>
           <SidebarIcon />
         </button>
       </div>

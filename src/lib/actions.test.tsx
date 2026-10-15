@@ -5,8 +5,8 @@ import { useShortcut } from "./shortcuts";
 import menuSource from "../../src-tauri/src/menu.rs?raw";
 
 /** A component that owns an action while it's mounted. */
-function Owner({ id, run, enabled = true }: { id: ActionId; run: () => void; enabled?: boolean }) {
-  useAction(id, run, enabled);
+function Owner({ id, run, enabled = true, title }: { id: ActionId; run: () => void; enabled?: boolean; title?: string }) {
+  useAction(id, run, enabled, title);
   return null;
 }
 
@@ -50,7 +50,7 @@ describe("which action a keystroke names", () => {
 
   it("has Show/Hide Sidebar on ⌃⌘S (macOS's own), and ⌘S and ⌘0 stay the editor's save and the canvas's Fit", () => {
     expect(actionForKey(key("s", { ctrlKey: true }))?.id).toBe("toggle-sidebar");
-    expect(ACTIONS.find((d) => d.id === "toggle-sidebar")).toMatchObject({ title: "Show/Hide Sidebar", group: "View", menu: true, native: true });
+    expect(ACTIONS.find((d) => d.id === "toggle-sidebar")).toMatchObject({ title: "Hide Sidebar", group: "View", menu: true, native: true });
     // ⌘S alone is the editor's save, and ⌘0 is the canvas's Fit.
     expect(actionForKey(key("s"))).toBeUndefined();
     expect(actionForKey(key("0"))?.id).toBe("canvas-fit");
@@ -85,6 +85,13 @@ describe("the Work menu", () => {
   it("is offered by the palette only while an owner has each enabled", () => {
     render(<Owner id="work-build" run={() => {}} />);
     expect(availableActions().map((e) => e.title)).toEqual(["Build"]);
+  });
+
+  it("uses the wording its owner gives it now (Show Sidebar once it is hidden), else the catalogue's", () => {
+    const { rerender } = render(<Owner id="toggle-sidebar" run={() => {}} />);
+    expect(availableActions().map((e) => e.title)).toEqual(["Hide Sidebar"]);
+    rerender(<Owner id="toggle-sidebar" run={() => {}} title="Show Sidebar" />);
+    expect(availableActions().map((e) => e.title)).toEqual(["Show Sidebar"]);
   });
 });
 
