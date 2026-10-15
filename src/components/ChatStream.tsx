@@ -149,7 +149,7 @@ export function ChatStream({ items, folder, sections, live = false, resend, ...h
   return (
     <>
       {turns.map(([first, ...rest]) => (
-        <section key={first.id} className="turn-section">
+        <section key={first.id} className="turn-section" data-turn={first.id}>
           {first.type === "user" && !first.auto ? <div className="turn-head">{render(first)}</div> : render(first)}
           {rest.map(render)}
         </section>
