@@ -345,8 +345,9 @@ pub fn enabled_plugins(home: &std::path::Path, folder: &std::path::Path) -> Vec<
 /// A worker starts lean, since a team's agents run at once on the user's plan: no advisor (each call sends its whole
 /// conversation to another model), none of the built-in subagent tool, no MCP servers but Lantern's, and none of the
 /// user's plugins (`plugins`, see `enabled_plugins`: their skills, agents and hooks are most of a session's starting
-/// context). The user's CLAUDE.md, permission rules and own hooks still apply. A worker in the shared folder can't edit.
-/// Any other chat with an advisor is told to have it check risky changes (see ADVISOR_REVIEW_ENV).
+/// context). The user's CLAUDE.md, permission rules and own hooks still apply. A worker in the shared folder can't use
+/// the edit tools. Any other chat with an advisor is told to have it check risky changes (see ADVISOR_REVIEW_ENV).
+#[allow(clippy::too_many_arguments)]
 pub fn launch_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: Option<&str>, effort: Option<&str>, advisor: Option<&str>, helper: &HelperConfig, plugins: &[String]) -> Vec<String> {
     let mut a = build_args(mode, auto_approve, resume, model, effort, helper);
     match &helper.role {
