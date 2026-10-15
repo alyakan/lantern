@@ -582,6 +582,7 @@ button.ghost.context-compact, button.ghost.context-clear { height: 20px; padding
 .pill-anchor { position: relative; }
 .pill-anchor .history-menu { right: auto; width: 440px; max-width: calc(100vw - 48px); }
 .folder-menu { top: calc(100% + 6px); left: 0; width: 380px; max-width: calc(100vw - 48px); max-height: 420px; }
+.folder-menu.has-moved { max-height: min(480px, calc(100vh - 24px)); }
 .folder-menu .menu-row { align-items: center; }
 .folder-menu .menu-row svg { flex: none; color: var(--muted); }
 .menu-heading { padding: 6px 8px 4px; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
@@ -603,6 +604,24 @@ button.icon.open-chat-close { position: absolute; right: 4px; width: 22px; heigh
 .open-chat-unread.on { display: block; flex: none; width: 7px; height: 7px; margin-right: 2px; border-radius: 50%; background: var(--unread); }
 .open-chat-unread.on ~ .menu-row-title { font-weight: 600; }
 .menu-row-path { margin-left: 8px; color: var(--faint); font-size: calc(11.5px * var(--font-scale)); }
+/* The folder menu's "Folders that moved": a hint, then one compact row for each folder (old path, then where it went and the two actions). */
+.moved-section { flex: none; display: flex; flex-direction: column; min-height: 0; }
+.moved-hint { margin: 0 8px 4px; font-size: calc(11.5px * var(--font-scale)); line-height: 1.35; color: var(--muted-text); }
+.moved-folders { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; }
+.moved-folder { display: flex; flex-direction: column; gap: 3px; margin: 0 2px 2px; padding: 6px 8px; border-radius: var(--radius-inner); background: var(--bg-hover); min-width: 0; }
+.mid-path { display: flex; min-width: 0; white-space: nowrap; font-size: calc(12px * var(--font-scale)); }
+.mid-head { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mid-tail { flex: none; }
+.moved-old { color: var(--muted-text); }
+.moved-to { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.moved-arrow { flex: none; color: var(--muted-text); font-size: calc(12px * var(--font-scale)); }
+.moved-new { flex: 1 1 0; min-width: 0; color: var(--text); }
+.moved-new.none { color: var(--muted-text); font-size: calc(12px * var(--font-scale)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.moved-actions { flex: none; display: inline-flex; align-items: center; gap: 4px; margin-left: auto; }
+.moved-folder button.moved-btn { height: var(--pill-s); padding: 0 10px; border-radius: 999px; font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
+.moved-folder button.ghost.moved-btn { color: var(--muted-text); }
+.moved-folder button.ghost.moved-btn:hover:not(:disabled) { color: var(--text); }
+button.moved-all { align-self: flex-start; margin: 2px 0 2px 10px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .menu-sep { flex: none; height: 1px; margin: 4px 6px; background: var(--line); }
 .menu-search { flex: none; height: 28px; margin: 2px 2px 4px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: inherit; font: calc(12.5px * var(--font-scale)) var(--ui); outline: none; }
 .menu-search::placeholder { color: var(--muted-text); }
@@ -1922,9 +1941,11 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-project-row:hover .sb-project-actions, .sb-project-row:focus-within .sb-project-actions { display: flex; }
 .sb-project-actions button.icon { width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--radius-chip); color: var(--muted); font-size: calc(14px * var(--font-scale)); line-height: 1; }
 .sb-project-actions button.icon:hover { background: var(--bg-hover); color: var(--text); }
-.sb-moved { display: flex; align-items: center; gap: 4px; margin: 0 0 2px 16px; font-size: calc(11.5px * var(--font-scale)); color: var(--attn-text); }
-.sb-moved .link-button { flex: 1; min-width: 0; text-align: left; color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sb-moved button.icon { flex: none; width: 20px; height: 20px; border: none; background: none; color: var(--muted); }
+.sb-moved { display: flex; align-items: center; gap: 2px; margin: 0 0 2px 20px; min-width: 0; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.sb-moved-text { flex: 0 1 auto; min-width: 0; margin-right: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-moved button.moved-link { flex: none; height: 20px; padding: 0 6px; border: none; border-radius: var(--radius-chip); background: none; color: var(--muted-text); font-size: inherit; }
+.sb-moved button.moved-link.primary-link { color: var(--text-2); font-weight: 500; }
+.sb-moved button.moved-link:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .sb-items { list-style: none; margin: 0 0 6px; padding: 0 0 0 14px; }
 .sb-item { position: relative; display: flex; align-items: center; }
 .sb-row { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; height: 24px; padding: 0 6px; border: none; background: none; border-radius: var(--radius-chip); color: var(--text-2); text-align: left; }
@@ -1968,7 +1989,7 @@ nav > .sb-note { padding-left: 8px; }
 /* Minimized: a narrow rail with each project's initials, and a badge for what needs you there. */
 .sidebar.rail { width: 52px; min-width: 52px; max-width: 52px; align-items: center; gap: 8px; padding: 2px 0 8px 0; }
 .rail-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; margin: 0; padding: 4px 0; list-style: none; }
-.rail-project { position: relative; width: 34px; height: 34px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--glass); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); font-weight: 600; }
+.rail-project { position: relative; width: 34px; height: 34px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--glass); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); font-weight: 600; display: inline-flex; align-items: center; justify-content: center; padding: 0; line-height: 1; }
 .rail-project:not(.open) { color: var(--muted-text); border-style: dashed; }
 .rail-project:hover { background: var(--bg-active); }
 .rail-project.current { border-color: var(--muted); background: var(--bg-active); color: var(--text); }

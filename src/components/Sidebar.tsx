@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import type { MovedFolder, RecentFolder, SessionSummary } from "../types";
-import { basename } from "../lib/diff";
 import { usePersistentState } from "../lib/layout";
 import { ACTIONS, shortcutLabel } from "../lib/actions";
 import { relativeTime } from "../lib/time";
 import { sidebarProjects, type ProjectOpen, type SidebarChat, type SidebarItem, type SidebarProject } from "../lib/sidebar";
 import { ChevronIcon, FolderOpenIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
+import { MovedNotice } from "./MovedFolders";
 import { moveFocus } from "./useMenuKeys";
 
 /** The sidebar's width in pixels: what Show/Hide Sidebar and the drag edge keep between these. */
@@ -239,16 +239,7 @@ function Project({ project, expanded, onToggle, current, branch, moved, onReloca
         </span>
         {menu && <ProjectMenu project={project} h={h} onClose={() => setMenu(false)} />}
       </div>
-      {moved && (
-        <div className="sb-moved">
-          <button className="link-button" title={moved.old} onClick={() => onRelocate(moved)}>
-            {`Moved? Bring its chats to ${moved.suggested ? basename(moved.suggested) : "a folder"}…`}
-          </button>
-          <button className="icon" aria-label={`Dismiss the moved notice for ${project.label}`} title="Dismiss" onClick={() => onDismissMoved(moved.old)}>
-            ×
-          </button>
-        </div>
-      )}
+      {moved && <MovedNotice moved={moved} label={project.label} onRelocate={onRelocate} onDismiss={onDismissMoved} />}
       {expanded && (
         <ul className="sb-items">
           {project.items.map((item) => (

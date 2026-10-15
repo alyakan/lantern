@@ -223,9 +223,9 @@ describe("the Moved? notice", () => {
     const { h } = setup({ moved });
     await screen.findByRole("region", { name: "network-monitor" });
     const group = project("network-monitor");
-    fireEvent.click(within(group).getByRole("button", { name: "Moved? Bring its chats to network-monitor…" }));
+    fireEvent.click(within(group).getByRole("button", { name: "Move chats from " + MONITOR + " to /projects/network-monitor" }));
     expect(h.onRelocate).toHaveBeenCalledWith(moved[0]);
-    fireEvent.click(within(group).getByRole("button", { name: "Dismiss the moved notice for network-monitor" }));
+    fireEvent.click(within(group).getByRole("button", { name: "Not moved: hide the notice for network-monitor" }));
     expect(h.onDismissMoved).toHaveBeenCalledWith(MONITOR);
     expect(within(project("lantern")).queryByText(/Moved\?/)).toBeNull();
   });

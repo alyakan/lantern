@@ -299,6 +299,18 @@ fn is_temp(path: &str) -> bool {
     ["/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/"].iter().any(|p| path.starts_with(p))
 }
 
+/// The app's data folder name (the bundle identifier), which holds the worktrees Lantern gives its workers.
+const APP_DATA_DIR: &str = "io.github.alyakan.lantern";
+
+/// Whether a folder is one an agent worked in, not one the user opened: a worker's worktree (under `worktrees` in Lantern's
+/// data folder, see lib.rs's worktree_root), or one Claude Code made for a subagent (under `.claude/worktrees` in a
+/// project). They're removed when the agent is closed, so they must never be listed as recent folders, projects, or
+/// folders that moved. The path decides, so it works for a folder that is already gone.
+pub fn is_agent_folder(path: &str) -> bool {
+    let parts: Vec<std::borrow::Cow<str>> = Path::new(path).components().map(|c| c.as_os_str().to_string_lossy()).collect();
+    parts.windows(2).any(|w| w[1] == "worktrees" && (w[0] == APP_DATA_DIR || w[0] == ".claude"))
+}
+
 /// Of several entries for one folder (transcripts in different project directories can name the same one), keeps the
 /// first, which is the newest when sorted newest first.
 fn keep_newest_per_folder(found: &mut Vec<RecentFolder>) {
@@ -329,7 +341,7 @@ pub fn recent_user_folders(projects_root: &Path) -> Vec<RecentFolder> {
             // Only the newest few: a folder used only by plugin automation lately isn't one the user picks.
             files.into_iter().take(5).find_map(|(updated_ms, f)| user_session_cwd(&f, &name).map(|path| RecentFolder { path, updated_ms }))
         })
-        .filter(|r| !is_temp(&r.path))
+        .filter(|r| !is_temp(&r.path) && !is_agent_folder(&r.path))
         .collect();
     found.sort_by_key(|r| std::cmp::Reverse(r.updated_ms));
     keep_newest_per_folder(&mut found);
@@ -400,7 +412,7 @@ pub struct FolderSessions {
 }
 
 /// Every folder with user sessions, across all project directories, most recently used first. A session is counted once
-/// by its id, even where a copy of it is in another directory (see relocate::ready_session). Temp folders are left out.
+/// by its id, even where a copy of it is in another directory (see relocate::ready_session). Temp folders and agents' (see is_agent_folder) are left out.
 pub fn session_folders(projects_root: &Path) -> Vec<FolderSessions> {
     let Ok(dirs) = std::fs::read_dir(projects_root) else { return vec![] };
     let mut by_folder: HashMap<String, HashMap<String, u64>> = HashMap::new();
@@ -412,7 +424,7 @@ pub fn session_folders(projects_root: &Path) -> Vec<FolderSessions> {
     }
     let mut folders: Vec<FolderSessions> = by_folder
         .into_iter()
-        .filter(|(path, _)| !is_temp(path))
+        .filter(|(path, _)| !is_temp(path) && !is_agent_folder(path))
         .map(|(path, ids)| FolderSessions {
             exists: Path::new(&path).is_dir(),
             sessions: ids.len(),
@@ -639,6 +651,38 @@ mod tests {
         assert_eq!(recent[0].updated_ms, 2_000_000);
         assert_eq!(recent_folders(root.path(), 1).len(), 1);
         assert!(recent_folders(&root.path().join("missing"), 10).is_empty());
+    }
+
+    #[test]
+    fn an_agents_worktree_is_not_a_recent_folder_or_a_session_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let session = |cwd: &str, secs: u64| {
+            let dir = root.path().join(encode_folder(Path::new(cwd)));
+            std::fs::create_dir_all(&dir).unwrap();
+            let p = dir.join(format!("s{secs}.jsonl"));
+            std::fs::write(&p, rec(json!({"type": "user", "cwd": cwd, "entrypoint": "sdk-cli", "message": {"role": "user", "content": "hi"}}))).unwrap();
+        };
+        let worker = "/Users/me/Library/Application Support/io.github.alyakan.lantern/worktrees/lantern/fix-w3";
+        let subagent = "/Users/me/dev/lantern/.claude/worktrees/agent-a1b2";
+        session(worker, 1);
+        session(subagent, 2);
+        session("/Users/me/dev/lantern", 3);
+        let recent: Vec<String> = recent_user_folders(root.path()).into_iter().map(|r| r.path).collect();
+        assert_eq!(recent, vec!["/Users/me/dev/lantern".to_string()]);
+        let known: Vec<String> = session_folders(root.path()).into_iter().map(|f| f.path).collect();
+        assert_eq!(known, vec!["/Users/me/dev/lantern".to_string()]);
+    }
+
+    #[test]
+    fn agent_folders_are_found_by_their_path() {
+        assert!(is_agent_folder("/Users/me/Library/Application Support/io.github.alyakan.lantern/worktrees/lantern/fix-w3"));
+        assert!(is_agent_folder("/Users/me/Library/Application Support/io.github.alyakan.lantern/worktrees/lantern/fix-w3/packages/app"));
+        assert!(is_agent_folder("/Users/me/dev/lantern/.claude/worktrees/agent-a1b2"));
+        // Other folders named "worktrees", and a project that only has "worktrees" in a name, are the user's own.
+        assert!(!is_agent_folder("/Users/me/dev/worktrees/lantern"));
+        assert!(!is_agent_folder("/Users/me/dev/lantern-worktrees/app"));
+        assert!(!is_agent_folder("/Users/me/Library/Application Support/io.github.alyakan.lantern"));
+        assert!(!is_agent_folder("/Users/me/dev/lantern"));
     }
 
     #[test]

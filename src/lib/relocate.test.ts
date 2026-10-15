@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FOLDER_RECORDS, LAST_FOLDER, NOT_FOLDER_KEYED, OPEN_CHATS, migrateFolderState, movedNote, withMovedNote, type KeyValueStore } from "./relocate";
+import { FOLDER_RECORDS, LAST_FOLDER, NOT_FOLDER_KEYED, OPEN_CHATS, migrateFolderState, movedNote, splitPath, withMovedNote, type KeyValueStore } from "./relocate";
 import { initialState, reducer } from "../store";
 
 /** An in-memory localStorage: the keys and values as they'd be saved. */
@@ -135,5 +135,15 @@ describe("the keys the app writes", () => {
     for (const key of [...FOLDER_RECORDS, LAST_FOLDER]) expect(saved, key).toContain(key);
     expect(chatKeys).toEqual([OPEN_CHATS]);
     for (const key of NOT_FOLDER_KEYED) expect(saved, key).toContain(key);
+  });
+});
+
+describe("splitPath", () => {
+  it("splits a path into its folder and its last name, which a long path keeps", () => {
+    expect(splitPath("/Users/you/dev/app")).toEqual(["/Users/you/dev/", "app"]);
+    expect(splitPath("/Users/you/dev/app/")).toEqual(["/Users/you/dev/", "app"]);
+    expect(splitPath("/app")).toEqual(["/", "app"]);
+    expect(splitPath("/")).toEqual(["/", ""]);
+    expect(splitPath("app")).toEqual(["", "app"]);
   });
 });
