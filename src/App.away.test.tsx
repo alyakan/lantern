@@ -50,7 +50,7 @@ describe("keeping the Mac awake", () => {
 
   it("says so, and tells the backend, when the setting is turned off in Settings", async () => {
     const calls = await launch();
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Settings/ }));
     const box = await screen.findByRole("checkbox", { name: "Keep my Mac awake while Claude works" });
     expect(box).toBeChecked();
     fireEvent.click(box);
