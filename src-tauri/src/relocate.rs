@@ -946,7 +946,7 @@ mod tests {
     #[test]
     fn the_same_named_folder_is_found_in_every_place_it_was_newest_first() {
         // Inside the crate's target dir: a temp dir's path is a scratch place, which the listing leaves out.
-        let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
+        let work = tempfile::tempdir_in(crate::scratch_dir()).unwrap();
         let w = work.path();
         let (dest, old, laptop, upper, unrelated) = (w.join("projects/acme-api"), w.join("old/acme-api"), w.join("laptop/acme-api"), w.join("src/ACME-API"), w.join("src/web"));
         for d in [&dest, &old, &upper, &unrelated] {
@@ -977,7 +977,7 @@ mod tests {
 
     #[test]
     fn the_places_are_found_from_real_transcripts_and_a_copy_counts_once() {
-        let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
+        let work = tempfile::tempdir_in(crate::scratch_dir()).unwrap();
         let (w, projects) = (work.path(), work.path().join("projects"));
         let (dest, same_case, gone, alias, web) = (w.join("now/acme-api"), w.join("src/ACME-API"), w.join("laptop/acme-api"), w.join("before/old-name"), w.join("src/web"));
         for d in [&dest, &same_case, &web] {
@@ -1012,7 +1012,7 @@ mod tests {
 
     #[test]
     fn the_destination_is_never_listed_not_even_through_a_link() {
-        let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
+        let work = tempfile::tempdir_in(crate::scratch_dir()).unwrap();
         let (dest, link) = (work.path().join("projects/acme-api"), work.path().join("links/acme-api"));
         std::fs::create_dir_all(&dest).unwrap();
         std::fs::create_dir_all(link.parent().unwrap()).unwrap();

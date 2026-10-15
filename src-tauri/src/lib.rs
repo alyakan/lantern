@@ -58,6 +58,13 @@ pub struct AppState {
     agent_limit: std::sync::atomic::AtomicUsize,
 }
 
+/// Where a test makes folders that must not be in the system temp dir (which recent folders leave out): the target dir
+/// cargo builds into, wherever that is (a worktree may build into another checkout's).
+#[cfg(test)]
+pub(crate) fn scratch_dir() -> std::path::PathBuf {
+    std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/target")), std::path::PathBuf::from)
+}
+
 /// The user's limit on agents running at once until the window says otherwise, and the range it may be set in.
 const DEFAULT_AGENT_LIMIT: usize = 3;
 const AGENT_LIMITS: std::ops::RangeInclusive<usize> = 1..=orchestra::MAX_WORKERS;
