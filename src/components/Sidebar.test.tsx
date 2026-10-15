@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { Sidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX } from "./Sidebar";
+import { Sidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX, sidebarMemory } from "./Sidebar";
 import type { ProjectOpen, SidebarChat } from "../lib/sidebar";
 
 const LANTERN = "/work/lantern";
@@ -70,6 +70,21 @@ const project = (name: string) => screen.getByRole("region", { name });
 beforeEach(() => localStorage.clear());
 
 describe("the sidebar's projects", () => {
+  it("shown again (as each peek is), starts from what it listed last instead of empty, and reads it all again behind it", async () => {
+    const memory = sidebarMemory();
+    const first = setup({ memory });
+    await waitFor(() => expect(screen.getAllByRole("region")).toHaveLength(3));
+    await waitFor(() => expect(within(project("lantern")).getByText("Map tab layout")).toBeInTheDocument());
+    first.unmount();
+    // The reads of the second one never finish, so what it shows can only be what the first listed.
+    const pending = () => new Promise<never>(() => {});
+    const reread = vi.fn(pending);
+    setup({ memory, loadRecent: pending, loadSessions: reread });
+    expect(screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"))).toEqual(["lantern", "network-monitor", "lumiform-ios"]);
+    expect(within(project("lantern")).getByText("Map tab layout")).toBeInTheDocument();
+    expect(reread).toHaveBeenCalledWith(LANTERN);
+  });
+
   it("has one group per project: the one with a chat open first and expanded, the other recent folders after it and collapsed", async () => {
     setup();
     await waitFor(() => expect(screen.getAllByRole("region")).toHaveLength(3));
