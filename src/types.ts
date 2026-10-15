@@ -89,6 +89,8 @@ export type UiEvent =
   | { kind: "merge_proposed"; worker: string; name: string; branch: string; into: string; summary: string; commits: number; files: { path: string; added: number; removed: number }[]; uncommitted: number; loose: string[] }
   /** How that ended: "merged" (detail: the branch merged into), "conflicts" (the files), "declined", "failed" (why), or
    * "changed" (what changed since it was proposed: nothing was merged and the proposal is gone). */
+  /** The subscription's five-hour window (the account's, whichever chat says): `used` 0–1, `resets_at` unix seconds. */
+  | { kind: "plan_usage"; used: number; resets_at: number | null; status: string }
   | { kind: "merge_resolved"; worker: string; outcome: "merged" | "conflicts" | "declined" | "failed" | "changed"; detail: string }
   | { kind: "unknown"; raw: unknown }
   | { kind: "parse_error"; line: string };

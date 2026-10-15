@@ -171,6 +171,9 @@ pub enum UiEvent {
     /// branch or its loose files are no longer what the user was shown, so the proposal is gone), with the detail (the
     /// branch merged into, the conflicting files, or why it failed or what changed).
     MergeResolved { worker: String, outcome: String, detail: String },
+    /// The subscription's five-hour window: `used` from 0 to 1, when it resets (unix seconds), and the CLI's status for it
+    /// ("allowed", "allowed_warning", "rejected"). For the whole account, so every chat reports the same.
+    PlanUsage { used: f64, resets_at: Option<u64>, status: String },
     Unknown { raw: Value },
     ParseError { line: String },
 }

@@ -1,3 +1,4 @@
+import { PlanMeter } from "./PlanMeter";
 import { useEffect, useRef, useState } from "react";
 import type { BackgroundTask, Status } from "../store";
 import { elapsed } from "../lib/time";
@@ -302,6 +303,7 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
         {menu === "folders" && onPickFolder && <FolderMenu folder={folder} recent={recent} onPick={onPickFolder} onBrowse={onOpenFolder} onClose={close} onKeyDown={folderKeys.onKeyDown} relocate={relocate} />}
       </div>
       <div className="topbar-side end" data-tauri-drag-region>
+        <PlanMeter />
         <div className="toolbar-group">
           {onOpenSettings && (
             <button className="icon" aria-label="Settings" title="Settings (⌘,)" onClick={onOpenSettings}>

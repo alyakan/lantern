@@ -1,3 +1,4 @@
+import { PlanMeter } from "./PlanMeter";
 import { memo, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
   bounds,
@@ -18,9 +19,9 @@ import {
   type View,
 } from "../lib/canvas";
 import { useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
-import { lostText, money, nodeStatus, readyToMerge, STATUS_LABEL, summaryLine, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
+import { lostText, nodeStatus, readyToMerge, STATUS_LABEL, summaryLine, usage, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
 import { useDismiss } from "../lib/useDismiss";
-import { totalCost, type State } from "../store";
+import { totalCost, totalTokens, type State } from "../store";
 import type { CloseAgreed, CloseCheck } from "../types";
 import { AgentMenu, type AgentMenuItem } from "./AgentMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -125,7 +126,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
   // A worker whose branch the main agent has asked the user to merge: that is what it is waiting on, and it's theirs to answer.
   const ready = !!parent && !!owner?.proposals.some((p) => p.worker === slot && p.status === "open");
   const label = ready && status === "idle" ? "Ready to merge" : STATUS_LABEL[status];
-  const spent = state ? money(totalCost(state)) : "";
+  const spent = state ? usage(totalCost(state), totalTokens(state)) : "";
   return (
     <section
       className={`canvas-node ${role} ${status}${ready ? " ready" : ""}${focused ? " focused" : ""}${folded ? " folded" : ""}`}
@@ -189,7 +190,11 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
     if (states[i]) bySlot[n.slot] = states[i]!;
   });
   const ready = readyToMerge(nodes, bySlot);
-  const total = money(Object.values(bySlot).reduce((sum, s) => sum + totalCost(s), 0));
+  const all = Object.values(bySlot);
+  const total = usage(
+    all.reduce((sum, s) => sum + totalCost(s), 0),
+    all.reduce((sum, s) => sum + totalTokens(s), 0),
+  );
   const main = nodes.find((n) => n.role === "main");
   const mainState = main ? bySlot[main.slot] : undefined;
   const canAsk = !!main && !!mainState && (mainState.status === "idle" || mainState.status === "running") && nodes.some((n) => n.role === "worker");
@@ -215,7 +220,7 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
               if (!s) return null;
               const status = nodeStatus(s);
               const label = ready.has(n.slot) && status === "idle" ? "Ready to merge" : STATUS_LABEL[status];
-              const spent = money(totalCost(s));
+              const spent = usage(totalCost(s), totalTokens(s));
               return (
                 <li key={n.slot}>
                   <button
@@ -274,6 +279,7 @@ function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onSho
         <button className="canvas-fit" aria-label="Fit everything" title="Fit everything in view" onClick={onFit}>
           Fit
         </button>
+        <PlanMeter />
         <Team nodes={nodes} onGoTo={onGoTo} />
         <HiddenAgents nodes={nodes.filter((n) => n.hidden)} onShow={onShow} />
         {main && <NewAgent main={main} />}

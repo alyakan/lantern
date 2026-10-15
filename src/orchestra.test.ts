@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialState, reducer, totalCost, type Action, type State } from "./store";
+import { initialState, reducer, totalCost, totalTokens, type Action, type State } from "./store";
 import { chatsReducer, initialChats, WAKE_LIMIT, wakesPaused, wakesToSend, type Chats } from "./sessions";
 import type { UiEvent } from "./types";
 
@@ -206,6 +206,19 @@ describe("what a chat has cost", () => {
     expect(totalCost(s)).toBeCloseTo(0.4);
     s = ev(s, done(0.35));
     expect(totalCost(s)).toBeCloseTo(0.45);
+  });
+
+  it("counts tokens across restarts as it does cost", () => {
+    const tok = (n: number): UiEvent => ({ kind: "turn_done", is_error: false, result: null, cost_usd: null, duration_ms: null, auth_hint: false, denied: 0, context_window: null, session_tokens: n } as UiEvent);
+    let s = ev(main, tok(1000));
+    s = ev(s, tok(3000));
+    // A new claude starts its count again: what the old one used is kept.
+    s = ev(s, tok(500));
+    expect(totalTokens(s)).toBe(3500);
+    s = reducer(s, { type: "restarting" });
+    s = ev(s, tok(200));
+    expect(totalTokens(s)).toBe(3700);
+    expect(totalTokens(reducer(s, { type: "folder_opened", folder: "/q" }))).toBe(0);
   });
 
   it("is left alone by a turn that reports no cost, and starts over with a new conversation", () => {

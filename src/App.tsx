@@ -1,3 +1,4 @@
+import { setPlanUsage } from "./lib/planUsage";
 import { pushAgentLimit } from "./lib/agentLimit";
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
@@ -251,7 +252,11 @@ export default function App() {
     const batch = batchPerFrame<{ slot: string; event: UiEvent }>((items) => {
       for (const { slot, event } of items) dispatchChats({ type: "in", slot, action: { type: "ui_event", event } });
     });
-    const unlisten = api.onUiEvent((slot, event) => batch.push({ slot, event }));
+    const unlisten = api.onUiEvent((slot, event) => {
+      // The plan's usage is the account's, not the chat's: kept once, for the top bar and the canvas.
+      if (event.kind === "plan_usage") setPlanUsage({ used: event.used, resetsAt: event.resets_at });
+      else batch.push({ slot, event });
+    });
     locate(null);
     return () => {
       batch.flush();

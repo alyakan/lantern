@@ -3,7 +3,6 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 pub const OUTPUT_LIMIT: usize = 4000;
-const IGNORED_TYPES: &[&str] = &["rate_limit_event"];
 const EDIT_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit"];
 
 /// Turns claude's stream-json output, one line at a time, into UI events. Claude Code's alone: it also reads Claude's
@@ -112,7 +111,7 @@ impl StreamParser {
             "control_response" => initialize_events(&v),
             // `/clear` started a fresh conversation in the same process.
             "conversation_reset" => vec![UiEvent::ConversationReset],
-            t if IGNORED_TYPES.contains(&t) => vec![],
+            "rate_limit_event" => plan_usage(&v).into_iter().collect(),
             _ => vec![UiEvent::Unknown { raw: v }],
         }
     }
@@ -398,6 +397,15 @@ fn result_event(v: &Value, turn: Option<&Turn>, session: &Totals) -> UiEvent {
         // Subagents may run on other models; the largest window is the main conversation's.
         context_window: v["modelUsage"].as_object().and_then(|m| m.values().filter_map(|u| u["contextWindow"].as_u64()).max()),
     }
+}
+
+/// How much of the plan's five-hour window is used, as a `rate_limit_event` says (the subscription's limit, shared by every
+/// chat and team). None when it doesn't say.
+fn plan_usage(v: &Value) -> Option<UiEvent> {
+    let info = &v["rate_limit_info"];
+    let window = &info["unifiedWindows"]["five_hour"];
+    let used = window["utilization"].as_f64()?;
+    Some(UiEvent::PlanUsage { used, resets_at: window["resetsAt"].as_u64().or(info["resetsAt"].as_u64()), status: info["status"].as_str().unwrap_or("").to_string() })
 }
 
 /// What an `initialize` reply offers: the slash commands (built-ins, custom commands, skills) and the models.
@@ -963,5 +971,25 @@ mod tests {
         assert_eq!(summarize("mcp__lantern__review_target", &serde_json::json!({"pr": 512})), "pr=512 base=auto");
         assert_eq!(summarize("mcp__lantern__review_target", &serde_json::json!({"pr": null, "base": "feat/core"})), "pr=none base=feat/core");
         assert_eq!(summarize("mcp__lantern__steps_guide", &serde_json::json!({"flavour": "Review"})), "Review");
+    }
+
+    #[test]
+    fn the_plans_five_hour_window_is_read_from_a_rate_limit_event() {
+        let mut p = StreamParser::default();
+        let ev = p.parse_line(r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1792066200,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":0.16,"resetsAt":1792066200},"seven_day":{"utilization":0.12,"resetsAt":1792393200}}}}"#);
+        assert!(matches!(ev.as_slice(), [UiEvent::PlanUsage { used, resets_at: Some(1792066200), status }] if (*used - 0.16).abs() < 1e-9 && status == "allowed"), "{ev:?}");
+        // One that doesn't say how full the window is shows nothing.
+        assert!(p.parse_line(r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}"#).is_empty());
+    }
+
+    /// An advisor's calls are billed to its own model: claude's per-model usage and total cost count them, so the chat's
+    /// cost and tokens do too (the top-level `usage` doesn't, and isn't read for them).
+    #[test]
+    fn an_advisors_calls_count_in_the_chats_cost_and_tokens() {
+        let mut p = StreamParser::default();
+        let done = p.parse_line(r#"{"type":"result","total_cost_usd":0.1074,"usage":{"input_tokens":4,"cache_creation_input_tokens":33341,"cache_read_input_tokens":60623,"output_tokens":30,"iterations":[{"type":"message","input_tokens":2},{"type":"advisor_message","model":"claude-sonnet-5-5","input_tokens":48473,"output_tokens":320}]},"modelUsage":{"claude-haiku-5-5":{"costUSD":0.0073,"inputTokens":4,"outputTokens":30,"cacheReadInputTokens":60623,"cacheCreationInputTokens":33341},"claude-sonnet-5-5":{"costUSD":0.1001,"inputTokens":48473,"outputTokens":320,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}"#);
+        let UiEvent::TurnDone { session_cost_usd, session_tokens, .. } = done.last().unwrap() else { panic!("{done:?}") };
+        assert_eq!(*session_cost_usd, Some(0.1074));
+        assert_eq!(*session_tokens, 4 + 30 + 60623 + 33341 + 48473 + 320);
     }
 }

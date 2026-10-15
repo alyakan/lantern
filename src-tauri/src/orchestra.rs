@@ -20,6 +20,20 @@ use std::time::{Duration, Instant};
 
 /// Workers one main agent may have going at once (stopped and ended ones don't count).
 pub const MAX_WORKERS: usize = 6;
+/// How full the plan's five-hour window may be before no more workers are started: past it, the workers already going
+/// would run out of plan and leave their work half done.
+pub const PLAN_STOP: f64 = 0.95;
+
+/// " (it resets in 42 min)", from a reset time in unix seconds; nothing when it isn't known or is past.
+fn resets_in(at: Option<u64>) -> String {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    match at.and_then(|at| at.checked_sub(now)) {
+        Some(left) if left >= 3600 => format!(" (it resets in {}h {}min)", left / 3600, left % 3600 / 60),
+        Some(left) => format!(" (it resets in {} min)", left.div_ceil(60)),
+        None => String::new(),
+    }
+}
+
 /// The model a Claude worker runs on when spawn_agent names none: the main agent's (often Opus) is more than most
 /// workers' jobs need, and every worker spends the user's plan.
 pub const WORKER_MODEL: &str = "sonnet";
@@ -185,6 +199,8 @@ struct Inner {
     /// Each main agent's slot, with the user's direct messages to its workers it hasn't been told of.
     mains: HashMap<String, Vec<String>>,
     next: u64,
+    /// The plan's five-hour window as a chat last reported it: how much is used (0 to 1), and when it resets.
+    plan: Option<(f64, Option<u64>)>,
 }
 
 pub struct Orchestra {
@@ -474,6 +490,9 @@ impl Orchestra {
         // Its worktree is filled in once there is one.
         let id = {
             let mut inner = self.inner.lock().unwrap();
+            if let Some((used, resets)) = inner.plan.filter(|(used, _)| *used >= PLAN_STOP) {
+                return Err(format!("The plan's five-hour usage is at {:.0}%{}. Don't start more workers now: wait for it to reset, or ask the user.", used * 100.0, resets_in(resets)));
+            }
             let live = inner.workers.values().filter(|w| w.parent == main && w.status.live()).count();
             if live >= MAX_WORKERS {
                 return Err(format!("{live} workers are already going (the most is {MAX_WORKERS}). Wait for one to finish, or stop_agent one."));
@@ -1017,6 +1036,11 @@ impl Orchestra {
     /// main agent should hear of become wake-ups.
     pub fn observe(self: &Arc<Self>, slot: &str, ev: &UiEvent) {
         let mut inner = self.inner.lock().unwrap();
+        // The plan is the account's, whichever chat said how full it is.
+        if let UiEvent::PlanUsage { used, resets_at, .. } = ev {
+            inner.plan = Some((*used, *resets_at));
+            return;
+        }
         let Some(w) = inner.workers.get_mut(slot) else { return };
         let (id, name, main) = (slot.to_string(), w.name.clone(), w.parent.clone());
         let mut wake: Option<String> = None;
@@ -2342,5 +2366,19 @@ mod tests {
         // The user starting one is told to close one instead.
         let err = o.spawn_for_user("s1", "x", None, "shared", None).await.unwrap_err();
         assert!(err.contains("your limit in Settings") && err.contains("or close one"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn no_worker_is_started_once_the_plan_is_nearly_used_up() {
+        let (_h, o, _r, _w) = setup();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        // Any chat may report it, not only one of the team's.
+        o.observe("s7", &UiEvent::PlanUsage { used: 0.94, resets_at: Some(now + 1800), status: "allowed_warning".into() });
+        spawn(&o, "fits").await;
+        o.observe("s7", &UiEvent::PlanUsage { used: 0.96, resets_at: Some(now + 1800), status: "allowed_warning".into() });
+        let err = call(&o, "spawn_agent", json!({"name": "late", "brief": "y"})).await.unwrap_err();
+        assert_eq!(err, "The plan's five-hour usage is at 96% (it resets in 30 min). Don't start more workers now: wait for it to reset, or ask the user.");
+        o.observe("s7", &UiEvent::PlanUsage { used: 0.1, resets_at: None, status: "allowed".into() });
+        assert!(call(&o, "spawn_agent", json!({"name": "after", "brief": "y"})).await.is_ok());
     }
 }
