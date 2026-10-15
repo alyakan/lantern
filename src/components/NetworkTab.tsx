@@ -6,6 +6,11 @@ import type { NetworkDetail, NetworkItem, NetworkLink, NetworkView, NetworkWatch
 import { JsonTree } from "./JsonTree";
 import { Md } from "./Md";
 import { Fold } from "./TestsTab";
+import { ExternalLink } from "./ExternalLink";
+import { TabEmpty } from "./TabEmpty";
+
+const NETWORK_MONITOR_URL = "https://github.com/alyakan/network-monitor";
+
 
 /** The folder's Network tab data, loaded when the folder opens and again whenever the backend says it changed. */
 export function useNetworkView(folder: string | null): NetworkView | null {
@@ -24,6 +29,26 @@ export function useNetworkView(folder: string | null): NetworkView | null {
     };
   }, [folder]);
   return view;
+}
+
+/**
+ * The Network tab before there is anything to list: what Network Monitor is and how requests get here, or, when Network
+ * Monitor is running and nothing is watched yet, how to add a watch.
+ */
+export function NetworkEmpty({ link }: { link: NetworkLink | null }) {
+  const running = link?.status === "connected";
+  return (
+    <TabEmpty title="Network">
+      <p>
+        {running
+          ? "Network Monitor is running, but nothing is watched yet. Tell Claude which requests matter (for example, “watch the request that loads the orders list”) and it saves a watch; matching requests show up here, and Claude can summarize their responses."
+          : "Network Monitor is a Mac app that records the HTTP traffic of your app. Route your app's traffic through it, then tell Claude which requests matter: Claude saves a watch, and the matching requests show up here, with summaries of their responses."}
+      </p>
+      <p>
+        <ExternalLink href={NETWORK_MONITOR_URL}>github.com/alyakan/network-monitor</ExternalLink>
+      </p>
+    </TabEmpty>
+  );
 }
 
 interface Props {

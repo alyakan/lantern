@@ -25,7 +25,7 @@ import { latestTurnOf, sinceLabel, withRevertNote, type RevertRequest } from "./
 import { withSkillNote } from "./lib/skillNote";
 import { agentTree, usesAgents } from "./lib/agents";
 import { agentGraph } from "./lib/agentGraph";
-import { BUILT_IN, CUSTOM_HARNESS, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
+import { BUILT_IN, CUSTOM_HARNESS, customOf, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
 import type { CloseAgreed, McpServer, MovedFolder, NewRule, NewWorker, OpenPr, RelocationEntry, SkillEntry, UpdateInfo } from "./types";
@@ -703,7 +703,7 @@ export default function App() {
     const chat = chats.slots[slot];
     // Claude's last reply looked like a page Lantern couldn't read: it hears so with this message, and the headings.
     const unread = chat && chat.mode === "steps" && !pick ? pageNote(chat.items, chatFlavour(chat), guides) : null;
-    // The latest Architecture Overview's map doesn't read, so the Map tab can't draw it: said once for each Overview.
+    // The latest Architecture Overview's map doesn't read, so the Plan tab can't draw it: said once for each Overview.
     const map = chat && chat.mode === "steps" ? architectureMap(pagesOf(chat.items)) : null;
     const broken = map?.kind === "broken" && mapNoted.current[slot] !== map.page ? mapNote(map) : null;
     if (map?.kind === "broken" && broken) mapNoted.current[slot] = map.page;
@@ -878,7 +878,7 @@ export default function App() {
   };
   // Changing model or effort on a chat with a preset makes it Custom: that preset with the change.
   const customize = (patch: Partial<Harness>) => {
-    const custom: Harness = { ...harnessOf(active), ...patch, id: CUSTOM_HARNESS, name: "Custom" };
+    const custom = customOf(harnessOf(active), patch);
     setSavedPresets([...savedPresets.filter((h) => h.id !== CUSTOM_HARNESS), custom]);
     switchHarness(custom);
   };
@@ -1312,7 +1312,7 @@ export default function App() {
   const treeOpts = { live: state.status === "running" || state.backgroundTasks.length > 0, folder: state.folder, mainModel: state.model, effort: settingsFor(active).effort, advisor: settingsFor(active).advisor, background: state.backgroundRuns };
   const tree = agentTree(state.items, treeOpts);
   const graph = useMemo(() => agentGraph(state.items, treeOpts), [state.items, state.backgroundRuns, treeOpts.live, treeOpts.mainModel, treeOpts.advisor]);
-  // The Summary tab: the plan so far, from the same pages the Step-by-step view shows. A row asks the view to open its
+  // The Plan tab: the plan so far, from the same pages the Step-by-step view shows. A row asks the view to open its
   // page; the chat it was for is kept so a request can't land in another one.
   const stepPages = useMemo(() => (stepsView ? pagesOf(state.items) : null), [stepsView, state.items]);
   const stepsSummary = useMemo(() => {
@@ -1321,7 +1321,7 @@ export default function App() {
   }, [stepPages]);
   const [pageJump, setPageJump] = useState<{ slot: string; page: string; key: number } | null>(null);
   const openPageIn = (slot: string) => (page: string) => setPageJump((j) => ({ slot, page, key: (j?.key ?? 0) + 1 }));
-  // The Map tab: the latest Architecture Overview's map, lit for the page on screen. A new Overview (not one already
+  // The Plan tab's map: the latest Architecture Overview's map, lit for the page on screen. A new Overview (not one already
   // there when the chat was opened) brings the tab up.
   const archMap = useMemo(() => (stepPages ? architectureMap(stepPages) : null), [stepPages]);
   const [shownPage, setShownPage] = useState<{ slot: string; page: string } | null>(null);
@@ -1338,7 +1338,7 @@ export default function App() {
     archSeen.current = { slot: active, page };
     if (seen?.slot === active && page && page !== seen.page) setArchOpenKey((k) => k + 1);
   }, [active, archMap?.page]);
-  // A box a part's chip named: the Map comes up with it lit.
+  // A box a part's chip named: the Plan tab comes up on the map with it lit.
   const [archBox, setArchBox] = useState<{ id: string; key: number } | null>(null);
   const openArchitecture = {
     open: (box?: string) => {

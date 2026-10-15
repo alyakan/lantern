@@ -490,16 +490,17 @@ button.ghost.context-compact, button.ghost.context-clear { height: 20px; padding
 /* The composer sits at the bottom, so the model menu opens upwards. */
 .model-menu { bottom: calc(100% + 6px); left: -6px; width: 400px; max-width: calc(100vw - 48px); max-height: 420px; overflow-y: auto; }
 .model-menu .menu-row-title { flex: none; }
-.effort-menu { width: 320px; }
 /* The mode menu opens up from the row under the chat box. */
 .mode-menu { width: 420px; left: -6px; bottom: calc(100% + 6px); }
 .mode-menu .menu-row { align-items: flex-start; gap: 10px; padding: 7px 8px; }
 .mode-icon { flex: none; display: inline-flex; margin-top: 3px; color: var(--muted); }
 .mode-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .mode-hint { font-size: calc(11.5px * var(--font-scale)); line-height: 1.4; color: var(--muted); white-space: normal; }
-.effort-menu .menu-row { align-items: center; }
+.effort-row { align-items: center; }
 .effort-bars { flex: none; }
-.composer-footer .model-picker + .model-picker { margin-left: 4px; }
+.chev.back { transform: rotate(135deg); }
+.menu-note { padding: 4px 8px 6px; font-size: calc(11.5px * var(--font-scale)); line-height: 1.4; color: var(--muted); }
+.customize-menu .menu-row { align-items: center; }
 .model-menu .menu-row-meta { flex: 1 1 auto; min-width: 0; justify-content: flex-end; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; text-align: right; }
 .send { width: 26px; height: 26px; flex: none; padding: 0; border-radius: 50%; border: none; background: none; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
 .send:not(:disabled) { background: var(--text); color: var(--bg); }
@@ -1316,7 +1317,6 @@ button.harness-restore { align-self: flex-start; border: none; background: none;
 .tone-haiku { --tone: var(--tone-haiku); }
 .tone-fable { --tone: var(--tone-fable); }
 .tone-none { --tone: var(--tone-none); }
-.agents-empty { padding: 40px 28px; text-align: center; font-size: calc(13px * var(--font-scale)); line-height: 1.6; color: var(--muted); }
 .agents { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; padding: 14px 16px 12px; overflow-y: auto; }
 .agents-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .agents-state { flex: none; padding: 1px 8px; border-radius: 999px; background: var(--bg-subtle); font-size: calc(11px * var(--font-scale)); font-weight: 600; color: var(--muted); }
@@ -1873,3 +1873,15 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .pr-number-field { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .pr-number-field input { width: 7em; }
 .start-explain { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: calc(12.5px * var(--font-scale)); color: var(--text); }
+
+/* A side-panel tab with nothing to show yet: its name and what will show there. */
+.tab-empty { padding: 40px 28px; text-align: center; font-size: calc(13px * var(--font-scale)); line-height: 1.6; color: var(--muted); }
+.tab-empty p { margin: 0 0 10px; }
+.tab-empty-title { margin-bottom: 8px; font-weight: 600; color: var(--text-2); }
+.tab-empty a { color: var(--text-2); text-decoration: underline; }
+/* Plan: Map and Plan, one at a time, in a Design chat. */
+.plan-bar { gap: 2px; }
+.plan-toggle { height: 20px; padding: 0 9px; border: none; border-radius: 999px; background: none; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); }
+.plan-toggle:hover:not(.active) { background: var(--bg-hover); color: var(--text-2); }
+.plan-toggle.active { background: var(--seg-thumb); color: var(--text); box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.18), 0 0 0 0.5px rgba(0, 0, 0, 0.06); }
+.customize-menu { max-height: min(560px, calc(100vh - 140px)); }

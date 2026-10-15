@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { BUILT_IN, DEFAULT_HARNESS, FAMILIES, FAMILY_LABEL, advisorsFor, familyOf, summary, usesFable, validAdvisor, type Harness } from "../lib/harness";
-import { EFFORT_LEVELS, effortLabel } from "./EffortPicker";
+import { EFFORT_LEVELS, effortLabel } from "../lib/effort";
 
 export interface HarnessSettingsProps {
   /** Every preset but Default, as saved (built-ins as edited, then your own). */

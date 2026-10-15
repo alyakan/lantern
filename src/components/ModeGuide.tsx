@@ -141,7 +141,7 @@ export const GUIDE: Record<GuideKey, About> = {
       "For a PR or a fix it reads the code or the diff; for a feature that isn't built yet it proposes the design and says so",
     ],
     you: [
-      "The map is in the side panel's Map tab: the part you're on is lit, hovering a box says what it does, and clicking one opens its page",
+      "The map is in the side panel's Plan tab: the part you're on is lit, hovering a box says what it does, and clicking one opens its page",
       "Agree with or reject each concern; Next sends your verdicts with it",
       "Drag the map to move it, pinch or ⌘-scroll to zoom, and Fit to see all of it again",
     ],

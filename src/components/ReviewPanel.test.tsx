@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ReviewPanel } from "./ReviewPanel";
+import { NetworkEmpty } from "./NetworkTab";
 import type { RevertControls } from "../lib/revert";
 
 vi.mock("./FullDiff", () => ({ default: ({ path }: { path: string }) => <div>diff of {path}</div> }));
@@ -153,29 +154,83 @@ describe("ReviewPanel", () => {
 });
 
 vi.mock("./SummaryTab", () => ({ SummaryTab: ({ summary, onOpenPage }: { summary: { headline: string | null; rows: { page: string }[] }; onOpenPage: (page: string) => void }) => <button onClick={() => onOpenPage(summary.rows[0].page)}>summary: {summary.headline}</button> }));
+vi.mock("./ArchitectureTab", () => ({ ArchitectureTab: () => <div>the map</div> }));
 
-describe("ReviewPanel's Summary tab", () => {
-  const summary = (onOpenPage = vi.fn()) => ({ slot: "s1", data: { headline: "Plan: 2 steps · 1 built", rows: [{ page: "p1" }] } as never, changed: [], running: false, onOpenPage });
-  const tabs = () => screen.getAllByRole("tab").map((t) => t.textContent);
+const summary = (onOpenPage = vi.fn()) => ({ slot: "s1", data: { headline: "Plan: 2 steps · 1 built", rows: [{ page: "p1" }] } as never, changed: [], running: false, onOpenPage });
+const architecture = (openKey = 0) => ({ map: {} as never, current: [], pageNames: {}, onOpenPage: vi.fn(), openKey });
+const tabs = () => screen.getAllByRole("tab").map((t) => t.textContent);
+const selected = () => screen.getAllByRole("tab").find((t) => t.getAttribute("aria-selected") === "true")?.textContent;
 
-  it("is a tab only when the chat has a plan to show, and opens a row's page", () => {
+describe("ReviewPanel's fixed tabs", () => {
+  it("always has Changes, Files, Plan, Activity, Tests and Network, in that order", () => {
+    localStorage.clear();
+    const { rerender } = render(<ReviewPanel {...base} selected={null} follow />);
+    expect(tabs()).toEqual(["Changes2", "Files", "Plan", "Activity", "Tests", "Network"]);
+    rerender(<ReviewPanel {...base} selected={null} follow summary={summary()} architecture={architecture()} />);
+    expect(tabs()).toEqual(["Changes2", "Files", "Plan", "Activity", "Tests", "Network"]);
+  });
+
+  it("Plan shows the plan and opens a row's page; it takes a click, so it doesn't take the pane over", () => {
     localStorage.clear();
     const onOpenPage = vi.fn();
-    const { rerender } = render(<ReviewPanel {...base} selected={null} follow />);
-    expect(tabs()).toEqual(["Changes2", "Files"]);
-    rerender(<ReviewPanel {...base} selected={null} follow summary={summary(onOpenPage)} />);
-    expect(tabs()).toEqual(["Changes2", "Files", "Summary"]);
-    // Showing it takes a click: it doesn't take the pane over when it first appears.
+    render(<ReviewPanel {...base} selected={null} follow summary={summary(onOpenPage)} />);
     expect(screen.queryByText(/Plan: 2 steps/)).toBeNull();
-    fireEvent.click(screen.getByRole("tab", { name: "Summary" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
     fireEvent.click(screen.getByText(/Plan: 2 steps/));
     expect(onOpenPage).toHaveBeenCalledWith("p1");
+    // No toggle without a map too.
+    expect(screen.queryByRole("group", { name: "Plan view" })).toBeNull();
+  });
+
+  it("Plan in a Design chat shows the map first, with a toggle to the plan", () => {
+    localStorage.clear();
+    render(<ReviewPanel {...base} selected={null} follow summary={summary()} architecture={architecture()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
+    expect(screen.getByText("the map")).toBeInTheDocument();
+    expect(screen.queryByText(/Plan: 2 steps/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Plan" }));
+    expect(screen.getByText(/Plan: 2 steps/)).toBeInTheDocument();
+    expect(screen.queryByText("the map")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Map" }));
+    expect(screen.getByText("the map")).toBeInTheDocument();
+    localStorage.clear();
+  });
+
+  it("opening the map brings Plan up on the map", () => {
+    localStorage.clear();
+    const { rerender } = render(<ReviewPanel {...base} selected={null} follow summary={summary()} architecture={architecture(0)} />);
+    expect(selected()).toBe("Changes2");
+    rerender(<ReviewPanel {...base} selected={null} follow summary={summary()} architecture={architecture(1)} />);
+    expect(selected()).toBe("Plan");
+    expect(screen.getByText("the map")).toBeInTheDocument();
+    localStorage.clear();
+  });
+
+  it("Plan in a chat with no plan says that Step by step chats show theirs here", () => {
+    localStorage.clear();
+    render(<ReviewPanel {...base} selected={null} follow />);
+    fireEvent.click(screen.getByRole("tab", { name: "Plan" }));
+    expect(screen.getByText(/Step by step chats show their plan here/)).toBeInTheDocument();
+    localStorage.clear();
+  });
+
+  it("Tests, Activity and Network each say what will show there instead of going away", () => {
+    localStorage.clear();
+    render(<ReviewPanel {...base} selected={null} follow />);
+    fireEvent.click(screen.getByRole("tab", { name: "Tests" }));
+    expect(screen.getByText("Test runs show here when Claude runs your tests.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
+    expect(screen.getByText("Each turn's subagents and tools show here.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Network" }));
+    expect(screen.getByText(/Network Monitor is a Mac app/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "github.com/alyakan/network-monitor" })).toHaveAttribute("href", "https://github.com/alyakan/network-monitor");
+    localStorage.clear();
   });
 
   it("moves between the tabs with the arrow keys, and each tab's panel is labelled by it", () => {
     localStorage.clear();
     render(<ReviewPanel {...base} selected={null} follow summary={summary()} />);
-    const [changes, files, summaryTab] = screen.getAllByRole("tab");
+    const [changes, files, , , , network] = screen.getAllByRole("tab");
     expect(changes).toHaveAttribute("tabindex", "0");
     expect(files).toHaveAttribute("tabindex", "-1");
     changes.focus();
@@ -184,16 +239,36 @@ describe("ReviewPanel's Summary tab", () => {
     expect(files).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel", { name: "Files" })).toBeInTheDocument();
     fireEvent.keyDown(files, { key: "End" });
-    expect(summaryTab).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tabpanel", { name: "Summary" })).toBeInTheDocument();
+    expect(network).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Network" })).toBeInTheDocument();
     localStorage.clear();
   });
 
-  it("falls back to Changes when the saved tab is Summary and this chat has none", () => {
-    localStorage.setItem("review.tab", JSON.stringify("summary"));
-    render(<ReviewPanel {...base} files={[]} selected={null} follow />);
-    expect(screen.getByRole("tab", { name: "Changes" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByText("No changes yet")).toBeInTheDocument();
+  it("a tab saved under an old name moves to its new one: Summary and Map to Plan, Agents to Activity", () => {
+    for (const [old, now] of [["summary", "Plan"], ["map", "Plan"], ["agents", "Activity"], ["tests", "Tests"], ["gone", "Changes2"]]) {
+      localStorage.setItem("review.tab", JSON.stringify(old));
+      const { unmount } = render(<ReviewPanel {...base} selected={null} follow />);
+      expect(selected()).toBe(now);
+      unmount();
+    }
+    // The saved name is rewritten, so it migrates once.
+    localStorage.setItem("review.tab", JSON.stringify("agents"));
+    render(<ReviewPanel {...base} selected={null} follow />);
+    expect(JSON.parse(localStorage.getItem("review.tab")!)).toBe("activity");
     localStorage.clear();
+  });
+});
+
+describe("NetworkEmpty", () => {
+  it("explains Network Monitor when it isn't running", () => {
+    render(<NetworkEmpty link={{ status: "not_running" } as never} />);
+    expect(screen.getByText(/Route your app's traffic through it/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /network-monitor/ })).toBeInTheDocument();
+  });
+
+  it("says how to add a watch when Network Monitor is running but nothing is watched", () => {
+    render(<NetworkEmpty link={{ status: "connected" } as never} />);
+    expect(screen.getByText(/Network Monitor is running, but nothing is watched yet/)).toBeInTheDocument();
+    expect(screen.getByText(/Tell Claude which requests matter/)).toBeInTheDocument();
   });
 });

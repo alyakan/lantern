@@ -9,13 +9,12 @@ import { describeCommands, replaceTrigger, sections as menuSections, triggerAt, 
 import { CompletionMenu, type McpIssue } from "./CompletionMenu";
 import { ArrowUpIcon, BranchIcon, FolderIcon, SparkIcon } from "./icons";
 import { ContextMeter } from "./ContextMeter";
-import { EFFORT_LEVELS, EffortPicker } from "./EffortPicker";
+import { EFFORT_LEVELS } from "../lib/effort";
 import { FolderPill, type RelocateMenu } from "./FolderPill";
 import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
 import type { Flavour } from "../lib/flavour";
 import type { Permissions, Workflow } from "../lib/workflow";
-import { ModelPicker } from "./ModelPicker";
-import { HarnessPicker } from "./HarnessPicker";
+import { ModelsPicker } from "./ModelsPicker";
 import type { Harness } from "../lib/harness";
 import type { OpenChat } from "./HistoryMenu";
 import { SessionPill } from "./SessionPill";
@@ -60,11 +59,11 @@ interface Props {
   queue?: { items: string[]; set: (next: string[]) => void };
   /** Context use and timing for the footer meter. */
   usage?: { used: number | null; window: number; lastTurnMs: number | null; actions?: { onCompact: () => void; onClear: () => void }; session?: { cost: number | null; tokens: number } };
-  /** The model chip becomes a picker: what the user chose (null = default) and how to change it. */
+  /** The Models chip: the model the user chose (null = default) and how to change it. */
   models?: { chosen: string | null; onChoose: (model: string | null) => void; defaultModel?: string | null; ids?: Record<string, string>; options?: ModelOption[] };
-  /** Thinking effort: the chosen level (null = default) and how to change it. */
+  /** Thinking effort, under the chip's Customize…: the chosen level (null = default) and how to change it. */
   effort?: { chosen: string | null; onChoose: (level: string | null) => void };
-  /** The chat's harness (which models do what) and the presets to switch to. */
+  /** The chat's harness (which models do what) and the presets the Models chip lists. */
   harness?: { presets: Harness[]; chosen: string; onChoose: (id: string) => void; onEdit?: () => void };
   /** What "/" offers: claude's slash commands and skills. */
   commands?: SlashCommand[];
@@ -525,7 +524,20 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           {terminal ? (
             <span className="terminal-hint">Claude sees the output with your next message · backspace to leave</span>
           ) : models ? (
-            <ModelPicker running={model ?? null} chosen={models.chosen} defaultModel={models.defaultModel} ids={models.ids} options={models.options} onChoose={models.onChoose} disabled={busy} />
+            <ModelsPicker
+              running={model ?? null}
+              chosen={models.chosen}
+              onChoose={models.onChoose}
+              defaultModel={models.defaultModel}
+              ids={models.ids}
+              options={models.options}
+              effort={effort && effortLevels.length > 0 ? { ...effort, levels: effortLevels } : undefined}
+              presets={harness?.presets}
+              preset={harness?.chosen}
+              onPreset={harness?.onChoose}
+              onEdit={harness?.onEdit}
+              disabled={busy}
+            />
           ) : (
             model && (
               <span className="composer-item" title="Model">
@@ -534,8 +546,6 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               </span>
             )
           )}
-          {!terminal && effort && effortLevels.length > 0 && <EffortPicker chosen={effort.chosen} levels={effortLevels} onChoose={effort.onChoose} disabled={busy} />}
-          {!terminal && harness && <HarnessPicker {...harness} disabled={busy} />}
           <div className="spacer" />
           {usage && <ContextMeter used={usage.used} window={usage.window} running={running} lastTurnMs={usage.lastTurnMs} actions={usage.actions} session={usage.session} />}
           {terminal ? (

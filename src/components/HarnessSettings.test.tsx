@@ -2,23 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { BUILT_IN } from "../lib/harness";
 import { HarnessSettings } from "./HarnessSettings";
-import { HarnessPicker } from "./HarnessPicker";
-
-describe("HarnessPicker", () => {
-  it("names the chat's preset and switches it", () => {
-    const onChoose = vi.fn();
-    const onEdit = vi.fn();
-    render(<HarnessPicker presets={BUILT_IN} chosen="default" onChoose={onChoose} onEdit={onEdit} />);
-    fireEvent.click(screen.getByRole("button", { name: /Standard/ }));
-    const menu = screen.getByRole("menu", { name: "Harness" });
-    expect(within(menu).getByText("Sonnet · Opus advisor · Haiku subagents")).toBeInTheDocument();
-    fireEvent.click(within(menu).getByRole("menuitemradio", { name: /Balanced/ }));
-    expect(onChoose).toHaveBeenCalledWith("balanced");
-    fireEvent.click(screen.getByRole("button", { name: /Standard/ }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Edit presets…" }));
-    expect(onEdit).toHaveBeenCalled();
-  });
-});
 
 describe("HarnessSettings", () => {
   const props = { saved: BUILT_IN.slice(1), folder: "/p/acme", folderDefault: "default", onFolderDefault: vi.fn(), fallbackModel: null };

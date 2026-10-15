@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { TabEmpty } from "./TabEmpty";
 import type { ModelCost } from "../types";
 import type { AgentTree, LogEntry } from "../lib/agents";
 import { shortModel } from "../lib/agents";
@@ -12,7 +13,7 @@ const tokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0
 
 /** The side panel's Activity tab: which agent and model does what in the latest turn, live while it runs. */
 export function AgentsTab({ tree, graph, usage }: { tree: AgentTree; graph: Graph; usage: ModelCost[] }) {
-  if (!tree.prompt) return <div className="agents-empty">Send a task to see which agent and model does what. Subagents and the advisor show here as they work.</div>;
+  if (!tree.prompt) return <TabEmpty title="Activity">Each turn's subagents and tools show here. Send a task to see which agent and model does what; subagents and the advisor show as they work.</TabEmpty>;
   const { live } = tree;
   return (
     <div className={`agents${live ? " live" : ""}`}>
