@@ -1750,8 +1750,7 @@ export default function App() {
                 order={projectOrder}
                 onOrder={setProjectOrder}
                 onToggle={() => setSidebarCompact(false)}
-                onPointerEnter={(e) => !e.buttons && sidebarPeek.hover()}
-                onPointerLeave={sidebarPeek.unhover}
+                width={sidebarWidth}
               />
             )}
             {sidebarPeek.phase !== "off" && (
