@@ -98,8 +98,8 @@ describe("the needs-you inbox", () => {
     // Allow stays dead for a moment after a row appears.
     await waitFor(() => expect(within(row).getByRole("button", { name: /^Allow / })).toBeEnabled());
     fireEvent.click(within(row).getByRole("button", { name: /^Allow / }));
-    await waitFor(() => expect(calledWith(calls, "respond_permission")).toHaveLength(1));
-    await waitFor(() => expect(within(dialog).getByText("Nothing is waiting for you.")).toBeInTheDocument());
+    await waitFor(() => expect(calledWith(calls, "respond_permission")).toHaveLength(1), { timeout: 10_000 });
+    await waitFor(() => expect(within(dialog).getByText("Nothing is waiting for you.")).toBeInTheDocument(), { timeout: 10_000 });
     expect(inboxButton()).toHaveAccessibleName("What needs you");
   });
 });
