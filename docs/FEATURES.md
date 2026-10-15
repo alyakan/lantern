@@ -166,6 +166,12 @@ An agent works on its own branch, and only you can approve merging it. When the 
 
 The canvas controls at the bottom show what the team has cost so far ("Team · $0.15") and **Plan usage**, how full your subscription's five-hour window is, with when it resets. It turns amber from 80% and red from 95%, and past 95% the Lead can't start new agents until the window resets. The meter is the account's, so it also shows in the title bar.
 
+Press the title bar's meter to see **where it went**: the plan's line ("62% of the 5-hour window, resets in 1h 40m") and every open chat and team, in any project, biggest first, each with its state, what it has used since it started (cost and tokens, when known) and the models it ran on ("Sonnet 62%, Opus 38%", from its latest turn, Opus in amber). A team is one row with its total, and opens to its Lead and agents; pressing a name goes to that chat. The figures are per chat or team since it started, not just this window, and closed chats aren't counted, so they needn't add up to the plan's percentage. Esc closes it.
+
+Each agent's **model** is on its window's title bar (the Lead's too) and in the Team list: "Sonnet" or "Haiku" quietly, "Opus" in amber, with the full model id as its tooltip, so an agent that has drifted onto Opus shows at a glance.
+
+Starting a team (the Workflow menu's Team, New ▸ Team, Start a team, or **+ Agent** on a team) while another team is working asks first: "Another team is working (acme-api, 3 agents). Every agent spends the same plan. Start anyway?" **Don't ask again** turns it off; Settings ▸ General ▸ Teams brings it back.
+
 **Subagents**, in the same controls, says where the Lead's built-in subagents (Claude Code's Agent tool, which runs inline where you can't see them) go:
 
 ![The Subagents menu: On the canvas or Inline](images/team-subagents-menu.png)

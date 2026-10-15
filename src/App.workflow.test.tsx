@@ -139,3 +139,72 @@ describe("what older versions saved", () => {
     expect(localStorage.getItem("settings.autoApproveByFolder")).toBeNull();
   });
 });
+
+/** How long a step may take on a loaded runner. */
+const LOAD = 10_000;
+
+describe("a second team while another is working", () => {
+  /** Picks a Workflow from the chip under the chat box (the agents' cards have their own), once the chat's claude has started. */
+  async function pick(chip: RegExp, row: RegExp) {
+    const find = () => within(document.querySelector(".composer-meta") as HTMLElement).getByRole("button", { name: chip });
+    await waitFor(() => expect(find()).toBeEnabled(), { timeout: LOAD });
+    fireEvent.click(find());
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: row }, { timeout: LOAD }));
+  }
+  /** A team whose Lead is working on a message, so the next team start has something to ask about. */
+  async function busyTeam() {
+    const calls = await launch();
+    await pick(/Workflow: Chat/, /^Team/);
+    const box = within(await screen.findByLabelText(/^Lead,/, undefined, { timeout: LOAD })).getByLabelText("Message this agent");
+    fireEvent.change(box, { target: { value: "Build the login form (team)" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(last(calls, "send_message")).toBeDefined(), { timeout: LOAD });
+    return calls;
+  }
+  const newTeam = async () => {
+    fireEvent.click(await screen.findByRole("button", { name: "New" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Team/ }));
+  };
+  const starts = (calls: Call[]) => calls.filter(([c]) => c === "start_session").length;
+
+  it("asks first, says who is working, and starts nothing on Cancel", async () => {
+    const calls = await busyTeam();
+    const before = starts(calls);
+    await newTeam();
+    expect(await screen.findByText(/^Another team is working \(acme-api, .*\)\. Every agent spends the same plan\. Start anyway\?$/, undefined, { timeout: LOAD })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByText(/Start anyway\?/)).toBeNull(), { timeout: LOAD });
+    expect(starts(calls)).toBe(before);
+  });
+
+  it("starts the team on Start, and with Don't ask again never asks again", async () => {
+    const calls = await busyTeam();
+    const before = starts(calls);
+    await newTeam();
+    fireEvent.click(await screen.findByLabelText("Don't ask again", undefined, { timeout: LOAD }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(starts(calls)).toBe(before + 1), { timeout: LOAD });
+    expect(JSON.parse(localStorage.getItem("settings.warnSecondTeam") ?? "true")).toBe(false);
+    // The first team's Lead is still working: a third team starts without asking.
+    await newTeam();
+    await waitFor(() => expect(starts(calls)).toBe(before + 2), { timeout: LOAD });
+    expect(screen.queryByText(/Start anyway\?/)).toBeNull();
+  });
+
+  it("doesn't ask when no team is working", async () => {
+    const calls = await launch();
+    const before = starts(calls);
+    await newTeam();
+    await waitFor(() => expect(starts(calls)).toBe(before + 1), { timeout: LOAD });
+    expect(screen.queryByText(/Start anyway\?/)).toBeNull();
+  });
+
+  it("asks before a chat becomes a Lead from the Workflow menu, too", async () => {
+    await busyTeam();
+    // A plain chat next to the team.
+    fireEvent.click(await screen.findByRole("button", { name: "New" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Chat/ }));
+    await pick(/Workflow: Chat/, /^Team/);
+    expect(await screen.findByText(/Start anyway\?/, undefined, { timeout: LOAD })).toBeInTheDocument();
+  });
+});

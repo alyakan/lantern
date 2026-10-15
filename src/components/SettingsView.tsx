@@ -112,6 +112,9 @@ export interface GeneralSettingsProps {
   onCustomTheme: (custom: CustomTheme) => void;
   textSize: TextSize;
   onTextSize: (size: TextSize) => void;
+  /** Whether starting a team asks first while another is working. */
+  warnTeams?: boolean;
+  onWarnTeams?: (on: boolean) => void;
 }
 
 type PageProps = Omit<Props, "open" | "onClose">;
@@ -123,7 +126,7 @@ const NOTIFY_EVENTS: { key: "finished" | "waiting" | "failed"; label: string }[]
 ];
 
 /** General: when Lantern tells you about Claude (notifications, a pause), the toasts' sound, and how the window looks. */
-function GeneralPage({ notify, onNotify, theme, onTheme, customTheme, onCustomTheme, textSize, onTextSize }: GeneralSettingsProps) {
+function GeneralPage({ notify, onNotify, theme, onTheme, customTheme, onCustomTheme, textSize, onTextSize, warnTeams, onWarnTeams }: GeneralSettingsProps) {
   const sound = useChimeOn();
   const agentLimit = useAgentLimit();
   const paused = notify.pausedUntil > Date.now();
@@ -207,6 +210,12 @@ function GeneralPage({ notify, onNotify, theme, onTheme, customTheme, onCustomTh
           </select>
         </label>
         <span className="settings-muted">Every agent spends the same plan. A Lead asking for one more is told to wait for one to finish.</span>
+        {onWarnTeams && (
+          <label className="general-option">
+            <input type="checkbox" checked={warnTeams ?? true} onChange={(e) => onWarnTeams(e.target.checked)} />
+            <span>Ask before starting a team while another is working</span>
+          </label>
+        )}
       </section>
     </>
   );

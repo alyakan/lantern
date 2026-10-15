@@ -30,6 +30,7 @@ import { AgentMenu, type AgentMenuItem } from "./AgentMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HiddenAgents } from "./HiddenAgents";
 import { NewAgent } from "./NewAgent";
+import { ModelChip } from "./ModelChip";
 import { NodeBody } from "./NodeBody";
 import { BranchIcon, ChevronIcon, OpenOutIcon } from "./icons";
 import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
@@ -175,6 +176,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
             {name}
           </span>
           <span className="node-meta" title={branch ?? undefined}>
+            <ModelChip model={state?.model ?? null} />
             {branch && <BranchIcon />}
             {[role === "main" ? "Runs the team" : branch ? branch.replace(/^lantern\//, "") : "Shared folder", spent || null].filter(Boolean).join(" · ")}
           </span>
@@ -321,7 +323,9 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
                   >
                     <span className={`node-dot ${status}`} aria-hidden />
                     <span className="team-text">
-                      <span className="team-name">{n.name}</span>
+                      <span className="team-name">
+                        {n.name} <ModelChip model={s.model} />
+                      </span>
                       <span className="team-line">{summaryLine(s, 90)}</span>
                     </span>
                     <span className="team-state">

@@ -1924,6 +1924,37 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .plan-meter { align-self: center; padding: 0 8px; color: var(--text-2); font-size: calc(12px * var(--font-scale)); white-space: nowrap; }
 .plan-meter.warn { color: var(--warn); }
 .plan-meter.stop { color: var(--del); font-weight: 600; }
+.plan-meter-box { position: relative; align-self: center; }
+button.plan-meter { height: 24px; border: none; border-radius: var(--radius-pill); background: none; font-family: var(--ui); cursor: pointer; }
+button.plan-meter:hover { background: var(--bg-hover); }
+/* Where the plan's use went: every open chat and team, biggest first, under the title bar's meter. */
+.usage-pop { position: absolute; top: calc(100% + 10px); right: 0; z-index: 30; width: min(440px, calc(100vw - 24px)); max-height: min(560px, calc(100vh - 80px)); overflow-y: auto; padding: 12px 12px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-float); background: var(--field); box-shadow: var(--shadow); color: var(--text); font-size: calc(12.5px * var(--font-scale)); animation: guide-in 140ms ease-out; }
+.usage-plan { margin: 0 0 8px; padding: 0 4px; font: 600 calc(13px * var(--font-scale)) var(--ui); }
+.usage-list, .usage-members { margin: 0; padding: 0; list-style: none; }
+.usage-members { margin-left: 22px; border-left: 1px solid var(--line); }
+.usage-row { display: grid; grid-template-columns: 22px 8px minmax(0, 1fr) auto; align-items: start; column-gap: 8px; padding: 7px 4px; border-radius: var(--radius); }
+.usage-row:hover { background: var(--bg-hover); }
+.usage-row.member { grid-template-columns: 8px minmax(0, 1fr) auto; padding-left: 10px; }
+.usage-row.member .usage-gap { display: none; }
+.usage-gap { width: 22px; }
+.usage-row .node-dot { margin-top: 5px; }
+.usage-toggle { width: 22px; height: 22px; padding: 0; }
+.usage-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.usage-name { display: block; max-width: 100%; margin: 0; padding: 0; border: none; background: none; color: var(--text); font: 600 calc(13px * var(--font-scale)) var(--ui); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.usage-name:hover { text-decoration: underline; }
+.usage-sub { color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); overflow-wrap: anywhere; }
+.usage-models .opus { color: var(--attn-text); font-weight: 600; }
+.usage-figures { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); white-space: nowrap; }
+.usage-spent { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.usage-empty { margin: 4px; color: var(--muted-text); }
+.usage-note { margin: 8px 4px 0; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); line-height: 1.45; }
+/* The model an agent runs on: quiet, amber for Opus so one that has drifted there shows at a glance. */
+.model-chip { flex: none; display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-pill); color: var(--muted-text); font: 500 calc(10.5px * var(--font-scale)) var(--ui); white-space: nowrap; }
+.model-chip.opus { border-color: var(--attn); background: color-mix(in srgb, var(--attn) 14%, transparent); color: var(--attn-text); font-weight: 600; }
+.node-meta .model-chip { height: 15px; padding: 0 5px; font-size: calc(10px * var(--font-scale)); }
+.team-name .model-chip { margin-left: 4px; vertical-align: 1px; }
+.team-warning-text { margin: 0; line-height: 1.5; color: var(--text-2); }
+.team-warning-ask { display: flex; align-items: center; gap: 8px; color: var(--text-2); }
 .canvas-attention { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 8px; height: var(--pill-m); padding: 0 14px; border: 1px solid var(--attn); border-radius: var(--radius-pill); background: var(--field); color: var(--text); font: 600 calc(12.5px * var(--font-scale)) var(--ui); box-shadow: var(--shadow); cursor: pointer; animation: pill-in 200ms ease-out backwards; }
 .canvas-attention:hover { background: var(--bg-hover); }
 /* The pill's own transform centres it, so it fades down with the separate `translate`. */
