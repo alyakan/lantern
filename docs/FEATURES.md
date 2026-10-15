@@ -181,23 +181,25 @@ The team runs on the Lead's Permissions, and an agent never gets more freedom th
 
 ## The sidebar and History
 
-The sidebar is one pane with one group for every project: the ones with a chat open first, then your other recent folders. It has three states: **Expanded** (pinned open beside the chat), **Collapsed** and **Hidden**.
+The sidebar is one pane with a group for every project that has a chat open, and nothing else: your past chats are in History (below). It has three states: **Expanded** (pinned open beside the chat), **Collapsed** and **Hidden**.
 
 **Expanded** is the whole pane, at the width you gave it (drag its edge to resize):
 
-- **New ▾** at the top starts a Chat (⌘N), a Team (⇧⌘N) or a PR review in the project on screen, and the pin button above it collapses the sidebar (View ▸ Collapse sidebar, or Collapse sidebar in the command palette).
-- A project's header has its initials in the colour the project has been given, its name, the branch when it is the project on screen, and a badge for how many things need you when it is folded. Click it to fold or open the project. Hover it for **+** (a new chat there) and **⋯**: New team, Bring old chats here…, Reveal in Finder, Move up, Move down and Remove from recents (which only hides it; Claude Code keeps the chats).
-- Under it are the project's open chats and teams as squares: the initials of the chat's title (a new chat is N) and a mark on its corner (a spinning ring while it works, an amber dot when it needs you, a blue dot when it finished while you were away), the title, and how it is. A team is one square (its Lead, with a small diamond badge) that shows the team's combined state, with its agents nested under it. Each project has a colour of its own, kept across restarts (and when its folder moves): its squares are tinted with it, and the chat on screen is filled with it, with a bar beside it. A chat that needs you rises to the top of its group, and one you can close has a **×** when you hover it.
-- Then the chats you pinned (with the pin icon) and the 3 latest past chats, each with how long ago. **Show all…** opens that project's History.
-- Click an open chat to switch to it, a past chat to resume it (in its own project), a team to open its canvas, an agent to focus it there. **Open folder…** at the bottom opens another project.
+- **New ▾** at the top starts a Chat (⌘N), a Team (⇧⌘N) or a PR review in the project on screen. The pin button above it collapses the sidebar (View ▸ Collapse sidebar, or Collapse sidebar in the command palette), and the **History** button under it opens History.
+- A project's header has its initials in the colour the project has been given, its name, the branch when it is the project on screen, and a badge for how many things need you when it is folded. Click it to fold or open the project. Hover it for **+** (a new chat there) and **⋯**: New team, Close finished chats, Bring old chats here…, Reveal in Finder, Move up, Move down and Remove from recents (which only hides it; Claude Code keeps the chats).
+- Under it are the project's open chats and teams as squares: the initials of the chat's title (a new chat is N) and a mark on its corner (a spinning ring while it works, an amber dot when it needs you, a blue dot when it finished while you were away), the title, and how it is. A team is one square (its Lead, with a small diamond badge) that shows the team's combined state, with its agents nested under it. Each project has a colour of its own, kept across restarts (and when its folder moves): its squares are tinted with it, and the chat on screen is filled with it, with a bar beside it. A chat that needs you rises to the top of its group.
+- Click an open chat to switch to it, a team to open its canvas, an agent to focus it there. **Open folder…** at the bottom opens another project.
+- Every row has a **×** when you hover it (or tab to it) that closes the chat, and in the collapsed bar a right click has **Close chat** (and a small × shows on a square's corner). A chat that is done or only a draft closes at once, including the one on screen (Lantern then shows another chat, or the start screen). One that is working or waiting on you asks first, right under it: **Stop and close?** An agent is closed the way the canvas's *Clean up and close* does it: it checks for uncommitted and unmerged work and asks before deleting any. A team's Lead asks **Close the team and its N agents?** and says what would be lost. A project's ⋯ has **Close finished chats**, which closes every chat that is done (not the working ones, drafts or teams) and says how many.
 
-![The expanded sidebar: two projects' open chats, a team with its agents under it, past chats, and the other recent projects folded](images/sidebar-expanded.png)
+![The expanded sidebar: two projects' open chats, a team with its agents under it, and the History button under New](images/sidebar-expanded.png)
 
-**Collapsed** is the pin button again (or the button at the top of the bar, Expand sidebar, when it is collapsed). It becomes a slim column with a small square for each open chat and team, not for each project. The squares are the same ones, each project's under its initials in its colour, and **+** at the top starts a chat. When there are more squares than fit, the column scrolls.
+![Closing a chat that waits on an answer asks first, under its row](images/sidebar-close.png)
+
+**Collapsed** is the pin button again (or the button at the top of the bar, Expand sidebar, when it is collapsed). It becomes a slim column with a small square for each open chat and team, not for each project. The squares are the same ones, each project's under its initials in its colour, **+** at the top starts a chat and the clock under it opens History. When there are more squares than fit, the column scrolls.
 
 ![The collapsed sidebar: four chats that need you (one a team) in one project's colour, and the chat on screen in a second project's](images/sidebar-collapsed.png)
 
-Rest the pointer on the collapsed column for a moment and the same pane opens over the chat: the squares stay where they are, and the titles, the project headers, the past chats and the rest slide out beside them. Click a chat to go there and it folds back, as it does when the pointer leaves or you press Esc. Moving focus into it from the keyboard opens it too. Its pin button keeps it open (expanded).
+Rest the pointer on the collapsed column for a moment and the same pane opens over the chat: the squares stay where they are, and the titles, the project headers and the rest slide out beside them. Click a chat to go there and it folds back, as it does when the pointer leaves or you press Esc. Moving focus into it from the keyboard opens it too. Its pin button keeps it open (expanded).
 
 ![The collapsed sidebar opened over the chat](images/sidebar-collapsed-open.png)
 
@@ -211,13 +213,13 @@ To look without showing it, rest the pointer on the window's left edge for a mom
 
 Projects stay in the order you give them; using one doesn't move it. A project you open for the first time goes at the top. To reorder, drag a project by its header: it lifts, the others slide out of its way, and it settles where you drop it (Esc puts it back). From the keyboard, ⌥⌘↑ and ⌥⌘↓ move the project whose header has focus, and its ⋯ menu has Move up and Move down. The collapsed bar follows the same order, and the order is remembered.
 
-A project's past chats are read only while it is open in the pane, so a long list of projects doesn't slow the start. Its width, whether it is collapsed and whether it is hidden are each remembered, so showing it again restores it.
+Its width, whether it is collapsed and whether it is hidden are each remembered, so showing it again restores it.
 
 The team canvas screenshot shows a team with its agents nested under it.
 
-**History** (⌘K, or a project's **Show all…**) lists the past chats of a project, including ones started in the terminal with Claude Code. You can search, pin, rename and export them.
+**History** (the clock button in the sidebar, or ⌘K; View ▸ Chat History, or Chat History in the command palette) lists the past chats of every project, including ones started in the terminal with Claude Code, grouped by project in the sidebar's order. A project's pinned chats come first, then the newest. Type to search all of them, or pick a project in the chip beside the search box. ↑ and ↓ move through the chats, Return opens one in its own project, and Esc (or ⌘K again) closes it. Each chat's ⋯ pins, renames, exports it or copies the command that picks it up in a terminal. The chats that are open are in the sidebar, so History leaves them out. It works with nothing open too: each project's header has a **+** that starts a chat there, which is how to start a project that has nothing open (the other ways are **New ▾**, **Open folder…** and the folder menu in the title bar).
 
-![History: a search box and the past chats of the project](images/history.png)
+![History: the past chats of every project, grouped by project, with a search box and a project chip](images/history.png)
 
 After you move a repository, Claude Code leaves its chats under the old path. **Bring old chats here…** (the folder menu in the title bar, a project's ⋯ menu, or the palette) finds the places the project was before and copies the chats you check into its History. Nothing is moved or overwritten, and nothing happens until you confirm.
 

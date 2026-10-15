@@ -44,44 +44,76 @@ beforeEach(() => {
 });
 
 describe("the sidebar in the app", () => {
-  it("lists the open project first and open, the other recent folders collapsed, and reads past chats only for the open one", async () => {
+  const history = () => screen.findByRole("dialog", { name: "Chat history" });
+
+  it("lists only the projects with a chat open, and reads no past chats until History is opened", async () => {
     const calls = await launch();
     const acme = await project("acme-api");
     expect(within(acme).getByRole("button", { name: /^acme-api/ })).toHaveAttribute("aria-expanded", "true");
-    // Past chats of the open project: the 3 most recent, and Show all for the rest.
-    expect(await within(acme).findByText("Fix the login redirect after OAuth callback")).toBeInTheDocument();
-    expect(within(acme).getByRole("button", { name: "Show all 5…" })).toBeInTheDocument();
-    expect(within(acme).queryByText("Release flow notes")).toBeNull();
-    const web = await project("web-dashboard · projects");
-    expect(within(web).getByRole("button", { name: /^web-dashboard/ })).toHaveAttribute("aria-expanded", "false");
-    expect(calledWith(calls, "list_sessions")).toEqual([{ folder: FOLDER }]);
-    // The empty chat on screen is there too, as the open chat.
+    // The empty chat on screen is there, as the open chat.
     expect(within(acme).getByTitle("New chat")).toHaveAttribute("aria-current", "true");
+    // The other recent folders and every past chat are in History, not in the pane.
+    expect(screen.queryByRole("region", { name: "web-dashboard · projects" })).toBeNull();
+    expect(screen.queryByText(/Show all/)).toBeNull();
+    await new Promise((r) => setTimeout(r, 300));
+    expect(calledWith(calls, "list_sessions")).toEqual([]);
+  });
+
+  it("has a History button under New that opens the past chats of every project, grouped by project, and toggles it", async () => {
+    const calls = await launch();
+    await project("acme-api");
+    const button = screen.getByRole("button", { name: "History" });
+    expect(button).toHaveAttribute("title", "History");
+    fireEvent.click(button);
+    const dialog = await history();
+    expect(await within(dialog).findByText("Fix the login redirect after OAuth callback")).toBeInTheDocument();
+    const names = within(dialog).getAllByRole("region").map((r) => r.getAttribute("aria-label"));
+    expect(names).toContain("acme-api");
+    expect(names).toContain("web-dashboard · projects");
+    await waitFor(() => expect(new Set(calledWith(calls, "list_sessions").map((a) => a?.folder)).has(OTHER)).toBe(true));
+    // A press on the button again closes it, and Escape does.
+    fireEvent.mouseDown(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull());
+    fireEvent.click(button);
+    await history();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
   });
 
   it("leaves an agent's conversation out of the past chats, though it is in the project's folder", async () => {
     // Agents that share the folder run their sessions in it, so Claude Code files them with the project's own.
     localStorage.setItem("session.agentIds", JSON.stringify(["3f1c2a", "c0ffee"]));
     await launch();
-    const acme = await project("acme-api");
-    expect(await within(acme).findByText("Add retries with backoff to fetchJson")).toBeInTheDocument();
-    expect(within(acme).queryByText("Fix the login redirect after OAuth callback")).toBeNull();
-    expect(within(acme).queryByText("Refactor the settings screen into smaller components")).toBeNull();
-    expect(within(acme).queryByRole("button", { name: /^Show all/ })).toBeNull(); // 3 of the 5 are the user's, all listed
+    await project("acme-api");
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    const acme = within(await history());
+    expect(await acme.findByText("Add retries with backoff to fetchJson")).toBeInTheDocument();
+    expect(acme.queryByText("Fix the login redirect after OAuth callback")).toBeNull();
+    expect(acme.queryByText("Refactor the settings screen into smaller components")).toBeNull();
   });
 
-  it("reads another project's chats when it is opened, and resumes one of them in that project", async () => {
+  it("resumes a past chat of another project from History, in that project", async () => {
     const calls = await launch();
-    const web = await project("web-dashboard · projects");
-    fireEvent.click(within(web).getByRole("button", { name: /^web-dashboard/ }));
-    fireEvent.click(await within(web).findByRole("button", { name: /Chart tooltips clip at the edge/ }));
+    await project("acme-api");
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    fireEvent.click(await within(await history()).findByText("Chart tooltips clip at the edge"));
     await waitFor(() => expect(calledWith(calls, "open_session").length).toBe(1));
     expect(calledWith(calls, "open_session")[0]).toMatchObject({ folder: OTHER, sessionId: "d4a501" });
-    // It is open now, in its project, and on screen: no longer listed as a past chat (the mock replays one conversation, so
-    // its title is that conversation's first prompt).
-    const open = await project("web-dashboard · projects");
+    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
+    // It is open now, in its project, and on screen: the pane lists that project too.
+    const open = await project("web-dashboard");
     await waitFor(() => expect(open.querySelector('[aria-current="true"]')).not.toBeNull());
-    expect(within(open).queryByText("Chart tooltips clip at the edge")).toBeNull();
+  });
+
+  it("starts a chat in a project with nothing open from its header in History", async () => {
+    const calls = await launch();
+    await project("acme-api");
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    fireEvent.click(await within(await history()).findByRole("button", { name: "New chat in web-dashboard · projects" }));
+    await waitFor(() => expect(calledWith(calls, "start_session").pop()).toMatchObject({ folder: OTHER }));
+    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
+    expect(await within(await project("web-dashboard")).findByTitle("New chat")).toHaveAttribute("aria-current", "true");
   });
 
   it("has New ▾ in place of the title bar's New chat and Start a team, and the title bar lost its History clock", async () => {
@@ -102,42 +134,15 @@ describe("the sidebar in the app", () => {
     expect(await screen.findByRole("button", { name: /Team: New team/ })).toBeInTheDocument();
   });
 
-  it("starts a chat in a project from its +, and shows it there", async () => {
-    const calls = await launch();
-    const web = await project("web-dashboard · projects");
-    fireEvent.click(within(web).getByRole("button", { name: "New chat in web-dashboard · projects" }));
-    await waitFor(() => expect(calledWith(calls, "start_session").pop()).toMatchObject({ folder: OTHER }));
-    expect(await within(await project("web-dashboard · projects")).findByTitle("New chat")).toHaveAttribute("aria-current", "true");
-  });
-
-  it("opens History for a project from Show all…, with past chats only, and resumes one", async () => {
-    const calls = await launch();
-    const acme = await project("acme-api");
-    fireEvent.click(await within(acme).findByRole("button", { name: "Show all 5…" }));
-    const history = await screen.findByRole("dialog", { name: "Chat history" });
-    expect(await within(history).findByText("Release flow notes")).toBeInTheDocument();
-    expect(within(history).getByText("Past chats in acme-api")).toBeInTheDocument();
-    expect(within(history).queryByText("Open chats")).toBeNull();
-    fireEvent.click(within(history).getByText("Release flow notes"));
-    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
-    await waitFor(() => expect(calledWith(calls, "open_session").pop()).toMatchObject({ folder: FOLDER, sessionId: "b0b0b0" }));
-  });
-
-  it("keeps History on ⌘K for the project on screen", async () => {
+  it("opens History for every project on ⌘K, and closes it on ⌘K again, with or without a project open", async () => {
     await launch();
     await project("acme-api");
     fireEvent.keyDown(window, { key: "k", metaKey: true });
-    expect(await screen.findByRole("dialog", { name: "Chat history" })).toBeInTheDocument();
-    expect(screen.getByText("Past chats in acme-api")).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
-  });
-
-  it("shows the Moved? notice on the project row of the folder that moved", async () => {
-    await launch();
-    const old = await project("web-dashboard · Github");
-    expect(within(old).getByRole("button", { name: /^Move chats from .*web-dashboard to .*web-dashboard$/ })).toBeInTheDocument();
-    expect(within(await project("acme-api")).queryByText(/Moved\?/)).toBeNull();
+    const dialog = await history();
+    expect(await within(dialog).findByText("Fix the login redirect after OAuth callback")).toBeInTheDocument();
+    expect(within(dialog).getByRole("combobox", { name: "Project" })).toHaveValue("");
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull());
   });
 
   it("hides completely with ⌃⌘S, leaving a Show sidebar button in the title bar, and brings it back the same way; it is remembered", async () => {
@@ -173,15 +178,16 @@ describe("the sidebar in the app", () => {
     ]);
   });
 
-  it("starts hidden when it was left minimized (the old rail), and reads no past chats until it is shown", async () => {
+  it("starts hidden when it was left minimized (the old rail), and reads no past chats at all until History is opened", async () => {
     localStorage.setItem("sidebar.collapsed", "true");
     const calls = await launch();
     const show = await screen.findByRole("button", { name: "Show sidebar" });
     expect(screen.queryByRole("complementary", { name: "Projects" })).toBeNull();
     expect(calledWith(calls, "list_sessions")).toEqual([]);
     fireEvent.click(show);
-    await within(await project("acme-api")).findByText("Fix the login redirect after OAuth callback");
-    expect(calledWith(calls, "list_sessions")).toEqual([{ folder: FOLDER }]);
+    await project("acme-api");
+    await new Promise((r) => setTimeout(r, 300));
+    expect(calledWith(calls, "list_sessions")).toEqual([]);
   });
 
   it("keeps the sidebar's width apart, so showing it again restores it", async () => {
@@ -200,15 +206,14 @@ describe("the sidebar in the app", () => {
     expect(screen.getByRole("complementary", { name: "Projects" })).toHaveStyle({ width: "300px" });
   });
 
-  it("removes a project from the recents, and brings it back when its folder is opened", async () => {
+  it("removes a project from the recents from its ⋯ menu, which only hides it", async () => {
     await launch();
-    const web = await project("web-dashboard · projects");
-    fireEvent.click(within(web).getByRole("button", { name: "More for web-dashboard · projects" }));
+    const acme = await project("acme-api");
+    fireEvent.click(within(acme).getByRole("button", { name: "More for acme-api" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Remove from recents" }));
-    await waitFor(() => expect(screen.queryByRole("region", { name: "web-dashboard · projects" })).toBeNull());
-    expect(JSON.parse(localStorage.getItem("sidebar.hidden") ?? "[]")).toEqual([OTHER]);
-    // The other web-dashboard (the moved one) has the name to itself now.
-    expect(await project("web-dashboard")).toBeInTheDocument();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("sidebar.hidden") ?? "[]")).toEqual([FOLDER]));
+    // It has a chat open, so it stays listed.
+    expect(await project("acme-api")).toBeInTheDocument();
   });
 });
 
@@ -253,13 +258,12 @@ describe("the hidden sidebar", () => {
   });
 
   it("goes to a chat picked in it, and puts itself away", async () => {
-    const calls = await launch();
+    await launch();
     await screen.findByRole("button", { name: "Show sidebar" });
     fireEvent.pointerEnter(edge());
     await rest();
     const acme = await project("acme-api");
-    fireEvent.click(await within(acme).findByRole("button", { name: /Release flow notes|Fix the login redirect after OAuth callback/ }));
-    await waitFor(() => expect(calledWith(calls, "open_session").length).toBe(1));
+    fireEvent.click(within(acme).getByRole("button", { name: /^New chat, acme-api/ }));
     await waitFor(() => expect(screen.queryByRole("complementary", { name: "Projects" })).toBeNull());
     // Still hidden: picking is not pinning.
     expect(screen.getByRole("button", { name: "Show sidebar" })).toBeInTheDocument();
@@ -356,18 +360,17 @@ describe("the collapsed sidebar", () => {
     beforeEach(() => localStorage.setItem("sidebar.compact", "true"));
     const panel = async () => (await column()).querySelector<HTMLElement>(".sb-panel")!;
 
-    it("opens the column itself over the chat when the pointer rests on it, with every project and past chats, and closes when it leaves", async () => {
-      const calls = await launch();
+    it("opens the column itself over the chat when the pointer rests on it, as the whole pane, and closes when it leaves", async () => {
+      await launch();
       const p = await panel();
       fireEvent.pointerEnter(p);
       expect(p).not.toHaveClass("expanded");
-      expect(calledWith(calls, "list_sessions")).toEqual([]);
       await rest();
       await waitFor(() => expect(p).toHaveClass("expanded"));
       // The same sidebar, wider: still collapsed as far as what is saved goes.
       expect(full()).toHaveClass("collapsed");
-      expect(await within(await project("acme-api")).findByText("Fix the login redirect after OAuth callback")).toBeInTheDocument();
-      expect(await project("web-dashboard · projects")).toBeInTheDocument();
+      expect(await project("acme-api")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "History" })).toBeInTheDocument();
       expect(localStorage.getItem("sidebar.compact")).toBe("true");
       fireEvent.pointerLeave(p);
       expect(p).not.toHaveClass("expanded");
@@ -430,16 +433,66 @@ describe("a team in the sidebar", () => {
     const acme = await project("acme-api");
     const row = await within(acme).findByRole("button", { name: /Team: / });
     const agents = within(acme).getByRole("list", { name: /^Agents in / });
-    expect(within(agents).getAllByRole("button").map((b) => b.getAttribute("title"))).toEqual(["Login form"]);
+    expect(within(agents).getAllByRole("button", { name: /, acme-api,/ }).map((b) => b.getAttribute("title"))).toEqual(["Login form"]);
     // The agent is under its team only: one row in the whole sidebar, and the agent's worktree isn't a project.
     expect(within(screen.getByRole("complementary", { name: "Projects" })).getAllByTitle("Login form")).toHaveLength(1);
     expect(screen.queryByRole("region", { name: /login-form/ })).toBeNull();
 
     fireEvent.click(row);
     expect(await screen.findByLabelText(/Agent Login form/)).toBeInTheDocument();
-    fireEvent.click(within(agents).getByRole("button", { name: /Login form/ }));
-    await waitFor(() => expect(within(agents).getByRole("button", { name: /Login form/ })).toHaveAttribute("aria-current", "true"));
+    fireEvent.click(within(agents).getByRole("button", { name: /^Login form, acme-api/ }));
+    await waitFor(() => expect(within(agents).getByRole("button", { name: /^Login form, acme-api/ })).toHaveAttribute("aria-current", "true"));
     // The team is still on its canvas.
     expect(screen.getByLabelText(/^Lead,/)).toBeInTheDocument();
+  });
+});
+
+describe("closing chats from the sidebar", () => {
+  const WORKTREE = "/Users/you/Library/Application Support/lantern/worktrees/acme-api/login-form-w1";
+  const team = [
+    { sessionId: "aaaa11", folder: WORKTREE, title: "Login form", draft: "", active: false, orchestra: { role: "worker", name: "Login form", parentSession: "bbbb22", branch: "lantern/login-form", base: "main", isolation: "worktree" } },
+    { sessionId: "bbbb22", folder: FOLDER, title: "Build the login flow", draft: "", active: true, orchestra: { role: "main" } },
+  ];
+
+  it("closes the chat on screen from its ×: nothing is left open, so the pane says so", async () => {
+    const calls = await launch();
+    const acme = await project("acme-api");
+    fireEvent.click(within(acme).getByRole("button", { name: "Close New chat" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "acme-api" })).toBeNull());
+    expect(calledWith(calls, "close_session").length).toBeGreaterThan(0);
+    expect(await screen.findByText("Nothing open. Start a chat with New, or find an old one in History.")).toBeInTheDocument();
+  });
+
+  it("asks \"Stop and close?\" before closing a chat that waits on an answer, and stops it on yes", async () => {
+    const calls = await launch();
+    await project("acme-api");
+    const box = screen.getByRole("textbox");
+    fireEvent.change(box, { target: { value: "ask me first" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await screen.findByText("Where should retries live?");
+    const before = calledWith(calls, "close_session").length;
+    fireEvent.click(await screen.findByRole("button", { name: /^Close ask me first/ }));
+    const ask = await screen.findByRole("group", { name: /^Close ask me first/ });
+    expect(ask).toHaveTextContent("Stop and close?");
+    expect(calledWith(calls, "close_session").length).toBe(before);
+    fireEvent.click(within(ask).getByRole("button", { name: "Stop and close" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "acme-api" })).toBeNull());
+    expect(calledWith(calls, "close_session").length).toBeGreaterThan(before);
+  });
+
+  it("asks \"Close the team and its 1 agent?\" with what would be lost, closes the agent the checked way, then the Lead", async () => {
+    localStorage.setItem("session.openChats", JSON.stringify(team));
+    const calls = await launch();
+    fireEvent.click(await screen.findByRole("button", { name: /^Restore( all)?$/ }));
+    const acme = await project("acme-api");
+    const lead = await within(acme).findByRole("button", { name: /^Team: / });
+    fireEvent.click(lead.parentElement!.querySelector<HTMLElement>(".sb-close")!);
+    const ask = await screen.findByRole("group", { name: /^Close / });
+    expect(ask).toHaveTextContent("Close the team and its 1 agent?");
+    expect(ask).toHaveTextContent("2 uncommitted files and 1 commit that isn't merged would be lost.");
+    expect(calledWith(calls, "orchestra_close_worker")).toEqual([]);
+    fireEvent.click(within(ask).getByRole("button", { name: "Close team and agents" }));
+    await waitFor(() => expect(calledWith(calls, "orchestra_close_worker")).toEqual([{ worker: expect.any(String), agreed: { uncommitted: 2, unmerged_commits: 1 } }]));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "acme-api" })).toBeNull());
   });
 });

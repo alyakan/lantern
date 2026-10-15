@@ -2191,6 +2191,8 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-head button.sb-button { width: 32px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border-radius: var(--radius-chip); color: var(--muted); }
 .sb-head button.sb-button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .sb-head button.sb-button.on { color: var(--text); }
+/* In the open pane the History button says what it is, in the pill's place under New. */
+.sb-head button.sb-button.labelled { width: auto; gap: 7px; padding: 0 10px 0 9px; font-size: calc(12.5px * var(--font-scale)); }
 .sb-pin-glyph { display: grid; place-items: center; }
 .sb-pin-glyph svg { width: 13px; height: 14px; }
 .sb-head button.sb-button.on svg { fill: currentColor; }
@@ -2219,7 +2221,7 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-text, .sb-project-name { opacity: 0; transition: opacity 0.12s; }
 .sb-panel.expanded .sb-text, .sb-panel.expanded .sb-project-name { opacity: 1; animation: sb-fade-in 0.18s 0.06s backwards; }
 /* What is new in the open pane (the rest of it) comes in the same way. */
-.sb-panel.expanded .sb-new, .sb-panel.expanded .sb-header, .sb-panel.expanded .sb-past-list, .sb-panel.expanded .sb-foot, .sb-panel.expanded .sb-note { animation: sb-fade-in 0.18s 0.06s backwards; }
+.sb-panel.expanded .sb-new, .sb-panel.expanded .sb-header, .sb-panel.expanded .sb-foot, .sb-panel.expanded .sb-note { animation: sb-fade-in 0.18s 0.06s backwards; }
 @keyframes sb-fade-in { from { opacity: 0; } }
 .sb-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; white-space: nowrap; }
 .sb-title { overflow: hidden; text-overflow: ellipsis; font-size: calc(12.5px * var(--font-scale)); color: var(--text); }
@@ -2282,21 +2284,11 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-title-line .spinner { flex: none; }
 .sb-pin { flex: none; display: grid; place-items: center; color: var(--muted); }
 /* The × has a place of its own at the row's end: the title truncates before it. */
-.sb-close { position: absolute; right: 2px; width: 20px; height: 20px; display: none; place-items: center; border: none; border-radius: var(--radius-chip); background: none; color: var(--muted); font-size: calc(14px * var(--font-scale)); line-height: 1; }
-.sb-item.closable:hover .sb-close, .sb-item.closable:focus-within .sb-close { display: grid; }
-.sb-item.closable:hover .sb-row, .sb-item.closable:focus-within .sb-row { padding-right: 28px; }
-.sb-close:hover { background: var(--bg-active); color: var(--text); }
-/* Past chats: plain rows, their titles in line with the open chats' titles. */
-.sb-past-list { list-style: none; margin: 6px 0 0; padding: 0; }
-.sb-past-list:empty { display: none; }
-.sb-row.past { height: 26px; color: var(--muted-text); }
-.sb-row.past:hover { color: var(--text-2); }
-.sb-row.past .sb-title { flex: 1; min-width: 0; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: inherit; }
-.sb-lead { flex: none; width: 36px; display: grid; place-items: center; }
-.sb-meta { flex: none; padding-right: 6px; font-size: calc(11px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
-.sb-more { flex: 1; height: 22px; padding: 0 6px 0 52px; border: none; background: none; text-align: left; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); }
-.sb-more:hover { color: var(--text); }
-.sb-note { padding: 3px 6px 3px 52px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+button.sb-close { position: absolute; right: 2px; width: 20px; height: 20px; display: none; place-items: center; border: none; border-radius: var(--radius-chip); background: none; color: var(--muted); font-size: calc(14px * var(--font-scale)); line-height: 1; }
+.sb-item:hover button.sb-close, .sb-item:focus-within button.sb-close { display: grid; }
+.sb-item:hover .sb-row, .sb-item:focus-within .sb-row { padding-right: 28px; }
+button.sb-close:hover { background: var(--bg-active); color: var(--text); }
+.sb-note { padding: 3px 6px 3px 6px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 nav > .sb-note { padding-left: 14px; }
 .sb-foot { flex: none; display: flex; align-items: center; gap: 7px; height: 28px; margin: 4px 8px 0 0; padding: 0 8px; border: none; background: none; border-radius: var(--radius-chip); color: var(--muted-text); text-align: left; }
 .sb-foot:hover { background: var(--bg-hover); color: var(--text); }
@@ -2304,10 +2296,23 @@ nav > .sb-note { padding-left: 14px; }
 .sb-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; transition: background 0.12s; }
 .sb-resize:hover::after, .sidebar.dragging .sb-resize::after, .sb-resize:focus-visible::after { background: var(--line-strong); }
 .sb-resize:focus-visible { outline: none; }
+/* In the collapsed bar a row's × is a small one on its square's corner, for the pointer (the keyboard has the context menu key). */
+.sb-group > li { position: relative; }
+.sb-corner-close { position: absolute; left: 2px; top: -5px; width: 16px; height: 16px; padding: 0; display: none; place-items: center; border: none; border-radius: 50%; background: var(--bg-active); color: var(--text); font-size: calc(12px * var(--font-scale)); line-height: 1; box-shadow: 0 0 0 2px var(--bg); }
+.sb-group > li:hover > .sb-corner-close { display: grid; }
+/* Closing asks first when it stops something or throws work away: inline under the row, or where the user pressed. */
+.sb-confirm-wrap { list-style: none; }
+.sb-confirm { display: flex; flex-direction: column; gap: 6px; margin: 0 0 0 6px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: var(--radius-card); background: var(--bg-subtle); font-size: calc(11.5px * var(--font-scale)); color: var(--text-2); white-space: normal; }
+.sb-confirm.floating { position: fixed; z-index: 40; width: 232px; margin: 0; background: var(--field); box-shadow: var(--shadow); }
+.sb-confirm-actions { display: flex; gap: 6px; }
+.sb-confirm-actions button { height: 24px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--field); color: var(--text); font-size: calc(11.5px * var(--font-scale)); }
+.sb-confirm-actions button:hover:not(:disabled) { background: var(--bg-hover); }
+.sb-confirm-actions .sb-confirm-yes { border-color: var(--del); color: var(--del); }
+.sb-context { position: fixed; z-index: 40; min-width: 150px; }
 @media (prefers-reduced-motion: reduce) {
   .sb-mark.running { animation: none; }
   .sb-panel, .sb-text, .sb-project-name { transition: none !important; }
-  .sb-panel.expanded .sb-text, .sb-panel.expanded .sb-project-name, .sb-panel.expanded .sb-new, .sb-panel.expanded .sb-header, .sb-panel.expanded .sb-past-list, .sb-panel.expanded .sb-foot, .sb-panel.expanded .sb-note { animation: none; }
+  .sb-panel.expanded .sb-text, .sb-panel.expanded .sb-project-name, .sb-panel.expanded .sb-new, .sb-panel.expanded .sb-header, .sb-panel.expanded .sb-foot, .sb-panel.expanded .sb-note { animation: none; }
   .sb-section { transition: none; }
   .sb-section.lifted { scale: none; }
 }
@@ -2326,4 +2331,11 @@ nav > .sb-note { padding-left: 14px; }
 
 /* History: one project's past chats, under the title bar. */
 .history-popover { position: fixed; z-index: 30; top: 52px; left: 50%; width: min(560px, calc(100vw - 48px)); transform: translateX(-50%); display: flex; }
-.history-popover .history-menu { position: static; flex: 1; min-width: 0; }
+.history-popover .history-menu { position: static; flex: 1; min-width: 0; max-height: min(560px, calc(100vh - 120px)); }
+.history-top { display: flex; align-items: center; gap: 6px; }
+.history-top .menu-search { flex: 1; min-width: 0; margin: 2px 0 4px 2px; }
+.history-filter { flex: none; max-width: 160px; height: 28px; margin: 0 2px 2px 0; padding: 0 6px; border: 0.5px solid var(--glass-line); border-radius: var(--radius-pill); background: var(--glass); color: var(--text); font-size: calc(12px * var(--font-scale)); }
+.history-group-head { display: flex; align-items: center; justify-content: space-between; }
+.history-group-head .menu-heading { flex: 1; min-width: 0; }
+.history-new { flex: none; width: 22px; height: 22px; display: grid; place-items: center; margin-right: 2px; border-radius: var(--radius-chip); color: var(--muted); }
+.history-new:hover { background: var(--bg-hover); color: var(--text); }
