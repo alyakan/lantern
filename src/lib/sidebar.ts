@@ -1,5 +1,5 @@
 import { chatState, chatTitle, type Chats } from "../sessions";
-import type { RecentFolder, SessionSummary } from "../types";
+import type { RecentFolder } from "../types";
 import { basename } from "./diff";
 import { needingYou, orchestraNodes, teamNodes } from "./orchestraView";
 import { orderProjects } from "./projectOrder";
@@ -19,8 +19,6 @@ export interface SidebarChat {
   /** The chat on screen (an agent, when it's the one focused on the canvas). */
   active: boolean;
   pinned: boolean;
-  /** It can be closed from here: finished or only a draft, and not the one on screen. */
-  closable: boolean;
 }
 
 /** A chat, or a team: its Lead's chat with the agents it runs nested under it. */
@@ -37,13 +35,7 @@ export interface ProjectOpen {
   target: { slot: string; team: string | null } | null;
 }
 
-export interface PastRow {
-  id: string;
-  title: string;
-  updated_ms: number;
-  pinned: boolean;
-}
-
+/** A project the sidebar's list of projects (History's filter, the saved order) has, with what is open in it. */
 export interface SidebarProject {
   folder: string;
   /** The folder's name, with its parent's when another project has the same one. */
@@ -52,10 +44,8 @@ export interface SidebarProject {
   items: SidebarItem[];
   needs: number;
   target: ProjectOpen["target"];
-  /** There is something open in it: it starts expanded. */
+  /** There is something open in it. */
   hasOpen: boolean;
-  /** Past chats, once read (they are read only for an expanded project): null before that. */
-  past: { pinned: PastRow[]; recent: PastRow[]; total: number } | null;
 }
 
 /** How a state reads, as words. */
@@ -66,7 +56,7 @@ export function markOf(chat: Pick<SidebarChat, "state" | "unread">): ChatDot | "
   return chat.unread && chat.state !== "waiting" ? "unread" : chat.state;
 }
 
-/** One open chat or team as the compact sidebar's square (a team is its Lead, with the team's combined state). */
+/** One open chat, team or agent as the sidebar's square (a team is its Lead, with the team's combined state). */
 export interface CompactChip {
   slot: string;
   team: boolean;
@@ -79,6 +69,9 @@ export interface CompactChip {
   status: string;
   /** One or two capitals from the title, for the square. */
   initials: string;
+  pinned: boolean;
+  /** How many tasks it still runs in the background. */
+  background: number;
 }
 
 export interface CompactGroup {
@@ -88,6 +81,9 @@ export interface CompactGroup {
   /** Two capitals of the project's name, for the label above its squares. */
   initials: string;
   chips: CompactChip[];
+  /** The same chats and teams with their agents nested (the open pane's rows), and what needs you here. */
+  items: SidebarItem[];
+  needs: number;
 }
 
 const FILLER = new Set(["a", "an", "the", "of", "to", "for", "and", "in", "on"]);
@@ -107,6 +103,24 @@ export function initials(name: string, single = 1): string {
 /** A chat's initials from its title: a chat or team with no title yet ("New chat", "New team") is N. */
 export const chatInitials = (title: string): string => (/^new (chat|team)$/i.test(title.trim()) ? "N" : initials(title));
 
+/** An open chat, a team (its Lead, with its agents' state) or an agent, as a square with its status. */
+export function chipOf(item: SidebarChat | SidebarItem): CompactChip {
+  const mark = markOf(item);
+  const team = "kind" in item && item.kind === "team";
+  return {
+    slot: item.slot,
+    team,
+    title: item.title,
+    state: item.state,
+    unread: item.unread,
+    active: item.active || (team && "agents" in item && item.agents.some((a) => a.active)),
+    status: mark === "unread" ? "Unread" : DOT_LABEL[mark],
+    initials: chatInitials(item.title),
+    pinned: item.pinned,
+    background: item.background,
+  };
+}
+
 /** Each folder's name for a list of projects: the folder's name, with its parent's when another one in the list has the same. */
 export function projectLabels(folders: string[]): string[] {
   const names = folders.map(basename);
@@ -117,7 +131,7 @@ export function projectLabels(folders: string[]): string[] {
 }
 
 /**
- * What is open, as the compact sidebar lists it: the projects with something open, in the order the full sidebar lists
+ * What is open, as the collapsed sidebar lists it: the projects with something open, in the order the sidebar lists
  * them (the recent list's), each with its chats and teams. An agent is never listed on its own, only inside its team.
  */
 export function compactGroups(open: Record<string, ProjectOpen>, recent: RecentFolder[], order: string[] = []): CompactGroup[] {
@@ -130,25 +144,10 @@ export function compactGroups(open: Record<string, ProjectOpen>, recent: RecentF
   const labels = projectLabels(folders);
   return folders.map((folder, i) => {
     const label = labels[i];
-    const chips = open[folder].items.map((item): CompactChip => {
-      const mark = markOf(item);
-      return {
-        slot: item.slot,
-        team: item.kind === "team",
-        title: item.title,
-        state: item.state,
-        unread: item.unread,
-        active: item.active || (item.kind === "team" && item.agents.some((a) => a.active)),
-        status: mark === "unread" ? "Unread" : DOT_LABEL[mark],
-        initials: chatInitials(item.title),
-      };
-    });
-    return { folder, label, initials: initials(names[i], 2), chips };
+    const chips = open[folder].items.map(chipOf);
+    return { folder, label, initials: initials(names[i], 2), chips, items: open[folder].items, needs: open[folder].needs };
   });
 }
-
-/** The latest past chats a project lists before "Show all…". */
-export const RECENT_PAST = 3;
 
 /** Everything that waits on you, in every project: what the title bar's button counts while the sidebar is hidden. */
 export function needsYou(open: Record<string, ProjectOpen>): number {
@@ -177,7 +176,6 @@ export function openProjects(chats: Chats, opts: { titles: Record<string, string
       sessionId: s.sessionId,
       active: slot === chats.active,
       pinned: pinnedIn(s.folder, s.sessionId),
-      closable: slot !== chats.active && !agent && !s.orchestrator && (state === "done" || state === "draft"),
     };
   };
   for (const [slot, s] of Object.entries(chats.slots)) {
@@ -213,16 +211,6 @@ export function openProjects(chats: Chats, opts: { titles: Record<string, string
   return out;
 }
 
-/** Past chats for the sidebar: the pinned ones, then the latest few, leaving out any that is open. */
-export function pastRows(sessions: SessionSummary[], openIds: string[], pinned: string[], titles: Record<string, string>, limit = RECENT_PAST): NonNullable<SidebarProject["past"]> {
-  const rows = sessions
-    .filter((s) => !openIds.includes(s.id))
-    .map((s): PastRow => ({ id: s.id, title: titles[s.id] ?? s.title, updated_ms: s.updated_ms, pinned: pinned.includes(s.id) }))
-    .sort((a, b) => b.updated_ms - a.updated_ms);
-  const pins = rows.filter((r) => r.pinned);
-  return { pinned: pins, recent: rows.filter((r) => !r.pinned).slice(0, limit), total: rows.length };
-}
-
 /**
  * The projects the sidebar lists, newest first, for orderProjects: those with a chat open (in the order of the recent
  * list, a project that isn't on it yet ahead of the rest), then the other recent folders. `hidden` folders (removed from
@@ -236,16 +224,15 @@ export function projectFolders(recent: RecentFolder[], hidden: string[], open: R
 }
 
 /**
- * The sidebar's projects, in the user's order (`order`, see orderProjects: a project not in it yet goes on top). `past`
- * holds the sessions read so far, by folder.
+ * The projects the sidebar knows, in the user's order (`order`, see orderProjects: a project not in it yet goes on top):
+ * the ones History lists past chats of.
  */
-export function sidebarProjects(input: { recent: RecentFolder[]; hidden: string[]; open: Record<string, ProjectOpen>; past: Record<string, SessionSummary[] | undefined>; pinned: Record<string, string[]>; titles: Record<string, string>; order?: string[] }): SidebarProject[] {
-  const { recent, hidden, open, past, pinned, titles } = input;
+export function sidebarProjects(input: { recent: RecentFolder[]; hidden: string[]; open: Record<string, ProjectOpen>; order?: string[] }): SidebarProject[] {
+  const { recent, hidden, open } = input;
   const folders = orderProjects(projectFolders(recent, hidden, open), input.order ?? []).listed;
   const labels = projectLabels(folders);
   return folders.map((folder, i) => {
     const o = open[folder];
-    const sessions = past[folder];
     return {
       folder,
       label: labels[i],
@@ -253,7 +240,6 @@ export function sidebarProjects(input: { recent: RecentFolder[]; hidden: string[
       needs: o?.needs ?? 0,
       target: o?.target ?? null,
       hasOpen: !!o,
-      past: sessions ? pastRows(sessions, o?.sessionIds ?? [], pinned[folder] ?? [], titles) : null,
     };
   });
 }

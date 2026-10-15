@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/** How long the pointer rests on the window's left edge (hidden) or on the compact column before the full sidebar slides in. */
+/** How long the pointer rests on the window's left edge before the hidden sidebar slides in. */
 export const PEEK_DELAY_MS = 250;
 /** The slide, in and out (the same in the stylesheet). */
 export const PEEK_SLIDE_MS = 160;
@@ -11,9 +11,9 @@ export type PeekPhase = "off" | "in" | "out";
 const reducedMotion = () => typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /**
- * The peek of a sidebar that is not shown in full (`away`: hidden, or compact): the full sidebar slides in over the chat
- * once the pointer has rested on the window's left edge or on the compact column, and goes again on `close` (the pointer
- * left it, Escape, a row was picked). Showing the sidebar in full (`away` false) ends it at once.
+ * The peek of a hidden sidebar (`away`): it slides in over the chat once the pointer has rested on the window's left edge,
+ * and goes again on `close` (the pointer left it, Escape, a row was picked). Showing the sidebar (`away` false) ends it
+ * at once.
  */
 export function usePeek(away: boolean) {
   const [phase, setPhase] = useState<PeekPhase>("off");

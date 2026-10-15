@@ -10,7 +10,7 @@ export const FOLDER_RECORDS = [
   "settings.harnessByFolder",
   "review.collapsedByFolder",
   "settings.pinnedSessions",
-  // The project's colour in the compact sidebar.
+  // The project's colour in the sidebar.
   "sidebar.projectColors",
 ] as const;
 

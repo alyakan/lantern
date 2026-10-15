@@ -180,7 +180,7 @@ export const api = {
   onUpdateState: (cb: (state: UpdateState) => void): Promise<UnlistenFn> => listen<UpdateState>("update-state", (e) => cb(e.payload)),
   /** "Lantern ▸ Check for Updates…" was chosen in the app menu. */
   onCheckForUpdates: (cb: () => void): Promise<UnlistenFn> => listen("check-for-updates", () => cb()),
-  /** The sidebar is now hidden, or compact: View's two sidebar items say what choosing them does. */
+  /** The sidebar is now hidden, or collapsed: View's two sidebar items say what choosing them does. */
   sidebarMenu: (hidden: boolean, compact: boolean) => invoke<void>("sidebar_menu", { hidden, compact }),
   /** Anything is working (and the user allows it): the Mac is kept from idle sleep until it isn't. */
   keepAwake: (working: boolean, allowed: boolean) => invoke<void>("keep_awake", { working, allowed }),
