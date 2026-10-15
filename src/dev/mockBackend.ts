@@ -556,7 +556,8 @@ async function playOrchestraWake(slot: string, text: string) {
       summary: "Adds the login form with inline validation. Its 6 tests pass.",
       commits: 3,
       files: [{ path: "src/auth/LoginForm.tsx", added: 84, removed: 0 }, { path: "src/auth/LoginForm.test.tsx", added: 61, removed: 0 }, { path: "src/App.tsx", added: 2, removed: 1 }],
-      uncommitted: 0,
+      uncommitted: 1,
+      loose: ["src/auth/strings.ts"],
     });
     await send({ kind: "tool_finished", parent: null, tool_use_id: "merge-1", is_error: false, output: "Asked the user to merge lantern/login-form into main." });
   }
@@ -1132,6 +1133,7 @@ export function installMockBackend() {
             { flavour: "Review", text: "Review: one changed file per page, then the summary.", headings: ["# Frame — <the PR's title>", "# File N of M — <path> (+added −removed)", "# Summary — <files reviewed, findings accepted, findings dropped>"] },
           ];
         case "set_agent_choice":
+        case "set_agent_limit":
           return null;
         case "list_permission_rules":
           // A couple of rules, so Settings has something to show in the browser preview.

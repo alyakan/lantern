@@ -34,15 +34,21 @@ pub fn exe_of(_pid: u32) -> Option<std::path::PathBuf> {
     None
 }
 
-/// `pid` is running this very program (the app's own executable, which is what the helper is: `lantern --permission-helper`).
-/// A shell with a single command runs it in place of itself, so a command the main agent ran can be claude's direct child
-/// too; it is not this program, and so not a helper.
-pub fn runs_this_program(pid: u32) -> bool {
+/// `pid` is running the program `exe` (the app's own executable is what the helper is: `lantern --permission-helper`).
+/// A shell with a single command runs it in place of itself, so a command claude ran can be its direct child too; it is
+/// another program, and so not a helper.
+pub fn runs_program(pid: u32, exe: &std::path::Path) -> bool {
     let real = |p: &std::path::Path| std::fs::canonicalize(p).ok();
-    match (exe_of(pid).and_then(|p| real(&p)), std::env::current_exe().ok().and_then(|p| real(&p))) {
-        (Some(theirs), Some(ours)) => theirs == ours,
+    match (exe_of(pid).and_then(|p| real(&p)), real(exe)) {
+        (Some(theirs), Some(wanted)) => theirs == wanted,
         _ => false,
     }
+}
+
+/// `pid` is running this very program.
+#[cfg(test)]
+pub fn runs_this_program(pid: u32) -> bool {
+    std::env::current_exe().is_ok_and(|exe| runs_program(pid, &exe))
 }
 
 /// `pid` is `ancestor` or one of the processes it started, directly or through others. A process that has gone has no

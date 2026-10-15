@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type State } from "../store";
 import { chatsReducer, initialChats, type Chats } from "../sessions";
-import { money, needingYou, nodeStatus, orchestraNodes, readyToMerge, summaryLine, teamMain, teamNodes, lostText } from "./orchestraView";
+import { money, needingYou, nodeStatus, orchestraNodes, readyToMerge, summaryLine, teamMain, teamNodes, lostText, tokens, usage } from "./orchestraView";
 
 const base: State = { ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/p" };
 const main: State = { ...base, orchestrator: true };
@@ -136,7 +136,7 @@ describe("money", () => {
 });
 
 describe("a merge waiting for you", () => {
-  const proposal = (worker: string, status: "open" | "merged" | "declined" = "open") => ({ worker, name: worker, branch: `lantern/${worker}`, into: "main", summary: "", commits: 1, files: [], uncommitted: 0, status, problem: null, attempts: 0 });
+  const proposal = (worker: string, status: "open" | "merged" | "declined" = "open") => ({ worker, name: worker, branch: `lantern/${worker}`, into: "main", summary: "", commits: 1, files: [], uncommitted: 0, loose: [], status, problem: null, attempts: 0 });
 
   it("makes its worker one that needs you, even though the worker itself is idle", () => {
     let c = spawn(initialChats(main), "w1", "A");
@@ -166,6 +166,8 @@ describe("lostText", () => {
 
   it("says what would be lost, in the words the question uses", () => {
     expect(lostText(check(3, 2))).toBe("3 uncommitted files and 2 commits that aren't merged");
+    expect([usage(1.2, 3_100_000), usage(0, 950), usage(0.5, 0), usage(0, 0)]).toEqual(["$1.20 · 3.1M tok", "950 tok", "$0.50", ""]);
+    expect(tokens(12_400)).toBe("12k tok");
     expect(lostText(check(1, 1))).toBe("1 uncommitted file and 1 commit that isn't merged");
     expect(lostText(check(0, 2))).toBe("2 commits that aren't merged");
     expect(lostText(check(4, 0))).toBe("4 uncommitted files");

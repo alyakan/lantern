@@ -54,6 +54,29 @@ pub struct AppState {
     prs: std::sync::Mutex<std::collections::HashMap<(std::path::PathBuf, u32), (std::time::Instant, pr::PrRange)>>,
     /// Network Monitor's captured traffic, as the network_* tools and the Network tab read it (see network.rs).
     network: Arc<network::Monitor>,
+    /// How many workers may run at once across all of Lantern (Settings → General; the window sends it).
+    agent_limit: std::sync::atomic::AtomicUsize,
+}
+
+/// Where a test makes folders that must not be in the system temp dir (which recent folders leave out): the target dir
+/// cargo builds into, wherever that is (a worktree may build into another checkout's).
+#[cfg(test)]
+pub(crate) fn scratch_dir() -> std::path::PathBuf {
+    std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/target")), std::path::PathBuf::from)
+}
+
+/// The user's limit on agents running at once until the window says otherwise, and the range it may be set in.
+const DEFAULT_AGENT_LIMIT: usize = 3;
+const AGENT_LIMITS: std::ops::RangeInclusive<usize> = 1..=orchestra::MAX_WORKERS;
+
+/// The user changed how many agents may run at once (or the window started and says what it was set to).
+#[tauri::command]
+fn set_agent_limit(state: State<'_, AppState>, limit: usize) -> Result<(), String> {
+    if !AGENT_LIMITS.contains(&limit) {
+        return Err(format!("The limit is between {} and {}.", AGENT_LIMITS.start(), AGENT_LIMITS.end()));
+    }
+    state.agent_limit.store(limit, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
 }
 
 /// How long a looked-up PR is used before it's fetched again (it may have new commits).
@@ -125,6 +148,27 @@ fn ceiling_of(main: Option<(Mode, bool, ProviderId)>) -> Mode {
     main.map_or(Mode::Ask, |(mode, auto, provider)| args::worker_mode(mode, auto, &capabilities_of(provider)))
 }
 
+/// `cfg`'s mode and auto-approve, no freer than `ceiling` allows (None: no ceiling, the chat is no worker). True when that
+/// lowered them.
+fn cap_mode(cfg: &mut SessionConfig, ceiling: Option<Mode>) -> bool {
+    let Some(ceiling) = ceiling else { return false };
+    let (mode, auto) = args::capped_mode(cfg.mode, cfg.auto_approve, ceiling, &capabilities_of(cfg.provider));
+    let lowered = (mode, auto) != (cfg.mode, cfg.auto_approve);
+    cfg.mode = mode;
+    cfg.auto_approve = auto;
+    lowered
+}
+
+/// The ceiling for chat `slot` when it is a worker of an open main agent: what its main agent allows now.
+fn worker_ceiling(state: &AppState, slot: &str) -> Option<Mode> {
+    state.orchestra.parent_of(slot).map(|main| main_ceiling(state, &main))
+}
+
+/// Tells the window a worker runs on Ask: its mode was lowered under it.
+fn told_ask(app: &AppHandle, slot: &str) {
+    let _ = app.emit("ui-event", SlotEvent { slot: slot.to_string(), event: ui_event::UiEvent::AgentMode { mode: "ask".into() } });
+}
+
 /// How the worker `worker` runs once its main agent's mode allows no more than `ceiling`: lowered (its claude restarted on
 /// the same conversation, since the mode is a launch flag) when it was running with more freedom than that.
 async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: Mode) {
@@ -143,7 +187,7 @@ async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: 
         cfg.helper = helper;
     }
     if launch(app, worker, &s, cfg, false).await.is_ok() {
-        let _ = app.emit("ui-event", SlotEvent { slot: worker.to_string(), event: ui_event::UiEvent::AgentMode { mode: "ask".into() } });
+        told_ask(app, worker);
     }
 }
 
@@ -175,6 +219,10 @@ impl orchestra::Host for AppHost {
     fn worker_mode(&self, main: &str, provider: ProviderId) -> Mode {
         let ceiling = main_ceiling(&self.app.state::<AppState>(), main);
         args::capped_mode(ceiling, false, ceiling, &capabilities_of(provider)).0
+    }
+
+    fn agent_limit(&self) -> usize {
+        self.app.state::<AppState>().agent_limit.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     fn worktree_root(&self) -> std::path::PathBuf {
@@ -213,7 +261,7 @@ impl orchestra::Host for AppHost {
             if req.model.is_some() {
                 cfg.model = req.model;
             }
-            cfg.helper = helper_config(&s, Role::Worker { name: req.name })?;
+            cfg.helper = helper_config(&s, Role::Worker { name: req.name, read_only: req.read_only })?;
             cfg.path_env = login_path(&state).await;
             launch(&self.app, &req.slot, &s, cfg, true).await?;
             // The main agent's mode may have been lowered while this one started (the mode it was given was read before):
@@ -271,16 +319,12 @@ impl orchestra::Host for AppHost {
 fn enroll(state: &AppState, id: &str, slot: &Slot, role: &Role) {
     if *role == Role::Main {
         state.orchestra.register_main(id);
-        // A call is the main agent's only when the process making it is this app's own helper, started directly by the
-        // chat's own claude: the OS says who is on the other end of the socket. A command the main agent ran (code a worker
-        // wrote, say) is another program, and a shell's single command can sit as close as a direct child, so both are
-        // required. Nothing in the process list or environment can pass for it.
-        let claude = slot.claude_pid.clone();
-        let from_this_chats_claude: permission::bridge::OrchestraAuth = Arc::new(move |caller| {
-            let main = claude.load(std::sync::atomic::Ordering::SeqCst);
-            main != 0 && process::is_child_of(caller, main) && process::runs_this_program(caller)
-        });
-        slot.bridge.set_orchestra(state.orchestra.handler(id.to_string()), from_this_chats_claude);
+        // Only this chat's own helper reaches the handler (see slot_for): a process this chat's claude started itself that
+        // runs Lantern's executable. That keeps out workers, their commands, other chats and anything else of the user's.
+        // It doesn't keep out the main agent itself: a command it runs that starts Lantern's executable directly (a shell
+        // runs a single command in its own place) is the same kind of process as the helper, and is let in. That gives
+        // the main agent nothing it can't already do with its own orchestra tools.
+        slot.bridge.set_orchestra(state.orchestra.handler(id.to_string()));
     } else {
         state.orchestra.forget(id);
     }
@@ -288,7 +332,10 @@ fn enroll(state: &AppState, id: &str, slot: &Slot, role: &Role) {
 
 /// The chat's slot, created on first use.
 fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, String> {
-    let slot = state.slots.get_or_create(slot, &std::env::temp_dir(), emitter(app), state.folder_rules.clone())?;
+    // Every request to the chat's bridge must come from its own claude's helper: a direct child of that claude running
+    // Lantern's own executable (see bridge::helper_of).
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let slot = state.slots.get_or_create(slot, &std::env::temp_dir(), emitter(app), state.folder_rules.clone(), move |claude| permission::bridge::helper_of(claude, exe))?;
     // Every chat's helper offers the network_* tools; they're answered here, for the chat's folder.
     let monitor = state.network.clone();
     slot.bridge.set_network(Arc::new(move |folder, tool, input| {
@@ -397,6 +444,13 @@ struct WorkerSettings {
     name: String,
     /// The main agent's slot, which has to be open already.
     parent: String,
+    /// The branch Lantern made for it, as the canvas saved it (None: a shared folder, or a save from before it was kept).
+    /// Its worktree's HEAD is the worker's to switch, so this is what says which branch is the worker's.
+    #[serde(default)]
+    branch: Option<String>,
+    /// It works in its main agent's folder, so it reads and doesn't edit (see Role::Worker).
+    #[serde(default)]
+    shared: bool,
 }
 
 fn checked_effort(effort: Option<String>) -> Result<Option<String>, String> {
@@ -406,11 +460,14 @@ fn checked_effort(effort: Option<String>) -> Result<Option<String>, String> {
     }
 }
 
+/// A chat's config from what the window sent. A worker's mode is no freer than its main agent allows now, whatever the
+/// window asked for (see `cap_mode`).
 async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: String, settings: Settings, resume: Option<String>) -> Result<SessionConfig, String> {
     if !std::path::Path::new(&folder).is_dir() {
         return Err(format!("{folder} no longer exists."));
     }
-    Ok(SessionConfig {
+    let ceiling = settings.worker.as_ref().map(|w| main_ceiling(state, &w.parent));
+    let mut cfg = SessionConfig {
         provider: settings.provider,
         binary: claude_path.into(),
         folder: folder.into(),
@@ -425,12 +482,14 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
             slot,
             match (settings.orchestrator, settings.worker) {
                 (true, _) => Role::Main,
-                (false, Some(w)) => Role::Worker { name: w.name },
+                (false, Some(w)) => Role::Worker { name: w.name, read_only: w.shared },
                 (false, None) => Role::Normal,
             },
         )?,
         path_env: login_path(state).await,
-    })
+    };
+    cap_mode(&mut cfg, ceiling);
+    Ok(cfg)
 }
 
 /// The user's name for their messages: the macOS account's full name, else git's user.name, else the login name.
@@ -458,10 +517,15 @@ async fn locate_claude(path_override: Option<String>) -> Result<String, String> 
 #[tauri::command]
 async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String, claude_path: String, folder: String, settings: Settings) -> Result<ProviderInfo, String> {
     let s = slot_for(&app, &state, &slot)?;
+    let asked = settings.mode;
     let cfg = new_config(&state, &s, claude_path, folder, settings, None).await?;
     enroll(&state, &slot, &s, &cfg.helper.role);
     let provider = cfg.provider.info();
+    let lowered = cfg.mode != asked;
     launch(&app, &slot, &s, cfg, true).await?;
+    if lowered {
+        told_ask(&app, &slot);
+    }
     menu::refresh_recent(&app).await;
     Ok(provider)
 }
@@ -480,8 +544,13 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
     cfg.resume = running_id.or(cfg.resume);
     cfg.helper = helper_config(&s, cfg.helper.role.clone())?;
     cfg.path_env = login_path(&state).await;
+    // A worker asked for more freedom than its main agent allows gets what it allows (the window is told).
+    let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
     let (new_mode, new_auto, provider) = (cfg.mode, cfg.auto_approve, cfg.provider);
     launch(&app, &slot, &s, cfg, false).await?;
+    if lowered {
+        told_ask(&app, &slot);
+    }
     // A worker never has more freedom than its main agent: when the main agent's mode is lowered, so are its workers'.
     if state.orchestra.is_main(&slot) {
         let ceiling = args::worker_mode(new_mode, new_auto, &capabilities_of(provider));
@@ -505,7 +574,12 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
     cfg.resume = running_id.or(cfg.resume);
     cfg.helper = helper_config(&s, cfg.helper.role.clone())?;
     cfg.path_env = login_path(&state).await;
-    launch(&app, &slot, &s, cfg, false).await
+    let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
+    launch(&app, &slot, &s, cfg, false).await?;
+    if lowered {
+        told_ask(&app, &slot);
+    }
+    Ok(())
 }
 
 /// Stops a chat and forgets it. Closing one that doesn't exist is fine.
@@ -1325,7 +1399,7 @@ async fn open_session(
             let replayed = tauri::async_runtime::spawn_blocking(move || history::replay(&path)).await.map_err(|e| e.to_string())?;
             // Registered before it starts, so its first events are seen, and unregistered if it never does.
             if let Some(w) = worker {
-                state.orchestra.adopt(&slot, &w.parent, &w.name, &cfg.folder).await?;
+                state.orchestra.adopt(&slot, &w.parent, &w.name, &cfg.folder, w.branch.as_deref()).await?;
             }
             if let Err(e) = launch(&app, &slot, &s, cfg, true).await {
                 state.orchestra.forget(&slot);
@@ -1333,7 +1407,7 @@ async fn open_session(
             }
             // The window put the chat up with the mode it was saved in: told the one it runs in, when that is lower.
             if lowered {
-                let _ = app.emit("ui-event", SlotEvent { slot: slot.clone(), event: ui_event::UiEvent::AgentMode { mode: "ask".into() } });
+                told_ask(&app, &slot);
             }
             // Its main agent may have been lowered while this one was opening.
             if let Some(parent) = &parent_slot {
@@ -1498,7 +1572,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, agent_limit: DEFAULT_AGENT_LIMIT.into() });
             app.manage(updates::Updates::default());
             if updates::checks_enabled() {
                 tauri::async_runtime::spawn(updates::watch(app.handle().clone()));
@@ -1601,7 +1675,8 @@ pub fn run() {
             copy_diagnostics,
             orchestra_close_check,
             orchestra_close_worker,
-            orchestra_spawn
+            orchestra_spawn,
+            set_agent_limit
         ])
         .build(tauri::generate_context!())
         .expect("error while building Lantern")
@@ -1654,6 +1729,50 @@ mod tests {
     fn a_worker_restored_before_its_main_agent_has_a_config_comes_back_on_ask() {
         assert_eq!(ceiling_of(None), Mode::Ask);
         assert_eq!(args::capped_mode(Mode::Auto, false, ceiling_of(None), &capabilities_of(ProviderId::Claude)), (Mode::Ask, false));
+    }
+
+    fn config(mode: Mode, auto_approve: bool) -> SessionConfig {
+        SessionConfig {
+            provider: ProviderId::Claude,
+            binary: "/bin/claude".into(),
+            folder: "/tmp".into(),
+            mode,
+            auto_approve,
+            resume: None,
+            model: None,
+            effort: None,
+            advisor: None,
+            subagent_model: None,
+            helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![] },
+            path_env: None,
+        }
+    }
+
+    /// Restarting a worker, changing its harness or starting it from the window: whatever mode is asked for, it runs no
+    /// freer than its main agent allows, and a chat that is no worker is left as asked.
+    #[test]
+    fn a_worker_restarted_with_more_freedom_than_its_main_agent_allows_is_capped() {
+        let mut cfg = config(Mode::Auto, false);
+        assert!(cap_mode(&mut cfg, Some(Mode::Ask)));
+        assert_eq!((cfg.mode, cfg.auto_approve), (Mode::Ask, false));
+        let mut steps = config(Mode::Steps, true);
+        assert!(cap_mode(&mut steps, Some(Mode::Ask)));
+        assert_eq!((steps.mode, steps.auto_approve), (Mode::Ask, false));
+        let mut allowed = config(Mode::Auto, false);
+        assert!(!cap_mode(&mut allowed, Some(Mode::Auto)));
+        assert_eq!(allowed.mode, Mode::Auto);
+        let mut no_worker = config(Mode::Auto, false);
+        assert!(!cap_mode(&mut no_worker, None));
+        assert_eq!(no_worker.mode, Mode::Auto);
+    }
+
+    /// A restored worker's settings carry the branch the canvas saved, and older saves (without one) still read.
+    #[test]
+    fn a_restored_workers_settings_carry_its_saved_branch() {
+        let saved: Settings = serde_json::from_str(r#"{"mode":"auto","model":null,"effort":null,"worker":{"name":"w","parent":"s1","branch":"lantern/w"}}"#).unwrap();
+        assert_eq!(saved.worker.unwrap().branch.as_deref(), Some("lantern/w"));
+        let older: Settings = serde_json::from_str(r#"{"mode":"auto","model":null,"effort":null,"worker":{"name":"w","parent":"s1"}}"#).unwrap();
+        assert_eq!(older.worker.unwrap().branch, None);
     }
 
     #[test]

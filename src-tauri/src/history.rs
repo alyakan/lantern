@@ -613,7 +613,7 @@ mod tests {
     fn recent_folders_are_real_user_folders_newest_first() {
         let root = tempfile::tempdir().unwrap();
         // Not in the system temp dir: recent_folders leaves those out.
-        let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
+        let work = tempfile::tempdir_in(crate::scratch_dir()).unwrap();
         let scratch = tempfile::tempdir().unwrap();
         let (older, newer, automation) = (work.path().join("older"), work.path().join("my.app"), work.path().join("bot"));
         for f in [&older, &newer, &automation] {
@@ -818,7 +818,7 @@ mod tests {
     #[test]
     fn a_folder_resumed_after_a_move_is_recent_under_its_new_path() {
         let root = tempfile::tempdir().unwrap();
-        let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
+        let work = tempfile::tempdir_in(crate::scratch_dir()).unwrap();
         let (new, old) = (work.path().join("new-app"), work.path().join("old-app"));
         std::fs::create_dir_all(&new).unwrap();
         let (new_s, old_s) = (new.to_string_lossy().into_owned(), old.to_string_lossy().into_owned());
@@ -879,7 +879,7 @@ mod tests {
     #[test]
     fn a_folder_is_known_whether_or_not_it_still_exists() {
         let root = tempfile::tempdir().unwrap();
-        let work = tempfile::tempdir_in(concat!(env!("CARGO_MANIFEST_DIR"), "/target")).unwrap();
+        let work = tempfile::tempdir_in(crate::scratch_dir()).unwrap();
         let (here, gone) = (work.path().join("here"), work.path().join("gone"));
         std::fs::create_dir_all(&here).unwrap();
         let (here_s, gone_s) = (here.to_string_lossy().into_owned(), gone.to_string_lossy().into_owned());

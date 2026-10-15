@@ -51,20 +51,38 @@ pub struct PermissionBridge {
     /// The rules for folders, shared by every chat.
     folder_rules: Arc<FolderRules>,
     /// Set only on the main agent's chat: any other chat's orchestra calls are refused.
-    orchestra: Mutex<Option<(OrchestraHandler, OrchestraAuth)>>,
+    orchestra: Mutex<Option<OrchestraHandler>>,
+    /// Who may ask anything at all: this chat's own helper (see `CallerAuth`).
+    auth: CallerAuth,
     /// Answers the network_* tools (see network.rs); set on every chat.
     network: Mutex<Option<NetworkHandler>>,
     /// The main agent's answer to "where should this helper run?", kept for the chat (see `AgentChoice`).
     agent_choice: Mutex<Option<AgentChoice>>,
 }
 
-/// Whether the process with this pid, on the other end of the socket, is the main agent's own helper (see
-/// process::descends_from). Who connects is asked of the OS, because anything the helper could be handed to prove itself
-/// (a secret in its arguments, its environment or a file) a worker's shell could read too.
-pub type OrchestraAuth = Arc<dyn Fn(u32) -> bool + Send + Sync>;
+/// Whether the process with this pid, on the other end of the socket, is this chat's own helper. Every request is asked
+/// it first: a permission card, an answer to AskUserQuestion, a reproduce request, a network or orchestra call. Who
+/// connects is asked of the OS, because anything the helper could be handed to prove itself (a secret in its arguments,
+/// its environment or a file) any other process of the user's could read too.
+pub type CallerAuth = Arc<dyn Fn(u32) -> bool + Send + Sync>;
+
+/// The helper of the claude whose pid `claude` holds (0: none is running): a process that claude started itself (not
+/// through a shell or anything else in between) and that runs `exe`, the program the helper is (`lantern
+/// --permission-helper`). A shell's single command can sit as close to claude as a direct child, which is why both are
+/// asked. Anything else is refused, whatever it sends.
+pub fn helper_of(claude: Arc<std::sync::atomic::AtomicU32>, exe: PathBuf) -> CallerAuth {
+    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
+    Arc::new(move |caller| {
+        let parent = claude.load(Ordering::SeqCst);
+        parent != 0 && crate::process::is_child_of(caller, parent) && crate::process::runs_program(caller, &exe)
+    })
+}
+
+const NOT_AUTHORIZED: &str = "Not authorized: only this chat's own Lantern helper may ask.";
 
 impl PermissionBridge {
-    pub fn start(socket_path: PathBuf, sink: Sink, folder_rules: Arc<FolderRules>) -> std::io::Result<Arc<Self>> {
+    /// `auth` says which process may ask (see `CallerAuth`); every other one is refused.
+    pub fn start(socket_path: PathBuf, sink: Sink, folder_rules: Arc<FolderRules>, auth: CallerAuth) -> std::io::Result<Arc<Self>> {
         let _ = std::fs::remove_file(&socket_path);
         let std_listener = std::os::unix::net::UnixListener::bind(&socket_path)?;
         // Only this user's processes may connect, whatever the directory's permissions are.
@@ -82,6 +100,7 @@ impl PermissionBridge {
             folder: Mutex::new(None),
             folder_rules,
             orchestra: Mutex::new(None),
+            auth,
             network: Mutex::new(None),
             agent_choice: Mutex::new(None),
         });
@@ -107,6 +126,14 @@ impl PermissionBridge {
         // Who is calling, as the OS says (None where it can't).
         let peer = stream.peer_cred().ok().and_then(|c| c.pid()).and_then(|p| u32::try_from(p).ok());
         let (read, mut write) = stream.into_split();
+        // Anyone else is answered no before a word they send is read: no card, no rule, no tool.
+        if !peer.is_some_and(|pid| (self.auth)(pid)) {
+            let resp = BridgeResponse { allow: false, message: Some(NOT_AUTHORIZED.into()), updated_input: None };
+            if let Ok(json) = serde_json::to_string(&resp) {
+                let _ = write.write_all(format!("{json}\n").as_bytes()).await;
+            }
+            return;
+        }
         let mut reader = BufReader::new(read.take(MAX_REQUEST));
         let mut line = String::new();
         match tokio::time::timeout(REQUEST_WAIT, reader.read_line(&mut line)).await {
@@ -118,8 +145,7 @@ impl PermissionBridge {
         if req.orchestra {
             let orchestra = self.orchestra.lock().unwrap().clone();
             let resp = match orchestra {
-                Some((_, auth)) if !peer.is_some_and(|pid| auth(pid)) => BridgeResponse { allow: false, message: Some("Not authorized: only the main agent's own helper may call the orchestra tools.".into()), updated_input: None },
-                Some((handle, _)) => handle(req.tool_name, req.input).await,
+                Some(handle) => handle(req.tool_name, req.input).await,
                 None => BridgeResponse { allow: false, message: Some("This chat is not the main agent of an orchestra.".into()), updated_input: None },
             };
             if let Ok(json) = serde_json::to_string(&resp) {
@@ -195,9 +221,9 @@ impl PermissionBridge {
         *self.network.lock().unwrap() = Some(handler);
     }
 
-    /// Makes this the main agent's bridge: orchestra tool calls from a process `authorize` accepts go to `handler`.
-    pub fn set_orchestra(&self, handler: OrchestraHandler, authorize: OrchestraAuth) {
-        *self.orchestra.lock().unwrap() = Some((handler, authorize));
+    /// Makes this the main agent's bridge: its helper's orchestra tool calls go to `handler`.
+    pub fn set_orchestra(&self, handler: OrchestraHandler) {
+        *self.orchestra.lock().unwrap() = Some(handler);
     }
 
     /// Returns false if the request is unknown or already answered. `message` goes back to Claude (a deny reason,
@@ -304,9 +330,14 @@ mod tests {
     use tokio::sync::mpsc;
 
     fn setup() -> (Arc<PermissionBridge>, mpsc::UnboundedReceiver<UiEvent>, tempfile::TempDir) {
+        setup_with(this_process())
+    }
+
+    /// A bridge that lets in whom `auth` accepts.
+    fn setup_with(auth: CallerAuth) -> (Arc<PermissionBridge>, mpsc::UnboundedReceiver<UiEvent>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let (tx, rx) = mpsc::unbounded_channel();
-        let bridge = PermissionBridge::start(dir.path().join("b.sock"), Arc::new(move |ev| { let _ = tx.send(ev); }), Arc::new(FolderRules::load(None))).unwrap();
+        let bridge = PermissionBridge::start(dir.path().join("b.sock"), Arc::new(move |ev| { let _ = tx.send(ev); }), Arc::new(FolderRules::load(None)), auth).unwrap();
         (bridge, rx, dir)
     }
 
@@ -409,9 +440,9 @@ mod tests {
         assert!(tokio::time::timeout(Duration::from_millis(100), rx.recv()).await.is_err(), "no card");
     }
 
-    /// Accepts the test's own process (which is what connects in these tests) and whatever it started.
-    fn this_process() -> OrchestraAuth {
-        Arc::new(|pid| crate::process::descends_from(pid, std::process::id()))
+    /// Accepts the test's own process, which is what connects in these tests (the helper runs in-process).
+    fn this_process() -> CallerAuth {
+        Arc::new(|pid| pid == std::process::id())
     }
 
     #[tokio::test]
@@ -422,23 +453,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_orchestra_call_from_a_process_that_is_not_the_main_agents_is_refused_before_it_reaches_the_orchestra() {
-        let (bridge, mut rx, _dir) = setup();
+    async fn a_request_from_a_process_that_is_not_the_chats_helper_is_refused_before_anything_sees_it() {
+        // The chat's claude is some other process: this one (a stand-in for any other process of the user's) is not its child.
+        let (bridge, mut rx, dir) = setup_with(Arc::new(|pid| crate::process::descends_from(pid, 1_999_999)));
+        bridge.set_folder(dir.path());
         let reached = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let seen = reached.clone();
-        // The main agent's claude is some other process: this one (a stand-in for a worker's shell) is not its child.
-        bridge.set_orchestra(
-            Arc::new(move |_, _| {
-                seen.store(true, Ordering::SeqCst);
-                Box::pin(async { BridgeResponse { allow: true, message: Some("ran".into()), updated_input: None } })
-            }),
-            Arc::new(|pid| crate::process::descends_from(pid, 1_999_999)),
-        );
+        let (seen, seen_net) = (reached.clone(), reached.clone());
+        bridge.set_orchestra(Arc::new(move |_, _| {
+            seen.store(true, Ordering::SeqCst);
+            Box::pin(async { BridgeResponse { allow: true, message: Some("ran".into()), updated_input: None } })
+        }));
+        bridge.set_network(Arc::new(move |_, _, _| {
+            seen_net.store(true, Ordering::SeqCst);
+            Box::pin(async { BridgeResponse { allow: true, message: Some("ran".into()), updated_input: None } })
+        }));
+        // Even a request a rule would allow.
+        bridge.add_rule(Scope::Chat, prefix_rule("npm test")).unwrap();
         let socket = bridge.socket_path.display().to_string();
-        let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &orchestra_call())).await.unwrap();
-        assert!(!reply.allow && reply.message.unwrap().contains("Not authorized"));
-        assert!(!reached.load(Ordering::SeqCst), "an unauthorized call ran an orchestra tool");
-        assert!(tokio::time::timeout(Duration::from_millis(100), rx.recv()).await.is_err());
+        let network = BridgeRequest { tool_name: "network_requests".into(), input: json!({}), tool_use_id: None, orchestra: false, network: true };
+        let reproduce = BridgeRequest::permission("reproduce".into(), json!({"steps": "x"}), None);
+        let question = BridgeRequest::permission("AskUserQuestion".into(), json!({"questions": []}), None);
+        for req in [orchestra_call(), network, request(), reproduce, question] {
+            let socket = socket.clone();
+            let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &req)).await.unwrap();
+            assert!(!reply.allow && reply.message.unwrap().contains("Not authorized"));
+        }
+        assert!(!reached.load(Ordering::SeqCst), "an unauthorized call ran a tool");
+        assert!(tokio::time::timeout(Duration::from_millis(100), rx.recv()).await.is_err(), "a card or an auto-allow was shown");
     }
 
     /// The real shape of it: a client in another process is let in only when the process the bridge trusts started it
@@ -446,7 +487,9 @@ mod tests {
     #[tokio::test]
     async fn only_a_client_started_directly_by_the_trusted_process_is_accepted() {
         use std::process::{Command, Stdio};
-        let (bridge, _rx, _dir) = setup();
+        // The trusted process is this one: its own child is let in; one started through a shell is not.
+        let me = std::process::id();
+        let (bridge, _rx, _dir) = setup_with(Arc::new(move |pid| crate::process::is_child_of(pid, me)));
         let socket = bridge.socket_path.display().to_string();
         let request = serde_json::to_string(&orchestra_call()).unwrap();
         let answer = |out: std::process::Output| serde_json::from_slice(&out.stdout).unwrap_or(BridgeResponse { allow: false, message: Some("no answer".into()), updated_input: None });
@@ -467,9 +510,7 @@ mod tests {
             }
         };
         let handler: OrchestraHandler = Arc::new(|_, _| Box::pin(async { BridgeResponse { allow: true, message: Some("ran".into()), updated_input: None } }));
-        let me = std::process::id();
-        // The trusted process is this one: its own child is let in; one started through a shell is not.
-        bridge.set_orchestra(handler.clone(), Arc::new(move |pid| crate::process::is_child_of(pid, me)));
+        bridge.set_orchestra(handler.clone());
         let accepted = tokio::task::spawn_blocking(direct.clone()).await.unwrap();
         assert_eq!(accepted.message.as_deref(), Some("ran"));
         let refused = tokio::task::spawn_blocking(through_shell).await.unwrap();
@@ -477,7 +518,16 @@ mod tests {
         // The trusted process is another one: nothing of this test's is let in.
         let sleeper = Command::new("sleep").arg("30").stdin(Stdio::null()).spawn().unwrap();
         let other = sleeper.id();
-        bridge.set_orchestra(handler, Arc::new(move |pid| crate::process::is_child_of(pid, other)));
+        let (bridge2, _rx2, _dir2) = setup_with(Arc::new(move |pid| crate::process::is_child_of(pid, other)));
+        let direct = {
+            let (socket, request) = (bridge2.socket_path.display().to_string(), request.clone());
+            move || -> BridgeResponse {
+                let mut child = Command::new("nc").args(["-U", "-w", "2", &socket]).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
+                std::io::Write::write_all(&mut child.stdin.take().unwrap(), format!("{request}\n").as_bytes()).unwrap();
+                answer(child.wait_with_output().unwrap())
+            }
+        };
+        bridge2.set_orchestra(handler);
         let refused = tokio::task::spawn_blocking(direct).await.unwrap();
         assert!(!refused.allow && refused.message.unwrap().contains("Not authorized"), "a process outside the main agent's tree was let in");
         let mut sleeper = sleeper;
@@ -490,7 +540,6 @@ mod tests {
         let (bridge, mut rx, _dir) = setup();
         bridge.set_orchestra(
             Arc::new(|tool, input| Box::pin(async move { BridgeResponse { allow: true, message: Some(format!("{tool} {input}")), updated_input: None } })),
-            this_process(),
         );
         let socket = bridge.socket_path.display().to_string();
         let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &orchestra_call())).await.unwrap();
@@ -500,7 +549,7 @@ mod tests {
 
     fn main_agent_bridge() -> (Arc<PermissionBridge>, mpsc::UnboundedReceiver<UiEvent>, tempfile::TempDir) {
         let (bridge, rx, dir) = setup();
-        bridge.set_orchestra(Arc::new(|_, _| Box::pin(async { BridgeResponse { allow: true, message: None, updated_input: None } })), this_process());
+        bridge.set_orchestra(Arc::new(|_, _| Box::pin(async { BridgeResponse { allow: true, message: None, updated_input: None } })));
         (bridge, rx, dir)
     }
 
@@ -584,7 +633,6 @@ mod tests {
                     BridgeResponse { allow: true, message: Some("late".into()), updated_input: None }
                 })
             }),
-            this_process(),
         );
         let socket = bridge.socket_path.display().to_string();
         let slow = tokio::task::spawn_blocking({

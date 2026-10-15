@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialState, reducer, totalCost, type Action, type State } from "./store";
+import { initialState, reducer, totalCost, totalTokens, type Action, type State } from "./store";
 import { chatsReducer, initialChats, WAKE_LIMIT, wakesPaused, wakesToSend, type Chats } from "./sessions";
 import type { UiEvent } from "./types";
 
@@ -143,7 +143,7 @@ describe("notes for the main agent", () => {
 });
 
 describe("merge proposals", () => {
-  const proposed: UiEvent = { kind: "merge_proposed", worker: "w1", name: "Login form", branch: "lantern/login-form", into: "main", summary: "Adds the form", commits: 2, files: [{ path: "a.ts", added: 10, removed: 1 }], uncommitted: 0 };
+  const proposed: UiEvent = { kind: "merge_proposed", worker: "w1", name: "Login form", branch: "lantern/login-form", into: "main", summary: "Adds the form", commits: 2, files: [{ path: "a.ts", added: 10, removed: 1 }], uncommitted: 1, loose: ["notes.md"] };
 
   it("are kept on the main agent's chat, one per worker, newest proposal replacing an older one", () => {
     let s = ev(main, proposed);
@@ -159,6 +159,9 @@ describe("merge proposals", () => {
     expect(ev(open, { kind: "merge_resolved", worker: "w1", outcome: "declined", detail: "" }).proposals[0]).toMatchObject({ status: "declined" });
     expect(ev(open, { kind: "merge_resolved", worker: "w1", outcome: "conflicts", detail: "a.ts, b.ts" }).proposals[0]).toMatchObject({ status: "open", problem: "Conflicts with main in a.ts, b.ts." });
     expect(ev(open, { kind: "merge_resolved", worker: "w1", outcome: "failed", detail: "The main checkout has 1 uncommitted change" }).proposals[0]).toMatchObject({ status: "open", problem: "The main checkout has 1 uncommitted change" });
+    // Changed since it was proposed: the card is retired, saying why.
+    expect(ev(open, { kind: "merge_resolved", worker: "w1", outcome: "changed", detail: "Its loose files aren't the ones the merge was proposed with." }).proposals[0]).toMatchObject({ status: "declined", problem: "Its loose files aren't the ones the merge was proposed with." });
+    expect(open.proposals[0].loose).toEqual(["notes.md"]);
     // Another worker's resolution leaves it alone.
     expect(ev(open, { kind: "merge_resolved", worker: "w2", outcome: "merged", detail: "main" }).proposals).toEqual(open.proposals);
   });
@@ -203,6 +206,19 @@ describe("what a chat has cost", () => {
     expect(totalCost(s)).toBeCloseTo(0.4);
     s = ev(s, done(0.35));
     expect(totalCost(s)).toBeCloseTo(0.45);
+  });
+
+  it("counts tokens across restarts as it does cost", () => {
+    const tok = (n: number): UiEvent => ({ kind: "turn_done", is_error: false, result: null, cost_usd: null, duration_ms: null, auth_hint: false, denied: 0, context_window: null, session_tokens: n } as UiEvent);
+    let s = ev(main, tok(1000));
+    s = ev(s, tok(3000));
+    // A new claude starts its count again: what the old one used is kept.
+    s = ev(s, tok(500));
+    expect(totalTokens(s)).toBe(3500);
+    s = reducer(s, { type: "restarting" });
+    s = ev(s, tok(200));
+    expect(totalTokens(s)).toBe(3700);
+    expect(totalTokens(reducer(s, { type: "folder_opened", folder: "/q" }))).toBe(0);
   });
 
   it("is left alone by a turn that reports no cost, and starts over with a new conversation", () => {

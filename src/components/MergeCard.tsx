@@ -21,7 +21,7 @@ export function MergeCard({ proposal }: { proposal: MergeProposal }) {
   if (proposal.status === "declined") {
     return (
       <div className="merge-card quiet" role="status">
-        Not merged: {proposal.branch}. The main agent can ask again.
+        Not merged: {proposal.branch}. {proposal.problem ? `${proposal.problem} ` : ""}The main agent can ask again.
       </div>
     );
   }
@@ -90,7 +90,19 @@ export function MergeCard({ proposal }: { proposal: MergeProposal }) {
           <span className="merge-from">The main agent says:</span> {proposal.summary}
         </p>
       )}
-      {proposal.uncommitted > 0 && <p className="merge-note">{plural(proposal.uncommitted, "file")} of loose work in its worktree will be committed first, so nothing is lost.</p>}
+      {proposal.loose.length > 0 && (
+        <div className="merge-note">
+          {plural(proposal.loose.length, "file")} of loose work in its worktree will be committed first, so nothing is lost:
+          <ul className="merge-files merge-loose">
+            {proposal.loose.slice(0, FILES_SHOWN).map((name) => (
+              <li key={name}>
+                <span title={name}>{name}</span>
+              </li>
+            ))}
+            {proposal.loose.length > FILES_SHOWN && <li className="merge-more">and {proposal.loose.length - FILES_SHOWN} more</li>}
+          </ul>
+        </div>
+      )}
       {proposal.problem && <p className="merge-problem" role="alert">{proposal.problem}</p>}
       <div className="merge-actions">
         <button

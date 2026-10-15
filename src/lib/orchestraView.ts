@@ -108,6 +108,18 @@ export function money(usd: number): string {
   return `$${usd < 10 ? usd.toFixed(2) : usd.toFixed(usd < 100 ? 1 : 0)}`;
 }
 
+/** Tokens for a screen, short: "950 tok", "12k tok", "3.1M tok"; nothing for none. */
+export function tokens(n: number): string {
+  if (n <= 0) return "";
+  const text = n < 1_000 ? `${n}` : n < 1_000_000 ? `${Math.round(n / 1_000)}k` : `${(n / 1_000_000).toFixed(1)}M`;
+  return `${text} tok`;
+}
+
+/** What an agent (or a team) has used: "$1.20 · 3.1M tok", with whichever is known; nothing when neither is. */
+export function usage(usd: number, n: number): string {
+  return [money(usd), tokens(n)].filter(Boolean).join(" · ");
+}
+
 /** What closing a worker would throw away, in words: "3 uncommitted files and 2 commits that aren't merged". Empty when nothing. */
 export function lostText(c: CloseCheck): string {
   const files = c.uncommitted > 0 ? `${c.uncommitted} uncommitted file${c.uncommitted === 1 ? "" : "s"}` : null;

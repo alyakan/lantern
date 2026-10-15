@@ -120,6 +120,8 @@ export interface MergeProposal {
   files: { path: string; added: number; removed: number }[];
   /** Loose work in the worker's worktree, which approving commits first. */
   uncommitted: number;
+  /** The loose files' names: what approving commits on top of the branch before it is merged. */
+  loose: string[];
   status: "open" | "merged" | "declined";
   /** Why the last approval didn't merge (conflicting files, a dirty checkout); the proposal stays open to try again. */
   problem: string | null;
@@ -144,6 +146,8 @@ export interface State {
    */
   costBase: number;
   costSeen: number;
+  /** Tokens from claude processes that have since ended, as `costBase` is for cost; `sessionTokens` is the current one's. */
+  tokenBase: number;
   /** Messages typed while Claude works, sent together when the turn ends. Per chat, so a background chat keeps its own. */
   queued: string[];
   claudePath: string | null;
@@ -218,6 +222,8 @@ export interface BackgroundTask {
 
 /** What the chat has cost so far, across restarts of its claude. */
 export const totalCost = (s: Pick<State, "costBase" | "costSeen">) => s.costBase + s.costSeen;
+/** Every token this chat's claude processes have read and written, its advisor's calls included. */
+export const totalTokens = (s: Pick<State, "tokenBase" | "sessionTokens">) => s.tokenBase + s.sessionTokens;
 
 export const initialState: State = {
   status: "locating",
@@ -227,6 +233,7 @@ export const initialState: State = {
   proposals: [],
   costBase: 0,
   costSeen: 0,
+  tokenBase: 0,
   queued: [],
   claudePath: null,
   setupError: null,
@@ -364,7 +371,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], costBase: 0, costSeen: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], costBase: 0, costSeen: 0, tokenBase: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -501,6 +508,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       // A total lower than the last one is a claude that started over (a restart): what the earlier one cost is kept.
       const reported = ev.cost_usd;
       const restarted = reported !== null && reported < state.costSeen;
+      const tokens = ev.session_tokens ?? state.sessionTokens;
       return {
         ...state,
         status: "idle",
@@ -514,7 +522,8 @@ function applyEvent(state: State, ev: UiEvent): State {
         cleared: false,
         items: state.cleared ? state.items : [...state.items, { type: "turn", id: `t${seq}`, isError: ev.is_error && !state.stopRequested, stopped: state.stopRequested, result: ev.is_error ? ev.result : null, durationMs: ev.duration_ms, denied: ev.denied, cost: ev.cost_usd, tokens: ev.tokens ?? null }],
         ...(ev.session_cost_usd != null ? { sessionCost: ev.session_cost_usd } : {}),
-        sessionTokens: ev.session_tokens ?? state.sessionTokens,
+        sessionTokens: tokens,
+        tokenBase: tokens < state.sessionTokens ? state.tokenBase + state.sessionTokens : state.tokenBase,
       };
     }
     case "permission_requested":
@@ -563,7 +572,7 @@ function applyEvent(state: State, ev: UiEvent): State {
     case "agent_mode":
       return { ...state, mode: ev.mode };
     case "merge_proposed": {
-      const proposal: MergeProposal = { worker: ev.worker, name: ev.name, branch: ev.branch, into: ev.into, summary: ev.summary, commits: ev.commits, files: ev.files, uncommitted: ev.uncommitted, status: "open", problem: null, attempts: 0 };
+      const proposal: MergeProposal = { worker: ev.worker, name: ev.name, branch: ev.branch, into: ev.into, summary: ev.summary, commits: ev.commits, files: ev.files, uncommitted: ev.uncommitted, loose: ev.loose, status: "open", problem: null, attempts: 0 };
       return { ...state, proposals: [...state.proposals.filter((p) => p.worker !== ev.worker), proposal] };
     }
     case "merge_resolved":
@@ -574,6 +583,8 @@ function applyEvent(state: State, ev: UiEvent): State {
           const answered = { attempts: p.attempts + 1 };
           if (ev.outcome === "merged") return { ...p, ...answered, status: "merged", problem: null };
           if (ev.outcome === "declined") return { ...p, ...answered, status: "declined", problem: null };
+          // Not what the user was shown any more: the card goes, saying why.
+          if (ev.outcome === "changed") return { ...p, ...answered, status: "declined", problem: ev.detail };
           return { ...p, ...answered, problem: ev.outcome === "conflicts" ? `Conflicts with ${p.into} in ${ev.detail}.` : ev.detail };
         }),
       };
@@ -655,6 +666,8 @@ export function reducer(state: State, action: Action): State {
         stopRequested: false,
         costBase: state.costBase + state.costSeen,
         costSeen: 0,
+        tokenBase: state.tokenBase + state.sessionTokens,
+        sessionTokens: 0,
         items: denyPending(state.items),
       };
     case "select_file":

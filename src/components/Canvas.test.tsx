@@ -321,7 +321,7 @@ describe("the canvas", () => {
 });
 
 describe("oversight", () => {
-  const proposal = { worker: "w1", name: "Worker 1", branch: "lantern/w1", into: "main", summary: "Adds it", commits: 2, files: [{ path: "a.ts", added: 3, removed: 1 }], uncommitted: 0, status: "open" as const, problem: null, attempts: 0 };
+  const proposal = { worker: "w1", name: "Worker 1", branch: "lantern/w1", into: "main", summary: "Adds it", commits: 2, files: [{ path: "a.ts", added: 3, removed: 1 }], uncommitted: 0, loose: [], status: "open" as const, problem: null, attempts: 0 };
   const withProposal = (): Chats => {
     const c = team(2);
     return { ...c, slots: { ...c.slots, s1: { ...c.slots.s1, proposals: [proposal] } } };
@@ -341,16 +341,18 @@ describe("oversight", () => {
 
   it("lists the team with what each is doing, takes you to one, and counts what the team has cost", () => {
     const chats = withProposal();
-    chats.slots.s1 = { ...chats.slots.s1, costSeen: 0.5 };
-    chats.slots.w1 = { ...chats.slots.w1, status: "idle", thinking: false, costBase: 0.1, costSeen: 0.25, items: [{ type: "assistant", id: "a", text: "Finished the form" }] };
+    chats.slots.s1 = { ...chats.slots.s1, costSeen: 0.5, sessionTokens: 2_000_000 };
+    chats.slots.w1 = { ...chats.slots.w1, status: "idle", thinking: false, costBase: 0.1, costSeen: 0.25, tokenBase: 600_000, sessionTokens: 500_000, items: [{ type: "assistant", id: "a", text: "Finished the form" }] };
     const { onFocus } = setup(chats);
     const button = screen.getByRole("button", { name: "Team" });
-    expect(button.textContent).toBe("Team · $0.85");
+    expect(button.textContent).toBe("Team · $0.85 · 3.1M tok");
+    // Each agent's card says what it has used.
+    expect(within(screen.getByLabelText(/Worker Worker 1/)).getByText(/\$0\.35 · 1\.1M tok/)).toBeTruthy();
     fireEvent.click(button);
     const list = screen.getByRole("dialog", { name: "Team" });
     expect(within(list).getByText("Ready to merge")).toBeTruthy();
     expect(within(list).getByText("Finished the form")).toBeTruthy();
-    expect(within(list).getByText("$0.35")).toBeTruthy();
+    expect(within(list).getByText("$0.35 · 1.1M tok")).toBeTruthy();
     fireEvent.click(within(list).getByText("Worker 1"));
     expect(onFocus).toHaveBeenCalledWith("w1");
     expect(screen.queryByRole("dialog", { name: "Team" })).toBeNull();

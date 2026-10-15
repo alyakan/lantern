@@ -1,6 +1,6 @@
 //! A running `claude` process: stream-json lines in and out, and the control requests on the same pipes.
 
-use crate::args::{build_args, harness_args};
+use crate::args::{enabled_plugins, launch_args, Role, ADVISOR_REVIEW_ENV};
 use crate::session::{EditHook, SessionConfig};
 use crate::stream_parser::StreamParser;
 use crate::ui_event::{Sink, UiEvent};
@@ -46,8 +46,17 @@ fn deliver(replies: &Replies, line: &str) -> bool {
 /// The claude command for `cfg`: program, arguments, environment and folder, before it is started.
 fn command(cfg: &SessionConfig) -> Command {
     let mut cmd = Command::new(&cfg.binary);
-    cmd.args(build_args(cfg.mode, cfg.auto_approve, cfg.resume.as_deref(), cfg.model.as_deref(), cfg.effort.as_deref(), &cfg.helper)).current_dir(&cfg.folder);
-    cmd.args(harness_args(cfg.advisor.as_deref()));
+    let worker = matches!(cfg.helper.role, Role::Worker { .. });
+    // A worker starts with none of the user's plugins: which those are is read from their settings (see launch_args).
+    let plugins = if worker { std::env::var_os("HOME").map(|home| enabled_plugins(std::path::Path::new(&home), &cfg.folder)).unwrap_or_default() } else { vec![] };
+    cmd.args(launch_args(cfg.mode, cfg.auto_approve, cfg.resume.as_deref(), cfg.model.as_deref(), cfg.effort.as_deref(), cfg.advisor.as_deref(), &cfg.helper, &plugins)).current_dir(&cfg.folder);
+    // A chat whose advisor checks its risky changes doesn't also have the security-guidance plugin review every stop and
+    // commit on another model.
+    if cfg.advisor.is_some() && !worker {
+        for (k, v) in ADVISOR_REVIEW_ENV {
+            cmd.env(k, v);
+        }
+    }
     if let Some(m) = &cfg.subagent_model {
         cmd.env("CLAUDE_CODE_SUBAGENT_MODEL", m);
     }
@@ -410,12 +419,21 @@ mod tests {
         let cmd = command(&cfg);
         let cmd = cmd.as_std();
         assert_eq!(cmd.get_program(), "/bin/claude");
-        let mut expected = build_args(cfg.mode, cfg.auto_approve, Some("sess-1"), Some("opus"), Some("high"), &cfg.helper);
-        expected.extend(["--advisor".to_string(), "fable".to_string()]);
+        let expected = launch_args(cfg.mode, cfg.auto_approve, Some("sess-1"), Some("opus"), Some("high"), Some("fable"), &cfg.helper, &[]);
+        assert_eq!(&expected[expected.len() - 2..], ["--advisor", "fable"]);
         assert_eq!(cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>(), expected);
         let env: Vec<(String, Option<String>)> = cmd.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
-        assert_eq!(env, vec![("CLAUDE_CODE_SUBAGENT_MODEL".to_string(), Some("haiku".to_string())), ("PATH".to_string(), Some("/custom/bin:/usr/bin".to_string()))]);
+        let set = |k: &str, v: &str| (k.to_string(), Some(v.to_string()));
+        // With an advisor, the security-guidance plugin's own reviews are off: the advisor does that job.
+        assert_eq!(env, vec![set("CLAUDE_CODE_SUBAGENT_MODEL", "haiku"), set("ENABLE_COMMIT_REVIEW", "0"), set("ENABLE_STOP_REVIEW", "0"), set("PATH", "/custom/bin:/usr/bin")]);
         assert_eq!(cmd.get_current_dir(), Some(dir.path()));
+
+        // A worker: no advisor whatever the harness says, so the plugin (which it doesn't load) isn't told anything.
+        let mut worker = cfg.clone();
+        worker.helper.role = crate::args::Role::Worker { name: "w".into(), read_only: false };
+        let args: Vec<String> = command(&worker).as_std().get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert!(!args.iter().any(|a| a == "--advisor") && args.iter().any(|a| a == "--strict-mcp-config"), "{args:?}");
+        assert!(!command(&worker).as_std().get_envs().any(|(k, _)| k == "ENABLE_STOP_REVIEW"));
 
         // Nothing chosen: no environment of its own, no advisor.
         let bare = command(&config("/bin/claude".into(), dir.path(), None));

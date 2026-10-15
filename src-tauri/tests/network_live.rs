@@ -6,7 +6,7 @@
 //! It costs a small haiku run.
 
 use lantern_lib::network::{Api, Monitor, Store};
-use lantern_lib::permission::bridge::PermissionBridge;
+use lantern_lib::permission::bridge::{helper_of, PermissionBridge};
 use lantern_lib::permission::protocol::BridgeResponse;
 use lantern_lib::permission::rules::{folder_key, FolderRules};
 use std::sync::Arc;
@@ -15,8 +15,10 @@ use std::sync::Arc;
 #[ignore = "needs Network Monitor running with JSON traffic captured, and the claude CLI"]
 async fn claude_watches_reads_and_summarizes_a_captured_response() {
     let dir = tempfile::tempdir().unwrap();
+    // Only the helper of the claude started below is let in.
+    let claude_pid = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let monitor = Arc::new(Monitor::new(Store::load(Some(dir.path().join("network.json"))), Box::new(Api::new(Api::default_info().unwrap()))));
-    let bridge = PermissionBridge::start(dir.path().join("b.sock"), Arc::new(|_| {}), Arc::new(FolderRules::load(None))).unwrap();
+    let bridge = PermissionBridge::start(dir.path().join("b.sock"), Arc::new(|_| {}), Arc::new(FolderRules::load(None)), helper_of(claude_pid.clone(), env!("CARGO_BIN_EXE_lantern").into())).unwrap();
     bridge.set_folder(dir.path());
     let m = monitor.clone();
     bridge.set_network(Arc::new(move |folder, tool, input| {
@@ -38,9 +40,11 @@ async fn claude_watches_reads_and_summarizes_a_captured_response() {
     let out = tokio::process::Command::new("claude")
         .args(["-p", prompt, "--model", "haiku", "--strict-mcp-config", "--mcp-config", &mcp.to_string(), "--allowedTools", &tools.join(","), "--output-format", "text"])
         .current_dir(dir.path())
-        .output()
-        .await
+        .stdout(std::process::Stdio::piped())
+        .spawn()
         .unwrap();
+    claude_pid.store(out.id().unwrap_or(0), std::sync::atomic::Ordering::SeqCst);
+    let out = out.wait_with_output().await.unwrap();
     eprintln!("claude said: {}", String::from_utf8_lossy(&out.stdout).trim());
 
     // What the app's follower does every 2 seconds: read the responses of what the watch matched.
