@@ -126,11 +126,15 @@ describe("NetworkTab", () => {
     rerender(<NetworkTab folder="/p" view={view({ items: summarized })} onSummarize={onSummarize} busy />);
     expect(screen.getByRole("button", { name: "Summarize again" })).toBeInTheDocument();
 
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Found on real timers first: on a loaded machine the response can take longer than findBy's default second.
+    const copy = await screen.findByRole("button", { name: "Copy JSON" }, { timeout: 5000 });
+    // Fake time only moves when told to, so a slow runner can't reset "Copied" before it's seen.
+    vi.useFakeTimers();
     try {
       Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
-      fireEvent.click(await screen.findByRole("button", { name: "Copy JSON" }));
-      await screen.findByRole("button", { name: "Copied" });
+      fireEvent.click(copy);
+      await act(async () => {});
+      expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
       act(() => void vi.advanceTimersByTime(1600));
       expect(screen.getByRole("button", { name: "Copy JSON" })).toBeInTheDocument();
     } finally {
