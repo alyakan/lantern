@@ -286,16 +286,19 @@ A few things to know:
 
 Settings ▸ General ▸ Theme picks how Lantern looks, with a small preview of each:
 
-![The theme picker in Settings, with Terminal and Nord among the choices](images/themes-picker.png)
+![The theme picker in Settings, with Terminal, Fallout and Nord among the choices](images/themes-picker.png)
 
 - **Follow macOS**, **Light** and **Dark**, as before.
-- **Terminal**: near-black with phosphor-green text, amber for "working", monospace everywhere, square corners and thin lines instead of shadows.
+- **Terminal**: a modern terminal scheme (think Warp or Ghostty): near-black with a cool tint, light text, monospace everywhere, square corners and thin lines instead of shadows. Colour is used the way syntax highlighting does: green for what you typed and for additions, yellow for "working", red for errors and removals, blue for links, purple for emphasis. **Bold** is white, `inline code` is an orange chip, headings are cyan and a quote has a purple bar.
+- **Fallout**: a Pip-Boy terminal, all phosphor green on green-black, in three levels: bright for headings and bold (with a soft glow), normal for text, dim for what is secondary. Inline code and code headers are in reverse video (dark on bright green), code blocks and what you send sit in boxes (what you send starts with a `>` prompt), small labels are in capitals, the cursor in the chat box is a block, and faint scanlines and a darkened edge sit over the window. They are still, don't catch clicks, and text keeps its contrast (4.5:1 or more).
 - **Solarized Dark**, **Nord** and **Paper** (a warm light theme): colours only.
 - **Custom**: **Customize…** opens six colour pickers (background, panels, text, secondary text, accent and lines), a **Monospace everywhere** switch and a **Rounded or Square** corners choice. It starts from the theme you have now, the app changes as you pick, and it warns you when your text colour would be hard to read on your background (under 4.5:1). The rest of the colours are worked out from your six.
 
 The code editor and diffs, diagrams and shell output follow the theme, and a chosen theme is on before the first screen is drawn, so nothing flashes the default.
 
-![Terminal: a chat with a diff, in green on near-black](images/theme-terminal.png)
+![Terminal: a chat with every kind of markdown, and its diff](images/theme-terminal.png)
+
+![Fallout: the same chat in phosphor green](images/theme-fallout.png)
 
 ## Keyboard shortcuts and the command palette
 

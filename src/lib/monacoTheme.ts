@@ -43,13 +43,16 @@ interface Syntax {
 // Xcode's Default (Light) and Default (Dark) source colours.
 const XCODE_LIGHT: Syntax = { keyword: "#9b2393", string: "#c41a16", number: "#1c00cf", comment: "#5d6c79", type: "#0b4f79", tag: "#9b2393", attrName: "#815f03", attrValue: "#c41a16", regexp: "#c41a16" };
 const XCODE_DARK: Syntax = { keyword: "#fc5fa3", string: "#fc6a5d", number: "#d0bf69", comment: "#7f8c98", type: "#5dd8ff", tag: "#fc5fa3", attrName: "#bf8555", attrValue: "#fc6a5d", regexp: "#fc6a5d" };
-const TERMINAL: Syntax = { keyword: "#b9f6c9", string: "#ffc933", number: "#ff9a3d", comment: "#3a9a58", type: "#5ac8fa", tag: "#b9f6c9", attrName: "#ffd23f", attrValue: "#ffc933", regexp: "#ff9a3d" };
+// Terminal: a modern terminal scheme (purple keywords, light-blue strings, orange numbers). Fallout: green phosphor, with amber strings and aqua numbers so code isn't one colour.
+const TERMINAL: Syntax = { keyword: "#d2a8ff", string: "#a5d6ff", number: "#ffa657", comment: "#8b949e", type: "#56d4dd", tag: "#7ee787", attrName: "#ffa657", attrValue: "#a5d6ff", regexp: "#7ee787" };
+const FALLOUT: Syntax = { keyword: "#c4ffd8", string: "#ffc933", number: "#6bffe0", comment: "#229e4e", type: "#8dffb0", tag: "#c4ffd8", attrName: "#8dffb0", attrValue: "#ffc933", regexp: "#ffc933" };
 const SOLARIZED: Syntax = { keyword: "#9cc41e", string: "#2aa198", number: "#e0709f", comment: "#657b83", type: "#d9a520", tag: "#4aa3e8", attrName: "#d9a520", attrValue: "#2aa198", regexp: "#e07a45" };
 const NORD: Syntax = { keyword: "#81a1c1", string: "#a3be8c", number: "#b48ead", comment: "#7b88a1", type: "#8fbcbb", tag: "#81a1c1", attrName: "#8fbcbb", attrValue: "#a3be8c", regexp: "#ebcb8b" };
 
 /** The source colours for a theme: its own where it has some, otherwise Xcode's for its light or dark. */
 export function syntaxFor(theme: ThemeId | undefined, dark: boolean): Syntax {
   if (theme === "terminal") return TERMINAL;
+  if (theme === "fallout") return FALLOUT;
   if (theme === "solarized") return SOLARIZED;
   if (theme === "nord") return NORD;
   return dark ? XCODE_DARK : XCODE_LIGHT;

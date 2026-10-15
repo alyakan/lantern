@@ -134,7 +134,7 @@ describe("themes", () => {
   const names = (b: string) => [...b.matchAll(/--([\w-]+):/g)].map((m) => m[1]);
   // Dark's tokens are the full list of colours a theme has to give; Light's block is `:root`, with the shared ones too.
   const colourTokens = names(block("dark")).filter((n) => !/^(shadow|card-shadow)$/.test(n));
-  const own = THEMES.filter((t) => ["terminal", "solarized", "nord", "paper"].includes(t.id));
+  const own = THEMES.filter((t) => ["terminal", "fallout", "solarized", "nord", "paper"].includes(t.id));
 
   it("has a block for each preset, with every colour token Dark has", () => {
     for (const { id } of own) {
@@ -183,39 +183,188 @@ describe("themes", () => {
     }
   });
 
+  // A theme's value for a token, following var() to wherever it comes from: the theme's own block, else the defaults in :root.
+  const rootBlock = css.match(/:root \{([^}]*)\}/)![1];
+  const resolve = (id: string, name: string, depth = 0): string => {
+    const raw = token(block(id), name) || token(rootBlock, name);
+    const ref = raw.match(/^var\(--([\w-]+)\)$/)?.[1];
+    if (ref && depth < 5) return resolve(id, ref, depth + 1);
+    if (raw === "currentColor") return resolve(id, "text");
+    if (raw === "transparent") return resolve(id, "sidebar");
+    return raw;
+  };
+  const hueOf = (hex: string) => {
+    const [r, g, b] = parseHex(hex).map((c) => c / 255);
+    const [max, min] = [Math.max(r, g, b), Math.min(r, g, b)];
+    if (max === min) return 0;
+    const h = max === r ? (g - b) / (max - min) : max === g ? 2 + (b - r) / (max - min) : 4 + (r - g) / (max - min);
+    return (h * 60 + 360) % 360;
+  };
+
+  describe("markdown tokens", () => {
+    const md = names(rootBlock).filter((n) => n.startsWith("md-"));
+
+    it("are in the defaults, and Light and Dark leave them alone, so their text is styled as it always was", () => {
+      expect(md).toEqual(expect.arrayContaining(["md-strong", "md-code-bg", "md-code-text", "md-link", "md-quote-bar", "md-heading", "md-pre-bg", "md-th-bg", "md-marker"]));
+      for (const b of [css.match(/:root\[data-theme="dark"\] \{([^}]*)\}/)![1], css.match(/:root:not\(\[data-theme\]\), :root\[data-theme="system"\] \{([^}]*)\}/)![1]]) {
+        expect(names(b).filter((n) => /^(md|user|crt|caret)-/.test(n))).toEqual([]);
+      }
+      // The defaults are what the rules said before the tokens: the text's own colour, Dark's code background, and so on.
+      expect(token(rootBlock, "md-strong")).toBe("currentColor");
+      expect(token(rootBlock, "md-strong-weight")).toBe("bolder");
+      expect(token(rootBlock, "md-code-bg")).toBe("var(--code-bg)");
+      expect(token(rootBlock, "md-link")).toBe("var(--text)");
+      expect(token(rootBlock, "md-link-line")).toBe("var(--faint)");
+      expect(token(rootBlock, "md-quote-bar")).toBe("var(--line-strong)");
+      expect(token(rootBlock, "md-quote-text")).toBe("var(--text-2)");
+      expect(token(rootBlock, "md-th-bg")).toBe("var(--bg-subtle)");
+      expect(token(rootBlock, "md-pre-head-text")).toBe("var(--muted)");
+    });
+
+    it("are what the markdown rules use", () => {
+      const rule = (sel: string) => css.split("\n").find((l) => l.startsWith(`${sel} {`)) ?? "";
+      expect(rule(".msg.assistant strong")).toMatch(/color: var\(--md-strong\)/);
+      expect(rule(".msg.assistant code")).toMatch(/background: var\(--md-code-bg\); color: var\(--md-code-text\)/);
+      expect(rule(".msg.assistant a")).toMatch(/color: var\(--md-link\)/);
+      expect(rule(".msg.assistant blockquote")).toMatch(/var\(--md-quote-bar\)/);
+      expect(rule(".code-block")).toMatch(/background: var\(--md-pre-bg\)/);
+      expect(rule(".msg.assistant .md-table th")).toMatch(/background: var\(--md-th-bg\)/);
+    });
+
+    it("read at 4.5:1 or more in every theme: bold, headings, links, inline code, quotes, table headers and code headers", () => {
+      for (const { id } of own) {
+        const on = (fg: string, bg: string, min = 4.5) => expect(contrast(resolve(id, fg), resolve(id, bg)), `${id}: ${fg} on ${bg}`).toBeGreaterThanOrEqual(min);
+        for (const surface of ["pane", "sidebar"]) for (const n of ["md-strong", "md-heading", "md-link", "md-em"]) on(n, surface);
+        on("md-code-text", "md-code-bg");
+        on("md-pre-text", "md-pre-bg");
+        // A code block's header keeps Light's and Dark's muted grey unless the theme gives it a bar of its own.
+        if (token(block(id), "md-pre-head-bg")) on("md-pre-head-text", "md-pre-head-bg");
+        on("md-quote-text", "md-quote-bg");
+        on("md-th-text", "md-th-bg");
+        // A quote's bar (where the theme gives it a colour; the others keep their line's) and a list's bullets are marks, not text: 3:1.
+        if (token(block(id), "md-quote-bar")) on("md-quote-bar", "sidebar", 3);
+        on("md-marker", "sidebar", 3);
+      }
+    });
+  });
+
   describe("Terminal", () => {
-    const b = block("terminal");
+    const rs = (n: string) => resolve("terminal", n);
 
-    it("is phosphor green on near-black, with amber for \"working\"", () => {
-      const [r, g, bl] = parseHex(token(b, "bg"));
-      expect(Math.max(r, g, bl)).toBeLessThan(20);
-      for (const name of ["text", "text-2", "accent"]) {
-        const [cr, cg, cb] = parseHex(token(b, name));
-        expect(cg, name).toBeGreaterThan(cr);
-        expect(cg, name).toBeGreaterThan(cb);
+    it("is a modern terminal: a near-black, slightly cool background, light neutral text, and colour with a role each", () => {
+      const [r, g, bl] = parseHex(rs("bg"));
+      expect(Math.max(r, g, bl)).toBeLessThan(32);
+      expect(bl).toBeGreaterThanOrEqual(r);
+      // The text is light and nearly neutral, not tinted green.
+      const [tr, tg, tb] = parseHex(rs("text"));
+      expect(Math.min(tr, tg, tb)).toBeGreaterThan(190);
+      expect(Math.max(tr, tg, tb) - Math.min(tr, tg, tb)).toBeLessThan(30);
+      expect(luminance(rs("text-2"))).toBeLessThan(luminance(rs("text")));
+      expect(luminance(rs("muted"))).toBeLessThan(luminance(rs("text-2")));
+      // Green is an addition, red a removal, yellow is "working", blue the accent and links, purple emphasis.
+      expect(hueOf(rs("add"))).toBeGreaterThan(100);
+      expect(hueOf(rs("add"))).toBeLessThan(150);
+      expect(Math.min(hueOf(rs("del")), 360 - hueOf(rs("del")))).toBeLessThan(15);
+      expect(hueOf(rs("working"))).toBeGreaterThan(30);
+      expect(hueOf(rs("working"))).toBeLessThan(55);
+      for (const n of ["accent", "md-link"]) {
+        expect(hueOf(rs(n)), n).toBeGreaterThan(195);
+        expect(hueOf(rs(n)), n).toBeLessThan(225);
       }
-      const [wr, wg, wb] = parseHex(token(b, "working"));
-      expect(wr).toBeGreaterThan(wg);
-      expect(wg).toBeGreaterThan(wb);
-      // Secondary text is dimmer than the text, the accent brighter.
-      expect(luminance(token(b, "text-2"))).toBeLessThan(luminance(token(b, "text")));
-      expect(luminance(token(b, "accent"))).toBeGreaterThan(luminance(token(b, "text")));
+      expect(hueOf(rs("md-em"))).toBeGreaterThan(260);
+      expect(hueOf(rs("md-em"))).toBeLessThan(290);
     });
 
-    it("is all monospace, with square corners (0–2px) and no shadows but 1px lines", () => {
-      expect(token(b, "ui")).toBe("var(--mono)");
-      for (const radius of names(b).filter((n) => n.startsWith("radius"))) expect(parseFloat(token(b, radius)), radius).toBeLessThanOrEqual(2);
-      // Every radius the stylesheet uses is one of those tokens (or a circle, or 2px or less).
-      expect(names(b).filter((n) => n.startsWith("radius")).length).toBeGreaterThanOrEqual(8);
+    it("tells bold, inline code, code blocks, links and quotes apart from the text", () => {
+      // Bold is brighter than the text and heavier; inline code is a chip of its own colour with an accent text colour.
+      expect(luminance(rs("md-strong"))).toBeGreaterThan(luminance(rs("text")));
+      expect(rs("md-strong-weight")).toBe("700");
+      expect(rs("md-code-bg")).not.toBe(rs("sidebar"));
+      expect(contrast(rs("md-code-bg"), rs("sidebar"))).toBeGreaterThanOrEqual(1.2);
+      expect(rs("md-code-text")).not.toBe(rs("text"));
+      expect(hueOf(rs("md-code-text"))).toBeGreaterThan(15);
+      expect(hueOf(rs("md-code-text"))).toBeLessThan(40);
+      // A code block is another panel than the chat card; a link is coloured (and underlined by the rules); a quote has a coloured bar.
+      expect(rs("md-pre-bg")).not.toBe(rs("sidebar"));
+      expect(rs("md-link")).not.toBe(rs("text"));
+      expect(rs("md-quote-bar")).not.toBe(rs("md-quote-text"));
+      expect(rs("md-heading")).not.toBe(rs("text"));
+    });
+
+    it("is all monospace, with square corners (0–3px) and no shadows but 1px lines", () => {
+      expect(token(block("terminal"), "ui")).toBe("var(--mono)");
+      for (const radius of names(block("terminal")).filter((n) => n.startsWith("radius"))) expect(parseFloat(rs(radius)), radius).toBeLessThanOrEqual(3);
+      expect(names(block("terminal")).filter((n) => n.startsWith("radius")).length).toBeGreaterThanOrEqual(8);
       for (const shadow of ["shadow", "card-shadow", "thumb-shadow", "badge-shadow", "lift-shadow", "hud-shadow"]) {
-        expect(token(b, shadow), shadow).toMatch(/^0 0 0 1px var\(--[\w-]+\)$/);
+        expect(rs(shadow), shadow).toMatch(/^0 0 0 1px var\(--[\w-]+\)$/);
       }
     });
 
-    it("draws the chat card and the review pane as bordered boxes", () => {
-      expect(token(b, "card-shadow")).toMatch(/1px/);
-      expect(token(b, "pane-edge")).toMatch(/^inset 0 0 0 1px/);
+    it("draws the chat card and the review pane as bordered boxes, and has no glow or scanlines", () => {
+      expect(rs("card-shadow")).toMatch(/1px/);
+      expect(rs("pane-edge")).toMatch(/^inset 0 0 0 1px/);
       expect(css).toMatch(/\.review \{[^}]*box-shadow: var\(--pane-edge\)/);
+      expect(rs("term-glow")).toBe("none");
+      expect(rs("crt-on")).toBe("none");
+    });
+  });
+
+  describe("Fallout", () => {
+    const rs = (n: string) => resolve("fallout", n);
+    const green = (hex: string) => {
+      const [r, g, b] = parseHex(hex);
+      return g > r && g > b;
+    };
+
+    it("is phosphor green on a very dark green-black, with amber for \"working\"", () => {
+      const [r, g, bl] = parseHex(rs("bg"));
+      expect(Math.max(r, g, bl)).toBeLessThan(20);
+      expect(g).toBeGreaterThan(r);
+      for (const n of ["text", "text-2", "accent", "md-strong", "md-heading", "md-link"]) expect(green(rs(n)), n).toBe(true);
+      // The three levels are a real green, not a grey: the text's red is under half its green.
+      for (const n of ["text", "text-2"]) expect(parseHex(rs(n))[0], n).toBeLessThan(parseHex(rs(n))[1] / 2);
+      expect(hueOf(rs("working"))).toBeGreaterThan(30);
+      expect(hueOf(rs("working"))).toBeLessThan(55);
+    });
+
+    it("has three clearly separate greens: bright for bold and headings, normal for text, dim for what is secondary", () => {
+      expect(rs("md-strong")).toBe(rs("md-heading"));
+      expect(contrast(rs("md-strong"), rs("text"))).toBeGreaterThanOrEqual(1.4);
+      expect(contrast(rs("text"), rs("text-2"))).toBeGreaterThanOrEqual(1.7);
+      expect(luminance(rs("md-strong"))).toBeGreaterThan(luminance(rs("text")));
+      expect(luminance(rs("text"))).toBeGreaterThan(luminance(rs("text-2")));
+      expect(luminance(rs("text-2"))).toBeGreaterThan(luminance(rs("muted")));
+      expect(rs("md-strong-glow")).toMatch(/^0 0 \d+px/);
+    });
+
+    it("solves green on green with structure: inline code and code headers in reverse video, boxed blocks, a marked prompt", () => {
+      // Reverse video: dark text on a bright block, readable at well over 4.5:1.
+      expect(luminance(rs("md-code-text"))).toBeLessThan(luminance(rs("md-code-bg")));
+      expect(contrast(rs("md-code-text"), rs("md-code-bg"))).toBeGreaterThanOrEqual(7);
+      expect(luminance(rs("md-pre-head-text"))).toBeLessThan(luminance(rs("md-pre-head-bg")));
+      expect(rs("md-pre-line")).not.toBe(rs("bg"));
+      // What you sent is in a box and starts with a prompt; Claude's reply is neither.
+      expect(rs("user-mark")).toBe('">"');
+      expect(rs("user-border")).toMatch(/^1px solid/);
+      expect(rs("label-case")).toBe("uppercase");
+      expect(rs("md-heading-case")).toBe("uppercase");
+    });
+
+    it("has a CRT's scanlines and vignette that never take a click and never move", () => {
+      expect(rs("crt-on")).toBe('""');
+      expect(rs("caret-shape")).toBe("block");
+      const rule = css.split("\n").find((l) => l.startsWith("body::after {")) ?? "";
+      expect(rule).toMatch(/pointer-events: none/);
+      expect(rule).toMatch(/position: fixed/);
+      expect(rule).not.toMatch(/animation/);
+      expect(css).not.toMatch(/@keyframes[^{]*(?:scan|flicker|crt)/i);
+    });
+
+    it("is all monospace and square, with 1px lines", () => {
+      expect(token(block("fallout"), "ui")).toBe("var(--mono)");
+      for (const radius of names(block("fallout")).filter((n) => n.startsWith("radius"))) expect(parseFloat(rs(radius)), radius).toBe(0);
+      expect(rs("shadow")).toMatch(/^0 0 0 1px var\(--[\w-]+\)$/);
+      expect(rs("pane-edge")).toMatch(/^inset 0 0 0 1px/);
     });
   });
 

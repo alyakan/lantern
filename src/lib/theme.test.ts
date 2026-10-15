@@ -92,7 +92,7 @@ describe("usePrefersDark", () => {
   });
 
   it("knows which of the other themes are dark and which are light", () => {
-    for (const [theme, dark] of [["terminal", true], ["solarized", true], ["nord", true], ["paper", false]] as const) {
+    for (const [theme, dark] of [["terminal", true], ["fallout", true], ["solarized", true], ["nord", true], ["paper", false]] as const) {
       applyTheme(theme, "default");
       expect(renderHook(() => usePrefersDark()).result.current, theme).toBe(dark);
     }
