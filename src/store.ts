@@ -6,6 +6,7 @@ import { readPageNote } from "./lib/pageNote";
 import { revertSummary, undoOf, undoSummary, type RevertNote, type RevertUndo } from "./lib/revert";
 import { KEEP_CHARS, readShellContext, takesShellContext } from "./lib/shell";
 import { readSkillNote } from "./lib/skillNote";
+import type { Subagents } from "./lib/workflow";
 
 export interface EditInfo {
   path: string;
@@ -175,6 +176,10 @@ export interface State {
   cleared: boolean;
   contextWindow: number | null;
   mode: Mode;
+  /** Permissions Auto on the Step by step workflow (the other workflows say it with `mode`): see `permissionsOf`. */
+  autoApprove: boolean;
+  /** A Team's Subagents setting, as its Lead shows it: where the Lead's built-in helpers run. */
+  subagents: Subagents;
   /** Step by step: a flavour picked from the header and not yet sent (it goes with the next message). */
   flavourPick: Flavour | null;
   /** Step by step: the flavour an older session was in, when its mode was Debug, Teach or Review. */
@@ -254,6 +259,8 @@ export const initialState: State = {
   cleared: false,
   contextWindow: null,
   mode: "ask",
+  autoApprove: false,
+  subagents: "canvas",
   flavourPick: null,
   flavourStart: null,
   model: null,
@@ -290,7 +297,9 @@ export type Action =
   | { type: "user_sent"; text: string; switchedTo?: Flavour; draft?: string; auto?: boolean }
   | { type: "wakes_taken" }
   | { type: "orchestrator_set"; on: boolean }
-  | { type: "mode_changed"; mode: Mode; flavourStart?: Flavour | null }
+  /** `autoApprove`: Step by step's Permissions (kept as it is when absent; other modes say it with the mode). */
+  | { type: "mode_changed"; mode: Mode; autoApprove?: boolean; flavourStart?: Flavour | null }
+  | { type: "subagents_set"; subagents: Subagents }
   | { type: "flavour_picked"; flavour: Flavour | null }
   | { type: "permission_decided"; id: string; allow: boolean; note?: string }
   | { type: "stop_requested" }
@@ -575,7 +584,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       };
     // The main agent's mode was lowered, so this worker's was too (its claude restarted on the same conversation).
     case "agent_mode":
-      return { ...state, mode: ev.mode };
+      return { ...state, mode: ev.mode, autoApprove: ev.mode === "steps" ? state.autoApprove : false };
     case "review_target":
       return { ...state, reviewTarget: { pr: ev.pr, base: ev.base } };
     case "merge_proposed": {
@@ -650,7 +659,9 @@ export function reducer(state: State, action: Action): State {
     case "orchestrator_set":
       return { ...state, orchestrator: action.on };
     case "mode_changed":
-      return { ...state, mode: action.mode, ...(action.flavourStart !== undefined ? { flavourStart: action.flavourStart } : {}) };
+      return { ...state, mode: action.mode, autoApprove: action.mode === "steps" ? (action.autoApprove ?? state.autoApprove) : false, ...(action.flavourStart !== undefined ? { flavourStart: action.flavourStart } : {}) };
+    case "subagents_set":
+      return { ...state, subagents: action.subagents };
     case "flavour_picked":
       return { ...state, flavourPick: action.flavour };
     case "permission_decided":

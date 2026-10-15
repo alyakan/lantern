@@ -208,16 +208,16 @@ describe("StepsView", () => {
     expect(current().querySelector(".step-command")).toHaveTextContent("failed in background");
   });
 
-  it("lists the commands that changed or checked the project, and switches auto-approve", () => {
+  it("lists the commands that changed or checked the project, and has no auto-approve switch of its own", () => {
     const bash = (id: string, summary: string, status: "done" | "error"): ChatItem => ({ type: "tool", id, name: "Bash", summary, status, output: "out", edit: null, children: [] });
     const ran: ChatItem[] = [...items.slice(0, -1), bash("b1", "cat utils.js", "done"), bash("b2", "npm test", "error"), items[items.length - 1]];
-    const onAutoApprove = vi.fn();
-    render(<StepsView state={state({ items: ran })} {...handlers()} autoApprove={false} onAutoApprove={onAutoApprove} />);
+    render(<StepsView state={state({ items: ran })} {...handlers()} />);
     const commands = current().querySelector(".step-commands")!;
     expect([...commands.querySelectorAll(".step-command-text")].map((c) => c.textContent)).toEqual(["npm test"]);
     expect(commands.querySelector(".step-command.error")).not.toBeNull();
-    fireEvent.click(screen.getByRole("switch", { name: /Auto-approve/ }));
-    expect(onAutoApprove).toHaveBeenCalledWith(true);
+    // Permissions are the chat's, under the box: nothing in the pages' header switches them.
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByText(/Auto-approve/)).toBeNull();
   });
 
   it("reviews a file a page at a time: finding cards, verdicts sent with Next, and a summary of them", () => {

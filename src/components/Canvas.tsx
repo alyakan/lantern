@@ -24,6 +24,8 @@ import { useAction } from "../lib/actions";
 import { lostText, nodeStatus, readyToMerge, statusLabel, summaryLine, usage, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
 import { usePopover } from "../lib/usePopover";
 import { totalCost, totalTokens, type State } from "../store";
+import { isBusy } from "../sessions";
+import { permissionsOf, workflowOf } from "../lib/workflow";
 import type { CloseAgreed, CloseCheck } from "../types";
 import { AgentMenu, type AgentMenuItem } from "./AgentMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -31,6 +33,8 @@ import { HiddenAgents } from "./HiddenAgents";
 import { NewAgent } from "./NewAgent";
 import { NodeBody } from "./NodeBody";
 import { BranchIcon, ChevronIcon, OpenOutIcon } from "./icons";
+import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
+import { SubagentsMenu } from "./SubagentsMenu";
 
 /** Where agents sit and how the canvas is framed. The app keeps it, so leaving the canvas and coming back finds it as it was. */
 export interface CanvasLayout {
@@ -75,7 +79,6 @@ const foldedHeight = (summary: boolean, zoom: number) => (summary ? SUMMARY_HEAD
 /** Room the agent menu needs, so one opened near an edge is moved in. */
 const MENU_SIZE = { w: 270, h: 120 };
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : "That didn't work.");
-const MODE_LABEL = { ask: "Ask", auto: "Auto", steps: "Step by step" } as const;
 
 interface Props {
   nodes: OrchestraNode[];
@@ -104,6 +107,8 @@ interface FrameProps {
   collapsed: boolean;
   /** It was not on the canvas before: it fades and grows in. */
   fresh: boolean;
+  /** A Lead whose team still has agents: it stays in Team until they are closed. */
+  holdsAgents: boolean;
   onGrab: (e: ReactPointerEvent<HTMLElement>, slot: string, kind: "move" | "resize") => void;
   onDrag: (e: ReactPointerEvent<HTMLElement>) => void;
   onRelease: (e: ReactPointerEvent<HTMLElement>) => void;
@@ -129,7 +134,7 @@ function SummaryBody({ slot }: { slot: string }) {
   );
 }
 
-const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, focused, summary, collapsed, fresh, onGrab, onDrag, onRelease, onToggle, onOpen, onPress, onMenu, onMore }: FrameProps) {
+const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, focused, summary, collapsed, fresh, holdsAgents, onGrab, onDrag, onRelease, onToggle, onOpen, onPress, onMenu, onMore }: FrameProps) {
   const state = useChatState(slot);
   const owner = useChatState(parent ?? slot);
   const status: NodeStatus = state ? nodeStatus(state) : "ended";
@@ -138,6 +143,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
   const ready = !!parent && !!owner?.proposals.some((p) => p.worker === slot && p.status === "open");
   const label = statusLabel(status, role, ready);
   const spent = state ? usage(totalCost(state), totalTokens(state)) : "";
+  const actions = useNodeActions();
   return (
     <section
       className={`canvas-node ${role} ${status}${ready ? " ready" : ""}${focused ? " focused" : ""}${folded ? " folded" : ""}${fresh ? " enter" : ""}`}
@@ -167,9 +173,16 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
           </span>
           <span className="node-meta" title={branch ?? undefined}>
             {branch && <BranchIcon />}
-            {[role === "main" ? "Runs the team" : branch ? branch.replace(/^lantern\//, "") : "Shared folder", state ? MODE_LABEL[state.mode] : null, spent || null].filter(Boolean).join(" · ")}
+            {[role === "main" ? "Runs the team" : branch ? branch.replace(/^lantern\//, "") : "Shared folder", spent || null].filter(Boolean).join(" · ")}
           </span>
         </span>
+        {/* Both settings are on every window's title bar, so a team's Permissions can be changed from the canvas. */}
+        {state && !folded && (
+          <span className="node-settings">
+            <PermissionsMenu compact permissions={permissionsOf(state)} onChange={(p) => actions.setPermissions(slot, p)} disabled={isBusy(state)} />
+            <WorkflowMenu compact workflow={workflowOf(state)} agent={role === "worker"} holdsAgents={holdsAgents} onChange={(w) => actions.setWorkflow(slot, w)} disabled={isBusy(state)} />
+          </span>
+        )}
         <span className="node-status">{label}</span>
         {role === "worker" && (
           <button className="icon" aria-label={`More for ${name}`} aria-haspopup="menu" title="More: hide, or clean up and close" onClick={(e) => onMore(e, slot)}>
@@ -322,6 +335,7 @@ function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onSho
         <PlanMeter />
         <Team nodes={nodes} onGoTo={onGoTo} />
         <HiddenAgents nodes={nodes.filter((n) => n.hidden)} onShow={onShow} />
+        {main && <SubagentsMenu main={main} />}
         {main && <NewAgent main={main} />}
       </div>
     </>
@@ -771,6 +785,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
             summary={summary}
             collapsed={!!layout.collapsed[n.slot]}
             fresh={arriving.has(n.slot)}
+            holdsAgents={n.role === "main" && nodes.some((o) => o.parent === n.slot)}
             onGrab={onGrab}
             onDrag={onDrag}
             onRelease={onRelease}

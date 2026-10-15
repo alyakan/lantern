@@ -1,6 +1,7 @@
 import type { ChatItem } from "../store";
 import type { Mode } from "../types";
 import { isApproval, parseHeading, startedFlavour } from "./steps";
+import { STEPS_AUTO } from "./workflow";
 
 /**
  * What Step by step is doing: building, building and explaining (for someone learning), reviewing a change, debugging,
@@ -18,21 +19,25 @@ export const FLAVOUR_PHASE: Record<Flavour, string> = { build: "Building", learn
 
 /**
  * A mode as saved by an older Lantern: Plan first is gone (its chats reopen asking before actions), and Debug, Teach and
- * Review were modes of their own before they became Step by step's flavours.
+ * Review were modes of their own before they became Step by step's flavours. `autoApprove`: Step by step's Permissions
+ * when the save says ("steps:auto"); null when it doesn't (an older save, whose auto-approve was the project's).
  */
-export function savedMode(raw: string | undefined | null): { mode: Mode; flavour: Flavour | null } {
+export function savedMode(raw: string | undefined | null): { mode: Mode; autoApprove: boolean | null; flavour: Flavour | null } {
   switch (raw) {
     case "auto":
+      return { mode: "auto", autoApprove: false, flavour: null };
     case "steps":
-      return { mode: raw, flavour: null };
+      return { mode: "steps", autoApprove: null, flavour: null };
+    case STEPS_AUTO:
+      return { mode: "steps", autoApprove: true, flavour: null };
     case "debug":
-      return { mode: "steps", flavour: "debug" };
+      return { mode: "steps", autoApprove: null, flavour: "debug" };
     case "teach":
-      return { mode: "steps", flavour: "learn" };
+      return { mode: "steps", autoApprove: null, flavour: "learn" };
     case "review":
-      return { mode: "steps", flavour: "review" };
+      return { mode: "steps", autoApprove: null, flavour: "review" };
     default:
-      return { mode: "ask", flavour: null };
+      return { mode: "ask", autoApprove: false, flavour: null };
   }
 }
 

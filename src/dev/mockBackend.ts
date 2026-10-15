@@ -1004,9 +1004,19 @@ export function installMockBackend() {
             sendTo(String(a.slot))({ kind: "mcp_tools", tools: MCP_TOOLS });
           }, 50);
           return null;
-        case "restart_session":
-          slotMode[String(a.slot)] = String(a.mode);
+        case "restart_session": {
+          const slot = String(a.slot);
+          slotMode[slot] = String(a.mode);
+          // Workflow Team makes the chat the Lead of a team; leaving it ends that (the real backend refuses while it has agents).
+          if (a.team === true) mockMain = slot;
+          else if (a.team === false && mockMain === slot) mockMain = null;
+          // An agent never has more freedom than its Lead: asking for Auto under a Lead on Ask is lowered, and the window told.
+          if (mockMain && slot !== mockMain && a.mode === "auto" && slotMode[mockMain] !== "auto") {
+            slotMode[slot] = "ask";
+            setTimeout(() => void sendTo(slot)({ kind: "agent_mode", mode: "ask" }), 30);
+          }
           return null;
+        }
         case "apply_harness":
           return null;
         case "close_session":
@@ -1132,7 +1142,7 @@ export function installMockBackend() {
             { flavour: "Build", text: "Build: plan one step per page, then build one step per page.", headings: ["# Frame — <the task in a few words>", "# Plan step N — <step title>", "# Plan complete — N steps", "# Step N of M — <step title>", "# Done — <what was built>"] },
             { flavour: "Review", text: "Review: one changed file per page, then the summary.", headings: ["# Frame — <the PR's title>", "# File N of M — <path> (+added −removed)", "# Summary — <files reviewed, findings accepted, findings dropped>"] },
           ];
-        case "set_agent_choice":
+        case "set_subagents":
         case "set_agent_limit":
           return null;
         case "list_permission_rules":

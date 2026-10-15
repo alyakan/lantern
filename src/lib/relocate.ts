@@ -3,13 +3,13 @@
  * folder's path (what usePersistentState saved for it); migrateFolderState gives the new path the old one's entry.
  */
 export const FOLDER_RECORDS = [
-  "settings.modeByFolder",
-  "settings.autoApproveByFolder",
+  "settings.permissionsByFolder",
+  "settings.workflowByFolder",
+  "settings.subagentsByFolder",
   "settings.promptHistory",
   "settings.harnessByFolder",
   "review.collapsedByFolder",
   "settings.pinnedSessions",
-  "settings.orchestraModeByFolder",
 ] as const;
 
 /** The folder that was open last, reopened at launch. */

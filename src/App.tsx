@@ -48,7 +48,7 @@ import { scrollWithin } from "./lib/scrollWithin";
 
 import { SlotContext } from "./lib/slot";
 import { ModeGuideContext } from "./lib/modeGuide";
-import { GUIDE, ModeGuide, type GuideKey } from "./components/ModeGuide";
+import { ModeGuide, type GuideKey } from "./components/ModeGuide";
 import { SettingsView, TAB_LABEL, type SettingsTab } from "./components/SettingsView";
 import { UpdatingOverlay } from "./components/UpdatingOverlay";
 import { isInstalling, useUpdateState } from "./lib/updates";
@@ -60,6 +60,7 @@ import { architectureMap, coversOf } from "./lib/architecture";
 import { ArchitecturePane } from "./lib/architecturePane";
 import { summarize } from "./lib/stepsSummary";
 import { flavourOf, savedMode, withFlavourNote, type Flavour } from "./lib/flavour";
+import { launchOf, migrateModeSettings, permissionsOf, PERMISSIONS_LABEL, WORKFLOW_LABEL, workflowOf, savedModeOf, type Permissions, type Subagents, type Workflow } from "./lib/workflow";
 import { FileLinksProvider } from "./lib/fileLinks";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Hud, type HudEvent } from "./components/Hud";
@@ -100,11 +101,6 @@ function mergeOwner(chats: { slots: Record<string, { proposals: { worker: string
   return Object.keys(chats.slots).find((slot) => chats.slots[slot].proposals.some((p) => p.worker === worker));
 }
 
-/** An orchestra's main agent starts on the mode the user chose for it. */
-interface OrchestraStart {
-  mode: Mode;
-}
-
 /**
  * What a restored chat was in an orchestra. A worker is reopened under its main agent once that has finished opening
  * (`parentReady`), so the backend knows the main agent by the time it adopts the worker.
@@ -119,18 +115,21 @@ const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error 
 const NO_SKILLS: SkillEntry[] = [];
 
 export default function App() {
-  // Remembered across launches: the permission mode and the last project opened.
-  // Each project remembers its own mode (a project in Step by step stays there; another stays a chat).
-  // Saved as strings: older ones can name modes that are gone (see savedMode).
-  const [modes, setModes] = usePersistentState<Record<string, string>>("settings.modeByFolder", {});
-  const modeFor = (folder: string): Mode => savedMode(modes[folder]).mode;
+  // What older Lanterns saved per project (one mode, Step by step's own auto-approve, how a team ran) becomes the two
+  // settings below, before anything reads them.
+  useState(() => migrateModeSettings(localStorage));
+  // Remembered across launches: each project's last Permissions (Ask or Auto) and Workflow (a project in Step by step stays
+  // there; another stays a chat; a Team is not remembered, the next chat in the project starts as a chat). They are what a
+  // new chat in the project starts with.
+  const [permissionsBy, setPermissionsBy] = usePersistentState<Record<string, Permissions>>("settings.permissionsByFolder", {});
+  const [workflowBy, setWorkflowBy] = usePersistentState<Record<string, Workflow>>("settings.workflowByFolder", {});
+  // A team's Subagents setting, per project too: the next team in it starts with the last choice.
+  const [subagentsBy, setSubagentsBy] = usePersistentState<Record<string, Subagents>>("settings.subagentsByFolder", {});
+  const permissionsFor = (folder: string): Permissions => (permissionsBy[folder] === "auto" ? "auto" : "ask");
+  const launchFor = (folder: string, team = false) => launchOf(permissionsFor(folder), team ? "team" : workflowBy[folder] === "steps" ? "steps" : "chat");
   // Each session's own mode, so reopening one from History brings back the mode it was in, not the folder's latest.
+  // Saved as strings: older ones can name modes that are gone (see savedMode).
   const [sessionModes, setSessionModes] = usePersistentState<Record<string, string>>("settings.modeBySession", {});
-  // Step by step's auto-approve, per project too.
-  const [autoBy, setAutoBy] = usePersistentState<Record<string, boolean>>("settings.autoApproveByFolder", {});
-  // How each project's orchestras run, once the user has chosen (see newOrchestra).
-  const [orchestraModes, setOrchestraModes] = usePersistentState<Record<string, "auto" | "ask">>("settings.orchestraModeByFolder", {});
-  const autoFor = (folder: string | null) => (folder ? (autoBy[folder] ?? false) : false);
   const [lastFolder, setLastFolder] = usePersistentState<string | null>("settings.lastFolder", null);
   // The folders recorded as moved (null until read): a chat saved in the old place reopens in the new one.
   const [moves, setMoves] = useState<RelocationEntry[] | null>(null);
@@ -161,7 +160,7 @@ export default function App() {
   // Each open chat's preset.
   const [harnessBySlot, setHarnessBySlot] = useState<Record<string, string>>({});
   // Every open chat. The one on screen is `active`; the others keep running in the background.
-  const [chats, dispatchChats] = useReducer(chatsReducer, undefined, () => initialChats({ ...initialState, mode: lastFolder ? modeFor(lastFolder) : "ask" }));
+  const [chats, dispatchChats] = useReducer(chatsReducer, undefined, () => initialChats({ ...initialState, ...(lastFolder ? { mode: launchFor(lastFolder).mode, autoApprove: launchFor(lastFolder).autoApprove } : {}) }));
   const active = chats.active;
   const state = chats.slots[active];
   // An orchestra shows as a canvas of its agents or as one chat at a time. The canvas's layout is kept here, so going to a
@@ -320,9 +319,10 @@ export default function App() {
   /** What a chat runs with: its preset's models, or (Default) the app's model and effort. */
   const settingsFor = (slot: string, h: Harness = harnessOf(slot)) => settingsOf(h, { model, effort });
 
-  const restart = (slot: string, mode: Mode, withEffort: string | null = settingsFor(slot).effort) => {
+  /** `change`: Step by step's Permissions and Workflow Team, when this restart is what sets them (see `launchOf`); else the chat keeps its own. */
+  const restart = (slot: string, mode: Mode, withEffort: string | null = settingsFor(slot).effort, change: { autoApprove?: boolean; team?: boolean } = {}) => {
     to(slot)({ type: "restarting" });
-    api.restartSession(slot, mode, withEffort, autoFor(chats.slots[slot]?.folder ?? null)).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+    api.restartSession(slot, mode, withEffort, change.autoApprove ?? chats.slots[slot]?.autoApprove ?? false, change.team ?? null).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
   };
 
   // If Stop made claude exit instead of just ending the turn, resume the session.
@@ -384,31 +384,32 @@ export default function App() {
   };
 
   // `quiet`: reopening the remembered project at launch; if that fails (e.g. the folder is gone), just forget it.
-  const startFresh = (folder: string, quiet = false, orchestra?: OrchestraStart) => {
-    if (state.claudePath) startIn(takeSlot(), folder, quiet, orchestra);
+  const startFresh = (folder: string, quiet = false, team = false) => {
+    if (state.claudePath) startIn(takeSlot(), folder, quiet, team);
   };
 
-  /** `orchestra`: the chat is the main agent of an orchestra, which can start worker agents, on the mode the user chose for it. */
-  const startIn = (slot: string, folder: string, quiet = false, orchestra?: OrchestraStart) => {
+  /** `team`: the chat is the Lead of a team, which can start agents, on the project's last Permissions (the agents never exceed them). */
+  const startIn = (slot: string, folder: string, quiet = false, team = false) => {
     const { claudePath } = state;
     if (!claudePath) return;
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
     reopened.current = true;
-    // An orchestra runs on the mode the user chose for it (asked the first time, see newOrchestra), which its workers never
-    // exceed. It doesn't change the project's own mode (see the effect below).
-    const mode: Mode = orchestra ? orchestra.mode : modeFor(folder);
-    const orchestrator = !!orchestra;
+    // A team's Lead runs on the project's last Permissions, which its agents never exceed; Team is not remembered as the
+    // project's Workflow (see the effect below).
+    const { mode, autoApprove } = launchFor(folder, team);
+    const orchestrator = team;
     const h = findHarness(presets, harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)({ type: "folder_opened", folder });
-    to(slot)({ type: "mode_changed", mode });
+    to(slot)({ type: "mode_changed", mode, autoApprove });
     to(slot)({ type: "orchestrator_set", on: orchestrator });
-    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, orchestra);
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team);
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
-    api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder), ...(orchestrator ? { orchestrator } : {}) }).then(
+    api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}) }).then(
       () => {
         if (startGen.current[slot] !== gen) return;
         delete relaunch.current[slot];
+        if (orchestrator) startSubagents(slot, folder);
         setLastFolder(folder);
         to(slot)({ type: "session_ready" });
       },
@@ -422,13 +423,16 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Not an orchestra's: its mode is its own, and a worker's folder is a worktree that's gone with it.
-    if (state.folder && !state.orchestrator && !chats.agents[active] && modes[state.folder] !== state.mode) setModes({ ...modes, [state.folder]: state.mode });
-    // An orchestra's mode, as the user last set it for its main agent, is what the project's next one starts on.
-    if (state.folder && state.orchestrator && (state.mode === "auto" || state.mode === "ask") && orchestraModes[state.folder] !== state.mode) setOrchestraModes({ ...orchestraModes, [state.folder]: state.mode });
-  }, [state.mode, state.folder]);
+    // Not a worker's: its folder is a worktree that's gone with it, and its Permissions are capped by its Lead.
+    if (!state.folder || chats.agents[active]) return;
+    const permissions = permissionsOf(state);
+    if (permissionsBy[state.folder] !== permissions) setPermissionsBy({ ...permissionsBy, [state.folder]: permissions });
+    // A Team is the chat's own: the project's next chat starts as a chat (or in Step by step, if that is where it was).
+    const workflow = workflowOf(state);
+    if (workflow !== "team" && workflowBy[state.folder] !== workflow) setWorkflowBy({ ...workflowBy, [state.folder]: workflow });
+  }, [state.mode, state.autoApprove, state.orchestrator, state.folder]);
   // Every open chat's, not just the one on screen: a worker's mode is set in the background (and may be lowered there).
-  const modesKey = Object.values(chats.slots).map((s) => `${s.sessionId}:${s.mode}`).join(" ");
+  const modesKey = Object.values(chats.slots).map((s) => `${s.sessionId}:${savedModeOf(s)}`).join(" ");
   useEffect(() => {
     const next = sessionModesToSave(chats.slots, sessionModes);
     if (next) setSessionModes(next);
@@ -483,12 +487,15 @@ export default function App() {
     reopened.current = true;
     // The mode it was last in (and for an older Debug, Teach or Review session, that flavour of Step by step); one from
     // before modes were kept per session reopens as a plain chat, not as whatever this folder's newest chat is doing.
-    const { mode, flavour: flavourStart } = savedMode(sessionModes[sessionId]);
+    const saved = savedMode(sessionModes[sessionId]);
+    const { mode, flavour: flavourStart } = saved;
+    // Step by step's Permissions: as the session saved them, else (an older save) the project's.
+    const autoApprove = mode === "steps" && (saved.autoApprove ?? permissionsFor(folder) === "auto");
     // The preset it last ran with, else the folder's.
     const h = findHarness(presets, harnessBySession[sessionId] ?? harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)(reuse ? { type: "restarting" } : { type: "folder_opened", folder });
-    to(slot)({ type: "mode_changed", mode, flavourStart });
+    to(slot)({ type: "mode_changed", mode, autoApprove, flavourStart });
     to(slot)({ type: "orchestrator_set", on: team?.role === "main" });
     // Trying again later doesn't wait on a main agent that has long since opened (or not).
     const again: TeamRole | undefined = team?.role === "worker" ? { ...team, parentReady: undefined } : team;
@@ -499,7 +506,7 @@ export default function App() {
         slot,
         claudePath,
         folder,
-        { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder), ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared" } } : {}) },
+        { mode, ...settingsFor(slot, h), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared" } } : {}) },
         sessionId,
       );
     // A worker waits for its main agent: if that one didn't open, this one comes back as an ordinary chat.
@@ -515,6 +522,7 @@ export default function App() {
           return false;
         }
         delete relaunch.current[slot];
+        if (as?.role === "main") startSubagents(slot, folder);
         to(slot)({ type: "history_loaded", sessionId, events: opened.events, movedFrom: opened.moved_from });
         to(slot)({ type: "session_ready" });
         if (as?.role === "worker") dispatchChats({ type: "adopt", slot, meta: { parent: as.parent, name: as.name, brief: "", folder, branch: as.branch, base: as.base, isolation: as.isolation, ...(as.hidden ? { hidden: true } : {}) } });
@@ -560,7 +568,7 @@ export default function App() {
     }
     if (c.sessionId) return resumeIn(slot, c.folder, c.sessionId, false, team);
     // Typed in the box but never sent: a new chat in its folder, as a main agent again if it was one.
-    startIn(slot, c.folder, false, team?.role === "main" ? { mode: orchestraModes[c.folder] ?? "ask" } : undefined);
+    startIn(slot, c.folder, false, team?.role === "main");
     return Promise.resolve(true);
   };
   const openAlready = (c: SavedChat) => (c.sessionId ? Object.entries(chats.slots).find(([, s]) => s.sessionId === c.sessionId)?.[0] : undefined);
@@ -777,12 +785,57 @@ export default function App() {
     if (sure) sendIn(slot, "/clear");
   };
 
-  const changeMode = (mode: Mode) =>
-    unlessBackground(active, () => {
-      if (mode !== "steps") dispatch({ type: "flavour_picked", flavour: null });
-      dispatch({ type: "mode_changed", mode });
-      if (state.folder) restart(active, mode);
+  /** A team's Subagents setting for a Lead that has just started: the project's last choice, told to the backend and shown. */
+  const startSubagents = (slot: string, folder: string) => {
+    const subagents = subagentsBy[folder] ?? "canvas";
+    to(slot)({ type: "subagents_set", subagents });
+    api.setSubagents(slot, subagents).catch(() => {});
+  };
+  /** The team's Subagents setting: where its Lead's built-in helpers run. Remembered for the project's next team. */
+  const changeSubagents = (slot: string, subagents: Subagents) => {
+    const s = chats.slots[slot];
+    if (!s?.orchestrator) return;
+    to(slot)({ type: "subagents_set", subagents });
+    api.setSubagents(slot, subagents).catch((e) => to(slot)({ type: "notice", text: errText(e) }));
+    if (s.folder) setSubagentsBy({ ...subagentsBy, [s.folder]: subagents });
+  };
+
+  /** A team's Lead still has agents on the canvas, which would be left with nobody to report to if it left Team. */
+  const holdsAgents = (slot: string) => !!chats.slots[slot]?.orchestrator && Object.values(chats.agents).some((a) => a.parent === slot);
+
+  /**
+   * Sets a chat's Permissions and Workflow together (they are one restart of its claude): Permissions Ask or Auto, the
+   * same in every workflow; Workflow Chat, Step by step or Team, where Team makes the chat the Lead of a team (see
+   * restart_session) and leaving it needs the team's agents closed first. An agent of a team keeps its Workflow's team,
+   * and its Permissions are capped by its Lead's (the backend lowers them and says so).
+   */
+  const setSettings = (slot: string, permissions: Permissions, workflow: Workflow) =>
+    unlessBackground(slot, () => {
+      const s = chats.slots[slot];
+      if (!s) return;
+      const agent = !!chats.agents[slot];
+      const leaving = s.orchestrator && workflow !== "team";
+      if (leaving && holdsAgents(slot)) return to(slot)({ type: "notice", text: "This team still has agents. Close them first, then switch its Workflow." });
+      const { mode, autoApprove, team } = launchOf(permissions, agent ? workflowOf(s) : workflow);
+      if (mode !== "steps") to(slot)({ type: "flavour_picked", flavour: null });
+      to(slot)({ type: "mode_changed", mode, autoApprove });
+      if (!agent) to(slot)({ type: "orchestrator_set", on: team });
+      if (s.folder) restart(slot, mode, settingsFor(slot).effort, { autoApprove, ...(agent ? {} : team && !s.orchestrator ? { team: true } : leaving ? { team: false } : {}) });
+      // Becoming a Lead: its agents will appear on the canvas, so that is where it goes.
+      if (team && !s.orchestrator) {
+        startSubagents(slot, s.folder ?? "");
+        focusAgent(slot);
+        setView("canvas");
+      }
     });
+  const changePermissions = (permissions: Permissions, slot = active) => {
+    const s = chats.slots[slot];
+    if (s && permissionsOf(s) !== permissions) setSettings(slot, permissions, workflowOf(s));
+  };
+  const changeWorkflow = (workflow: Workflow, slot = active) => {
+    const s = chats.slots[slot];
+    if (s && workflowOf(s) !== workflow) setSettings(slot, permissionsOf(s), workflow);
+  };
 
   // Step by step's flavour as you see it: one you picked and haven't sent yet, or the conversation's.
   const chatFlavour = (s: typeof state) => (s.mode === "steps" ? (s.flavourPick ?? flavourOf(s.items, s.flavourStart)) : null);
@@ -791,10 +844,13 @@ export default function App() {
   const pickFlavour = (next: Flavour | null) => {
     const inChat = state.mode === "steps" ? flavourOf(state.items, state.flavourStart) : null;
     if (state.mode !== "steps") {
+      if (holdsAgents(active)) return dispatch({ type: "notice", text: "This team still has agents. Close them first, then switch its Workflow." });
       return unlessBackground(active, () => {
+        const autoApprove = permissionsOf(state) === "auto";
         dispatch({ type: "flavour_picked", flavour: next === inChat ? null : next });
-        dispatch({ type: "mode_changed", mode: "steps" });
-        if (state.folder) restart(active, "steps");
+        dispatch({ type: "mode_changed", mode: "steps", autoApprove });
+        dispatch({ type: "orchestrator_set", on: false });
+        if (state.folder) restart(active, "steps", settingsFor(active).effort, { autoApprove, ...(state.orchestrator ? { team: false } : {}) });
       });
     }
     dispatch({ type: "flavour_picked", flavour: next === inChat ? null : next });
@@ -990,21 +1046,12 @@ export default function App() {
   showRef.current = showAgent;
   const canvasFocus = useMemo(() => (slot: string) => focusRef.current(slot), []);
   const canvasOpen = useMemo(() => (slot: string) => showRef.current(slot), []);
-  // How a project's orchestras run, once chosen. Starting a team is not the same as consenting to agents that act without
-  // asking, so the first time it is asked, and the answer is kept for that project (changed in the main agent's mode menu).
-  const newOrchestra = async () => {
+  // A new team: a Lead chat on the project's last Permissions, which its agents never exceed (change them from any window's
+  // title bar, or under the box).
+  const newOrchestra = () => {
     const folder = state.folder;
     if (!folder) return;
-    let mode = orchestraModes[folder];
-    if (!mode) {
-      const auto = await ask(
-        "An orchestra is a main agent and the workers it starts, all acting in this project.\n\nOn Auto, Claude Code's own safety checks approve routine actions, so agents can work without stopping at every step. On Ask, every agent asks you before each action. Workers never get more freedom than the main agent.",
-        { title: "How should this team run?", kind: "info", okLabel: "Run on Auto", cancelLabel: "Run on Ask" },
-      ).catch(() => false);
-      mode = auto ? "auto" : "ask";
-      setOrchestraModes({ ...orchestraModes, [folder]: mode });
-    }
-    startFresh(folder, false, { mode });
+    startFresh(folder, false, true);
     setView("canvas");
   };
   const doing = {
@@ -1073,6 +1120,9 @@ export default function App() {
       if (worker === active && parent) focusAgent(parent);
     },
     show: (worker: string) => dispatchChats({ type: "set_hidden", slot: worker, hidden: false }),
+    setPermissions: (slot: string, permissions: Permissions) => changePermissions(permissions, slot),
+    setWorkflow: (slot: string, workflow: Workflow) => changeWorkflow(workflow, slot),
+    setSubagents: changeSubagents,
     draft: (slot: string) => drafts.current[slot] ?? "",
     setDraft: (slot: string, text: string) => {
       if (text) drafts.current[slot] = text;
@@ -1103,6 +1153,9 @@ export default function App() {
       closeWorker: (worker, agreed) => doingRef.current.closeWorker(worker, agreed),
       hide: (worker) => doingRef.current.hide(worker),
       show: (worker) => doingRef.current.show(worker),
+      setPermissions: (slot, permissions) => doingRef.current.setPermissions(slot, permissions),
+      setWorkflow: (slot, workflow) => doingRef.current.setWorkflow(slot, workflow),
+      setSubagents: (main, subagents) => doingRef.current.setSubagents(main, subagents),
       draft: (slot) => doingRef.current.draft(slot),
       setDraft: (slot, text) => doingRef.current.setDraft(slot, text),
     }),
@@ -1300,21 +1353,24 @@ export default function App() {
   const [guideAt, setGuideAt] = useState<GuideKey | null>(null);
   const [settingsAt, setSettingsAt] = useState<SettingsTab | null>(null);
   useAction("settings", () => setSettingsAt(settingsAt ?? "general"));
-  // ⇧⌘P: every action that can run, and the things that aren't shortcuts: switching mode or harness, and each Settings
+  // ⇧⌘P: every action that can run, and the things that aren't shortcuts: switching Permissions, Workflow or harness, and each Settings
   // page. Listed as they are when the palette opens.
   const [palette, setPalette] = useState<PaletteEntry[] | null>(null);
   const paletteEntries = (): PaletteEntry[] => {
     const ready = !!state.folder && !isBusy(state);
-    const modes = (["ask", "auto", "steps"] as const)
-      .filter((m) => ready && m !== state.mode)
-      .map((m): PaletteEntry => ({ id: `mode:${m}`, title: `Switch to ${GUIDE[m].label}`, group: "Mode", shortcut: null, run: () => changeMode(m) }));
+    const permissions = (["ask", "auto"] as const)
+      .filter((p) => ready && p !== permissionsOf(state))
+      .map((p): PaletteEntry => ({ id: `permissions:${p}`, title: `Permissions: ${PERMISSIONS_LABEL[p]}`, group: "Permissions", shortcut: null, run: () => changePermissions(p) }));
+    const workflows = (["chat", "steps", "team"] as const)
+      .filter((w) => ready && w !== workflowOf(state) && !(w === "team" && chats.agents[active]))
+      .map((w): PaletteEntry => ({ id: `workflow:${w}`, title: `Workflow: ${WORKFLOW_LABEL[w]}${w === "steps" ? "…" : ""}`, group: "Workflow", shortcut: null, run: () => changeWorkflow(w) }));
     const harnesses = presets
       .filter((h) => ready && h.id !== harnessOf(active).id)
       .map((h): PaletteEntry => ({ id: `harness:${h.id}`, title: `Use the ${h.name} harness`, group: "Harness", shortcut: null, run: () => switchHarness(h) }));
     const tabs = (["general", "harness", "mcp", "skills", "permissions", "updates"] as SettingsTab[])
       .filter((t) => t !== "harness" || !!state.folder)
       .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
-    return [...availableActions(), ...modes, ...harnesses, ...tabs];
+    return [...availableActions(), ...permissions, ...workflows, ...harnesses, ...tabs];
   };
   // Pressed again while open, it closes.
   useAction("command-palette", () => setPalette((open) => (open ? null : paletteEntries())));
@@ -1365,10 +1421,12 @@ export default function App() {
   const carryFolderState = (old: string, next: string) => {
     const changed: Migrated = migrateFolderState(localStorage, old, next);
     const take = <T,>(key: string) => changed[key] as T | undefined;
-    const modes = take<Record<string, string>>("settings.modeByFolder");
-    if (modes) setModes(modes);
-    const auto = take<Record<string, boolean>>("settings.autoApproveByFolder");
-    if (auto) setAutoBy(auto);
+    const permissions = take<Record<string, Permissions>>("settings.permissionsByFolder");
+    if (permissions) setPermissionsBy(permissions);
+    const workflows = take<Record<string, Workflow>>("settings.workflowByFolder");
+    if (workflows) setWorkflowBy(workflows);
+    const subagents = take<Record<string, Subagents>>("settings.subagentsByFolder");
+    if (subagents) setSubagentsBy(subagents);
     const prompts = take<Record<string, string[]>>("settings.promptHistory");
     if (prompts) setPromptsBy(prompts);
     const harness = take<Record<string, string>>("settings.harnessByFolder");
@@ -1440,9 +1498,12 @@ export default function App() {
         if (hero) setOffer([]);
         runShell(active, command);
       }}
-      mode={state.folder ? state.mode : undefined}
+      permissions={state.folder ? permissionsOf(state) : undefined}
+      workflow={state.folder ? workflowOf(state) : undefined}
       flavour={flavour}
-      onModeChange={changeMode}
+      onPermissionsChange={(p) => changePermissions(p)}
+      onWorkflowChange={(w) => changeWorkflow(w)}
+      holdsAgents={holdsAgents(active)}
       model={state.model}
       idlePlaceholder={stepsView ? (flavour === "review" ? "Ask about this file…" : "Ask about this page or change it…") : stepsMode && hero ? HERO_PLACEHOLDER[flavour ?? "none"] : undefined}
       sendAndNext={stepsView ? (text) => sendIn(active, andNext(text)) : undefined}
@@ -1541,15 +1602,7 @@ export default function App() {
                     <ArchitecturePane.Provider value={state.folder ? openArchitecture : null}>
                     <FileLinksProvider key={active} slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention}>
                       {stepsView ? (
-                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} onPickFlavour={pickFlavour} autoApprove={autoFor(state.folder)}
-                          onAutoApprove={(on) =>
-                            unlessBackground(active, () => {
-                              if (!state.folder) return;
-                              setAutoBy({ ...autoBy, [state.folder]: on });
-                              to(active)({ type: "restarting" });
-                              api.restartSession(active, state.mode, settingsFor(active).effort, on).then(() => to(active)({ type: "session_ready" })).catch((e) => to(active)({ type: "failed", text: errText(e) }));
-                            })
-                          } onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} />
+                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} onPickFlavour={pickFlavour} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} />
                       ) : (
                         <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} />
                       )}
@@ -1656,11 +1709,13 @@ export default function App() {
         )}
         <ModeGuide
           open={guideAt}
-          mode={state.mode}
+          permissions={permissionsOf(state)}
+          workflow={workflowOf(state)}
           flavour={flavour}
           onUse={state.folder && !isBusy(state) ? (key) => {
             setGuideAt(null);
-            if (key === "ask" || key === "auto" || key === "steps") changeMode(key);
+            if (key === "ask" || key === "auto") changePermissions(key);
+            else if (key === "chat" || key === "steps" || key === "team") changeWorkflow(key);
             else pickFlavour(key);
           } : undefined}
           onClose={() => setGuideAt(null)}

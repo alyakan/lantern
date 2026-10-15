@@ -6,19 +6,20 @@ Run against the built `Lantern.app` (launched from Finder, not a terminal, so PA
 2. Open folder: the model name appears in the toolbar.
 3. Ask: "Create notes.md with three bullet points." A Write card shows a green diff and `notes.md` shows in Changes.
 4. Ask: "Change the second bullet." The Edit card shows red/green lines. Clicking `notes.md` in Changes shows a Monaco diff against the empty original (the file was created this session).
-5. Ask mode: "Run `python3 -c 'print(7)'`." An Allow/Deny card appears. Deny: Claude reports it was denied. Repeat and Allow: the output `7` is visible when you expand the Bash card.
-6. While an Allow/Deny card is pending, switch to Auto: the card shows Denied, the session restarts, and the conversation continues (ask "what did I ask you before?").
-7. Auto mode: "Run `ls`." No prompt appears.
+5. Permissions Ask: "Run `python3 -c 'print(7)'`." An Allow/Deny card appears. Deny: Claude reports it was denied. Repeat and Allow: the output `7` is visible when you expand the Bash card.
+6. While an Allow/Deny card is pending, switch Permissions to Auto: the card shows Denied, the session restarts, and the conversation continues (ask "what did I ask you before?").
+7. Permissions Auto: "Run `ls`." No prompt appears.
 8. Stop: ask for a long task, press Stop. The turn ends and the input unlocks. If a "Session ended" banner shows up, the app restarts the session by itself.
 9. Crash recovery: in a terminal, `pkill -f "claude -p --input-format stream-json"`. A "Claude stopped unexpectedly" banner appears; Restart session resumes and remembers earlier messages.
 10. Subagent: "Use a subagent to list the files here." A Task card appears; expanding it shows the nested steps.
 11. Huge output: "Run `seq 1 100000`." The card output ends with `…` and the UI stays responsive.
-12. Before the first message: the input is enabled right after opening a folder, and switching Ask/Auto right after opening works.
+12. Before the first message: the input is enabled right after opening a folder, and switching Permissions (Ask/Auto) and Workflow (Chat/Step by step/Team) right after opening works.
 13. Press Stop mid-turn while an Allow/Deny card is pending. The card shows Denied, and the next prompt still works.
 
 Orchestras (use a scratch git repo with at least one commit):
 
-- New orchestra asks whether the team runs on Auto or Ask the first time, and not again for that project. The canvas shows one agent, the main agent, with its mode.
+- New orchestra asks nothing: the team's Lead starts on the project's last Permissions. The canvas shows one agent, the Lead, with Permissions and Workflow (Team) chips on its title bar, and a "Subagents: On the canvas" control. Choosing Team under Workflow in an ordinary chat does the same, on that conversation.
+- Switch Permissions on the Lead's title bar: the Lead restarts and its agents (on their own title bars) follow, lowered to Ask if the Lead is on Ask. Switch Subagents to Inline: the Lead's built-in Agent tool now runs inline, with no card.
 - Ask it: "Add a file a.txt in one worker and b.txt in another, each on its own branch." Two workers appear, tethered, each in a worktree under Lantern's app data (`~/Library/Application Support/…/worktrees`), each on a `lantern/…` branch. The main chat names each worker it started.
 - A worker that needs permission (on Ask) pulses amber, the pill says "1 agent needs you", and the prompt is in that worker's own window. Answering it there lets the worker carry on.
 - Type to a worker directly. It answers; the main agent's next note mentions that you messaged it.

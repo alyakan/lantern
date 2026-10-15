@@ -1,6 +1,7 @@
 /**
- * How Claude may act: ask before actions, auto-approve, or step by step (a page per message, in a flavour: see
- * lib/flavour.ts).
+ * How a chat launches: Permissions Ask, Permissions Auto, or the Step by step workflow (a page per message, in a flavour:
+ * see lib/flavour.ts), whose own Permissions are `auto_approve`. A chat's two settings, Permissions and Workflow, are
+ * read from this with lib/workflow.ts.
  */
 export type Mode = "ask" | "auto" | "steps";
 

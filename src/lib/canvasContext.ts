@@ -1,6 +1,7 @@
 import { createContext, useContext, useRef, useSyncExternalStore } from "react";
 import type { State } from "../store";
 import type { CloseAgreed, CloseCheck, NewWorker } from "../types";
+import type { Permissions, Subagents, Workflow } from "./workflow";
 
 /**
  * Every open chat's state, for the canvas: each agent on it subscribes to its own chat, so a streaming reply in one agent
@@ -96,6 +97,12 @@ export interface NodeActions {
   /** Takes a worker's card off the canvas (it keeps working), or puts it back. */
   hide(worker: string): void;
   show(worker: string): void;
+  /** A window's Permissions: Ask or Auto. An agent's is capped by its Lead's (it comes back lowered when it asks for more). */
+  setPermissions(slot: string, permissions: Permissions): void;
+  /** A window's Workflow: Chat, Step by step or Team. Team makes the chat the Lead of a team. */
+  setWorkflow(slot: string, workflow: Workflow): void;
+  /** The team's Subagents setting, on its Lead: where the Lead's built-in helpers run. */
+  setSubagents(main: string, subagents: Subagents): void;
 }
 
 export const NodeActionsContext = createContext<NodeActions | null>(null);

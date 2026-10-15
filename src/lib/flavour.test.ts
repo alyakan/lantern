@@ -7,14 +7,16 @@ const a = (id: string, text: string): ChatItem => ({ type: "assistant", id, text
 
 describe("savedMode", () => {
   it("maps modes an older Lantern saved onto the three, keeping Step by step's flavour", () => {
-    expect(savedMode("ask")).toEqual({ mode: "ask", flavour: null });
-    expect(savedMode("auto")).toEqual({ mode: "auto", flavour: null });
-    expect(savedMode("steps")).toEqual({ mode: "steps", flavour: null });
-    expect(savedMode("plan")).toEqual({ mode: "ask", flavour: null });
-    expect(savedMode("debug")).toEqual({ mode: "steps", flavour: "debug" });
-    expect(savedMode("teach")).toEqual({ mode: "steps", flavour: "learn" });
-    expect(savedMode("review")).toEqual({ mode: "steps", flavour: "review" });
-    expect(savedMode(undefined)).toEqual({ mode: "ask", flavour: null });
+    expect(savedMode("ask")).toEqual({ mode: "ask", autoApprove: false, flavour: null });
+    expect(savedMode("auto")).toEqual({ mode: "auto", autoApprove: false, flavour: null });
+    // Step by step's Permissions are kept with it; an older save didn't say, which is null.
+    expect(savedMode("steps")).toEqual({ mode: "steps", autoApprove: null, flavour: null });
+    expect(savedMode("steps:auto")).toEqual({ mode: "steps", autoApprove: true, flavour: null });
+    expect(savedMode("plan")).toEqual({ mode: "ask", autoApprove: false, flavour: null });
+    expect(savedMode("debug")).toEqual({ mode: "steps", autoApprove: null, flavour: "debug" });
+    expect(savedMode("teach")).toEqual({ mode: "steps", autoApprove: null, flavour: "learn" });
+    expect(savedMode("review")).toEqual({ mode: "steps", autoApprove: null, flavour: "review" });
+    expect(savedMode(undefined)).toEqual({ mode: "ask", autoApprove: false, flavour: null });
   });
 });
 

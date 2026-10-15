@@ -54,8 +54,6 @@ interface Props extends StreamHandlers {
   /** Pick a flavour from the header's badge: Claude is told with the next message. */
   onPickFlavour: (flavour: Flavour) => void;
   /** Claude Code's auto mode approves actions instead of the app asking; each step is still reviewed as a page. */
-  autoApprove?: boolean;
-  onAutoApprove?: (on: boolean) => void;
   /** The page on screen changed: the turns whose changes the Changes pane should show (null: not all known). */
   onPage: (range: { from: number; to: number } | null) => void;
   /** The page that's on screen (once a slide has come to rest): the Map tab lights the boxes it covers. */
@@ -71,7 +69,7 @@ const isTyping = (el: Element | null) => !!el && (el instanceof HTMLInputElement
 // Step-by-step mode's view of the conversation: a page per step, side by side, one on screen. Questions about a step
 // and changes to it stay on its page; Previous and Next (or ← →) slide between pages, and on the newest page Next
 // approves the step and Claude carries on.
-export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPage, onShown, onReviewFile, autoApprove = false, onAutoApprove, jump = null, ...handlers }: Props) {
+export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPage, onShown, onReviewFile, jump = null, ...handlers }: Props) {
   // A revision you undid: the page shows the version you went back to, until Claude revises the step again.
   const [kept, setKept] = useState<Record<string, { turn: number; over: number }>>({});
   const claudes = pagesOf(state.items);
@@ -255,12 +253,6 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
         )}
         <div className="spacer" />
         <FlavourBadge flavour={flavour} onPick={onPickFlavour} disabled={running} />
-        {onAutoApprove && (
-          <button className={`steps-auto${autoApprove ? " on" : ""}`} role="switch" aria-checked={autoApprove} disabled={running} title={autoApprove ? "Auto-approve is on: Claude Code's auto mode approves routine actions and stops risky ones. Click to be asked instead." : "Commands and other actions ask you first. Click to auto-approve them (you still review every step)."} onClick={() => onAutoApprove(!autoApprove)}>
-            <span className="steps-auto-knob" aria-hidden />
-            Auto-approve
-          </button>
-        )}
       </div>
 
       <div className="steps-viewport" ref={viewport}>

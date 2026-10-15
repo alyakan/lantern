@@ -373,8 +373,6 @@ button.edit-toggle:hover:not(:disabled) { color: var(--text); }
 .permission { border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px 12px; background: var(--bg-subtle); display: flex; flex-direction: column; gap: 8px; font-size: calc(13px * var(--font-scale)); }
 .permission-detail { margin: 0; padding: 6px 8px; background: var(--code-bg); border-radius: var(--radius-chip); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
 .permission-actions { display: flex; gap: 6px; }
-.permission-kind { margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--bg-active); color: var(--text-2); font-size: calc(11px * var(--font-scale)); font-weight: 400; }
-.permission-same { display: inline-flex; align-items: center; gap: 6px; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
 .permission-actions button { height: 24px; padding: 0 12px; font-size: calc(12px * var(--font-scale)); }
 .always-menu { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--bg-subtle); }
 .always-group { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
@@ -881,7 +879,7 @@ button.json-more:hover { color: var(--text); }
 
 /* Step-by-step mode: pages side by side, one on screen, sliding between them. */
 .steps { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-/* The flavour badge and the auto-approve switch always keep their full width. When the row is tight the page dots give
+/* The flavour badge always keeps its full width. When the row is tight the page dots give
    way, down to three (46px: the current page's pill and two dots, which the rail keeps scrolled to); the pane itself
    can't be narrower than that (MIN_LEFT in SplitPane.tsx). The background count is dropped first. */
 .steps-head { container-type: inline-size; display: flex; align-items: center; gap: 10px; height: 44px; flex: none; padding: 0 14px 0 20px; border-bottom: 1px solid var(--line); }
@@ -1017,15 +1015,7 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 .step-command-note { flex: none; margin-left: auto; padding-left: 10px; font-size: calc(11px * var(--font-scale)); color: var(--muted); white-space: nowrap; }
 .step-command.background.running .step-command-note { color: var(--working); }
 .step-command.background.error .step-command-note { color: var(--del); }
-/* Step by step's auto-approve switch. */
 /* Never squeezed: in a narrow pane the page circles give way (they scroll) instead. */
-.steps-auto { flex: none; display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px 0 6px; border: 0.5px solid var(--glass-line); border-radius: 999px; background: var(--glass); color: var(--muted); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
-.steps-auto:hover:not(:disabled) { color: var(--text-2); }
-.steps-auto-knob { flex: none; position: relative; width: 22px; height: 13px; border-radius: 999px; background: var(--bg-active); transition: background 0.15s; }
-.steps-auto-knob::after { content: ""; position: absolute; top: 2px; left: 2px; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); transition: transform 0.15s, background 0.15s; }
-.steps-auto.on { color: var(--text); }
-.steps-auto.on .steps-auto-knob { background: var(--text-2); }
-.steps-auto.on .steps-auto-knob::after { transform: translateX(9px); background: var(--pane); }
 
 /* Review pages: a file's findings as cards, severity in orange (blocker) and yellow (should fix), nits grey. */
 :root { --sev-blocker: #d9661f; --sev-should: #a88400; --sev-should-text: #7a5f00; }
@@ -1589,6 +1579,16 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .node-meta svg { flex: none; }
 .node-head .icon { font-size: calc(16px * var(--font-scale)); line-height: 1; }
 .node-status { flex: none; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); white-space: nowrap; }
+/* A window's Permissions and Workflow, on its title bar: small chips whose menus open downwards over the chat. */
+.node-settings { flex: none; display: inline-flex; align-items: center; gap: 4px; }
+.node-chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; margin: 0; padding: 0 7px; border: 0.5px solid var(--glass-line); border-radius: 999px; background: var(--glass); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); font-weight: 500; white-space: nowrap; }
+.node-chip:hover:not(:disabled) { color: var(--text); }
+.node-settings .mode-menu.below { bottom: auto; top: calc(100% + 6px); left: auto; right: -4px; width: 270px; max-width: none; }
+.subagents-list { display: flex; flex-direction: column; gap: 2px; width: 320px; }
+.subagents-list button { display: flex; width: 100%; padding: 8px 10px; border: none; border-radius: var(--radius); background: none; color: var(--text); text-align: left; }
+.subagents-list button:hover { background: var(--bg-hover); }
+.subagents-list button.current { background: var(--bg-active); }
+.canvas.summary .node-settings { display: none; }
 .canvas-node.waiting .node-status, .canvas-node.held .node-status { color: var(--attn-text); font-weight: 600; }
 @keyframes body-in { from { opacity: 0; } }
 .node-body { flex: 1; min-height: 0; display: flex; flex-direction: column; animation: body-in 120ms ease-out; }

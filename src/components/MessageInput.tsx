@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { Status } from "../store";
-import type { FoundFile, ModelOption, Mode, RecentFolder, SessionSummary, SkillEntry, SlashCommand } from "../types";
+import type { FoundFile, ModelOption, RecentFolder, SessionSummary, SkillEntry, SlashCommand } from "../types";
 import { basename } from "../lib/diff";
 import { useShortcut } from "../lib/shortcuts";
 import { matchCommands } from "../lib/slash";
@@ -11,8 +11,9 @@ import { ArrowUpIcon, BranchIcon, FolderIcon, SparkIcon } from "./icons";
 import { ContextMeter } from "./ContextMeter";
 import { EFFORT_LEVELS, EffortPicker } from "./EffortPicker";
 import { FolderPill, type RelocateMenu } from "./FolderPill";
-import { ModeMenu } from "./ModeMenu";
+import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
 import type { Flavour } from "../lib/flavour";
+import type { Permissions, Workflow } from "../lib/workflow";
 import { ModelPicker } from "./ModelPicker";
 import { HarnessPicker } from "./HarnessPicker";
 import type { Harness } from "../lib/harness";
@@ -36,10 +37,15 @@ interface Props {
   onCancelStart?: () => void;
   /** "!" at the start of the box turns it into a terminal: Enter runs the rest as a shell command in the folder. */
   onRun?: (command: string) => void;
-  mode?: Mode;
-  /** Step by step's flavour, which the mode chip names too. */
+  /** The chat's two settings, as chips under the box: Permissions (Ask or Auto) and Workflow (Chat, Step by step or Team). */
+  permissions?: Permissions;
+  workflow?: Workflow;
+  /** Step by step's flavour, which the Workflow chip names too. */
   flavour?: Flavour | null;
-  onModeChange?: (mode: Mode) => void;
+  onPermissionsChange?: (permissions: Permissions) => void;
+  onWorkflowChange?: (workflow: Workflow) => void;
+  /** A Lead that still has agents: its Workflow stays Team until they are closed. */
+  holdsAgents?: boolean;
   model?: string | null;
   branch?: string | null;
   /** Empty conversation: float the composer in the middle with a folder pill above it. */
@@ -77,7 +83,7 @@ interface Props {
   history?: { entries: string[]; remember: (entry: string) => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, harness, update, history }: Props) {
+export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, harness, update, history }: Props) {
   // A draft with big pastes in it comes back as the box had it: their placeholders, and the text they stand for.
   const [restored] = useState(() => decodeDraft(draft?.initial ?? ""));
   const [text, setTextState] = useState(restored.text);
@@ -559,9 +565,10 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           )}
         </div>
       </div>
-      {(mode || branch || update) && (
+      {(permissions || branch || update) && (
         <div className="composer-meta">
-          {mode && onModeChange && <ModeMenu mode={mode} flavour={flavour} onChange={onModeChange} disabled={busy} />}
+          {permissions && onPermissionsChange && <PermissionsMenu permissions={permissions} onChange={onPermissionsChange} disabled={busy} />}
+          {workflow && onWorkflowChange && <WorkflowMenu workflow={workflow} flavour={flavour} onChange={onWorkflowChange} disabled={busy} holdsAgents={holdsAgents} />}
           <div className="spacer" />
           {update && <UpdateButton {...update} />}
           {branch && (

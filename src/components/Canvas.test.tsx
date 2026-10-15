@@ -29,7 +29,7 @@ function team(workers = 2): Chats {
   return c;
 }
 
-const actions = (over: Partial<NodeActions> = {}): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(() => Promise.resolve()), reviewMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), spawn: vi.fn(() => Promise.resolve()), closeCheck: vi.fn(() => Promise.resolve({ worktree: true, branch: null, uncommitted: 0, unmerged_commits: 0 })), closeWorker: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(), ...over });
+const actions = (over: Partial<NodeActions> = {}): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(() => Promise.resolve()), reviewMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), spawn: vi.fn(() => Promise.resolve()), closeCheck: vi.fn(() => Promise.resolve({ worktree: true, branch: null, uncommitted: 0, unmerged_commits: 0 })), closeWorker: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), setPermissions: vi.fn(), setWorkflow: vi.fn(), setSubagents: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(), ...over });
 
 function setup(chats: Chats, extra: { attention?: string[]; layout?: ReturnType<typeof newLayout>; actions?: Partial<NodeActions> } = {}) {
   const store = createChatStore();
@@ -84,15 +84,74 @@ describe("placeNodes", () => {
   });
 });
 
+/** A team whose agents are all idle, so their settings can be changed. */
+function idleTeam(workers: number): Chats {
+  const c = team(workers);
+  return { ...c, slots: Object.fromEntries(Object.entries(c.slots).map(([slot, s]) => [slot, { ...s, status: "idle" as const, thinking: false }])) };
+}
+
 describe("the canvas", () => {
   it("shows every agent with its name, role and what it is doing, and the worker's branch", () => {
     setup(team(2));
     const agents = screen.getAllByRole("region");
     expect(agents.map((a) => a.getAttribute("aria-label"))).toEqual(["Main agent Main agent, Ready", "Worker Worker 1, Working", "Worker Worker 2, Working"]);
     const w1 = screen.getByLabelText(/Worker Worker 1/);
-    expect(within(w1).getByText("w1 · Auto")).toBeTruthy(); // its branch (lantern/w1 without the prefix) and its mode
-    expect(within(screen.getByLabelText(/Main agent Main agent/)).getByText("Runs the team · Auto")).toBeTruthy();
+    expect(within(w1).getByText("w1")).toBeTruthy(); // its branch (lantern/w1 without the prefix)
+    expect(within(w1).getByRole("button", { name: "Permissions: Auto" })).toBeTruthy();
+    expect(within(screen.getByLabelText(/Main agent Main agent/)).getByText("Runs the team")).toBeTruthy();
     expect(document.querySelectorAll("path.tether")).toHaveLength(2);
+  });
+
+  it("puts Permissions and Workflow on every window's title bar, and changes them for that window", () => {
+    const { acts } = setup(idleTeam(1));
+    const lead = screen.getByLabelText(/Main agent Main agent/);
+    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    expect(within(lead).getByRole("button", { name: "Workflow: Team" })).toBeTruthy();
+    expect(within(w1).getByRole("button", { name: "Workflow: Chat" })).toBeTruthy();
+    // A team's Permissions are changed from the canvas, on the Lead's window or an agent's.
+    fireEvent.click(within(lead).getByRole("button", { name: "Permissions: Auto" }));
+    fireEvent.click(within(lead).getByRole("menuitemradio", { name: /^Ask/ }));
+    expect(acts.setPermissions).toHaveBeenCalledWith("s1", "ask");
+    fireEvent.click(within(w1).getByRole("button", { name: "Permissions: Auto" }));
+    fireEvent.click(within(w1).getByRole("menuitemradio", { name: /^Ask/ }));
+    expect(acts.setPermissions).toHaveBeenCalledWith("w1", "ask");
+  });
+
+  it("keeps the Lead in Team while it has agents, and offers an agent no Team of its own", () => {
+    const { acts } = setup(idleTeam(1));
+    const lead = screen.getByLabelText(/Main agent Main agent/);
+    fireEvent.click(within(lead).getByRole("button", { name: "Workflow: Team" }));
+    expect(within(lead).getByRole("menuitemradio", { name: /^Chat/ })).toBeDisabled();
+    expect(within(lead).getByRole("menuitemradio", { name: /^Step by step/ })).toBeDisabled();
+    fireEvent.keyDown(within(lead).getByRole("menu"), { key: "Escape" });
+    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    fireEvent.click(within(w1).getByRole("button", { name: "Workflow: Chat" }));
+    expect(within(w1).queryByRole("menuitemradio", { name: /^Team/ })).toBeNull();
+    fireEvent.click(within(w1).getByRole("menuitemradio", { name: /^Step by step/ }));
+    expect(acts.setWorkflow).toHaveBeenCalledWith("w1", "steps");
+  });
+
+  it("lets a Lead with no agents leave Team", () => {
+    setup(team(0));
+    const lead = screen.getByLabelText(/Main agent Main agent/);
+    fireEvent.click(within(lead).getByRole("button", { name: "Workflow: Team" }));
+    expect(within(lead).getByRole("menuitemradio", { name: /^Chat/ })).toBeEnabled();
+  });
+
+  it("shows the team's Subagents setting in its controls, on the canvas by default, and changes it", () => {
+    const { acts } = setup(team(1));
+    fireEvent.click(screen.getByRole("button", { name: "Subagents: On the canvas" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Inline/ }));
+    expect(acts.setSubagents).toHaveBeenCalledWith("s1", "inline");
+  });
+
+  it("hides the title bar's settings while an agent is folded, and while it works (a change restarts it)", () => {
+    setup(team(1));
+    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    // A worker that is working can't be switched: its claude would restart mid-turn.
+    expect(within(w1).getByRole("button", { name: "Permissions: Auto" })).toBeDisabled();
+    fireEvent.click(within(w1).getByRole("button", { name: "Collapse Worker 1" }));
+    expect(within(screen.getByLabelText(/Worker Worker 1/)).queryByRole("button", { name: /^Permissions:/ })).toBeNull();
   });
 
   it("folds an agent to its title and back, and opens one full size", () => {

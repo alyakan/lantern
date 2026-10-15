@@ -400,3 +400,27 @@ describe("turn numbers", () => {
     expect(replayed.items.map((it) => (it.type === "user" ? it.turn : "-"))).toEqual([undefined, 0]);
   });
 });
+
+describe("Permissions and Workflow", () => {
+  it("keeps Step by step's Permissions with the mode, and Auto and Ask say theirs with the mode itself", () => {
+    let s: State = { ...initialState, folder: "/p", status: "idle" };
+    s = reducer(s, { type: "mode_changed", mode: "steps", autoApprove: true });
+    expect(s).toMatchObject({ mode: "steps", autoApprove: true });
+    // A change that doesn't say keeps what Step by step had.
+    expect(reducer(s, { type: "mode_changed", mode: "steps" }).autoApprove).toBe(true);
+    // Out of Step by step, Auto is the mode; there is no auto-approve left over to come back.
+    s = reducer(s, { type: "mode_changed", mode: "auto", autoApprove: false });
+    expect(s).toMatchObject({ mode: "auto", autoApprove: false });
+    expect(reducer(s, { type: "mode_changed", mode: "steps" }).autoApprove).toBe(false);
+  });
+
+  it("lowers an agent's Permissions to Ask when its Lead's are lower, auto-approve included", () => {
+    const agent: State = { ...initialState, folder: "/wt", status: "idle", mode: "steps", autoApprove: true };
+    expect(ev(agent, { kind: "agent_mode", mode: "ask" })).toMatchObject({ mode: "ask", autoApprove: false });
+  });
+
+  it("holds a team's Subagents setting on its Lead, on the canvas until the user says otherwise", () => {
+    expect(initialState.subagents).toBe("canvas");
+    expect(reducer(initialState, { type: "subagents_set", subagents: "inline" }).subagents).toBe("inline");
+  });
+});

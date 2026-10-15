@@ -48,12 +48,18 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ["shellInput", () => api.shellInput("s1", "r1", "y\r"), ["shell_input", { slot: "s1", id: "r1", text: "y\r" }]],
   ["stopShell", () => api.stopShell("s1", "r1"), ["stop_shell", { slot: "s1", id: "r1" }]],
   ["interrupt", () => api.interrupt("s1"), ["interrupt", { slot: "s1" }]],
-  ["restartSession", () => api.restartSession("s1", "ask", null), ["restart_session", { slot: "s1", mode: "ask", effort: null, autoApprove: null }]],
+  ["restartSession", () => api.restartSession("s1", "ask", null), ["restart_session", { slot: "s1", mode: "ask", effort: null, autoApprove: null, team: null }]],
   [
-    "restartSession (auto-approve)",
+    "restartSession (Step by step on Auto)",
     () => api.restartSession("s1", "steps", "high", true),
-    ["restart_session", { slot: "s1", mode: "steps", effort: "high", autoApprove: true }],
+    ["restart_session", { slot: "s1", mode: "steps", effort: "high", autoApprove: true, team: null }],
   ],
+  [
+    "restartSession (into a team)",
+    () => api.restartSession("s1", "auto", null, false, true),
+    ["restart_session", { slot: "s1", mode: "auto", effort: null, autoApprove: false, team: true }],
+  ],
+  ["setSubagents", () => api.setSubagents("s1", "inline"), ["set_subagents", { slot: "s1", subagents: "inline" }]],
   [
     "getFileDiff",
     () => api.getFileDiff("s1", "a.ts"),

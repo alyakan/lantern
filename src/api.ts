@@ -77,8 +77,11 @@ export const api = {
   shellInput: (slot: string, id: string, text: string) => invoke<void>("shell_input", { slot, id, text }),
   stopShell: (slot: string, id: string) => invoke<void>("stop_shell", { slot, id }),
   interrupt: (slot: string) => invoke<void>("interrupt", { slot }),
-  /** `autoApprove`: Step by step's auto-approve (null keeps the chat's current setting). */
-  restartSession: (slot: string, mode: Mode, effort: string | null, autoApprove: boolean | null = null) => invoke<void>("restart_session", { slot, mode, effort, autoApprove }),
+  /**
+   * `autoApprove`: Permissions Auto on Step by step (null keeps the chat's current setting). `team`: Workflow Team, which
+   * makes the chat the Lead of a team (true) or an ordinary chat again (false); null leaves its role alone.
+   */
+  restartSession: (slot: string, mode: Mode, effort: string | null, autoApprove: boolean | null = null, team: boolean | null = null) => invoke<void>("restart_session", { slot, mode, effort, autoApprove, team }),
   /** `turn`: with the "turn" scope, which turn (the latest when null); `toTurn`: the end of a range of turns from it. */
   /** `pr`: with the "pr" scope, the pull request's number. */
   /** `base`: with the "branch" scope, the branch it is compared with (null: Lantern works it out). */
@@ -96,7 +99,8 @@ export const api = {
   /** Step by step's flavours as the prompt Claude runs with has them: each one's instructions and its pages' headings. */
   stepsGuide: () => invoke<FlavourGuide[]>("steps_guide"),
   /** Where the main agent's helpers run from now on in this chat (null: ask each time again). */
-  setAgentChoice: (slot: string, choice: "canvas" | "inline" | null) => invoke<void>("set_agent_choice", { slot, choice }),
+  /** The team's Subagents setting, on its Lead: where the Lead's built-in helpers run. */
+  setSubagents: (slot: string, subagents: "canvas" | "inline") => invoke<void>("set_subagents", { slot, subagents }),
   /** Makes an "Always allow" rule from a card (the request itself is answered by respondPermission). */
   addPermissionRule: (slot: string, rule: NewRule) => invoke<void>("add_permission_rule", { slot, rule }),
   /** The rules Settings lists: this chat's (when `slot` is open) and every folder's. */

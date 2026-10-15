@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type TransitionEvent } from "react";
 import { clampRatio } from "../lib/layout";
 
-// The chat pane: Step by step's header (the flavour badge, the auto-approve switch and three page dots) has to fit. Keep
+// The chat pane: Step by step's header (the flavour badge and three page dots) has to fit. Keep
 // in sync with .split-left in styles.css.
 const MIN_LEFT = 384;
 // The side pane: its tabs (Changes, Files, Summary, Agents, Tests) and the Changes filter have to fit on one row.
