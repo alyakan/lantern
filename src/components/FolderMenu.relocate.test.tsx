@@ -15,24 +15,46 @@ function menu(relocate?: Partial<RelocateMenu>, props: { onClose?: () => void; o
 }
 
 describe("the folder menu's moved folders", () => {
-  it("offers a moved folder, with the place its sessions go to, and brings them over when picked", () => {
+  it("lists a moved folder with the place its chats go to, and moves them when asked", () => {
     const { onClose, onRelocate } = menu({});
-    expect(screen.getByText("Moved?")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("menuitem", { name: /web-dashboard was moved\? Bring its chats to web-dashboard/ }));
+    expect(screen.getByText("Folders that moved")).toBeInTheDocument();
+    expect(screen.getByText(/These folders are gone/)).toBeInTheDocument();
+    // The old path and the new one, each with the full path as its tooltip.
+    expect(screen.getByTitle(OLD)).toBeInTheDocument();
+    expect(screen.getAllByTitle(NEW).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("menuitem", { name: `Move chats from ${OLD} to ${NEW}` }));
     expect(onClose).toHaveBeenCalled();
     expect(onRelocate).toHaveBeenCalledWith({ old: OLD, suggested: NEW });
   });
 
-  it("says where it was, and that its sessions go to a folder to choose, when nothing matches it", () => {
-    menu({ moved: [{ old: OLD, suggested: null }] });
-    expect(screen.getByRole("menuitem", { name: /web-dashboard was moved\? Bring its chats to a folder/ })).toHaveTextContent("Was in /Users/you/Documents/Github");
+  it("offers to choose a folder when nothing matches the moved one", () => {
+    const { onRelocate } = menu({ moved: [{ old: OLD, suggested: null }] });
+    expect(screen.getByText("Choose a folder…")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: `Move chats from ${OLD}` }));
+    expect(onRelocate).toHaveBeenCalledWith({ old: OLD, suggested: null });
   });
 
-  it("dismisses a notice without bringing anything over", () => {
-    const { onRelocate, onDismiss } = menu({});
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss the moved notice for web-dashboard" }));
+  it("hides a notice with Not moved, without bringing anything over or closing the menu", () => {
+    const { onClose, onRelocate, onDismiss } = menu({});
+    fireEvent.click(screen.getByRole("menuitem", { name: "Not moved: hide the notice for web-dashboard" }));
     expect(onDismiss).toHaveBeenCalledWith(OLD);
     expect(onRelocate).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("lists three moved folders and the rest after Show all", () => {
+    const moved = ["a", "b", "c", "d", "e"].map((n) => ({ old: `/gone/${n}`, suggested: null }));
+    menu({ moved });
+    expect(screen.getAllByRole("menuitem", { name: /^Move chats from/ })).toHaveLength(3);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Show all 5…" }));
+    expect(screen.getAllByRole("menuitem", { name: /^Move chats from/ })).toHaveLength(5);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Show fewer" }));
+    expect(screen.getAllByRole("menuitem", { name: /^Move chats from/ })).toHaveLength(3);
+  });
+
+  it("has no Show all for three or fewer", () => {
+    menu({ moved: ["a", "b", "c"].map((n) => ({ old: `/gone/${n}`, suggested: null })) });
+    expect(screen.queryByRole("menuitem", { name: /^Show all/ })).not.toBeInTheDocument();
   });
 
   it("opens the Bring old sessions dialog from the folder menu, for the open folder", () => {
@@ -44,14 +66,14 @@ describe("the folder menu's moved folders", () => {
 
   it("shows no moved section, and no bring item, without the moved parts", () => {
     menu(undefined);
-    expect(screen.queryByText("Moved?")).not.toBeInTheDocument();
+    expect(screen.queryByText("Folders that moved")).not.toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Bring old chats here…" })).not.toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Open folder…" })).toBeInTheDocument();
   });
 
   it("shows no moved section when nothing is left to offer", () => {
     menu({ moved: [] });
-    expect(screen.queryByText("Moved?")).not.toBeInTheDocument();
+    expect(screen.queryByText("Folders that moved")).not.toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Bring old chats here…" })).toBeInTheDocument();
   });
 });

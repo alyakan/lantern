@@ -62,6 +62,13 @@ export function withMovedNote(text: string, from: string | null, to: string | nu
   return `${movedNote(from, to)}\n\n${text}`;
 }
 
+/** A path as its folder and its last name (`["/Users/you/dev/", "app"]`): the last name is the part a long path keeps. */
+export function splitPath(path: string): [string, string] {
+  const trimmed = path.length > 1 ? path.replace(/\/+$/, "") : path;
+  const i = trimmed.lastIndexOf("/");
+  return i < 0 ? ["", trimmed] : [trimmed.slice(0, i + 1), trimmed.slice(i + 1)];
+}
+
 /** What the migration changed: each key's new value, as it was written. */
 export type Migrated = Record<string, unknown>;
 

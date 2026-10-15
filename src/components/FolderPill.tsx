@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent }
 import type { MovedFolder, RecentFolder } from "../types";
 import { basename } from "../lib/diff";
 import { FolderIcon } from "./icons";
+import { MovedFolders } from "./MovedFolders";
 import { useMenuKeys } from "./useMenuKeys";
 
 /** The folder menu's relocation parts: the folders that seem to have moved, and what to do about them. */
@@ -78,26 +79,10 @@ export function FolderMenu({ folder, recent, onPick, onBrowse, onClose, onKeyDow
     act();
   };
   return (
-    <div className="menu folder-menu" role="menu" aria-label="Folders" onKeyDown={onKeyDown}>
+    <div className={`menu folder-menu${recent !== undefined && relocate && relocate.moved.length > 0 ? " has-moved" : ""}`} role="menu" aria-label="Folders" onKeyDown={onKeyDown}>
       {recent !== undefined && relocate && relocate.moved.length > 0 && (
         <>
-          <div className="menu-heading">Moved?</div>
-          <ul className="menu-list moved-folders" aria-label="Folders that may have moved">
-            {relocate.moved.map((m) => (
-              <li key={m.old} className="moved-folder">
-                <button role="menuitem" className="menu-row" title={m.old} onClick={() => choose(() => relocate.onRelocate(m))}>
-                  <FolderIcon />
-                  <span className="menu-row-title">
-                    {`${basename(m.old)} was moved? Bring its chats to ${m.suggested ? basename(m.suggested) : "a folder"}…`}
-                    <span className="menu-row-path">{m.suggested ?? `Was in ${parentOf(m.old)}`}</span>
-                  </span>
-                </button>
-                <button className="icon moved-folder-dismiss" aria-label={`Dismiss the moved notice for ${basename(m.old)}`} title="Dismiss" onClick={() => relocate.onDismiss(m.old)}>
-                  ×
-                </button>
-              </li>
-            ))}
-          </ul>
+          <MovedFolders moved={relocate.moved} onRelocate={(m) => choose(() => relocate.onRelocate(m))} onDismiss={relocate.onDismiss} />
           <div className="menu-sep" />
         </>
       )}

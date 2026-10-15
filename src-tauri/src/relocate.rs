@@ -154,14 +154,16 @@ pub struct Moved {
 }
 
 /// The recent folders whose path is gone, each with where it probably went. A folder already moved (its old path is an
-/// alias) isn't listed.
-pub fn moved_candidates(recent: &[RecentFolder], aliases: &[String]) -> Vec<Moved> {
+/// alias) isn't listed, nor is one an agent worked in (a worker's worktree goes when the worker does), nor one with no
+/// sessions left in `folders` (see history::session_folders): there's nothing to bring over.
+pub fn moved_candidates(recent: &[RecentFolder], aliases: &[String], folders: &[history::FolderSessions]) -> Vec<Moved> {
+    let has_sessions = |path: &str| folders.iter().any(|f| f.path == path && f.sessions > 0);
     recent
         .iter()
-        .filter(|r| !Path::new(&r.path).is_dir() && !aliases.contains(&r.path))
+        .filter(|r| !Path::new(&r.path).is_dir() && !aliases.contains(&r.path) && !history::is_agent_folder(&r.path) && has_sessions(&r.path))
         .map(|gone| {
             let name = Path::new(&gone.path).file_name();
-            let same_name: Vec<&RecentFolder> = recent.iter().filter(|c| c.path != gone.path && Path::new(&c.path).is_dir() && Path::new(&c.path).file_name() == name).collect();
+            let same_name: Vec<&RecentFolder> = recent.iter().filter(|c| c.path != gone.path && Path::new(&c.path).is_dir() && !history::is_agent_folder(&c.path) && Path::new(&c.path).file_name() == name).collect();
             let suggested = match same_name.as_slice() {
                 [only] => Some(only.path.clone()),
                 _ => None,
@@ -199,7 +201,7 @@ fn name_key(path: &str) -> String {
 pub fn old_locations(folders: &[history::FolderSessions], dest: &str, aliases: &[String]) -> Vec<OldLocation> {
     let mut found: Vec<OldLocation> = folders
         .iter()
-        .filter(|f| !same_place(&f.path, dest))
+        .filter(|f| !same_place(&f.path, dest) && !history::is_agent_folder(&f.path))
         .filter_map(|f| {
             let already = aliases.iter().any(|a| same_place(a, &f.path));
             let named_alike = name_key(&f.path) == name_key(dest);
@@ -629,21 +631,60 @@ mod tests {
         let exists = |p: &Path| RecentFolder { path: p.to_string_lossy().into_owned(), updated_ms: 1 };
         std::fs::create_dir_all(dir.path().join("docs/lantern")).unwrap();
         std::fs::create_dir_all(dir.path().join("dev/web")).unwrap();
+        // Every gone folder here still has sessions.
+        let with_sessions = |recent: &[RecentFolder]| -> Vec<history::FolderSessions> { recent.iter().map(|r| folder_sessions(Path::new(&r.path), 2, 5)).collect() };
+        let candidates = |recent: &[RecentFolder], aliases: &[String]| moved_candidates(recent, aliases, &with_sessions(recent));
         // One match: suggested.
         let recent = vec![exists(&gone), exists(&other)];
-        assert_eq!(moved_candidates(&recent, &[]), vec![Moved { old: gone.to_string_lossy().into_owned(), suggested: Some(other.to_string_lossy().into_owned()) }]);
+        assert_eq!(candidates(&recent, &[]), vec![Moved { old: gone.to_string_lossy().into_owned(), suggested: Some(other.to_string_lossy().into_owned()) }]);
         // Two existing folders named the same: no suggestion.
         let second = dir.path().join("elsewhere/lantern");
         std::fs::create_dir_all(&second).unwrap();
         let recent = vec![exists(&gone), exists(&other), exists(&second)];
-        assert_eq!(moved_candidates(&recent, &[])[0].suggested, None);
+        assert_eq!(candidates(&recent, &[])[0].suggested, None);
         // None with the same name: no suggestion either. A folder that exists isn't a candidate.
         let recent = vec![exists(&gone), exists(&dir.path().join("dev/web"))];
-        assert_eq!(moved_candidates(&recent, &[]).len(), 1);
-        assert_eq!(moved_candidates(&recent, &[])[0].suggested, None);
-        assert!(moved_candidates(&[exists(&other)], &[]).is_empty());
+        assert_eq!(candidates(&recent, &[]).len(), 1);
+        assert_eq!(candidates(&recent, &[])[0].suggested, None);
+        assert!(candidates(&[exists(&other)], &[]).is_empty());
         // Already moved (its path is an alias): not listed.
-        assert!(moved_candidates(&[exists(&gone), exists(&other)], &[gone.to_string_lossy().into_owned()]).is_empty());
+        assert!(candidates(&[exists(&gone), exists(&other)], &[gone.to_string_lossy().into_owned()]).is_empty());
+    }
+
+    #[test]
+    fn a_gone_folder_with_no_sessions_left_is_not_a_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gone, empty) = (dir.path().join("dev/lantern"), dir.path().join("dev/old"));
+        let recent: Vec<RecentFolder> = [&gone, &empty].iter().map(|p| RecentFolder { path: p.to_string_lossy().into_owned(), updated_ms: 1 }).collect();
+        // `gone` has sessions to bring over; `empty` has none, or isn't listed at all.
+        let folders = [folder_sessions(&gone, 1, 5), folder_sessions(&empty, 0, 5)];
+        let found: Vec<String> = moved_candidates(&recent, &[], &folders).into_iter().map(|m| m.old).collect();
+        assert_eq!(found, vec![gone.to_string_lossy().into_owned()]);
+        assert!(moved_candidates(&recent, &[], &[]).is_empty());
+    }
+
+    #[test]
+    fn an_agents_folder_is_never_a_candidate_or_a_suggestion_or_an_old_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("dev/lantern");
+        std::fs::create_dir_all(&real).unwrap();
+        // A worker's worktree (Lantern's) and a subagent's (Claude Code's), both gone now.
+        let worker = "/Users/me/Library/Application Support/io.github.alyakan.lantern/worktrees/lantern/fix-w3";
+        let subagent = "/Users/me/dev/lantern/.claude/worktrees/agent-a1b2";
+        let worker_same_name = "/Users/me/Library/Application Support/io.github.alyakan.lantern/worktrees/lantern/lantern";
+        let recent: Vec<RecentFolder> = [worker, subagent, worker_same_name, &real.to_string_lossy()].iter().map(|p| RecentFolder { path: (*p).into(), updated_ms: 1 }).collect();
+        let folders: Vec<history::FolderSessions> = recent.iter().map(|r| folder_sessions(Path::new(&r.path), 3, 5)).collect();
+        assert!(moved_candidates(&recent, &[], &folders).is_empty());
+        // A gone folder with the worker folder's name is suggested nothing, and the worktree isn't an old place of its folder.
+        let gone = RecentFolder { path: dir.path().join("old/lantern").to_string_lossy().into_owned(), updated_ms: 1 };
+        let mut all = recent.clone();
+        all.push(gone.clone());
+        let mut with = folders.clone();
+        with.push(folder_sessions(Path::new(&gone.path), 1, 5));
+        let found = moved_candidates(&all, &[], &with);
+        assert_eq!(found, vec![Moved { old: gone.path.clone(), suggested: Some(real.to_string_lossy().into_owned()) }]);
+        let places = old_locations(&folders, &real.to_string_lossy(), &[]);
+        assert!(places.iter().all(|p| !history::is_agent_folder(&p.path)), "{places:?}");
     }
 
     #[test]

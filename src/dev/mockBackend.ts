@@ -1196,8 +1196,16 @@ export function installMockBackend() {
         case "relocations_list":
           return [];
         case "moved_folder_candidates":
-          // A folder from before it moved, and the one place it's at now (the same name, and the only such folder).
-          return [{ old: "/Users/you/Documents/Github/web-dashboard", suggested: "/Users/you/projects/web-dashboard" }];
+          // Folders that are gone, each with the one place it's at now when there's exactly one folder of the same name. The
+          // worker's and the subagent's worktrees are gone too, but the app never lists an agent's folder (see history::is_agent_folder).
+          return [
+            { old: "/Users/you/Documents/Github/web-dashboard", suggested: "/Users/you/projects/web-dashboard" },
+            { old: "/Users/you/Documents/Github/billing-service", suggested: null },
+            { old: "/Users/you/src/legacy/infra", suggested: "/Users/you/src/infra" },
+            { old: "/Users/you/Desktop/mobile-app/packages/design-system", suggested: null },
+            { old: "/Users/you/Library/Application Support/io.github.alyakan.lantern/worktrees/web-dashboard/fix-login-w3", suggested: null },
+            { old: "/Users/you/projects/web-dashboard/.claude/worktrees/agent-a1b2c3", suggested: null },
+          ].filter((m) => !/\/(io\.github\.alyakan\.lantern|\.claude)\/worktrees\//.test(m.old));
         case "list_open_prs":
           // ?prs=missing shows what the picker says when gh isn't installed.
           if (new URLSearchParams(location.search).get("prs") === "missing") return Promise.reject("The GitHub CLI (gh) isn't installed. Install it from cli.github.com, then run `gh auth login` in a terminal.");

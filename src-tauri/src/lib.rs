@@ -1466,7 +1466,7 @@ fn relocations_list(state: State<'_, AppState>) -> Vec<relocate::Entry> {
 async fn moved_folder_candidates(state: State<'_, AppState>) -> Result<Vec<relocate::Moved>, String> {
     let root = projects_root()?;
     let aliases: Vec<String> = state.relocations.list().into_iter().flat_map(|e| e.aliases).collect();
-    tauri::async_runtime::spawn_blocking(move || relocate::moved_candidates(&history::recent_user_folders(&root), &aliases)).await.map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || relocate::moved_candidates(&history::recent_user_folders(&root), &aliases, &history::session_folders(&root))).await.map_err(|e| e.to_string())
 }
 
 /// The places `folder` was before, whose sessions Lantern can bring over (see relocate::old_locations). Read only.

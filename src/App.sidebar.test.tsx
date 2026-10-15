@@ -125,7 +125,7 @@ describe("the sidebar in the app", () => {
   it("shows the Moved? notice on the project row of the folder that moved", async () => {
     await launch();
     const old = await project("web-dashboard · Github");
-    expect(within(old).getByRole("button", { name: "Moved? Bring its chats to web-dashboard…" })).toBeInTheDocument();
+    expect(within(old).getByRole("button", { name: /^Move chats from .*web-dashboard to .*web-dashboard$/ })).toBeInTheDocument();
     expect(within(await project("acme-api")).queryByText(/Moved\?/)).toBeNull();
   });
 
