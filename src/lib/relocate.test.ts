@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FOLDER_RECORDS, LAST_FOLDER, NOT_FOLDER_KEYED, OPEN_CHATS, migrateFolderState, movedNote, splitPath, withMovedNote, type KeyValueStore } from "./relocate";
+import { FOLDER_LISTS, FOLDER_RECORDS, LAST_FOLDER, NOT_FOLDER_KEYED, OPEN_CHATS, migrateFolderState, movedNote, splitPath, withMovedNote, type KeyValueStore } from "./relocate";
 import { initialState, reducer } from "../store";
 
 /** An in-memory localStorage: the keys and values as they'd be saved. */
@@ -29,6 +29,7 @@ describe("migrateFolderState", () => {
       "settings.harnessByFolder": { [OLD]: "max" },
       "review.collapsedByFolder": { [OLD]: true },
       "settings.pinnedSessions": { [OLD]: ["s1"] },
+      "sidebar.projectColors": { [OLD]: 3 },
     });
     const changed = migrateFolderState(store, OLD, NEXT);
     expect(Object.keys(changed).sort()).toEqual([...FOLDER_RECORDS].sort());
@@ -39,8 +40,17 @@ describe("migrateFolderState", () => {
     expect(read(store, "settings.harnessByFolder")).toEqual({ [OLD]: "max", [NEXT]: "max" });
     expect(read(store, "review.collapsedByFolder")).toEqual({ [OLD]: true, [NEXT]: true });
     expect(read(store, "settings.pinnedSessions")).toEqual({ [OLD]: ["s1"], [NEXT]: ["s1"] });
+    expect(read(store, "sidebar.projectColors")).toEqual({ [OLD]: 3, [NEXT]: 3 });
     // What was returned is what was written.
     expect(changed["settings.permissionsByFolder"]).toEqual(read(store, "settings.permissionsByFolder"));
+  });
+
+  it("puts the new folder in the old one's place in the project order, unless it's already there", () => {
+    const store = memoryStore({ "sidebar.projectOrder": ["/a", OLD, "/b"] });
+    expect(migrateFolderState(store, OLD, NEXT)["sidebar.projectOrder"]).toEqual(["/a", NEXT, "/b"]);
+    expect(read(store, "sidebar.projectOrder")).toEqual(["/a", NEXT, "/b"]);
+    const both = memoryStore({ "sidebar.projectOrder": [NEXT, OLD] });
+    expect(migrateFolderState(both, OLD, NEXT)).toEqual({});
   });
 
   it("keeps an entry the new folder already has", () => {
@@ -127,12 +137,12 @@ describe("the keys the app writes", () => {
   });
 
   it("classifies every saved key as a folder's record or as not about a folder", () => {
-    const classified = [...FOLDER_RECORDS, LAST_FOLDER, ...NOT_FOLDER_KEYED];
+    const classified = [...FOLDER_RECORDS, ...FOLDER_LISTS, LAST_FOLDER, ...NOT_FOLDER_KEYED];
     expect(saved.filter((key) => !classified.includes(key as never))).toEqual([]);
   });
 
   it("has every migrated key in use, and no classified key the app no longer writes", () => {
-    for (const key of [...FOLDER_RECORDS, LAST_FOLDER]) expect(saved, key).toContain(key);
+    for (const key of [...FOLDER_RECORDS, ...FOLDER_LISTS, LAST_FOLDER]) expect(saved, key).toContain(key);
     expect(chatKeys).toEqual([OPEN_CHATS]);
     for (const key of NOT_FOLDER_KEYED) expect(saved, key).toContain(key);
   });

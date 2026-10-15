@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useFitMenu } from "../lib/useFitMenu";
 import type { MovedFolder, RecentFolder } from "../types";
 import { basename } from "../lib/diff";
 import { FolderIcon } from "./icons";
@@ -78,8 +79,11 @@ export function FolderMenu({ folder, recent, onPick, onBrowse, onClose, onKeyDow
     onClose();
     act();
   };
+  // Opened from the chat box at the bottom of the window, it opens upward when it doesn't fit below.
+  const root = useRef<HTMLDivElement>(null);
+  useFitMenu(root, [recent === null, recent?.length ?? 0, relocate?.moved.length ?? 0]);
   return (
-    <div className={`menu folder-menu${recent !== undefined && relocate && relocate.moved.length > 0 ? " has-moved" : ""}`} role="menu" aria-label="Folders" onKeyDown={onKeyDown}>
+    <div className={`menu folder-menu${recent !== undefined && relocate && relocate.moved.length > 0 ? " has-moved" : ""}`} role="menu" aria-label="Folders" onKeyDown={onKeyDown} ref={root}>
       {recent !== undefined && relocate && relocate.moved.length > 0 && (
         <>
           <MovedFolders moved={relocate.moved} onRelocate={(m) => choose(() => relocate.onRelocate(m))} onDismiss={relocate.onDismiss} />

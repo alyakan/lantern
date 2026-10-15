@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { SidebarCompact } from "./SidebarCompact";
+import { PROJECT_COLORS } from "../lib/projectColors";
 import type { ProjectOpen, SidebarChat } from "../lib/sidebar";
 
 const LANTERN = "/work/lantern";
@@ -29,14 +30,14 @@ function setup(over: Partial<React.ComponentProps<typeof SidebarCompact>> = {}) 
     { path: LANTERN, updated_ms: 2 },
     { path: MONITOR, updated_ms: 1 },
   ]);
-  render(<SidebarCompact open={open} loadRecent={loadRecent} canNew {...h} {...over} />);
+  render(<SidebarCompact open={open} loadRecent={loadRecent} canNew colors={{}} onColors={vi.fn()} {...h} {...over} />);
   return { h, loadRecent };
 }
 
 const chipFor = (name: RegExp) => screen.getByRole("button", { name });
 
 describe("the compact sidebar", () => {
-  it("has a square for each open chat and team, but none for an agent, with the chat's initials, and a labelled line above each project", async () => {
+  it("has a square for each open chat and team, but none for an agent, with the chat's initials, and a label above each project", async () => {
     setup();
     await waitFor(() => expect(screen.getAllByRole("list")).toHaveLength(2));
     const lantern = screen.getByRole("list", { name: "lantern" });
@@ -51,6 +52,37 @@ describe("the compact sidebar", () => {
       ["LA", "lantern"],
       ["NM", "network-monitor"],
     ]);
+  });
+
+  it("gives each project a colour of its own: a saved one stays, a new project gets one no other has, to save", async () => {
+    const onColors = vi.fn();
+    const color = (name: string) => screen.getByRole("list", { name }).style.getPropertyValue("--pc");
+    const { rerender } = render(<SidebarCompact open={open} loadRecent={vi.fn().mockResolvedValue([])} canNew colors={{ [MONITOR]: 0 }} onColors={onColors} onNewChat={vi.fn()} onChat={vi.fn()} onTeam={vi.fn()} onToggle={vi.fn()} />);
+    expect(color("network-monitor")).toBe(PROJECT_COLORS[0]);
+    expect(color("lantern")).toBe(PROJECT_COLORS[1]);
+    await waitFor(() => expect(onColors).toHaveBeenCalledWith({ [MONITOR]: 0, [LANTERN]: 1 }));
+    // Once saved (and after a restart, read back), nothing new is saved and the colours stay.
+    const saved = { [MONITOR]: 0, [LANTERN]: 1 };
+    rerender(<SidebarCompact open={open} loadRecent={vi.fn().mockResolvedValue([])} canNew colors={saved} onColors={onColors} onNewChat={vi.fn()} onChat={vi.fn()} onTeam={vi.fn()} onToggle={vi.fn()} />);
+    await act(async () => {});
+    onColors.mockClear();
+    rerender(<SidebarCompact open={open} loadRecent={vi.fn().mockResolvedValue([])} canNew colors={saved} onColors={onColors} onNewChat={vi.fn()} onChat={vi.fn()} onTeam={vi.fn()} onToggle={vi.fn()} />);
+    await act(async () => {});
+    expect(color("lantern")).toBe(PROJECT_COLORS[1]);
+    expect(onColors).not.toHaveBeenCalled();
+  });
+
+  it("lists projects in the saved order, and saves one new to it at the top, but doesn't start the order itself", async () => {
+    const onOrder = vi.fn();
+    const props = { loadRecent: vi.fn().mockResolvedValue([]), canNew: true, colors: {}, onColors: vi.fn(), onNewChat: vi.fn(), onChat: vi.fn(), onTeam: vi.fn(), onToggle: vi.fn() };
+    const { unmount } = render(<SidebarCompact open={open} order={[MONITOR]} onOrder={onOrder} {...props} />);
+    expect(screen.getAllByRole("list").map((l) => l.getAttribute("aria-label"))).toEqual(["lantern", "network-monitor"]);
+    await waitFor(() => expect(onOrder).toHaveBeenCalledWith([LANTERN, MONITOR]));
+    unmount();
+    const none = vi.fn();
+    render(<SidebarCompact open={open} order={[]} onOrder={none} {...props} />);
+    await act(async () => {});
+    expect(none).not.toHaveBeenCalled();
   });
 
   it("marks what works, what needs you and what finished unread; a plain finished chat has no mark", async () => {

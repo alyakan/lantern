@@ -137,6 +137,14 @@ export const StepsIcon = () => (
 );
 
 // A ready update: a circular arrow, restart to take it.
+// An arrow turning back: putting changes back as they were.
+export const RevertIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" {...base}>
+    <path d="M1.8 6a4.2 4.2 0 1 0 1.3-3" />
+    <path d="M2.6 1v2.2h2.2" />
+  </svg>
+);
+
 export const RestartIcon = () => (
   <svg width="12" height="12" viewBox="0 0 12 12" {...base}>
     <path d="M10.2 6a4.2 4.2 0 1 1-1.3-3" />

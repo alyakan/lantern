@@ -4,8 +4,13 @@ use serde_json::{json, Value};
 
 /// The name the app shows for a reproduce request (not a real tool, so it can't clash with one).
 pub const REPRODUCE: &str = "Reproduce";
+use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::io::{self, BufRead, BufReader, Write};
+use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
+use std::sync::mpsc;
+use std::time::Duration;
 
 /// Tools every chat has that only say or show something, so they run without asking: Step by step's own instructions
 /// (`steps_guide`), and what the Changes pane compares while reviewing (`review_target`).
@@ -181,44 +186,193 @@ impl ReviewTargetArgs {
 
 /// Sends the request to the app and waits for the user's answer. Any failure means deny (and says `failed`).
 pub fn ask_bridge(socket: Option<&str>, req: &BridgeRequest) -> BridgeResponse {
-    let attempt = || -> io::Result<BridgeResponse> {
-        let path = socket.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "LANTERN_SOCKET is not set"))?;
-        let mut stream = UnixStream::connect(path)?;
-        writeln!(stream, "{}", serde_json::to_string(req)?)?;
-        let mut line = String::new();
-        BufReader::new(stream).read_line(&mut line)?;
-        serde_json::from_str(&line).map_err(io::Error::other)
-    };
-    attempt().unwrap_or_else(|e| BridgeResponse {
+    connect_bridge(socket, req).and_then(read_answer).unwrap_or_else(|e| failed(&e))
+}
+
+/// Opens a connection to the app and sends it the request; the answer comes back on it (see read_answer).
+fn connect_bridge(socket: Option<&str>, req: &BridgeRequest) -> io::Result<UnixStream> {
+    let path = socket.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "LANTERN_SOCKET is not set"))?;
+    let mut stream = UnixStream::connect(path)?;
+    writeln!(stream, "{}", serde_json::to_string(req)?)?;
+    Ok(stream)
+}
+
+/// Waits for the app's answer on a connection that sent it a request.
+fn read_answer(stream: UnixStream) -> io::Result<BridgeResponse> {
+    let mut line = String::new();
+    BufReader::new(stream).read_line(&mut line)?;
+    serde_json::from_str(&line).map_err(io::Error::other)
+}
+
+/// The answer when the app couldn't be asked: deny, and say so.
+fn failed(e: &io::Error) -> BridgeResponse {
+    BridgeResponse {
         allow: false,
         message: Some(format!("Lantern could not show the permission prompt ({e}), so the action was denied.")),
         updated_input: None,
         failed: true,
-    })
+    }
 }
 
 /// The `--permission-helper` main loop: newline-delimited JSON-RPC on stdin/stdout.
-pub fn run_helper(input: impl BufRead, output: impl Write, socket: Option<&str>) -> io::Result<()> {
+pub fn run_helper(input: impl BufRead + Send, output: impl Write, socket: Option<&str>) -> io::Result<()> {
     run_helper_as(input, output, socket, Offer::default())
 }
 
+/// What the helper hears while it works: a message from its client, the end of its input, or the app's answer to the
+/// request it is waiting on.
+enum Heard {
+    Message(Value),
+    Closed,
+    Answer(io::Result<BridgeResponse>),
+}
+
+/// Whether `msg` is the client calling off request `id` (MCP's notifications/cancelled, sent when it stops waiting).
+fn cancels(msg: &Value, id: &Value) -> bool {
+    !id.is_null() && msg["method"] == "notifications/cancelled" && msg["params"]["requestId"] == *id
+}
+
 /// `offer`: which tools this helper's chat has (`LANTERN_ROLE`, `LANTERN_STEPS`: see `Offer::from_env`).
-pub fn run_helper_as(mut input: impl BufRead, mut output: impl Write, socket: Option<&str>, offer: Offer) -> io::Result<()> {
-    let ask = |req: BridgeRequest| ask_bridge(socket, &req);
-    let mut server = Server::new(offer);
-    let mut buf = Vec::new();
-    loop {
-        buf.clear();
-        if input.read_until(b'\n', &mut buf)? == 0 {
-            return Ok(());
+///
+/// Its input is read on a thread of its own, so a request that waits on the user (a card) still hears its client: when
+/// the client calls a request off (it gave up waiting), the helper hangs up on the app, which takes the card down (see
+/// PermissionBridge), or drops it unasked if it was still queued, and it gets no reply, as MCP asks. When the client goes
+/// away, a waiting card is taken down the same way and no new one is shown; what the app answers at once still is.
+/// Everything else is answered in order.
+///
+/// While a request waits, the client is told every PROGRESS_EVERY that it still is (MCP progress, on the progress token
+/// it sent): Claude Code gives up on a tool that says nothing for a while (30 minutes by default), and a card must wait for
+/// the user as long as it takes.
+pub fn run_helper_as(input: impl BufRead + Send, output: impl Write, socket: Option<&str>, offer: Offer) -> io::Result<()> {
+    run_helper_with(input, output, socket, offer, PROGRESS_EVERY)
+}
+
+/// How often a waiting request tells the client it's still waiting: well inside the shortest wait Claude Code allows (30s).
+pub const PROGRESS_EVERY: Duration = Duration::from_secs(20);
+
+fn run_helper_with(mut input: impl BufRead + Send, output: impl Write, socket: Option<&str>, offer: Offer, progress_every: Duration) -> io::Result<()> {
+    let (tx, rx) = mpsc::channel::<Heard>();
+    let output = RefCell::new(output);
+    let send = |msg: &Value| -> io::Result<()> {
+        let mut out = output.borrow_mut();
+        writeln!(out, "{msg}")?;
+        out.flush()
+    };
+    std::thread::scope(|scope| {
+        let read_tx = tx.clone();
+        scope.spawn(move || {
+            let mut buf = Vec::new();
+            loop {
+                buf.clear();
+                match input.read_until(b'\n', &mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        // Bytes that aren't a JSON message are skipped: a bad line must not end the helper, or every later prompt is denied.
+                        if let Ok(msg) = serde_json::from_slice::<Value>(&buf) {
+                            if read_tx.send(Heard::Message(msg)).is_err() {
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            let _ = read_tx.send(Heard::Closed);
+        });
+
+        // Messages that arrived while a request waited (answered after it, in order), the request being answered, whether
+        // it was called off, and whether the input has ended.
+        let backlog = RefCell::new(VecDeque::<Value>::new());
+        let current = RefCell::new(Value::Null);
+        // The progress token of the request being answered (MCP's _meta.progressToken), if it sent one.
+        let token = RefCell::new(Value::Null);
+        let called_off = Cell::new(false);
+        let closed = Cell::new(false);
+        let ask = |req: BridgeRequest| -> BridgeResponse {
+            // A card waits on the user; the rest the app answers at once.
+            let card = !(req.orchestra || req.network || req.review);
+            if card && closed.get() {
+                called_off.set(true);
+                return failed(&io::Error::new(io::ErrorKind::BrokenPipe, "Claude Code has gone"));
+            }
+            let stream = match connect_bridge(socket, &req) {
+                Ok(stream) => stream,
+                Err(e) => return failed(&e),
+            };
+            let reader = match stream.try_clone() {
+                Ok(reader) => reader,
+                Err(e) => return failed(&e),
+            };
+            let answer_tx = tx.clone();
+            std::thread::spawn(move || {
+                let _ = answer_tx.send(Heard::Answer(read_answer(reader)));
+            });
+            let mut told = 0;
+            loop {
+                let heard = match rx.recv_timeout(progress_every) {
+                    Ok(heard) => Ok(heard),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        // Only a card is kept alive: the rest the app answers at once, and one it doesn't answer should
+                        // time out as Claude Code would have it, not be held open for ever.
+                        let token = token.borrow().clone();
+                        if card && !token.is_null() {
+                            told += 1;
+                            let _ = send(&json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": token, "progress": told, "message": "Waiting for the user"}}));
+                        }
+                        continue;
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => Err(()),
+                };
+                match heard {
+                    Ok(Heard::Answer(answer)) => return answer.unwrap_or_else(|e| failed(&e)),
+                    Ok(Heard::Message(msg)) if cancels(&msg, &current.borrow()) => {
+                        // Hanging up makes the app take the card down, and the answer thread then ends with an error.
+                        called_off.set(true);
+                        let _ = stream.shutdown(Shutdown::Both);
+                    }
+                    // MCP's keep-alive is answered at once, even while a card waits: the client is checking the helper is there.
+                    Ok(Heard::Message(msg)) if msg["method"] == "ping" && msg.get("id").is_some() => {
+                        let _ = send(&json!({"jsonrpc": "2.0", "id": msg["id"], "result": {}}));
+                    }
+                    // A request still queued that is called off is dropped before it is ever shown.
+                    Ok(Heard::Message(msg)) if msg["method"] == "notifications/cancelled" => {
+                        let id = &msg["params"]["requestId"];
+                        backlog.borrow_mut().retain(|queued| queued.get("id") != Some(id));
+                    }
+                    Ok(Heard::Message(msg)) => backlog.borrow_mut().push_back(msg),
+                    Ok(Heard::Closed) | Err(_) => {
+                        closed.set(true);
+                        if card {
+                            called_off.set(true);
+                            let _ = stream.shutdown(Shutdown::Both);
+                        }
+                    }
+                }
+            }
+        };
+        let mut server = Server::new(offer);
+        loop {
+            let queued = backlog.borrow_mut().pop_front();
+            let msg = match queued {
+                Some(msg) => msg,
+                None if closed.get() => return Ok(()),
+                None => match rx.recv() {
+                    Ok(Heard::Message(msg)) => msg,
+                    Ok(Heard::Answer(_)) => continue,
+                    Ok(Heard::Closed) | Err(_) => return Ok(()),
+                },
+            };
+            *current.borrow_mut() = msg.get("id").cloned().unwrap_or(Value::Null);
+            *token.borrow_mut() = msg["params"]["_meta"]["progressToken"].clone();
+            called_off.set(false);
+            let reply = server.handle(&msg, &ask);
+            if called_off.get() {
+                continue;
+            }
+            if let Some(reply) = reply {
+                send(&reply)?;
+            }
         }
-        // Bytes that aren't a JSON message are skipped: a bad line must not end the helper, or every later prompt is denied.
-        let Ok(msg) = serde_json::from_slice::<Value>(&buf) else { continue };
-        if let Some(reply) = server.handle(&msg, &ask) {
-            writeln!(output, "{reply}")?;
-            output.flush()?;
-        }
-    }
+    })
 }
 
 #[cfg(test)]
@@ -496,6 +650,210 @@ mod tests {
         let replies: Vec<Value> = String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
         assert_eq!(replies.len(), 2);
         assert_eq!(replies[1]["id"], 1);
+    }
+
+    /// A stand-in for the app on a fresh socket: takes one request and says so on `got`, then answers it once `release`
+    /// says to (answer Some), or waits for the helper to hang up (None). Returns the request and whether it hung up.
+    struct FakeApp {
+        socket: String,
+        got: mpsc::Receiver<()>,
+        release: mpsc::Sender<()>,
+        done: std::thread::JoinHandle<(BridgeRequest, bool)>,
+    }
+
+    fn fake_app(name: &str, answer: Option<BridgeResponse>) -> FakeApp {
+        let path = std::env::temp_dir().join(format!("lantern-helper-{name}-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let (got_tx, got) = mpsc::channel();
+        let (release, release_rx) = mpsc::channel::<()>();
+        let done = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let req: BridgeRequest = serde_json::from_str(&line).unwrap();
+            got_tx.send(()).unwrap();
+            if let Some(answer) = answer {
+                release_rx.recv().unwrap();
+                writeln!(stream, "{}", serde_json::to_string(&answer).unwrap()).unwrap();
+                return (req, false);
+            }
+            let mut rest = String::new();
+            let hung_up = matches!(reader.read_line(&mut rest), Ok(0));
+            (req, hung_up)
+        });
+        FakeApp { socket: path.to_string_lossy().into_owned(), got, release, done }
+    }
+
+    /// The helper on a thread, reading what the test writes (its client stays there until the writer is dropped).
+    fn helper_on(socket: String) -> (UnixStream, std::thread::JoinHandle<Vec<Value>>) {
+        let (client, input) = UnixStream::pair().unwrap();
+        let handle = std::thread::spawn(move || {
+            let mut out = Vec::new();
+            run_helper(BufReader::new(input), &mut out, Some(&socket)).unwrap();
+            String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+        });
+        (client, handle)
+    }
+
+    fn ids(replies: &[Value]) -> Vec<Value> {
+        replies.iter().map(|r| r["id"].clone()).collect()
+    }
+
+    #[test]
+    fn a_card_the_client_calls_off_is_taken_down_and_gets_no_reply() {
+        let app = fake_app("cancel", None);
+        let (mut client, helper) = helper_on(app.socket.clone());
+        writeln!(client, "{}", call("AskUserQuestion", json!({"questions": []}))).unwrap();
+        app.got.recv().unwrap();
+        writeln!(client, r#"{{"jsonrpc":"2.0","method":"notifications/cancelled","params":{{"requestId":2,"reason":"timed out"}}}}"#).unwrap();
+        // The helper hangs up, so the app takes the card down.
+        let (req, hung_up) = app.done.join().unwrap();
+        assert_eq!(req.tool_name, "AskUserQuestion");
+        assert!(hung_up);
+        // It goes on answering; the called-off request gets nothing.
+        writeln!(client, r#"{{"jsonrpc":"2.0","id":3,"method":"tools/list"}}"#).unwrap();
+        drop(client);
+        assert_eq!(ids(&helper.join().unwrap()), vec![json!(3)]);
+    }
+
+    #[test]
+    fn a_card_waiting_is_answered_first_and_what_came_meanwhile_after_it() {
+        let app = fake_app("answer", Some(BridgeResponse { allow: true, message: None, updated_input: None, failed: false }));
+        let (mut client, helper) = helper_on(app.socket.clone());
+        writeln!(client, "{}", call("Bash", json!({"command": "ls"}))).unwrap();
+        app.got.recv().unwrap();
+        // Another request's cancel isn't this one's.
+        writeln!(client, r#"{{"jsonrpc":"2.0","method":"notifications/cancelled","params":{{"requestId":7}}}}"#).unwrap();
+        writeln!(client, r#"{{"jsonrpc":"2.0","id":3,"method":"tools/list"}}"#).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        app.release.send(()).unwrap();
+        app.done.join().unwrap();
+        drop(client);
+        let replies = helper.join().unwrap();
+        assert_eq!(ids(&replies), vec![json!(2), json!(3)]);
+        assert_eq!(decision(&replies[0])["behavior"], "allow");
+    }
+
+    /// A permission prompt with its own request id.
+    fn call_as(id: u64, tool: &str) -> Value {
+        let mut msg = call(tool, json!({}));
+        msg["id"] = json!(id);
+        msg
+    }
+
+    #[test]
+    fn a_card_waiting_tells_the_client_it_still_is_on_its_progress_token() {
+        let app = fake_app("progress", Some(BridgeResponse { allow: true, message: None, updated_input: None, failed: false }));
+        let (mut client, input) = UnixStream::pair().unwrap();
+        let socket = app.socket.clone();
+        let helper = std::thread::spawn(move || {
+            let mut out = Vec::new();
+            run_helper_with(BufReader::new(input), &mut out, Some(&socket), Offer::default(), Duration::from_millis(20)).unwrap();
+            String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).collect::<Vec<_>>()
+        });
+        let mut msg = call("Bash", json!({"command": "ls"}));
+        msg["params"]["_meta"] = json!({"progressToken": 7});
+        writeln!(client, "{msg}").unwrap();
+        app.got.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(120));
+        app.release.send(()).unwrap();
+        app.done.join().unwrap();
+        drop(client);
+        let out = helper.join().unwrap();
+        let (progress, rest): (Vec<_>, Vec<_>) = out.into_iter().partition(|m| m["method"] == "notifications/progress");
+        assert!(progress.len() >= 2, "{progress:?}");
+        assert!(progress.iter().all(|p| p["params"]["progressToken"] == 7));
+        // Each says more than the last, as MCP asks.
+        assert!(progress.windows(2).all(|w| w[1]["params"]["progress"].as_u64() > w[0]["params"]["progress"].as_u64()));
+        assert_eq!(ids(&rest), vec![json!(2)]);
+    }
+
+    #[test]
+    fn a_request_without_a_progress_token_gets_no_progress() {
+        let app = fake_app("noprogress", Some(BridgeResponse { allow: true, message: None, updated_input: None, failed: false }));
+        let (mut client, input) = UnixStream::pair().unwrap();
+        let socket = app.socket.clone();
+        let helper = std::thread::spawn(move || {
+            let mut out = Vec::new();
+            run_helper_with(BufReader::new(input), &mut out, Some(&socket), Offer::default(), Duration::from_millis(20)).unwrap();
+            String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).collect::<Vec<_>>()
+        });
+        writeln!(client, "{}", call("Bash", json!({"command": "ls"}))).unwrap();
+        app.got.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(80));
+        app.release.send(()).unwrap();
+        app.done.join().unwrap();
+        drop(client);
+        assert_eq!(ids(&helper.join().unwrap()), vec![json!(2)]);
+    }
+
+    #[test]
+    fn only_a_card_is_kept_alive_with_progress() {
+        let app = fake_app("noncard", Some(BridgeResponse { allow: true, message: Some("2 requests".into()), updated_input: None, failed: false }));
+        let (mut client, input) = UnixStream::pair().unwrap();
+        let socket = app.socket.clone();
+        let helper = std::thread::spawn(move || {
+            let mut out = Vec::new();
+            run_helper_with(BufReader::new(input), &mut out, Some(&socket), Offer::default(), Duration::from_millis(20)).unwrap();
+            String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).collect::<Vec<_>>()
+        });
+        // A network tool: the app answers it, slowly here; it isn't a card, so it gets no keep-alive.
+        let msg = json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "network_requests", "arguments": {}, "_meta": {"progressToken": 9}}});
+        writeln!(client, "{msg}").unwrap();
+        app.got.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(120));
+        app.release.send(()).unwrap();
+        app.done.join().unwrap();
+        drop(client);
+        assert_eq!(ids(&helper.join().unwrap()), vec![json!(4)]);
+    }
+
+    #[test]
+    fn a_ping_is_answered_at_once_while_a_card_waits() {
+        let app = fake_app("ping", Some(BridgeResponse { allow: true, message: None, updated_input: None, failed: false }));
+        let (mut client, helper) = helper_on(app.socket.clone());
+        writeln!(client, "{}", call("Bash", json!({"command": "ls"}))).unwrap();
+        app.got.recv().unwrap();
+        writeln!(client, r#"{{"jsonrpc":"2.0","id":5,"method":"ping"}}"#).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        app.release.send(()).unwrap();
+        app.done.join().unwrap();
+        drop(client);
+        // The ping's answer comes before the card's.
+        assert_eq!(ids(&helper.join().unwrap()), vec![json!(5), json!(2)]);
+    }
+
+    #[test]
+    fn a_card_still_queued_that_the_client_calls_off_is_never_shown() {
+        let app = fake_app("queued", Some(BridgeResponse { allow: true, message: None, updated_input: None, failed: false }));
+        let (mut client, helper) = helper_on(app.socket.clone());
+        writeln!(client, "{}", call("Bash", json!({"command": "ls"}))).unwrap();
+        app.got.recv().unwrap();
+        // A second prompt queues behind the first, and times out before the first is answered.
+        writeln!(client, "{}", call_as(4, "Write")).unwrap();
+        writeln!(client, r#"{{"jsonrpc":"2.0","method":"notifications/cancelled","params":{{"requestId":4}}}}"#).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        app.release.send(()).unwrap();
+        // The app was asked once: the called-off one never reached it (it takes one request, then is gone).
+        assert_eq!(app.done.join().unwrap().0.tool_name, "Bash");
+        drop(client);
+        assert_eq!(ids(&helper.join().unwrap()), vec![json!(2)]);
+    }
+
+    #[test]
+    fn a_card_whose_client_goes_away_is_taken_down_and_no_new_one_is_shown() {
+        let app = fake_app("gone", None);
+        let (mut client, helper) = helper_on(app.socket.clone());
+        writeln!(client, "{}", call("Bash", json!({"command": "ls"}))).unwrap();
+        app.got.recv().unwrap();
+        writeln!(client, "{}", call_as(4, "Write")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        drop(client);
+        assert!(app.done.join().unwrap().1);
+        // Neither prompt is answered, and the queued one isn't shown to anyone.
+        assert!(helper.join().unwrap().is_empty());
     }
 
     #[test]

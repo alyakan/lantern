@@ -2,19 +2,36 @@ import { useEffect, useLayoutEffect, useRef, useState, type UIEvent } from "reac
 import { AWAY_FROM_END, JumpToLatest } from "./JumpToLatest";
 import { useSlot } from "../lib/slot";
 import { recallScroll, rememberScroll } from "../lib/scrollMemory";
+import { anchorOf, scrollToAnchor, type ChatAnchor } from "../lib/scrollAnchor";
 import type { State } from "../store";
 import { workingVerb } from "../lib/verbs";
 import { ChatStream, type ResendHandlers, type StreamHandlers } from "./ChatStream";
 
 export function ChatView({ state, resend, ...handlers }: { state: State; resend?: ResendHandlers } & StreamHandlers) {
   const scroller = useRef<HTMLDivElement>(null);
-  // Back in this chat: where you left it; at the end if you were there (or it's new).
+  // Back in this chat: where you left it; at the end if you were there (or it's new). Kept as a place in the chat, not
+  // pixels, since the same chat shows at other widths (its card on the canvas, the chat itself, a resized pane).
   const slot = useSlot();
-  const left = recallScroll(`${slot}:chat`);
-  const nearBottom = useRef(left === undefined || left < 0);
+  const left = recallScroll<ChatAnchor | -1>(`${slot}:chat`);
+  const nearBottom = useRef(left === undefined || left === -1);
+  const anchor = useRef<ChatAnchor | null>(left === undefined || left === -1 ? null : left);
+  // While it is being put back, the scrolling that does it isn't the user's: it mustn't move the place.
+  const restoring = useRef(anchor.current !== null);
   useLayoutEffect(() => {
-    if (left !== undefined && left >= 0 && scroller.current) scroller.current.scrollTop = left;
+    const el = scroller.current;
+    if (!el || !anchor.current) return;
+    const place = anchor.current;
+    scrollToAnchor(el, place);
+    // Again once what renders a moment later (code, diagrams) has its height.
+    const frame = requestAnimationFrame(() => {
+      if (restoring.current) scrollToAnchor(el, place);
+      restoring.current = false;
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
+  const byHand = () => {
+    restoring.current = false;
+  };
   // Your own message goes to the end, even if you'd scrolled up to read: you're following what you just sent.
   const lastSent = (items: State["items"]) => [...items].reverse().find((it) => it.type === "user" && !it.auto)?.id;
   const sent = useRef(lastSent(state.items));
@@ -29,12 +46,14 @@ export function ChatView({ state, resend, ...handlers }: { state: State; resend?
     if (nearBottom.current && el) el.scrollTop = el.scrollHeight;
   }, [state.items, state.thinking]);
   // The chat box grows as you type, which makes this area shorter without scrolling it: stay at the end if you were
-  // there, so the box doesn't end up over the last lines.
+  // there, so the box doesn't end up over the last lines. Resized elsewhere (a wider pane, a card made bigger), it keeps
+  // the place you were reading, which the same pixels no longer are.
   useEffect(() => {
     const el = scroller.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
       if (nearBottom.current) el.scrollTop = el.scrollHeight;
+      else if (anchor.current) scrollToAnchor(el, anchor.current);
     });
     observer.observe(el);
     return () => observer.disconnect();
@@ -44,10 +63,12 @@ export function ChatView({ state, resend, ...handlers }: { state: State; resend?
   const onScroll = (e: UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     const fromEnd = el.scrollHeight - el.scrollTop - el.clientHeight;
-    nearBottom.current = fromEnd < 80;
     setAway(fromEnd > AWAY_FROM_END);
+    if (restoring.current) return;
+    nearBottom.current = fromEnd < 80;
+    anchor.current = nearBottom.current ? null : anchorOf(el);
     // -1: at the end, so coming back follows the end even if it grew meanwhile.
-    rememberScroll(`${slot}:chat`, nearBottom.current ? -1 : el.scrollTop);
+    rememberScroll<ChatAnchor | -1>(`${slot}:chat`, anchor.current ?? -1);
   };
   // For the whole turn, until Claude is fully done: a line at the bottom with the turn's word, like Claude Code's
   // spinner under its output.
@@ -59,7 +80,7 @@ export function ChatView({ state, resend, ...handlers }: { state: State; resend?
   };
   return (
     <div className="chat-wrap">
-      <div className="chat" ref={scroller} onScroll={onScroll}>
+      <div className="chat" ref={scroller} onScroll={onScroll} onWheel={byHand} onPointerDown={byHand} onKeyDown={byHand}>
         {state.items.length === 0 && !state.thinking && <div className="empty">What should Claude work on?</div>}
         <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} resend={resend} {...handlers} />
         {thinkingLine && (

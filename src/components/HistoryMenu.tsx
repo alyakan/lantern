@@ -1,4 +1,5 @@
-import { useContext, useState } from "react";
+import { useContext, useRef, useState } from "react";
+import { useFitMenu } from "../lib/useFitMenu";
 import type { SessionSummary } from "../types";
 import { relativeTime } from "../lib/time";
 import { SessionActionsContext, pinnedFirst, resumeCommand } from "../lib/sessionActions";
@@ -31,9 +32,12 @@ export function HistoryMenu({ sessions, exclude = [], project, onOpen, onClose, 
   const [renaming, setRenaming] = useState<{ id: string; text: string } | null>(null);
   const [names, setNames] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<string | null>(null);
+  // Opened from the chat box at the bottom of the window, it opens upward when it doesn't fit below.
+  const root = useRef<HTMLDivElement>(null);
+  useFitMenu(root, [sessions === null, shown?.length ?? 0, !!oldSessions]);
 
   return (
-    <div className="menu history-menu" role="dialog" aria-label="Chat history">
+    <div className="menu history-menu" role="dialog" aria-label="Chat history" ref={root}>
       <input
         className="menu-search"
         autoCapitalize="off"

@@ -66,7 +66,7 @@ import { FileLinksProvider } from "./lib/fileLinks";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Hud, type HudEvent } from "./components/Hud";
 import { HistoryPopover } from "./components/HistoryPopover";
-import { Sidebar, SIDEBAR_DEFAULT } from "./components/Sidebar";
+import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects } from "./lib/sidebar";
 import { SidebarCompact } from "./components/SidebarCompact";
 import { usePeek } from "./lib/peek";
@@ -1504,6 +1504,10 @@ export default function App() {
     if (collapsed) setCollapsedBy(collapsed);
     const pinned = take<Record<string, string[]>>("settings.pinnedSessions");
     if (pinned) setPinnedBy(pinned);
+    const colors = take<Record<string, number>>("sidebar.projectColors");
+    if (colors) setProjectColors(colors);
+    const order = take<string[]>("sidebar.projectOrder");
+    if (order) setProjectOrder(order);
     const last = take<string>(LAST_FOLDER);
     if (last) setLastFolder(last);
     if (changed[OPEN_CHATS]) setOffer((chats) => chats.map((c) => (c.folder === old ? { ...c, folder: next } : c)));
@@ -1547,6 +1551,11 @@ export default function App() {
   // is its width. The first key is the one that once said "minimized to the rail": that is hidden now.
   const [sidebarHidden, setSidebarHidden] = usePersistentState("sidebar.collapsed", false);
   const [sidebarCompact, setSidebarCompact] = usePersistentState("sidebar.compact", false);
+  const [projectColors, setProjectColors] = usePersistentState<Record<string, number>>("sidebar.projectColors", {});
+  // The user's order of the projects (see orderProjects).
+  const [projectOrder, setProjectOrder] = usePersistentState<string[]>("sidebar.projectOrder", []);
+  // What the sidebar last listed, so showing it again (a peek mounts a new one) starts from that instead of empty.
+  const sidebarMemoryRef = useRef(sidebarMemory());
   const [sidebarWidth, setSidebarWidth] = usePersistentState("sidebar.width", SIDEBAR_DEFAULT);
   // Projects removed from the recents here (Claude Code keeps their chats; one with a chat open is listed regardless).
   const [hiddenFolders, setHiddenFolders] = usePersistentState<string[]>("sidebar.hidden", []);
@@ -1616,6 +1625,9 @@ export default function App() {
     onReviewPr: then(sidebarHandlers.onReviewPr),
   };
   const sidebarProps = {
+    memory: sidebarMemoryRef.current,
+    order: projectOrder,
+    onOrder: setProjectOrder,
     width: sidebarWidth,
     onWidth: setSidebarWidth,
     open: openByProject,
@@ -1733,6 +1745,10 @@ export default function App() {
                 onNewChat={sidebarHandlers.onNewChat}
                 onChat={sidebarHandlers.onChat}
                 onTeam={sidebarHandlers.onTeam}
+                colors={projectColors}
+                onColors={setProjectColors}
+                order={projectOrder}
+                onOrder={setProjectOrder}
                 onToggle={() => setSidebarCompact(false)}
                 onPointerEnter={(e) => !e.buttons && sidebarPeek.hover()}
                 onPointerLeave={sidebarPeek.unhover}

@@ -35,6 +35,7 @@ import { NodeBody } from "./NodeBody";
 import { BranchIcon, ChevronIcon, OpenOutIcon } from "./icons";
 import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
 import { SubagentsMenu } from "./SubagentsMenu";
+import { useQuiet } from "../lib/quiet";
 
 /** Where agents sit and how the canvas is framed. The app keeps it, so leaving the canvas and coming back finds it as it was. */
 export interface CanvasLayout {
@@ -142,6 +143,8 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
   // A worker whose branch the main agent has asked the user to merge: that is what it is waiting on, and it's theirs to answer.
   const ready = !!parent && !!owner?.proposals.some((p) => p.worker === slot && p.status === "open");
   const label = statusLabel(status, role, ready);
+  // A card at work that's been quiet a while says how long, so a long think can be told from a stuck one.
+  const quiet = useQuiet(state?.activityAt ?? null, status === "working");
   const spent = state ? usage(totalCost(state), totalTokens(state)) : "";
   const actions = useNodeActions();
   return (
@@ -183,7 +186,10 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
             <WorkflowMenu compact workflow={workflowOf(state)} agent={role === "worker"} holdsAgents={holdsAgents} onChange={(w) => actions.setWorkflow(slot, w)} disabled={isBusy(state)} />
           </span>
         )}
-        <span className="node-status">{label}</span>
+        <span className="node-status" title={quiet ? `Its last step was ${quiet} ago` : undefined}>
+          {label}
+          {quiet && <span className="node-quiet"> · {quiet} ago</span>}
+        </span>
         {role === "worker" && (
           <button className="icon" aria-label={`More for ${name}`} aria-haspopup="menu" title="More: hide, or clean up and close" onClick={(e) => onMore(e, slot)}>
             ⋯

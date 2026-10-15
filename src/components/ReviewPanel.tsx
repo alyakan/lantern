@@ -9,7 +9,7 @@ import type { NetworkItem } from "../types";
 import { basename, dirOf, relativeTo } from "../lib/diff";
 import { usePersistentState } from "../lib/layout";
 import { Counts } from "./EditLine";
-import { DocIcon } from "./icons";
+import { RevertIcon, DocIcon } from "./icons";
 import { moveFocus, useMenuKeys } from "./useMenuKeys";
 import { FilesTab } from "./FilesTab";
 import { AgentsTab } from "./AgentsTab";
@@ -197,11 +197,13 @@ export function ReviewPanel(props: Props) {
         {tab === "changes" && allRevert && rv && count > 0 && (
           <button
             className="ghost revert-all"
+            aria-label="Revert all"
             disabled={!!revertOff}
             title={revertOff ?? (allRevert.scope === "session" ? "Put every file this chat changed back to how it was before the chat began" : "Put the files your last message changed back to how they were before it")}
             onClick={() => setReverting({ title: allRevert.scope === "session" ? "Revert all of this chat's changes?" : "Revert the last message's changes?", files: props.files, request: allRevert })}
           >
-            Revert all
+            <RevertIcon />
+            <span className="revert-all-label">Revert all</span>
           </button>
         )}
       </div>

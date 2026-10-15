@@ -156,7 +156,7 @@ fn orchestra_tools() -> Vec<Value> {
         }),
         json!({
             "name": "propose_merge",
-            "description": "Ask the user to merge an agent's branch into the main checkout. Only the user can approve it; you get a note with their answer. The agent must have finished its turn. Proposing again after it changed replaces the earlier proposal.",
+            "description": "Ask the user to merge an agent's branch into the main checkout. Only the user can approve it; you get a note with their answer. The agent must have finished its turn, or be stopped. Proposing again after it changed replaces the earlier proposal.",
             "inputSchema": {"type": "object", "properties": {"id": id_schema(), "summary": {"type": "string", "description": "What the branch does and what you checked, in plain language."}}, "required": ["id", "summary"], "additionalProperties": false}
         }),
     ]

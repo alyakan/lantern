@@ -6,6 +6,8 @@
 */
 :root {
   --bg: #ffffff;           /* window and toolbar; the editor area is the same surface, like Xcode */
+  --pc-tint: 13%;          /* how much of a project's colour tints its compact squares, and colours their letters */
+  --pc-ink: 78%;
   --pane: #ffffff;         /* the review pane (also the diff editor background) */
   --sidebar: #f5f5f7;      /* the chat card */
   --field: #ffffff;        /* composer, menus */
@@ -61,6 +63,8 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #1f1f24;         /* Xcode's Default (Dark) editor background */
+    --pc-tint: 24%;
+    --pc-ink: 45%;
     --pane: #1f1f24;
     --sidebar: #29292e;
     --field: #202025;
@@ -99,6 +103,8 @@
 }
 :root[data-theme="dark"] {
   --bg: #1f1f24;
+  --pc-tint: 24%;
+  --pc-ink: 45%;
   --pane: #1f1f24;
   --sidebar: #29292e;
   --field: #202025;
@@ -521,7 +527,7 @@ button.ghost.context-compact, button.ghost.context-clear { height: 20px; padding
 /* Changes | Files as a macOS segmented control. */
 .pane-tabs { container-type: inline-size; display: flex; align-items: center; gap: 8px; height: 44px; flex: none; padding: 0 10px; }
 /* In the narrowest the pane gets, with every tab there is, the tabs tighten and the filter keeps a few letters. */
-@container (max-width: 440px) { .pane-tabs .pane-tabs-track button { padding: 0 7px; } }
+@container (max-width: 540px) { .pane-tabs .pane-tabs-track button { padding: 0 7px; } }
 /* Changes | Files | Tests: the same size as the pane's other pills (the Changes filter, Build | Learn | Review), not the
    title bar's larger capsules. */
 .pane-tabs-track { display: inline-flex; gap: 2px; height: 26px; align-items: center; padding: 0 2px; border-radius: 999px; background: var(--glass); border: 0.5px solid var(--glass-line); }
@@ -532,7 +538,7 @@ button.ghost.context-compact, button.ghost.context-clear { height: 20px; padding
 /* The Changes filter: a pill that opens a menu of what to show, each with what it means. */
 /* Both give way when the row is tight (five tabs and the filter in a narrow pane): the tabs down to their labels, the
    filter's name to an ellipsis, leaving its count. */
-.scope-anchor { position: relative; margin-left: auto; min-width: 0; }
+.scope-anchor { position: relative; flex: none; margin-left: auto; }
 .scope-button { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 26px; padding: 0 10px 0 12px; border: 0.5px solid var(--glass-line); border-radius: 999px; background: var(--glass); color: var(--text); font-size: calc(11.5px * var(--font-scale)); }
 .scope-button:hover:not(:disabled), .scope-button.pressed { background: var(--bg-hover); }
 .scope-label { min-width: 26px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -571,6 +577,8 @@ button.ghost.context-compact, button.ghost.context-clear { height: 20px; padding
 .jump-file { display: inline-flex; align-items: center; gap: 5px; flex: 0 1 auto; min-width: 48px; color: var(--text); white-space: nowrap; }
 .jump-file svg { flex: none; }
 .jump-file svg { color: var(--muted); }
+/* A narrow pane shows the file alone: its folders would push its name out of sight (the full path is the tooltip). */
+@container (max-width: 560px) { .review-bar .jump-dir, .review-bar .jump-sep { display: none; } }
 .picker-button[aria-expanded="true"] { background: var(--bg-hover); }
 .picker-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* Dropdown menus (session history), styled like VS Code's folder menu. */
@@ -581,8 +589,10 @@ button.ghost.context-compact, button.ghost.context-clear { height: 20px; padding
 /* Under a capsule above the composer, the menu opens from the capsule's left edge. */
 .pill-anchor { position: relative; }
 .pill-anchor .history-menu { right: auto; width: 440px; max-width: calc(100vw - 48px); }
-.folder-menu { top: calc(100% + 6px); left: 0; width: 380px; max-width: calc(100vw - 48px); max-height: 420px; }
+.folder-menu { top: calc(100% + 6px); left: 0; width: 380px; max-width: calc(100vw - 48px); max-height: 420px; overflow-y: auto; }
 .folder-menu.has-moved { max-height: min(480px, calc(100vh - 24px)); }
+/* Capped to fit the window, the whole menu scrolls as one: no part of it is squeezed to nothing. */
+.folder-menu > * { flex-shrink: 0; }
 .folder-menu .menu-row { align-items: center; }
 .folder-menu .menu-row svg { flex: none; color: var(--muted); }
 .menu-heading { padding: 6px 8px 4px; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
@@ -904,7 +914,8 @@ button.json-more:hover { color: var(--text); }
    can't be narrower than that (MIN_LEFT in SplitPane.tsx). The background count is dropped first. */
 .steps-head { container-type: inline-size; display: flex; align-items: center; gap: 10px; height: 44px; flex: none; padding: 0 14px 0 20px; border-bottom: 1px solid var(--line); }
 @container (max-width: 480px) { .steps-head .steps-background { display: none; } }
-.steps-rail { display: flex; align-items: center; gap: 4px; flex: 0 1000 auto; min-width: 46px; overflow-x: auto; scrollbar-width: none; scroll-behavior: smooth; }
+/* Full height of the bar: a scrolling rail clips to its box, and an 8px box cut off the bottom of the dots once there were enough pages to scroll. */
+.steps-rail { display: flex; align-items: center; align-self: stretch; gap: 4px; flex: 0 1000 auto; min-width: 52px; padding: 0 3px; overflow-x: auto; scrollbar-width: none; scroll-behavior: smooth; }
 .steps-rail::-webkit-scrollbar { display: none; }
 /* A dot per page; the one on screen stretches into a pill. Build pages are solid, plan pages hollow. */
 .steps-dot { flex: none; width: 8px; height: 8px; padding: 0; border: 1.5px solid var(--faint); border-radius: 999px; background: none; transition: width 0.2s cubic-bezier(0.32, 0.72, 0, 1), background 0.2s; }
@@ -1543,7 +1554,12 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .revert-undo { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: calc(12px * var(--font-scale)); }
 .revert-undo-text { min-width: 0; }
 .revert-undo-note { flex: 1; color: var(--muted); font-size: calc(11.5px * var(--font-scale)); }
-.revert-all { margin-left: 4px; }
+.revert-all { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: 4px; white-space: nowrap; }
+/* Wide, it says Revert all; narrow, it's the arrow alone (named for VoiceOver and in its tooltip). */
+.revert-all svg { display: none; }
+@container (max-width: 520px) { .pane-tabs .revert-all { padding: 0 6px; } .pane-tabs .revert-all svg { display: block; } .pane-tabs .revert-all-label { display: none; } }
+/* The scope chip keeps its count and drops its word when there's no room for it. */
+@container (max-width: 460px) { .pane-tabs .scope-label { display: none; } .pane-tabs { gap: 6px; } .pane-tabs .pane-tabs-track button { padding: 0 5px; } .pane-tabs .revert-all { margin-left: 0; } }
 .summary-revert { margin-left: 4px; }
 
 /* The orchestra's canvas: agents as floating chats on a pannable, zoomable surface, tethered to the main agent. */
@@ -1599,6 +1615,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .node-meta svg { flex: none; }
 .node-head .icon { font-size: calc(16px * var(--font-scale)); line-height: 1; }
 .node-status { flex: none; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); white-space: nowrap; }
+.node-quiet { color: var(--muted-text); font-variant-numeric: tabular-nums; }
 /* A window's Permissions and Workflow, on its title bar: small chips whose menus open downwards over the chat. */
 .node-settings { flex: none; display: inline-flex; align-items: center; gap: 4px; }
 .node-chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; margin: 0; padding: 0 7px; border: 0.5px solid var(--glass-line); border-radius: 999px; background: var(--glass); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); font-weight: 500; white-space: nowrap; }
@@ -1924,7 +1941,12 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-menu .menu-row { align-items: center; }
 .project-menu { left: auto; right: 4px; }
 .sb-list { flex: 1; min-height: 0; overflow-y: auto; padding-right: 6px; }
-.sb-project { margin-bottom: 2px; }
+.sb-project { margin-bottom: 2px; border-radius: 8px; transition: box-shadow 0.16s, background 0.16s, scale 0.16s; }
+/* Dragging a project to reorder: it lifts off the list (the others slide out of its way, see useReorder). */
+.sidebar.reordering, .sidebar.reordering * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
+.sidebar.reordering .sb-project-row .sb-project-actions { display: none; }
+.sb-project.lifted { background: var(--bg); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16), 0 0 0 0.5px var(--line-strong); scale: 1.015; }
+@media (prefers-reduced-motion: reduce) { .sb-project { transition: none; } .sb-project.lifted { scale: none; } }
 .sb-project-row { position: relative; display: flex; align-items: center; }
 .sb-project-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; height: 26px; padding: 0 6px 0 2px; border: none; background: none; border-radius: var(--radius-chip); color: var(--text); font-weight: 600; text-align: left; }
 .sb-project-toggle:hover { background: var(--bg-hover); }
@@ -2005,22 +2027,25 @@ nav > .sb-note { padding-left: 8px; }
 .cp-head { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding-bottom: 6px; }
 .cp-head button.cp-button { width: 32px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border-radius: var(--radius-chip); color: var(--muted); }
 .cp-head button.cp-button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
-.cp-list { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 6px; overflow-y: auto; overflow-x: hidden; padding: 4px 0; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+/* Room around the squares for the marks on their corners and the bar beside the one on screen. */
+.cp-list { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 6px; overflow-y: auto; overflow-x: hidden; padding: 6px 0; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .cp-list::-webkit-scrollbar { width: 4px; }
 .cp-list::-webkit-scrollbar-thumb { border-radius: 2px; background: var(--line-strong); }
 .cp-group { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
-.cp-project { flex: none; width: 100%; display: flex; align-items: center; gap: 4px; margin-top: 2px; color: var(--muted-text); font-size: calc(9.5px * var(--font-scale)); font-weight: 600; letter-spacing: 0.04em; line-height: 1; }
-.cp-project::before, .cp-project::after { content: ""; flex: 1; min-width: 3px; border-top: 1px solid var(--line-strong); }
-.cp-project:first-child::before { display: none; }
-.cp-chip { position: relative; width: 36px; height: 36px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border: 0.5px solid var(--glass-line); border-radius: 10px; background: var(--glass); color: var(--text-2); font-size: calc(12.5px * var(--font-scale)); font-weight: 600; }
-.cp-chip:hover { background: var(--bg-hover); color: var(--text); }
-.cp-chip.current { background: var(--bg-active); color: var(--text); box-shadow: 0 0 0 1.5px var(--text-2); }
+/* Each project's colour (--pc, set per project) tints its label and squares; the one on screen is filled with it. */
+.cp-project { flex: none; width: 100%; display: flex; justify-content: center; margin-top: 6px; color: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-ink), var(--text)); font-size: calc(9.5px * var(--font-scale)); font-weight: 600; letter-spacing: 0.06em; line-height: 1; }
+.cp-project:first-child { margin-top: 0; }
+.cp-chip { position: relative; width: 36px; height: 36px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border: none; border-radius: 10px; background: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-tint), var(--bg)); color: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-ink), var(--text)); font-size: calc(12px * var(--font-scale)); font-weight: 600; transition: background 0.12s, color 0.12s; }
+.cp-chip:hover { background: color-mix(in srgb, var(--pc, var(--muted)) calc(var(--pc-tint) + 9%), var(--bg)); color: var(--text); }
+.cp-chip.current { background: var(--pc, var(--accent)); color: #fff; }
+.cp-chip.current::before { content: ""; position: absolute; left: -6px; top: 50%; width: 3px; height: 18px; margin-top: -9px; border-radius: 0 2px 2px 0; background: var(--pc, var(--text)); }
 .cp-initials { display: inline-flex; align-items: center; justify-content: center; line-height: 1; letter-spacing: 0.02em; }
-.cp-team { position: absolute; right: 3px; bottom: 3px; display: inline-flex; width: 9px; height: 9px; color: var(--muted); }
-.cp-team svg { width: 9px; height: 9px; fill: currentColor; }
-.cp-mark { position: absolute; top: 3px; right: 3px; box-sizing: border-box; width: 9px; height: 9px; border-radius: 50%; }
-.cp-mark.running { border: 1.5px solid color-mix(in srgb, var(--working) 28%, transparent); border-top-color: var(--working); animation: spin 0.8s linear infinite; }
-.cp-mark.waiting { background: var(--attn); box-shadow: 0 0 0 2px color-mix(in srgb, var(--attn) 30%, transparent); }
+/* The marks sit on the corners, cut out of the square by a ring of the column's background. */
+.cp-team { position: absolute; right: -3px; bottom: -3px; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%; background: var(--bg-subtle); color: var(--text-2); box-shadow: 0 0 0 2px var(--bg); }
+.cp-team svg { width: 8px; height: 8px; fill: currentColor; }
+.cp-mark { position: absolute; top: -3px; right: -3px; box-sizing: border-box; width: 11px; height: 11px; border-radius: 50%; box-shadow: 0 0 0 2px var(--bg); }
+.cp-mark.running { border: 2px solid color-mix(in srgb, var(--working) 28%, var(--bg)); border-top-color: var(--working); background: var(--bg); animation: spin 0.8s linear infinite; }
+.cp-mark.waiting { background: var(--attn); }
 .cp-mark.unread { background: var(--unread); }
 .cp-tip { position: fixed; z-index: 30; transform: translateY(-50%); max-width: 260px; padding: 6px 9px; border-radius: var(--radius-chip); background: var(--bg); box-shadow: 0 0 0 0.5px var(--line-strong), var(--shadow); pointer-events: none; font-size: calc(12px * var(--font-scale)); }
 .cp-tip-title { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

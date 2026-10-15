@@ -2,6 +2,7 @@ import { chatState, chatTitle, type Chats } from "../sessions";
 import type { RecentFolder, SessionSummary } from "../types";
 import { basename } from "./diff";
 import { needingYou, orchestraNodes, teamNodes } from "./orchestraView";
+import { orderProjects } from "./projectOrder";
 
 /** How a chat reads in the sidebar. `draft`: text typed in its box but not sent. */
 export type ChatDot = "running" | "waiting" | "draft" | "done";
@@ -110,11 +111,12 @@ export const chatInitials = (title: string): string => (/^new (chat|team)$/i.tes
  * What is open, as the compact sidebar lists it: the projects with something open, in the order the full sidebar lists
  * them (the recent list's), each with its chats and teams. An agent is never listed on its own, only inside its team.
  */
-export function compactGroups(open: Record<string, ProjectOpen>, recent: RecentFolder[]): CompactGroup[] {
+export function compactGroups(open: Record<string, ProjectOpen>, recent: RecentFolder[], order: string[] = []): CompactGroup[] {
   const rank = (folder: string) => recent.findIndex((r) => r.path === folder);
-  const folders = Object.keys(open)
+  const newest = Object.keys(open)
     .filter((f) => open[f].items.length > 0)
     .sort((a, b) => rank(a) - rank(b));
+  const folders = orderProjects(newest, order).listed;
   const names = folders.map(basename);
   return folders.map((folder, i) => {
     const parent = basename(folder.slice(0, Math.max(folder.lastIndexOf("/"), 0)) || "/");
@@ -213,16 +215,24 @@ export function pastRows(sessions: SessionSummary[], openIds: string[], pinned: 
 }
 
 /**
- * The sidebar's projects: those with a chat open first (in the order of the recent list, a project that isn't on it yet
- * ahead of the rest), then the other recent folders. `hidden` folders (removed from recents) only show while a chat is open
- * in them. `past` holds the sessions read so far, by folder.
+ * The projects the sidebar lists, newest first, for orderProjects: those with a chat open (in the order of the recent
+ * list, a project that isn't on it yet ahead of the rest), then the other recent folders. `hidden` folders (removed from
+ * recents) only show while a chat is open in them. Before there is a saved order, this is the order shown.
  */
-export function sidebarProjects(input: { recent: RecentFolder[]; hidden: string[]; open: Record<string, ProjectOpen>; past: Record<string, SessionSummary[] | undefined>; pinned: Record<string, string[]>; titles: Record<string, string> }): SidebarProject[] {
-  const { recent, hidden, open, past, pinned, titles } = input;
+export function projectFolders(recent: RecentFolder[], hidden: string[], open: Record<string, unknown>): string[] {
   const rank = (folder: string) => recent.findIndex((r) => r.path === folder);
   const opened = Object.keys(open).sort((a, b) => rank(a) - rank(b));
   const others = recent.map((r) => r.path).filter((f) => !open[f] && !hidden.includes(f));
-  const folders = [...opened, ...others];
+  return [...opened, ...others];
+}
+
+/**
+ * The sidebar's projects, in the user's order (`order`, see orderProjects: a project not in it yet goes on top). `past`
+ * holds the sessions read so far, by folder.
+ */
+export function sidebarProjects(input: { recent: RecentFolder[]; hidden: string[]; open: Record<string, ProjectOpen>; past: Record<string, SessionSummary[] | undefined>; pinned: Record<string, string[]>; titles: Record<string, string>; order?: string[] }): SidebarProject[] {
+  const { recent, hidden, open, past, pinned, titles } = input;
+  const folders = orderProjects(projectFolders(recent, hidden, open), input.order ?? []).listed;
   const names = folders.map(basename);
   return folders.map((folder, i) => {
     const o = open[folder];
