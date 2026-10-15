@@ -40,15 +40,23 @@ export function PanZoom({ width, height, label, fitKey = "", children }: Props) 
   // Once you've moved it yourself, a resize leaves it where you put it.
   const touched = useRef(false);
 
-  const fit = useCallback(() => {
+  const fit = useCallback((animate = false) => {
     const el = box.current;
     if (!el) return;
+    if (animate) {
+      touched.current = false;
+      const moving = world.current;
+      moving?.classList.add("animating");
+      window.clearTimeout(eased.current);
+      eased.current = window.setTimeout(() => moving?.classList.remove("animating"), 320);
+    }
     const w = el.clientWidth;
     const h = el.clientHeight;
     if (w <= 0 || h <= 0) return setView({ x: 0, y: 0, zoom: 1 });
     // The whole thing, centred, as big as the room allows.
     const zoom = clampZoom(Math.min(FIT_MAX, (w - 2 * FIT_PAD) / width, (h - 2 * FIT_PAD) / height));
-    setView({ zoom, x: (w - width * zoom) / 2, y: (h - height * zoom) / 2 });
+    const next = { zoom, x: (w - width * zoom) / 2, y: (h - height * zoom) / 2 };
+    setView(next);
   }, [width, height]);
   useLayoutEffect(() => {
     touched.current = false;
@@ -63,6 +71,18 @@ export function PanZoom({ width, height, label, fitKey = "", children }: Props) 
   }, [fit]);
 
   const apply = (v: View) => {
+    world.current?.classList.remove("animating");
+    touched.current = true;
+    setView(v);
+  };
+  // A jump (a button, the lit box coming into view) eases like the canvas's; a gesture follows the pointer, so it must not.
+  const world = useRef<HTMLDivElement>(null);
+  const eased = useRef(0);
+  const ease = (v: View) => {
+    const el = world.current;
+    el?.classList.add("animating");
+    window.clearTimeout(eased.current);
+    eased.current = window.setTimeout(() => el?.classList.remove("animating"), 320);
     touched.current = true;
     setView(v);
   };
@@ -78,7 +98,7 @@ export function PanZoom({ width, height, label, fitKey = "", children }: Props) 
     // Wider than the room: its start is what is wanted.
     const dx = r.w * v.zoom > el.clientWidth - 2 * pad ? pad - left : shift(left, r.w * v.zoom, el.clientWidth);
     const dy = r.h * v.zoom > el.clientHeight - 2 * pad ? pad - top : shift(top, r.h * v.zoom, el.clientHeight);
-    if (dx !== 0 || dy !== 0) apply(panBy(v, dx, dy));
+    if (dx !== 0 || dy !== 0) ease(panBy(v, dx, dy));
   }, []);
   const centre = () => ({ x: (box.current?.clientWidth ?? 0) / 2, y: (box.current?.clientHeight ?? 0) / 2 });
 
@@ -148,21 +168,21 @@ export function PanZoom({ width, height, label, fitKey = "", children }: Props) 
   return (
     <div className="pz">
       <div ref={box} className={`pz-surface${drag.current?.moved ? " dragging" : ""}`} role="group" aria-label={label} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={() => (drag.current = null)}>
-        <div className="pz-world" style={{ width, height, transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
+        <div ref={world} className="pz-world" style={{ width, height, transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
           <PanZoomReveal.Provider value={reveal}>{children}</PanZoomReveal.Provider>
         </div>
       </div>
       <div className="pz-tools" role="group" aria-label="Zoom">
-        <button aria-label="Zoom out" title="Zoom out (or pinch, or ⌘-scroll)" onClick={() => apply(zoomAt(view, 1 / 1.25, centre()))}>
+        <button aria-label="Zoom out" title="Zoom out (or pinch, or ⌘-scroll)" onClick={() => ease(zoomAt(view, 1 / 1.25, centre()))}>
           −
         </button>
         <span className="pz-level" aria-label="Zoom level">
           {Math.round(view.zoom * 100)}%
         </span>
-        <button aria-label="Zoom in" title="Zoom in (or pinch, or ⌘-scroll)" onClick={() => apply(zoomAt(view, 1.25, centre()))}>
+        <button aria-label="Zoom in" title="Zoom in (or pinch, or ⌘-scroll)" onClick={() => ease(zoomAt(view, 1.25, centre()))}>
           +
         </button>
-        <button aria-label="Fit" title="Fit the whole map in view" onClick={() => ((touched.current = false), fit())}>
+        <button aria-label="Fit" title="Fit the whole map in view" onClick={() => fit(true)}>
           Fit
         </button>
       </div>

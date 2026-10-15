@@ -889,3 +889,64 @@ describe("what the canvas says aloud", () => {
     expect(document.querySelector('[data-node="s1"]')!.className).toContain("held");
   });
 });
+
+describe("motion", () => {
+  it("lets a new agent and its tether arrive once, and not again when the canvas is shown again", () => {
+    const chats = team(1);
+    const layout = newLayout();
+    const first = setup(chats, { layout });
+    expect(document.querySelector('[data-node="w1"]')!.className).toContain("enter");
+    expect(document.querySelector(".tether-enter")).toBeTruthy();
+    first.unmount();
+    setup(chats, { layout });
+    expect(document.querySelector('[data-node="w1"]')!.className).not.toContain("enter");
+    expect(document.querySelector(".tether-enter")).toBeNull();
+  });
+
+  it("rings the attention pill when the count goes up, but not when the canvas opens with agents waiting", () => {
+    const chats = team(2);
+    const store = createChatStore();
+    store.set(chats.slots);
+    const layout = newLayout();
+    const show = (attention: string[]) => (
+      <ChatStoreContext.Provider value={store}>
+        <NodeActionsContext.Provider value={actions()}>
+          <Canvas nodes={orchestraNodes(chats, () => "Main agent")} layout={layout} activeSlot="s1" attention={attention} onFocus={vi.fn()} onOpen={vi.fn()} />
+        </NodeActionsContext.Provider>
+      </ChatStoreContext.Provider>
+    );
+    const { rerender } = render(show(["w1"]));
+    expect(document.querySelector(".canvas-attention-ring")).toBeNull();
+    rerender(show(["w1", "w2"]));
+    expect(document.querySelector(".canvas-attention-ring")).toBeTruthy();
+  });
+
+  it("stops easing a card's height while it is being resized", () => {
+    setup(team(1));
+    const canvas = screen.getByTestId("canvas");
+    const grip = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-resize")!;
+    fireEvent.pointerDown(grip, { button: 0, pointerId: 2, clientX: 0, clientY: 0 });
+    expect(canvas.classList.contains("resizing")).toBe(true);
+    fireEvent.pointerUp(grip, { pointerId: 2 });
+    expect(canvas.classList.contains("resizing")).toBe(false);
+  });
+
+  it("keeps cards and chats from flickering around the threshold, swapping the body with a fade", () => {
+    setup(team(1));
+    const canvas = screen.getByTestId("canvas");
+    const zoomTo = (target: number) => {
+      const z = JSON.parse(canvas.style.getPropertyValue("--zoom") || "1");
+      act(() => void fireEvent.wheel(canvas, { ctrlKey: true, deltaY: -Math.log(target / z) / 0.01 }));
+    };
+    zoomTo(0.4);
+    expect(canvas.classList.contains("summary")).toBe(true);
+    zoomTo(0.5); // inside the band: still cards
+    expect(canvas.classList.contains("summary")).toBe(true);
+    zoomTo(0.55);
+    expect(canvas.classList.contains("summary")).toBe(false);
+    zoomTo(0.5); // and still chats on the way back down
+    expect(canvas.classList.contains("summary")).toBe(false);
+    zoomTo(0.45);
+    expect(canvas.classList.contains("summary")).toBe(true);
+  });
+});

@@ -47,6 +47,22 @@ export function NetworkTab({ folder, view, onSummarize, busy = false }: Props) {
     setPicked(null);
     setTop(null);
   }, [folder]);
+  // Rows that came in since the last look flash once; the ones there when the tab opened do not.
+  const known = useRef<{ folder: string; ids: Set<string> } | null>(null);
+  const [flashing, setFlashing] = useState<Set<string>>(new Set());
+  const ids = view.items.map((i) => i.tx.id).join(",");
+  useEffect(() => {
+    const now = view.items.map((i) => i.tx.id);
+    // Another folder's tab is a first look again.
+    const before = known.current?.folder === folder ? known.current.ids : null;
+    known.current = { folder, ids: new Set(now) };
+    if (!before) return;
+    const added = now.filter((id) => !before.has(id));
+    if (added.length === 0) return;
+    setFlashing((f) => new Set([...f, ...added]));
+    // Left to run out by itself even if more rows come in meanwhile: each batch takes its own flash back.
+    window.setTimeout(() => setFlashing((f) => new Set([...f].filter((id) => !added.includes(id)))), 1300);
+  }, [ids, folder]);
   const first = view.items[0]?.tx.id ?? null;
   const seen = view.items.some((i) => i.tx.id === top) ? top : first;
   useEffect(() => {
@@ -87,7 +103,7 @@ export function NetworkTab({ folder, view, onSummarize, busy = false }: Props) {
           <ul className="network-list" aria-label="Matching requests" ref={list}>
             {view.items.map((item) => (
               <li key={item.tx.id}>
-                <button className={`network-row${item.tx.id === current?.tx.id ? " current" : ""}`} aria-current={item.tx.id === current?.tx.id} title={item.tx.url} onClick={() => setPicked(item.tx.id)}>
+                <button className={`network-row${item.tx.id === current?.tx.id ? " current" : ""}${flashing.has(item.tx.id) ? " fresh" : ""}`} aria-current={item.tx.id === current?.tx.id} title={item.tx.url} onClick={() => setPicked(item.tx.id)}>
                   <span className={`network-status ${tone(item.tx)}`}>{statusLabel(item.tx)}</span>
                   <span className="network-method">{item.tx.method}</span>
                   <span className="network-url">{shortUrl(item.tx.url)}</span>

@@ -43,6 +43,12 @@ export function ArchGraphSvg({ layout, current, opens, onOpen, shown = null, onS
     const n = reveal && layout.nodes.find((x) => x.id === reveal.id);
     if (n) panTo?.(rectOf(n));
   }, [reveal?.key]);
+  // The page on screen changed: its box is brought into view, easing there (not at all when it already is in view).
+  const litKey = current.join(",");
+  useEffect(() => {
+    const n = layout.nodes.find((x) => current.includes(x.id));
+    if (n) panTo?.(rectOf(n));
+  }, [litKey]);
   const focused = layout.nodes.some((n) => current.includes(n.id)) || picked !== null;
   const lit = (id: string) => current.includes(id) || picked?.node === id;
   const onKey = (e: KeyboardEvent, n: PlacedNode) => {

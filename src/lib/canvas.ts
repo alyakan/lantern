@@ -26,6 +26,11 @@ export const MIN_ZOOM = 0.2;
 export const MAX_ZOOM = 1.6;
 /** Below this zoom a chat is too small to read, so agents show as summary cards instead. */
 export const SUMMARY_ZOOM = 0.5;
+/** A pinch that hovers around SUMMARY_ZOOM mustn't swap cards and chats back and forth: cards start below this, chats return above SUMMARY_EXIT. */
+export const SUMMARY_ENTER = 0.48;
+export const SUMMARY_EXIT = 0.52;
+/** Whether the agents are cards at `zoom`, given whether they were (the two thresholds make a band where it stays as it is). */
+export const inSummary = (was: boolean, zoom: number) => (was ? zoom < SUMMARY_EXIT : zoom < SUMMARY_ENTER);
 export const MAIN_SIZE: Size = { w: 520, h: 660 };
 export const WORKER_SIZE: Size = { w: 420, h: 520 };
 /** The smallest an agent can be resized to. */

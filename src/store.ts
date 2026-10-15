@@ -127,6 +127,8 @@ export interface MergeProposal {
   problem: string | null;
   /** How many times the backend has answered an approval: an attempt that fails the same way twice is still an answer. */
   attempts: number;
+  /** When it arrived (ms): a card drawn soon after is one that just came, and says so. */
+  at?: number;
 }
 
 export interface State {
@@ -577,7 +579,7 @@ function applyEvent(state: State, ev: UiEvent): State {
     case "review_target":
       return { ...state, reviewTarget: { pr: ev.pr, base: ev.base } };
     case "merge_proposed": {
-      const proposal: MergeProposal = { worker: ev.worker, name: ev.name, branch: ev.branch, into: ev.into, summary: ev.summary, commits: ev.commits, files: ev.files, uncommitted: ev.uncommitted, loose: ev.loose, status: "open", problem: null, attempts: 0 };
+      const proposal: MergeProposal = { worker: ev.worker, name: ev.name, branch: ev.branch, into: ev.into, summary: ev.summary, commits: ev.commits, files: ev.files, uncommitted: ev.uncommitted, loose: ev.loose, status: "open", problem: null, attempts: 0, at: Date.now() };
       return { ...state, proposals: [...state.proposals.filter((p) => p.worker !== ev.worker), proposal] };
     }
     case "merge_resolved":

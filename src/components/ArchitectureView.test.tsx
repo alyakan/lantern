@@ -141,6 +141,18 @@ describe("the Map tab", () => {
     expect(world.style.transform).not.toBe(before);
   });
 
+  it("eases the zoom and Fit buttons like the canvas does, and leaves a gesture to follow the pointer", () => {
+    render(<ArchitectureTab map={map} current={[]} pageNames={names} onOpenPage={() => {}} />);
+    const world = document.querySelector(".pz-world") as HTMLElement;
+    expect(world.classList.contains("animating")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(world.classList.contains("animating")).toBe(true);
+    fireEvent.wheel(document.querySelector(".pz-surface")!, { deltaX: 0, deltaY: 20 });
+    expect(world.classList.contains("animating")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Fit" }));
+    expect(world.classList.contains("animating")).toBe(true);
+  });
+
   it("draws every box as a button, says what the change does to it, and lights the part on screen", () => {
     const { container } = render(<ArchitectureTab map={map} current={["authSvc"]} pageNames={names} onOpenPage={() => {}} />);
     expect(screen.getByText("auth behind a gateway")).toBeInTheDocument();

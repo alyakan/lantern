@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bounds, centerOn, clampZoom, firstBox, fitView, GAP, MAIN_SIZE, MAX_ZOOM, MIN_NODE, MIN_ZOOM, moveBox, overlaps, panBy, placeWorker, resizeBox, SUMMARY_ZOOM, tether, toScreen, toWorld, WORKER_SIZE, zoomAt, type Box, type View } from "./canvas";
+import { inSummary, bounds, centerOn, clampZoom, firstBox, fitView, GAP, MAIN_SIZE, MAX_ZOOM, MIN_NODE, MIN_ZOOM, moveBox, overlaps, panBy, placeWorker, resizeBox, SUMMARY_ZOOM, tether, toScreen, toWorld, WORKER_SIZE, zoomAt, type Box, type View } from "./canvas";
 
 const view: View = { x: 100, y: 50, zoom: 0.5 };
 
@@ -149,5 +149,15 @@ describe("moving and resizing", () => {
   it("resizes from the corner and never below the minimum", () => {
     expect(resizeBox({ x: 0, y: 0, w: 400, h: 400 }, 100, 50, 1)).toEqual({ x: 0, y: 0, w: 500, h: 450 });
     expect(resizeBox({ x: 0, y: 0, w: 400, h: 400 }, -9999, -9999, 1)).toEqual({ x: 0, y: 0, ...MIN_NODE });
+  });
+});
+
+describe("inSummary", () => {
+  it("turns agents into cards below 0.48 and back into chats above 0.52, and leaves them as they were in between", () => {
+    expect(inSummary(false, 0.47)).toBe(true);
+    expect(inSummary(false, 0.5)).toBe(false);
+    expect(inSummary(true, 0.5)).toBe(true);
+    expect(inSummary(true, 0.53)).toBe(false);
+    expect(inSummary(false, 1)).toBe(false);
   });
 });

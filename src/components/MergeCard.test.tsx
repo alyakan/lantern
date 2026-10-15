@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { NodeActionsContext, type NodeActions } from "../lib/canvasContext";
 import type { MergeProposal } from "../store";
@@ -95,6 +95,22 @@ describe("the merge card", () => {
     show({ ...proposal, status: "declined", problem: "lantern/login-form has commits it didn't have when the merge was proposed." });
     expect(screen.getByRole("status").textContent).toBe("Not merged: lantern/login-form. lantern/login-form has commits it didn't have when the merge was proposed. The main agent can ask again.");
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("rings a card that has just arrived, and not one drawn again later", () => {
+    const { container } = render(
+      <NodeActionsContext.Provider value={actions()}>
+        <MergeCard proposal={{ ...proposal, at: Date.now() }} />
+      </NodeActionsContext.Provider>,
+    );
+    expect(container.querySelector(".merge-card")).toHaveClass("arrive");
+    cleanup();
+    const old = render(
+      <NodeActionsContext.Provider value={actions()}>
+        <MergeCard proposal={{ ...proposal, at: Date.now() - 60_000 }} />
+      </NodeActionsContext.Provider>,
+    );
+    expect(old.container.querySelector(".merge-card")).not.toHaveClass("arrive");
   });
 
   it("says the user's own not-yet as a quiet line", () => {

@@ -11,6 +11,7 @@ import {
   panBy,
   placeWorker,
   resizeBox,
+  inSummary,
   SUMMARY_ZOOM,
   tether,
   zoomAt,
@@ -41,9 +42,11 @@ export interface CanvasLayout {
   collapsed: Record<string, boolean>;
   /** Agents back to front. */
   order: string[];
+  /** Agents already drawn on the canvas: one not in here is new, and arrives. */
+  seen: Set<string>;
 }
 
-export const newLayout = (): CanvasLayout => ({ boxes: {}, view: null, touched: false, collapsed: {}, order: [] });
+export const newLayout = (): CanvasLayout => ({ boxes: {}, view: null, touched: false, collapsed: {}, order: [], seen: new Set() });
 
 /** Gives every agent a place (new ones go beside their main agent, in free space) and forgets agents that are gone. */
 export function placeNodes(layout: CanvasLayout, nodes: { slot: string; role: "main" | "worker"; parent: string | null }[]): void {
@@ -68,7 +71,7 @@ export function placeNodes(layout: CanvasLayout, nodes: { slot: string; role: "m
 const COLLAPSED_HEIGHT = 52;
 /** Zoomed out into cards, a title bar is drawn at a size that reads on screen (see `.canvas.summary .node-head`), so a folded card is that tall in the canvas's own units. */
 const SUMMARY_HEAD = 40;
-const foldedHeight = (zoom: number) => (zoom < SUMMARY_ZOOM ? SUMMARY_HEAD / zoom : COLLAPSED_HEIGHT);
+const foldedHeight = (summary: boolean, zoom: number) => (summary ? SUMMARY_HEAD / zoom : COLLAPSED_HEIGHT);
 /** Room the agent menu needs, so one opened near an edge is moved in. */
 const MENU_SIZE = { w: 270, h: 120 };
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : "That didn't work.");
@@ -99,6 +102,8 @@ interface FrameProps {
   /** Zoomed out too far to read a chat: a card with the agent's latest words instead. */
   summary: boolean;
   collapsed: boolean;
+  /** It was not on the canvas before: it fades and grows in. */
+  fresh: boolean;
   onGrab: (e: ReactPointerEvent<HTMLElement>, slot: string, kind: "move" | "resize") => void;
   onDrag: (e: ReactPointerEvent<HTMLElement>) => void;
   onRelease: (e: ReactPointerEvent<HTMLElement>) => void;
@@ -124,7 +129,7 @@ function SummaryBody({ slot }: { slot: string }) {
   );
 }
 
-const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, focused, summary, collapsed, onGrab, onDrag, onRelease, onToggle, onOpen, onPress, onMenu, onMore }: FrameProps) {
+const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, focused, summary, collapsed, fresh, onGrab, onDrag, onRelease, onToggle, onOpen, onPress, onMenu, onMore }: FrameProps) {
   const state = useChatState(slot);
   const owner = useChatState(parent ?? slot);
   const status: NodeStatus = state ? nodeStatus(state) : "ended";
@@ -135,7 +140,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
   const spent = state ? usage(totalCost(state), totalTokens(state)) : "";
   return (
     <section
-      className={`canvas-node ${role} ${status}${ready ? " ready" : ""}${focused ? " focused" : ""}${folded ? " folded" : ""}`}
+      className={`canvas-node ${role} ${status}${ready ? " ready" : ""}${focused ? " focused" : ""}${folded ? " folded" : ""}${fresh ? " enter" : ""}`}
       data-node={slot}
       aria-label={`${role === "main" ? "Main agent" : "Worker"} ${name}, ${label}`}
       style={{ transform: `translate(${box.x}px, ${box.y}px)`, width: box.w, height: folded ? (summary ? `calc(${SUMMARY_HEAD}px / var(--zoom))` : COLLAPSED_HEIGHT) : box.h, zIndex: z }}
@@ -179,7 +184,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
         </button>
       </header>
       {!folded && (
-        <div className="node-body" title={summary ? "Click to zoom in on this agent" : undefined}>
+        <div key={summary ? "card" : "chat"} className="node-body" title={summary ? "Click to zoom in on this agent" : undefined}>
           {summary ? <SummaryBody slot={slot} /> : <NodeBody slot={slot} parent={parent} />}
         </div>
       )}
@@ -189,10 +194,15 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
 });
 
 /** A tether from a main agent to one of its workers: it flows while the worker works, and pulses when it needs you. */
-const TetherLine = memo(function TetherLine({ slot, d }: { slot: string; d: string }) {
+const TetherLine = memo(function TetherLine({ slot, d, fresh }: { slot: string; d: string; fresh: boolean }) {
   const state = useChatState(slot);
   const status: NodeStatus = state ? nodeStatus(state) : "ended";
-  return <path className={`tether ${status}`} data-tether={slot} d={d} />;
+  // The fade is on a group of its own: the line's own animation (flowing, pulsing) is its status's.
+  return (
+    <g className={fresh ? "tether-enter" : undefined}>
+      <path className={`tether ${status}`} data-tether={slot} d={d} />
+    </g>
+  );
 });
 
 /**
@@ -280,10 +290,18 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
 }
 
 function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onShow, main }: { zoom: number; attention: number; nodes: OrchestraNode[]; onZoom: (factor: number) => void; onFit: () => void; onNext: () => void; onGoTo: (slot: string) => void; onShow: (slot: string) => void; main: string | undefined }) {
+  // One ring each time the count goes up (not when the canvas opens with some waiting already).
+  const before = useRef(attention);
+  const [rung, setRung] = useState(0);
+  useEffect(() => {
+    if (attention > before.current) setRung((n) => n + 1);
+    before.current = attention;
+  }, [attention]);
   return (
     <>
       {attention > 0 && (
         <button className="canvas-attention" onClick={onNext} title="Go to the next agent waiting for you">
+          {rung > 0 && <span key={rung} className="canvas-attention-ring" aria-hidden />}
           <span className="node-dot waiting" aria-hidden />
           {attention === 1 ? "1 agent needs you" : `${attention} agents need you`}
         </button>
@@ -362,12 +380,18 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   const paintTethersRef = useRef<() => void>(() => {});
   const [zoomPct, setZoomPct] = useState(view.current.zoom);
   const [summary, setSummary] = useState(view.current.zoom < SUMMARY_ZOOM);
+  const summaryRef = useRef(summary);
   const nextAttention = useRef(0);
   const actions = useNodeActions();
 
   // Hidden agents keep their place (so one comes back where it was) but are not drawn, tethered or framed.
   placeNodes(layout, nodes);
   const visible = nodes.filter((n) => !n.hidden);
+  // Agents not on the canvas before this render arrive with a little motion; they are marked as drawn once it has been.
+  const arriving = new Set(visible.map((n) => n.slot).filter((s) => !layout.seen.has(s)));
+  useEffect(() => {
+    for (const n of visible) layout.seen.add(n.slot);
+  });
   const shownSlots = useRef<string[]>([]);
   shownSlots.current = visible.map((n) => n.slot);
 
@@ -387,10 +411,12 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       vp.style.setProperty("--vx", `${v.x}px`);
       vp.style.setProperty("--vy", `${v.y}px`);
     }
+    // Cards below SUMMARY_ENTER, chats again above SUMMARY_EXIT; in between, whichever it was.
+    summaryRef.current = inSummary(summaryRef.current, v.zoom);
     // A folded card's height depends on the zoom once it is a card, and its tether meets it.
     if (Object.values(layout.collapsed).some(Boolean)) paintTethersRef.current();
     // Only these two things in React depend on the zoom: the label, and whether agents are cards. Both are cheap.
-    setSummary((prev) => (prev === v.zoom < SUMMARY_ZOOM ? prev : v.zoom < SUMMARY_ZOOM));
+    setSummary(summaryRef.current);
     setZoomPct((prev) => (Math.round(prev * 100) === Math.round(v.zoom * 100) ? prev : v.zoom));
   }, [layout]);
 
@@ -518,7 +544,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   /** An agent as the canvas shows it: a folded one is only its title bar tall, and its tether meets that. */
   const shown = (slot: string, zoom = view.current.zoom): Box => {
     const b = layout.boxes[slot];
-    return layout.collapsed[slot] ? { ...b, h: foldedHeight(zoom) } : b;
+    return layout.collapsed[slot] ? { ...b, h: foldedHeight(summaryRef.current, zoom) } : b;
   };
   const frame = useRef(0);
   const nodesNow = useRef(nodes);
@@ -531,7 +557,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     for (const n of nodesNow.current) {
       const line = n.parent && layout.boxes[n.parent] && layout.boxes[n.slot] ? w.querySelector(`[data-tether="${n.slot}"]`) : null;
       if (!line) continue;
-      const at = (slot: string): Box => (layout.collapsed[slot] ? { ...layout.boxes[slot], h: foldedHeight(zoom) } : layout.boxes[slot]);
+      const at = (slot: string): Box => (layout.collapsed[slot] ? { ...layout.boxes[slot], h: foldedHeight(summaryRef.current, zoom) } : layout.boxes[slot]);
       line.setAttribute("d", tether(at(n.parent!), at(n.slot)).d);
     }
   }, [layout]);
@@ -570,6 +596,8 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     e.currentTarget.setPointerCapture?.(e.pointerId);
     // The zoom is taken now and kept for the whole drag: the movement is measured from here, in screen pixels, so a zoom
     // that changes meanwhile (a wheel tick, an agent arriving and the view re-framing) must not change what they mean.
+    // A card's height eases when it folds; while it is being dragged to a size it must follow the pointer.
+    if (kind === "resize") viewport.current?.classList.add("resizing");
     drag.current = { id: e.pointerId, kind, slot, x: e.clientX, y: e.clientY, box: { ...layout.boxes[slot] }, zoom: view.current.zoom };
   }, [layout]);
 
@@ -585,6 +613,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   const onRelease = useCallback((e: ReactPointerEvent<HTMLElement>) => {
     if (drag.current?.id !== e.pointerId) return;
     drag.current = null;
+    viewport.current?.classList.remove("resizing");
     if (frame.current) cancelAnimationFrame(frame.current);
     paint();
     redraw();
@@ -725,7 +754,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
           {visible.map((n) => {
             const parent = n.parent ? layout.boxes[n.parent] : undefined;
             const box = layout.boxes[n.slot];
-            return parent && box ? <TetherLine key={n.slot} slot={n.slot} d={tether(shown(n.parent!), shown(n.slot)).d} /> : null;
+            return parent && box ? <TetherLine key={n.slot} slot={n.slot} d={tether(shown(n.parent!), shown(n.slot)).d} fresh={arriving.has(n.slot)} /> : null;
           })}
         </svg>
         {visible.map((n) => (
@@ -741,6 +770,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
             focused={n.slot === activeSlot}
             summary={summary}
             collapsed={!!layout.collapsed[n.slot]}
+            fresh={arriving.has(n.slot)}
             onGrab={onGrab}
             onDrag={onDrag}
             onRelease={onRelease}

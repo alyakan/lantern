@@ -69,17 +69,22 @@ describe("NetworkTab", () => {
   });
 
   it("removes a watch from its chip, and offers to put it back for a few seconds", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Plain fake timers, and the promises flushed by hand: nothing here waits on a real clock that a slow runner could lose.
+    vi.useFakeTimers();
     try {
       render(<NetworkTab folder="/p" view={view()} onSummarize={null} />);
-      fireEvent.click(screen.getByRole("button", { name: "Stop watching Checklists" }));
+      const remove = async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Stop watching Checklists" }));
+        await act(async () => {});
+      };
+      await remove();
       expect(api.networkUnwatch).toHaveBeenCalledWith("/p", "Checklists");
-      fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+      fireEvent.click(screen.getByRole("button", { name: "Undo" }));
       expect(api.networkRewatch).toHaveBeenCalledWith("/p", "Checklists", "GET", "/v1/checklists");
       expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
       // Left alone, the offer goes.
-      fireEvent.click(screen.getByRole("button", { name: "Stop watching Checklists" }));
-      await screen.findByRole("button", { name: "Undo" });
+      await remove();
+      expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
       act(() => void vi.advanceTimersByTime(5100));
       expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
     } finally {
@@ -101,6 +106,21 @@ describe("NetworkTab", () => {
     await waitFor(() => expect(api.networkResponse).toHaveBeenLastCalledWith("/p", "two"));
     expect(screen.queryByText(/new ↑/)).toBeNull();
     expect(screen.getByRole("button", { name: /404 GET api\.x\/v1\/checklists\/two/ }).getAttribute("aria-current")).toBe("true");
+  });
+
+  it("flashes the rows that came in since, once, and not the ones that were there", () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(<NetworkTab folder="/p" view={view({ items: [item("one")] })} onSummarize={null} />);
+      const rows = () => [...document.querySelectorAll("button.network-row")];
+      expect(rows().map((r) => r.classList.contains("fresh"))).toEqual([false]);
+      rerender(<NetworkTab folder="/p" view={view({ items: [item("two", { tx: tx("two", { status: 404 }) }), item("one")] })} onSummarize={null} />);
+      expect(rows().map((r) => r.classList.contains("fresh"))).toEqual([true, false]);
+      act(() => void vi.advanceTimersByTime(1400));
+      expect(rows().map((r) => r.classList.contains("fresh"))).toEqual([false, false]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows a link error under the status, not only in a tooltip", () => {
