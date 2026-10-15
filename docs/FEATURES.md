@@ -262,12 +262,27 @@ A few things to know:
 
 ![Settings, on the General tab](images/settings.png)
 
-- **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, the theme (follow macOS, light or dark), the text size, and **Agents running at once** for teams.
+- **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, the theme (see below), the text size, and **Agents running at once** for teams.
 - **Harness**: the model presets (who is the Lead, the advisor and the subagents) that the Models chip offers.
 - **MCP servers**: your servers with their status. Log in, reconnect, turn off, add, edit or remove them (through Claude Code's own settings). A secret never goes into the project's committed `.mcp.json`.
 - **Skills**: the project's and plugins' skills, each with a preview of its file.
 - **Permissions**: the rules you saved with **Always allow…**, by folder or chat.
 - **Updates**: Lantern updates itself. When a new release is out, "Update ready" appears under the chat box; click it to restart onto the new version, or leave it and it installs when you quit. **Lantern ▸ Check for Updates…** looks right now.
+
+### Themes
+
+Settings ▸ General ▸ Theme picks how Lantern looks, with a small preview of each:
+
+![The theme picker in Settings, with Terminal and Nord among the choices](images/themes-picker.png)
+
+- **Follow macOS**, **Light** and **Dark**, as before.
+- **Terminal**: near-black with phosphor-green text, amber for "working", monospace everywhere, square corners and thin lines instead of shadows.
+- **Solarized Dark**, **Nord** and **Paper** (a warm light theme): colours only.
+- **Custom**: **Customize…** opens six colour pickers (background, panels, text, secondary text, accent and lines), a **Monospace everywhere** switch and a **Rounded or Square** corners choice. It starts from the theme you have now, the app changes as you pick, and it warns you when your text colour would be hard to read on your background (under 4.5:1). The rest of the colours are worked out from your six.
+
+The code editor and diffs, diagrams and shell output follow the theme, and a chosen theme is on before the first screen is drawn, so nothing flashes the default.
+
+![Terminal: a chat with a diff, in green on near-black](images/theme-terminal.png)
 
 ## Keyboard shortcuts and the command palette
 
