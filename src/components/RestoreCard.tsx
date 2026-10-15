@@ -15,7 +15,7 @@ export function RestoreCard({ chats, folder, onRestoreAll, onRestore, onDismiss 
   onDismiss: () => void;
 }) {
   return (
-    <section className="steps-intro restore-card" aria-label="Chats from last time">
+    <section className="steps-intro restore-card" aria-label="Restore chats">
       <div className="steps-intro-head">
         <span className="steps-intro-title">
           <ClockIcon />

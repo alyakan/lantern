@@ -195,6 +195,23 @@ describe("reducer", () => {
     expect(s.items[0]).toMatchObject({ type: "user", text: "map it", switchedTo: "architecture" });
   });
 
+  it("a message replayed from a Learn (or explaining) chat is Build with Explain as you go on, and keeps it when sent", () => {
+    const old = ev(initialState, { kind: "user_text", text: "[Lantern: this chat switched to Learn. The user picked it. How Learn works:\n\nLearn: …\n\n(end of Lantern's note)]\n\nteach me" });
+    expect(old.items[0]).toMatchObject({ type: "user", text: "teach me", switchedTo: "build", explained: true });
+    const noted = ev(initialState, { kind: "user_text", text: "[Lantern: this chat switched to Debug, explaining as you go. The user picked it.]\n\nit crashes" });
+    expect(noted.items[0]).toMatchObject({ switchedTo: "debug", explained: true });
+    const plain = ev(initialState, { kind: "user_text", text: "[Lantern: this chat switched to Debug. The user picked it.]\n\nit crashes" });
+    expect(plain.items[0]).not.toHaveProperty("explained");
+    // Sent from the box: the pick (and its option) is used up with the message.
+    let t = reducer(initialState, { type: "flavour_picked", flavour: "build", explain: true });
+    expect(t).toMatchObject({ flavourPick: "build", explainPick: true });
+    t = reducer(t, { type: "user_sent", text: "go", switchedTo: "build", explained: true });
+    expect(t).toMatchObject({ flavourPick: null, explainPick: false });
+    expect(t.items[0]).toMatchObject({ switchedTo: "build", explained: true });
+    // Taking the pick back takes the option with it.
+    expect(reducer(reducer(initialState, { type: "flavour_picked", flavour: "build", explain: true }), { type: "flavour_picked", flavour: null })).toMatchObject({ flavourPick: null, explainPick: false });
+  });
+
   it("turn_done clears a retry banner", () => {
     let s = ev(running, { kind: "retrying", attempt: 1, max_retries: 10, error: "overloaded" });
     expect(s.banner?.kind).toBe("info");

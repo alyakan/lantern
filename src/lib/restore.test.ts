@@ -22,7 +22,7 @@ describe("chatsToSave", () => {
       { sessionId: "a", folder: "/p", title: "Retry flaky uploads", draft: "", active: false },
       { sessionId: "b", folder: "/other", title: "Fix b", draft: "half a prompt", active: true },
       // Typed but never sent: no conversation to resume, just the folder and the text.
-      { sessionId: null, folder: "/p", title: "New session", draft: "never sent", active: false },
+      { sessionId: null, folder: "/p", title: "New chat", draft: "never sent", active: false },
     ]);
   });
 });

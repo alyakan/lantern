@@ -87,7 +87,7 @@ export function FolderMenu({ folder, recent, onPick, onBrowse, onClose, onKeyDow
                 <button role="menuitem" className="menu-row" title={m.old} onClick={() => choose(() => relocate.onRelocate(m))}>
                   <FolderIcon />
                   <span className="menu-row-title">
-                    {`${basename(m.old)} was moved? Bring its sessions to ${m.suggested ? basename(m.suggested) : "a folder"}…`}
+                    {`${basename(m.old)} was moved? Bring its chats to ${m.suggested ? basename(m.suggested) : "a folder"}…`}
                     <span className="menu-row-path">{m.suggested ?? `Was in ${parentOf(m.old)}`}</span>
                   </span>
                 </button>
@@ -127,7 +127,7 @@ export function FolderMenu({ folder, recent, onPick, onBrowse, onClose, onKeyDow
       </button>
       {relocate && (
         <button role="menuitem" className="menu-row" onClick={() => choose(() => relocate.onRelocate(null))}>
-          <span className="menu-row-title">Bring old sessions here…</span>
+          <span className="menu-row-title">Bring old chats here…</span>
         </button>
       )}
     </div>

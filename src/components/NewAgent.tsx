@@ -36,7 +36,7 @@ export function NewAgent({ main }: { main: string }) {
   const submit = () => {
     if (busy) return;
     if (!form.task.trim()) {
-      setProblem("Say what the worker should do.");
+      setProblem("Say what the agent should do.");
       task.current?.focus();
       return;
     }
@@ -56,7 +56,7 @@ export function NewAgent({ main }: { main: string }) {
 
   return (
     <div className="canvas-team" ref={box}>
-      <button ref={button} className="canvas-fit" aria-expanded={open} aria-haspopup="dialog" aria-controls={open ? id : undefined} title="Start a worker yourself" onClick={() => setOpen(!open)}>
+      <button ref={button} className="canvas-fit" aria-expanded={open} aria-haspopup="dialog" aria-controls={open ? id : undefined} title="Start an agent yourself" onClick={() => setOpen(!open)}>
         + Agent
       </button>
       {open && (

@@ -11,11 +11,11 @@ import type { PaletteEntry } from "./palette";
  * ⌘K starts its chords), so the action doesn't run.
  */
 const CATALOGUE = [
-  { id: "new-session", title: "New Session", group: "File", key: "n", menu: true, native: true },
+  { id: "new-session", title: "New Chat", group: "File", key: "n", menu: true, native: true },
   { id: "open-folder", title: "Open Folder…", group: "File", key: "o", menu: true, native: true },
   // In the palette and the shortcut sheet only: no native menu item, so the webview's keydown runs it.
-  { id: "relocate-folder", title: "Bring old sessions here…", group: "File", key: "r", shift: true },
-  // Only while there is an orchestra: switches between its canvas and the chat view.
+  { id: "relocate-folder", title: "Bring old chats here…", group: "File", key: "r", shift: true },
+  // Only while there is a team: switches between its canvas and the chat view.
   { id: "toggle-canvas", title: "Switch Canvas and Chat View", group: "View", key: "c", shift: true },
   // Only while the canvas has focus (see Canvas.tsx).
   { id: "canvas-zoom-in", title: "Zoom In on the Canvas", group: "View", key: "=" },
@@ -23,13 +23,20 @@ const CATALOGUE = [
   { id: "canvas-fit", title: "Fit the Canvas to Everyone", group: "View", key: "0" },
   { id: "canvas-next-agent", title: "Next Agent on the Canvas", group: "View", key: "]" },
   { id: "canvas-previous-agent", title: "Previous Agent on the Canvas", group: "View", key: "[" },
-  { id: "session-history", title: "Session History", group: "View", key: "k", menu: true, skipInEditor: true },
+  { id: "session-history", title: "Chat History", group: "View", key: "k", menu: true, skipInEditor: true },
   { id: "find-file", title: "Find File…", group: "Search", key: "p", menu: true, native: true },
   { id: "search-files", title: "Search in Files…", group: "Search", key: "f", shift: true, menu: true, native: true },
   { id: "find-in-file", title: "Find in File", group: "Search", key: "f", menu: true },
-  { id: "toggle-changes", title: "Toggle Changes Pane", group: "View", key: "\\", menu: true, native: true },
+  { id: "toggle-changes", title: "Show/Hide Side Panel", group: "View", key: "\\", menu: true, native: true },
   { id: "command-palette", title: "Command Palette…", group: "View", key: "p", shift: true, menu: true, native: true },
   { id: "settings", title: "Settings…", group: "View", key: ",", menu: true, native: true },
+  // Ways to start work (the Work menu): Build, Debug and Design are Step by step in that flavour, Review a PR lists the
+  // open pull requests, and Start a team makes a chat a team's Lead.
+  { id: "work-build", title: "Build", group: "Work", menu: true },
+  { id: "work-review-pr", title: "Review a PR…", group: "Work", menu: true },
+  { id: "work-debug", title: "Debug", group: "Work", menu: true },
+  { id: "work-design", title: "Design", group: "Work", menu: true },
+  { id: "work-team", title: "Start a Team", group: "Work", key: "n", shift: true, menu: true, native: true },
   { id: "keyboard-shortcuts", title: "Keyboard Shortcuts", group: "Help", key: "/", menu: true, skipInEditor: true },
   { id: "report-bug", title: "Report a Bug…", group: "Help", menu: true },
   { id: "focus-input", title: "Focus the Message Box", group: "Chat", key: "l" },
@@ -39,7 +46,7 @@ const CATALOGUE = [
 /** The catalogue, typed as plain entries (the ids are checked against the literal list above). */
 export const ACTIONS: readonly ActionDef[] = CATALOGUE;
 
-export type ActionGroup = "File" | "View" | "Search" | "Chat" | "Help" | "Mode" | "Harness" | "Settings";
+export type ActionGroup = "File" | "View" | "Search" | "Chat" | "Work" | "Help" | "Mode" | "Harness" | "Settings";
 
 export interface ActionDef {
   id: string;

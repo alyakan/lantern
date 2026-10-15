@@ -10,10 +10,11 @@ export interface FlavourGuide {
   headings: string[];
 }
 
-/** The guides by flavour, as the backend gives them. */
-export type Guides = Partial<Record<Flavour, FlavourGuide>>;
+/** The guides by flavour, as the backend gives them, and the Explain as you go option's under "explain". */
+export type Guides = Partial<Record<Flavour | "explain", FlavourGuide>>;
 
-export const guidesByFlavour = (list: FlavourGuide[]): Guides => Object.fromEntries(list.map((g) => [g.flavour.toLowerCase(), g]));
+/** The backend names Design's section by its name; the flavour's id is the older "architecture". */
+export const guidesByFlavour = (list: FlavourGuide[]): Guides => Object.fromEntries(list.map((g) => [g.flavour.toLowerCase() === "design" ? "architecture" : g.flavour.toLowerCase(), g]));
 
 /**
  * The latest reply, when it is set like a page (its first line a heading, or all bold) but isn't one of the flavour's

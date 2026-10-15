@@ -61,7 +61,7 @@ describe("isBusy / chatTitle", () => {
   });
 
   it("names a chat by its first prompt", () => {
-    expect(chatTitle(ready)).toBe("New session");
+    expect(chatTitle(ready)).toBe("New chat");
     expect(chatTitle({ ...ready, items: [{ type: "user", id: "u1", text: "Fix the login\nredirect" }] })).toBe("Fix the login");
     // Once a title is made for its session, that's the name.
     const titled = { ...ready, sessionId: "abc", items: [{ type: "user" as const, id: "u1", text: "Fix the login redirect after the OAuth callback fails" }] };

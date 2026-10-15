@@ -4,8 +4,8 @@ import { usePopover } from "../lib/usePopover";
 import { SUBAGENTS_LABEL, type Subagents } from "../lib/workflow";
 
 const ROWS: { value: Subagents; hint: string }[] = [
-  { value: "canvas", hint: "The Lead's helpers become agents with a window, a chat and, if they write, a branch of their own" },
-  { value: "inline", hint: "They run inside the Lead's chat, shown only in its Agents tab" },
+  { value: "canvas", hint: "The Lead's subagents become agents with a window, a chat and, if they write, a branch of their own" },
+  { value: "inline", hint: "They run inside the Lead's chat, shown only in its Activity tab" },
 ];
 
 /**
@@ -20,7 +20,7 @@ export function SubagentsMenu({ main }: { main: string }) {
   if (!lead) return null;
   return (
     <div className="canvas-team" ref={box}>
-      <button ref={button} className="canvas-fit" aria-expanded={open} aria-haspopup="menu" aria-controls={open ? id : undefined} title="Where the Lead's built-in helpers run: as agents on the canvas, or inline in its chat" onClick={() => setOpen(!open)}>
+      <button ref={button} className="canvas-fit" aria-expanded={open} aria-haspopup="menu" aria-controls={open ? id : undefined} title="Where the Lead's built-in subagents run: as agents on the canvas, or inline in its chat" onClick={() => setOpen(!open)}>
         Subagents: {SUBAGENTS_LABEL[lead.subagents]}
       </button>
       {open && (

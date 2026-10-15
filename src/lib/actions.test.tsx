@@ -40,6 +40,13 @@ describe("which action a keystroke names", () => {
     expect(actionForKey(key("\\"))?.id).toBe("toggle-changes");
   });
 
+  it("has Start a Team on ⇧⌘N, next to New Chat on ⌘N, and the side panel's toggle on ⌘\\", () => {
+    expect(actionForKey(key("n", { shiftKey: true }))?.id).toBe("work-team");
+    expect(ACTIONS.find((d) => d.id === "work-team")).toMatchObject({ title: "Start a Team", group: "Work", menu: true, native: true });
+    expect(ACTIONS.find((d) => d.id === "new-session")?.title).toBe("New Chat");
+    expect(ACTIONS.find((d) => d.id === "toggle-changes")?.title).toBe("Show/Hide Side Panel");
+  });
+
   it("gives every shortcut to one action only", () => {
     const seen = new Map<string, string>();
     for (const def of ACTIONS) {
@@ -48,6 +55,21 @@ describe("which action a keystroke names", () => {
       expect(seen.get(k), `${def.id} and ${seen.get(k)} share ${k}`).toBeUndefined();
       seen.set(k, def.id);
     }
+  });
+});
+
+describe("the Work menu", () => {
+  it("lists Build, Review a PR…, Debug, Design and Start a Team, in the menu bar and the palette's registry", () => {
+    const work = ACTIONS.filter((d) => d.group === "Work");
+    expect(work.map((d) => d.title)).toEqual(["Build", "Review a PR…", "Debug", "Design", "Start a Team"]);
+    expect(work.every((d) => d.menu)).toBe(true);
+    // Each is in the native menu's Work submenu too.
+    for (const d of work) expect(menuSource, d.id).toContain(`("${d.id}", "${d.title === "Start a Team" ? "Start a Team" : d.title}"`);
+  });
+
+  it("is offered by the palette only while an owner has each enabled", () => {
+    render(<Owner id="work-build" run={() => {}} />);
+    expect(availableActions().map((e) => e.title)).toEqual(["Build"]);
   });
 });
 

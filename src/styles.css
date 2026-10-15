@@ -1113,6 +1113,7 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 /* Step by step's flavour, in the header: what it's doing, picked from its menu. It flashes when the flavour changes. */
 .flavour-anchor { position: relative; flex: none; }
 .flavour-badge { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px 0 11px; border: 0.5px solid var(--glass-line); border-radius: 999px; background: var(--seg-thumb); color: var(--text); font-size: calc(12.5px * var(--font-scale)); font-weight: 600; box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.12); animation: flavour-in 0.9s ease-out; }
+.flavour-badge .flavour-explain { font-size: calc(11px * var(--font-scale)); font-weight: 500; color: var(--text-2); }
 .flavour-badge.none { background: var(--glass); color: var(--text-2); font-weight: 500; box-shadow: none; animation: none; }
 .flavour-badge:hover:not(:disabled) { background: var(--bg-hover); }
 .flavour-badge svg { color: var(--text-2); }
@@ -1864,3 +1865,11 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
   .node-dot { transition: none; }
   .pz-world.animating { transition: none; }
 }
+
+/* The Review a PR picker: a row per open pull request. */
+.pr-list { max-height: 260px; overflow-y: auto; }
+.pr-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; }
+.pr-number { flex: none; min-width: 3.2em; color: var(--muted); font-variant-numeric: tabular-nums; }
+.pr-number-field { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.pr-number-field input { width: 7em; }
+.start-explain { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: calc(12.5px * var(--font-scale)); color: var(--text); }

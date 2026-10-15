@@ -31,7 +31,7 @@ export function MergeCard({ proposal }: { proposal: MergeProposal }) {
     // The user's own "not yet" stays until the lead proposes again; a proposal that changed under them says why it went.
     return (
       <div className="merge-card quiet" role="status">
-        {proposal.problem ? `Not merged: ${proposal.branch}. ${proposal.problem} The main agent can ask again.` : "You said not yet; the lead was told."}
+        {proposal.problem ? `Not merged: ${proposal.branch}. ${proposal.problem} The Lead can ask again.` : "You said not yet; the lead was told."}
       </div>
     );
   }
@@ -99,7 +99,7 @@ export function MergeCard({ proposal }: { proposal: MergeProposal }) {
       )}
       {proposal.summary && (
         <p className="merge-summary">
-          <span className="merge-from">The main agent says:</span> {proposal.summary}
+          <span className="merge-from">The Lead says:</span> {proposal.summary}
         </p>
       )}
       {proposal.loose.length > 0 && (

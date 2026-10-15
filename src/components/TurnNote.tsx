@@ -16,7 +16,7 @@ export function TurnNote({ item, onRetry }: { item: TurnItem; onRetry?: () => vo
       {item.isError && <div className="error">{item.result ?? "The turn ended with an error."}</div>}
       {item.denied > 0 && <div className="muted">{`${item.denied} action${item.denied === 1 ? "" : "s"} denied`}</div>}
       {usage && (
-        <div className="turn-usage muted" title="Tokens count input (cached input included) and output. The cost is what this turn added to the session.">
+        <div className="turn-usage muted" title="Tokens count input (cached input included) and output. The cost is what this turn added to the chat.">
           {usage}
         </div>
       )}

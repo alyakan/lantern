@@ -57,25 +57,25 @@ export function HistoryMenu({ sessions, currentId, onOpen, onClose, open = [], o
   const [copied, setCopied] = useState<string | null>(null);
 
   return (
-    <div className="menu history-menu" role="dialog" aria-label="Session history">
+    <div className="menu history-menu" role="dialog" aria-label="Chat history">
       <input
         className="menu-search"
         autoCapitalize="off"
         autoCorrect="off"
         autoFocus
-        placeholder="Search sessions"
+        placeholder="Search chats"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => e.key === "Escape" && onClose()}
       />
       {oldSessions && oldSessions.count > 0 && (
         <button className="menu-row bring-old" onClick={oldSessions.onOpen}>
-          <span className="menu-row-title">{`${oldSessions.count} ${oldSessions.count === 1 ? "session" : "sessions"} from before you moved this project: Bring them here`}</span>
+          <span className="menu-row-title">{`${oldSessions.count} ${oldSessions.count === 1 ? "chat" : "chats"} from before you moved this project: Bring them here`}</span>
         </button>
       )}
       {(current || shownOpen.length > 0) && (
         <>
-          <div className="menu-heading">Open</div>
+          <div className="menu-heading">Open chats</div>
           {/* Lists of buttons, not listboxes: a button can't sit inside an option, and these are Tab-through. */}
           <ul className="menu-list open-chats-list" aria-label="Open chats">
             {current && (
@@ -111,15 +111,15 @@ export function HistoryMenu({ sessions, currentId, onOpen, onClose, open = [], o
               </li>
             ))}
           </ul>
-          <div className="menu-heading">Past sessions</div>
+          <div className="menu-heading">Past chats</div>
         </>
       )}
       {shown === null ? (
         <div className="menu-empty">Loading…</div>
       ) : shown.length === 0 ? (
-        <div className="menu-empty">{q ? "No matching sessions" : "No past sessions in this folder"}</div>
+        <div className="menu-empty">{q ? "No matching chats" : "No past chats in this folder"}</div>
       ) : (
-        <ul className="menu-list" aria-label="Past sessions">
+        <ul className="menu-list" aria-label="Past chats">
           {shown.map((s) => {
             const title = names[s.id] ?? s.title;
             const pinned = !!actions?.pinned.includes(s.id);
@@ -138,7 +138,7 @@ export function HistoryMenu({ sessions, currentId, onOpen, onClose, open = [], o
                     }}
                   >
                     <input
-                      aria-label="Name for this session"
+                      aria-label="Name for this chat"
                       autoFocus
                       value={editing.text}
                       onChange={(e) => setRenaming({ id: s.id, text: e.target.value })}
@@ -176,7 +176,7 @@ export function HistoryMenu({ sessions, currentId, onOpen, onClose, open = [], o
                     </button>
                     <button
                       className="link-button"
-                      title="The command that picks this session up in a terminal"
+                      title="The command that picks this chat up in a terminal"
                       onClick={() => navigator.clipboard?.writeText(resumeCommand(actions.folder, s.id)).then(() => setCopied(s.id), () => {})}
                     >
                       {copied === s.id ? "Copied" : "Copy resume command"}

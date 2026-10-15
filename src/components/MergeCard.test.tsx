@@ -47,7 +47,7 @@ describe("the merge card", () => {
     expect(screen.getByText(/3 commits · 3 files/)).toBeTruthy();
     expect(screen.getByText("+147")).toBeTruthy();
     expect(screen.getByText("−1")).toBeTruthy();
-    expect(screen.getByText(/The main agent says:/).parentElement!.textContent).toContain("Adds the form. 6 tests pass.");
+    expect(screen.getByText(/The Lead says:/).parentElement!.textContent).toContain("Adds the form. 6 tests pass.");
   });
 
   it("lists the files only on request, and a few of many", () => {
@@ -93,7 +93,7 @@ describe("the merge card", () => {
 
   it("says why a proposal that changed under the user is gone", () => {
     show({ ...proposal, status: "declined", problem: "lantern/login-form has commits it didn't have when the merge was proposed." });
-    expect(screen.getByRole("status").textContent).toBe("Not merged: lantern/login-form. lantern/login-form has commits it didn't have when the merge was proposed. The main agent can ask again.");
+    expect(screen.getByRole("status").textContent).toBe("Not merged: lantern/login-form. lantern/login-form has commits it didn't have when the merge was proposed. The Lead can ask again.");
     expect(screen.queryByRole("button")).toBeNull();
   });
 

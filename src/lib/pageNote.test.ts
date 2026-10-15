@@ -88,12 +88,12 @@ describe("mapNote", () => {
 
 describe("the switch note", () => {
   it("carries the flavour's own instructions, brackets and all, and still reads back", () => {
-    const guide = 'Architecture: … {"nodes": [{"id": "a"}], "edges": []} …';
-    const note = flavourNote("architecture", guide);
-    expect(note).toContain("How Architecture works, from Lantern's instructions:");
+    const guide = 'Design: … {"nodes": [{"id": "a"}], "edges": []} …';
+    const note = flavourNote("architecture", { guide });
+    expect(note).toContain("How Design works, from Lantern's instructions:");
     expect(note).toContain(guide);
-    expect(readFlavourNote(withFlavourNote("architecture", "map it", guide))).toEqual({ text: "map it", flavour: "architecture" });
+    expect(readFlavourNote(withFlavourNote("architecture", "map it", { guide }))).toEqual({ text: "map it", flavour: "architecture", explain: false });
     // Without a guide (and in older chats), the short note is as it was.
-    expect(readFlavourNote(withFlavourNote("review", "go"))).toEqual({ text: "go", flavour: "review" });
+    expect(readFlavourNote(withFlavourNote("review", "go"))).toEqual({ text: "go", flavour: "review", explain: false });
   });
 });

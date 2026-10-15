@@ -190,7 +190,7 @@ pub struct Worktree {
 /// Creates a worktree for `name` under `parent` on a new branch `lantern/<name>` (numbered if that exists), starting
 /// from the commit the main checkout is on. Work not committed yet is not in it.
 pub fn add_worktree(folder: &Path, parent: &Path, name: &str, id: &str, path_env: Option<&str>) -> Result<Worktree, String> {
-    let repo = repo_root(folder, path_env).ok_or("This folder isn't in a git repository, so a worker can't get a worktree of its own.")?;
+    let repo = repo_root(folder, path_env).ok_or("This folder isn't in a git repository, so an agent can't get a worktree of its own.")?;
     let base = current_branch(&repo).filter(|b| branch_exists(&repo, b, path_env));
     let slug = self::slug(name);
     let mut branch = format!("lantern/{slug}");
@@ -476,7 +476,7 @@ pub fn is_workers_branch(branch: &str) -> bool {
 /// that isn't one of Lantern's own (see `is_workers_branch`) is never deleted: asked to, nothing is removed.
 pub fn remove_worktree(repo: &Path, root: &Path, branch: &str, delete_branch: bool, force: bool, path_env: Option<&str>) -> Result<(), String> {
     if delete_branch && !is_workers_branch(branch) {
-        return Err(format!("{branch} isn't a branch Lantern made for a worker, so Lantern won't delete it."));
+        return Err(format!("{branch} isn't a branch Lantern made for an agent, so Lantern won't delete it."));
     }
     let root_arg = root.to_string_lossy().to_string();
     let mut args = vec!["worktree", "remove"];

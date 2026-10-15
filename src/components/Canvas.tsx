@@ -148,7 +148,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
     <section
       className={`canvas-node ${role} ${status}${ready ? " ready" : ""}${focused ? " focused" : ""}${folded ? " folded" : ""}${fresh ? " enter" : ""}`}
       data-node={slot}
-      aria-label={`${role === "main" ? "Main agent" : "Worker"} ${name}, ${label}`}
+      aria-label={`${role === "main" ? name : `Agent ${name}`}, ${label}`}
       style={{ transform: `translate(${box.x}px, ${box.y}px)`, width: box.w, height: folded ? (summary ? `calc(${SUMMARY_HEAD}px / var(--zoom))` : COLLAPSED_HEIGHT) : box.h, zIndex: z }}
       onPointerDownCapture={() => onPress(slot)}
       onContextMenu={role === "worker" ? (e) => onMenu(e, slot) : undefined}
@@ -224,7 +224,7 @@ const TetherLine = memo(function TetherLine({ slot, d, fresh }: { slot: string; 
  */
 /** What "Ask for an update" asks the main agent: a status report a person can read without knowing the code. */
 export const UPDATE_REQUEST =
-  "Give me a short status report in plain language: for each worker, what it has done, what it is doing now, and anything blocked or waiting for my decision. Look at each worker's latest work first if you need to. No code unless I ask.";
+  "Give me a short status report in plain language: for each agent, what it has done, what it is doing now, and anything blocked or waiting for my decision. Look at each agent's latest work first if you need to. No code unless I ask.";
 
 function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -292,8 +292,8 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
             })}
           </ul>
           {canAsk && (
-            <button className="team-ask" onClick={askForUpdate} title="The main agent writes up where everything stands, in plain language">
-              Ask the main agent for an update
+            <button className="team-ask" onClick={askForUpdate} title="The Lead writes up where everything stands, in plain language">
+              Ask the Lead for an update
             </button>
           )}
         </div>

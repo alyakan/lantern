@@ -36,7 +36,7 @@ function setup(chats: Chats, extra: { attention?: string[]; layout?: ReturnType<
   store.set(chats.slots);
   const layout = extra.layout ?? newLayout();
   const handlers = { onFocus: vi.fn(), onOpen: vi.fn() };
-  const nodes = orchestraNodes(chats, () => "Main agent");
+  const nodes = orchestraNodes(chats, () => "Lead");
   const acts = actions(extra.actions);
   const ui = (
     <ChatStoreContext.Provider value={store}>
@@ -51,7 +51,7 @@ function setup(chats: Chats, extra: { attention?: string[]; layout?: ReturnType<
 describe("placeNodes", () => {
   it("puts the main agent first and workers beside it without overlap, and gives every agent a front-to-back place", () => {
     const layout = newLayout();
-    placeNodes(layout, orchestraNodes(team(3), () => "Main agent"));
+    placeNodes(layout, orchestraNodes(team(3), () => "Lead"));
     expect(layout.boxes.s1).toEqual({ x: 0, y: 0, ...MAIN_SIZE });
     expect(layout.boxes.w1.x).toBe(MAIN_SIZE.w + GAP);
     const boxes = Object.values(layout.boxes);
@@ -63,12 +63,12 @@ describe("placeNodes", () => {
   it("leaves agents the user moved where they put them, and forgets agents that are gone", () => {
     const layout = newLayout();
     const chats = team(2);
-    placeNodes(layout, orchestraNodes(chats, () => "Main agent"));
+    placeNodes(layout, orchestraNodes(chats, () => "Lead"));
     layout.boxes.w1 = { x: 5, y: 6, w: 400, h: 300 };
-    placeNodes(layout, orchestraNodes(chats, () => "Main agent"));
+    placeNodes(layout, orchestraNodes(chats, () => "Lead"));
     expect(layout.boxes.w1).toEqual({ x: 5, y: 6, w: 400, h: 300 });
     const fewer = chatsReducer(chats, { type: "remove", slot: "w2" });
-    placeNodes(layout, orchestraNodes(fewer, () => "Main agent"));
+    placeNodes(layout, orchestraNodes(fewer, () => "Lead"));
     expect(Object.keys(layout.boxes)).toEqual(["s1", "w1"]);
     expect(layout.order).toEqual(["s1", "w1"]);
   });
@@ -78,7 +78,7 @@ describe("placeNodes", () => {
     let chats = team(2);
     chats = chatsReducer(chats, { type: "add", slot: "s2" });
     chats = chatsReducer(chats, { type: "in", slot: "s2", action: { type: "orchestrator_set", on: true } });
-    placeNodes(layout, orchestraNodes(chats, () => "Main agent"));
+    placeNodes(layout, orchestraNodes(chats, () => "Lead"));
     const team1 = [layout.boxes.s1, layout.boxes.w1, layout.boxes.w2];
     expect(team1.every((b) => b.y + b.h < layout.boxes.s2.y)).toBe(true);
   });
@@ -94,18 +94,18 @@ describe("the canvas", () => {
   it("shows every agent with its name, role and what it is doing, and the worker's branch", () => {
     setup(team(2));
     const agents = screen.getAllByRole("region");
-    expect(agents.map((a) => a.getAttribute("aria-label"))).toEqual(["Main agent Main agent, Ready", "Worker Worker 1, Working", "Worker Worker 2, Working"]);
-    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    expect(agents.map((a) => a.getAttribute("aria-label"))).toEqual(["Lead, Ready", "Agent Worker 1, Working", "Agent Worker 2, Working"]);
+    const w1 = screen.getByLabelText(/Agent Worker 1/);
     expect(within(w1).getByText("w1")).toBeTruthy(); // its branch (lantern/w1 without the prefix)
     expect(within(w1).getByRole("button", { name: "Permissions: Auto" })).toBeTruthy();
-    expect(within(screen.getByLabelText(/Main agent Main agent/)).getByText("Runs the team")).toBeTruthy();
+    expect(within(screen.getByLabelText(/^Lead,/)).getByText("Runs the team")).toBeTruthy();
     expect(document.querySelectorAll("path.tether")).toHaveLength(2);
   });
 
   it("puts Permissions and Workflow on every window's title bar, and changes them for that window", () => {
     const { acts } = setup(idleTeam(1));
-    const lead = screen.getByLabelText(/Main agent Main agent/);
-    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    const lead = screen.getByLabelText(/^Lead,/);
+    const w1 = screen.getByLabelText(/Agent Worker 1/);
     expect(within(lead).getByRole("button", { name: "Workflow: Team" })).toBeTruthy();
     expect(within(w1).getByRole("button", { name: "Workflow: Chat" })).toBeTruthy();
     // A team's Permissions are changed from the canvas, on the Lead's window or an agent's.
@@ -119,12 +119,12 @@ describe("the canvas", () => {
 
   it("keeps the Lead in Team while it has agents, and offers an agent no Team of its own", () => {
     const { acts } = setup(idleTeam(1));
-    const lead = screen.getByLabelText(/Main agent Main agent/);
+    const lead = screen.getByLabelText(/^Lead,/);
     fireEvent.click(within(lead).getByRole("button", { name: "Workflow: Team" }));
     expect(within(lead).getByRole("menuitemradio", { name: /^Chat/ })).toBeDisabled();
     expect(within(lead).getByRole("menuitemradio", { name: /^Step by step/ })).toBeDisabled();
     fireEvent.keyDown(within(lead).getByRole("menu"), { key: "Escape" });
-    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    const w1 = screen.getByLabelText(/Agent Worker 1/);
     fireEvent.click(within(w1).getByRole("button", { name: "Workflow: Chat" }));
     expect(within(w1).queryByRole("menuitemradio", { name: /^Team/ })).toBeNull();
     fireEvent.click(within(w1).getByRole("menuitemradio", { name: /^Step by step/ }));
@@ -133,7 +133,7 @@ describe("the canvas", () => {
 
   it("lets a Lead with no agents leave Team", () => {
     setup(team(0));
-    const lead = screen.getByLabelText(/Main agent Main agent/);
+    const lead = screen.getByLabelText(/^Lead,/);
     fireEvent.click(within(lead).getByRole("button", { name: "Workflow: Team" }));
     expect(within(lead).getByRole("menuitemradio", { name: /^Chat/ })).toBeEnabled();
   });
@@ -147,22 +147,22 @@ describe("the canvas", () => {
 
   it("hides the title bar's settings while an agent is folded, and while it works (a change restarts it)", () => {
     setup(team(1));
-    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    const w1 = screen.getByLabelText(/Agent Worker 1/);
     // A worker that is working can't be switched: its claude would restart mid-turn.
     expect(within(w1).getByRole("button", { name: "Permissions: Auto" })).toBeDisabled();
     fireEvent.click(within(w1).getByRole("button", { name: "Collapse Worker 1" }));
-    expect(within(screen.getByLabelText(/Worker Worker 1/)).queryByRole("button", { name: /^Permissions:/ })).toBeNull();
+    expect(within(screen.getByLabelText(/Agent Worker 1/)).queryByRole("button", { name: /^Permissions:/ })).toBeNull();
   });
 
   it("folds an agent to its title and back, and opens one full size", () => {
     const { onOpen, layout } = setup(team(1));
-    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    const w1 = screen.getByLabelText(/Agent Worker 1/);
     expect(w1.querySelector(".node-body")).toBeTruthy();
     fireEvent.click(within(w1).getByRole("button", { name: "Collapse Worker 1" }));
-    expect(screen.getByLabelText(/Worker Worker 1/).querySelector(".node-body")).toBeNull();
+    expect(screen.getByLabelText(/Agent Worker 1/).querySelector(".node-body")).toBeNull();
     expect(layout.collapsed.w1).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Expand Worker 1" }));
-    expect(screen.getByLabelText(/Worker Worker 1/).querySelector(".node-body")).toBeTruthy();
+    expect(screen.getByLabelText(/Agent Worker 1/).querySelector(".node-body")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Open Worker 1 full size" }));
     expect(onOpen).toHaveBeenCalledWith("w1");
   });
@@ -170,7 +170,7 @@ describe("the canvas", () => {
   it("tells the app which agent was pressed, and brings it to the front", () => {
     const { onFocus, layout } = setup(team(2));
     expect(layout.order).toEqual(["s1", "w1", "w2"]);
-    fireEvent.pointerDown(within(screen.getByLabelText(/Worker Worker 1/)).getByText("Worker 1"));
+    fireEvent.pointerDown(within(screen.getByLabelText(/Agent Worker 1/)).getByText("Worker 1"));
     expect(onFocus).toHaveBeenCalledWith("w1");
     expect(layout.order).toEqual(["s1", "w2", "w1"]);
   });
@@ -218,7 +218,7 @@ describe("the canvas", () => {
       fireEvent.wheel(canvas, { ctrlKey: true, deltaY: 300 });
     });
     expect(canvas.classList.contains("summary")).toBe(true);
-    const card = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-body")!;
+    const card = screen.getByLabelText(/Agent Worker 1/).querySelector(".node-body")!;
     // A press that doesn't move is a click.
     act(() => {
       fireEvent.pointerDown(card, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
@@ -236,7 +236,7 @@ describe("the canvas", () => {
     });
     expect(canvas.classList.contains("summary")).toBe(true);
     const before = { ...layout.view! };
-    const card = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-body")!;
+    const card = screen.getByLabelText(/Agent Worker 1/).querySelector(".node-body")!;
     act(() => {
       fireEvent.pointerDown(card, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
       fireEvent.pointerMove(card, { pointerId: 1, clientX: 160, clientY: 130 });
@@ -271,7 +271,7 @@ describe("the canvas", () => {
     const { layout } = setup(team(1));
     const canvas = screen.getByTestId("canvas");
     const zoom = layout.view?.zoom ?? 1;
-    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    const w1 = screen.getByLabelText(/Agent Worker 1/);
     const start = { ...layout.boxes.w1 };
     const head = w1.querySelector(".node-head")!;
     fireEvent.pointerDown(head, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
@@ -293,7 +293,7 @@ describe("the canvas", () => {
       fireEvent.wheel(canvas, { deltaX: 30, deltaY: 50 });
     });
     expect(layout.view).toMatchObject({ x: x0 - 30, y: y0 - 50 });
-    const chat = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-chat")!;
+    const chat = screen.getByLabelText(/Agent Worker 1/).querySelector(".node-chat")!;
     const before = { ...layout.view! };
     act(() => {
       fireEvent.wheel(chat, { deltaX: 0, deltaY: 80 });
@@ -301,7 +301,7 @@ describe("the canvas", () => {
     expect(layout.view).toEqual(before);
     // A title is not a chat: the wheel pans there.
     act(() => {
-      fireEvent.wheel(screen.getByLabelText(/Worker Worker 1/).querySelector(".node-head")!, { deltaX: 0, deltaY: 20 });
+      fireEvent.wheel(screen.getByLabelText(/Agent Worker 1/).querySelector(".node-head")!, { deltaX: 0, deltaY: 20 });
     });
     expect(layout.view!.y).toBeCloseTo(before.y - 20);
   });
@@ -328,7 +328,7 @@ describe("the canvas", () => {
     });
     const zoom = layout.view!.zoom;
     expect(zoom).toBeLessThan(1);
-    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    const w1 = screen.getByLabelText(/Agent Worker 1/);
     const start = { ...layout.boxes.w1 };
     const head = w1.querySelector(".node-head")!;
     fireEvent.pointerDown(head, { button: 0, pointerId: 1, clientX: 100, clientY: 100 });
@@ -362,20 +362,20 @@ describe("the canvas", () => {
     first.layout.boxes.w1 = { x: 900, y: 40, w: 410, h: 380 };
     first.unmount();
     setup(team(1), { layout: first.layout });
-    expect(screen.getByLabelText(/Worker Worker 1/).style.transform).toContain("translate(900px, 40px)");
+    expect(screen.getByLabelText(/Agent Worker 1/).style.transform).toContain("translate(900px, 40px)");
   });
 
   it("redraws only the agent whose chat changed", () => {
     const { store } = setup(team(2));
     const chats = team(2);
-    const w2Body = screen.getByLabelText(/Worker Worker 2/).querySelector(".node-body")!;
-    const w1Before = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-chat");
+    const w2Body = screen.getByLabelText(/Agent Worker 2/).querySelector(".node-body")!;
+    const w1Before = screen.getByLabelText(/Agent Worker 1/).querySelector(".node-chat");
     act(() => {
       store.set({ ...chats.slots, w2: { ...chats.slots.w2, items: [...chats.slots.w2.items, { type: "assistant", id: "a1", text: "Done for now" }] } });
     });
     expect(w2Body.textContent).toContain("Done for now");
     // The other agent's DOM was left alone.
-    expect(screen.getByLabelText(/Worker Worker 1/).querySelector(".node-chat")).toBe(w1Before);
+    expect(screen.getByLabelText(/Agent Worker 1/).querySelector(".node-chat")).toBe(w1Before);
   });
 });
 
@@ -390,12 +390,12 @@ describe("oversight", () => {
     const chats = withProposal();
     chats.slots.w1 = { ...chats.slots.w1, status: "idle", thinking: false };
     setup(chats);
-    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    const w1 = screen.getByLabelText(/Agent Worker 1/);
     expect(within(w1).getByText("Ready to merge")).toBeTruthy();
     expect(within(w1).getByRole("group", { name: "Merge lantern/w1" })).toBeTruthy();
-    expect(within(screen.getByLabelText(/Main agent Main agent/)).getByRole("group", { name: "Merge lantern/w1" })).toBeTruthy();
+    expect(within(screen.getByLabelText(/^Lead,/)).getByRole("group", { name: "Merge lantern/w1" })).toBeTruthy();
     // The other worker has nothing to show.
-    expect(within(screen.getByLabelText(/Worker Worker 2/)).queryByRole("group", { name: /Merge/ })).toBeNull();
+    expect(within(screen.getByLabelText(/Agent Worker 2/)).queryByRole("group", { name: /Merge/ })).toBeNull();
   });
 
   it("lists the team with what each is doing, takes you to one, and counts what the team has cost", () => {
@@ -406,7 +406,7 @@ describe("oversight", () => {
     const button = screen.getByRole("button", { name: "Team" });
     expect(button.textContent).toBe("Team · $0.85 · 3.1M tok");
     // Each agent's card says what it has used.
-    expect(within(screen.getByLabelText(/Worker Worker 1/)).getByText(/\$0\.35 · 1\.1M tok/)).toBeTruthy();
+    expect(within(screen.getByLabelText(/Agent Worker 1/)).getByText(/\$0\.35 · 1\.1M tok/)).toBeTruthy();
     fireEvent.click(button);
     const list = screen.getByRole("dialog", { name: "Team" });
     expect(within(list).getByText("Ready to merge")).toBeTruthy();
@@ -441,14 +441,14 @@ describe("asking for an update", () => {
     render(
       <ChatStoreContext.Provider value={store}>
         <NodeActionsContext.Provider value={a}>
-          <Canvas nodes={orchestraNodes(chats, () => "Main agent")} layout={newLayout()} activeSlot="s1" attention={[]} onFocus={onFocus} onOpen={vi.fn()} />
+          <Canvas nodes={orchestraNodes(chats, () => "Lead")} layout={newLayout()} activeSlot="s1" attention={[]} onFocus={onFocus} onOpen={vi.fn()} />
         </NodeActionsContext.Provider>
       </ChatStoreContext.Provider>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Team" }));
     return onFocus;
   };
-  const ask = () => screen.getByRole("button", { name: "Ask the main agent for an update" });
+  const ask = () => screen.getByRole("button", { name: "Ask the Lead for an update" });
 
   it("sends the main agent a request for a plain-language status report, and takes you to it", () => {
     const a = actions();
@@ -474,12 +474,12 @@ describe("asking for an update", () => {
 
   it("is not offered when there are no workers to report on, or the main agent can't take it", () => {
     mount(team(0), actions());
-    expect(screen.queryByRole("button", { name: "Ask the main agent for an update" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ask the Lead for an update" })).toBeNull();
     cleanup();
     const stopped = team(1);
     stopped.slots.s1 = { ...stopped.slots.s1, status: "ended" };
     mount(stopped, actions());
-    expect(screen.queryByRole("button", { name: "Ask the main agent for an update" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Ask the Lead for an update" })).toBeNull();
   });
 });
 
@@ -490,7 +490,7 @@ describe("what the loop guard holds back, and what is typed", () => {
     const a = actions();
     const store = createChatStore();
     store.set(chats.slots);
-    const nodes = orchestraNodes(chats, () => "Main agent");
+    const nodes = orchestraNodes(chats, () => "Lead");
     render(
       <ChatStoreContext.Provider value={store}>
         <NodeActionsContext.Provider value={a}>
@@ -498,7 +498,7 @@ describe("what the loop guard holds back, and what is typed", () => {
         </NodeActionsContext.Provider>
       </ChatStoreContext.Provider>,
     );
-    const banner = within(screen.getByLabelText(/Main agent Main agent/)).getByText(/2 updates from the workers are held back/);
+    const banner = within(screen.getByLabelText(/^Lead,/)).getByText(/2 updates from the agents are held back/);
     expect(banner.textContent).toContain(`${WAKE_LIMIT} replies in a row`);
     expect(screen.getByRole("button", { name: /1 agent needs you/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Pass them on" }));
@@ -520,11 +520,11 @@ describe("what the loop guard holds back, and what is typed", () => {
     render(
       <ChatStoreContext.Provider value={store}>
         <NodeActionsContext.Provider value={a}>
-          <Canvas nodes={orchestraNodes(chats, () => "Main agent")} layout={newLayout()} activeSlot="s1" attention={[]} onFocus={vi.fn()} onOpen={vi.fn()} />
+          <Canvas nodes={orchestraNodes(chats, () => "Lead")} layout={newLayout()} activeSlot="s1" attention={[]} onFocus={vi.fn()} onOpen={vi.fn()} />
         </NodeActionsContext.Provider>
       </ChatStoreContext.Provider>,
     );
-    const box = within(screen.getByLabelText(/Worker Worker 1/)).getByLabelText("Message this agent") as HTMLTextAreaElement;
+    const box = within(screen.getByLabelText(/Agent Worker 1/)).getByLabelText("Message this agent") as HTMLTextAreaElement;
     expect(box.value).toBe("half a thought");
     fireEvent.change(box, { target: { value: "half a thought, and more" } });
     expect(a.setDraft).toHaveBeenLastCalledWith("w1", "half a thought, and more");
@@ -536,7 +536,7 @@ function hidden(chats: Chats, ...workers: string[]): Chats {
   return workers.reduce((c, slot) => chatsReducer(c, { type: "set_hidden", slot, hidden: true }), chats);
 }
 
-const head = (name: string) => screen.getByLabelText(new RegExp(`^Worker Worker ${name},`)).querySelector(".node-head")!;
+const head = (name: string) => screen.getByLabelText(new RegExp(`^Agent Worker ${name},`)).querySelector(".node-head")!;
 
 describe("the menu of an agent's card", () => {
   it("opens on a right-click on a worker's title or body, on its first item, and is a menu", () => {
@@ -547,20 +547,20 @@ describe("the menu of an agent's card", () => {
     expect(within(menu).getAllByRole("menuitem").map((i) => i.querySelector(".menu-label")!.textContent)).toEqual(["Hide", "Clean up and close"]);
     expect(document.activeElement).toBe(within(menu).getByRole("menuitem", { name: /Hide/ }));
     // From the body too, and for another agent: the menu is that agent's.
-    fireEvent.contextMenu(screen.getByLabelText(/Worker Worker 2/).querySelector(".node-body")!, { clientX: 60, clientY: 60 });
+    fireEvent.contextMenu(screen.getByLabelText(/Agent Worker 2/).querySelector(".node-body")!, { clientX: 60, clientY: 60 });
     expect(screen.getAllByRole("menu")).toHaveLength(1);
     expect(screen.getByRole("menu", { name: "Worker 2 actions" })).toBeTruthy();
   });
 
   it("is not offered on the main agent", () => {
     setup(team(1));
-    expect(fireEvent.contextMenu(screen.getByLabelText(/Main agent Main agent/).querySelector(".node-head")!)).toBe(true);
+    expect(fireEvent.contextMenu(screen.getByLabelText(/^Lead,/).querySelector(".node-head")!)).toBe(true);
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("leaves the browser's menu to the box where you type and to text you have selected", () => {
     setup(team(1));
-    const box = within(screen.getByLabelText(/Worker Worker 1/)).getByLabelText("Message this agent");
+    const box = within(screen.getByLabelText(/Agent Worker 1/)).getByLabelText("Message this agent");
     expect(fireEvent.contextMenu(box)).toBe(true);
     expect(screen.queryByRole("menu")).toBeNull();
     const selection = vi.spyOn(window, "getSelection").mockReturnValue({ toString: () => "picked words" } as Selection);
@@ -636,7 +636,7 @@ describe("the menu of an agent's card", () => {
 describe("agents taken off the canvas", () => {
   it("are not drawn or tethered, keep their place, and are counted in a Hidden control", () => {
     const { layout } = setup(hidden(team(2), "w1"));
-    expect(screen.getAllByRole("region").map((a) => a.getAttribute("aria-label"))).toEqual(["Main agent Main agent, Ready", "Worker Worker 2, Working"]);
+    expect(screen.getAllByRole("region").map((a) => a.getAttribute("aria-label"))).toEqual(["Lead, Ready", "Agent Worker 2, Working"]);
     expect(document.querySelectorAll("path.tether")).toHaveLength(1);
     expect(layout.boxes.w1).toBeTruthy();
     expect(screen.getByRole("button", { name: "Hidden (1)" })).toBeTruthy();
@@ -736,7 +736,7 @@ describe("cleaning up and closing an agent", () => {
   });
 
   it("says why when it can't be closed, instead of closing", async () => {
-    const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.reject("That worker's branch is being merged right now.")) } });
+    const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.reject("That agent's branch is being merged right now.")) } });
     chooseClose();
     expect((await screen.findByRole("alert")).textContent).toContain("being merged right now");
     expect(acts.closeWorker).not.toHaveBeenCalled();
@@ -756,7 +756,7 @@ describe("cleaning up and closing an agent", () => {
     let chats = initialChats(main);
     chats = chatsReducer(chats, { type: "in", slot: "s1", action: { type: "ui_event", event: { kind: "agent_spawned", worker: "w1", name: "Reader", brief: "Read", folder: "/p", branch: null, base: null, isolation: "shared", mode: "auto" } } });
     setup(chats);
-    fireEvent.contextMenu(screen.getByLabelText(/^Worker Reader,/).querySelector(".node-head")!);
+    fireEvent.contextMenu(screen.getByLabelText(/^Agent Reader,/).querySelector(".node-head")!);
     expect(screen.getByRole("menuitem", { name: /Clean up and close/ }).textContent).toContain("shares your folder, so no files are removed");
   });
 
@@ -803,7 +803,7 @@ describe("scrolling inside the canvas", () => {
     act(() => void fireEvent.wheel(canvas, { ctrlKey: true, deltaY: 0 })); // frames the view, so there is one to compare
     const before = { ...layout.view! };
     const over = (el: Element) => act(() => void fireEvent.wheel(el, { deltaX: 0, deltaY: 60 }));
-    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    const w1 = screen.getByLabelText(/Agent Worker 1/);
     over(w1.querySelector(".node-composer")!);
     for (const cls of ["node-merges", "canvas-team-list", "canvas-overlay"]) {
       const el = document.createElement("div");
@@ -829,7 +829,7 @@ describe("a folded card zoomed out into a card", () => {
     const full = tetherEnd();
     zoomOut();
     expect(layout.view!.zoom).toBeLessThan(SUMMARY_ZOOM);
-    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    const w1 = screen.getByLabelText(/Agent Worker 1/);
     expect(w1.getAttribute("style")).toContain("calc(40px / var(--zoom))");
     // The tether meets the card's edge at 40px of screen height: more canvas units than the 52 it was folded to.
     const box = layout.boxes.w1;
@@ -856,7 +856,7 @@ describe("the agents' title bars", () => {
 
   it("can be focused, and Enter on one opens that agent full size", () => {
     const { onOpen } = setup(team(1));
-    const head = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-head") as HTMLElement;
+    const head = screen.getByLabelText(/Agent Worker 1/).querySelector(".node-head") as HTMLElement;
     expect(head.tabIndex).toBe(0);
     fireEvent.keyDown(screen.getByRole("button", { name: "Open Worker 1 full size" }), { key: "Enter" });
     expect(onOpen).not.toHaveBeenCalled();
@@ -899,7 +899,7 @@ describe("keys on the canvas", () => {
 
   it("zoom and fit with ⌘= ⌘− ⌘0 while the canvas has focus, and not otherwise", () => {
     const { layout } = setup(team(1));
-    const head = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-head") as HTMLElement;
+    const head = screen.getByLabelText(/Agent Worker 1/).querySelector(".node-head") as HTMLElement;
     act(() => void fireEvent.wheel(screen.getByTestId("canvas"), { ctrlKey: true, deltaY: 0 }));
     const zoom0 = layout.view!.zoom;
     fireEvent.keyDown(window, cmd("="));
@@ -917,7 +917,7 @@ describe("keys on the canvas", () => {
 
   it("go to the next and the previous agent with ⌘] and ⌘[", () => {
     const { onFocus } = setup(team(2));
-    const head = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-head") as HTMLElement;
+    const head = screen.getByLabelText(/Agent Worker 1/).querySelector(".node-head") as HTMLElement;
     act(() => head.focus());
     fireEvent.keyDown(window, cmd("]"));
     expect(onFocus).toHaveBeenLastCalledWith("w1");
@@ -944,7 +944,7 @@ describe("what the canvas says aloud", () => {
     const chats = team(1);
     chats.slots.s1 = { ...chats.slots.s1, wakes: ["note"], autoStreak: WAKE_LIMIT };
     setup(chats);
-    expect(screen.getByLabelText(/^Main agent Main agent/).getAttribute("aria-label")).toBe("Main agent Main agent, Needs you · updates held");
+    expect(screen.getByLabelText(/^Lead/).getAttribute("aria-label")).toBe("Lead, Needs you · updates held");
     expect(document.querySelector('[data-node="s1"]')!.className).toContain("held");
   });
 });
@@ -970,7 +970,7 @@ describe("motion", () => {
     const show = (attention: string[]) => (
       <ChatStoreContext.Provider value={store}>
         <NodeActionsContext.Provider value={actions()}>
-          <Canvas nodes={orchestraNodes(chats, () => "Main agent")} layout={layout} activeSlot="s1" attention={attention} onFocus={vi.fn()} onOpen={vi.fn()} />
+          <Canvas nodes={orchestraNodes(chats, () => "Lead")} layout={layout} activeSlot="s1" attention={attention} onFocus={vi.fn()} onOpen={vi.fn()} />
         </NodeActionsContext.Provider>
       </ChatStoreContext.Provider>
     );
@@ -983,7 +983,7 @@ describe("motion", () => {
   it("stops easing a card's height while it is being resized", () => {
     setup(team(1));
     const canvas = screen.getByTestId("canvas");
-    const grip = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-resize")!;
+    const grip = screen.getByLabelText(/Agent Worker 1/).querySelector(".node-resize")!;
     fireEvent.pointerDown(grip, { button: 0, pointerId: 2, clientX: 0, clientY: 0 });
     expect(canvas.classList.contains("resizing")).toBe(true);
     fireEvent.pointerUp(grip, { pointerId: 2 });

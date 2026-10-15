@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { ModeGuide } from "./ModeGuide";
 import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
-import { StepsIntro } from "./StepsIntro";
+import { StartScreen } from "./StartScreen";
 import { ModeGuideContext } from "../lib/modeGuide";
 
 describe("ModeGuide", () => {
@@ -24,14 +24,26 @@ describe("ModeGuide", () => {
     expect(onUse).toHaveBeenLastCalledWith("team");
   });
 
-  it("lists Permissions, Workflows and five flavours, marks what the chat is on, and says what to ask for Learn", () => {
-    render(<ModeGuide open="learn" permissions="ask" workflow="chat" flavour={null} onClose={() => {}} />);
+  it("lists Permissions, Workflows, four flavours and Explain as you go, marks what the chat is on, and says what to ask for it", () => {
+    render(<ModeGuide open="explain" permissions="ask" workflow="chat" flavour={null} onClose={() => {}} />);
     const nav = screen.getByRole("navigation", { name: "Modes" });
     expect([...nav.querySelectorAll(".mode-guide-group-title")].map((t) => t.textContent)).toEqual(["Permissions", "Workflow", "Step by step's flavours"]);
-    expect([...nav.querySelectorAll(".mode-guide-tab")].map((t) => t.textContent)).toEqual(["AskNow", "Auto", "ChatNow", "Step by step", "Team", "Build", "Learn", "Review", "Debug", "Architecture"]);
+    expect([...nav.querySelectorAll(".mode-guide-tab")].map((t) => t.textContent)).toEqual(["AskNow", "Auto", "ChatNow", "Step by step", "Team", "Build", "Review", "Debug", "Design", "Explain as you go"]);
     expect(screen.getByText(/Try: .*interview/)).toBeInTheDocument();
     // No switch offered while the chat can't change.
     expect(screen.queryByRole("button", { name: /^(Use|Start) / })).toBeNull();
+  });
+
+  it("turns Explain as you go on from its page, and names Design for the architecture flavour", () => {
+    const onUse = vi.fn();
+    render(<ModeGuide open="explain" permissions="ask" workflow="steps" flavour="debug" onUse={onUse} onClose={() => {}} />);
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Explain as you go");
+    expect(document.querySelector(".mode-guide-eyebrow")).toHaveTextContent("Step by step");
+    fireEvent.click(screen.getByRole("button", { name: "Turn it on" }));
+    expect(onUse).toHaveBeenLastCalledWith("explain");
+    fireEvent.click(screen.getByRole("button", { name: /^Design/ }));
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("Design");
+    expect(screen.getByRole("button", { name: "Start Design" })).toBeInTheDocument();
   });
 
   it("describes Team and each Permissions setting in the new vocabulary", () => {
@@ -44,13 +56,13 @@ describe("ModeGuide", () => {
     expect(screen.getByText(/never has more freedom than its Lead/)).toBeInTheDocument();
   });
 
-  it("is opened from the Permissions and Workflow menus and Step by step's intro", () => {
+  it("is opened from the Permissions and Workflow menus and the start screen", () => {
     const open = vi.fn();
     render(
       <ModeGuideContext.Provider value={open}>
         <PermissionsMenu permissions="auto" onChange={() => {}} />
         <WorkflowMenu workflow="steps" flavour="review" onChange={() => {}} />
-        <StepsIntro picked={null} onPick={() => {}} />
+        <StartScreen picked={null} team={false} onFlavour={() => {}} onReview={() => {}} onTeam={() => {}} />
       </ModeGuideContext.Provider>,
     );
     fireEvent.click(screen.getByRole("button", { name: /Permissions: Auto/ }));
@@ -58,7 +70,7 @@ describe("ModeGuide", () => {
     // The Workflow chip names Step by step's flavour too.
     fireEvent.click(screen.getByRole("button", { name: /Step by step · Review/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: /How the modes work/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
+    fireEvent.click(screen.getByRole("button", { name: "How they work" }));
     expect(open.mock.calls).toEqual([["auto"], ["review"], ["steps"]]);
   });
 });

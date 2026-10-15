@@ -430,3 +430,12 @@ export interface NetworkDetail {
   response_headers: { name: string; value: string }[];
   response_body: NetworkBody;
 }
+
+/** An open pull request, as the "Review a PR" picker lists it (from `gh pr list`). */
+export interface OpenPr {
+  number: number;
+  title: string;
+  author: string;
+  branch: string;
+  draft: boolean;
+}

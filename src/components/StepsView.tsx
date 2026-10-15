@@ -3,14 +3,14 @@ import { CollapsibleText } from "./CollapsibleText";
 import { Md } from "./Md";
 import { AWAY_FROM_END, JumpToLatest } from "./JumpToLatest";
 import { useSlot } from "../lib/slot";
-import { FLAVOUR_LABEL, FLAVOURS, type Flavour } from "../lib/flavour";
+import { FLAVOUR_LABEL, FLAVOURS, flavourName, type Flavour } from "../lib/flavour";
 import { FlavourBadge } from "./FlavourBadge";
 import { FLAVOUR_ICON } from "./ModeGuide";
 import { recallScroll, rememberScroll } from "../lib/scrollMemory";
 import { messageTime } from "../lib/time";
 import { initials, useUserName } from "../lib/userName";
 import type { State } from "../store";
-import { isApproval, movesOn, pageLabel, pagesOf, pageTitle, promptText, startedFlavour, startText, stayedIn, stayText, type StepPage, type StepTurn } from "../lib/steps";
+import { isApproval, movesOn, pageLabel, pagesOf, pageTitle, promptText, startedChoice, startedFlavour, startText, stayedIn, stayText, type StepPage, type StepTurn } from "../lib/steps";
 import { mattersToTask } from "../lib/commands";
 import type { BackgroundRun, ChatItem, ToolItem } from "../store";
 import { workingVerb } from "../lib/verbs";
@@ -51,8 +51,10 @@ interface Props extends StreamHandlers {
   onSend?: (text: string) => void;
   /** The flavour Step by step is in (one picked and not yet sent included); null before one is chosen. */
   flavour: Flavour | null;
-  /** Pick a flavour from the header's badge: Claude is told with the next message. */
-  onPickFlavour: (flavour: Flavour) => void;
+  /** Explain as you go is on (Build and Debug). */
+  explain?: boolean;
+  /** Pick a flavour (and Explain as you go) from the header's badge: Claude is told with the next message. */
+  onPickFlavour: (flavour: Flavour, explain?: boolean) => void;
   /** Claude Code's auto mode approves actions instead of the app asking; each step is still reviewed as a page. */
   /** The page on screen changed: the turns whose changes the Changes pane should show (null: not all known). */
   onPage: (range: { from: number; to: number } | null) => void;
@@ -69,7 +71,7 @@ const isTyping = (el: Element | null) => !!el && (el instanceof HTMLInputElement
 // Step-by-step mode's view of the conversation: a page per step, side by side, one on screen. Questions about a step
 // and changes to it stay on its page; Previous and Next (or ← →) slide between pages, and on the newest page Next
 // approves the step and Claude carries on.
-export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPage, onShown, onReviewFile, jump = null, ...handlers }: Props) {
+export function StepsView({ state, flavour, explain = false, onNext, onSend, onPickFlavour, onPage, onShown, onReviewFile, jump = null, ...handlers }: Props) {
   // A revision you undid: the page shows the version you went back to, until Claude revises the step again.
   const [kept, setKept] = useState<Record<string, { turn: number; over: number }>>({});
   const claudes = pagesOf(state.items);
@@ -197,7 +199,7 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
   const review = flavour === "review";
   const arch = flavour === "architecture";
   const newest = at === last;
-  const teach = flavour === "learn";
+  const teach = explain;
   // Review: whether a file has come yet, so Next opens the first one or the next.
   const filesSoFar = review && pages.slice(0, at + 1).some((p) => p.heading?.kind === "file");
 
@@ -252,7 +254,7 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
           </span>
         )}
         <div className="spacer" />
-        <FlavourBadge flavour={flavour} onPick={onPickFlavour} disabled={running} />
+        <FlavourBadge flavour={flavour} explain={explain} onPick={onPickFlavour} disabled={running} />
       </div>
 
       <div className="steps-viewport" ref={viewport}>
@@ -432,7 +434,7 @@ function Page({ page, unread, first, live, teach, review, arch, suggestion, verd
         <ChatStream items={mainItems} folder={folder} live={live && page.main === page.turns.length - 1} {...handlers} />
         {reviewFile && <ReviewFileView file={reviewFile} verdicts={verdicts} onVerdict={onVerdict} />}
         {part && <ArchitecturePartView part={part} verdicts={verdicts} onVerdict={onVerdict} />}
-        {h?.kind === "switch" && h.flavour && suggestion && <SuggestionCard flavour={h.flavour} why={h.title} {...suggestion} />}
+        {h?.kind === "switch" && h.flavour && suggestion && <SuggestionCard flavour={h.flavour} explain={!!h.explain} why={h.title} {...suggestion} />}
         {summary && <ReviewSummaryTable rows={summary.rows} onAction={summary.onAction} busy={summary.busy} architecture={summary.architecture} />}
       </div>
       <StepCommands page={page} runs={runs} />
@@ -475,16 +477,18 @@ function Page({ page, unread, first, live, teach, review, arch, suggestion, verd
  * Claude's suggestion to work in a flavour: start it, stay in the one you're in, or start another. Once answered, it
  * says how.
  */
-function SuggestionCard({ flavour, why, current, answer, onAnswer }: { flavour: Flavour; why: string; current: Flavour | null; answer: string | null; onAnswer?: (text: string) => void }) {
+function SuggestionCard({ flavour, explain, why, current, answer, onAnswer }: { flavour: Flavour; explain: boolean; why: string; current: Flavour | null; answer: string | null; onAnswer?: (text: string) => void }) {
   const label = FLAVOUR_LABEL[flavour];
-  const started = answer === null ? null : startedFlavour(answer) ?? (isApproval(answer) ? flavour : null);
-  const outcome = answer === null ? null : started ? `You started ${FLAVOUR_LABEL[started]}` : stayedIn(answer) ? "You kept going as before" : "You answered in the chat";
+  // "Build, explaining as you go" when Claude suggests the option too.
+  const named = flavourName(flavour, explain);
+  const started = answer === null ? null : startedChoice(answer) ?? (isApproval(answer) ? { flavour, explain } : null);
+  const outcome = answer === null ? null : started ? `You started ${flavourName(started.flavour, started.explain)}` : stayedIn(answer) ? "You kept going as before" : "You answered in the chat";
   return (
     <div className={`suggestion${outcome ? " answered" : ""}`} role="group" aria-label={`Claude suggests ${label}`}>
       <div className="suggestion-head">
         <span className="suggestion-icon">{FLAVOUR_ICON[flavour]}</span>
         <span>
-          Claude suggests <strong>{label}</strong>
+          Claude suggests <strong>{named}</strong>
         </span>
       </div>
       {why && <p className="suggestion-why">{why}</p>}
@@ -493,8 +497,8 @@ function SuggestionCard({ flavour, why, current, answer, onAnswer }: { flavour: 
       ) : (
         onAnswer && (
           <div className="suggestion-actions">
-            <button className="primary" onClick={() => onAnswer(startText(label))}>
-              Start {label}
+            <button className="primary" onClick={() => onAnswer(startText(label, explain))}>
+              Start {named}
             </button>
             {current && current !== flavour && <button onClick={() => onAnswer(stayText(FLAVOUR_LABEL[current]))}>Stay in {FLAVOUR_LABEL[current]}</button>}
             <span className="suggestion-others">

@@ -52,11 +52,11 @@ function readable(): string {
 describe("the places with sessions", () => {
   it("names the project and lists each place with its sessions, all checked but the one already brought over", async () => {
     open();
-    expect(await screen.findByText(/Lantern found sessions from earlier locations of "acme-api":/)).toBeInTheDocument();
-    expect(screen.getByText("Bring old sessions into acme-api")).toBeInTheDocument();
+    expect(await screen.findByText(/Lantern found chats from earlier locations of "acme-api":/)).toBeInTheDocument();
+    expect(screen.getByText("Bring old chats into acme-api")).toBeInTheDocument();
     expect(screen.getByText("acme-api")).toBeInTheDocument();
     expect(screen.getByTitle(DEST)).toHaveTextContent("~/projects/acme-api");
-    expect(screen.getByRole("checkbox", { name: /acme-api.*7 sessions/ })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /acme-api.*7 chats/ })).toBeChecked();
     const gone = screen.getByRole("checkbox", { name: /old-laptop/ });
     expect(gone).toBeChecked();
     expect(within(gone.closest("label")!).getByText("folder no longer exists")).toBeInTheDocument();
@@ -64,17 +64,17 @@ describe("the places with sessions", () => {
     expect(done).toBeDisabled();
     expect(done).not.toBeChecked();
     expect(within(done.closest("label")!).getByText(/already brought over/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Bring 12 sessions here" })).toBeEnabled();
-    expect(screen.getByText("Your old session files stay where they are: Lantern copies what's needed.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bring 12 chats here" })).toBeEnabled();
+    expect(screen.getByText("Your old chats stay where they are: Lantern copies what's needed.")).toBeInTheDocument();
   });
 
   it("counts only the checked places, and can't bring nothing", async () => {
     open();
     const first = await screen.findByRole("checkbox", { name: /~\/Documents\/Github\/acme-api/ });
     fireEvent.click(first);
-    expect(screen.getByRole("button", { name: "Bring 5 sessions here" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Bring 5 chats here" })).toBeEnabled();
     fireEvent.click(screen.getByRole("checkbox", { name: /old-laptop/ }));
-    expect(screen.getByRole("button", { name: "Bring 0 sessions here" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Bring 0 chats here" })).toBeDisabled();
   });
 
   it("shows a long path cut in the middle, with the whole path as its tooltip", async () => {
@@ -92,7 +92,7 @@ describe("when nothing is found under the name", () => {
 
   it("says so and offers the folders with sessions to choose from, filtered as typed, one at a time", async () => {
     open();
-    expect(await screen.findByText('No old sessions found under the name "acme-api".')).toBeInTheDocument();
+    expect(await screen.findByText('No old chats found under the name "acme-api".')).toBeInTheDocument();
     // The project itself isn't offered.
     expect(screen.queryByRole("radio", { name: /~\/projects\/acme-api/ })).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("textbox", { name: "Filter folders" }), { target: { value: "dash" } });
@@ -102,7 +102,7 @@ describe("when nothing is found under the name", () => {
     // The chosen folder is the place to bring from, with its sessions and that it's gone.
     expect(screen.getByRole("checkbox", { name: /web-dashboard/ })).toBeChecked();
     expect(screen.getAllByText("folder no longer exists").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "Bring 9 sessions here" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Bring 9 chats here" })).toBeEnabled();
   });
 
   it("picks the first folder shown when Enter is pressed in the filter, without bringing anything", async () => {
@@ -110,7 +110,7 @@ describe("when nothing is found under the name", () => {
     const filter = await screen.findByRole("textbox", { name: "Filter folders" });
     fireEvent.change(filter, { target: { value: "notes" } });
     fireEvent.keyDown(filter, { key: "Enter" });
-    expect(await screen.findByRole("checkbox", { name: /notes.*3 sessions/ })).toBeChecked();
+    expect(await screen.findByRole("checkbox", { name: /notes.*3 chats/ })).toBeChecked();
     expect(relocate).not.toHaveBeenCalled();
   });
 
@@ -118,20 +118,20 @@ describe("when nothing is found under the name", () => {
     known.mockResolvedValue([{ path: DEST, exists: true, sessions: 12, updated_ms: Date.now() }, WEB]);
     open({ from: WEB.path });
     expect(await screen.findByRole("checkbox", { name: /web-dashboard/ })).toBeChecked();
-    expect(screen.queryByText(/No old sessions found/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Bring 9 sessions here" })).toBeEnabled();
+    expect(screen.queryByText(/No old chats found/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bring 9 chats here" })).toBeEnabled();
   });
 });
 
 describe("without a project", () => {
   it("the only action is choosing the project folder, and then the places are looked for", async () => {
     const { pickFolder } = open({ destination: null });
-    expect(screen.getByText("Bring old sessions into a project")).toBeInTheDocument();
+    expect(screen.getByText("Bring old chats into a project")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Bring \d/ })).not.toBeInTheDocument();
     pickFolder.mockResolvedValueOnce(DEST);
     fireEvent.click(screen.getByRole("button", { name: "Choose the project folder…" }));
     await waitFor(() => expect(locations).toHaveBeenCalledWith(DEST));
-    expect(await screen.findByRole("button", { name: "Bring 12 sessions here" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Bring 12 chats here" })).toBeEnabled();
   });
 
   it("a cancelled picker keeps the dialog as it was", async () => {
@@ -146,8 +146,8 @@ describe("without a project", () => {
 describe("bringing the sessions", () => {
   it("brings each checked place in turn, says how many are in History, and offers to open it", async () => {
     const { onRelocated, onClose, onOpenHistory } = open();
-    fireEvent.click(await screen.findByRole("button", { name: "Bring 12 sessions here" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Done: 12 sessions are in History now.");
+    fireEvent.click(await screen.findByRole("button", { name: "Bring 12 chats here" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Done: 12 chats are in History now.");
     expect(relocate.mock.calls).toEqual([
       [CODE.path, DEST, { project_settings: true, memory: true }],
       [LAPTOP.path, DEST, { project_settings: true, memory: true }],
@@ -164,8 +164,8 @@ describe("bringing the sessions", () => {
 
   it("without the History button (another project is open), the success ends with Close", async () => {
     open({ onOpenHistory: undefined });
-    fireEvent.click(await screen.findByRole("button", { name: "Bring 12 sessions here" }));
-    expect(await screen.findByRole("status")).toHaveTextContent("Done: 12 sessions are in History now.");
+    fireEvent.click(await screen.findByRole("button", { name: "Bring 12 chats here" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Done: 12 chats are in History now.");
     expect(screen.queryByRole("button", { name: "Open History" })).not.toBeInTheDocument();
   });
 
@@ -176,15 +176,15 @@ describe("bringing the sessions", () => {
     relocate.mockRejectedValueOnce("~/.claude.json changed while Lantern was copying it, so nothing was written. Try again.");
     // After the attempt the places are looked up again: the one that came over is now already brought over.
     locations.mockResolvedValueOnce([{ ...CODE, already: true }, LAPTOP, { ...SRC }]);
-    fireEvent.click(await screen.findByRole("button", { name: "Bring 12 sessions here" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Bring 12 chats here" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("changed while Lantern was copying it");
     expect(alert).toHaveTextContent("~/old-laptop/acme-api");
     expect(onRelocated).toHaveBeenCalledTimes(1);
-    const retry = screen.getByRole("button", { name: "Bring 5 sessions here" });
+    const retry = screen.getByRole("button", { name: "Bring 5 chats here" });
     expect(screen.getByRole("checkbox", { name: /~\/Documents\/Github\/acme-api/ })).toBeDisabled();
     fireEvent.click(retry);
-    expect(await screen.findByRole("status")).toHaveTextContent("Done: 12 sessions are in History now.");
+    expect(await screen.findByRole("status")).toHaveTextContent("Done: 12 chats are in History now.");
     expect(relocate).toHaveBeenLastCalledWith(LAPTOP.path, DEST, { project_settings: true, memory: true });
     expect(relocate).toHaveBeenCalledTimes(3);
   });
@@ -192,18 +192,18 @@ describe("bringing the sessions", () => {
   it("the Details choices go to the move, and say 'none found' when the preview has nothing", async () => {
     preview.mockImplementation(async (old) => (old === LAPTOP.path ? { ...FOUND, project_entry: false, memory_files: 0, rules: 0 } : FOUND));
     open();
-    await screen.findByRole("button", { name: "Bring 12 sessions here" });
+    await screen.findByRole("button", { name: "Bring 12 chats here" });
     fireEvent.click(screen.getByRole("checkbox", { name: /~\/Documents\/Github\/acme-api/ }));
     await waitFor(() => expect(screen.getAllByText("none found")).toHaveLength(2));
     fireEvent.click(screen.getByText("Details"));
     fireEvent.click(screen.getByRole("checkbox", { name: /memory/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Bring 5 sessions here" }));
+    fireEvent.click(screen.getByRole("button", { name: "Bring 5 chats here" }));
     await waitFor(() => expect(relocate).toHaveBeenCalledWith(LAPTOP.path, DEST, { project_settings: true, memory: false }));
   });
 
   it("the Details checkboxes are on by default, with plain wording", async () => {
     open();
-    await screen.findByRole("button", { name: "Bring 12 sessions here" });
+    await screen.findByRole("button", { name: "Bring 12 chats here" });
     expect(screen.getByRole("checkbox", { name: /MCP servers and permissions, including your "Always allow" choices \(Claude Code keeps these per folder\)/ })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: /its memory \(notes Claude saved about this project\)/ })).toBeChecked();
   });
@@ -212,7 +212,7 @@ describe("bringing the sessions", () => {
 describe("keyboard access", () => {
   it("puts focus on the action once the places are in", async () => {
     open();
-    expect(await screen.findByRole("button", { name: "Bring 12 sessions here" })).toHaveFocus();
+    expect(await screen.findByRole("button", { name: "Bring 12 chats here" })).toHaveFocus();
   });
 
   it("puts focus on the filter when nothing was found", async () => {
@@ -223,14 +223,14 @@ describe("keyboard access", () => {
 
   it("Escape closes the dialog, unless a move is running", async () => {
     const { onClose } = open();
-    await screen.findByRole("button", { name: "Bring 12 sessions here" });
+    await screen.findByRole("button", { name: "Bring 12 chats here" });
     fireEvent(document.querySelector("dialog")!, new Event("cancel", { cancelable: true }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("Enter on the action brings the sessions", async () => {
     open();
-    const action = await screen.findByRole("button", { name: "Bring 12 sessions here" });
+    const action = await screen.findByRole("button", { name: "Bring 12 chats here" });
     fireEvent.submit(action.closest("form")!);
     await waitFor(() => expect(relocate).toHaveBeenCalledTimes(2));
   });
@@ -246,7 +246,7 @@ describe("the words the dialog shows", () => {
     first.unmount();
 
     const detected = open();
-    await screen.findByRole("button", { name: "Bring 12 sessions here" });
+    await screen.findByRole("button", { name: "Bring 12 chats here" });
     seen.push(readable());
     fireEvent.click(screen.getByRole("checkbox", { name: /old-laptop/ }));
     seen.push(readable());
@@ -261,7 +261,7 @@ describe("the words the dialog shows", () => {
     locations.mockResolvedValue([CODE, LAPTOP, SRC]);
     relocate.mockRejectedValueOnce("~/.claude.json changed while Lantern was copying it.");
     open();
-    fireEvent.click(await screen.findByRole("button", { name: "Bring 12 sessions here" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Bring 12 chats here" }));
     await screen.findByRole("alert");
     seen.push(readable());
 

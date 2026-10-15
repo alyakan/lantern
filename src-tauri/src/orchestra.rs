@@ -329,7 +329,7 @@ impl Orchestra {
     /// until it does something, and the main agent hears of it from then.
     pub async fn adopt(self: &Arc<Self>, slot: &str, parent: &str, name: &str, folder: &Path, branch: Option<&str>) -> Result<(), String> {
         if !self.is_main(parent) {
-            return Err("The main agent this worker belonged to isn't open.".into());
+            return Err("The Lead this agent belonged to isn't open.".into());
         }
         let (f, env, branch) = (folder.to_path_buf(), self.host.path_env().await, branch.map(String::from));
         let main_folder = self.host.main_folder(parent).ok();
@@ -348,7 +348,7 @@ impl Orchestra {
         let mut inner = self.inner.lock().unwrap();
         // The main agent may have been closed while this waited.
         if !inner.mains.contains_key(parent) {
-            return Err("The main agent this worker belonged to isn't open.".into());
+            return Err("The Lead this agent belonged to isn't open.".into());
         }
         if inner.workers.contains_key(slot) {
             return Ok(());
@@ -826,16 +826,16 @@ impl Orchestra {
     /// merged, declined, or being merged right now) has nothing to approve.
     fn begin_merge(&self, worker: &str) -> Result<(String, String, git::Worktree, Proposed), String> {
         let mut inner = self.inner.lock().unwrap();
-        let w = inner.workers.get_mut(worker).ok_or("That worker is no longer part of the orchestra.")?;
+        let w = inner.workers.get_mut(worker).ok_or("That agent is no longer part of the team.")?;
         if w.merge != Merge::Proposed {
-            return Err("There is no merge proposal waiting for that worker.".into());
+            return Err("There is no merge proposal waiting for that agent.".into());
         }
         // Merging takes whatever is in its worktree, so it mustn't be in the middle of changing it.
         if w.status != Status::Idle {
             return Err(format!("{} is {}. Wait until it has finished its turn, then approve the merge.", w.name, w.status.label()));
         }
-        let wt = w.worktree.clone().ok_or("That worker shares the main folder, so it has no branch.")?;
-        let proposed = w.proposed.clone().ok_or("The merge has no branch to go into: ask the main agent to propose it again.")?;
+        let wt = w.worktree.clone().ok_or("That agent shares the main folder, so it has no branch.")?;
+        let proposed = w.proposed.clone().ok_or("The merge has no branch to go into: ask the Lead to propose it again.")?;
         w.merge = Merge::Merging;
         Ok((w.parent.clone(), w.name.clone(), wt, proposed))
     }
@@ -843,11 +843,11 @@ impl Orchestra {
     pub fn decline_merge(self: &Arc<Self>, worker: &str) -> Result<(), String> {
         let (main, wt) = {
             let mut inner = self.inner.lock().unwrap();
-            let w = inner.workers.get_mut(worker).ok_or("That worker is no longer part of the orchestra.")?;
+            let w = inner.workers.get_mut(worker).ok_or("That agent is no longer part of the team.")?;
             if w.merge != Merge::Proposed {
-                return Err("There is no merge proposal waiting for that worker.".into());
+                return Err("There is no merge proposal waiting for that agent.".into());
             }
-            let wt = w.worktree.clone().ok_or("That worker shares the main folder, so it has no branch.")?;
+            let wt = w.worktree.clone().ok_or("That agent shares the main folder, so it has no branch.")?;
             w.merge = Merge::Declined;
             (w.parent.clone(), wt)
         };
@@ -862,7 +862,7 @@ impl Orchestra {
         let (main, _, wt) = self.worktree_of(worker)?;
         let (merged, merging) = self.inner.lock().unwrap().workers.get(worker).map_or((false, false), |w| (w.merge == Merge::Merged, w.merge == Merge::Merging));
         if merging {
-            return Err("That worker's branch is being merged right now.".into());
+            return Err("That agent's branch is being merged right now.".into());
         }
         let repo = self.host.main_folder(&main)?;
         let env = self.host.path_env().await;
@@ -900,7 +900,7 @@ impl Orchestra {
             (w.parent.clone(), w.worktree.clone(), w.proposed.as_ref().map(|p| p.into.clone()), w.merge == Merge::Merging)
         };
         if merging {
-            return Err("That worker's branch is being merged right now.".into());
+            return Err("That agent's branch is being merged right now.".into());
         }
         let Some(wt) = wt else { return Ok(CloseCheck { worktree: false, branch: None, uncommitted: 0, unmerged_commits: 0 }) };
         let repo = self.host.main_folder(&main)?;
@@ -984,13 +984,13 @@ impl Orchestra {
         }
         let task = task.trim();
         if task.is_empty() {
-            return Err("Say what the worker should do.".into());
+            return Err("Say what the agent should do.".into());
         }
         let name = name.map(str::trim).filter(|n| !n.is_empty()).map_or_else(|| clip(&task.split_whitespace().take(5).collect::<Vec<_>>().join(" "), 40), String::from);
         let args = serde_json::json!({ "name": name, "brief": task, "isolation": isolation, "model": model });
         // The limit's message tells the main agent what to do about it; the user closes a worker instead.
         let reply = self.spawn(main, &args).await.map_err(|e| e.replace("or stop_agent one.", "or close one."))?;
-        let id = reply.strip_prefix("Started agent ").and_then(|r| r.split_whitespace().next()).ok_or("The worker started, but its id couldn't be read.")?.to_string();
+        let id = reply.strip_prefix("Started agent ").and_then(|r| r.split_whitespace().next()).ok_or("The agent started, but its id couldn't be read.")?.to_string();
         let (name, place) = {
             let inner = self.inner.lock().unwrap();
             let w = inner.workers.get(&id).ok_or(GONE)?;
@@ -1002,8 +1002,8 @@ impl Orchestra {
 
     fn worktree_of(&self, worker: &str) -> Result<(String, String, git::Worktree), String> {
         let inner = self.inner.lock().unwrap();
-        let w = inner.workers.get(worker).ok_or("That worker is no longer part of the orchestra.")?;
-        let wt = w.worktree.clone().ok_or("That worker shares the main folder, so it has no branch.")?;
+        let w = inner.workers.get(worker).ok_or("That agent is no longer part of the team.")?;
+        let wt = w.worktree.clone().ok_or("That agent shares the main folder, so it has no branch.")?;
         Ok((w.parent.clone(), w.name.clone(), wt))
     }
 
@@ -2227,7 +2227,7 @@ mod tests {
     #[tokio::test]
     async fn a_worker_the_user_starts_meets_the_same_limits_and_checks_and_says_what_to_do_about_them() {
         let (host, o, _r, _w) = setup();
-        assert!(o.spawn_for_user("s1", "   ", None, "worktree", None).await.unwrap_err().contains("what the worker should do"));
+        assert!(o.spawn_for_user("s1", "   ", None, "worktree", None).await.unwrap_err().contains("what the agent should do"));
         assert!(o.spawn_for_user("s1", "x", None, "moon", None).await.unwrap_err().contains("isolation"));
         assert!(o.spawn_for_user("s1", "x", None, "worktree", Some("--bare")).await.unwrap_err().contains("not a model name"));
         assert!(o.spawn_for_user("s9", "x", None, "worktree", None).await.unwrap_err().contains("not a Team's lead"));

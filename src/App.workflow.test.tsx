@@ -96,7 +96,7 @@ describe("Permissions and Workflow, under the box", () => {
   it("change a team's Permissions from the Lead's title bar on the canvas, where both settings are", async () => {
     const calls = await launch();
     await choose(/Workflow: Chat/, /^Team/);
-    const lead = await screen.findByLabelText(/^Main agent /);
+    const lead = await screen.findByLabelText(/^Lead,/);
     expect(within(lead).getByRole("button", { name: "Workflow: Team" })).toBeInTheDocument();
     fireEvent.click(within(lead).getByRole("button", { name: "Permissions: Ask" }));
     fireEvent.click(within(lead).getByRole("menuitemradio", { name: /^Auto/ }));
@@ -109,7 +109,7 @@ describe("a new team", () => {
   it("is not asked how it should run: it takes the chat's Permissions, and the card for where subagents run is gone", async () => {
     localStorage.setItem("settings.permissionsByFolder", JSON.stringify({ [FOLDER]: "auto" }));
     const calls = await launch();
-    fireEvent.click(await screen.findByRole("button", { name: "New orchestra" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Start a team" }));
     await waitFor(() => expect(calls.filter(([c]) => c === "start_session").length).toBeGreaterThan(1));
     const started = calls.filter(([c]) => c === "start_session").pop()![1] as { settings: Record<string, unknown> };
     expect(started.settings).toMatchObject({ mode: "auto", orchestrator: true });

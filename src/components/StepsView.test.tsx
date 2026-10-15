@@ -310,8 +310,8 @@ describe("StepsView", () => {
     expect(screen.queryByRole("button", { name: "Next step →" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Stay in Build" }));
     expect(onSend).toHaveBeenLastCalledWith("Stay in Build.");
-    fireEvent.click(screen.getByRole("button", { name: "Learn" }));
-    expect(onSend).toHaveBeenLastCalledWith("Start Learn.");
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    expect(onSend).toHaveBeenLastCalledWith("Start Review.");
     fireEvent.click(screen.getByRole("button", { name: "Start Debug" }));
     expect(onSend).toHaveBeenLastCalledWith("Start Debug.");
 
@@ -321,5 +321,30 @@ describe("StepsView", () => {
     expect(current().querySelector(".step-asked")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "← Previous" }));
     expect(screen.getByRole("group", { name: "Claude suggests Debug" })).toHaveTextContent("You started Debug");
+  });
+
+  it("suggests Explain as you go with a flavour, and answers with it; a suggestion of Learn reads the same way", () => {
+    const asked: ChatItem[] = [
+      { type: "user", id: "u1", text: "I'm learning Swift concurrency", turn: 1 },
+      { type: "assistant", id: "a1", text: "# Switch to Build, explaining as you go — you want to learn it by building" },
+      { type: "turn", id: "t1", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
+    ];
+    const onSend = vi.fn();
+    const { rerender } = render(<StepsView state={state({ items: asked })} {...handlers()} onSend={onSend} />);
+    expect(screen.getByRole("group", { name: "Claude suggests Build" })).toHaveTextContent("Claude suggests Build, explaining as you go");
+    fireEvent.click(screen.getByRole("button", { name: "Start Build, explaining as you go" }));
+    expect(onSend).toHaveBeenLastCalledWith("Start Build, explaining as you go.");
+    // An older chat's "Switch to Learn" is the same suggestion.
+    const old: ChatItem[] = [asked[0], { type: "assistant", id: "a1", text: "# Switch to Learn — you want to learn" }, asked[2]];
+    rerender(<StepsView state={state({ items: old })} {...handlers()} onSend={onSend} />);
+    expect(screen.getByRole("group", { name: "Claude suggests Build" })).toHaveTextContent("explaining as you go");
+  });
+
+  it("shows Explain as you go on the badge, and Design for the Architecture flavour", () => {
+    const items: ChatItem[] = [{ type: "user", id: "u1", text: "add x", turn: 1 }, { type: "assistant", id: "a1", text: "# Frame — x" }, { type: "turn", id: "t1", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 }];
+    const { rerender } = render(<StepsView state={state({ items })} {...handlers("build")} explain />);
+    expect(screen.getByRole("button", { name: /Build/ })).toHaveTextContent("explaining");
+    rerender(<StepsView state={state({ items })} {...handlers("architecture")} />);
+    expect(screen.getByRole("button", { name: /Design/ })).toBeInTheDocument();
   });
 });

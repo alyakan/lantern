@@ -147,7 +147,7 @@ impl PermissionBridge {
             let orchestra = self.orchestra.lock().unwrap().clone();
             let resp = match orchestra {
                 Some(handle) => handle(req.tool_name, req.input).await,
-                None => BridgeResponse { allow: false, message: Some("This chat is not the main agent of an orchestra.".into()), updated_input: None, failed: false },
+                None => BridgeResponse { allow: false, message: Some("This chat is not the Lead of a team.".into()), updated_input: None, failed: false },
             };
             if let Ok(json) = serde_json::to_string(&resp) {
                 let _ = write.write_all(format!("{json}\n").as_bytes()).await;
@@ -640,7 +640,7 @@ mod tests {
         let socket = bridge.socket_path.display().to_string();
         let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &orchestra_call())).await.unwrap();
         assert!(!reply.allow);
-        assert!(reply.message.unwrap().contains("not the main agent"));
+        assert!(reply.message.unwrap().contains("not the Lead"));
         assert!(tokio::time::timeout(Duration::from_millis(200), rx.recv()).await.is_err());
     }
 

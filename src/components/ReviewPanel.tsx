@@ -56,7 +56,7 @@ interface Props {
   onSaved?: () => void;
   /** Show this run in the Tests tab (from the chat); `key` changes for every request. */
   focusRun?: { id: string; key: number } | null;
-  /** The Agents tab: the latest turn's agent tree, cost per model, and `openKey`, changed to bring the tab up. */
+  /** The Activity tab: the latest turn's agent tree, cost per model, and `openKey`, changed to bring the tab up. */
   agents?: { tree: AgentTree; graph: AgentGraph; usage: ModelCost[]; openKey: number };
   /** The Summary tab, in a Step-by-step chat that has a step to show: the plan so far, and how to open a row's page. */
   summary?: { slot: string; data: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void; doc?: ExportDoc };
@@ -142,7 +142,7 @@ export function ReviewPanel(props: Props) {
   const scopeRevert = revertFor(props.scope ?? "session", props.stepRange);
   // "Revert all" is for the chat's changes or the last message's, not a step's (which the Summary offers).
   const allRevert = scopeRevert !== null && scopeRevert !== "unknown" && !(scopeRevert.scope === "turn" && scopeRevert.turn !== null) ? scopeRevert : null;
-  const revertOff = scopeRevert === "unknown" ? "This step's changes aren't known: the session was reopened after it." : (rv?.blocked ?? null);
+  const revertOff = scopeRevert === "unknown" ? "This step's changes aren't known: the chat was reopened after it." : (rv?.blocked ?? null);
   const fileRevert = rv && scopeRevert !== null ? { off: revertOff, onFile: (file: ChangedFile) => scopeRevert !== "unknown" && setReverting({ title: `Revert ${basename(relativeTo(file.path, props.folder))}?`, files: [file], request: scopeRevert }) } : undefined;
   return (
     <aside className="review">
@@ -177,7 +177,7 @@ export function ReviewPanel(props: Props) {
           )}
           {props.agents && (
             <button id={tabId("agents")} role="tab" tabIndex={tab === "agents" ? 0 : -1} aria-selected={tab === "agents"} className={tab === "agents" ? "active" : ""} onClick={() => setTab("agents")}>
-              Agents
+              Activity
               {props.agents.tree.live && <span className="tab-live" aria-label="working" />}
             </button>
           )}
@@ -300,7 +300,7 @@ function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr,
       scope === "git" ? (gitError ?? "Nothing uncommitted") :
       scope === "pr" ? (gitError ?? `Fetching pull request #${pr}…`) :
       scope === "branch" ? (gitError ?? "Reading the branch…") :
-      scope !== "turn" ? "No changes yet" : stepRange === null ? "This step's changes aren't known: the session was reopened after it" : stepRange !== undefined ? "No changes in this step" : "No changes in the last turn";
+      scope !== "turn" ? "No changes yet" : stepRange === null ? "This step's changes aren't known: the chat was reopened after it" : stepRange !== undefined ? "No changes in this step" : "No changes in the last turn";
     return <div className="empty">{empty}</div>;
   }
 
@@ -346,7 +346,7 @@ function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr,
   );
 }
 
-const SCOPE_LABEL: Record<Exclude<ChangeScope, "pr" | "turn">, string> = { branch: "This branch", session: "Session", git: "Uncommitted" };
+const SCOPE_LABEL: Record<Exclude<ChangeScope, "pr" | "turn">, string> = { branch: "This branch", session: "This chat", git: "Uncommitted" };
 
 /** Which changes the Changes tab shows, as a menu: each option with its count and what it means. */
 function ScopeMenu({ scope = "session", onScope, pr, branch, stepRange, scopeCounts }: Props & { onScope: (scope: ChangeScope) => void }) {

@@ -65,7 +65,7 @@ export function SummaryTab({ slot, summary, changed, running, onOpenPage, doc, r
   const revertOf = (row: SummaryRow) => {
     if (!revert || !row.changes) return undefined;
     const range = row.range;
-    if (!range) return { off: "This step's changes aren't known: the session was reopened after it.", onRevert: () => {} };
+    if (!range) return { off: "This step's changes aren't known: the chat was reopened after it.", onRevert: () => {} };
     const found = filesOf(row);
     if (!found || found.length === 0) return undefined;
     return { off: revert.blocked, onRevert: () => setReverting({ title: `Revert ${row.label}?`, files: found, request: { scope: "turn", turn: range.from, toTurn: range.to } }) };

@@ -73,6 +73,8 @@ export type ChatItem =
       auto?: boolean;
       /** Step by step: sent with the flavour the user had just picked (Claude was told in a note before the text). */
       switchedTo?: Flavour;
+      /** ...with Explain as you go on. */
+      explained?: boolean;
       /** Sent from the box: the box's text as an encoded draft, so Edit brings its paste placeholders back (see lib/paste.ts). */
       draft?: string;
       /** Sent by another agent, not typed here: the main agent's message to a worker, or a worker's brief. */
@@ -182,8 +184,12 @@ export interface State {
   subagents: Subagents;
   /** Step by step: a flavour picked from the header and not yet sent (it goes with the next message). */
   flavourPick: Flavour | null;
+  /** ...and whether Explain as you go is on with it (Build and Debug). */
+  explainPick: boolean;
   /** Step by step: the flavour an older session was in, when its mode was Debug, Teach or Review. */
   flavourStart: Flavour | null;
+  /** ...and Explain as you go, which a Teach session had on. */
+  explainStart: boolean;
   model: string | null;
   items: ChatItem[];
   changedFiles: ChangedFile[];
@@ -262,7 +268,9 @@ export const initialState: State = {
   autoApprove: false,
   subagents: "canvas",
   flavourPick: null,
+  explainPick: false,
   flavourStart: null,
+  explainStart: false,
   model: null,
   items: [],
   changedFiles: [],
@@ -294,13 +302,13 @@ export type Action =
   | { type: "history_loaded"; sessionId: string; events: UiEvent[]; movedFrom?: string | null }
   | { type: "session_ready" }
   /** `auto`: sent by Lantern from agents' notes, not typed by the user. */
-  | { type: "user_sent"; text: string; switchedTo?: Flavour; draft?: string; auto?: boolean }
+  | { type: "user_sent"; text: string; switchedTo?: Flavour; explained?: boolean; draft?: string; auto?: boolean }
   | { type: "wakes_taken" }
   | { type: "orchestrator_set"; on: boolean }
   /** `autoApprove`: Step by step's Permissions (kept as it is when absent; other modes say it with the mode). */
-  | { type: "mode_changed"; mode: Mode; autoApprove?: boolean; flavourStart?: Flavour | null }
+  | { type: "mode_changed"; mode: Mode; autoApprove?: boolean; flavourStart?: Flavour | null; explainStart?: boolean }
   | { type: "subagents_set"; subagents: Subagents }
-  | { type: "flavour_picked"; flavour: Flavour | null }
+  | { type: "flavour_picked"; flavour: Flavour | null; explain?: boolean }
   | { type: "permission_decided"; id: string; allow: boolean; note?: string }
   | { type: "stop_requested" }
   | { type: "restarting" }
@@ -385,7 +393,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -415,13 +423,13 @@ function applyEvent(state: State, ev: UiEvent): State {
       const seq = state.seq + 1;
       const sent = readShellContext(ev.text);
       const read = readFlavourNote(readPageNote(sent.text));
-      const { flavour } = read;
+      const { flavour, explain } = read;
       const text = readSkillNote(read.text);
       const at = ev.at ?? 0;
       const shells = sent.shells.map((s, i): ShellItem => ({ type: "shell", id: `sh-u${seq}-${i}`, command: s.command, output: s.output, status: s.stopped ? "stopped" : s.running ? "unknown" : s.code ? "failed" : "done", code: s.code, startedAt: at, endedAt: at, shared: true }));
       // Commands alone (Claude Code's own `!` mode writes them so): no prompt to show after them.
       if (shells.length > 0 && !text.trim()) return { ...state, seq, items: [...state.items, ...shells] };
-      return { ...state, seq, items: [...state.items, ...shells, { type: "user", id: `u${seq}`, text, at: ev.at, ...(flavour ? { switchedTo: flavour } : {}) }] };
+      return { ...state, seq, items: [...state.items, ...shells, { type: "user", id: `u${seq}`, text, at: ev.at, ...(flavour ? { switchedTo: flavour, ...(explain ? { explained: true } : {}) } : {}) }] };
     }
     case "shell_output":
       return { ...state, items: mapShell(state.items, ev.id, (s) => ({ ...s, output: (s.output + ev.text).slice(-KEEP_CHARS) })) };
@@ -580,7 +588,7 @@ function applyEvent(state: State, ev: UiEvent): State {
         thinking: false,
         stopRequested: false,
         items: denyPending(failRunning(state.items)),
-        banner: ev.reason ? { kind: "error", text: ev.reason, action: null } : { kind: "info", text: "The main agent stopped this worker. Restart it to carry on.", action: "restart" },
+        banner: ev.reason ? { kind: "error", text: ev.reason, action: null } : { kind: "info", text: "The Lead stopped this agent. Restart it to carry on.", action: "restart" },
       };
     // The main agent's mode was lowered, so this worker's was too (its claude restarted on the same conversation).
     case "agent_mode":
@@ -642,7 +650,7 @@ export function reducer(state: State, action: Action): State {
       return state.status === "starting" ? { ...state, status: "idle" } : state;
     case "user_sent": {
       const seq = state.seq + 1;
-      const item: ChatItem = { type: "user", id: `u${seq}`, text: action.text, at: Date.now(), ...(action.auto ? { auto: true } : {}), ...(action.switchedTo ? { switchedTo: action.switchedTo } : {}), ...(action.draft ? { draft: action.draft } : {}) };
+      const item: ChatItem = { type: "user", id: `u${seq}`, text: action.text, at: Date.now(), ...(action.auto ? { auto: true } : {}), ...(action.switchedTo ? { switchedTo: action.switchedTo, ...(action.explained ? { explained: true } : {}) } : {}), ...(action.draft ? { draft: action.draft } : {}) };
       // A picked flavour went with this message.
       // The commands run since the last message went with this one (unless it's a slash command).
       const sent = takesShellContext(action.text) ? state.items.map((it): ChatItem => (it.type === "shell" && !it.shared ? { ...it, shared: true } : it)) : state.items;
@@ -652,18 +660,18 @@ export function reducer(state: State, action: Action): State {
       const movedFrom = takesShellContext(action.text) ? null : state.movedFrom;
       // Anything the user sends ends a run of automatic turns; the guard counts only the unattended ones.
       const autoStreak = action.auto ? state.autoStreak + 1 : 0;
-      return { ...state, status: "running", thinking: true, stopRequested: false, seq, autoStreak, flavourPick: action.switchedTo ? null : state.flavourPick, items: [...sent, item], revertUndo: null, revertNotes: noted, movedFrom };
+      return { ...state, status: "running", thinking: true, stopRequested: false, seq, autoStreak, flavourPick: action.switchedTo ? null : state.flavourPick, explainPick: action.switchedTo ? false : state.explainPick, items: [...sent, item], revertUndo: null, revertNotes: noted, movedFrom };
     }
     case "wakes_taken":
       return { ...state, wakes: [] };
     case "orchestrator_set":
       return { ...state, orchestrator: action.on };
     case "mode_changed":
-      return { ...state, mode: action.mode, autoApprove: action.mode === "steps" ? (action.autoApprove ?? state.autoApprove) : false, ...(action.flavourStart !== undefined ? { flavourStart: action.flavourStart } : {}) };
+      return { ...state, mode: action.mode, autoApprove: action.mode === "steps" ? (action.autoApprove ?? state.autoApprove) : false, ...(action.flavourStart !== undefined ? { flavourStart: action.flavourStart } : {}), ...(action.explainStart !== undefined ? { explainStart: action.explainStart } : {}) };
     case "subagents_set":
       return { ...state, subagents: action.subagents };
     case "flavour_picked":
-      return { ...state, flavourPick: action.flavour };
+      return { ...state, flavourPick: action.flavour, explainPick: !!action.flavour && !!action.explain };
     case "permission_decided":
       return {
         ...state,

@@ -37,7 +37,7 @@ describe("WorkflowMenu", () => {
     fireEvent.click(screen.getByRole("button", { name: /Workflow/ }));
     const text = screen.getByRole("menu").textContent ?? "";
     expect(text).not.toMatch(/teach|Auto-approve|Ask before actions/);
-    expect(text).toMatch(/build, learn, review, debug or map the architecture/);
+    expect(text).toMatch(/build, review, debug or design/);
   });
 
   it("names Step by step's flavour on its chip", () => {

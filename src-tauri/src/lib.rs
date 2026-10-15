@@ -239,7 +239,7 @@ impl orchestra::Host for AppHost {
             let parent_slot = req.parent.clone();
             let parent = state.slots.get(&req.parent)?;
             // The worker runs on its main agent's provider unless another was asked for: it is cloned with the rest of the config.
-            let mut cfg = parent.config.lock().unwrap().clone().ok_or("The main agent has no folder open.")?;
+            let mut cfg = parent.config.lock().unwrap().clone().ok_or("The Lead has no folder open.")?;
             if req.provider != cfg.provider {
                 // Another provider's CLI is a program, models and settings of its own: none of the main agent's carry over.
                 let id = req.provider;
@@ -1137,11 +1137,20 @@ fn set_subagents(state: State<'_, AppState>, slot: String, subagents: permission
     Ok(())
 }
 
+/// The open pull requests of the folder's repository, for the start screen's "Review a PR" picker. An error is a message
+/// for the user: gh missing, not logged in, or not a GitHub repository.
+#[tauri::command]
+async fn list_open_prs(state: State<'_, AppState>, folder: String) -> Result<Vec<pr::OpenPr>, String> {
+    let path_env = login_path(&state).await;
+    let folder = std::path::PathBuf::from(folder);
+    tauri::async_runtime::spawn_blocking(move || pr::open_prs(&folder, path_env.as_deref())).await.map_err(|e| e.to_string())?
+}
+
 /// Step by step's flavours as the prompt Claude runs with has them: each one's section and its headings. The window
 /// repeats them in its notes (switching flavour, a page it couldn't read), so they're never a copy that has drifted.
 #[tauri::command]
 fn steps_guide() -> Vec<args::FlavourGuide> {
-    args::FLAVOURS.iter().filter_map(|f| args::flavour_guide(f)).collect()
+    args::FLAVOURS.iter().chain([&args::EXPLAIN]).filter_map(|f| args::flavour_guide(f)).collect()
 }
 
 /// Makes an "Always allow" rule from a card (the request itself is answered by respond_permission).
@@ -1669,6 +1678,7 @@ pub fn run() {
             change_summary,
             respond_permission,
             steps_guide,
+            list_open_prs,
             set_subagents,
             list_permission_rules,
             add_permission_rule,

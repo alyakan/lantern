@@ -1,4 +1,8 @@
 import { useState } from "react";
+import { ExternalLink } from "./ExternalLink";
+
+/** Where Claude Code is installed from. */
+export const INSTALL_URL = "https://docs.anthropic.com/en/docs/claude-code";
 
 export function SetupScreen({ error, onCheck }: { error: string | null; onCheck: (pathOverride: string | null) => void }) {
   const [path, setPath] = useState("");
@@ -7,7 +11,9 @@ export function SetupScreen({ error, onCheck }: { error: string | null; onCheck:
       <h1>Claude CLI not found</h1>
       {error && <p className="muted">{error}</p>}
       <ol>
-        <li>Install Claude Code.</li>
+        <li>
+          Install Claude Code: <ExternalLink href={INSTALL_URL}>how to install it</ExternalLink>.
+        </li>
         <li>
           Run <code>claude</code> once in a terminal and log in.
         </li>

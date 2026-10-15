@@ -46,7 +46,7 @@ describe("the form to start an agent", () => {
     open();
     type(task(), "   ");
     fireEvent.click(within(form()).getByRole("button", { name: "Start agent" }));
-    expect(within(form()).getByRole("alert").textContent).toBe("Say what the worker should do.");
+    expect(within(form()).getByRole("alert").textContent).toBe("Say what the agent should do.");
     expect(task().getAttribute("aria-invalid")).toBe("true");
     expect(document.activeElement).toBe(task());
     expect(spawn).not.toHaveBeenCalled();

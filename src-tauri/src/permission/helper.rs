@@ -134,14 +134,14 @@ pub fn handle_message_as(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeRespo
 /// What steps_guide answers: the rules every flavour shares, then the asked flavour's section (or every flavour's). Err
 /// when there is no such flavour.
 pub fn steps_guide_text(flavour: &str) -> Result<String, String> {
-    use crate::args::{flavour_guide, steps_rules, FLAVOURS};
+    use crate::args::{flavour_guide, steps_rules, EXPLAIN, FLAVOURS};
     let one = (!flavour.trim().is_empty()).then(|| flavour_guide(flavour)).flatten();
     if !flavour.trim().is_empty() && one.is_none() {
-        return Err(format!("There is no flavour {flavour:?}. Step by step's flavours are {}.", FLAVOURS.join(", ")));
+        return Err(format!("There is no flavour {flavour:?}. Step by step's flavours are {}, and its option is {EXPLAIN}.", FLAVOURS.join(", ")));
     }
     let sections: Vec<String> = match one {
         Some(g) => vec![g.text],
-        None => FLAVOURS.iter().filter_map(|f| flavour_guide(f)).map(|g| g.text).collect(),
+        None => FLAVOURS.iter().chain([&EXPLAIN]).filter_map(|f| flavour_guide(f)).map(|g| g.text).collect(),
     };
     Ok(format!("{}\n\n{}", steps_rules(), sections.join("\n\n")))
 }
@@ -526,15 +526,17 @@ mod tests {
         let review = text(tool_call("steps_guide", json!({"flavour": "review"})));
         assert!(review.contains("You work one page at a time") && review.contains("# File N of M") && !review.contains("# Evidence N"));
         let all = text(tool_call("steps_guide", json!({})));
-        assert!(all.contains("# File N of M") && all.contains("# Evidence N") && all.contains("# Overview"));
+        assert!(all.contains("# File N of M") && all.contains("# Evidence N") && all.contains("# Overview") && all.contains("Explain as you go:"));
         let unknown = tool_call("steps_guide", json!({"flavour": "Teach"}));
         assert_eq!(unknown["isError"], true);
-        assert!(text(unknown).contains("Step by step's flavours are Build, Learn, Review, Debug, Architecture"));
+        assert!(text(unknown).contains("Step by step's flavours are Build, Review, Debug, Design, and its option is Explain as you go"));
+        let explain = text(tool_call("steps_guide", json!({"flavour": "Learn"})));
+        assert!(explain.contains("explain the why") && !explain.contains("# Evidence N"), "Learn is the option's old name");
     }
 
     #[test]
-    fn steps_guides_architecture_section_has_the_shape_of_the_map() {
-        let text = tool_call("steps_guide", json!({"flavour": "Architecture"}))["content"][0]["text"].as_str().unwrap().to_string();
+    fn steps_guides_design_section_has_the_shape_of_the_map() {
+        let text = tool_call("steps_guide", json!({"flavour": "Design"}))["content"][0]["text"].as_str().unwrap().to_string();
         for part in ["```architecture", "\"layers\"", "\"nodes\"", "\"edges\"", "\"status\"", "\"layer\""] {
             assert!(text.contains(part), "{part}");
         }

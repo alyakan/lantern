@@ -68,9 +68,9 @@ export const NodeBody = memo(function NodeBody({ slot, parent }: { slot: string;
       {wakesPaused(state) && (
         <div className="node-banner info" role="status">
           <span>
-            {state.wakes.length === 1 ? "1 update from the workers is" : `${state.wakes.length} updates from the workers are`} held back: {WAKE_LIMIT} replies in a row went out without you, and this keeps the team from running on unwatched.
+            {state.wakes.length === 1 ? "1 update from the agents is" : `${state.wakes.length} updates from the agents are`} held back: {WAKE_LIMIT} replies in a row went out without you, and this keeps the team from running on unwatched.
           </span>
-          <button onClick={() => actions.send(slot, "Carry on with the latest updates from the workers.")}>Pass them on</button>
+          <button onClick={() => actions.send(slot, "Carry on with the latest updates from the agents.")}>Pass them on</button>
         </div>
       )}
       {state.banner && (

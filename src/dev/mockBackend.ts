@@ -147,7 +147,9 @@ async function playArchitecture(slot: string, text: string) {
 /** Step by step: the flavour each chat is in, what Claude suggested, and the task it was suggested for. */
 const flavourOfSlot: Record<string, string> = {};
 const suggestedFor: Record<string, { flavour: string; task: string }> = {};
-const LABEL: Record<string, string> = { build: "Build", learn: "Learn", review: "Review", debug: "Debug", architecture: "Architecture" };
+const LABEL: Record<string, string> = { build: "Build", learn: "Build, explaining as you go", review: "Review", debug: "Debug", architecture: "Design" };
+/** What a flavour's name in a note or answer is: Learn is Build explaining as you go, and Architecture is Design. */
+const flavourId = (word: string) => ({ learn: "learn", teach: "learn", design: "architecture" })[word.toLowerCase()] ?? word.toLowerCase();
 
 /** What Claude would suggest for a task. */
 function suggestionFor(text: string): { flavour: string; why: string } {
@@ -165,18 +167,18 @@ function suggestionFor(text: string): { flavour: string; why: string } {
 async function playStepByStep(slot: string, raw: string) {
   const send = sendTo(slot);
   const done = () => send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 1400, auth_hint: false, denied: 0, context_window: 200_000 });
-  const note = /^\[Lantern: this chat switched to (Build|Learn|Review|Debug|Architecture)\b[^\]]*\]\s*/.exec(raw);
+  const note = /^\[Lantern: this chat switched to (Build|Learn|Review|Debug|Design|Architecture)\b(, explaining as you go)?[^\]]*\]\s*/.exec(raw);
   const text = note ? raw.slice(note[0].length) : raw;
   if (stepPage[slot] === undefined && flavourOfSlot[slot] === undefined && !note) {
     await send({ kind: "session_started", session_id: `mock-${slot}`, model: "claude-opus-5-5", cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
   }
-  const start = /^start (build|learn|review|debug|architecture)\b/i.exec(text.trim());
+  const start = /^start (build|learn|review|debug|design|architecture)\b(, explaining as you go)?/i.exec(text.trim());
   let task = text;
   if (note) {
-    flavourOfSlot[slot] = note[1].toLowerCase();
+    flavourOfSlot[slot] = note[2] && flavourId(note[1]) === "build" ? "learn" : flavourId(note[1]);
     delete stepPage[slot];
   } else if (start && suggestedFor[slot]) {
-    flavourOfSlot[slot] = start[1].toLowerCase();
+    flavourOfSlot[slot] = start[2] && flavourId(start[1]) === "build" ? "learn" : flavourId(start[1]);
     task = suggestedFor[slot].task;
     delete suggestedFor[slot];
     delete stepPage[slot];
@@ -1140,6 +1142,7 @@ export function installMockBackend() {
           // A short stand-in for the backend's own (args::flavour_guide): enough for the notes to show their headings.
           return [
             { flavour: "Build", text: "Build: plan one step per page, then build one step per page.", headings: ["# Frame — <the task in a few words>", "# Plan step N — <step title>", "# Plan complete — N steps", "# Step N of M — <step title>", "# Done — <what was built>"] },
+            { flavour: "Explain", text: "Explain as you go: explain the why on every page.", headings: [] },
             { flavour: "Review", text: "Review: one changed file per page, then the summary.", headings: ["# Frame — <the PR's title>", "# File N of M — <path> (+added −removed)", "# Summary — <files reviewed, findings accepted, findings dropped>"] },
           ];
         case "set_subagents":
@@ -1185,6 +1188,14 @@ export function installMockBackend() {
         case "moved_folder_candidates":
           // A folder from before it moved, and the one place it's at now (the same name, and the only such folder).
           return [{ old: "/Users/you/Documents/Github/web-dashboard", suggested: "/Users/you/projects/web-dashboard" }];
+        case "list_open_prs":
+          // ?prs=missing shows what the picker says when gh isn't installed.
+          if (new URLSearchParams(location.search).get("prs") === "missing") return Promise.reject("The GitHub CLI (gh) isn't installed. Install it from cli.github.com, then run `gh auth login` in a terminal.");
+          return [
+            { number: 128, title: "Retry fetchJson with backoff", author: "ada", branch: "feat/retry-fetch", draft: false },
+            { number: 127, title: "Fix the crash saving a form with an empty title", author: "grace", branch: "fix/empty-title", draft: false },
+            { number: 121, title: "Draft: move the settings screen to tabs", author: "ada", branch: "wip/settings-tabs", draft: true },
+          ];
         case "old_locations":
           return a.folder === FOLDER ? OLD_LOCATIONS : [];
         case "known_folders":

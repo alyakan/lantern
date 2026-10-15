@@ -23,7 +23,7 @@ describe("AgentsTab", () => {
     expect(screen.getByText("Live")).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Agent graph" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "main Sonnet 5.5: running" })).toBeInTheDocument();
-    expect(within(screen.getByRole("list", { name: "Session log" })).getByText("reviewed · before starting")).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: "Chat log" })).getByText("reviewed · before starting")).toBeInTheDocument();
   });
 
   it("shows the cost per model once the turn is done, and says what to do before any", () => {

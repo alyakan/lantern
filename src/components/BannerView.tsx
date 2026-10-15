@@ -4,7 +4,7 @@ export function BannerView({ banner, onRestart, onDismiss }: { banner: Banner; o
   return (
     <div className={`banner banner-${banner.kind}`} role="status">
       <span>{banner.text}</span>
-      {banner.action === "restart" && <button onClick={onRestart}>Restart session</button>}
+      {banner.action === "restart" && <button onClick={onRestart}>Restart chat</button>}
       <button className="link" aria-label="Dismiss" onClick={onDismiss}>
         ✕
       </button>

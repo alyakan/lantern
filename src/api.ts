@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
-import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -128,6 +128,8 @@ export const api = {
   movedFolderCandidates: () => invoke<MovedFolder[]>("moved_folder_candidates"),
   /** The places the folder was before whose sessions can be brought over: named like it, or already brought over. */
   oldLocations: (folder: string) => invoke<OldLocation[]>("old_locations", { folder }),
+  /** The open pull requests of the folder's repository (gh); rejects with a message for the user when gh is missing, logged out or the folder isn't on GitHub. */
+  openPrs: (folder: string) => invoke<OpenPr[]>("list_open_prs", { folder }),
   /** Every folder with sessions, gone ones included, for choosing where a folder was before. */
   knownFolders: () => invoke<FolderSessions[]>("known_folders"),
   /** What moving `old` to `next` would bring over. Nothing is changed. */

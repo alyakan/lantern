@@ -43,7 +43,7 @@ describe("ReviewPanel reverts", () => {
   it("is off for a step whose turns aren't known, and absent for a git view", () => {
     const { rerender } = render(<ReviewPanel {...base} scope="turn" stepRange={null} selected="/p/src/a.ts" follow revert={controls()} />);
     expect(screen.getByRole("button", { name: "Revert" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Revert" })).toHaveAttribute("title", "This step's changes aren't known: the session was reopened after it.");
+    expect(screen.getByRole("button", { name: "Revert" })).toHaveAttribute("title", "This step's changes aren't known: the chat was reopened after it.");
     rerender(<ReviewPanel {...base} scope="git" selected="/p/src/a.ts" follow revert={controls()} />);
     expect(screen.queryByRole("button", { name: "Revert" })).toBeNull();
   });
@@ -83,9 +83,9 @@ describe("ReviewPanel", () => {
   it("filters between the last turn's changes and the whole session's", () => {
     const onScope = vi.fn();
     const { rerender } = render(<ReviewPanel {...base} scope="session" onScope={onScope} scopeCounts={{ turn: 1, session: 2, git: null }} selected="/p/src/a.ts" follow />);
-    expect(filterButton()).toHaveTextContent("Session2");
+    expect(filterButton()).toHaveTextContent("This chat2");
     openFilter();
-    expect(option(/^Session/)).toHaveAttribute("aria-checked", "true");
+    expect(option(/^This chat/)).toHaveAttribute("aria-checked", "true");
     expect(option(/^Last turn/)).toHaveAttribute("aria-checked", "false");
     expect(option(/^Last turn/)).toHaveTextContent("What changed since your last message");
     fireEvent.click(option(/^Last turn/));

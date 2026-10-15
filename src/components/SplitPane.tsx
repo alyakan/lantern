@@ -119,7 +119,7 @@ export function SplitPane({ left, right, ratio, collapsed, onRatio }: Props) {
               className="split-handle"
               role="separator"
               aria-orientation="vertical"
-              aria-label="Resize the review panel"
+              aria-label="Resize the side panel"
               aria-valuenow={Math.round(ratio * 100)}
               tabIndex={0}
               title="Drag to resize, double-click to reset"

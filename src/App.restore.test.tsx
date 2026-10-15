@@ -100,8 +100,8 @@ describe("restoring a team at launch", () => {
     fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
     fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
     // Each window's title bar says its Permissions: the Lead's and the agent's.
-    expect(await within(await screen.findByLabelText(/^Main agent /)).findByRole("button", { name: "Permissions: Auto" })).toBeInTheDocument();
-    expect(await within(await screen.findByLabelText(/Worker Login form/)).findByRole("button", { name: "Permissions: Auto" })).toBeInTheDocument();
+    expect(await within(await screen.findByLabelText(/^Lead,/)).findByRole("button", { name: "Permissions: Auto" })).toBeInTheDocument();
+    expect(await within(await screen.findByLabelText(/Agent Login form/)).findByRole("button", { name: "Permissions: Auto" })).toBeInTheDocument();
     // Still saved under both sessions for the next restart.
     expect(JSON.parse(localStorage.getItem("settings.modeBySession") ?? "{}")).toMatchObject({ bbbb22: "auto", aaaa11: "auto" });
   });
@@ -111,21 +111,21 @@ describe("restoring a team at launch", () => {
     await launch();
     fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
     fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
-    expect(await within(await screen.findByLabelText(/^Main agent /)).findByRole("button", { name: "Permissions: Auto" })).toBeInTheDocument();
-    expect(await within(await screen.findByLabelText(/Worker Login form/)).findByRole("button", { name: "Permissions: Ask" })).toBeInTheDocument();
+    expect(await within(await screen.findByLabelText(/^Lead,/)).findByRole("button", { name: "Permissions: Auto" })).toBeInTheDocument();
+    expect(await within(await screen.findByLabelText(/Agent Login form/)).findByRole("button", { name: "Permissions: Ask" })).toBeInTheDocument();
   });
 
   it("keeps the side panel beside the canvas, shut until the user opens it, and remembers that", async () => {
     await launch();
     fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
     fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
-    expect(await screen.findByLabelText(/Worker Login form/)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/Agent Login form/)).toBeInTheDocument();
     // The panel is there beside the canvas (its Changes tab is in the page), shut.
     expect(screen.getByRole("tab", { name: /^Changes/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Show changes" }));
-    expect(await screen.findByRole("button", { name: "Hide changes" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show side panel" }));
+    expect(await screen.findByRole("button", { name: "Hide side panel" })).toBeInTheDocument();
     // Still the canvas, now with the panel open beside it; and the choice is kept for the next time.
-    expect(screen.getByLabelText(/Worker Login form/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Agent Login form/)).toBeInTheDocument();
     await waitFor(() => expect(JSON.parse(localStorage.getItem("review.canvasPanel") ?? "false")).toBe(true));
   });
 

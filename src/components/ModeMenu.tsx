@@ -13,7 +13,7 @@ const PERMISSION_ROWS: { value: Permissions; hint: string; icon: ReactNode }[] =
 
 const WORKFLOW_ROWS: { value: Workflow; hint: string; icon: ReactNode }[] = [
   { value: "chat", hint: "A plain conversation: Claude works as you ask", icon: <SparkIcon /> },
-  { value: "steps", hint: "One page at a time: Claude suggests whether to build, learn, review, debug or map the architecture, and you start it", icon: <StepsIcon /> },
+  { value: "steps", hint: "One page at a time: Claude suggests whether to build, review, debug or design, and you start it", icon: <StepsIcon /> },
   { value: "team", hint: "This chat becomes the Lead of a team: it starts agents that work in parallel, each in a chat of its own", icon: <OrchestraIcon /> },
 ];
 

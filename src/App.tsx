@@ -7,7 +7,8 @@ import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/rev
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
 import { summarizeRequest } from "./lib/network";
-import { StepsIntro } from "./components/StepsIntro";
+import { StartScreen } from "./components/StartScreen";
+import { ReviewPrDialog } from "./components/ReviewPrDialog";
 import { windowFocused } from "./lib/windowFocus";
 import { initialState, reducer, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
@@ -27,7 +28,7 @@ import { agentGraph } from "./lib/agentGraph";
 import { BUILT_IN, CUSTOM_HARNESS, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
-import type { CloseAgreed, McpServer, MovedFolder, NewRule, NewWorker, RelocationEntry, SkillEntry, UpdateInfo } from "./types";
+import type { CloseAgreed, McpServer, MovedFolder, NewRule, NewWorker, OpenPr, RelocationEntry, SkillEntry, UpdateInfo } from "./types";
 import { LAST_FOLDER, OPEN_CHATS, migrateFolderState, withMovedNote, type Migrated } from "./lib/relocate";
 import { BringOldSessionsDialog } from "./components/BringOldSessionsDialog";
 import { stepFile, usePersistentState } from "./lib/layout";
@@ -59,7 +60,7 @@ import { andNext, pageLabel, pagesOf, pageTitle } from "./lib/steps";
 import { architectureMap, coversOf } from "./lib/architecture";
 import { ArchitecturePane } from "./lib/architecturePane";
 import { summarize } from "./lib/stepsSummary";
-import { flavourOf, savedMode, withFlavourNote, type Flavour } from "./lib/flavour";
+import { canExplain, flavourState, savedMode, withFlavourNote, type Flavour } from "./lib/flavour";
 import { launchOf, migrateModeSettings, permissionsOf, PERMISSIONS_LABEL, WORKFLOW_LABEL, workflowOf, savedModeOf, type Permissions, type Subagents, type Workflow } from "./lib/workflow";
 import { FileLinksProvider } from "./lib/fileLinks";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -90,10 +91,9 @@ function countFinished(items: ChatItem[], name: string): number {
 const HERO_PLACEHOLDER: Record<Flavour | "none", string> = {
   none: "What are you working on? Claude suggests how to go about it",
   build: "What should we build, step by step?",
-  learn: "What do you want to learn, and what for?",
   review: "Which change? e.g. Review PR 128, or Review my branch",
   debug: "What's going wrong, and when?",
-  architecture: "What should be mapped? A feature to design, a fix, or e.g. PR 128",
+  architecture: "What should be designed? A feature, a fix, or e.g. PR 128",
 };
 
 /** The chat whose merge cards include `worker`'s: its main agent's, even if the worker's own chat has been closed. */
@@ -488,14 +488,14 @@ export default function App() {
     // The mode it was last in (and for an older Debug, Teach or Review session, that flavour of Step by step); one from
     // before modes were kept per session reopens as a plain chat, not as whatever this folder's newest chat is doing.
     const saved = savedMode(sessionModes[sessionId]);
-    const { mode, flavour: flavourStart } = saved;
+    const { mode, flavour: flavourStart, explain: explainStart } = saved;
     // Step by step's Permissions: as the session saved them, else (an older save) the project's.
     const autoApprove = mode === "steps" && (saved.autoApprove ?? permissionsFor(folder) === "auto");
     // The preset it last ran with, else the folder's.
     const h = findHarness(presets, harnessBySession[sessionId] ?? harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)(reuse ? { type: "restarting" } : { type: "folder_opened", folder });
-    to(slot)({ type: "mode_changed", mode, autoApprove, flavourStart });
+    to(slot)({ type: "mode_changed", mode, autoApprove, flavourStart, explainStart });
     to(slot)({ type: "orchestrator_set", on: team?.role === "main" });
     // Trying again later doesn't wait on a main agent that has long since opened (or not).
     const again: TeamRole | undefined = team?.role === "worker" ? { ...team, parentReady: undefined } : team;
@@ -699,6 +699,7 @@ export default function App() {
   const mapNoted = useRef<Record<string, string>>({});
   const sendIn = (slot: string, text: string, draft?: string, auto = false) => {
     const pick = chats.slots[slot]?.flavourPick ?? null;
+    const explain = pick !== null && canExplain(pick) && !!chats.slots[slot]?.explainPick;
     const chat = chats.slots[slot];
     // Claude's last reply looked like a page Lantern couldn't read: it hears so with this message, and the headings.
     const unread = chat && chat.mode === "steps" && !pick ? pageNote(chat.items, chatFlavour(chat), guides) : null;
@@ -706,13 +707,13 @@ export default function App() {
     const map = chat && chat.mode === "steps" ? architectureMap(pagesOf(chat.items)) : null;
     const broken = map?.kind === "broken" && mapNoted.current[slot] !== map.page ? mapNote(map) : null;
     if (map?.kind === "broken" && broken) mapNoted.current[slot] = map.page;
-    to(slot)({ type: "user_sent", text, ...(auto ? { auto } : {}), ...(pick ? { switchedTo: pick } : {}), ...(draft ? { draft } : {}) });
+    to(slot)({ type: "user_sent", text, ...(auto ? { auto } : {}), ...(pick ? { switchedTo: pick, ...(explain ? { explained: true } : {}) } : {}), ...(draft ? { draft } : {}) });
     // Commands run since the last message go first, so Claude sees what they printed; skills named mid-message get
     // a note so Claude uses them.
     const items = chats.slots[slot]?.items ?? [];
     const noted = withSkillNote(text, skillNames(slot));
     // Files reverted since the last message: Claude is told, so it doesn't act on what it last wrote.
-    const reverted = withRevertNote(withPageNote([unread, broken].filter(Boolean).join("\n\n") || null, pick ? withFlavourNote(pick, noted, guides[pick]?.text) : noted), chats.slots[slot]?.revertNotes ?? []);
+    const reverted = withRevertNote(withPageNote([unread, broken].filter(Boolean).join("\n\n") || null, pick ? withFlavourNote(pick, noted, { guide: guides[pick]?.text, explain, explainGuide: guides.explain?.text }) : noted), chats.slots[slot]?.revertNotes ?? []);
     // A chat opened from a place the folder moved from: Claude is told once that the paths in earlier messages are old.
     const moved = withMovedNote(reverted, chats.slots[slot]?.movedFrom ?? null, chats.slots[slot]?.folder ?? null);
     api.sendMessage(slot, withShellContext(items, moved)).then(
@@ -837,23 +838,29 @@ export default function App() {
     if (s && workflowOf(s) !== workflow) setSettings(slot, permissionsOf(s), workflow);
   };
 
-  // Step by step's flavour as you see it: one you picked and haven't sent yet, or the conversation's.
-  const chatFlavour = (s: typeof state) => (s.mode === "steps" ? (s.flavourPick ?? flavourOf(s.items, s.flavourStart)) : null);
-  const flavour = chatFlavour(state);
-  // Picking the flavour the chat is already in takes back a pick; one from outside Step by step switches to it.
-  const pickFlavour = (next: Flavour | null) => {
-    const inChat = state.mode === "steps" ? flavourOf(state.items, state.flavourStart) : null;
+  // Step by step's flavour as you see it (and whether Explain as you go is on): one you picked and haven't sent yet, or
+  // the conversation's.
+  const inConversation = (s: typeof state) => (s.mode === "steps" ? flavourState(s.items, s.flavourStart, s.explainStart) : { flavour: null, explain: false });
+  const chatFlavourState = (s: typeof state) => (s.mode === "steps" && s.flavourPick ? { flavour: s.flavourPick, explain: s.explainPick } : inConversation(s));
+  const chatFlavour = (s: typeof state) => chatFlavourState(s).flavour;
+  const { flavour, explain } = chatFlavourState(state);
+  // Picking the flavour (and option) the chat is already in takes back a pick; one from outside Step by step switches to it.
+  // `wantExplain`: the Explain as you go option; left out, it stays as it is when the new flavour has it.
+  const pickFlavour = (next: Flavour | null, wantExplain?: boolean) => {
+    const inChat = inConversation(state);
+    const explainNext = next !== null && canExplain(next) && (wantExplain ?? explain);
+    const pick = next === inChat.flavour && explainNext === inChat.explain ? null : next;
     if (state.mode !== "steps") {
       if (holdsAgents(active)) return dispatch({ type: "notice", text: "This team still has agents. Close them first, then switch its Workflow." });
       return unlessBackground(active, () => {
         const autoApprove = permissionsOf(state) === "auto";
-        dispatch({ type: "flavour_picked", flavour: next === inChat ? null : next });
+        dispatch({ type: "flavour_picked", flavour: pick, explain: explainNext });
         dispatch({ type: "mode_changed", mode: "steps", autoApprove });
         dispatch({ type: "orchestrator_set", on: false });
         if (state.folder) restart(active, "steps", settingsFor(active).effort, { autoApprove, ...(state.orchestrator ? { team: false } : {}) });
       });
     }
-    dispatch({ type: "flavour_picked", flavour: next === inChat ? null : next });
+    dispatch({ type: "flavour_picked", flavour: pick, explain: explainNext });
   };
 
   /**
@@ -1269,7 +1276,7 @@ export default function App() {
   // shown. Another chat, outside any team, has no canvas, and neither does the toggle for it.
   const team = teamMain(chats, active);
   const mains = Object.values(chats.slots).filter((s) => s.orchestrator).length;
-  const nodes = team ? teamNodes(orchestraNodes(chats, (_slot, s) => (mains > 1 && s.folder ? `Main agent · ${basename(s.folder)}` : "Main agent")), team) : [];
+  const nodes = team ? teamNodes(orchestraNodes(chats, (_slot, s) => (mains > 1 && s.folder ? `Lead · ${basename(s.folder)}` : "Lead")), team) : [];
   const inOrchestra = team !== null;
   const attention = needingYou(nodes, chats.slots);
   useAction("toggle-canvas", () => setView((v) => (v === "canvas" ? "chat" : "canvas")), inOrchestra);
@@ -1299,7 +1306,7 @@ export default function App() {
   // have their own flow.
   const resendHandlers = state.status === "idle" && !stepsMode ? { onEdit: editInBox, onResend: (p: { text: string; draft?: string }) => sendIn(active, p.text, p.draft) } : undefined;
   const hero = state.items.length === 0 && !state.thinking;
-  // The Agents tab: the latest turn's tree. It comes up by itself the first time a chat's turn uses a subagent or the
+  // The Activity tab: the latest turn's tree. It comes up by itself the first time a chat's turn uses a subagent or the
   // advisor; after that it's left where you put it.
   // Live while Claude works, and while anything it started runs on in the background (a workflow, a subagent).
   const treeOpts = { live: state.status === "running" || state.backgroundTasks.length > 0, folder: state.folder, mainModel: state.model, effort: settingsFor(active).effort, advisor: settingsFor(active).advisor, background: state.backgroundRuns };
@@ -1372,6 +1379,33 @@ export default function App() {
       .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
     return [...availableActions(), ...permissions, ...workflows, ...harnesses, ...tabs];
   };
+  // The Work menu: Build, Debug and Design are Step by step in that flavour; Review a PR lists the open pull requests and
+  // starts a review on the one chosen; Start a team makes an empty chat a team's Lead, and otherwise starts a new one.
+  const workReady = !!state.folder && !isBusy(state) && !chats.agents[active];
+  const [prPicker, setPrPicker] = useState(false);
+  const pendingPrompt = useRef<{ slot: string; text: string; at: number } | null>(null);
+  const startReviewOf = (pr: OpenPr) => {
+    setPrPicker(false);
+    pickFlavour("review");
+    pendingPrompt.current = { slot: active, text: `Review PR #${pr.number}`, at: Date.now() };
+  };
+  // The message waits for the chat to be Step by step and idle (switching restarts its claude).
+  useEffect(() => {
+    const pending = pendingPrompt.current;
+    const s = pending && chats.slots[pending.slot];
+    if (!pending || !s) return;
+    if (Date.now() - pending.at > 60_000) pendingPrompt.current = null;
+    else if (s.mode === "steps" && s.status === "idle" && chatFlavour(s) === "review") {
+      pendingPrompt.current = null;
+      sendIn(pending.slot, pending.text);
+    }
+  }, [chats.slots]);
+  const startTeam = () => (hero ? changeWorkflow("team") : newOrchestra());
+  useAction("work-build", () => pickFlavour("build"), workReady);
+  useAction("work-review-pr", () => setPrPicker(true), workReady);
+  useAction("work-debug", () => pickFlavour("debug"), workReady);
+  useAction("work-design", () => pickFlavour("architecture"), workReady);
+  useAction("work-team", startTeam, workReady);
   // Pressed again while open, it closes.
   useAction("command-palette", () => setPalette((open) => (open ? null : paletteEntries())));
   // ⌘/ and Help ▸ Keyboard Shortcuts: the sheet of shortcuts, toggled the same way.
@@ -1505,7 +1539,7 @@ export default function App() {
       onWorkflowChange={(w) => changeWorkflow(w)}
       holdsAgents={holdsAgents(active)}
       model={state.model}
-      idlePlaceholder={stepsView ? (flavour === "review" ? "Ask about this file…" : "Ask about this page or change it…") : stepsMode && hero ? HERO_PLACEHOLDER[flavour ?? "none"] : undefined}
+      idlePlaceholder={stepsView ? (flavour === "review" ? "Ask about this file…" : "Ask about this page or change it…") : stepsMode && hero ? explain && flavour === "build" ? "What do you want to learn, and what for?" : HERO_PLACEHOLDER[flavour ?? "none"] : undefined}
       sendAndNext={stepsView ? (text) => sendIn(active, andNext(text)) : undefined}
       hero={hero}
       folder={state.folder}
@@ -1591,7 +1625,7 @@ export default function App() {
                     {offer.length > 0 && state.claudePath && (
                       <RestoreCard chats={offer} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />
                     )}
-                    {stepsMode && state.folder && <StepsIntro picked={state.flavourPick} onPick={pickFlavour} />}
+                    {state.folder && <StartScreen picked={stepsMode ? state.flavourPick : null} explain={explain} onExplain={(on) => state.flavourPick && pickFlavour(state.flavourPick, on)} team={workflowOf(state) === "team"} onFlavour={pickFlavour} onReview={() => setPrPicker(true)} onTeam={() => changeWorkflow(workflowOf(state) === "team" ? "chat" : "team")} />}
                     {composer}
                   </div>
                 </div>
@@ -1602,7 +1636,7 @@ export default function App() {
                     <ArchitecturePane.Provider value={state.folder ? openArchitecture : null}>
                     <FileLinksProvider key={active} slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention}>
                       {stepsView ? (
-                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} onPickFlavour={pickFlavour} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} />
+                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} explain={explain} onPickFlavour={pickFlavour} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} />
                       ) : (
                         <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} />
                       )}
@@ -1707,15 +1741,18 @@ export default function App() {
             onOpenHistory={state.folder && bringing.destination === state.folder ? () => { setBringing(null); runAction("session-history"); } : undefined}
           />
         )}
+        {prPicker && state.folder && <ReviewPrDialog folder={state.folder} onPick={startReviewOf} onClose={() => setPrPicker(false)} />}
         <ModeGuide
           open={guideAt}
           permissions={permissionsOf(state)}
           workflow={workflowOf(state)}
           flavour={flavour}
+          explain={explain}
           onUse={state.folder && !isBusy(state) ? (key) => {
             setGuideAt(null);
             if (key === "ask" || key === "auto") changePermissions(key);
             else if (key === "chat" || key === "steps" || key === "team") changeWorkflow(key);
+            else if (key === "explain") pickFlavour(canExplain(flavour) ? flavour : "build", true);
             else pickFlavour(key);
           } : undefined}
           onClose={() => setGuideAt(null)}

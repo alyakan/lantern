@@ -76,10 +76,10 @@ fn base_tools(steps: bool) -> Vec<Value> {
         }),
         json!({
             "name": "steps_guide",
-            "description": "How Lantern's Step by step workflow works: the page rules, and each flavour's (Build, Learn, Review, Debug, Architecture) headings and format, including the shape of the Architecture map. Read it before working in a flavour you aren't sure of, or when Lantern says it couldn't read a page.",
+            "description": "How Lantern's Step by step workflow works: the page rules, and each flavour's (Build, Review, Debug, Design) headings and format, and the Explain as you go option, including the shape of the Design map. Read it before working in a flavour you aren't sure of, or when Lantern says it couldn't read a page.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"flavour": {"type": "string", "enum": crate::args::FLAVOURS, "description": "One flavour; leave it out for all of them."}},
+                "properties": {"flavour": {"type": "string", "enum": crate::args::FLAVOURS.iter().chain([&crate::args::EXPLAIN]).collect::<Vec<_>>(), "description": "One flavour; leave it out for all of them."}},
                 "additionalProperties": false
             }
         }),

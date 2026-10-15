@@ -1,5 +1,6 @@
 import type { ChatItem } from "../store";
 import type { Flavour } from "./flavour";
+import { EXPLAINING, flavourWord, FLAVOUR_WORDS } from "./flavourWord";
 import { isVerdictNext } from "./review";
 import { parsePlanStep } from "./markdown";
 
@@ -10,8 +11,9 @@ export interface Heading {
   n: number | null;
   total: number | null;
   title: string;
-  /** A switch page: the flavour Claude suggests. */
+  /** A switch page: the flavour Claude suggests, and whether it suggests Explain as you go with it. */
   flavour?: Flavour;
+  explain?: boolean;
   /** A lettered step ("Step 6b"): the letter, which tells it from step 6a. */
   sub?: string;
 }
@@ -24,14 +26,14 @@ type UserItem = Extract<ChatItem, { type: "user" }>;
  * a step may have a letter ("Step 6b") and an "of" that isn't a count ("Step 24 of LUM-2614"), and the title may follow a
  * dash, a colon, "·" or "|".
  */
-const HEADING = /^(Frame|Plan step\s+(\d+)([a-z])?|Plan complete|Plan update|Step\s+(\d+)([a-z])?(?:\s+of\s+(\d+|[\w.#-]+))?|File\s+(\d+)\s+of\s+(\d+)|Summary|Done|Evidence(?:\s+(\d+))?|Fix|Switch to\s+(Build|Learn|Review|Debug|Architecture)|Overview|Part\s+(\d+)\s+of\s+(\d+))\b\s*(?:[—–:·|-]+\s*(.*))?$/i;
+const HEADING = /^(Frame|Plan step\s+(\d+)([a-z])?|Plan complete|Plan update|Step\s+(\d+)([a-z])?(?:\s+of\s+(\d+|[\w.#-]+))?|File\s+(\d+)\s+of\s+(\d+)|Summary|Done|Evidence(?:\s+(\d+))?|Fix|Switch to\s+(Build|Learn|Review|Debug|Design|Architecture)(?:,\s*explaining as you go)?|Overview|Part\s+(\d+)\s+of\s+(\d+))\b\s*(?:[—–:·|-]+\s*(.*))?$/i;
 
 /** The words of a message's first line when it is set as a heading ("#" marks, or all bold); null when it isn't one. */
 export function headingWords(first: string): string | null {
   const line = first.trim();
   const bold = /^\*\*([^*]+?)\*\*:?$/.exec(line);
   const words = /^#{1,3}\s/.test(line) ? line.replace(/^#{1,3}\s*/, "").replace(/^\*\*([^*]+)\*\*$/, "$1") : bold ? bold[1] : null;
-  return words === null ? null : words.trim().replace(/^(?:Build|Learn|Review|Debug|Architecture)\s*[·|:—–-]\s*/i, "");
+  return words === null ? null : words.trim().replace(/^(?:Build|Learn|Review|Debug|Design|Architecture)\s*[·|:—–-]\s*/i, "");
 }
 
 /**
@@ -58,7 +60,10 @@ export function parseHeading(text: string): Heading | null {
   const word = m[1].toLowerCase();
   const title = (m[13] ?? "").replace(/\*\*/g, "").trim();
   const sub = (letter: string | undefined) => (letter ? { sub: letter.toLowerCase() } : {});
-  if (word.startsWith("switch to")) return { kind: "switch", n: null, total: null, title, flavour: m[10].toLowerCase() as Flavour };
+  if (word.startsWith("switch to")) {
+    const { flavour, explain } = flavourWord(m[10]);
+    return { kind: "switch", n: null, total: null, title, flavour, ...(explain || new RegExp(EXPLAINING, "i").test(words ?? "") ? { explain: true } : {}) };
+  }
   if (word.startsWith("evidence")) return { kind: "evidence", n: m[9] ? Number(m[9]) : null, total: null, title };
   if (word === "fix") return { kind: "fix", n: null, total: null, title };
   if (word.startsWith("file")) return { kind: "file", n: Number(m[7]), total: Number(m[8]), title };
@@ -131,15 +136,22 @@ export const andNext = (text: string) => `${text.trim()}\n\n${NEXT_SUFFIX}`;
 export const movesOn = (text: string) => isApproval(text) || isVerdictNext(text) || startedFlavour(text) !== null || stayedIn(text) || text.trimEnd().endsWith(NEXT_SUFFIX);
 
 /** The answers to a switch page: start a flavour, or stay in the one you're in. */
-export const startText = (label: string) => `Start ${label}.`;
+export const startText = (label: string, explain = false) => `Start ${label}${explain ? ", explaining as you go" : ""}.`;
 export const stayText = (label: string) => `Stay in ${label}.`;
 /** The flavour a "Start Debug." answer starts, if that's what the prompt is. */
 export function startedFlavour(text: string): Flavour | null {
-  const m = /^start\s+(build|learn|review|debug|architecture)\b[.!]*$/i.exec(text.trim());
-  return m ? (m[1].toLowerCase() as Flavour) : null;
+  return startedChoice(text)?.flavour ?? null;
+}
+
+/** "Start Debug." or "Start Build, explaining as you go.": the flavour, and whether Explain as you go is on with it. */
+export function startedChoice(text: string): { flavour: Flavour; explain: boolean } | null {
+  const m = new RegExp(`^start\\s+(${FLAVOUR_WORDS})\\b(${EXPLAINING})?[.!]*$`, "i").exec(text.trim());
+  if (!m) return null;
+  const { flavour, explain } = flavourWord(m[1]);
+  return { flavour, explain: explain || !!m[2] };
 }
 /** A "Stay in Build." answer: carry on as before. */
-export const stayedIn = (text: string) => /^stay in\s+(build|learn|review|debug|architecture)\b[.!]*$/i.test(text.trim());
+export const stayedIn = (text: string) => new RegExp(`^stay in\\s+(${FLAVOUR_WORDS})\\b(${EXPLAINING})?[.!]*$`, "i").test(text.trim());
 /** What to show of a prompt: without the ⌘Enter suffix. */
 export const promptText = (text: string) => text.trimEnd().replace(NEXT_SUFFIX, "").trimEnd();
 

@@ -72,7 +72,7 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
   const busy = status === "starting";
   const backgroundRunning = openChats.some((c) => c.state === "running" || c.state === "waiting" || !!c.background);
   const backgroundUnread = openChats.some((c) => c.unread && c.state === "done");
-  const toggleLabel = reviewCollapsed ? "Show changes" : "Hide changes";
+  const toggleLabel = reviewCollapsed ? "Show side panel" : "Hide side panel";
   const canUseSessions = !!folder && !busy;
   // At most one of the title bar's menus is open.
   const [menu, setMenu] = useState<"history" | "folders" | "background" | null>(null);
@@ -242,17 +242,17 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
             </button>
           )}
           {orchestra && (
-            <button className="icon" aria-label="New orchestra" title="New orchestra: a main agent that runs workers" disabled={!canUseSessions} onClick={orchestra.onNew}>
+            <button className="icon" aria-label="Start a team" title="Start a team (⇧⌘N): a Lead that runs agents" disabled={!canUseSessions} onClick={orchestra.onNew}>
               <OrchestraIcon />
             </button>
           )}
           {onNewSession && (
-            <button className="icon" aria-label="New session" title="New session (⌘N)" disabled={!canUseSessions} onClick={onNewSession}>
+            <button className="icon" aria-label="New chat" title="New chat (⌘N)" disabled={!canUseSessions} onClick={onNewSession}>
               <PlusIcon />
             </button>
           )}
           {loadSessions && onOpenSession && (
-            <button ref={historyButton} className={`icon${menu === "history" ? " pressed" : ""}`} aria-label="Session history" aria-expanded={menu === "history"} title="Session history (⌘K)" disabled={!canUseSessions} onClick={toggleHistory}>
+            <button ref={historyButton} className={`icon${menu === "history" ? " pressed" : ""}`} aria-label="Chat history" aria-expanded={menu === "history"} title="Chat history (⌘K)" disabled={!canUseSessions} onClick={toggleHistory}>
               <ClockIcon />
               {(backgroundUnread || backgroundRunning) && <span className={`dot${backgroundUnread ? " unread" : ""}`} aria-hidden="true" />}
             </button>

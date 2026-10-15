@@ -18,14 +18,14 @@ describe("the folder menu's moved folders", () => {
   it("offers a moved folder, with the place its sessions go to, and brings them over when picked", () => {
     const { onClose, onRelocate } = menu({});
     expect(screen.getByText("Moved?")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("menuitem", { name: /web-dashboard was moved\? Bring its sessions to web-dashboard/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /web-dashboard was moved\? Bring its chats to web-dashboard/ }));
     expect(onClose).toHaveBeenCalled();
     expect(onRelocate).toHaveBeenCalledWith({ old: OLD, suggested: NEW });
   });
 
   it("says where it was, and that its sessions go to a folder to choose, when nothing matches it", () => {
     menu({ moved: [{ old: OLD, suggested: null }] });
-    expect(screen.getByRole("menuitem", { name: /web-dashboard was moved\? Bring its sessions to a folder/ })).toHaveTextContent("Was in /Users/you/Documents/Github");
+    expect(screen.getByRole("menuitem", { name: /web-dashboard was moved\? Bring its chats to a folder/ })).toHaveTextContent("Was in /Users/you/Documents/Github");
   });
 
   it("dismisses a notice without bringing anything over", () => {
@@ -37,7 +37,7 @@ describe("the folder menu's moved folders", () => {
 
   it("opens the Bring old sessions dialog from the folder menu, for the open folder", () => {
     const { onClose, onRelocate } = menu({});
-    fireEvent.click(screen.getByRole("menuitem", { name: "Bring old sessions here…" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Bring old chats here…" }));
     expect(onClose).toHaveBeenCalled();
     expect(onRelocate).toHaveBeenCalledWith(null);
   });
@@ -45,13 +45,13 @@ describe("the folder menu's moved folders", () => {
   it("shows no moved section, and no bring item, without the moved parts", () => {
     menu(undefined);
     expect(screen.queryByText("Moved?")).not.toBeInTheDocument();
-    expect(screen.queryByRole("menuitem", { name: "Bring old sessions here…" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Bring old chats here…" })).not.toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Open folder…" })).toBeInTheDocument();
   });
 
   it("shows no moved section when nothing is left to offer", () => {
     menu({ moved: [] });
     expect(screen.queryByText("Moved?")).not.toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Bring old sessions here…" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Bring old chats here…" })).toBeInTheDocument();
   });
 });

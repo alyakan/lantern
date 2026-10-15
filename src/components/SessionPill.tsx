@@ -34,9 +34,9 @@ export function SessionPill({ loadSessions, currentId, onOpen, disabled, openCha
 
   return (
     <div className="pill-anchor" ref={root}>
-      <button className="pill" aria-haspopup="dialog" aria-expanded={open} disabled={disabled} title="Continue a past session" onClick={toggle}>
+      <button className="pill" aria-haspopup="dialog" aria-expanded={open} disabled={disabled} title="Continue a past chat" onClick={toggle}>
         <ClockIcon />
-        <span>New session</span>
+        <span>New chat</span>
         <span className="chev down" aria-hidden />
       </button>
       {open && (

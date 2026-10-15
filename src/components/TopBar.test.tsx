@@ -8,7 +8,7 @@ describe("TopBar", () => {
   it("can reopen a collapsed review panel, even before a folder is open", () => {
     const onToggleReview = vi.fn();
     render(<TopBar {...base} reviewCollapsed onToggleReview={onToggleReview} />);
-    const toggle = screen.getByRole("button", { name: "Show changes" });
+    const toggle = screen.getByRole("button", { name: "Show side panel" });
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(toggle);
     expect(onToggleReview).toHaveBeenCalled();
@@ -42,10 +42,10 @@ describe("TopBar", () => {
     const onOpenSession = vi.fn();
     const loadSessions = vi.fn().mockResolvedValue([{ id: "s1", title: "Fix the login redirect", updated_ms: Date.now(), prompts: 2 }]);
     render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadSessions={loadSessions} onOpenSession={onOpenSession} onNewSession={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "Session history" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chat history" }));
     fireEvent.click(await screen.findByText("Fix the login redirect"));
     expect(onOpenSession).toHaveBeenCalledWith("s1");
-    expect(screen.queryByRole("dialog", { name: "Session history" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
   });
 
   it("opens the recent-folders menu from the folder pill, one menu at a time", async () => {
@@ -64,7 +64,7 @@ describe("TopBar", () => {
     // Opening history closes the folder menu, and "Open folder…" still reaches the dialog.
     fireEvent.click(screen.getByRole("button", { name: /^p$/ }));
     await screen.findByRole("menu", { name: "Folders" });
-    fireEvent.click(screen.getByRole("button", { name: "Session history" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chat history" }));
     expect(screen.queryByRole("menu", { name: "Folders" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /^p$/ }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Open folder…" }));
@@ -94,10 +94,10 @@ describe("TopBar", () => {
     cmd("n");
     expect(onNewSession).toHaveBeenCalledOnce();
     cmd("k");
-    expect(await screen.findByRole("dialog", { name: "Session history" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Chat history" })).toBeInTheDocument();
     cmd("o");
     expect(onOpenFolder).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("dialog", { name: "Session history" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
 
     rerender(<TopBar {...props} status="starting" />);
     cmd("n");
@@ -114,11 +114,11 @@ describe("TopBar", () => {
   it("keeps new session and history available while Claude works, so you can switch away", () => {
     const props = { ...base, folder: "/p", reviewCollapsed: false, onToggleReview: () => {}, loadSessions: async () => [], onOpenSession: () => {}, onNewSession: () => {} };
     const { rerender } = render(<TopBar {...props} status="running" />);
-    expect(screen.getByRole("button", { name: "Session history" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "New session" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Chat history" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "New chat" })).toBeEnabled();
     rerender(<TopBar {...props} status="starting" />);
-    expect(screen.getByRole("button", { name: "Session history" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "New session" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Chat history" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "New chat" })).toBeDisabled();
   });
 
   it("lists chats open in the background and switches to one", async () => {
@@ -130,13 +130,13 @@ describe("TopBar", () => {
     ];
     const openChats = [{ slot: "s2", title: "Add retries", state: "running" as const, sessionId: "abc", elsewhere: null }];
     render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadSessions={loadSessions} onOpenSession={onOpenSession} openChats={openChats} onSwitchChat={onSwitchChat} />);
-    const history = screen.getByRole("button", { name: "Session history" });
+    const history = screen.getByRole("button", { name: "Chat history" });
     expect(history.querySelector(".dot")).not.toBeNull();
     fireEvent.click(history);
     const open = await screen.findByRole("list", { name: "Open chats" });
     expect(open).toHaveTextContent("Add retriesRunning");
     // The same session isn't listed again under past sessions.
-    expect(await screen.findByRole("list", { name: "Past sessions" })).not.toHaveTextContent("Add retries");
+    expect(await screen.findByRole("list", { name: "Past chats" })).not.toHaveTextContent("Add retries");
     fireEvent.click(screen.getByRole("button", { name: /Add retries/ }));
     expect(onSwitchChat).toHaveBeenCalledWith("s2");
     expect(onOpenSession).not.toHaveBeenCalled();
@@ -146,7 +146,7 @@ describe("TopBar", () => {
     const props = { ...base, folder: "/p", reviewCollapsed: false, onToggleReview: () => {}, loadSessions: async () => [], onOpenSession: () => {} };
     const chat = { slot: "s2", title: "Add retries", state: "done" as const, sessionId: "abc", elsewhere: null };
     const { rerender } = render(<TopBar {...props} openChats={[{ ...chat, unread: true }]} />);
-    const history = screen.getByRole("button", { name: "Session history" });
+    const history = screen.getByRole("button", { name: "Chat history" });
     expect(history.querySelector(".dot.unread")).not.toBeNull();
     fireEvent.click(history);
     expect(await screen.findByLabelText("Unread")).toBeInTheDocument();
@@ -189,11 +189,11 @@ describe("TopBar", () => {
 
   it("gives focus back to the History button when its menu closes", async () => {
     render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadSessions={() => Promise.resolve([])} onOpenSession={() => {}} />);
-    const history = screen.getByRole("button", { name: "Session history" });
+    const history = screen.getByRole("button", { name: "Chat history" });
     fireEvent.click(history);
-    await screen.findByRole("dialog", { name: "Session history" });
+    await screen.findByRole("dialog", { name: "Chat history" });
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("dialog", { name: "Session history" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
     expect(history).toHaveFocus();
   });
 
@@ -224,8 +224,8 @@ describe("TopBar", () => {
       { path: "/src/acme-api", exists: true, sessions: 4, updated_ms: Date.now(), already: true },
     ]);
     render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadSessions={async () => []} onOpenSession={() => {}} bringOld={{ load, onOpen }} />);
-    fireEvent.click(screen.getByRole("button", { name: "Session history" }));
-    fireEvent.click(await screen.findByRole("button", { name: "7 sessions from before you moved this project: Bring them here" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chat history" }));
+    fireEvent.click(await screen.findByRole("button", { name: "7 chats from before you moved this project: Bring them here" }));
     expect(load).toHaveBeenCalled();
     expect(onOpen).toHaveBeenCalledTimes(1);
   });
@@ -233,8 +233,8 @@ describe("TopBar", () => {
   it("shows no old sessions row when they are all brought over already", async () => {
     const load = vi.fn().mockResolvedValue([{ path: "/src/acme-api", exists: true, sessions: 4, updated_ms: Date.now(), already: true }]);
     render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} loadSessions={async () => []} onOpenSession={() => {}} bringOld={{ load, onOpen: () => {} }} />);
-    fireEvent.click(screen.getByRole("button", { name: "Session history" }));
-    await screen.findByText("No past sessions in this folder");
+    fireEvent.click(screen.getByRole("button", { name: "Chat history" }));
+    await screen.findByText("No past chats in this folder");
     expect(screen.queryByText(/from before you moved/)).not.toBeInTheDocument();
   });
 
@@ -256,7 +256,7 @@ describe("TopBar", () => {
   it("hides an open review panel", () => {
     const onToggleReview = vi.fn();
     render(<TopBar {...base} reviewCollapsed={false} onToggleReview={onToggleReview} />);
-    const toggle = screen.getByRole("button", { name: "Hide changes" });
+    const toggle = screen.getByRole("button", { name: "Hide side panel" });
     expect(toggle).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(toggle);
     expect(onToggleReview).toHaveBeenCalled();
