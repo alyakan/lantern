@@ -2,6 +2,7 @@ import { useContext, useState } from "react";
 import { useMenuInside } from "../lib/useMenuInside";
 import type { SessionSummary } from "../types";
 import { relativeTime } from "../lib/time";
+import { moveFocus } from "./useMenuKeys";
 import { SessionActionsContext, pinnedFirst, resumeCommand } from "../lib/sessionActions";
 
 interface Props {
@@ -37,7 +38,18 @@ export function HistoryMenu({ sessions, exclude = [], project, onOpen, onClose, 
   const { ref: root, style } = useMenuInside(true, [sessions === null, shown?.length ?? 0, !!oldSessions]);
 
   return (
-    <div className="menu history-menu" role="dialog" aria-label="Chat history" ref={root} style={style}>
+    <div
+      className="menu history-menu"
+      role="dialog"
+      aria-label="Chat history"
+      ref={root}
+      style={style}
+      onKeyDown={(e) => {
+        // Escape closes from anywhere in it (a name being typed takes its own Escape first); ↑ ↓ walk the search box and the chats.
+        if (e.key === "Escape") onClose();
+        else if (e.key === "ArrowDown" || e.key === "ArrowUp") moveFocus(e, [...e.currentTarget.querySelectorAll<HTMLElement>(".menu-search, .session-row .menu-row")]);
+      }}
+    >
       <input
         className="menu-search"
         autoCapitalize="off"
@@ -46,7 +58,6 @@ export function HistoryMenu({ sessions, exclude = [], project, onOpen, onClose, 
         placeholder="Search chats"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => e.key === "Escape" && onClose()}
       />
       {oldSessions && oldSessions.count > 0 && (
         <button className="menu-row bring-old" onClick={oldSessions.onOpen}>
@@ -83,7 +94,10 @@ export function HistoryMenu({ sessions, exclude = [], project, onOpen, onClose, 
                       value={editing.text}
                       onChange={(e) => setRenaming({ id: s.id, text: e.target.value })}
                       onKeyDown={(e) => {
-                        if (e.key === "Escape") setRenaming(null);
+                        if (e.key === "Escape") {
+                          e.stopPropagation();
+                          setRenaming(null);
+                        }
                       }}
                     />
                     <button type="submit" className="link-button" disabled={!editing.text.trim()}>

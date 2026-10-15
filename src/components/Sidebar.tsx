@@ -87,12 +87,16 @@ interface Props extends SidebarHandlers {
   onOrder?: (order: string[]) => void;
 }
 
-/** Closes a popover on a press outside it or Escape. */
-function useDismiss(open: boolean, root: RefObject<HTMLElement | null>, close: () => void) {
+/** Closes a popover on a press outside it or Escape; Escape puts focus back on `opener`, the button that opened it. */
+function useDismiss(open: boolean, root: RefObject<HTMLElement | null>, close: () => void, opener?: () => HTMLElement | null | undefined) {
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && close();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      close();
+      opener?.()?.focus();
+    };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -109,7 +113,7 @@ const menuKeys = (e: ReactKeyboardEvent<HTMLElement>) => void moveFocus(e, [...e
 function NewMenu({ canNew, onNewChat, onNewTeam, onReviewPr }: Pick<Props, "canNew" | "onNewChat" | "onNewTeam" | "onReviewPr">) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
-  useDismiss(open, root, () => setOpen(false));
+  useDismiss(open, root, () => setOpen(false), () => root.current?.querySelector<HTMLElement>("[aria-haspopup]"));
   useEffect(() => {
     if (open) root.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   }, [open]);
@@ -192,7 +196,7 @@ interface Moves {
 
 function ProjectMenu({ project, h, moves, onClose }: { project: SidebarProject; h: SidebarHandlers; moves: Moves; onClose: () => void }) {
   const root = useRef<HTMLDivElement>(null);
-  useDismiss(true, root, onClose);
+  useDismiss(true, root, onClose, () => root.current?.parentElement?.querySelector<HTMLElement>('[aria-haspopup="menu"]'));
   useEffect(() => {
     root.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   }, []);

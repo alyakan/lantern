@@ -687,7 +687,7 @@ button.slash-issue:hover:not(:disabled) { background: color-mix(in srgb, var(--w
 .slash-name { flex: none; font-family: var(--mono); font-size: calc(12px * var(--font-scale)); color: var(--text); }
 .slash-hint { flex: none; font-family: var(--mono); font-size: calc(11.5px * var(--font-scale)); color: var(--faint); }
 .slash-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
-.composer-box:focus-within { border-color: var(--faint); }
+.composer-box:focus-within { border-color: var(--muted); }
 /* While Claude works, a soft highlight travels around the box's border (a rotating gradient masked to the edge). */
 @property --sweep { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
 .composer-box.working { border-color: var(--line-strong); }
@@ -965,7 +965,7 @@ button.icon.session-more { flex: none; width: 24px; height: 24px; margin-right: 
 /* The toast: top middle, just under the title bar. It drops in with a border glowing in its status colour, says what
    happened on a second line, and slides back up when its line runs out (paused while hovered). */
 .hud { --hud-accent: var(--text-2); position: fixed; top: 56px; left: 0; right: 0; margin: 0 auto; width: max-content; min-width: 260px; max-width: min(520px, calc(100vw - 48px)); z-index: 50; display: flex; align-items: center; gap: 11px; min-height: 48px; padding: 8px 10px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--hud-accent) 55%, var(--line-strong)); border-radius: var(--radius-hud); background: var(--field); color: var(--text); font: inherit; font-size: calc(12.5px * var(--font-scale)); text-align: left; cursor: pointer; box-shadow: var(--shadow), var(--hud-shadow), 0 0 0 1px color-mix(in srgb, var(--hud-accent) 22%, transparent), 0 0 16px color-mix(in srgb, var(--hud-accent) 28%, transparent); animation: toast 6s ease forwards, hud-glow 1.2s ease-in-out 0.35s 2; }
-.hud:focus-visible { outline: none; }
+.hud:focus-visible { outline: 1.5px solid var(--hud-accent); outline-offset: 2px; }
 .hud.finished { --hud-accent: var(--add); }
 .hud.failed { --hud-accent: var(--del); }
 .hud.waiting { --hud-accent: var(--sev-should); }
@@ -1887,7 +1887,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 
 .node-composer { flex: none; padding: 8px 10px 10px; border-top: 1px solid var(--line); }
 .node-composer-box { display: flex; align-items: flex-end; gap: 6px; padding: 6px 6px 6px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--field); transition: border-color 0.12s; }
-.node-composer-box:focus-within { border-color: var(--faint); }
+.node-composer-box:focus-within { border-color: var(--muted); }
 .node-composer textarea { flex: 1; min-width: 0; max-height: 140px; padding: 2px 0; resize: none; border: none; outline: none; background: none; color: inherit; font: calc(13px * var(--font-scale))/1.45 var(--ui); }
 .node-composer textarea::placeholder { color: var(--muted-text); }
 .node-composer textarea:disabled { cursor: default; }
@@ -2259,8 +2259,10 @@ nav > .sb-note { padding-left: 8px; }
 .sb-foot:hover { background: var(--bg-hover); color: var(--text); }
 .sb-resize { position: absolute; top: 0; bottom: 0; right: -3px; width: 7px; cursor: col-resize; touch-action: none; z-index: 3; }
 .sb-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; transition: background 0.12s; }
-.sb-resize:hover::after, .sidebar.dragging .sb-resize::after, .sb-resize:focus-visible::after { background: var(--line-strong); }
+.sb-resize:hover::after, .sidebar.dragging .sb-resize::after { background: var(--line-strong); }
+/* Focused from the keyboard the line is thicker and darker, as the side panel's handle's ring is. */
 .sb-resize:focus-visible { outline: none; }
+.sb-resize:focus-visible::after { left: 2px; width: 3px; border-radius: 2px; background: var(--muted); }
 
 /* Hidden: the title bar's button brings it back, badged with what needs you. At the window's left edge an 8px strip waits for
    the pointer, and the sidebar then slides in over the chat until the pointer leaves it. */

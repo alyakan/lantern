@@ -202,6 +202,16 @@ describe("clicking in the sidebar", () => {
     expect(within(project("lumiform-ios")).getByRole("button", { name: /^lumiform-ios/ })).toHaveAttribute("aria-expanded", "true");
   });
 
+  it("closes a project's ⋯ menu on Escape, with focus back on the ⋯ button", async () => {
+    setup();
+    const more = await screen.findByRole("button", { name: "More for network-monitor" });
+    fireEvent.click(more);
+    expect(within(screen.getByRole("menu", { name: "network-monitor actions" })).getAllByRole("menuitem")[0]).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "network-monitor actions" })).toBeNull();
+    expect(more).toHaveFocus();
+  });
+
   it("has a ⋯ menu per project: New team, Bring old chats here…, Reveal in Finder, Remove from recents", async () => {
     const { h } = setup();
     fireEvent.click(await screen.findByRole("button", { name: "More for network-monitor" }));
@@ -260,6 +270,16 @@ describe("New ▾", () => {
     fireEvent.click(screen.getByRole("button", { name: "New" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Review a PR…" }));
     expect(h.onReviewPr).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes on Escape, with focus back on the New button", () => {
+    setup();
+    const button = screen.getByRole("button", { name: "New" });
+    fireEvent.click(button);
+    expect(within(screen.getByRole("menu", { name: "New" })).getAllByRole("menuitem")[0]).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "New" })).toBeNull();
+    expect(button).toHaveFocus();
   });
 
   it("is off when nothing can be started (no project open, or its chat is starting)", () => {
