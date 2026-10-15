@@ -5,7 +5,7 @@ import { rulePattern } from "../lib/permissionRules";
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
-/** The "Always allow" rules: this chat's (when one is open) and each folder's. A rule allows a call without a card; Deny still asks. */
+/** The "Always allow" rules (Settings > Allow rules): this chat's (when one is open) and each folder's. A rule allows a call without a card; Deny still asks. */
 export function PermissionRules({ slot }: { slot: string | null }) {
   const [rules, setRules] = useState<RuleEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +19,7 @@ export function PermissionRules({ slot }: { slot: string | null }) {
     <>
       <div className="settings-head">
         <div>
-          <h2 className="mode-guide-title">Permissions</h2>
+          <h2 className="mode-guide-title">Allow rules</h2>
           <p className="mode-guide-summary">
             Rules that let Claude run a kind of call without asking. Make one with Always allow… on a permission card. This chat's rules end with the chat; a folder's apply to every chat in it. A rule only ever allows: Deny still asks.
           </p>
@@ -42,17 +42,15 @@ export function PermissionRules({ slot }: { slot: string | null }) {
           {!slot && <p className="settings-muted">Open a chat to see its rules.</p>}
         </div>
       )}
-      <ul className="settings-list" aria-label="Permission rules">
+      <ul className="settings-list" aria-label="Allow rules">
         {rules?.map((r) => (
-          <li key={JSON.stringify(r)} className="settings-row">
-            <div className="settings-row-text">
-              <span className="settings-row-name">{r.scope === "chat" ? "This chat" : "This folder"}</span>
-              <span className="settings-row-sub">
-                {r.folder ? `${r.folder} · ` : ""}
-                {r.tool}
-              </span>
-              <span className="settings-row-sub">{rulePattern(r)}</span>
-            </div>
+          <li key={JSON.stringify(r)} className="settings-row rule-row">
+            <span className="settings-row-name rule-scope">{r.scope === "chat" ? "This chat" : "This folder"}</span>
+            <span className="rule-text" title={`${r.folder ? `${r.folder} · ` : ""}${r.tool} · ${rulePattern(r)}`}>
+              {r.folder ? `${r.folder} · ` : ""}
+              {r.tool}
+              <span className="rule-pattern">{rulePattern(r)}</span>
+            </span>
             <button onClick={() => remove(r)} aria-label={`Remove the rule for ${r.tool}, ${rulePattern(r)}`}>
               Remove
             </button>

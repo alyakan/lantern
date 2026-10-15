@@ -1,5 +1,5 @@
-import { useContext, useRef, useState } from "react";
-import { useFitMenu } from "../lib/useFitMenu";
+import { useContext, useState } from "react";
+import { useMenuInside } from "../lib/useMenuInside";
 import type { SessionSummary } from "../types";
 import { relativeTime } from "../lib/time";
 import { SessionActionsContext, pinnedFirst, resumeCommand } from "../lib/sessionActions";
@@ -33,11 +33,11 @@ export function HistoryMenu({ sessions, exclude = [], project, onOpen, onClose, 
   const [names, setNames] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState<string | null>(null);
   // Opened from the chat box at the bottom of the window, it opens upward when it doesn't fit below.
-  const root = useRef<HTMLDivElement>(null);
-  useFitMenu(root, [sessions === null, shown?.length ?? 0, !!oldSessions]);
+  // The chat column clips what sticks out of it, so it also stays inside that column sideways.
+  const { ref: root, style } = useMenuInside(true, [sessions === null, shown?.length ?? 0, !!oldSessions]);
 
   return (
-    <div className="menu history-menu" role="dialog" aria-label="Chat history" ref={root}>
+    <div className="menu history-menu" role="dialog" aria-label="Chat history" ref={root} style={style}>
       <input
         className="menu-search"
         autoCapitalize="off"

@@ -349,7 +349,7 @@ async function playTeamTurn(slot: string) {
   await send({ kind: "thinking", parent: null });
   await sleep(500);
   await advise("adv1");
-  await streamText(send, "tm:0", "Splitting this up: an explorer maps the auth code, a researcher checks the OAuth spec, and a worker updates the fixtures and runs the tests.");
+  await streamText(send, "tm:0", "Splitting this up: an explorer maps the auth code, a researcher checks the OAuth spec, and an agent updates the fixtures and runs the tests.");
   const agents: [string, string, string, string][] = [
     ["ag-w", "general-purpose", "Update JWT fixtures and run auth tests", "claude-sonnet-5-5"],
     ["ag-e", "Explore", "Map the auth module and its callers", "claude-haiku-5-5"],

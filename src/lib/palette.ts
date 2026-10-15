@@ -1,10 +1,25 @@
-/** One line of the command palette: an action, a mode, a harness or a Settings page, with its shortcut if it has one. */
+/** One line of the command palette: an action, a mode, a models preset or a Settings page, with its shortcut if it has one. */
 export interface PaletteEntry {
   id: string;
   title: string;
   group: string;
   shortcut: string | null;
   run: () => void;
+}
+
+/** Words that keep their capital in a sentence-case title. */
+const PROPER = new Set(["Claude", "PR", "MCP", "Lantern"]);
+
+/** "Switch Canvas and Chat View" → "Switch canvas and chat view": the palette's titles in sentence case, names kept. */
+export function sentenceCase(title: string): string {
+  return title
+    .split(" ")
+    .map((word, i) => {
+      if (i === 0) return word;
+      const bare = word.replace(/[…,.:]+$/, "");
+      return PROPER.has(bare) || !/^[A-Z][a-z]*$/.test(bare) ? word : word[0].toLowerCase() + word.slice(1);
+    })
+    .join(" ");
 }
 
 /**

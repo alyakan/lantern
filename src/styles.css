@@ -422,7 +422,8 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 .pane-toggle .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--text-2); }
 /* On the history button: a chat is running in the background. */
 .title-center button.icon { position: relative; }
-.canvas-toggle { position: relative; }
+.canvas-toggle, .settings-button { position: relative; }
+.settings-button .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
 .canvas-toggle .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn); }
 .title-center .dot { position: absolute; top: 4px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
 /* …or one finished there that you haven't opened: blue, like an unread message. */
@@ -671,8 +672,6 @@ button.edit-toggle:hover:not(:disabled) { color: var(--text); }
 .composer-box { position: relative; display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); padding: 10px 8px 8px 12px; background: var(--field); cursor: text; transition: border-color 0.12s; }
 /* Slash commands: opens above the chat box as you type "/". */
 .slash-menu { bottom: calc(100% + 6px); left: 0; right: 0; max-height: 300px; margin: 0; cursor: default; }
-/* In the middle of an empty chat there's only about half the window above the box. */
-.composer.hero .slash-menu { max-height: min(300px, calc(50vh - 130px)); }
 .slash-list, .slash-section-items { list-style: none; margin: 0; padding: 0; }
 .slash-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .slash-section { padding: 6px 8px 2px; font-size: calc(10.5px * var(--font-scale)); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint); }
@@ -905,6 +904,7 @@ button.icon.session-more { flex: none; width: 24px; height: 24px; margin-right: 
 .shortcuts::backdrop { background: var(--overlay); }
 .shortcuts[open] { animation: guide-in 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
 .shortcuts-body { display: flex; flex-direction: column; gap: 12px; max-height: inherit; padding: 20px 24px 16px; overflow-y: auto; }
+.shortcuts-body:focus { outline: none; }
 .shortcuts-groups { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; }
 .shortcuts-group-title { margin: 0 0 4px; font-size: calc(11px * var(--font-scale)); font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .shortcuts-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
@@ -1425,7 +1425,7 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 .composer-box.terminal textarea { font: calc(13px * var(--font-scale))/1.5 var(--mono); color: var(--term-text); caret-color: var(--term-bright); text-shadow: 0 0 6px color-mix(in srgb, var(--term-bright) 35%, transparent); }
 .composer-box.terminal textarea::placeholder { color: var(--term-dim); text-shadow: none; }
 .terminal-prompt { flex: none; font: 600 calc(13px * var(--font-scale))/1.5 var(--mono); color: var(--term-bright); text-shadow: 0 0 8px color-mix(in srgb, var(--term-bright) 60%, transparent); user-select: none; }
-.terminal-hint { font: calc(11px * var(--font-scale)) var(--mono); color: var(--term-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.terminal-hint { font: calc(11px * var(--font-scale))/1.4 var(--mono); color: var(--term-dim); min-width: 0; }
 .composer-box.terminal .context-meter { color: var(--term-dim); }
 .send.run:not(:disabled) { background: var(--term-bright); color: var(--term-bg); box-shadow: 0 0 10px color-mix(in srgb, var(--term-bright) 45%, transparent); }
 .send.run:hover:not(:disabled) { background: var(--term-bright); opacity: 0.85; }
@@ -1495,6 +1495,10 @@ button.danger { color: var(--del); }
 .settings-row-main { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px 10px; border: none; background: none; text-align: left; border-radius: var(--radius-md); }
 .settings-row-main:hover:not(:disabled) { background: var(--bg-hover); }
 .settings-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.rule-row { display: flex; align-items: center; gap: 12px; padding: 9px 10px; }
+.rule-scope { flex: none; }
+.rule-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11.5px * var(--font-scale)); color: var(--muted); }
+.rule-pattern { margin-left: 8px; font-family: var(--mono); color: var(--text-2); }
 .settings-row-name { font-size: calc(13px * var(--font-scale)); font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-row-sub { font-size: calc(11.5px * var(--font-scale)); color: var(--muted); }
 .mcp-icon { flex: none; width: 22px; height: 22px; border-radius: calc(var(--radius-inner) + 1px); object-fit: contain; }

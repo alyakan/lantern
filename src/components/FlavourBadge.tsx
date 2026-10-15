@@ -4,6 +4,7 @@ import { useModeGuide } from "../lib/modeGuide";
 import { InfoIcon, LearnIcon, StepsIcon } from "./icons";
 import { FLAVOUR_ICON } from "./ModeGuide";
 import { useMenuKeys } from "./useMenuKeys";
+import { useMenuInside } from "../lib/useMenuInside";
 
 const HINT: Record<Flavour, string> = {
   build: "Plan and build one step at a time",
@@ -22,6 +23,7 @@ export function FlavourBadge({ flavour, explain = false, onPick, disabled }: { f
   const guide = useModeGuide();
   const root = useRef<HTMLDivElement>(null);
   const keys = useMenuKeys(open, root);
+  const inside = useMenuInside(open);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
@@ -44,7 +46,7 @@ export function FlavourBadge({ flavour, explain = false, onPick, disabled }: { f
         <span className="chev down" aria-hidden />
       </button>
       {open && (
-        <div className="menu flavour-menu" role="menu" aria-label="Flavour" onKeyDown={keys.onKeyDown}>
+        <div className="menu flavour-menu" ref={inside.ref} style={inside.style} role="menu" aria-label="Flavour" onKeyDown={keys.onKeyDown}>
           {FLAVOURS.map((f) => (
             <button
               key={f}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { RestartIcon } from "./icons";
+import { useMenuInside } from "../lib/useMenuInside";
 
 interface Props {
   version: string;
@@ -15,6 +16,7 @@ interface Props {
 export function UpdateButton({ version, busy, onRestart, onLater }: Props) {
   const [asking, setAsking] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const inside = useMenuInside(asking);
 
   useEffect(() => {
     if (!asking) return;
@@ -36,7 +38,7 @@ export function UpdateButton({ version, busy, onRestart, onLater }: Props) {
         Update ready
       </button>
       {asking && (
-        <div className="menu update-menu" role="alertdialog" aria-label={`Update to ${version}`}>
+        <div className="menu update-menu" ref={inside.ref} style={inside.style} role="alertdialog" aria-label={`Update to ${version}`}>
           <p className="update-question">
             {chats} still working. Restarting stops {busy === 1 ? "it" : "them"}; you can resume {busy === 1 ? "it" : "them"} from History.
           </p>

@@ -30,6 +30,11 @@ describe("the shortcut sheet", () => {
     expect(dimmed).toHaveAttribute("title", "Not available right now");
   });
 
+  it("opens with the dialog focused, not its Close button down the page, so the first sections stay in view", () => {
+    render(<ShortcutSheet available={[]} onClose={() => {}} />);
+    expect(document.activeElement).toHaveClass("shortcuts-body");
+  });
+
   it("closes with its Close button", () => {
     const onClose = vi.fn();
     render(<ShortcutSheet available={[]} onClose={onClose} />);

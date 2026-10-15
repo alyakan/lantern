@@ -236,7 +236,7 @@ export default function App() {
   useEffect(() => {
     void pushAgentLimit();
   }, []);
-  // When each chat's last turn ended, for the title bar's "Finished | Today at 19:22".
+  // When each chat's last turn ended, for the title bar's "Done | Today at 19:22".
   const [finishedAt, setFinishedAt] = useState<Record<string, Date>>({});
   // The pop-up shown when the chat on screen finishes a turn.
   const [hud, setHud] = useState<HudEvent | null>(null);
@@ -1402,7 +1402,7 @@ export default function App() {
   const [guideAt, setGuideAt] = useState<GuideKey | null>(null);
   const [settingsAt, setSettingsAt] = useState<SettingsTab | null>(null);
   useAction("settings", () => setSettingsAt(settingsAt ?? "general"));
-  // ⇧⌘P: every action that can run, and the things that aren't shortcuts: switching Permissions, Workflow or harness, and each Settings
+  // ⇧⌘P: every action that can run, and the things that aren't shortcuts: switching Permissions, Workflow or Models, and each Settings
   // page. Listed as they are when the palette opens.
   const [palette, setPalette] = useState<PaletteEntry[] | null>(null);
   const paletteEntries = (): PaletteEntry[] => {
@@ -1415,7 +1415,7 @@ export default function App() {
       .map((w): PaletteEntry => ({ id: `workflow:${w}`, title: `Workflow: ${WORKFLOW_LABEL[w]}${w === "steps" ? "…" : ""}`, group: "Workflow", shortcut: null, run: () => changeWorkflow(w) }));
     const harnesses = presets
       .filter((h) => ready && h.id !== harnessOf(active).id)
-      .map((h): PaletteEntry => ({ id: `harness:${h.id}`, title: `Use the ${h.name} harness`, group: "Harness", shortcut: null, run: () => switchHarness(h) }));
+      .map((h): PaletteEntry => ({ id: `harness:${h.id}`, title: `Models: ${h.name}`, group: "Models", shortcut: null, run: () => switchHarness(h) }));
     const tabs = (["general", "harness", "mcp", "skills", "permissions", "updates"] as SettingsTab[])
       .filter((t) => t !== "harness" || !!state.folder)
       .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
@@ -1728,6 +1728,7 @@ export default function App() {
           onOpenFolder={openFolder}
           onToggleReview={() => setReviewCollapsed(!reviewCollapsed)}
           onOpenSettings={() => setSettingsAt("general")}
+          mcpIssues={(mcpIssues[active] ?? []).map((i) => `${i.name} ${i.problem}`)}
           onBringOld={bringHere}
           branch={branch}
           activity={activityStatus(state, finishedAt[active] ?? null)}

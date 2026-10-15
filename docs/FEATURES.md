@@ -71,7 +71,7 @@ Under the box:
 In the box:
 
 - Type `/` for skills, commands and MCP prompts, and `@` to point Claude at a file.
-- Start a message with `!` and the box becomes a terminal: `!git status` runs in the chat's folder and Claude sees the output with your next message. Long-running commands (a dev server) keep going until you stop them, and a prompt such as a password is answered in place.
+- Start a message with `!` and the box becomes a terminal: `!git status` runs in the chat's folder and Claude sees the output with your next message (the hint under the box says so, and that backspace leaves the terminal). Long-running commands (a dev server) keep going until you stop them, and a prompt such as a password is answered in place.
 - Pasting more than a few lines shows `[Pasted text #1 · 120 lines]`; the whole text is still sent.
 - Send while Claude is working and the message is queued until its turn ends.
 
@@ -143,6 +143,7 @@ The app becomes a canvas of floating chats tethered to the Lead:
 ![The team canvas: a Lead and three agents, one of which needs permission](images/team-canvas.png)
 
 - Drag a title to move a window and its corner to resize it. Drag the background to pan; pinch or ⌘-scroll to zoom. Zoomed out, agents become cards, and a click zooms in.
+- Every window and sidebar row says what its chat is doing in the same words: **Working**, **Needs you**, **Ready** (a Lead with nothing running), **Done** (an agent that finished its turn) or **Stopped**. The title bar says the same for the chat you're in.
 - An agent's permission prompts appear in its own window. The pill at the top ("1 agent needs you") takes you to the next one that does.
 - ⇧⌘C switches between the canvas and the chat view, and the sidebar lists the team with its agents under it.
 - A team comes back when Lantern reopens, with the agents that were still going. An agent the Lead stopped, one whose worktree is gone, and one whose Lead isn't coming back are not reopened, and an agent's conversation is never listed among a project's past chats.
@@ -263,10 +264,10 @@ A few things to know:
 ![Settings, on the General tab](images/settings.png)
 
 - **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, the theme (see below), the text size, and **Agents running at once** for teams.
-- **Harness**: the model presets (who is the Lead, the advisor and the subagents) that the Models chip offers.
-- **MCP servers**: your servers with their status. Log in, reconnect, turn off, add, edit or remove them (through Claude Code's own settings). A secret never goes into the project's committed `.mcp.json`.
+- **Models**: the model presets (who is the Lead, the advisor and the subagents) that the Models chip offers.
+- **MCP servers**: your servers with their status. Log in, reconnect, turn off, add, edit or remove them (through Claude Code's own settings). When one is down or needs you to log in, a small amber dot sits on the Settings gear in the title bar (hover it to see which), and the `/` menu says so too. A secret never goes into the project's committed `.mcp.json`.
 - **Skills**: the project's and plugins' skills, each with a preview of its file.
-- **Permissions**: the rules you saved with **Always allow…**, by folder or chat.
+- **Allow rules**: the rules you saved with **Always allow…**, each on one line with its scope (this chat or this folder), what it covers and a **Remove** button. (The tab isn't called Permissions, so it can't be mistaken for the Permissions chip under the chat box.)
 - **Updates**: Lantern updates itself. When a new release is out, "Update ready" appears under the chat box; click it to restart onto the new version, or leave it and it installs when you quit. **Lantern ▸ Check for Updates…** looks right now.
 
 ### Themes
@@ -286,7 +287,7 @@ The code editor and diffs, diagrams and shell output follow the theme, and a cho
 
 ## Keyboard shortcuts and the command palette
 
-**⇧⌘P** opens the command palette: every action in Lantern by name, with its shortcut, plus ones with no shortcut such as "Permissions: Auto", "Workflow: Team", "Use the Max harness" and "Settings: Skills".
+**⇧⌘P** opens the command palette: every action in Lantern by name, with its shortcut (titles in sentence case, like "Chat history"), plus ones with no shortcut such as "Permissions: Auto", "Workflow: Team", "Models: Max" and "Settings: Skills".
 
 ![The command palette](images/command-palette.png)
 

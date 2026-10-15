@@ -22,11 +22,16 @@ export function ShortcutSheet({ available, onClose }: Props) {
     // jsdom has no showModal: there, the attribute alone opens it (as in the mode guide).
     if (el.showModal) el.showModal();
     else el.setAttribute("open", "");
+    // showModal focuses the first button, which is Close at the bottom and scrolls the list away from its first
+    // sections: put focus on the scrolling list instead (arrow keys scroll it), back at the top.
+    const body = el.querySelector<HTMLElement>(".shortcuts-body");
+    body?.focus({ preventScroll: true });
+    if (body) body.scrollTop = 0;
   }, []);
   const shortcuts = ACTIONS.filter((a) => a.key);
   return (
     <dialog ref={ref} className="shortcuts" aria-labelledby="shortcuts-title" onClose={onClose} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="shortcuts-body">
+      <div className="shortcuts-body" tabIndex={-1}>
         <div className="settings-head">
           <div>
             <h2 className="mode-guide-title" id="shortcuts-title">
