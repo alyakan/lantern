@@ -904,7 +904,8 @@ button.json-more:hover { color: var(--text); }
    can't be narrower than that (MIN_LEFT in SplitPane.tsx). The background count is dropped first. */
 .steps-head { container-type: inline-size; display: flex; align-items: center; gap: 10px; height: 44px; flex: none; padding: 0 14px 0 20px; border-bottom: 1px solid var(--line); }
 @container (max-width: 480px) { .steps-head .steps-background { display: none; } }
-.steps-rail { display: flex; align-items: center; gap: 4px; flex: 0 1000 auto; min-width: 46px; overflow-x: auto; scrollbar-width: none; scroll-behavior: smooth; }
+/* Full height of the bar: a scrolling rail clips to its box, and an 8px box cut off the bottom of the dots once there were enough pages to scroll. */
+.steps-rail { display: flex; align-items: center; align-self: stretch; gap: 4px; flex: 0 1000 auto; min-width: 52px; padding: 0 3px; overflow-x: auto; scrollbar-width: none; scroll-behavior: smooth; }
 .steps-rail::-webkit-scrollbar { display: none; }
 /* A dot per page; the one on screen stretches into a pill. Build pages are solid, plan pages hollow. */
 .steps-dot { flex: none; width: 8px; height: 8px; padding: 0; border: 1.5px solid var(--faint); border-radius: 999px; background: none; transition: width 0.2s cubic-bezier(0.32, 0.72, 0, 1), background 0.2s; }
