@@ -189,9 +189,15 @@ The sidebar has one group for every project: the ones with a chat open first, th
 - Hover a project for **+** (a new chat there) and **⋯**: New team, Bring old chats here…, Reveal in Finder and Remove from recents (which only hides it; Claude Code keeps the chats).
 - **New ▾** at the top starts a Chat (⌘N), a Team (⇧⌘N) or a PR review in the project on screen.
 
-**⌃⌘S** (View ▸ Show/Hide Sidebar) folds it to a narrow rail of project initials with the same badges, so a waiting chat is never hidden: a click on one goes straight to the chat that needs you. Drag the sidebar's edge to resize it. Its width and whether it's folded are remembered.
+**⌃⌘S** (View ▸ Show/Hide Sidebar, or the button at the top of the sidebar) hides the sidebar completely, and the chat takes the whole width. A **Show sidebar** button then sits at the left of the title bar. When a chat or an agent needs you, it carries an amber badge with how many, so a waiting chat is never hidden: click it to bring the sidebar back.
 
-![The sidebar folded to a rail of project initials](images/sidebar-rail.png)
+![The sidebar hidden, with the title bar's button badged for the 2 chats that need you](images/sidebar-hidden.png)
+
+To look without showing it, rest the pointer on the window's left edge for a moment and the sidebar slides in over the chat. Click a chat in it to go there, and it slides away again, as it does when the pointer leaves it or you press Esc. To keep it open, use its top-right button or ⌃⌘S.
+
+![The hidden sidebar peeking in over the chat](images/sidebar-peek.png)
+
+Drag the sidebar's edge to resize it. Its width is remembered on its own, so showing it again restores it, and so is whether it was hidden.
 
 The expanded sidebar is in most of the other screenshots on this page; the team canvas one shows a team with its agents nested under it.
 

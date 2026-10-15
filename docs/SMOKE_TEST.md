@@ -33,7 +33,7 @@ Sidebar:
 - Hover a project: **+** starts a chat there, **⋯** has New team, Bring old chats here…, Reveal in Finder (Finder opens on the folder) and Remove from recents (it goes; opening the folder again brings it back).
 - **Show all…** opens that project's History: past chats only (the open ones are in the sidebar), with search, pin, rename, export. ⌘K opens History for the project on screen.
 - **New ▾** has Chat (⌘N), Team (⇧⌘N) and Review a PR…. The title bar has no History clock, no New buttons and no "waiting" count.
-- ⌃⌘S (View ▸ Show/Hide Sidebar) shrinks it to a rail of project initials: badges show what needs you, a click on a project with a waiting chat goes to that chat. Drag the sidebar's edge to resize it; quit and reopen: the width and the rail are as left.
+- ⌃⌘S (View ▸ Show/Hide Sidebar) hides it completely: a Show sidebar button appears at the left of the title bar, badged with how many chats need you. Rest the pointer on the window's left edge: the sidebar slides in over the chat, and away when the pointer leaves it or on Esc; a click on a chat goes there and closes it. Drag the sidebar's edge to resize it; quit and reopen: the width and whether it was hidden are as left.
 - With many projects, the first launch doesn't stall: a project's past chats are read only once it is expanded.
 
 Starting work:
