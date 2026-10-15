@@ -10,6 +10,7 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc;
+use std::time::Duration;
 
 /// Tools every chat has that only say or show something, so they run without asking: Step by step's own instructions
 /// (`steps_guide`), and what the Changes pane compares while reviewing (`review_target`).
@@ -238,8 +239,25 @@ fn cancels(msg: &Value, id: &Value) -> bool {
 /// PermissionBridge), or drops it unasked if it was still queued, and it gets no reply, as MCP asks. When the client goes
 /// away, a waiting card is taken down the same way and no new one is shown; what the app answers at once still is.
 /// Everything else is answered in order.
-pub fn run_helper_as(mut input: impl BufRead + Send, mut output: impl Write, socket: Option<&str>, offer: Offer) -> io::Result<()> {
+///
+/// While a request waits, the client is told every PROGRESS_EVERY that it still is (MCP progress, on the progress token
+/// it sent): Claude Code gives up on a tool that says nothing for a while (30 minutes by default), and a card must wait for
+/// the user as long as it takes.
+pub fn run_helper_as(input: impl BufRead + Send, output: impl Write, socket: Option<&str>, offer: Offer) -> io::Result<()> {
+    run_helper_with(input, output, socket, offer, PROGRESS_EVERY)
+}
+
+/// How often a waiting request tells the client it's still waiting: well inside the shortest wait Claude Code allows (30s).
+pub const PROGRESS_EVERY: Duration = Duration::from_secs(20);
+
+fn run_helper_with(mut input: impl BufRead + Send, output: impl Write, socket: Option<&str>, offer: Offer, progress_every: Duration) -> io::Result<()> {
     let (tx, rx) = mpsc::channel::<Heard>();
+    let output = RefCell::new(output);
+    let send = |msg: &Value| -> io::Result<()> {
+        let mut out = output.borrow_mut();
+        writeln!(out, "{msg}")?;
+        out.flush()
+    };
     std::thread::scope(|scope| {
         let read_tx = tx.clone();
         scope.spawn(move || {
@@ -265,6 +283,8 @@ pub fn run_helper_as(mut input: impl BufRead + Send, mut output: impl Write, soc
         // it was called off, and whether the input has ended.
         let backlog = RefCell::new(VecDeque::<Value>::new());
         let current = RefCell::new(Value::Null);
+        // The progress token of the request being answered (MCP's _meta.progressToken), if it sent one.
+        let token = RefCell::new(Value::Null);
         let called_off = Cell::new(false);
         let closed = Cell::new(false);
         let ask = |req: BridgeRequest| -> BridgeResponse {
@@ -286,8 +306,21 @@ pub fn run_helper_as(mut input: impl BufRead + Send, mut output: impl Write, soc
             std::thread::spawn(move || {
                 let _ = answer_tx.send(Heard::Answer(read_answer(reader)));
             });
+            let mut told = 0;
             loop {
-                match rx.recv() {
+                let heard = match rx.recv_timeout(progress_every) {
+                    Ok(heard) => Ok(heard),
+                    Err(mpsc::RecvTimeoutError::Timeout) => {
+                        let token = token.borrow().clone();
+                        if !token.is_null() {
+                            told += 1;
+                            let _ = send(&json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": token, "progress": told, "message": "Waiting for the user"}}));
+                        }
+                        continue;
+                    }
+                    Err(mpsc::RecvTimeoutError::Disconnected) => Err(()),
+                };
+                match heard {
                     Ok(Heard::Answer(answer)) => return answer.unwrap_or_else(|e| failed(&e)),
                     Ok(Heard::Message(msg)) if cancels(&msg, &current.borrow()) => {
                         // Hanging up makes the app take the card down, and the answer thread then ends with an error.
@@ -323,14 +356,14 @@ pub fn run_helper_as(mut input: impl BufRead + Send, mut output: impl Write, soc
                 },
             };
             *current.borrow_mut() = msg.get("id").cloned().unwrap_or(Value::Null);
+            *token.borrow_mut() = msg["params"]["_meta"]["progressToken"].clone();
             called_off.set(false);
             let reply = server.handle(&msg, &ask);
             if called_off.get() {
                 continue;
             }
             if let Some(reply) = reply {
-                writeln!(output, "{reply}")?;
-                output.flush()?;
+                send(&reply)?;
             }
         }
     })
@@ -702,6 +735,52 @@ mod tests {
         let mut msg = call(tool, json!({}));
         msg["id"] = json!(id);
         msg
+    }
+
+    #[test]
+    fn a_card_waiting_tells_the_client_it_still_is_on_its_progress_token() {
+        let app = fake_app("progress", Some(BridgeResponse { allow: true, message: None, updated_input: None, failed: false }));
+        let (mut client, input) = UnixStream::pair().unwrap();
+        let socket = app.socket.clone();
+        let helper = std::thread::spawn(move || {
+            let mut out = Vec::new();
+            run_helper_with(BufReader::new(input), &mut out, Some(&socket), Offer::default(), Duration::from_millis(20)).unwrap();
+            String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).collect::<Vec<_>>()
+        });
+        let mut msg = call("Bash", json!({"command": "ls"}));
+        msg["params"]["_meta"] = json!({"progressToken": 7});
+        writeln!(client, "{msg}").unwrap();
+        app.got.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(120));
+        app.release.send(()).unwrap();
+        app.done.join().unwrap();
+        drop(client);
+        let out = helper.join().unwrap();
+        let (progress, rest): (Vec<_>, Vec<_>) = out.into_iter().partition(|m| m["method"] == "notifications/progress");
+        assert!(progress.len() >= 2, "{progress:?}");
+        assert!(progress.iter().all(|p| p["params"]["progressToken"] == 7));
+        // Each says more than the last, as MCP asks.
+        assert!(progress.windows(2).all(|w| w[1]["params"]["progress"].as_u64() > w[0]["params"]["progress"].as_u64()));
+        assert_eq!(ids(&rest), vec![json!(2)]);
+    }
+
+    #[test]
+    fn a_request_without_a_progress_token_gets_no_progress() {
+        let app = fake_app("noprogress", Some(BridgeResponse { allow: true, message: None, updated_input: None, failed: false }));
+        let (mut client, input) = UnixStream::pair().unwrap();
+        let socket = app.socket.clone();
+        let helper = std::thread::spawn(move || {
+            let mut out = Vec::new();
+            run_helper_with(BufReader::new(input), &mut out, Some(&socket), Offer::default(), Duration::from_millis(20)).unwrap();
+            String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).collect::<Vec<_>>()
+        });
+        writeln!(client, "{}", call("Bash", json!({"command": "ls"}))).unwrap();
+        app.got.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(80));
+        app.release.send(()).unwrap();
+        app.done.join().unwrap();
+        drop(client);
+        assert_eq!(ids(&helper.join().unwrap()), vec![json!(2)]);
     }
 
     #[test]
