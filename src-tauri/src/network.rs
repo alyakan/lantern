@@ -1316,6 +1316,23 @@ mod tests {
     }
 
     #[test]
+    fn a_watch_that_was_removed_can_be_put_back_and_finds_what_it_matched() {
+        let (fake, m) = monitor();
+        fake.add(tx(A, 1, "GET", "https://x/users/1", "completed"), "{}");
+        let users = Watch { label: "users".into(), method: Some("GET".into()), url: "/users".into() };
+        m.watch("/p", users.clone());
+        m.poll();
+        assert_eq!(m.view("/p").items.len(), 1);
+        assert!(m.unwatch("/p", "users"));
+        m.poll();
+        assert!(m.view("/p").items.is_empty() && m.view("/p").watches.is_empty());
+        m.watch("/p", users.clone());
+        m.poll();
+        let view = m.view("/p");
+        assert_eq!((view.items.len(), view.watches), (1, vec![users]));
+    }
+
+    #[test]
     fn removing_a_watch_that_is_not_there_lists_the_ones_that_are() {
         let (_fake, m) = monitor();
         let none = m.call(Some("/p"), "network_unwatch", &json!({"label": "Users"})).unwrap_err();

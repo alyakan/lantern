@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { initialState, type ChatItem, type State } from "../store";
 import { StepsView } from "./StepsView";
 import { ArchitectureTab } from "./ArchitectureTab";
@@ -68,7 +68,7 @@ describe("Architecture in Step by step", () => {
   it("draws the Overview page's map in the page, with a way to the pane", () => {
     const open = vi.fn();
     render(
-      <ArchitecturePane.Provider value={open}>
+      <ArchitecturePane.Provider value={{ open, label: (id) => (id === "gw" ? "Gateway" : id) }}>
         <StepsView state={state(2)} {...handlers()} />
       </ArchitecturePane.Provider>,
     );
@@ -76,6 +76,42 @@ describe("Architecture in Step by step", () => {
     expect(within(block).getByRole("button", { name: /^Gateway, new/ })).toBeInTheDocument();
     fireEvent.click(within(block).getByRole("button", { name: "Open in the pane" }));
     expect(open).toHaveBeenCalled();
+  });
+
+  it("names a part's boxes on the map by their labels, and a chip opens the Map with that box lit", () => {
+    const open = vi.fn();
+    render(
+      <ArchitecturePane.Provider value={{ open, label: (id) => (id === "gw" ? "Gateway" : id) }}>
+        <StepsView state={state(3)} {...handlers()} />
+      </ArchitecturePane.Provider>,
+    );
+    const chip = within(current().querySelector(".arch-covers") as HTMLElement).getByRole("button", { name: "Gateway" });
+    fireEvent.click(chip);
+    expect(open).toHaveBeenCalledWith("gw");
+  });
+
+  it("says where Next goes on the first pages, and how many of a part's concerns are answered", () => {
+    const { rerender } = render(<StepsView state={state(1)} {...handlers()} />);
+    expect(screen.getByRole("button", { name: "Overview →" })).toHaveAttribute("title", "Go on to the Overview");
+    rerender(<StepsView state={state(2)} {...handlers()} />);
+    expect(screen.getByRole("button", { name: "First part →" })).toHaveAttribute("title", "Go on to the first part");
+    rerender(<StepsView state={state(3)} {...handlers()} />);
+    expect(screen.getByText("0 of 1 concern answered")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Agree" }));
+    expect(screen.getByText("1 of 1 concern answered")).toBeInTheDocument();
+  });
+
+  it("says under a reply that looked like a page but wasn't one that Lantern couldn't show it", () => {
+    const s = state(3);
+    s.items = [...s.items, { type: "user", id: "ux", text: "why?", turn: 9 }, { type: "assistant", id: "ax", text: "## Architecture · The retry story\n\nIt retries." }];
+    render(<StepsView state={s} {...handlers()} />);
+    expect(screen.getByText("Lantern couldn't show this as a page; it will tell Claude with your next message.")).toBeInTheDocument();
+    // An answer with no heading is how answers should be.
+    const plain = state(3);
+    plain.items = [...plain.items, { type: "user", id: "ux", text: "why?", turn: 9 }, { type: "assistant", id: "ax", text: "Because it retries." }];
+    cleanup();
+    render(<StepsView state={plain} {...handlers()} />);
+    expect(screen.queryByText(/couldn't show this as a page/)).toBeNull();
   });
 
   it("ends in a summary of the concerns, and starts a Build from it", () => {
@@ -93,6 +129,17 @@ describe("the Map tab", () => {
   const map = architectureMap(pages)!;
   const names = { [pages[2].key]: "Part 1 of 2 — Gateway", [pages[3].key]: "Part 2 of 2 — Auth service" };
   const box = (name: RegExp) => screen.getByRole("button", { name });
+
+  it("marks a box with no page of its own as disabled, and pans the map to the box the arrow keys reach", () => {
+    render(<ArchitectureTab map={map} current={[]} pageNames={names} onOpenPage={() => {}} />);
+    expect(box(/^Logs/)).toHaveAttribute("aria-disabled", "true");
+    expect(box(/^Gateway/)).not.toHaveAttribute("aria-disabled");
+    const world = document.querySelector(".pz-world") as HTMLElement;
+    const before = world.style.transform;
+    fireEvent.keyDown(box(/^Gateway/), { key: "ArrowRight" });
+    // The room has no size here, so any box is "off screen": the view moved to bring the next one in.
+    expect(world.style.transform).not.toBe(before);
+  });
 
   it("draws every box as a button, says what the change does to it, and lights the part on screen", () => {
     const { container } = render(<ArchitectureTab map={map} current={["authSvc"]} pageNames={names} onOpenPage={() => {}} />);

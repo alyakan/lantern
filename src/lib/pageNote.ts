@@ -15,6 +15,23 @@ export type Guides = Partial<Record<Flavour, FlavourGuide>>;
 
 export const guidesByFlavour = (list: FlavourGuide[]): Guides => Object.fromEntries(list.map((g) => [g.flavour.toLowerCase(), g]));
 
+/**
+ * The latest reply, when it is set like a page (its first line a heading, or all bold) but isn't one of the flavour's
+ * headings: Lantern couldn't make a page of it. `first` is its first line. Null when the turn's reply was a page, or an
+ * answer with no heading, which is how answers should be.
+ */
+export function unreadReply(items: readonly ChatItem[]): { id: string; first: string } | null {
+  const lastUser = items.map((it) => it.type === "user").lastIndexOf(true);
+  if (lastUser < 0) return null;
+  const replies = items.slice(lastUser + 1).filter((it): it is Extract<ChatItem, { type: "assistant" }> => it.type === "assistant" && !!it.text.trim());
+  // The turn's page is its last heading; with one there, nothing went wrong.
+  if (replies.length === 0 || replies.some((r) => parseHeading(r.text) !== null)) return null;
+  const last = replies[replies.length - 1];
+  const first = (last.text.split("\n").find((l) => l.trim()) ?? "").trim();
+  if (headingWords(first) === null && !/^#{4,6}\s/.test(first)) return null;
+  return { id: last.id, first };
+}
+
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /**
@@ -23,16 +40,8 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…`
  * telling Claude what it wrote and the headings to use. Null when the reply was a page, or an answer with no heading.
  */
 export function pageNote(items: readonly ChatItem[], flavour: Flavour | null, guides: Guides): string | null {
-  if (!flavour) return null;
-  const lastUser = items.map((it) => it.type === "user").lastIndexOf(true);
-  if (lastUser < 0) return null;
-  const replies = items.slice(lastUser + 1).filter((it): it is Extract<ChatItem, { type: "assistant" }> => it.type === "assistant" && !!it.text.trim());
-  // The turn's page is its last heading; with one there, nothing went wrong.
-  if (replies.length === 0 || replies.some((r) => parseHeading(r.text) !== null)) return null;
-  const last = replies[replies.length - 1];
-  const first = (last.text.split("\n").find((l) => l.trim()) ?? "").trim();
-  // An answer without a heading is how answers should be: only a heading Lantern couldn't read is worth a note.
-  if (headingWords(first) === null && !/^#{4,6}\s/.test(first)) return null;
+  const first = flavour ? unreadReply(items)?.first : undefined;
+  if (!flavour || first === undefined) return null;
   const label = FLAVOUR_LABEL[flavour];
   const headings = guides[flavour]?.headings ?? [];
   const list = headings.length ? ` ${label}'s headings are:\n${headings.join("\n")}\n` : ` Read mcp__lantern__steps_guide for ${label}'s headings.`;

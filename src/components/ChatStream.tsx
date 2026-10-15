@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { CollapsibleText } from "./CollapsibleText";
 import { Md } from "./Md";
 import { MessageActions, type MessageAction } from "./MessageActions";
@@ -14,6 +14,30 @@ import { ShellBlock } from "./ShellBlock";
 import { TurnNote } from "./TurnNote";
 
 type UserRow = Extract<ChatItem, { type: "user" }>;
+
+/** A line of a note from the agents: two lines of it, and Show more for the rest. */
+function NoteLine({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const line = useRef<HTMLSpanElement>(null);
+  // Where there is layout it is measured; where there is none (a test), a long line is taken to be clipped.
+  const [clipped, setClipped] = useState(text.length > 200);
+  useLayoutEffect(() => {
+    const el = line.current;
+    if (el && !open) setClipped(el.clientHeight > 0 ? el.scrollHeight > el.clientHeight + 1 : text.length > 200);
+  }, [text, open]);
+  return (
+    <>
+      <span ref={line} className={`auto-turn-line${open ? "" : " clamped"}`}>
+        {text}
+      </span>
+      {clipped && (
+        <button className="link-button auto-turn-more" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? "Show less" : "Show more"}
+        </button>
+      )}
+    </>
+  );
+}
 
 /** What a sent prompt can do again: Edit puts it back in the box, Retry and Regenerate send it. Only offered when idle. */
 export interface ResendHandlers {
@@ -76,8 +100,8 @@ export function ChatStream({ items, folder, sections, live = false, resend, ...h
           return (
             <div key={row.id} className="auto-turn" role="note">
               <span className="auto-turn-dot" aria-hidden />
-              {/* Notes from an orchestra's workers read as what happened; anything else is shown as it was written. */}
-              <span>{friendlyNotes(row.text).map((line, i) => <span key={i} className="auto-turn-line">{line}</span>)}</span>
+              {/* Notes from a team's agents read as what happened; anything else is shown as it was written. */}
+              <span>{friendlyNotes(row.text).map((line, i) => <NoteLine key={i} text={line} />)}</span>
             </div>
           );
         return (

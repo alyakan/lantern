@@ -64,7 +64,7 @@ interface Props {
    * The Map tab, once a Step-by-step chat has an Architecture Overview: its map, the boxes the page on screen covers, each
    * page's name, how to open one, and `openKey`, changed to bring the tab up.
    */
-  architecture?: { map: ArchitectureMap; current: string[]; pageNames: Record<string, string>; onOpenPage: (page: string) => void; openKey: number };
+  architecture?: { map: ArchitectureMap; current: string[]; pageNames: Record<string, string>; onOpenPage: (page: string) => void; openKey: number; box?: { id: string; key: number } | null };
   /** The Network tab's Summarize: asks Claude in this chat about one request (absent: no chat to ask). */
   onSummarizeRequest?: (item: NetworkItem) => void;
   /** Claude is in the middle of a turn in this chat. */
@@ -251,7 +251,7 @@ export function ReviewPanel(props: Props) {
       )}
       {tab === "map" && props.architecture && (
         <div className="tab-body" role="tabpanel" aria-labelledby={tabId("map")}>
-          <ArchitectureTab map={props.architecture.map} current={props.architecture.current} pageNames={props.architecture.pageNames} onOpenPage={props.architecture.onOpenPage} />
+          <ArchitectureTab map={props.architecture.map} current={props.architecture.current} pageNames={props.architecture.pageNames} onOpenPage={props.architecture.onOpenPage} box={props.architecture.box} />
         </div>
       )}
       {tab === "agents" && props.agents && (

@@ -1,11 +1,13 @@
 import type { ArchitecturePart } from "../lib/architecture";
 import type { Verdict } from "../lib/review";
 import { HudCheckIcon } from "./icons";
+import { useArchitecturePane } from "../lib/architecturePane";
 import { Md } from "./Md";
 import { FindingCard } from "./ReviewPages";
 
 /** One piece of the architecture: what it's for, what it connects to, what changes in it, and the concerns about it. */
 export function ArchitecturePartView({ part, verdicts, onVerdict }: { part: ArchitecturePart; verdicts: Record<number, Verdict> | undefined; onVerdict?: (index: number, v: Verdict | null) => void }) {
+  const pane = useArchitecturePane();
   const section = (title: string, body: string, className: string) =>
     body && (
       <section className="review-section">
@@ -20,11 +22,19 @@ export function ArchitecturePartView({ part, verdicts, onVerdict }: { part: Arch
       {part.covers.length > 0 && (
         <div className="arch-covers" aria-label="Covers">
           <span className="arch-covers-label">On the map</span>
-          {part.covers.map((id) => (
-            <span key={id} className="arch-node">
-              {id}
-            </span>
-          ))}
+          {part.covers.map((id) => {
+            const label = pane?.label(id) ?? id;
+            // With a pane to open, a box's chip takes you to it on the map.
+            return pane ? (
+              <button key={id} className="arch-node" title={`Show ${label} on the map`} onClick={() => pane.open(id)}>
+                {label}
+              </button>
+            ) : (
+              <span key={id} className="arch-node">
+                {label}
+              </span>
+            );
+          })}
         </div>
       )}
       {part.preface && (

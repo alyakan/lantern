@@ -1278,9 +1278,15 @@ export default function App() {
     archSeen.current = { slot: active, page };
     if (seen?.slot === active && page && page !== seen.page) setArchOpenKey((k) => k + 1);
   }, [active, archMap?.page]);
-  const openArchitecture = () => {
-    setReviewCollapsed(false);
-    setArchOpenKey((k) => k + 1);
+  // A box a part's chip named: the Map comes up with it lit.
+  const [archBox, setArchBox] = useState<{ id: string; key: number } | null>(null);
+  const openArchitecture = {
+    open: (box?: string) => {
+      setReviewCollapsed(false);
+      setArchOpenKey((k) => k + 1);
+      if (box) setArchBox((b) => ({ id: box, key: (b?.key ?? 0) + 1 }));
+    },
+    label: (id: string) => (archMap?.kind === "native" ? (archMap.spec.nodes.find((n) => n.id === id)?.label ?? id) : id),
   };
   const [agentsOpenKey, setAgentsOpenKey] = useState(0);
   const agentsShown = useRef<Set<string>>(new Set());
@@ -1560,7 +1566,7 @@ export default function App() {
             <ErrorBoundary name="review pane">
               <ReviewPanel
                 agents={state.folder ? { tree, graph, usage: state.modelUsage, openKey: agentsOpenKey } : undefined}
-                architecture={archMap ? { map: archMap, current: shownCovers, pageNames: archPageNames, onOpenPage: openPageIn(active), openKey: archOpenKey } : undefined}
+                architecture={archMap ? { map: archMap, current: shownCovers, pageNames: archPageNames, onOpenPage: openPageIn(active), openKey: archOpenKey, box: archBox } : undefined}
                 summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: openPageIn(active), doc: { pages: stepPages ?? [], title: chatTitle(state, titles), folder: state.folder } } : undefined}
                 folder={state.folder}
                 ready={state.status !== "starting"}

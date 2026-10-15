@@ -16,6 +16,7 @@ import type { BackgroundRun, ChatItem, ToolItem } from "../store";
 import { workingVerb } from "../lib/verbs";
 import { ChatStream, type StreamHandlers } from "./ChatStream";
 import { isVerdictNext, parseReviewFile, splitFileTitle, verdictMessage, withoutCue, type ReviewFile, type Verdict } from "../lib/review";
+import { unreadReply } from "../lib/pageNote";
 import { ReviewFileHeader, ReviewFileView, ReviewSummaryTable, type ReviewedFinding } from "./ReviewPages";
 import { ArchitecturePartView } from "./ArchitecturePages";
 import { parseArchitecturePart, type ArchitecturePart } from "../lib/architecture";
@@ -212,6 +213,11 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
       return { ...all, [pageKey]: page };
     });
   const currentReview = page ? (reviewOf(page)?.findings ?? partOf(page)?.concerns ?? null) : null;
+  // A part's concerns the user has answered (agreed or rejected), of all it has.
+  const concernCount = page ? (partOf(page)?.concerns.length ?? 0) : 0;
+  const answeredCount = page ? Object.keys(verdicts[page.key] ?? {}).length : 0;
+  // The latest reply, when it looked like a page but Lantern couldn't read it as one: said under the newest page.
+  const unread = !!flavour && unreadReply(state.items) !== null && !running;
   const next = () => {
     const message = currentReview ? verdictMessage(currentReview, verdicts[page.key]) : "Next";
     onNext(message === "Next." ? "Next" : message);
@@ -288,6 +294,7 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
                   runs={state.backgroundRuns}
                   latest={latestOf.get(p.key) ?? p.main}
                   onUpdate={i === last && !running && onSend ? () => onSend(UPDATE_STEP) : undefined}
+                  unread={i === last && unread}
                   onKeep={(turn, over) => setKept((all) => ({ ...all, [p.key]: { turn, over } }))}
                   {...handlers}
                 />}
@@ -316,9 +323,16 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
             // The suggestion's card has the answers.
             <span className="steps-hint">Start it, or pick another</span>
           ) : (
-            <button className="primary" disabled={waiting || heading?.kind === "done" || heading?.kind === "summary"} title={review ? "Send your verdicts and go on to the next file" : arch ? "Send your verdicts and go on" : heading?.kind === "plan-complete" ? "Lock the plan: Claude builds exactly these steps, and asks before changing them" : heading?.kind === "plan-update" ? "Approve this change to the locked plan" : "Approve this page and go on to the next"} onClick={next}>
+            <>
+            {arch && heading?.kind === "part" && concernCount > 0 && (
+              <span className="steps-answered" aria-live="polite">
+                {answeredCount} of {concernCount} concern{concernCount === 1 ? "" : "s"} answered
+              </span>
+            )}
+            <button className="primary" disabled={waiting || heading?.kind === "done" || heading?.kind === "summary"} title={review ? "Send your verdicts and go on to the next file" : arch ? (heading?.kind === "frame" ? "Go on to the Overview" : heading?.kind === "overview" ? "Go on to the first part" : heading?.kind === "part" && heading.n === heading.total ? "Send your verdicts and go on to the Summary" : "Send your verdicts and go on to the next part") : heading?.kind === "plan-complete" ? "Lock the plan: Claude builds exactly these steps, and asks before changing them" : heading?.kind === "plan-update" ? "Approve this change to the locked plan" : "Approve this page and go on to the next"} onClick={next}>
               {heading?.kind === "done" || heading?.kind === "summary" ? "Done" : heading?.kind === "plan-complete" ? "Lock plan →" : heading?.kind === "plan-update" ? "Approve update →" : review ? (heading?.kind === "file" && heading.n === heading.total ? "Summary →" : filesSoFar ? "Next file →" : "First file →") : arch ? (heading?.kind === "frame" ? "Overview →" : heading?.kind === "overview" ? "First part →" : heading?.kind === "part" && heading.n === heading.total ? "Summary →" : "Next part →") : flavour === "debug" ? "Next →" : "Next step →"}
             </button>
+            </>
           )
         ) : (
           <button className="ghost" onClick={() => go(at + 1)}>
@@ -332,6 +346,8 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
 
 interface PageProps extends StreamHandlers {
   page: StepPage;
+  /** The latest reply looked like a page but wasn't one of the flavour's headings: Lantern says so under it. */
+  unread?: boolean;
   first: boolean;
   live: boolean;
   teach: boolean;
@@ -358,7 +374,7 @@ interface PageProps extends StreamHandlers {
   onUpdate?: () => void;
 }
 
-function Page({ page, first, live, teach, review, arch, suggestion, verdicts, onVerdict, summary, folder, latest, runs, onKeep, onUpdate, ...handlers }: PageProps) {
+function Page({ page, unread, first, live, teach, review, arch, suggestion, verdicts, onVerdict, summary, folder, latest, runs, onKeep, onUpdate, ...handlers }: PageProps) {
   const h = page.heading;
   const opening = page.turns[0];
   const asked = opening.prompt.auto ? null : first ? opening.prompt.text : justMovesOn(opening.prompt.text) ? null : promptText(opening.prompt.text);
@@ -453,6 +469,11 @@ function Page({ page, first, live, teach, review, arch, suggestion, verdicts, on
             );
           })}
         </div>
+      )}
+      {unread && (
+        <p className="step-unread" role="status">
+          Lantern couldn't show this as a page; it will tell Claude with your next message.
+        </p>
       )}
     </div>
   );
