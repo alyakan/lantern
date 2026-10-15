@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { chatsReducer, initialChats } from "../sessions";
 import { initialState, type State } from "../store";
 import type { UiEvent } from "../types";
-import { chatsToSave, currentFolder, loadSaved, save, screenFirst, sessionModesToSave, toCurrentFolders, withOffered, type SavedChat } from "./restore";
+import { agentSessionsOf, chatsToSave, currentFolder, isAgentFolder, loadSaved, restorable, save, screenFirst, sessionModesToSave, toCurrentFolders, withOffered, withoutGone, type SavedChat } from "./restore";
 
 const chat = (over: Partial<State>): State => ({ ...initialState, status: "idle", ...over });
 const talked = (sessionId: string, folder = "/p"): State => chat({ folder, sessionId, items: [{ type: "user", id: "u1", text: `Fix ${sessionId}` }] });
@@ -24,6 +24,66 @@ describe("chatsToSave", () => {
       // Typed but never sent: no conversation to resume, just the folder and the text.
       { sessionId: null, folder: "/p", title: "New chat", draft: "never sent", active: false },
     ]);
+  });
+});
+
+describe("chatsToSave, for a team", () => {
+  const agent = { parent: "s1", name: "Login form", brief: "", folder: "/wt/login", branch: "lantern/login", base: "main", isolation: "worktree" as const };
+  const team = (worker: Partial<State> = {}) => ({ s1: { ...talked("lead"), orchestrator: true }, s2: { ...talked("w1", "/wt/login"), ...worker } });
+
+  it("saves an agent with the session of its main agent, so it comes back inside its team", () => {
+    const saved = chatsToSave(team(), "s1", {}, {}, { s2: agent });
+    expect(saved.map((c) => [c.sessionId, c.orchestra])).toEqual([["lead", { role: "main" }], ["w1", { role: "worker", name: "Login form", parentSession: "lead", branch: "lantern/login", base: "main", isolation: "worktree" }]]);
+  });
+
+  it("leaves out an agent its Lead stopped: it isn't brought back at launch", () => {
+    expect(chatsToSave(team({ leadStopped: true }), "s1", {}, {}, { s2: agent }).map((c) => c.sessionId)).toEqual(["lead"]);
+  });
+});
+
+describe("restorable", () => {
+  const lead = saved({ sessionId: "lead", orchestra: { role: "main" } });
+  const worker = (over: Partial<SavedChat> = {}) => saved({ sessionId: "w1", folder: "/wt/login", orchestra: { role: "worker", name: "W", parentSession: "lead", branch: null, base: null, isolation: "worktree" }, ...over });
+
+  it("keeps a team together and the user's own chats", () => {
+    const own = saved({ sessionId: "own" });
+    expect(restorable([worker(), lead, own])).toEqual([worker(), lead, own]);
+  });
+
+  it("drops an agent whose main agent isn't saved", () => {
+    expect(restorable([worker(), saved({ sessionId: "own" })]).map((c) => c.sessionId)).toEqual(["own"]);
+    // A main agent that has no conversation yet can't be named by its agents either.
+    expect(restorable([worker(), saved({ sessionId: null, draft: "x", orchestra: { role: "main" } })])).toHaveLength(1);
+  });
+
+  it("drops an ordinary chat that is an agent's: in an agent's worktree, or a conversation known to be one", () => {
+    const old = saved({ sessionId: "old", folder: "/Users/me/Library/Application Support/io.github.alyakan.lantern/worktrees/app/login-w1" });
+    const shared = saved({ sessionId: "shared" });
+    expect(restorable([old, shared, lead], new Set(["shared"])).map((c) => c.sessionId)).toEqual(["lead"]);
+  });
+});
+
+describe("agent folders and sessions", () => {
+  it("tells an agent's worktree by its path, as history.rs does", () => {
+    expect(isAgentFolder("/Users/me/Library/Application Support/io.github.alyakan.lantern/worktrees/app/login-w1")).toBe(true);
+    expect(isAgentFolder("/Users/me/dev/app/.claude/worktrees/agent-1")).toBe(true);
+    expect(isAgentFolder("/Users/me/dev/worktrees/app")).toBe(false);
+    expect(isAgentFolder("/Users/me/dev/app")).toBe(false);
+  });
+
+  it("names the sessions of the saved agents, and of chats an older version saved from their worktrees", () => {
+    const agents = [
+      saved({ sessionId: "w1", orchestra: { role: "worker", name: "W", parentSession: "lead", branch: null, base: null, isolation: "shared" } }),
+      saved({ sessionId: "old", folder: "/x/io.github.alyakan.lantern/worktrees/app/w2" }),
+      saved({ sessionId: "own" }),
+      saved({ sessionId: "lead", orchestra: { role: "main" } }),
+    ];
+    expect(agentSessionsOf(agents)).toEqual(["w1", "old"]);
+  });
+
+  it("leaves out workers whose folders are gone", () => {
+    const w = (id: string, folder: string) => saved({ sessionId: id, folder, orchestra: { role: "worker", name: id, parentSession: "lead", branch: null, base: null, isolation: "worktree" } });
+    expect(withoutGone([w("a", "/wt/a"), w("b", "/wt/b"), saved({ sessionId: "own", folder: "/wt/a" })], new Set(["/wt/a"])).map((c) => c.sessionId)).toEqual(["b", "own"]);
   });
 });
 
@@ -96,11 +156,9 @@ describe("chatsToSave for an orchestra", () => {
     expect("orchestra" in saved[2]).toBe(false);
   });
 
-  it("saves a worker as an ordinary chat when its main agent has no session to name", () => {
+  it("leaves out a worker whose main agent has no session to name, rather than saving it as an ordinary chat", () => {
     const slots = { s1: { ...chat({ folder: "/p", sessionId: null, items: [] }), orchestrator: true }, w1: talked("worker-session", "/wt/login") };
-    const saved = chatsToSave(slots, "w1", {}, {}, { w1: meta });
-    expect(saved).toHaveLength(1);
-    expect(saved[0].orchestra).toBeUndefined();
+    expect(chatsToSave(slots, "w1", {}, {}, { w1: meta })).toEqual([]);
   });
 
   it("saves a worker the user hid as hidden, and one that is shown with nothing extra", () => {

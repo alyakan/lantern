@@ -73,7 +73,7 @@ import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { SetupScreen } from "./components/SetupScreen";
 import { RestoreCard } from "./components/RestoreCard";
-import { chatsToSave, currentFolder, loadSaved, save, screenFirst, sessionModesToSave, toCurrentFolders, withOffered, type SavedChat } from "./lib/restore";
+import { agentSessionsOf, chatsToSave, currentFolder, loadSaved, restorable, save, screenFirst, sessionModesToSave, toCurrentFolders, withOffered, withoutGone, type SavedChat } from "./lib/restore";
 import { SplitPane } from "./components/SplitPane";
 import { TopBar } from "./components/TopBar";
 import { Canvas, newLayout } from "./components/Canvas";
@@ -132,6 +132,8 @@ export default function App() {
   // Each session's own mode, so reopening one from History brings back the mode it was in, not the folder's latest.
   // Saved as strings: older ones can name modes that are gone (see savedMode).
   const [sessionModes, setSessionModes] = usePersistentState<Record<string, string>>("settings.modeBySession", {});
+  // The conversations of agents (workers of a team): they belong to their team, so the past chats never list them.
+  const [agentSessions, setAgentSessions] = usePersistentState<string[]>("session.agentIds", []);
   const [lastFolder, setLastFolder] = usePersistentState<string | null>("settings.lastFolder", null);
   // The folders recorded as moved (null until read): a chat saved in the old place reopens in the new one.
   const [moves, setMoves] = useState<RelocationEntry[] | null>(null);
@@ -466,7 +468,9 @@ export default function App() {
     startFresh(folder);
   };
 
-  const loadSessions = () => (state.folder ? api.listSessions(state.folder) : Promise.resolve([]));
+  // The past chats of a project: the user's own. An agent's conversation (a shared one is in the project's folder too) stays with its team.
+  const listPast = (folder: string) => api.listSessions(folder).then((all) => all.filter((x) => !agentSessions.includes(x.id)));
+  const loadSessions = () => (state.folder ? listPast(state.folder) : Promise.resolve([]));
 
   // Replays a past session into a chat, then continues it with `claude --resume`. A session that's already open
   // in a chat is switched to instead.
@@ -506,6 +510,8 @@ export default function App() {
     to(slot)(reuse ? { type: "restarting" } : { type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode, autoApprove, flavourStart, explainStart });
     to(slot)({ type: "orchestrator_set", on: team?.role === "main" });
+    // A worker is part of its team from the start, not only once it has opened: until then it would be an ordinary chat in the sidebar.
+    if (team?.role === "worker") dispatchChats({ type: "adopt", slot, meta: { parent: team.parent, name: team.name, brief: "", folder, branch: team.branch, base: team.base, isolation: team.isolation, ...(team.hidden ? { hidden: true } : {}) } });
     // Trying again later doesn't wait on a main agent that has long since opened (or not).
     const again: TeamRole | undefined = team?.role === "worker" ? { ...team, parentReady: undefined } : team;
     relaunch.current[slot] = () => void resumeIn(slot, folder, sessionId, reuse, again);
@@ -518,8 +524,8 @@ export default function App() {
         { mode, ...settingsFor(slot, h), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared" } } : {}) },
         sessionId,
       );
-    // A worker waits for its main agent: if that one didn't open, this one comes back as an ordinary chat.
-    const adopted = team?.role === "worker" && team.parentReady ? team.parentReady.then((ok) => (ok ? team : undefined)) : Promise.resolve(team);
+    // A worker waits for its main agent: if that one didn't open, this one stays closed too, under it, where Retry can try again.
+    const adopted = team?.role === "worker" && team.parentReady ? team.parentReady.then((ok) => (ok ? team : Promise.reject("Its Lead didn't open, so this agent can't come back yet."))) : Promise.resolve(team);
     return adopted
       .then((as) => open(as).then((opened) => ({ opened, as })))
       .then(({ opened, as }) => {
@@ -534,7 +540,6 @@ export default function App() {
         if (as?.role === "main") startSubagents(slot, folder);
         to(slot)({ type: "history_loaded", sessionId, events: opened.events, movedFrom: opened.moved_from });
         to(slot)({ type: "session_ready" });
-        if (as?.role === "worker") dispatchChats({ type: "adopt", slot, meta: { parent: as.parent, name: as.name, brief: "", folder, branch: as.branch, base: as.base, isolation: as.isolation, ...(as.hidden ? { hidden: true } : {}) } });
         return true;
       })
       .catch((e) => {
@@ -543,9 +548,25 @@ export default function App() {
       });
   };
 
+  // An agent's conversation is recorded once it has one, so it can be told from the user's own chats.
+  useEffect(() => {
+    const ids = Object.keys(chats.agents).flatMap((slot) => chats.slots[slot]?.sessionId ?? []);
+    if (ids.some((id) => !agentSessions.includes(id))) setAgentSessions([...new Set([...agentSessions, ...ids])]);
+  }, [chats.slots, chats.agents]);
+
   // The chats that were open when Lantern last closed, offered back at launch until restored, dismissed, or a message
   // is sent in a new chat instead.
-  const [offer, setOffer] = useState<SavedChat[]>(loadSaved);
+  const [offer, setOffer] = useState<SavedChat[]>(() => restorable(loadSaved(), new Set(agentSessions)));
+  // What was saved before this launch says which conversations were agents' (an older version saved them as chats).
+  useEffect(() => {
+    const known = agentSessionsOf(loadSaved());
+    if (known.some((id) => !agentSessions.includes(id))) setAgentSessions([...new Set([...agentSessions, ...known])]);
+  }, []);
+  // A worker's worktree is removed once its branch is merged: it isn't brought back from a folder that is gone.
+  useEffect(() => {
+    const folders = [...new Set(offer.filter((c) => c.orchestra?.role === "worker").map((c) => c.folder))];
+    if (folders.length > 0) api.foldersGone(folders).then((gone) => gone.length > 0 && setOffer((o) => withoutGone(o, new Set(gone))), () => {});
+  }, []);
   // Offered where their folders are now, once the moves are known.
   useEffect(() => {
     if (moves) setOffer((o) => toCurrentFolders(o, moves));
@@ -573,13 +594,17 @@ export default function App() {
     if (o?.role === "main") team = { role: "main" };
     else if (o?.role === "worker") {
       const parent = opened[o.parentSession] ?? openMainOf(o.parentSession);
-      if (parent) team = { role: "worker", parent: parent.slot, name: o.name, branch: o.branch, base: o.base, isolation: o.isolation, hidden: o.hidden, parentReady: parent.ready };
+      // An agent only comes back inside its team: without its main agent it stays closed, never an ordinary chat.
+      if (!parent) return Promise.resolve(false);
+      team = { role: "worker", parent: parent.slot, name: o.name, branch: o.branch, base: o.base, isolation: o.isolation, hidden: o.hidden, parentReady: parent.ready };
     }
     if (c.sessionId) return resumeIn(slot, c.folder, c.sessionId, false, team);
     // Typed in the box but never sent: a new chat in its folder, as a main agent again if it was one.
     startIn(slot, c.folder, false, team?.role === "main");
     return Promise.resolve(true);
   };
+  // What the restore card lists: agents aren't, they come back with their team.
+  const offeredTop = offer.filter((c) => c.orchestra?.role !== "worker");
   const openAlready = (c: SavedChat) => (c.sessionId ? Object.entries(chats.slots).find(([, s]) => s.sessionId === c.sessionId)?.[0] : undefined);
   /** The main agent already open for this session, if there is one (already opened, so there is nothing to wait for). */
   const openMainOf = (session: string) => {
@@ -588,14 +613,25 @@ export default function App() {
   };
 
   // One chat, on screen (in the empty chat on screen if there is one).
+  // A team's agents come back with it (they are never offered on their own).
   const restoreOne = (offered: SavedChat) => {
-    setOffer((o) => o.filter((x) => x !== offered));
+    const team = offered.orchestra?.role === "main" && offered.sessionId ? offer.filter((w) => w.orchestra?.role === "worker" && w.orchestra.parentSession === offered.sessionId) : [];
+    setOffer((o) => o.filter((x) => x !== offered && !team.includes(x)));
     // Chosen before the moves were read, it still goes where its folder is now.
     const c = { ...offered, folder: here(offered.folder) };
     const already = openAlready(c);
     if (already) return switchTo(already);
     if (!state.claudePath) return;
-    void restoreInto(takeSlot(), c);
+    const slot = takeSlot();
+    const ready = restoreInto(slot, c);
+    if (c.sessionId) {
+      const opened = { [c.sessionId]: { slot, ready } };
+      for (const w of team) {
+        const own = `s${++slotSeq.current}`;
+        dispatchChats({ type: "add", slot: own });
+        void restoreInto(own, { ...w, folder: here(w.folder) }, opened);
+      }
+    }
     setComposerEpoch((e) => e + 1);
     setLastFolder(c.folder);
   };
@@ -607,7 +643,8 @@ export default function App() {
     const [first] = ordered;
     if (!first || !state.claudePath) return;
     const isMain = (c: SavedChat) => c.orchestra?.role === "main";
-    const inOrder = [...ordered.filter(isMain), ...ordered.filter((c) => !isMain(c))];
+    const teamOpen = ({ orchestra: o }: SavedChat) => o?.role !== "worker" || ordered.some((m) => isMain(m) && m.sessionId === o.parentSession) || !!openMainOf(o.parentSession);
+    const inOrder = [...ordered.filter(isMain), ...ordered.filter((c) => !isMain(c) && teamOpen(c))];
     setOffer([]);
     const opened: Record<string, { slot: string; ready: Promise<boolean> }> = {};
     let onScreen: string | undefined;
@@ -627,7 +664,8 @@ export default function App() {
     });
     if (onScreen) dispatchChats({ type: "activate", slot: onScreen });
     setComposerEpoch((e) => e + 1);
-    setLastFolder(first.folder);
+    // The project to reopen next time is a chat's, never an agent's worktree.
+    setLastFolder((inOrder.find((c) => c.orchestra?.role !== "worker") ?? first).folder);
   };
 
   const syncChanges = (slot: string) =>
@@ -1641,7 +1679,7 @@ export default function App() {
           branch={branch}
           canNew={canStart}
           loadRecent={loadRecentFolders}
-          loadSessions={api.listSessions}
+          loadSessions={listPast}
           pinned={pinnedBy}
           titles={titles}
           hidden={hiddenFolders}
@@ -1669,8 +1707,8 @@ export default function App() {
               {hero ? (
                 <div className="hero-wrap">
                   <div className="hero-stack">
-                    {offer.length > 0 && state.claudePath && (
-                      <RestoreCard chats={offer} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />
+                    {offeredTop.length > 0 && state.claudePath && (
+                      <RestoreCard chats={offeredTop} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />
                     )}
                     {state.folder && <StartScreen picked={stepsMode ? state.flavourPick : null} explain={explain} onExplain={(on) => state.flavourPick && pickFlavour(state.flavourPick, on)} team={workflowOf(state) === "team"} onFlavour={pickFlavour} onReview={() => setPrPicker(true)} onTeam={() => changeWorkflow(workflowOf(state) === "team" ? "chat" : "team")} />}
                     {composer}
@@ -1795,7 +1833,7 @@ export default function App() {
             <HistoryPopover
               folder={history.folder}
               exclude={openChatIds}
-              load={() => api.listSessions(history.folder)}
+              load={() => listPast(history.folder)}
               loadOld={() => api.oldLocations(history.folder)}
               onBring={() => { const folder = history.folder; setHistory(null); setBringing({ destination: folder, from: null }); }}
               onOpen={(id) => { const folder = history.folder; setHistory(null); openSession(id, folder); }}

@@ -202,6 +202,8 @@ export interface State {
   thinking: boolean;
   banner: Banner | null;
   stopRequested: boolean;
+  /** A worker the main agent stopped (stop_agent), until it is restarted: it isn't brought back at launch. */
+  leadStopped: boolean;
   debug: string[];
   seq: number;
   /** What claude runs in the background (a command with run_in_background, a background agent), and since when. */
@@ -282,6 +284,7 @@ export const initialState: State = {
   thinking: false,
   banner: null,
   stopRequested: false,
+  leadStopped: false,
   debug: [],
   seq: 0,
   backgroundTasks: [],
@@ -393,7 +396,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -577,7 +580,7 @@ function applyEvent(state: State, ev: UiEvent): State {
     // The main agent wrote to this worker: it shows as a message from it, and the worker is at work on it.
     case "agent_message": {
       const seq = state.seq + 1;
-      return { ...state, seq, stopRequested: false, status: state.status === "idle" ? "running" : state.status, thinking: state.status === "idle" || state.thinking, items: [...state.items, { type: "user", id: `u${seq}`, text: ev.text, at: Date.now(), from: ev.from }] };
+      return { ...state, seq, stopRequested: false, leadStopped: false, status: state.status === "idle" ? "running" : state.status, thinking: state.status === "idle" || state.thinking, items: [...state.items, { type: "user", id: `u${seq}`, text: ev.text, at: Date.now(), from: ev.from }] };
     }
     // Stopped by the main agent, which is a decision of its own: the user's earlier Stop (if any) must not turn it into a
     // restart (the app restarts a chat that ended after the user pressed Stop).
@@ -587,6 +590,7 @@ function applyEvent(state: State, ev: UiEvent): State {
         status: "ended",
         thinking: false,
         stopRequested: false,
+        leadStopped: true,
         items: denyPending(failRunning(state.items)),
         banner: ev.reason ? { kind: "error", text: ev.reason, action: null } : { kind: "info", text: "The Lead stopped this agent. Restart it to carry on.", action: "restart" },
       };
@@ -690,6 +694,7 @@ export function reducer(state: State, action: Action): State {
         status: "starting",
         banner: null,
         stopRequested: false,
+        leadStopped: false,
         costBase: state.costBase + state.costSeen,
         costSeen: 0,
         tokenBase: state.tokenBase + state.sessionTokens,

@@ -21,6 +21,8 @@ export const OPEN_CHATS = "session.openChats";
 export const NOT_FOLDER_KEYED = [
   "settings.modeBySession",
   "settings.harnessBySession",
+  // The conversations of agents (a list of session ids): what the past chats leave out.
+  "session.agentIds",
   "settings.model",
   "settings.effort",
   "settings.defaultModel",

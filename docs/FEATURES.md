@@ -145,7 +145,7 @@ The app becomes a canvas of floating chats tethered to the Lead:
 - Drag a title to move a window and its corner to resize it. Drag the background to pan; pinch or ⌘-scroll to zoom. Zoomed out, agents become cards, and a click zooms in.
 - An agent's permission prompts appear in its own window. The pill at the top ("1 agent needs you") takes you to the next one that does.
 - ⇧⌘C switches between the canvas and the chat view, and the sidebar lists the team with its agents under it.
-- A team comes back when Lantern reopens.
+- A team comes back when Lantern reopens, with the agents that were still going. An agent the Lead stopped, one whose worktree is gone, and one whose Lead isn't coming back are not reopened, and an agent's conversation is never listed among a project's past chats.
 
 The same canvas in the dark theme:
 

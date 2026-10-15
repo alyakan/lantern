@@ -122,6 +122,8 @@ export const api = {
   /** Replays a past session into the chat and resumes it. A session only in a folder's old place is copied into the folder first. */
   openSession: (slot: string, claudePath: string, folder: string, settings: Settings, sessionId: string) =>
     invoke<OpenedSession>("open_session", { slot, claudePath, folder, settings, sessionId }),
+  /** Which of the folders no longer exist. */
+  foldersGone: (folders: string[]) => invoke<string[]>("folders_gone", { folders }),
   /** Where each folder was before it moved, as Lantern recorded it. */
   relocationsList: () => invoke<RelocationEntry[]>("relocations_list"),
   /** The recent folders that are gone, each with the place it probably moved to. */

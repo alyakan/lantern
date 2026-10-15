@@ -1455,6 +1455,13 @@ async fn open_session(
     }
 }
 
+/// Which of these folders are gone (an agent's worktree is removed once its branch is merged), for leaving out the chats
+/// that were open in them when Lantern last closed.
+#[tauri::command]
+fn folders_gone(folders: Vec<String>) -> Vec<String> {
+    folders.into_iter().filter(|f| !std::path::Path::new(f).is_dir()).collect()
+}
+
 /// Where each folder was before it moved, as Lantern recorded it.
 #[tauri::command]
 fn relocations_list(state: State<'_, AppState>) -> Vec<relocate::Entry> {
@@ -1699,6 +1706,7 @@ pub fn run() {
             title_session,
             open_session,
             relocations_list,
+            folders_gone,
             moved_folder_candidates,
             old_locations,
             known_folders,

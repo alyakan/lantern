@@ -59,6 +59,17 @@ describe("the sidebar in the app", () => {
     expect(within(acme).getByTitle("New chat")).toHaveAttribute("aria-current", "true");
   });
 
+  it("leaves an agent's conversation out of the past chats, though it is in the project's folder", async () => {
+    // Agents that share the folder run their sessions in it, so Claude Code files them with the project's own.
+    localStorage.setItem("session.agentIds", JSON.stringify(["3f1c2a", "c0ffee"]));
+    await launch();
+    const acme = await project("acme-api");
+    expect(await within(acme).findByText("Add retries with backoff to fetchJson")).toBeInTheDocument();
+    expect(within(acme).queryByText("Fix the login redirect after OAuth callback")).toBeNull();
+    expect(within(acme).queryByText("Refactor the settings screen into smaller components")).toBeNull();
+    expect(within(acme).queryByRole("button", { name: /^Show all/ })).toBeNull(); // 3 of the 5 are the user's, all listed
+  });
+
   it("reads another project's chats when it is opened, and resumes one of them in that project", async () => {
     const calls = await launch();
     const web = await project("web-dashboard · projects");
@@ -186,7 +197,7 @@ describe("a team in the sidebar", () => {
   it("shows the team with its agent nested under it, and the agent nowhere else; clicks open the canvas and focus the agent", async () => {
     localStorage.setItem("session.openChats", JSON.stringify(team));
     await launch();
-    fireEvent.click(await screen.findByRole("button", { name: "Restore all" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Restore( all)?$/ }));
     const acme = await project("acme-api");
     const row = await within(acme).findByRole("button", { name: /Team: / });
     const agents = within(acme).getByRole("list", { name: /^Agents in / });

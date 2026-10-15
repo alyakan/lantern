@@ -1195,6 +1195,9 @@ export function installMockBackend() {
           return { events: REPLAY, moved_from: null, read_only: null };
         case "relocations_list":
           return [];
+        case "folders_gone":
+          // A worker's worktree is removed once its branch is merged: the one whose name ends "-gone" is.
+          return (a.folders as string[]).filter((f) => f.endsWith("-gone"));
         case "moved_folder_candidates":
           // Folders that are gone, each with the one place it's at now when there's exactly one folder of the same name. The
           // worker's and the subagent's worktrees are gone too, but the app never lists an agent's folder (see history::is_agent_folder).

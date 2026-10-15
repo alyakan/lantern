@@ -79,6 +79,13 @@ describe("a worker the main agent starts", () => {
     const failed = ev(main, { kind: "agent_stopped", reason: "It didn't start: claude is not installed" });
     expect(failed.banner).toEqual({ kind: "error", text: "It didn't start: claude is not installed", action: null });
   });
+
+  it("is remembered as stopped (so it isn't saved for the next launch) until it is restarted or written to", () => {
+    const stopped = ev({ ...main, status: "running" }, { kind: "agent_stopped", reason: null });
+    expect(stopped.leadStopped).toBe(true);
+    expect(reducer(stopped, { type: "restarting" }).leadStopped).toBe(false);
+    expect(ev(stopped, { kind: "agent_message", from: "main agent", text: "carry on" }).leadStopped).toBe(false);
+  });
 });
 
 describe("notes for the main agent", () => {
