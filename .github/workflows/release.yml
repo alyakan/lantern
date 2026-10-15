@@ -46,10 +46,12 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
 
+      # Apple Silicon only (from 0.1.32): one build instead of a universal one's two. Intel Macs stay on 0.1.31, the last
+      # universal release; the updater's manifest only lists darwin-aarch64 from here on.
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
         with:
           toolchain: stable
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: aarch64-apple-darwin
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -71,16 +73,9 @@ jobs:
             echo 'END_OF_NOTES'
           } >> "$GITHUB_OUTPUT"
 
-      # notarytool wants the App Store Connect key as a file.
-      - name: Write the notarization key
-        env:
-          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
-        run: |
-          printf '%s' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
-          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
-
-      # Signs with the Developer ID certificate, then notarizes and staples. The certificate expires on
-      # 1 Feb 2027: after that, export a new one into APPLE_CERTIFICATE. Builds signed before then keep working.
+      # Signs with the Developer ID certificate. The certificate expires on 1 Feb 2027: after that, export a new one into
+      # APPLE_CERTIFICATE. Builds signed before then keep working. It doesn't notarize (no APPLE_API_KEY here): the dmg is
+      # notarized once below, and Apple's ticket for it covers the app inside, so a second wait on Apple bought nothing.
       # The `app` bundle also makes the self-update: Lantern.app.tar.gz, signed with the updater key (whose loss would
       # strand every install on its version), and latest.json, which installed apps read once the release is published.
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
@@ -89,8 +84,6 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
@@ -98,9 +91,20 @@ jobs:
           releaseName: Lantern ${{ github.ref_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
-          args: --target universal-apple-darwin --bundles app,dmg
+          args: --target aarch64-apple-darwin --bundles app,dmg
 
-      # tauri-action notarizes the app but not the dmg around it, which Gatekeeper also checks after a download.
+      # notarytool wants the App Store Connect key as a file: written only now, so it isn't on disk while the build runs.
+      - name: Write the notarization key
+        env:
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+        run: |
+          printf '%s' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+          echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/AuthKey.p8" >> "$GITHUB_ENV"
+
+      # The one notarization: the dmg, with the app in it. Gatekeeper checks the dmg after a download (the ticket is stapled
+      # to it) and the app when it first opens (Apple's ticket lists the app's signature too, so that check passes online;
+      # the self-update's app is the same app, signed the same). The last check fails the release if Apple doesn't know
+      # the app by itself, so a missing ticket can't ship.
       - name: Notarize and staple the dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -108,8 +112,11 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           TAG: ${{ github.ref_name }}
         run: |
-          dmg=$(ls src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg)
+          dmg=$(ls src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg)
+          app=$(ls -d src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app)
           xcrun notarytool submit "$dmg" --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" --wait
           xcrun stapler staple "$dmg"
           spctl -a -vv -t open --context context:primary-signature "$dmg"
+          spctl -a -vv -t exec "$app" 2>&1 | tee "$RUNNER_TEMP/app-assessment.txt"
+          grep -q "source=Notarized Developer ID" "$RUNNER_TEMP/app-assessment.txt"
           gh release upload "$TAG" "$dmg" --clobber
