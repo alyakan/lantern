@@ -1989,7 +1989,7 @@ nav > .sb-note { padding-left: 8px; }
 /* Minimized: a narrow rail with each project's initials, and a badge for what needs you there. */
 .sidebar.rail { width: 52px; min-width: 52px; max-width: 52px; align-items: center; gap: 8px; padding: 2px 0 8px 0; }
 .rail-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; margin: 0; padding: 4px 0; list-style: none; }
-.rail-project { position: relative; width: 34px; height: 34px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--glass); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); font-weight: 600; }
+.rail-project { position: relative; width: 34px; height: 34px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--glass); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); font-weight: 600; display: inline-flex; align-items: center; justify-content: center; padding: 0; line-height: 1; }
 .rail-project:not(.open) { color: var(--muted-text); border-style: dashed; }
 .rail-project:hover { background: var(--bg-active); }
 .rail-project.current { border-color: var(--muted); background: var(--bg-active); color: var(--text); }
