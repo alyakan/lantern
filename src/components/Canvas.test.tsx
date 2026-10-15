@@ -284,6 +284,30 @@ describe("the canvas", () => {
     expect(layout.boxes.w1.x).toBeCloseTo(start.x + 50 / zoom);
   });
 
+  it("gives the world a layer of its own only while it pans or zooms, so the text is drawn sharp at rest", () => {
+    vi.useFakeTimers();
+    try {
+      setup(team(1));
+      const world = screen.getByTestId("canvas").querySelector(".canvas-world")!;
+      expect(world).not.toHaveClass("moving");
+      act(() => {
+        fireEvent.wheel(screen.getByTestId("canvas"), { ctrlKey: true, deltaY: -200 });
+      });
+      expect(world).toHaveClass("moving");
+      // Still moving while it keeps going, and let go a moment after it stops.
+      act(() => vi.advanceTimersByTime(100));
+      act(() => {
+        fireEvent.wheel(screen.getByTestId("canvas"), { ctrlKey: true, deltaY: -50 });
+      });
+      act(() => vi.advanceTimersByTime(100));
+      expect(world).toHaveClass("moving");
+      act(() => vi.advanceTimersByTime(100));
+      expect(world).not.toHaveClass("moving");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("pans with the wheel on the background but lets a chat scroll under it", () => {
     const { layout } = setup(team(1));
     const canvas = screen.getByTestId("canvas");

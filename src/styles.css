@@ -1816,7 +1816,9 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
   background-position: var(--vx, 0) var(--vy, 0); }
 .split-left .canvas { margin: 0; }
 .canvas.panning { cursor: grabbing; }
-.canvas-world { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; will-change: transform; }
+/* A layer of its own only while it moves: kept at rest, WebKit scales the picture it drew at the first zoom, so text is soft. */
+.canvas-world { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
+.canvas-world.moving { will-change: transform; }
 .canvas-world.animating { transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
 .canvas-tethers { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .tether { fill: none; stroke: color-mix(in srgb, var(--text) 30%, transparent); stroke-width: 3px; vector-effect: non-scaling-stroke; stroke-linecap: round; transition: stroke 0.3s; }

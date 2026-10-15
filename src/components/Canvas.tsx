@@ -451,6 +451,12 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   const shownSlots = useRef<string[]>([]);
   shownSlots.current = visible.map((n) => n.slot);
 
+  // The world keeps a layer of its own only while it moves (smooth panning and zooming); a moment after it stops, the layer
+  // is let go and the text is drawn again at the zoom it is at. Held, the layer keeps the picture it had at the zoom it
+  // was first drawn and scales that, which is what made text soft when zoomed in.
+  const settle = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(settle.current), []);
+
   /** Frames the canvas at `v`: straight onto the elements (no React), animated when it's a jump rather than a gesture. */
   const apply = useCallback((v: View, animate = false) => {
     view.current = v;
@@ -458,6 +464,9 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     const w = world.current;
     const vp = viewport.current;
     if (w) {
+      w.classList.add("moving");
+      window.clearTimeout(settle.current);
+      settle.current = window.setTimeout(() => w.classList.remove("moving"), animate ? 360 : 160);
       w.classList.toggle("animating", animate);
       w.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
       if (animate) window.setTimeout(() => w.classList.remove("animating"), 320);
