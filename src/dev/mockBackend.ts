@@ -12,6 +12,8 @@ const NEXT_VERSION = APP_VERSION.replace(/\d+$/, (patch) => String(Number(patch)
 // With &project=name the project folder has that name (a long one, to see the title bar cope).
 const FOLDER = `/Users/you/projects/${new URLSearchParams(typeof location === "undefined" ? "" : location.search).get("project") ?? "acme-api"}`;
 const FILE = `${FOLDER}/src/client/retry.ts`;
+// With &hot the Lead's context is well used (a 200k window at 64%) and so is a started agent's: for the Context list and Compact.
+const HOT = typeof location !== "undefined" && new URLSearchParams(location.search).has("hot");
 // With &more the demo turn also writes a test file and hits a failing typecheck, for the file tabs and failure count.
 const MORE = new URLSearchParams(location.search).has("more");
 const TEST_FILE = `${FOLDER}/src/client/retry.test.ts`;
@@ -481,8 +483,8 @@ async function playOrchestraTurn(slot: string) {
     void playWorker(slot, w);
   }
   await streamText(send, "o:1", "All three are running. I'll check each one as it reports back.");
-  await send({ kind: "context_used", tokens: 412_000 });
-  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.04, duration_ms: 4000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+  await send({ kind: "context_used", tokens: HOT ? 128_000 : 412_000 });
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.04, duration_ms: 4000, auth_hint: false, denied: 0, context_window: HOT ? 200_000 : 1_000_000 });
 }
 
 /**
@@ -567,7 +569,7 @@ async function playOrchestraWake(slot: string, text: string) {
     });
     await send({ kind: "tool_finished", parent: null, tool_use_id: "merge-1", is_error: false, output: "Asked the user to merge lantern/login-form into main." });
   }
-  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.02, duration_ms: 2500, auth_hint: false, denied: 0, context_window: 1_000_000 });
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.02, duration_ms: 2500, auth_hint: false, denied: 0, context_window: HOT ? 200_000 : 1_000_000 });
 }
 
 /** How many workers' notes the mock main agent has been told of, per chat. */
@@ -1061,7 +1063,10 @@ export function installMockBackend() {
           const name = String(a.name ?? "").trim() || String(a.task).split(/\s+/).slice(0, 5).join(" ");
           void sendTo(String(a.main))({ kind: "agent_spawned", worker: id, name, brief: String(a.task), folder: worktree ? `/Users/you/Library/Application Support/lantern/worktrees/web-app/${id}` : FOLDER, branch: worktree ? `lantern/${id}` : null, base: worktree ? "main" : null, isolation: worktree ? "worktree" : "shared", mode: slotMode[String(a.main)] === "auto" ? "auto" : "ask" });
           // It starts thinking, which is also its first word: a card that then says nothing for minutes shows as quiet.
-          void sleep(150).then(() => sendTo(id)({ kind: "thinking", parent: null }));
+          void sleep(150).then(async () => {
+            await sendTo(id)({ kind: "thinking", parent: null });
+            if (HOT) await sendTo(id)({ kind: "context_used", tokens: 150_000 });
+          });
           return id;
         }
         case "run_shell":

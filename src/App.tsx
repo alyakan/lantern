@@ -1120,6 +1120,8 @@ export default function App() {
   };
   const doing = {
     send: sendIn,
+    // The canvas asked the user already (its Clear is confirmed in the menu), so this doesn't ask again.
+    clear: (slot: string) => sendIn(slot, "/clear"),
     stop: stopIn,
     queue: (slot: string, items: string[]) => to(slot)({ type: "queue_set", items }),
     decide: decideIn,
@@ -1200,6 +1202,7 @@ export default function App() {
   const nodeActions = useMemo<NodeActions>(
     () => ({
       send: (slot, text) => doingRef.current.send(slot, text),
+      clear: (slot) => doingRef.current.clear(slot),
       stop: (slot) => doingRef.current.stop(slot),
       queue: (slot, items) => doingRef.current.queue(slot, items),
       decide: (slot, id, allow, note, answered) => doingRef.current.decide(slot, id, allow, note, answered),

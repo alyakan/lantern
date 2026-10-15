@@ -1924,6 +1924,40 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .canvas-context-who { display: inline-block; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .canvas-ctl-wide { display: flex; align-items: center; gap: 2px; }
 .canvas-controls .canvas-ctl-more, .canvas-ctl-short { display: none; }
+/* An agent's context share on its title bar, with the menu that opens from it (Compact, Clear). */
+.node-context-anchor { position: relative; flex: none; display: inline-flex; }
+.node-context { height: 22px; padding: 0 7px; border: none; border-radius: var(--radius-pill); background: none; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); font-variant-numeric: tabular-nums; }
+.node-context:hover, .node-context[aria-expanded="true"] { background: var(--bg-hover); color: var(--text); }
+.node-context.warn { color: var(--warn); font-weight: 600; }
+.node-context.full { color: var(--del); font-weight: 600; }
+.node-context-menu { top: calc(100% + 6px); right: -4px; width: 280px; }
+.canvas-menu button[aria-disabled="true"], .context-list button[aria-disabled="true"] { opacity: 0.55; cursor: default; }
+.node-context-ask { margin: 0; padding: 6px 10px 8px; font-size: calc(12.5px * var(--font-scale)); line-height: 1.4; color: var(--text-2); }
+.canvas.summary .node-context-anchor { display: none; }
+/* The toolbar's list of every agent's context. */
+.context-list { width: 440px; }
+.ctx-head { display: flex; flex-direction: column; gap: 4px; padding: 2px 2px 8px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.ctx-all { align-self: flex-start; height: var(--pill-s); padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--field); color: var(--text); font-size: calc(12px * var(--font-scale)); font-weight: 600; }
+.ctx-all:hover:not([aria-disabled="true"]) { background: var(--bg-hover); }
+.ctx-said { margin: 0; min-height: 1em; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
+.ctx-said:empty { display: none; }
+.ctx-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 10px; padding: 7px 8px; border-radius: var(--radius); }
+.ctx-row:hover { background: var(--bg-hover); }
+.ctx-name { min-width: 0; padding: 0; border: none; background: none; color: var(--text); font: 600 calc(13px * var(--font-scale)) var(--ui); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-name:hover { text-decoration: underline; }
+.ctx-percent { font-size: calc(12px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.ctx-row.warn .ctx-percent { color: var(--warn); font-weight: 600; }
+.ctx-row.full .ctx-percent { color: var(--del); font-weight: 600; }
+.ctx-line { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ctx-bar { flex: 1; min-width: 48px; height: 6px; border-radius: var(--radius-pill); background: var(--bg-active); overflow: hidden; }
+.ctx-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--muted); }
+.ctx-row.warn .ctx-bar > span { background: var(--warn); }
+.ctx-row.full .ctx-bar > span { background: var(--del); }
+.ctx-tokens { flex: none; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
+.ctx-actions, .ctx-confirm { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
+.ctx-actions button, .ctx-confirm button { height: 22px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--field); color: var(--text); font-size: calc(12px * var(--font-scale)); }
+.ctx-actions button:hover:not([aria-disabled="true"]), .ctx-confirm button:hover { background: var(--bg-hover); }
+.ctx-confirm .danger { color: var(--del); }
 .canvas-more-head { padding: 6px 10px 2px; font-size: calc(11px * var(--font-scale)); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-text); }
 .canvas-more-list { width: 300px; }
 /* The toolbar never wraps or gets cut off: as the canvas narrows (the side panel is open) the least used controls fold into "⋯", then the Context chip and Team shorten. */

@@ -36,7 +36,7 @@ import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
 import { SubagentsMenu } from "./SubagentsMenu";
 import { CanvasOverflow } from "./CanvasOverflow";
 import { useQuiet } from "../lib/quiet";
-import { FULL_AT, WARN_AT } from "./ContextMeter";
+import { NodeContext, TeamContext } from "./ContextControls";
 
 /** Where agents sit and how the canvas is framed. The app keeps it, so leaving the canvas and coming back finds it as it was. */
 export interface CanvasLayout {
@@ -182,6 +182,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
             {[role === "main" ? "Runs the team" : branch ? branch.replace(/^lantern\//, "") : "Shared folder", spent || null].filter(Boolean).join(" · ")}
           </span>
         </span>
+        {state && !folded && <NodeContext slot={slot} name={name} />}
         {/* Both settings are on every window's title bar, so a team's Permissions can be changed from the canvas. */}
         {state && !folded && (
           <span className="node-settings">
@@ -234,47 +235,6 @@ const TetherLine = memo(function TetherLine({ slot, d, fresh }: { slot: string; 
 /** What "Ask for an update" asks the main agent: a status report a person can read without knowing the code. */
 export const UPDATE_REQUEST =
   "Give me a short status report in plain language: for each agent, what it has done, what it is doing now, and anything blocked or waiting for my decision. Look at each agent's latest work first if you need to. No code unless I ask.";
-
-/** A chat's window when it hasn't said (before its first turn ends): what the chat's own meter assumes. */
-const DEFAULT_WINDOW = 200_000;
-
-/**
- * The team's context, in the toolbar: how full the fullest agent's context is (the Lead's, until another is fuller),
- * saying whose when it isn't the Lead's. Warns in amber and red at the same points a chat's own meter does, in words as
- * well as colour; the tooltip lists everyone. A click goes to that agent, where Compact and Clear are. A chat's context
- * is what it holds now, so it drops when the agent compacts.
- */
-function TeamContext({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string) => void }) {
-  const states = useChatStates(nodes.map((n) => n.slot));
-  const rows = nodes.flatMap((n, i) => {
-    const used = states[i]?.contextUsed;
-    if (used === null || used === undefined) return [];
-    const window = states[i]?.contextWindow || DEFAULT_WINDOW;
-    return [{ node: n, used, window, percent: Math.round(Math.min(used / window, 1) * 100) }];
-  });
-  if (rows.length === 0) return null;
-  // The first of equals: the Lead comes first.
-  const fullest = rows.reduce((a, b) => (b.percent > a.percent ? b : a));
-  const level = fullest.percent >= FULL_AT ? "full" : fullest.percent >= WARN_AT ? "warn" : null;
-  const note = level === "full" ? "nearly full" : level === "warn" ? "getting full" : null;
-  const whose = fullest.node.role === "main" ? "" : fullest.node.name;
-  const details = rows.map((r) => `${r.node.name}: ${r.percent}% (${r.used.toLocaleString()} of ${r.window.toLocaleString()} tokens)`).join("\n");
-  const advice = `At ${WARN_AT}% or more, open that agent and use Compact.`;
-  return (
-    <button
-      className={`canvas-fit canvas-context${level ? ` ${level}` : ""}`}
-      aria-label={`Context: ${fullest.node.name} ${fullest.percent}% used${note ? `, ${note}` : ""}`}
-      title={`The share of ${fullest.node.name}'s context window in use now: the fullest agent's on the team. ${advice} Click to go to it.\n${details}`}
-      onClick={() => onGoTo(fullest.node.slot)}
-    >
-      <span className="canvas-ctl-long">
-        Context {fullest.percent}%{whose && " · "}
-        <span className="canvas-context-who">{whose}</span>
-      </span>
-      <span className="canvas-ctl-short">{fullest.percent}%</span>
-    </button>
-  );
-}
 
 function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string) => void }) {
   const [open, setOpen] = useState(false);
