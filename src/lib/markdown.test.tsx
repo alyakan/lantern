@@ -113,6 +113,17 @@ describe("untagged code blocks", () => {
 });
 
 describe("Md", () => {
+  it("puts a table in a box of its own, with each cell's content in a box with a widest width", () => {
+    const { container } = render(<Md>{"| Share | What |\n| --: | --- |\n| ~34% | The Rayak team, run at the same time |"}</Md>);
+    const box = container.querySelector(".md-table");
+    expect(box?.firstElementChild?.tagName).toBe("TABLE");
+    const cells = [...container.querySelectorAll("th, td")];
+    expect(cells.map((c) => c.firstElementChild?.className)).toEqual(["md-cell", "md-cell", "md-cell", "md-cell"]);
+    expect(cells.map((c) => c.textContent)).toEqual(["Share", "What", "~34%", "The Rayak team, run at the same time"]);
+    // GFM's column alignment still reaches the cell.
+    expect((cells[2] as HTMLElement).style.textAlign || cells[2].getAttribute("align")).toBe("right");
+  });
+
   it("renders a plan step as a card, and other code with a header", () => {
     const { container } = render(<Md>{"```\nFile:   a.ts\nChange: add it\nVerify: a test\n```\n\n```ts\nconst a = 1;\n```"}</Md>);
     expect([...container.querySelectorAll(".plan-card dt")].map((d) => d.textContent)).toEqual(["File", "Change", "Verify"]);

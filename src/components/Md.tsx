@@ -178,7 +178,32 @@ function Blockquote({ node: _node, children, ...rest }: ComponentProps<"blockquo
   );
 }
 
-const components = { ...markdownComponents, pre: Pre, blockquote: Blockquote };
+/** A table in a box of its own, like a code block: it scrolls sideways in there when it can't fit, not the whole message. */
+function Table({ node: _node, ...rest }: ComponentProps<"table"> & { node?: unknown }) {
+  return (
+    <div className="md-table">
+      <table {...rest} />
+    </div>
+  );
+}
+
+/** A cell's content in a box with a widest width (a table cell's own max-width is ignored), so a long text wraps there. */
+function Cell({ node: _node, children, ...rest }: ComponentProps<"td"> & { node?: unknown }) {
+  return (
+    <td {...rest}>
+      <div className="md-cell">{children}</div>
+    </td>
+  );
+}
+function HeadCell({ node: _node, children, ...rest }: ComponentProps<"th"> & { node?: unknown }) {
+  return (
+    <th {...rest}>
+      <div className="md-cell">{children}</div>
+    </th>
+  );
+}
+
+const components = { ...markdownComponents, pre: Pre, blockquote: Blockquote, table: Table, td: Cell, th: HeadCell };
 // For a line of text inside other text (a table cell, a card row): no paragraph around it.
 const inlineComponents = { ...components, p: ({ children }: { children?: ReactNode }) => <>{children}</> };
 /**

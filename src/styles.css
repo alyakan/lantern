@@ -322,9 +322,19 @@ button.msg-action:hover:not(:disabled) { background: var(--bg-hover); color: var
 .callout-icon { display: inline-grid; place-items: center; width: 14px; height: 14px; border: 1.2px solid currentColor; border-radius: 50%; font-size: calc(9px * var(--font-scale)); font-weight: 700; line-height: 1; }
 .callout > p:last-child, .callout > ul:last-child { margin-bottom: 0; }
 .msg.assistant blockquote { margin: 0 0 10px; padding: 2px 12px; border-left: 2px solid var(--line-strong); color: var(--text-2); }
-.msg.assistant table { border-collapse: collapse; margin: 0 0 10px; font-size: calc(12.5px * var(--font-scale)); font-variant-numeric: tabular-nums; }
-.msg.assistant th, .msg.assistant td { padding: 4px 14px 4px 0; border-bottom: 1px solid var(--line); text-align: left; }
-.msg.assistant th { font-weight: 600; color: var(--text-2); border-bottom-color: var(--line-strong); }
+/* A table sits in a box like a code block, as wide as the table, and scrolls sideways in it. Each column takes its
+   natural width up to about 28 characters' worth (less in a narrow pane), wrapping longer text there; when the columns
+   together are wider than the message, the box scrolls. Words aren't broken inside a table (the message's overflow-wrap:
+   anywhere would squeeze a column to a letter), except one too long for its column's widest. */
+.msg.assistant { container-type: inline-size; }
+.md-table { width: fit-content; max-width: 100%; margin: 0 0 10px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+.msg.assistant .md-table table { width: max-content; border-collapse: collapse; margin: 0; font-size: calc(12.5px * var(--font-scale)); font-variant-numeric: tabular-nums; }
+.md-cell { max-width: min(28em, 70cqi); overflow-wrap: break-word; word-break: normal; }
+.msg.assistant .md-table th, .msg.assistant .md-table td { padding: 6px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.msg.assistant .md-table th { font-weight: 600; color: var(--text-2); background: var(--bg-subtle); border-bottom-color: var(--line-strong); }
+.msg.assistant .md-table tr:last-child td { border-bottom: none; }
+.msg.assistant .md-table th[align="right"], .msg.assistant .md-table td[align="right"] { text-align: right; }
+.msg.assistant .md-table th[align="center"], .msg.assistant .md-table td[align="center"] { text-align: center; }
 .msg.assistant h1, .msg.assistant h2, .msg.assistant h3 { margin: 4px 0 8px; font-size: calc(14.5px * var(--font-scale)); line-height: 1.4; }
 .msg.assistant a { color: var(--text); text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 2px; }
 .msg.assistant a:hover { text-decoration-color: currentColor; }
@@ -1305,7 +1315,6 @@ label.mcp-scope-option { flex-direction: row; align-items: flex-start; gap: 8px;
 .md-preview-page.msg.assistant h3 { font-size: calc(15.5px * var(--font-scale)); }
 .md-preview-page.msg.assistant h4 { font-size: calc(14px * var(--font-scale)); }
 .md-preview-page.msg.assistant hr { margin: 18px 0; border: none; border-top: 1px solid var(--line); }
-.md-preview-page.msg.assistant table { display: block; max-width: 100%; overflow-x: auto; }
 .md-preview-page.msg.assistant li > p { margin: 0 0 4px; }
 .md-preview-empty, .md-image-blocked { color: var(--muted); }
 .skill-preview { flex: 0 0 46%; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
