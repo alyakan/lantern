@@ -533,6 +533,33 @@ async fn locate_claude(path_override: Option<String>) -> Result<String, String> 
         .map_err(|e| e.to_string())?
 }
 
+/// Whether claude is logged in, and as whom (`claude auth status`).
+#[derive(serde::Serialize)]
+struct Login {
+    logged_in: bool,
+    account: Option<String>,
+}
+
+/// Asks the claude at `claude_path` whether it is logged in, for the first-launch screen. An error means claude couldn't
+/// say (too old to have `auth status`, or it didn't answer): the screen then leaves it to the first chat to find out.
+#[tauri::command]
+async fn claude_login(state: State<'_, AppState>, claude_path: String) -> Result<Login, String> {
+    let path_env = login_path(&state).await;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = std::process::Command::new(&claude_path);
+        cmd.args(["auth", "status"]).stdin(std::process::Stdio::null());
+        if let Some(path) = path_env {
+            cmd.env("PATH", path);
+        }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        // A claude that isn't logged in may exit with an error and still say so, in the same JSON.
+        let status: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|_| "claude didn't say whether it is logged in.".to_string())?;
+        Ok(Login { logged_in: status["loggedIn"].as_bool().unwrap_or(false), account: status["email"].as_str().map(str::to_string) })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String, claude_path: String, folder: String, settings: Settings) -> Result<ProviderInfo, String> {
     let s = slot_for(&app, &state, &slot)?;
@@ -1665,6 +1692,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             locate_claude,
+            claude_login,
             sidebar_menu,
             keep_awake,
             user_name,

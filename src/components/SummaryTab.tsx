@@ -31,17 +31,12 @@ export interface ExportDoc {
 }
 
 /**
- * The right pane's Summary tab, in Step by step: the plan so far, a row per step (or reviewed file, evidence round,
- * fix), each with what its page says and the files it changed. A row opens its page in the chat. With `doc`, the plan
- * can be exported as markdown.
+ * The files each row of the summary changed, from the backend's per-turn changes: asked again as edits land or a turn
+ * ends, and again on `retry` after a failure. With `doc`, `markdown` writes the plan as a document from what's known then.
  */
-export function SummaryTab({ slot, summary, changed, running, onOpenPage, doc, revert }: { slot: string; summary: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void; doc?: ExportDoc; revert?: RevertControls }) {
-  // The files each row changed, from the backend's per-turn changes: asked again as edits land or a turn ends, and
-  // again when the user tries again after a failure.
+export function useStepFiles(slot: string, summary: StepsSummary, changed: ChangedFile[], running: boolean, doc?: ExportDoc) {
   const [files, setFiles] = useState<Record<string, Lookup>>({});
   const [attempt, setAttempt] = useState(0);
-  // A step's revert waiting on its dialog.
-  const [reverting, setReverting] = useState<{ title: string; files: ChangedFile[]; request: RevertRequest } | null>(null);
   const ranges = summary.rows.flatMap((r) => (r.range ? [r.range] : []));
   const wanted = ranges.map(rangeKey).join(",");
   useEffect(() => {
@@ -60,17 +55,6 @@ export function SummaryTab({ slot, summary, changed, running, onOpenPage, doc, r
     const lookup = row.range ? files[rangeKey(row.range)] : undefined;
     return lookup && "files" in lookup ? lookup.files : undefined;
   };
-
-  // A row's revert: the files its turns changed, put back to how they were before them. Off when its turns aren't known.
-  const revertOf = (row: SummaryRow) => {
-    if (!revert || !row.changes) return undefined;
-    const range = row.range;
-    if (!range) return { off: "This step's changes aren't known: the chat was reopened after it.", onRevert: () => {} };
-    const found = filesOf(row);
-    if (!found || found.length === 0) return undefined;
-    return { off: revert.blocked, onRevert: () => setReverting({ title: `Revert ${row.label}?`, files: found, request: { scope: "turn", turn: range.from, toTurn: range.to } }) };
-  };
-
   // The document is made when it's asked for, from what the tab knows then.
   const markdown = (results: boolean) =>
     planMarkdown({
@@ -87,6 +71,28 @@ export function SummaryTab({ slot, summary, changed, running, onOpenPage, doc, r
       date: new Date(),
       results,
     });
+  return { files, failed, retry: () => setAttempt((a) => a + 1), filesOf, markdown };
+}
+
+/**
+ * The right pane's Summary tab, in Step by step: the plan so far, a row per step (or reviewed file, evidence round,
+ * fix), each with what its page says and the files it changed. A row opens its page in the chat. With `doc`, the plan
+ * can be exported as markdown.
+ */
+export function SummaryTab({ slot, summary, changed, running, onOpenPage, doc, revert }: { slot: string; summary: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void; doc?: ExportDoc; revert?: RevertControls }) {
+  const { files, failed, retry, filesOf, markdown } = useStepFiles(slot, summary, changed, running, doc);
+  // A step's revert waiting on its dialog.
+  const [reverting, setReverting] = useState<{ title: string; files: ChangedFile[]; request: RevertRequest } | null>(null);
+
+  // A row's revert: the files its turns changed, put back to how they were before them. Off when its turns aren't known.
+  const revertOf = (row: SummaryRow) => {
+    if (!revert || !row.changes) return undefined;
+    const range = row.range;
+    if (!range) return { off: "This step's changes aren't known: the chat was reopened after it.", onRevert: () => {} };
+    const found = filesOf(row);
+    if (!found || found.length === 0) return undefined;
+    return { off: revert.blocked, onRevert: () => setReverting({ title: `Revert ${row.label}?`, files: found, request: { scope: "turn", turn: range.from, toTurn: range.to } }) };
+  };
 
   return (
     <div className="summary">
@@ -97,7 +103,7 @@ export function SummaryTab({ slot, summary, changed, running, onOpenPage, doc, r
       {failed && (
         <div className="summary-retry" role="alert">
           Couldn't read the files some steps changed.{" "}
-          <button className="link-button" onClick={() => setAttempt((a) => a + 1)}>
+          <button className="link-button" onClick={() => retry()}>
             Try again
           </button>
         </div>

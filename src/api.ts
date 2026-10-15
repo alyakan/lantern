@@ -28,9 +28,17 @@ export interface RevertOutcome {
   reason: string | null;
 }
 
+/** Whether claude is logged in, and as whom. */
+export interface ClaudeLogin {
+  logged_in: boolean;
+  account: string | null;
+}
+
 /** Every chat-specific call names its slot: the chat (and claude process) it's about. */
 export const api = {
   locateClaude: (pathOverride: string | null) => invoke<string>("locate_claude", { pathOverride }),
+  /** Whether the claude at this path is logged in, and as whom; rejects when claude can't say. */
+  claudeLogin: (claudePath: string) => invoke<ClaudeLogin>("claude_login", { claudePath }),
   startSession: (slot: string, claudePath: string, folder: string, settings: Settings) => invoke<ProviderInfo | null>("start_session", { slot, claudePath, folder, settings }),
   /** Restarts the chat's claude on the same session with another harness (main model and effort, advisor, subagents). */
   applyHarness: (slot: string, h: { model: string | null; effort: string | null; advisor: string | null; subagent_model: string | null }) =>

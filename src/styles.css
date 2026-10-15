@@ -1326,7 +1326,7 @@ button.json-more:hover { color: var(--text); }
    way, down to three (46px: the current page's pill and two dots, which the rail keeps scrolled to); the pane itself
    can't be narrower than that (MIN_LEFT in SplitPane.tsx). The background count is dropped first. */
 .steps-head { container-type: inline-size; display: flex; align-items: center; gap: 10px; height: 44px; flex: none; padding: 0 14px 0 20px; border-bottom: 1px solid var(--line); }
-@container (max-width: 480px) { .steps-head .steps-background { display: none; } }
+@container (max-width: 640px) { .steps-head .steps-background { display: none; } }
 /* Full height of the bar: a scrolling rail clips to its box, and an 8px box cut off the bottom of the dots once there were enough pages to scroll. */
 .steps-rail { display: flex; align-items: center; align-self: stretch; gap: 4px; flex: 0 1000 auto; min-width: 52px; padding: 0 3px; overflow-x: auto; scrollbar-width: none; scroll-behavior: smooth; }
 .steps-rail::-webkit-scrollbar { display: none; }
@@ -1335,6 +1335,19 @@ button.json-more:hover { color: var(--text); }
 .steps-dot.build { border-color: var(--muted); background: var(--muted); }
 .steps-dot:hover:not(.current) { border-color: var(--text-2); }
 .steps-dot.current { width: 22px; border-color: var(--text); background: var(--text); }
+/* The named stages above the dots: earlier ones checked, the one you're in lit and holding its pages' dots, later ones dim. */
+.steps-phases { display: flex; align-items: center; align-self: stretch; gap: 6px; min-width: 0; flex: 0 1 auto; }
+.steps-phase { display: inline-flex; align-items: center; align-self: stretch; gap: 6px; min-width: 0; flex: none; padding: 0; border: none; background: none; color: var(--muted-text); font-size: calc(12px * var(--font-scale)); white-space: nowrap; }
+.steps-phase.current { flex: 0 1 auto; color: var(--text); font-weight: 600; }
+button.steps-phase:disabled { color: var(--faint); }
+button.steps-phase:not(:disabled):hover { color: var(--text); }
+.steps-phase-mark { display: inline-grid; place-items: center; flex: none; width: 16px; height: 16px; border-radius: var(--radius-pill); border: 1.5px solid var(--faint); font-size: calc(9.5px * var(--font-scale)); font-weight: 600; line-height: 1; }
+.steps-phase.past .steps-phase-mark { border-color: var(--add); background: var(--add); color: var(--on-color); }
+.steps-phase.current .steps-phase-mark { border-color: var(--text); background: var(--text); color: var(--bg); }
+.steps-phase-sep { flex: none; width: 12px; height: 1px; background: var(--line-strong); }
+.steps-phase.current .steps-rail { margin-left: 2px; }
+@container (max-width: 470px) { .steps-phase:not(.current) .steps-phase-name { display: none; } .steps-phase-sep { width: 6px; } }
+@container (max-width: 300px) { .steps-phase.current .steps-phase-name { display: none; } }
 /* Still running in the background, beside the phase (the title bar's count, where you're looking). */
 .steps-background { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--working) 12%, transparent); color: var(--working); font-size: calc(11px * var(--font-scale)); }
 .steps-background .spinner { width: 9px; height: 9px; border-color: color-mix(in srgb, var(--working) 30%, transparent); border-top-color: var(--working); }
@@ -1385,7 +1398,21 @@ button.json-more:hover { color: var(--text); }
 .steps-nav { display: flex; align-items: center; gap: 10px; flex: none; max-width: calc(var(--col) + 80px); width: 100%; margin: 0 auto; padding: 8px 20px 2px; }
 .steps-nav .primary, .steps-nav .ghost { height: 28px; padding: 0 14px; border-radius: var(--radius-pill); font-size: calc(12.5px * var(--font-scale)); }
 .steps-nav > :last-child { margin-left: auto; }
-.steps-count { font-size: calc(11.5px * var(--font-scale)); color: var(--muted); font-variant-numeric: tabular-nums; }
+/* The Done page's hand-off: what to do with the finished work. */
+.handoff { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-float); background: var(--bg-subtle); }
+.handoff-heading { font-size: calc(12px * var(--font-scale)); font-weight: 600; color: var(--text-2); }
+.handoff-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.handoff-actions > button, .handoff-export .summary-export-button { height: var(--pill-m); padding: 0 14px; border-radius: var(--radius-pill); font-size: calc(12.5px * var(--font-scale)); }
+.handoff-actions > button[aria-expanded="true"] { background: var(--bg-active); }
+.handoff-actions .handoff-export { margin-left: 0; max-width: none; }
+.handoff-export .summary-export-button { border: 1px solid var(--line-strong); background: var(--field); color: var(--text); }
+.handoff-export .summary-export-button:hover, .handoff-export .summary-export-button[aria-expanded="true"] { background: var(--bg-hover); }
+.handoff-export .summary-export-menu { right: auto; left: 0; }
+.handoff-confirm { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.handoff-confirm-label { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.handoff-prompt { margin: 0; padding: 8px 12px; border-left: 2px solid var(--line-strong); color: var(--text-2); font-size: calc(13px * var(--font-scale)); line-height: 1.45; }
+.handoff-confirm-actions { display: flex; gap: 8px; }
+.handoff-confirm-actions button { height: var(--pill-m); padding: 0 14px; border-radius: var(--radius-pill); font-size: calc(12.5px * var(--font-scale)); }
 .steps-working .activity-line { cursor: default; }
 .steps-working .activity-line:hover { background: none; }
 
@@ -1413,7 +1440,7 @@ button.link-button:hover:not(:disabled) { background: none; color: var(--text); 
 .file-results .tree-row { padding-left: 10px; }
 .tree-row.result { gap: 6px; }
 .tree-row.picked { background: var(--bg-hover); color: var(--text); }
-.result-dir { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11.5px * var(--font-scale)); color: var(--faint); direction: rtl; text-align: left; }
+.result-dir { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11.5px * var(--font-scale)); color: var(--faint); text-align: left; }
 .result-dir > * { direction: ltr; unicode-bidi: embed; }
 mark.hit { background: none; color: var(--text); font-weight: 600; text-decoration: underline; text-decoration-color: var(--faint); text-underline-offset: 2px; }
 .result-dir mark.hit { color: var(--text-2); }
@@ -1516,6 +1543,30 @@ mark.text-hit { border-radius: 2px; background: color-mix(in srgb, var(--text) 1
 .setup-row { display: flex; gap: 8px; }
 .setup-row input { flex: 1; font: inherit; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: inherit; }
 .center { display: flex; height: 100%; align-items: center; justify-content: center; }
+/* First launch, before a folder is open: one way forward, the projects used before, and whether claude is ready. */
+.welcome { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 28px; padding: 9vh 24px 28px; }
+.welcome-body { order: 1; display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; max-width: calc(var(--col) + 40px); text-align: center; }
+.welcome h1, .setup h1 { margin: 0; font-size: calc(22px * var(--font-scale)); font-weight: 600; letter-spacing: -0.01em; }
+.welcome h2 { margin: 0; font-size: calc(11.5px * var(--font-scale)); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-text); }
+.welcome-lead { margin: 0; max-width: 460px; color: var(--muted-text); font-size: calc(13.5px * var(--font-scale)); line-height: 1.5; }
+.welcome-open { display: inline-flex; align-items: center; gap: 8px; height: 36px; margin-top: 6px; padding: 0 20px; border-radius: var(--radius-pill); font-size: calc(14px * var(--font-scale)); }
+.welcome-open kbd { margin-left: 4px; padding: 1px 6px; border-radius: var(--radius-chip); background: color-mix(in srgb, currentColor 18%, transparent); font: inherit; font-size: calc(11.5px * var(--font-scale)); }
+.welcome-recents { display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 18px; text-align: left; }
+.welcome-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.welcome-card { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-float); background: var(--bg-subtle); color: var(--text); text-align: left; }
+.welcome-card:hover { border-color: var(--line-strong); background: var(--bg-hover); }
+.welcome-card-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(13.5px * var(--font-scale)); font-weight: 600; }
+.welcome-card-path { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.welcome-card-when { margin-top: 4px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted); }
+.claude-check { order: 2; display: flex; align-items: center; gap: 8px; margin-top: auto; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
+.claude-check-mark { display: inline-grid; place-items: center; flex: none; width: 15px; height: 15px; border-radius: var(--radius-pill); background: var(--add); color: var(--on-color); font-size: calc(9.5px * var(--font-scale)); font-weight: 700; }
+.claude-check-mark .spinner { width: 11px; height: 11px; }
+.claude-check.warn { order: 0; margin-top: 0; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; max-width: 520px; padding: 14px 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-float); background: var(--auth-bg); color: var(--text-2); font-size: calc(13px * var(--font-scale)); }
+.claude-check.warn .claude-check-mark { background: var(--warn); }
+.claude-check.warn p { margin: 0; line-height: 1.5; }
+.claude-check.warn button { height: var(--pill-m); padding: 0 14px; border-radius: var(--radius-pill); }
+.claude-check-line { display: flex; align-items: center; gap: 8px; }
+.setup-error { word-break: break-word; }
 
 /* The chat's mode, under the chat box: a chip you notice, naming Step by step's style too. */
 .meta-item.mode-chip { margin: 0; padding: 0 8px; border: 0.5px solid var(--glass-line); background: var(--glass); color: var(--text-2); font-weight: 500; }
