@@ -536,24 +536,44 @@ async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String,
     Ok(provider)
 }
 
-/// Restarts a chat's claude on the same session (`--resume`), e.g. with a new permission mode or effort.
+/// The role a chat has after its Workflow is set to Team (`team` true) or to another (false): a chat becomes the Lead of a
+/// team, or stops being one. A worker keeps its role (its Workflow is its Lead's to set), and `team` None leaves it as it is.
+/// Stopping being a Lead is refused while it has agents, which would be left with nobody to report to.
+fn role_after(role: &Role, team: Option<bool>, agents: usize) -> Result<Role, String> {
+    match (role, team) {
+        (Role::Worker { .. }, _) | (_, None) => Ok(role.clone()),
+        (_, Some(true)) => Ok(Role::Main),
+        (Role::Main, Some(false)) if agents > 0 => Err("This team still has agents. Close them first, then switch its Workflow.".into()),
+        (_, Some(false)) => Ok(Role::Normal),
+    }
+}
+
+/// Restarts a chat's claude on the same session (`--resume`), e.g. with new Permissions, Workflow or effort. `mode` and
+/// `auto_approve` are the launch flags those make (Auto is `Auto`, or `Steps` with `auto_approve`); `team` is Workflow Team:
+/// true makes the chat the Lead of a team (its claude restarts with the Lead's tools and instructions, on the same
+/// conversation), false makes a Lead an ordinary chat again, and None leaves its role alone.
 #[tauri::command]
-async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: String, mode: Mode, effort: Option<String>, auto_approve: Option<bool>) -> Result<(), String> {
+async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: String, mode: Mode, effort: Option<String>, auto_approve: Option<bool>, team: Option<bool>) -> Result<(), String> {
     let s = state.slots.get(&slot)?;
     let running_id = s.session.lock().await.as_ref().and_then(|x| x.session_id());
     let mut cfg = s.config.lock().unwrap().clone().ok_or("No folder is open")?;
+    let role = role_after(&cfg.helper.role, team, state.orchestra.workers_of(&slot).len())?;
     cfg.mode = mode;
     cfg.effort = checked_effort(effort)?;
     if let Some(auto) = auto_approve {
         cfg.auto_approve = auto;
     }
     cfg.resume = running_id.or(cfg.resume);
-    cfg.helper = helper_config(&s, cfg.helper.role.clone())?;
+    cfg.helper = helper_config(&s, role.clone())?;
     cfg.path_env = login_path(&state).await;
     // A worker asked for more freedom than its main agent allows gets what it allows (the window is told).
     let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
     let (new_mode, new_auto, provider) = (cfg.mode, cfg.auto_approve, cfg.provider);
     launch(&app, &slot, &s, cfg, false).await?;
+    // Registered as the Lead (or taken out of the team registry) once it runs as one; a worker's role never changes here.
+    if team.is_some() && !matches!(role, Role::Worker { .. }) {
+        enroll(&state, &slot, &s, &role);
+    }
     if lowered {
         told_ask(&app, &slot);
     }
@@ -1109,11 +1129,11 @@ fn list_permission_rules(state: State<'_, AppState>, slot: Option<String>) -> Ve
     chat.chain(folders).collect()
 }
 
-/// Where the main agent's helpers run from now on in this chat, after the user ticked "same for the rest of this chat" on
-/// the helper card (the request itself is answered by respond_permission). None asks each time again.
+/// The team's Subagents setting: where the Lead's built-in helpers run from now on, on the canvas or inline. Only a
+/// Lead's calls are ever answered by it (ordinary chats run their subagents inline).
 #[tauri::command]
-fn set_agent_choice(state: State<'_, AppState>, slot: String, choice: Option<permission::bridge::AgentChoice>) -> Result<(), String> {
-    state.slots.get(&slot)?.bridge.set_agent_choice(choice);
+fn set_subagents(state: State<'_, AppState>, slot: String, subagents: permission::bridge::Subagents) -> Result<(), String> {
+    state.slots.get(&slot)?.bridge.set_subagents(subagents);
     Ok(())
 }
 
@@ -1649,7 +1669,7 @@ pub fn run() {
             change_summary,
             respond_permission,
             steps_guide,
-            set_agent_choice,
+            set_subagents,
             list_permission_rules,
             add_permission_rule,
             remove_permission_rule,
@@ -1771,6 +1791,32 @@ mod tests {
         let mut no_worker = config(Mode::Auto, false);
         assert!(!cap_mode(&mut no_worker, None));
         assert_eq!(no_worker.mode, Mode::Auto);
+    }
+
+    /// Workflow Team on a running chat: it becomes the Lead (restart with the Lead's role), and goes back to an ordinary chat
+    /// only once its agents are gone. A worker's role is its Lead's, whatever is asked.
+    #[test]
+    fn choosing_team_in_a_chat_makes_it_the_lead_and_leaving_needs_no_agents() {
+        assert_eq!(role_after(&Role::Normal, Some(true), 0), Ok(Role::Main));
+        assert_eq!(role_after(&Role::Normal, None, 0), Ok(Role::Normal));
+        assert_eq!(role_after(&Role::Main, Some(true), 3), Ok(Role::Main));
+        assert_eq!(role_after(&Role::Main, None, 3), Ok(Role::Main));
+        assert_eq!(role_after(&Role::Main, Some(false), 0), Ok(Role::Normal));
+        assert!(role_after(&Role::Main, Some(false), 2).unwrap_err().contains("still has agents"));
+        let worker = Role::Worker { name: "w".into(), read_only: false };
+        for team in [Some(true), Some(false), None] {
+            assert_eq!(role_after(&worker, team, 0), Ok(worker.clone()), "{team:?}");
+        }
+    }
+
+    /// Permissions mean the same in every workflow: a team whose Lead is on Auto (in Chat or Step by step terms) lets its
+    /// agents run on Auto, and one on Ask never does.
+    #[test]
+    fn a_leads_permissions_cap_its_agents_the_same_in_every_workflow() {
+        let claude = ProviderId::Claude;
+        for (mode, auto, agents) in [(Mode::Auto, false, Mode::Auto), (Mode::Steps, true, Mode::Auto), (Mode::Ask, false, Mode::Ask), (Mode::Steps, false, Mode::Ask)] {
+            assert_eq!(ceiling_of(Some((mode, auto, claude))), agents, "{mode:?} {auto}");
+        }
     }
 
     /// A restored worker's settings carry the branch the canvas saved, and older saves (without one) still read.

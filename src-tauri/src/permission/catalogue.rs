@@ -18,9 +18,9 @@ pub fn negotiate(asked: Option<&str>) -> &'static str {
 /// Which tools a helper lists, from how its chat runs (see main.rs).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Offer {
-    /// The chat is a Team's lead (`LANTERN_ROLE=main`), which also has the Team tools.
+    /// The chat's Workflow is Team and it is the Lead (`LANTERN_ROLE=main`), which also has the Team tools.
     pub orchestrator: bool,
-    /// The chat is in Step by step (`LANTERN_STEPS=1`), which also has `reproduce`.
+    /// The chat's Workflow is Step by step (`LANTERN_STEPS=1`), which also has `reproduce`.
     pub steps: bool,
 }
 
@@ -35,22 +35,23 @@ impl Offer {
 pub fn instructions(offer: Offer) -> String {
     let mut text = String::from(
         "These are Lantern's tools, the desktop app this chat runs in. A message or block that starts with \"[Lantern: \" is a note from Lantern, not the user's words.
-- steps_guide: Step by step's page rules, and a flavour's headings and formats. Read it when you are unsure of one, or when Lantern says it couldn't read a page.
+- steps_guide: the Step by step workflow's page rules, and a flavour's headings and formats. Read it when you are unsure of one, or when Lantern says it couldn't read a page.
 - review_target: tell Lantern what you are reviewing (a pull request, or the checked-out branch and its base), so its Changes tab compares that. Call it when a review starts and whenever the target changes.
 - network_requests, network_request: the HTTP traffic the user captured with their Network Monitor app. List or search first, then read one request. Use them when the user asks about requests or API responses.
 - network_watch, network_unwatch, network_watches: the requests the user says matter, kept for this folder and shown live in the Network tab.
 - network_summarize: put your summary of a response on its request in the Network tab. Read the request first.",
     );
     if offer.steps {
-        text.push_str("\n- reproduce: ask the user to reproduce a bug now, with your diagnostic logging in place. It waits for them and returns whether they could, with their note. Use it in Step by step's Debug flavour instead of ending your turn to ask.");
+        text.push_str("\n- reproduce: ask the user to reproduce a bug now, with your diagnostic logging in place. It waits for them and returns whether they could, with their note. Use it in the Step by step workflow's Debug flavour instead of ending your turn to ask.");
     }
     if offer.orchestrator {
         text.push_str(
-            "\nYou are the Team's lead, and these tools run its agents:
+            "\nYour Workflow is Team and you are its Lead (the user's Permissions, Ask or Auto, cap every agent's too), and these tools run its agents:
 - spawn_agent: start an agent with a chat of its own. It runs on its own and returns at once.
 - list_agents, read_agent: see every agent's status and latest message, or read one's conversation.
 - message_agent, stop_agent: instruct an agent, or stop it (its worktree and branch are kept).
 - propose_merge: ask the user to merge an agent's branch; only they can approve it.
+Your built-in Agent tool follows the team's Subagents setting: on the canvas (the default) it is refused and you use spawn_agent instead; inline it runs inside this chat.
 None of them waits: when an agent finishes a turn, stops, or waits on the user, a \"[Lantern: \" note reaches you.",
         );
     }
@@ -75,7 +76,7 @@ fn base_tools(steps: bool) -> Vec<Value> {
         }),
         json!({
             "name": "steps_guide",
-            "description": "How Lantern's Step by step works: the page rules, and each flavour's (Build, Learn, Review, Debug, Architecture) headings and format, including the shape of the Architecture map. Read it before working in a flavour you aren't sure of, or when Lantern says it couldn't read a page.",
+            "description": "How Lantern's Step by step workflow works: the page rules, and each flavour's (Build, Learn, Review, Debug, Architecture) headings and format, including the shape of the Architecture map. Read it before working in a flavour you aren't sure of, or when Lantern says it couldn't read a page.",
             "inputSchema": {
                 "type": "object",
                 "properties": {"flavour": {"type": "string", "enum": crate::args::FLAVOURS, "description": "One flavour; leave it out for all of them."}},
@@ -98,7 +99,7 @@ fn base_tools(steps: bool) -> Vec<Value> {
     if steps {
         tools.push(json!({
             "name": "reproduce",
-            "description": "Step by step's Debug flavour: ask the user to reproduce the bug now, with your diagnostic logging in place. Waits until they have, and returns whether they could and anything they noted (e.g. pasted logs). Call it instead of ending your turn to ask them.",
+            "description": "The Step by step workflow's Debug flavour: ask the user to reproduce the bug now, with your diagnostic logging in place. Waits until they have, and returns whether they could and anything they noted (e.g. pasted logs). Call it instead of ending your turn to ask them.",
             "inputSchema": {
                 "type": "object",
                 "properties": {

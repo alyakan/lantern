@@ -23,19 +23,20 @@ pub type OrchestraHandler = Arc<dyn Fn(String, serde_json::Value) -> std::pin::P
 /// Serves the network_* tool calls of any chat: (the chat's folder key, tool, arguments) in, as OrchestraHandler answers.
 pub type NetworkHandler = Arc<dyn Fn(Option<String>, String, serde_json::Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = BridgeResponse> + Send>> + Send + Sync>;
 
-/// Where the user wants the main agent's helpers to run, once they have said so for the chat.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+/// The team's Subagents setting: where the Lead's helpers (its built-in Agent tool) run. A team is on the canvas until the
+/// user says otherwise; a chat that isn't a team's Lead never has this asked of it (its subagents run inline).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum AgentChoice {
-    /// As workers on the canvas, with a chat each.
+pub enum Subagents {
+    /// As agents on the canvas, with a chat each.
+    #[default]
     Canvas,
     /// Inline, as Claude Code's own Agent tool runs them.
     Inline,
 }
 
-/// What a main agent reads when its Agent call is turned down because the user wants helpers on the canvas. The card's
-/// "Run on canvas" button sends the same words (CANVAS_REFUSAL in PermissionCard.tsx).
-pub const CANVAS_REFUSAL: &str = "Not run inline: the user wants helpers on the canvas, as workers with a chat of their own. Start this one with spawn_agent instead, using the same task as its brief (isolation \"shared\" if it only reads), then carry on or end your turn; you'll get a note when it finishes a turn.";
+/// What a Lead reads when its Agent call is turned down because the team's Subagents are on the canvas.
+pub const CANVAS_REFUSAL: &str = "Not run inline: the team's Subagents setting is the canvas: helpers are agents with a chat of their own. Start this one with spawn_agent instead, using the same task as its brief (isolation \"shared\" if it only reads), then carry on or end your turn; you'll get a note when it finishes a turn.";
 
 /// Unix-socket server that turns helper requests into UI permission cards, or answers them by a rule.
 pub struct PermissionBridge {
@@ -56,8 +57,8 @@ pub struct PermissionBridge {
     auth: CallerAuth,
     /// Answers the network_* tools (see network.rs); set on every chat.
     network: Mutex<Option<NetworkHandler>>,
-    /// The main agent's answer to "where should this helper run?", kept for the chat (see `AgentChoice`).
-    agent_choice: Mutex<Option<AgentChoice>>,
+    /// The team's Subagents setting, for a chat that is its Lead (see `Subagents`).
+    subagents: Mutex<Subagents>,
 }
 
 /// Whether the process with this pid, on the other end of the socket, is this chat's own helper. Every request is asked
@@ -102,7 +103,7 @@ impl PermissionBridge {
             orchestra: Mutex::new(None),
             auth,
             network: Mutex::new(None),
-            agent_choice: Mutex::new(None),
+            subagents: Mutex::new(Subagents::default()),
         });
         let b = bridge.clone();
         let accept = tauri::async_runtime::spawn(async move {
@@ -180,20 +181,17 @@ impl PermissionBridge {
             }
             return;
         }
-        // The main agent's helper run inline, once the user has said where helpers go for this chat: answered without a card.
-        // Only a main agent is ever asked (see build_args), and this bridge is the one that has an orchestra.
+        // The Lead's helper run inline: answered by the team's Subagents setting, with no card. Only a Lead is ever asked
+        // (see build_args), and this bridge is the one that has an orchestra.
         if crate::args::INLINE_AGENT_TOOLS.contains(&req.tool_name.as_str()) && self.orchestra.lock().unwrap().is_some() {
-            let resp = match self.agent_choice() {
-                Some(AgentChoice::Canvas) => Some(BridgeResponse { allow: false, message: Some(CANVAS_REFUSAL.into()), updated_input: None, failed: false }),
-                Some(AgentChoice::Inline) => Some(BridgeResponse { allow: true, message: None, updated_input: None, failed: false }),
-                None => None,
+            let resp = match self.subagents() {
+                Subagents::Canvas => BridgeResponse { allow: false, message: Some(CANVAS_REFUSAL.into()), updated_input: None, failed: false },
+                Subagents::Inline => BridgeResponse { allow: true, message: None, updated_input: None, failed: false },
             };
-            if let Some(resp) = resp {
-                if let Ok(json) = serde_json::to_string(&resp) {
-                    let _ = write.write_all(format!("{json}\n").as_bytes()).await;
-                }
-                return;
+            if let Ok(json) = serde_json::to_string(&resp) {
+                let _ = write.write_all(format!("{json}\n").as_bytes()).await;
             }
+            return;
         }
         // The helper sends nothing after its request, so its read half only tells us when it has gone.
         let mut read = reader.into_inner().into_inner();
@@ -269,20 +267,19 @@ impl PermissionBridge {
         self.chat_rules.lock().unwrap().clone()
     }
 
-    /// A new conversation starts in this chat, so its "this chat" rules go with the old one, and so does where it wanted
-    /// its helpers to run.
+    /// A new conversation starts in this chat, so its "this chat" rules go with the old one. The team's Subagents setting
+    /// is the team's, not the conversation's: it stays.
     pub fn clear_chat_rules(&self) {
         self.chat_rules.lock().unwrap().clear();
-        *self.agent_choice.lock().unwrap() = None;
     }
 
-    /// Where the main agent's helpers run from now on in this chat (None: ask each time).
-    pub fn set_agent_choice(&self, choice: Option<AgentChoice>) {
-        *self.agent_choice.lock().unwrap() = choice;
+    /// Where the Lead's helpers run from now on.
+    pub fn set_subagents(&self, subagents: Subagents) {
+        *self.subagents.lock().unwrap() = subagents;
     }
 
-    pub fn agent_choice(&self) -> Option<AgentChoice> {
-        *self.agent_choice.lock().unwrap()
+    pub fn subagents(&self) -> Subagents {
+        *self.subagents.lock().unwrap()
     }
 
     /// Makes a rule, if it's one `rules::validate` accepts. A folder rule needs the chat to have a folder.
@@ -595,23 +592,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_main_agents_inline_helper_asks_with_a_card_until_the_user_says_where_helpers_go() {
+    async fn the_leads_inline_helper_is_refused_with_how_to_start_an_agent_and_no_card_by_default() {
         let (bridge, mut rx, _dir) = main_agent_bridge();
-        let helper = ask_tool_in_background(&bridge, "Agent", agent_input());
-        match next_event(&mut rx).await {
-            UiEvent::PermissionRequested { request_id, tool_name, input } => {
-                assert_eq!((tool_name.as_str(), &input["description"]), ("Agent", &json!("Find the callers")));
-                assert!(bridge.respond(&request_id, false, Some("no".into()), None));
-            }
-            other => panic!("unexpected {other:?}"),
-        }
-        assert!(!helper.await.unwrap().allow);
-    }
-
-    #[tokio::test]
-    async fn once_the_user_chose_the_canvas_an_inline_helper_is_refused_with_how_to_start_a_worker_and_no_card() {
-        let (bridge, mut rx, _dir) = main_agent_bridge();
-        bridge.set_agent_choice(Some(AgentChoice::Canvas));
+        assert_eq!(bridge.subagents(), Subagents::Canvas);
         for tool in ["Agent", "Task"] {
             let reply = ask_tool_in_background(&bridge, tool, agent_input()).await.unwrap();
             assert_eq!(reply, BridgeResponse { allow: false, message: Some(CANVAS_REFUSAL.into()), updated_input: None, failed: false }, "{tool}");
@@ -621,13 +604,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn once_the_user_chose_inline_the_helper_runs_without_a_card_and_other_tools_still_ask() {
+    async fn with_subagents_inline_the_helper_runs_without_a_card_and_other_tools_still_ask() {
         let (bridge, mut rx, _dir) = main_agent_bridge();
-        bridge.set_agent_choice(Some(AgentChoice::Inline));
+        bridge.set_subagents(Subagents::Inline);
         let reply = ask_tool_in_background(&bridge, "Agent", agent_input()).await.unwrap();
         assert_eq!(reply, BridgeResponse { allow: true, message: None, updated_input: None, failed: false });
         assert!(tokio::time::timeout(Duration::from_millis(200), rx.recv()).await.is_err(), "a card was shown");
-        // The choice is about helpers only.
+        // The setting is about helpers only.
         let bash = ask_in_background(&bridge);
         next_request_id(&mut rx).await;
         bridge.cancel_all();
@@ -635,19 +618,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_choice_is_the_main_agents_alone_and_a_new_conversation_forgets_it() {
-        // A chat with no orchestra (an ordinary chat that has its own ask rule for Agent) is asked as usual.
+    async fn the_setting_is_the_leads_alone_and_a_new_conversation_keeps_it() {
+        // A chat with no orchestra (an ordinary chat, whose subagents run inline as Claude Code runs them) is asked as usual.
         let (bridge, mut rx, _dir) = setup();
-        bridge.set_agent_choice(Some(AgentChoice::Canvas));
+        bridge.set_subagents(Subagents::Canvas);
         let helper = ask_tool_in_background(&bridge, "Agent", agent_input());
         match next_event(&mut rx).await {
             UiEvent::PermissionRequested { request_id, .. } => assert!(bridge.respond(&request_id, true, None, None)),
             other => panic!("unexpected {other:?}"),
         }
         assert!(helper.await.unwrap().allow);
-        // And starting over clears it.
+        // Starting a new conversation clears the chat's rules, not the team's setting.
+        bridge.set_subagents(Subagents::Inline);
         bridge.clear_chat_rules();
-        assert_eq!(bridge.agent_choice(), None);
+        assert_eq!(bridge.subagents(), Subagents::Inline);
     }
 
     #[tokio::test]
