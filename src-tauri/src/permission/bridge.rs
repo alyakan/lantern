@@ -128,7 +128,7 @@ impl PermissionBridge {
         let (read, mut write) = stream.into_split();
         // Anyone else is answered no before a word they send is read: no card, no rule, no tool.
         if !peer.is_some_and(|pid| (self.auth)(pid)) {
-            let resp = BridgeResponse { allow: false, message: Some(NOT_AUTHORIZED.into()), updated_input: None };
+            let resp = BridgeResponse { allow: false, message: Some(NOT_AUTHORIZED.into()), updated_input: None, failed: true };
             if let Ok(json) = serde_json::to_string(&resp) {
                 let _ = write.write_all(format!("{json}\n").as_bytes()).await;
             }
@@ -146,7 +146,7 @@ impl PermissionBridge {
             let orchestra = self.orchestra.lock().unwrap().clone();
             let resp = match orchestra {
                 Some(handle) => handle(req.tool_name, req.input).await,
-                None => BridgeResponse { allow: false, message: Some("This chat is not the main agent of an orchestra.".into()), updated_input: None },
+                None => BridgeResponse { allow: false, message: Some("This chat is not the main agent of an orchestra.".into()), updated_input: None, failed: false },
             };
             if let Ok(json) = serde_json::to_string(&resp) {
                 let _ = write.write_all(format!("{json}\n").as_bytes()).await;
@@ -158,7 +158,22 @@ impl PermissionBridge {
             let handler = self.network.lock().unwrap().clone();
             let resp = match handler {
                 Some(handle) => handle(self.folder(), req.tool_name, req.input).await,
-                None => BridgeResponse { allow: false, message: Some("Lantern's network tools aren't ready in this chat.".into()), updated_input: None },
+                None => BridgeResponse { allow: false, message: Some("Lantern's network tools aren't ready in this chat.".into()), updated_input: None, failed: false },
+            };
+            if let Ok(json) = serde_json::to_string(&resp) {
+                let _ = write.write_all(format!("{json}\n").as_bytes()).await;
+            }
+            return;
+        }
+        // A review_target call sets what the Changes pane compares: the window is told, and no card is shown.
+        if req.review {
+            let resp = match super::helper::ReviewTargetArgs::parse(&req.input) {
+                Ok(target) => {
+                    let says = target.says();
+                    sink(UiEvent::ReviewTarget { pr: target.pr, base: target.base });
+                    BridgeResponse { allow: true, message: Some(says), updated_input: None, failed: false }
+                }
+                Err(e) => BridgeResponse { allow: false, message: Some(e), updated_input: None, failed: false },
             };
             if let Ok(json) = serde_json::to_string(&resp) {
                 let _ = write.write_all(format!("{json}\n").as_bytes()).await;
@@ -169,8 +184,8 @@ impl PermissionBridge {
         // Only a main agent is ever asked (see build_args), and this bridge is the one that has an orchestra.
         if crate::args::INLINE_AGENT_TOOLS.contains(&req.tool_name.as_str()) && self.orchestra.lock().unwrap().is_some() {
             let resp = match self.agent_choice() {
-                Some(AgentChoice::Canvas) => Some(BridgeResponse { allow: false, message: Some(CANVAS_REFUSAL.into()), updated_input: None }),
-                Some(AgentChoice::Inline) => Some(BridgeResponse { allow: true, message: None, updated_input: None }),
+                Some(AgentChoice::Canvas) => Some(BridgeResponse { allow: false, message: Some(CANVAS_REFUSAL.into()), updated_input: None, failed: false }),
+                Some(AgentChoice::Inline) => Some(BridgeResponse { allow: true, message: None, updated_input: None, failed: false }),
                 None => None,
             };
             if let Some(resp) = resp {
@@ -190,7 +205,7 @@ impl PermissionBridge {
         if let Some((scope, rule)) = matched {
             // A rule answers it: no card, and the tool gets its input as Claude sent it, not the resolved paths matched on.
             sink(UiEvent::PermissionAutoAllowed { request_id: id, tool_name: req.tool_name, input: req.input, scope, rule });
-            let resp = BridgeResponse { allow: true, message: None, updated_input: None };
+            let resp = BridgeResponse { allow: true, message: None, updated_input: None, failed: false };
             if let Ok(json) = serde_json::to_string(&resp) {
                 let _ = write.write_all(format!("{json}\n").as_bytes()).await;
             }
@@ -231,7 +246,7 @@ impl PermissionBridge {
     /// `updated_input`: on allow, the tool's input as it should run (AskUserQuestion's, with the user's answers).
     pub fn respond(&self, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>) -> bool {
         match self.pending.lock().unwrap().remove(request_id) {
-            Some(tx) => tx.send(BridgeResponse { allow, message, updated_input }).is_ok(),
+            Some(tx) => tx.send(BridgeResponse { allow, message, updated_input, failed: false }).is_ok(),
             None => false,
         }
     }
@@ -380,7 +395,7 @@ mod tests {
         let helper = ask_in_background(&bridge);
         let id = next_request_id(&mut rx).await;
         assert!(bridge.respond(&id, true, None, None));
-        assert_eq!(helper.await.unwrap(), BridgeResponse { allow: true, message: None, updated_input: None });
+        assert_eq!(helper.await.unwrap(), BridgeResponse { allow: true, message: None, updated_input: None, failed: false });
     }
 
     #[tokio::test]
@@ -419,7 +434,7 @@ mod tests {
     }
 
     fn orchestra_call() -> BridgeRequest {
-        BridgeRequest { tool_name: "list_agents".into(), input: json!({}), tool_use_id: None, orchestra: true, network: false }
+        BridgeRequest { tool_name: "list_agents".into(), input: json!({}), tool_use_id: None, orchestra: true, network: false, review: false }
     }
 
     #[tokio::test]
@@ -430,14 +445,35 @@ mod tests {
         let saw = seen.clone();
         bridge.set_network(Arc::new(move |folder, tool, _| {
             *saw.lock().unwrap() = Some((folder, tool));
-            Box::pin(async { BridgeResponse { allow: true, message: Some("3 requests".into()), updated_input: None } })
+            Box::pin(async { BridgeResponse { allow: true, message: Some("3 requests".into()), updated_input: None, failed: false } })
         }));
         let socket = bridge.socket_path.display().to_string();
-        let call = BridgeRequest { tool_name: "network_requests".into(), input: json!({}), tool_use_id: None, orchestra: false, network: true };
+        let call = BridgeRequest { tool_name: "network_requests".into(), input: json!({}), tool_use_id: None, orchestra: false, network: true, review: false };
         let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &call)).await.unwrap();
         assert_eq!(reply.message.as_deref(), Some("3 requests"));
         assert_eq!(seen.lock().unwrap().clone(), Some((Some(rules::folder_key(dir.path())), "network_requests".to_string())));
         assert!(tokio::time::timeout(Duration::from_millis(100), rx.recv()).await.is_err(), "no card");
+    }
+
+    #[tokio::test]
+    async fn a_review_target_call_tells_the_window_what_to_compare_and_never_shows_a_card() {
+        let (bridge, mut rx, _dir) = setup();
+        let socket = bridge.socket_path.display().to_string();
+        let call = |input: Value| BridgeRequest { tool_name: "review_target".into(), input, tool_use_id: None, orchestra: false, network: false, review: true };
+        let ask = |req: BridgeRequest| {
+            let socket = socket.clone();
+            async move { tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &req)).await.unwrap() }
+        };
+        let reply = ask(call(json!({"pr": 512}))).await;
+        assert!(reply.allow && reply.message.unwrap().contains("#512"));
+        assert_eq!(next_event(&mut rx).await, UiEvent::ReviewTarget { pr: Some(512), base: None });
+        let reply = ask(call(json!({"base": "feat/core"}))).await;
+        assert!(reply.allow);
+        assert_eq!(next_event(&mut rx).await, UiEvent::ReviewTarget { pr: None, base: Some("feat/core".into()) });
+        // What the app can't use is refused, and the window hears nothing.
+        let reply = ask(call(json!({"base": "--output=x"}))).await;
+        assert!(!reply.allow && !reply.failed);
+        assert!(tokio::time::timeout(Duration::from_millis(100), rx.recv()).await.is_err());
     }
 
     /// Accepts the test's own process, which is what connects in these tests (the helper runs in-process).
@@ -461,19 +497,20 @@ mod tests {
         let (seen, seen_net) = (reached.clone(), reached.clone());
         bridge.set_orchestra(Arc::new(move |_, _| {
             seen.store(true, Ordering::SeqCst);
-            Box::pin(async { BridgeResponse { allow: true, message: Some("ran".into()), updated_input: None } })
+            Box::pin(async { BridgeResponse { allow: true, message: Some("ran".into()), updated_input: None, failed: false } })
         }));
         bridge.set_network(Arc::new(move |_, _, _| {
             seen_net.store(true, Ordering::SeqCst);
-            Box::pin(async { BridgeResponse { allow: true, message: Some("ran".into()), updated_input: None } })
+            Box::pin(async { BridgeResponse { allow: true, message: Some("ran".into()), updated_input: None, failed: false } })
         }));
         // Even a request a rule would allow.
         bridge.add_rule(Scope::Chat, prefix_rule("npm test")).unwrap();
         let socket = bridge.socket_path.display().to_string();
-        let network = BridgeRequest { tool_name: "network_requests".into(), input: json!({}), tool_use_id: None, orchestra: false, network: true };
+        let network = BridgeRequest { tool_name: "network_requests".into(), input: json!({}), tool_use_id: None, orchestra: false, network: true, review: false };
         let reproduce = BridgeRequest::permission("reproduce".into(), json!({"steps": "x"}), None);
         let question = BridgeRequest::permission("AskUserQuestion".into(), json!({"questions": []}), None);
-        for req in [orchestra_call(), network, request(), reproduce, question] {
+        let review = BridgeRequest { tool_name: "review_target".into(), input: json!({"pr": 1}), tool_use_id: None, orchestra: false, network: false, review: true };
+        for req in [orchestra_call(), network, request(), reproduce, question, review] {
             let socket = socket.clone();
             let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &req)).await.unwrap();
             assert!(!reply.allow && reply.message.unwrap().contains("Not authorized"));
@@ -492,7 +529,7 @@ mod tests {
         let (bridge, _rx, _dir) = setup_with(Arc::new(move |pid| crate::process::is_child_of(pid, me)));
         let socket = bridge.socket_path.display().to_string();
         let request = serde_json::to_string(&orchestra_call()).unwrap();
-        let answer = |out: std::process::Output| serde_json::from_slice(&out.stdout).unwrap_or(BridgeResponse { allow: false, message: Some("no answer".into()), updated_input: None });
+        let answer = |out: std::process::Output| serde_json::from_slice(&out.stdout).unwrap_or(BridgeResponse { allow: false, message: Some("no answer".into()), updated_input: None, failed: false });
         // `nc` started by this test itself, like a helper started by claude.
         let direct = {
             let (socket, request) = (socket.clone(), request.clone());
@@ -509,7 +546,7 @@ mod tests {
                 answer(Command::new("sh").arg("-c").arg(format!("printf '%s\\n' '{request}' | nc -U -w 2 '{socket}'")).stdin(Stdio::null()).output().unwrap())
             }
         };
-        let handler: OrchestraHandler = Arc::new(|_, _| Box::pin(async { BridgeResponse { allow: true, message: Some("ran".into()), updated_input: None } }));
+        let handler: OrchestraHandler = Arc::new(|_, _| Box::pin(async { BridgeResponse { allow: true, message: Some("ran".into()), updated_input: None, failed: false } }));
         bridge.set_orchestra(handler.clone());
         let accepted = tokio::task::spawn_blocking(direct.clone()).await.unwrap();
         assert_eq!(accepted.message.as_deref(), Some("ran"));
@@ -539,17 +576,17 @@ mod tests {
     async fn an_orchestra_call_is_served_by_the_handler_and_never_shows_a_card() {
         let (bridge, mut rx, _dir) = setup();
         bridge.set_orchestra(
-            Arc::new(|tool, input| Box::pin(async move { BridgeResponse { allow: true, message: Some(format!("{tool} {input}")), updated_input: None } })),
+            Arc::new(|tool, input| Box::pin(async move { BridgeResponse { allow: true, message: Some(format!("{tool} {input}")), updated_input: None, failed: false } })),
         );
         let socket = bridge.socket_path.display().to_string();
         let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &orchestra_call())).await.unwrap();
-        assert_eq!(reply, BridgeResponse { allow: true, message: Some("list_agents {}".into()), updated_input: None });
+        assert_eq!(reply, BridgeResponse { allow: true, message: Some("list_agents {}".into()), updated_input: None, failed: false });
         assert!(tokio::time::timeout(Duration::from_millis(200), rx.recv()).await.is_err(), "a card was shown");
     }
 
     fn main_agent_bridge() -> (Arc<PermissionBridge>, mpsc::UnboundedReceiver<UiEvent>, tempfile::TempDir) {
         let (bridge, rx, dir) = setup();
-        bridge.set_orchestra(Arc::new(|_, _| Box::pin(async { BridgeResponse { allow: true, message: None, updated_input: None } })));
+        bridge.set_orchestra(Arc::new(|_, _| Box::pin(async { BridgeResponse { allow: true, message: None, updated_input: None, failed: false } })));
         (bridge, rx, dir)
     }
 
@@ -577,7 +614,7 @@ mod tests {
         bridge.set_agent_choice(Some(AgentChoice::Canvas));
         for tool in ["Agent", "Task"] {
             let reply = ask_tool_in_background(&bridge, tool, agent_input()).await.unwrap();
-            assert_eq!(reply, BridgeResponse { allow: false, message: Some(CANVAS_REFUSAL.into()), updated_input: None }, "{tool}");
+            assert_eq!(reply, BridgeResponse { allow: false, message: Some(CANVAS_REFUSAL.into()), updated_input: None, failed: false }, "{tool}");
         }
         assert!(CANVAS_REFUSAL.contains("spawn_agent") && CANVAS_REFUSAL.contains("same task as its brief"));
         assert!(tokio::time::timeout(Duration::from_millis(200), rx.recv()).await.is_err(), "a card was shown");
@@ -588,7 +625,7 @@ mod tests {
         let (bridge, mut rx, _dir) = main_agent_bridge();
         bridge.set_agent_choice(Some(AgentChoice::Inline));
         let reply = ask_tool_in_background(&bridge, "Agent", agent_input()).await.unwrap();
-        assert_eq!(reply, BridgeResponse { allow: true, message: None, updated_input: None });
+        assert_eq!(reply, BridgeResponse { allow: true, message: None, updated_input: None, failed: false });
         assert!(tokio::time::timeout(Duration::from_millis(200), rx.recv()).await.is_err(), "a card was shown");
         // The choice is about helpers only.
         let bash = ask_in_background(&bridge);
@@ -630,7 +667,7 @@ mod tests {
             Arc::new(|_, _| {
                 Box::pin(async {
                     tokio::time::sleep(Duration::from_millis(600)).await;
-                    BridgeResponse { allow: true, message: Some("late".into()), updated_input: None }
+                    BridgeResponse { allow: true, message: Some("late".into()), updated_input: None, failed: false }
                 })
             }),
         );
@@ -678,7 +715,7 @@ mod tests {
             }
             other => panic!("unexpected {other:?}"),
         }
-        assert_eq!(helper.await.unwrap(), BridgeResponse { allow: true, message: None, updated_input: None });
+        assert_eq!(helper.await.unwrap(), BridgeResponse { allow: true, message: None, updated_input: None, failed: false });
         assert!(rx.try_recv().is_err(), "no card came up");
     }
 

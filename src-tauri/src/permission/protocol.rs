@@ -16,11 +16,14 @@ pub struct BridgeRequest {
     /// the helper only.
     #[serde(default)]
     pub network: bool,
+    /// A review_target call: the app shows what it names in the Changes pane (UiEvent::ReviewTarget). Set by the helper only.
+    #[serde(default)]
+    pub review: bool,
 }
 
 impl BridgeRequest {
     pub fn permission(tool_name: String, input: Value, tool_use_id: Option<String>) -> Self {
-        Self { tool_name, input, tool_use_id, orchestra: false, network: false }
+        Self { tool_name, input, tool_use_id, orchestra: false, network: false, review: false }
     }
 }
 
@@ -32,6 +35,10 @@ pub struct BridgeResponse {
     /// On allow, the tool's input as it should run, when the user changed it: AskUserQuestion's with their answers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_input: Option<Value>,
+    /// The helper's own word, never the app's: the app couldn't be asked (not reachable, or it dropped the request). It
+    /// tells that apart from a user who said no.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub failed: bool,
 }
 
 /// The JSON the permission prompt tool must return to claude.
@@ -52,9 +59,9 @@ mod answer_tests {
         let input = json!({"questions": [{"question": "Which database?", "options": [{"label": "Postgres"}, {"label": "SQLite"}]}]});
         let mut answered = input.clone();
         answered["answers"] = json!({"Which database?": "SQLite"});
-        let resp = BridgeResponse { allow: true, message: None, updated_input: Some(answered.clone()) };
+        let resp = BridgeResponse { allow: true, message: None, updated_input: Some(answered.clone()), failed: false };
         assert_eq!(decision_json(&input, &resp), json!({"behavior": "allow", "updatedInput": answered}));
-        let plain = BridgeResponse { allow: true, message: None, updated_input: None };
+        let plain = BridgeResponse { allow: true, message: None, updated_input: None, failed: false };
         assert_eq!(decision_json(&input, &plain)["updatedInput"], input);
         // Older helpers' replies (no updated_input) still read.
         let old: BridgeResponse = serde_json::from_str(r#"{"allow":true,"message":null}"#).unwrap();

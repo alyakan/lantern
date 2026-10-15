@@ -346,7 +346,7 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
                 Ok(text) => (true, text),
                 Err(text) => (false, text),
             };
-            permission::protocol::BridgeResponse { allow, message: Some(text), updated_input: None }
+            permission::protocol::BridgeResponse { allow, message: Some(text), updated_input: None, failed: false }
         })
     }));
     Ok(slot)

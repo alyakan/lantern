@@ -552,10 +552,19 @@ impl Monitor {
                 let query = s("query").map(str::to_lowercase);
                 let method = s("method");
                 let status = s("status");
-                let found: Vec<&Tx> = list
-                    .transactions
+                // Newest first; with `before`, only the requests older than that one (the page after the last one read).
+                let newest_first: Vec<&Tx> = list.transactions.iter().rev().collect();
+                let older = match s("before") {
+                    Some(before) => {
+                        let before = self.resolve_id(folder, before)?;
+                        let at = newest_first.iter().position(|t| t.id == before).ok_or("No captured request has that id now (Network Monitor may have dropped it). Search again with network_requests.")?;
+                        &newest_first[at + 1..]
+                    }
+                    None => &newest_first[..],
+                };
+                let found: Vec<&Tx> = older
                     .iter()
-                    .rev()
+                    .copied()
                     .filter(|t| query.as_ref().is_none_or(|q| visible_url(&t.url).to_lowercase().contains(q)))
                     .filter(|t| method.is_none_or(|m| t.method.eq_ignore_ascii_case(m)))
                     .filter(|t| status.is_none_or(|st| t.status.is_some_and(|code| code.to_string().starts_with(st)) || (st == "failed" && t.state == "failed")))
@@ -563,13 +572,13 @@ impl Monitor {
                 if found.is_empty() {
                     return Ok(format!("None of the {} requests Network Monitor has captured match.", list.transactions.len()));
                 }
-                let now = now_ms() as f64;
                 let mut out = format!("{} of {} captured requests match, newest first{}:\n", found.len(), list.transactions.len(), if found.len() > limit { format!(" (showing {limit})") } else { String::new() });
                 for t in found.iter().take(limit) {
-                    out.push_str(&format!("{}  {}  {} {}  {}  ({}{})\n", t.id, ago(now - t.started_at), t.method, status_text(t), visible_url(&t.url), size_text(t.response_size), t.duration_ms.map(|d| format!(", {d:.0} ms")).unwrap_or_default()));
+                    out.push_str(&format!("{}  {}  {} {}  {}  ({}{})\n", t.id, iso_utc(t.started_at), t.method, status_text(t), visible_url(&t.url), size_text(t.response_size), t.duration_ms.map(|d| format!(", {d:.0} ms")).unwrap_or_default()));
                 }
+                let more = if found.len() > limit { format!("\nOlder: network_requests with before={}.", found[limit - 1].id) } else { String::new() };
                 // URLs come from the network too.
-                Ok(format!("{}\nRead one with network_request and its id.", fenced(&out)))
+                Ok(format!("{}\nRead one with network_request and its id.{more}", fenced(&out)))
             }
             "network_request" => {
                 let id = s("id").ok_or("Give the request's id (from network_requests).")?;
@@ -604,7 +613,11 @@ impl Monitor {
             "network_unwatch" => {
                 let folder = folder_or_err()?;
                 let label = s("label").ok_or("Give the label of the watch to remove.")?;
-                if self.unwatch(folder, label) { Ok(format!("Stopped watching \"{label}\".")) } else { Err(format!("There's no watch called \"{label}\" in this folder.")) }
+                if self.unwatch(folder, label) {
+                    return Ok(format!("Stopped watching \"{label}\"."));
+                }
+                let labels: Vec<String> = self.store.watches(folder).into_iter().map(|w| format!("\"{}\"", w.label)).collect();
+                Err(if labels.is_empty() { format!("There's no watch called \"{label}\" in this folder, and it has none.") } else { format!("There's no watch called \"{label}\" in this folder. Its watches are: {}.", labels.join(", ")) })
             }
             "network_watches" => {
                 let folder = folder_or_err()?;
@@ -998,14 +1011,22 @@ fn size_text(bytes: u64) -> String {
     }
 }
 
-fn ago(ms: f64) -> String {
-    let s = (ms / 1000.0).max(0.0) as u64;
-    match s {
-        0..=59 => format!("{s}s ago"),
-        60..=3599 => format!("{}m ago", s / 60),
-        3600..=86399 => format!("{}h ago", s / 3600),
-        _ => format!("{}d ago", s / 86400),
-    }
+/// A time in ms since the epoch as ISO 8601 in UTC, to the second ("2026-10-15T09:30:05Z"): the same on every read, unlike
+/// "5s ago".
+fn iso_utc(ms: f64) -> String {
+    let secs = (ms / 1000.0).max(0.0) as i64;
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // Days since 1970-01-01 to a civil date (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
 fn now_ms() -> u64 {
@@ -1015,16 +1036,18 @@ fn now_ms() -> u64 {
 /// The network_* tools' definitions, for the helper's tools/list.
 pub fn tool_list() -> Vec<Value> {
     let id = json!({"type": "string", "description": "The request's id, as network_requests lists it (its first 8 characters are enough when they're unique)."});
+    let method = |what: &str| json!({"type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "CONNECT", "TRACE"], "description": what});
     vec![
         json!({
             "name": "network_requests",
-            "description": "Search the HTTP(S) traffic the user's Network Monitor app has captured (their app or device sends it through that proxy). Newest first: id, when, method, status, URL, size, time taken.",
+            "description": "Search the HTTP(S) traffic the user's Network Monitor app has captured (their app or device sends it through that proxy). Newest first: id, start time (UTC), method, status, URL, size, time taken. A long list ends with the call that reads the next, older page.",
             "inputSchema": {"type": "object", "properties": {
                 "query": {"type": "string", "description": "Text the URL contains (host, path or query)."},
-                "method": {"type": "string", "description": "GET, POST…"},
+                "method": method("Only this method."),
                 "status": {"type": "string", "description": "A status code or its start (\"4\" for every 4xx), or \"failed\"."},
-                "limit": {"type": "integer", "description": "How many to list (default 25, at most 200)."}
-            }}
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 25, "description": "How many to list."},
+                "before": {"type": "string", "description": "A request's id: list only the requests older than it. The previous reply's last line gives the one for the next page."}
+            }, "additionalProperties": false}
         }),
         json!({
             "name": "network_request",
@@ -1032,35 +1055,35 @@ pub fn tool_list() -> Vec<Value> {
             "inputSchema": {"type": "object", "properties": {
                 "id": id,
                 "path": {"type": "string", "description": "Only this part of a JSON response, e.g. \"data.items[0]\" or \"meta.pagination\"."},
-                "max_chars": {"type": "integer", "description": "How much of the body to return (default 20000)."}
-            }, "required": ["id"]}
+                "max_chars": {"type": "integer", "minimum": 500, "maximum": 200_000, "default": 20_000, "description": "How much of the body to return."}
+            }, "required": ["id"], "additionalProperties": false}
         }),
         json!({
             "name": "network_watch",
             "description": "Save a watch for requests the user says matter, in this folder: Lantern's Network tab then lists every captured request that matches, live, with its response. A watch with the same label is replaced.",
             "inputSchema": {"type": "object", "properties": {
-                "label": {"type": "string", "description": "A short name the user will recognise (\"Checklist list\")."},
-                "url": {"type": "string", "description": "Text the URL contains; `*` stands for anything (\"api.example.com/v1/checklists*\"). Case doesn't matter."},
-                "method": {"type": "string", "description": "Only this method; omit for any."}
-            }, "required": ["label", "url"]}
+                "label": {"type": "string", "maxLength": 60, "description": "A short name the user will recognise (\"Checklist list\")."},
+                "url": {"type": "string", "maxLength": 500, "description": "Text the URL contains; `*` stands for anything (\"api.example.com/v1/checklists*\"). Case doesn't matter."},
+                "method": method("Only this method; omit for any.")
+            }, "required": ["label", "url"], "additionalProperties": false}
         }),
         json!({
             "name": "network_unwatch",
-            "description": "Remove one of this folder's watches.",
-            "inputSchema": {"type": "object", "properties": {"label": {"type": "string"}}, "required": ["label"]}
+            "description": "Remove one of this folder's watches. network_watches lists their labels.",
+            "inputSchema": {"type": "object", "properties": {"label": {"type": "string", "maxLength": 60, "description": "The label of the watch to remove, as network_watches lists it."}}, "required": ["label"], "additionalProperties": false}
         }),
         json!({
             "name": "network_watches",
             "description": "This folder's watches, and how many captured requests each has matched.",
-            "inputSchema": {"type": "object", "properties": {}}
+            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
         }),
         json!({
             "name": "network_summarize",
-            "description": "Show your summary of a response in the Network tab, on that request. Read it first with network_request. Write markdown for someone scanning: what the response holds (key fields and values, counts), then anything odd (nulls, errors, empty lists, unexpected values). Don't repeat the method, URL or status, or paste the raw JSON: the tab shows those around your summary.",
+            "description": "Show your summary of a response in the Network tab, on that request; it replaces an earlier summary of the same request. Read it first with network_request. Write markdown for someone scanning: what the response holds (key fields and values, counts), then anything odd (nulls, errors, empty lists, unexpected values). Don't repeat the method, URL or status, or paste the raw JSON: the tab shows those around your summary.",
             "inputSchema": {"type": "object", "properties": {
                 "id": id,
                 "summary": {"type": "string", "description": "Markdown."}
-            }, "required": ["id", "summary"]}
+            }, "required": ["id", "summary"], "additionalProperties": false}
         }),
     ]
 }
@@ -1261,6 +1284,40 @@ mod tests {
         assert!(none.starts_with("None of the 2"));
         *fake.down.lock().unwrap() = true;
         assert!(m.call(None, "network_requests", &json!({})).unwrap_err().contains("isn't running"));
+    }
+
+    #[test]
+    fn times_are_absolute_and_a_long_list_pages_back_with_before() {
+        assert_eq!(iso_utc(0.0), "1970-01-01T00:00:00Z");
+        assert_eq!(iso_utc(1_781_515_805_000.0), "2026-06-15T09:30:05Z");
+        assert_eq!(iso_utc(951_782_400_000.0), "2000-02-29T00:00:00Z");
+        let (fake, m) = monitor();
+        let id = |i: u64| format!("{i:08}-0000-0000-0000-000000000000");
+        for i in 1..=5 {
+            fake.add(tx(&id(i), i, "GET", &format!("https://x/page/{i}"), "completed"), "{}");
+        }
+        let first = m.call(None, "network_requests", &json!({"limit": 2})).unwrap();
+        assert!(first.contains("1970-01-01T00:00:05Z") && !first.contains(" ago"), "{first}");
+        assert!(first.contains("/page/5") && first.contains("/page/4") && !first.contains("/page/3"), "{first}");
+        assert!(first.ends_with(&format!("Older: network_requests with before={}.", id(4))), "{first}");
+        let second = m.call(None, "network_requests", &json!({"limit": 2, "before": id(4)})).unwrap();
+        assert!(second.contains("/page/3") && second.contains("/page/2") && !second.contains("/page/4"), "{second}");
+        assert!(second.ends_with(&format!("before={}.", id(2))), "{second}");
+        let last = m.call(None, "network_requests", &json!({"limit": 2, "before": &id(2)[..8]})).unwrap();
+        assert!(last.contains("/page/1") && !last.contains("Older:"), "{last}");
+        let gone = m.call(None, "network_requests", &json!({"before": id(9)})).unwrap_err();
+        assert!(gone.contains("No captured request has that id"), "{gone}");
+    }
+
+    #[test]
+    fn removing_a_watch_that_is_not_there_lists_the_ones_that_are() {
+        let (_fake, m) = monitor();
+        let none = m.call(Some("/p"), "network_unwatch", &json!({"label": "Users"})).unwrap_err();
+        assert!(none.contains("no watch called \"Users\"") && none.contains("has none"), "{none}");
+        m.call(Some("/p"), "network_watch", &json!({"label": "Orders", "url": "/orders"})).unwrap();
+        m.call(Some("/p"), "network_watch", &json!({"label": "Cart", "url": "/cart"})).unwrap();
+        let some = m.call(Some("/p"), "network_unwatch", &json!({"label": "Users"})).unwrap_err();
+        assert!(some.contains("Its watches are: \"Orders\", \"Cart\"."), "{some}");
     }
 
     #[test]

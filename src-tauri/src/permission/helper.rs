@@ -1,3 +1,4 @@
+use super::catalogue::{self, Offer};
 use super::protocol::{decision_json, BridgeRequest, BridgeResponse};
 use serde_json::{json, Value};
 
@@ -10,209 +11,175 @@ use std::os::unix::net::UnixStream;
 /// (`steps_guide`), and what the Changes pane compares while reviewing (`review_target`).
 pub const LANTERN_TOOLS: &[&str] = &["steps_guide", "review_target"];
 
-/// The tools only the main agent has (see orchestra.rs). Each returns at once: this helper answers one message at a
+/// The tools only a Team's lead has (see orchestra.rs). Each returns at once: this helper answers one message at a
 /// time, so a call that waited would hold up the permission prompts behind it.
 pub const ORCHESTRA_TOOLS: &[&str] = &["spawn_agent", "list_agents", "read_agent", "message_agent", "stop_agent", "propose_merge"];
 
-fn orchestra_tool_list() -> Vec<Value> {
-    let id = json!({"type": "string", "description": "The worker's id, as spawn_agent or list_agents gave it (w1, w2…)."});
-    vec![
-        json!({
-            "name": "spawn_agent",
-            "description": "Start a worker agent with a chat of its own. Returns at once with its id; it runs on its own and you get a note when it finishes a turn. Its brief is its whole task: write it for someone who has not seen this conversation.",
-            "inputSchema": {"type": "object", "properties": {
-                "name": {"type": "string", "description": "A short name for the worker (a few words), shown on the canvas and used for its branch."},
-                "brief": {"type": "string", "description": "The task: goal, files or areas involved, constraints, how to verify, what done looks like."},
-                "isolation": {"type": "string", "enum": ["worktree", "shared"], "description": "worktree (default): its own git worktree and branch. shared: your folder, for read-only work (research or review). Its edit tools are off, but its shell commands run in your folder, so don't give it work that writes."},
-                "provider": {"type": "string", "description": "Which agent provider runs it, from the providers your instructions list; omit to use yours. Only a listed one is available."},
-                "model": {"type": "string", "description": "A model for it, as the provider that runs it names models (for claude: sonnet, opus, haiku…); omit for claude's sonnet (another provider's default when it isn't claude). Use opus only for work that needs it: every worker spends the user's plan."}
-            }, "required": ["name", "brief"]}
-        }),
-        json!({
-            "name": "list_agents",
-            "description": "Every worker you started: id, name, status, branch, turns and its latest message.",
-            "inputSchema": {"type": "object", "properties": {}}
-        }),
-        json!({
-            "name": "read_agent",
-            "description": "A worker's conversation, as plain entries. Without a cursor it returns the latest entries; with one, the entries from that index on (the reply says which cursor reads the next page).",
-            "inputSchema": {"type": "object", "properties": {
-                "id": id,
-                "cursor": {"type": "integer", "description": "Index of the first entry to return (0 is the start)."},
-                "limit": {"type": "integer", "description": "How many entries (default 30, at most 100)."}
-            }, "required": ["id"]}
-        }),
-        json!({
-            "name": "message_agent",
-            "description": "Send a worker an instruction or an answer. It appears in the worker's chat as from the main agent.",
-            "inputSchema": {"type": "object", "properties": {"id": id, "text": {"type": "string"}}, "required": ["id", "text"]}
-        }),
-        json!({
-            "name": "stop_agent",
-            "description": "Stop a worker. Its worktree and branch are kept.",
-            "inputSchema": {"type": "object", "properties": {"id": id}, "required": ["id"]}
-        }),
-        json!({
-            "name": "propose_merge",
-            "description": "Ask the user to merge a worker's branch into the main checkout. Only the user can approve it; you get a note with their answer.",
-            "inputSchema": {"type": "object", "properties": {"id": id, "summary": {"type": "string", "description": "What the branch does and what you checked, in plain language."}}, "required": ["id", "summary"]}
-        }),
-    ]
+/// A tool call's result as the model reads it.
+fn result_json(text: String, is_error: bool) -> Value {
+    json!({"isError": is_error, "content": [{"type": "text", "text": text}]})
 }
 
-/// Answers one MCP JSON-RPC message. Returns None for notifications (no `id`).
+/// What the app answered a tool call with: its message when it gave one, else a line that says what to do about it.
+fn app_result(tool: &str, resp: BridgeResponse) -> Value {
+    let text = resp.message.unwrap_or_else(|| {
+        if resp.allow {
+            format!("{tool} finished; Lantern had nothing to add.")
+        } else {
+            format!("{tool} failed inside Lantern without a reason; try once more, then tell the user.")
+        }
+    });
+    result_json(text, !resp.allow)
+}
+
+/// One MCP server session: which tools this helper's chat has, and the protocol revision negotiated with its client.
+pub struct Server {
+    offer: Offer,
+    version: &'static str,
+}
+
+impl Server {
+    pub fn new(offer: Offer) -> Self {
+        Self { offer, version: catalogue::negotiate(None) }
+    }
+
+    /// Answers one MCP JSON-RPC message. Returns None for notifications (no `id`). `initialize` settles the revision the
+    /// tool list is then described in. A caller that claims the lead role without being its helper gets nowhere: the app
+    /// lets an orchestra call through only when the OS says the helper is that chat's own process (see PermissionBridge).
+    pub fn handle(&mut self, msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeResponse) -> Option<Value> {
+        let id = msg.get("id")?.clone();
+        let result = match msg["method"].as_str().unwrap_or("") {
+            "initialize" => {
+                self.version = catalogue::negotiate(msg["params"]["protocolVersion"].as_str());
+                json!({
+                    "protocolVersion": self.version,
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "lantern", "version": env!("CARGO_PKG_VERSION")},
+                    "instructions": catalogue::instructions(self.offer)
+                })
+            }
+            "tools/list" => json!({"tools": catalogue::tool_list(self.offer, self.version)}),
+            "tools/call" => self.call(&msg["params"], ask),
+            // MCP's keep-alive: answered with nothing.
+            "ping" => json!({}),
+            // A request this server doesn't have: the client is told so, rather than given an empty result.
+            _ => return Some(json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "Method not found"}})),
+        };
+        Some(json!({"jsonrpc": "2.0", "id": id, "result": result}))
+    }
+
+    fn call(&self, params: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeResponse) -> Value {
+        let tool = params["name"].as_str().unwrap_or("");
+        let args = &params["arguments"];
+        match tool {
+            // The CLI's permission prompt: the one call whose arguments are a request to the user.
+            "approve" => {
+                let req = BridgeRequest::permission(args["tool_name"].as_str().unwrap_or("").to_string(), args["input"].clone(), args["tool_use_id"].as_str().map(String::from));
+                let resp = ask(req.clone());
+                json!({"content": [{"type": "text", "text": decision_json(&req.input, &resp).to_string()}]})
+            }
+            t if ORCHESTRA_TOOLS.contains(&t) => {
+                if self.offer.orchestrator {
+                    app_result(t, ask(BridgeRequest { tool_name: t.into(), input: args.clone(), tool_use_id: None, orchestra: true, network: false, review: false }))
+                } else {
+                    result_json(format!("{t} is only available to a Team's lead."), true)
+                }
+            }
+            "steps_guide" => match steps_guide_text(args["flavour"].as_str().unwrap_or("")) {
+                Ok(text) => result_json(text, false),
+                Err(text) => result_json(text, true),
+            },
+            // The app is told what the pane should compare, and answers once the window has it.
+            "review_target" => match ReviewTargetArgs::parse(args) {
+                Ok(target) => {
+                    let resp = ask(BridgeRequest { tool_name: tool.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: false, review: true });
+                    if resp.allow && resp.message.is_none() {
+                        result_json(target.says(), false)
+                    } else {
+                        app_result(tool, resp)
+                    }
+                }
+                Err(text) => result_json(text, true),
+            },
+            // Answered by the app at once (it reads Network Monitor on loopback), for any chat.
+            t if crate::network::TOOLS.contains(&t) => app_result(t, ask(BridgeRequest { tool_name: t.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: true, review: false })),
+            "reproduce" if self.offer.steps => {
+                let resp = ask(BridgeRequest::permission(REPRODUCE.into(), args.clone(), None));
+                if resp.failed {
+                    return result_json("Lantern couldn't show the reproduce card. Ask the user in your message to reproduce it and end your turn.".into(), true);
+                }
+                let note = resp.message.filter(|m| !m.trim().is_empty()).map(|m| format!(" Their note: {m}")).unwrap_or_default();
+                let text = if resp.allow { format!("The user reproduced the problem.{note}") } else { format!("The user could not reproduce the problem.{note}") };
+                json!({"content": [{"type": "text", "text": text}]})
+            }
+            "reproduce" => result_json("reproduce only works in Step by step's Debug flavour. Ask the user to reproduce it in your message and end your turn.".into(), true),
+            other => {
+                let listed: Vec<String> = catalogue::tool_list(self.offer, self.version).iter().filter_map(|t| t["name"].as_str()).filter(|n| *n != "approve").map(String::from).collect();
+                result_json(format!("Lantern has no tool \"{other}\". Its tools here are: {}.", listed.join(", ")), true)
+            }
+        }
+    }
+}
+
+/// Answers one MCP JSON-RPC message in a fresh session (a chat that isn't a Team's lead, and isn't in Step by step).
 pub fn handle_message(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeResponse) -> Option<Value> {
-    handle_message_as(msg, ask, false)
+    handle_message_as(msg, ask, Offer::default())
 }
 
-/// `orchestrator`: this is the main agent's helper (`LANTERN_ROLE=main`), which also offers the orchestra tools. That only
-/// decides what is listed: the app lets a call through when the OS says the helper is the main agent's own process
-/// (see PermissionBridge), so a helper that claims the role without being its helper gets nowhere.
-pub fn handle_message_as(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeResponse, orchestrator: bool) -> Option<Value> {
-    let id = msg.get("id")?.clone();
-    let result = match msg["method"].as_str().unwrap_or("") {
-        "initialize" => json!({
-            "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
-            "capabilities": {"tools": {}},
-            "serverInfo": {"name": "lantern", "version": env!("CARGO_PKG_VERSION")}
-        }),
-        "tools/list" => {
-            let mut tools = base_tools();
-            tools.extend(crate::network::tool_list());
-            if orchestrator {
-                tools.extend(orchestra_tool_list());
-            }
-            json!({"tools": tools})
-        }
-        // Matched before the fallback below, which treats any other tool name as an `approve` call.
-        "tools/call" if ORCHESTRA_TOOLS.contains(&msg["params"]["name"].as_str().unwrap_or("")) => {
-            let tool = msg["params"]["name"].as_str().unwrap_or("");
-            if orchestrator {
-                let resp = ask(BridgeRequest { tool_name: tool.into(), input: msg["params"]["arguments"].clone(), tool_use_id: None, orchestra: true, network: false });
-                let text = resp.message.unwrap_or_else(|| if resp.allow { "Done.".into() } else { "That didn't work.".into() });
-                json!({"isError": !resp.allow, "content": [{"type": "text", "text": text}]})
-            } else {
-                json!({"isError": true, "content": [{"type": "text", "text": format!("{tool} is only available to the main agent.")}]})
-            }
-        }
-        "tools/call" if msg["params"]["name"] == "steps_guide" => {
-            let asked = msg["params"]["arguments"]["flavour"].as_str().unwrap_or("");
-            json!({"content": [{"type": "text", "text": steps_guide_text(asked)}]})
-        }
-        "tools/call" if msg["params"]["name"] == "review_target" => match review_target(&msg["params"]["arguments"]) {
-            Ok(text) => json!({"content": [{"type": "text", "text": text}]}),
-            Err(text) => json!({"isError": true, "content": [{"type": "text", "text": text}]}),
-        },
-        // Answered by the app at once (it reads Network Monitor on loopback), for any chat.
-        "tools/call" if crate::network::TOOLS.contains(&msg["params"]["name"].as_str().unwrap_or("")) => {
-            let tool = msg["params"]["name"].as_str().unwrap_or("");
-            let resp = ask(BridgeRequest { tool_name: tool.into(), input: msg["params"]["arguments"].clone(), tool_use_id: None, orchestra: false, network: true });
-            let text = resp.message.unwrap_or_else(|| if resp.allow { "Done.".into() } else { "That didn't work.".into() });
-            json!({"isError": !resp.allow, "content": [{"type": "text", "text": text}]})
-        }
-        "tools/call" if msg["params"]["name"] == "reproduce" => {
-            let resp = ask(BridgeRequest::permission(REPRODUCE.into(), msg["params"]["arguments"].clone(), None));
-            let note = resp.message.filter(|m| !m.trim().is_empty()).map(|m| format!(" Their note: {m}")).unwrap_or_default();
-            let text = if resp.allow { format!("The user reproduced the problem.{note}") } else { format!("The user could not reproduce the problem.{note}") };
-            json!({"content": [{"type": "text", "text": text}]})
-        }
-        "tools/call" => {
-            let args = &msg["params"]["arguments"];
-            let req = BridgeRequest::permission(
-                args["tool_name"].as_str().unwrap_or("").to_string(),
-                args["input"].clone(),
-                args["tool_use_id"].as_str().map(String::from),
-            );
-            let resp = ask(req.clone());
-            json!({"content": [{"type": "text", "text": decision_json(&req.input, &resp).to_string()}]})
-        }
-        // MCP's keep-alive: answered with nothing.
-        "ping" => json!({}),
-        // A request this server doesn't have: the client is told so, rather than given an empty result.
-        _ => return Some(json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": "Method not found"}})),
-    };
-    Some(json!({"jsonrpc": "2.0", "id": id, "result": result}))
+/// One message in a fresh session of a helper that offers `offer` (see `Server`).
+pub fn handle_message_as(msg: &Value, ask: &dyn Fn(BridgeRequest) -> BridgeResponse, offer: Offer) -> Option<Value> {
+    Server::new(offer).handle(msg, ask)
 }
 
-/// What steps_guide answers: the rules every flavour shares, then the asked flavour's section (or every flavour's).
-pub fn steps_guide_text(flavour: &str) -> String {
+/// What steps_guide answers: the rules every flavour shares, then the asked flavour's section (or every flavour's). Err
+/// when there is no such flavour.
+pub fn steps_guide_text(flavour: &str) -> Result<String, String> {
     use crate::args::{flavour_guide, steps_rules, FLAVOURS};
     let one = (!flavour.trim().is_empty()).then(|| flavour_guide(flavour)).flatten();
     if !flavour.trim().is_empty() && one.is_none() {
-        return format!("There is no flavour {flavour:?}. Step by step's flavours are {}.", FLAVOURS.join(", "));
+        return Err(format!("There is no flavour {flavour:?}. Step by step's flavours are {}.", FLAVOURS.join(", ")));
     }
     let sections: Vec<String> = match one {
         Some(g) => vec![g.text],
         None => FLAVOURS.iter().filter_map(|f| flavour_guide(f)).map(|g| g.text).collect(),
     };
-    format!("{}\n\n{}", steps_rules(), sections.join("\n\n"))
+    Ok(format!("{}\n\n{}", steps_rules(), sections.join("\n\n")))
 }
 
-/// Checks a review_target call and says what the Changes pane shows now. The window reads the call itself (its card
-/// header, see stream_parser::summarize), so nothing is sent anywhere.
-fn review_target(args: &Value) -> Result<String, String> {
-    let pr = match &args["pr"] {
-        Value::Null => None,
-        v => Some(v.as_u64().filter(|n| (1..10_000_000).contains(n)).ok_or("`pr` is a pull request's number, or null for a local branch.")?),
-    };
-    let base = match &args["base"] {
-        Value::Null => None,
-        Value::String(s) if s.trim().is_empty() => None,
-        Value::String(s) if s.len() <= 200 && !s.starts_with('-') && !s.contains("..") && s.chars().all(|c| c.is_ascii_alphanumeric() || "._/-".contains(c)) => Some(s.trim().to_string()),
-        _ => return Err("`base` is a branch name, such as feat/core or origin/main.".into()),
-    };
-    Ok(match (pr, base) {
-        (Some(n), _) => format!("The Changes pane shows pull request #{n}'s changes now."),
-        (None, Some(b)) => format!("The Changes pane shows the checked-out branch's changes since {b} now."),
-        (None, None) => "The Changes pane shows the checked-out branch's changes now, against the branch Lantern finds it was built on.".into(),
-    })
+/// What a review_target call names: a pull request, or the checked-out branch against `base` (None: Lantern finds it).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReviewTargetArgs {
+    pub pr: Option<u64>,
+    pub base: Option<String>,
 }
 
-fn base_tools() -> Vec<Value> {
-    vec![
-        json!({
-            "name": "approve",
-            "description": "Ask the Lantern user to allow or deny a tool call",
-            "inputSchema": {
-                "type": "object",
-                "properties": {"tool_name": {"type": "string"}, "input": {"type": "object"}, "tool_use_id": {"type": "string"}},
-                "required": ["tool_name", "input"]
-            }
-        }),
-        json!({
-            "name": "steps_guide",
-            "description": "How Lantern's Step-by-step mode works: the page rules, and each flavour's (Build, Learn, Review, Debug, Architecture) headings and format. Read it before working in a flavour you aren't sure of, or when Lantern says it couldn't read a page.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {"flavour": {"type": "string", "description": "One flavour (Build, Learn, Review, Debug or Architecture); leave it out for all of them."}}
-            }
-        }),
-        json!({
-            "name": "review_target",
-            "description": "Set what Lantern's Changes pane compares while you review: a pull request by its number, or the checked-out branch against the branch it is built on. Call it when a review starts, and whenever what you review changes (you opened a PR for the branch, or moved to another PR).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "pr": {"type": ["integer", "null"], "description": "The pull request's number; null for the checked-out local branch."},
-                    "base": {"type": "string", "description": "For a local branch: the branch it is stacked on (its PR's base, or the branch it was cut from). Leave it out to let Lantern find it."}
-                }
-            }
-        }),
-        json!({
-            "name": "reproduce",
-            "description": "Debug mode: ask the user to reproduce the bug now, with your diagnostic logging in place. Waits until they have, and returns whether they could and anything they noted (e.g. pasted logs). Call it instead of ending your turn to ask them.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "steps": {"type": "string", "description": "Markdown: exactly what to do to trigger the bug, and where the logs will show up."}
-                },
-                "required": ["steps"]
-            }
-        }),
-    ]
+impl ReviewTargetArgs {
+    /// Checks a call's arguments. The helper does it before asking the app, and the app again before it shows anything.
+    pub fn parse(args: &Value) -> Result<Self, String> {
+        let pr = match &args["pr"] {
+            Value::Null => None,
+            v => Some(v.as_u64().filter(|n| (1..10_000_000).contains(n)).ok_or("`pr` is a pull request's number, or null for a local branch.")?),
+        };
+        let base = match &args["base"] {
+            Value::Null => None,
+            Value::String(s) if s.trim().is_empty() => None,
+            Value::String(s) if s.len() <= 200 && !s.starts_with('-') && !s.contains("..") && s.chars().all(|c| c.is_ascii_alphanumeric() || "._/-".contains(c)) => Some(s.trim().to_string()),
+            _ => return Err("`base` is a branch name, such as feat/core or origin/main.".into()),
+        };
+        Ok(Self { pr, base })
+    }
+
+    /// What the model reads back: what the Changes pane shows now.
+    pub fn says(&self) -> String {
+        match (self.pr, &self.base) {
+            (Some(n), _) => format!("The Changes pane shows pull request #{n}'s changes now."),
+            (None, Some(b)) => format!("The Changes pane shows the checked-out branch's changes since {b} now."),
+            (None, None) => "The Changes pane shows the checked-out branch's changes now, against the branch Lantern finds it was built on.".into(),
+        }
+    }
 }
 
-/// Sends the request to the app and waits for the user's answer. Any failure means deny.
+/// Sends the request to the app and waits for the user's answer. Any failure means deny (and says `failed`).
 pub fn ask_bridge(socket: Option<&str>, req: &BridgeRequest) -> BridgeResponse {
     let attempt = || -> io::Result<BridgeResponse> {
         let path = socket.ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "LANTERN_SOCKET is not set"))?;
@@ -226,17 +193,19 @@ pub fn ask_bridge(socket: Option<&str>, req: &BridgeRequest) -> BridgeResponse {
         allow: false,
         message: Some(format!("Lantern could not show the permission prompt ({e}), so the action was denied.")),
         updated_input: None,
+        failed: true,
     })
 }
 
 /// The `--permission-helper` main loop: newline-delimited JSON-RPC on stdin/stdout.
 pub fn run_helper(input: impl BufRead, output: impl Write, socket: Option<&str>) -> io::Result<()> {
-    run_helper_as(input, output, socket, false)
+    run_helper_as(input, output, socket, Offer::default())
 }
 
-/// `orchestrator`: the main agent's helper (`LANTERN_ROLE=main`), which also serves the orchestra tools.
-pub fn run_helper_as(mut input: impl BufRead, mut output: impl Write, socket: Option<&str>, orchestrator: bool) -> io::Result<()> {
+/// `offer`: which tools this helper's chat has (`LANTERN_ROLE`, `LANTERN_STEPS`: see `Offer::from_env`).
+pub fn run_helper_as(mut input: impl BufRead, mut output: impl Write, socket: Option<&str>, offer: Offer) -> io::Result<()> {
     let ask = |req: BridgeRequest| ask_bridge(socket, &req);
+    let mut server = Server::new(offer);
     let mut buf = Vec::new();
     loop {
         buf.clear();
@@ -245,7 +214,7 @@ pub fn run_helper_as(mut input: impl BufRead, mut output: impl Write, socket: Op
         }
         // Bytes that aren't a JSON message are skipped: a bad line must not end the helper, or every later prompt is denied.
         let Ok(msg) = serde_json::from_slice::<Value>(&buf) else { continue };
-        if let Some(reply) = handle_message_as(&msg, &ask, orchestrator) {
+        if let Some(reply) = server.handle(&msg, &ask) {
             writeln!(output, "{reply}")?;
             output.flush()?;
         }
@@ -257,8 +226,11 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    const LEAD: Offer = Offer { orchestrator: true, steps: false };
+    const STEPS: Offer = Offer { orchestrator: false, steps: true };
+
     fn allow_all(_: BridgeRequest) -> BridgeResponse {
-        BridgeResponse { allow: true, message: None, updated_input: None }
+        BridgeResponse { allow: true, message: None, updated_input: None, failed: false }
     }
 
     fn call(tool: &str, input: Value) -> Value {
@@ -271,12 +243,37 @@ mod tests {
     }
 
     #[test]
-    fn initialize_echoes_protocol_version() {
-        let r = handle_message(&json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-11-25"}}), &allow_all).unwrap();
+    fn initialize_echoes_a_protocol_version_lantern_implements_and_answers_another_with_its_latest() {
+        let init = |v: Value| handle_message(&json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": v}}), &allow_all).unwrap();
+        let r = init(json!("2025-06-18"));
         assert_eq!(r["id"], 0);
-        assert_eq!(r["result"]["protocolVersion"], "2025-11-25");
+        assert_eq!(r["result"]["protocolVersion"], "2025-06-18");
         assert_eq!(r["result"]["serverInfo"]["name"], "lantern");
         assert!(r["result"]["capabilities"]["tools"].is_object());
+        assert_eq!(init(json!("2099-01-01"))["result"]["protocolVersion"], "2025-11-25");
+        assert_eq!(init(json!(null))["result"]["protocolVersion"], "2025-11-25");
+    }
+
+    #[test]
+    fn initialize_carries_instructions_for_this_chats_tools() {
+        let init = |offer| handle_message_as(&json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}}), &allow_all, offer).unwrap()["result"]["instructions"].as_str().unwrap().to_string();
+        let plain = init(Offer::default());
+        assert!(plain.contains("[Lantern: ") && plain.contains("network_summarize") && !plain.contains("reproduce") && !plain.contains("spawn_agent"));
+        assert!(init(STEPS).contains("reproduce") && !init(STEPS).contains("spawn_agent"));
+        assert!(init(LEAD).contains("spawn_agent") && !init(LEAD).contains("reproduce"));
+    }
+
+    #[test]
+    fn titles_and_annotations_follow_the_version_negotiated_at_initialize() {
+        let mut server = Server::new(Offer::default());
+        let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+        let init = |v: &str| json!({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": v}});
+        server.handle(&init("2024-11-05"), &allow_all);
+        let old = server.handle(&list, &allow_all).unwrap();
+        assert!(old["result"]["tools"][0].get("annotations").is_none() && old["result"]["tools"][0].get("title").is_none());
+        server.handle(&init("2025-06-18"), &allow_all);
+        let new = server.handle(&list, &allow_all).unwrap();
+        assert!(new["result"]["tools"][0]["annotations"].is_object() && new["result"]["tools"][0]["title"].is_string());
     }
 
     #[test]
@@ -295,7 +292,7 @@ mod tests {
         let seen = std::cell::RefCell::new(None);
         let r = handle_message(&call("Bash", json!({"command": "npm test"})), &|req| {
             *seen.borrow_mut() = Some(req);
-            BridgeResponse { allow: true, message: None, updated_input: None }
+            BridgeResponse { allow: true, message: None, updated_input: None, failed: false }
         })
         .unwrap();
         assert_eq!(decision(&r), json!({"behavior": "allow", "updatedInput": {"command": "npm test"}}));
@@ -306,7 +303,7 @@ mod tests {
 
     #[test]
     fn deny_has_default_message() {
-        let r = handle_message(&call("Bash", json!({"command": "rm -rf x"})), &|_| BridgeResponse { allow: false, message: None, updated_input: None }).unwrap();
+        let r = handle_message(&call("Bash", json!({"command": "rm -rf x"})), &|_| BridgeResponse { allow: false, message: None, updated_input: None, failed: false }).unwrap();
         assert_eq!(decision(&r), json!({"behavior": "deny", "message": "The user denied this action."}));
     }
 
@@ -314,18 +311,72 @@ mod tests {
     fn reproduce_asks_the_user_and_reports_back_with_their_note() {
         let seen = std::cell::RefCell::new(None);
         let msg = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "reproduce", "arguments": {"steps": "1. Open settings"}}});
-        let r = handle_message(&msg, &|req| {
+        let r = handle_message_as(&msg, &|req| {
             *seen.borrow_mut() = Some(req);
-            BridgeResponse { allow: true, message: Some("[lantern-debug] token=null".into()), updated_input: None }
-        })
+            BridgeResponse { allow: true, message: Some("[lantern-debug] token=null".into()), updated_input: None, failed: false }
+        }, STEPS)
         .unwrap();
         assert_eq!(r["result"]["content"][0]["text"], "The user reproduced the problem. Their note: [lantern-debug] token=null");
         let req = seen.borrow().clone().unwrap();
         assert_eq!((req.tool_name.as_str(), req.input["steps"].as_str()), (REPRODUCE, Some("1. Open settings")));
-        let r = handle_message(&msg, &|_| BridgeResponse { allow: false, message: None, updated_input: None }).unwrap();
+        let r = handle_message_as(&msg, &|_| BridgeResponse { allow: false, message: None, updated_input: None, failed: false }, STEPS).unwrap();
         assert_eq!(r["result"]["content"][0]["text"], "The user could not reproduce the problem.");
-        let tools = handle_message(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &allow_all).unwrap();
+        assert!(r["result"].get("isError").is_none());
+        let tools = handle_message_as(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &allow_all, STEPS).unwrap();
         assert!(tool_names(&tools).contains(&"reproduce".to_string()));
+    }
+
+    #[test]
+    fn reproduce_outside_step_by_step_is_an_error_that_says_what_to_do_instead_and_asks_no_one() {
+        let called = std::cell::Cell::new(false);
+        let msg = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "reproduce", "arguments": {"steps": "x"}}});
+        let r = handle_message(&msg, &|_| {
+            called.set(true);
+            BridgeResponse { allow: true, message: None, updated_input: None, failed: false }
+        })
+        .unwrap();
+        assert!(!called.get());
+        assert_eq!(r["result"]["isError"], true);
+        assert_eq!(r["result"]["content"][0]["text"], "reproduce only works in Step by step's Debug flavour. Ask the user to reproduce it in your message and end your turn.");
+        let tools = handle_message(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &allow_all).unwrap();
+        assert!(!tool_names(&tools).contains(&"reproduce".to_string()));
+    }
+
+    #[test]
+    fn a_reproduce_card_that_could_not_be_shown_is_an_error_not_a_user_who_could_not_reproduce() {
+        let msg = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "reproduce", "arguments": {"steps": "x"}}});
+        let r = handle_message_as(&msg, &|_| BridgeResponse { allow: false, message: Some("Lantern could not show the permission prompt (x).".into()), updated_input: None, failed: true }, STEPS).unwrap();
+        assert_eq!(r["result"]["isError"], true);
+        assert_eq!(r["result"]["content"][0]["text"], "Lantern couldn't show the reproduce card. Ask the user in your message to reproduce it and end your turn.");
+        // Through the real client: a socket that isn't there is a failure, a user's "no" is not.
+        let socket_down = |req: BridgeRequest| ask_bridge(Some("/nonexistent/lantern.sock"), &req);
+        assert!(socket_down(BridgeRequest::permission("Reproduce".into(), json!({}), None)).failed);
+    }
+
+    #[test]
+    fn an_unknown_tool_is_an_error_naming_the_tools_there_are_and_only_approve_is_a_permission_prompt() {
+        let called = std::cell::Cell::new(false);
+        let msg = json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "frobnicate", "arguments": {"tool_name": "Bash", "input": {}}}});
+        let r = handle_message(&msg, &|_| {
+            called.set(true);
+            BridgeResponse { allow: true, message: None, updated_input: None, failed: false }
+        })
+        .unwrap();
+        assert!(!called.get(), "an unknown tool name reached the permission path");
+        assert_eq!(r["result"]["isError"], true);
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with("Lantern has no tool \"frobnicate\". Its tools here are: steps_guide, review_target, network_requests"), "{text}");
+        assert!(!text.contains("approve") && !text.contains("spawn_agent") && text.ends_with("network_summarize."), "{text}");
+        let tools = handle_message(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &allow_all).unwrap();
+        let approve = tools["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "approve").unwrap().clone();
+        assert_eq!(approve["description"], "Internal: Claude Code's permission prompt. Lantern calls it for the CLI; never call it yourself.");
+    }
+
+    #[test]
+    fn an_answer_with_no_words_tells_the_model_what_to_do() {
+        let msg = json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "network_watches", "arguments": {}}});
+        let r = handle_message(&msg, &|_| BridgeResponse { allow: false, message: None, updated_input: None, failed: false }).unwrap();
+        assert_eq!((r["result"]["isError"].clone(), r["result"]["content"][0]["text"].clone()), (json!(true), json!("network_watches failed inside Lantern without a reason; try once more, then tell the user.")));
     }
 
     fn tool_names(reply: &Value) -> Vec<String> {
@@ -335,9 +386,9 @@ mod tests {
     #[test]
     fn only_the_main_agents_helper_lists_the_orchestra_tools() {
         let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
-        let every_chats: Vec<&str> = ["approve", "steps_guide", "review_target", "reproduce"].into_iter().chain(crate::network::TOOLS.iter().copied()).collect();
-        assert_eq!(tool_names(&handle_message_as(&list, &allow_all, false).unwrap()), every_chats);
-        let names = tool_names(&handle_message_as(&list, &allow_all, true).unwrap());
+        let every_chats: Vec<&str> = ["approve", "steps_guide", "review_target"].into_iter().chain(crate::network::TOOLS.iter().copied()).collect();
+        assert_eq!(tool_names(&handle_message_as(&list, &allow_all, Offer::default()).unwrap()), every_chats);
+        let names = tool_names(&handle_message_as(&list, &allow_all, LEAD).unwrap());
         assert_eq!(names[..every_chats.len()], every_chats);
         assert_eq!(names[every_chats.len()..], *ORCHESTRA_TOOLS);
     }
@@ -348,8 +399,8 @@ mod tests {
         let msg = json!({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "network_watch", "arguments": {"label": "Users", "url": "/users"}}});
         let r = handle_message_as(&msg, &|req| {
             *seen.borrow_mut() = Some(req);
-            BridgeResponse { allow: true, message: Some("Watching.".into()), updated_input: None }
-        }, false)
+            BridgeResponse { allow: true, message: Some("Watching.".into()), updated_input: None, failed: false }
+        }, Offer::default())
         .unwrap();
         assert_eq!((r["result"]["isError"].clone(), r["result"]["content"][0]["text"].clone()), (json!(false), json!("Watching.")));
         let req = seen.borrow().clone().unwrap();
@@ -360,7 +411,7 @@ mod tests {
     #[test]
     fn spawn_agent_takes_an_optional_provider_and_leaves_the_choice_of_one_to_the_app() {
         let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
-        let tools = handle_message_as(&list, &allow_all, true).unwrap();
+        let tools = handle_message_as(&list, &allow_all, LEAD).unwrap();
         let spawn = tools["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "spawn_agent").unwrap().clone();
         assert_eq!(spawn["inputSchema"]["required"], json!(["name", "brief"]));
         // No list of names in the schema: which providers exist is up to the app, which answers a wrong one with the right ones.
@@ -375,8 +426,8 @@ mod tests {
         let msg = json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "spawn_agent", "arguments": {"name": "login", "brief": "Build it"}}});
         let r = handle_message_as(&msg, &|req| {
             *seen.borrow_mut() = Some(req);
-            BridgeResponse { allow: true, message: Some("Started w1.".into()), updated_input: None }
-        }, true)
+            BridgeResponse { allow: true, message: Some("Started w1.".into()), updated_input: None, failed: false }
+        }, LEAD)
         .unwrap();
         assert_eq!(r["result"]["content"][0]["text"], "Started w1.");
         assert_eq!(r["result"]["isError"], false);
@@ -384,7 +435,7 @@ mod tests {
         assert!(req.orchestra);
         assert_eq!((req.tool_name.as_str(), req.input["brief"].as_str()), ("spawn_agent", Some("Build it")));
         // A failure reaches the model as a tool error with the reason.
-        let r = handle_message_as(&msg, &|_| BridgeResponse { allow: false, message: Some("At most 6 workers.".into()), updated_input: None }, true).unwrap();
+        let r = handle_message_as(&msg, &|_| BridgeResponse { allow: false, message: Some("At most 6 workers.".into()), updated_input: None, failed: false }, LEAD).unwrap();
         assert_eq!((r["result"]["isError"].clone(), r["result"]["content"][0]["text"].clone()), (json!(true), json!("At most 6 workers.")));
     }
 
@@ -394,11 +445,12 @@ mod tests {
         let msg = json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "spawn_agent", "arguments": {"name": "x", "brief": "y"}}});
         let r = handle_message_as(&msg, &|_| {
             called.set(true);
-            BridgeResponse { allow: true, message: None, updated_input: None }
-        }, false)
+            BridgeResponse { allow: true, message: None, updated_input: None, failed: false }
+        }, Offer::default())
         .unwrap();
         assert!(!called.get());
         assert_eq!(r["result"]["isError"], true);
+        assert_eq!(r["result"]["content"][0]["text"], "spawn_agent is only available to a Team's lead.");
     }
 
     #[test]
@@ -408,8 +460,8 @@ mod tests {
         let msg = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "approve", "arguments": {"tool_name": "spawn_agent", "input": {}, "orchestra": true}}});
         handle_message_as(&msg, &|req| {
             *seen.borrow_mut() = Some(req);
-            BridgeResponse { allow: true, message: None, updated_input: None }
-        }, true);
+            BridgeResponse { allow: true, message: None, updated_input: None, failed: false }
+        }, LEAD);
         assert!(!seen.borrow().clone().unwrap().orchestra);
     }
 
@@ -475,18 +527,48 @@ mod tests {
         assert!(review.contains("You work one page at a time") && review.contains("# File N of M") && !review.contains("# Evidence N"));
         let all = text(tool_call("steps_guide", json!({})));
         assert!(all.contains("# File N of M") && all.contains("# Evidence N") && all.contains("# Overview"));
-        assert!(text(tool_call("steps_guide", json!({"flavour": "Teach"}))).contains("Step by step's flavours are Build, Learn, Review, Debug, Architecture"));
+        let unknown = tool_call("steps_guide", json!({"flavour": "Teach"}));
+        assert_eq!(unknown["isError"], true);
+        assert!(text(unknown).contains("Step by step's flavours are Build, Learn, Review, Debug, Architecture"));
     }
 
     #[test]
-    fn review_target_says_what_the_pane_shows_and_refuses_what_isnt_a_pr_or_branch() {
+    fn steps_guides_architecture_section_has_the_shape_of_the_map() {
+        let text = tool_call("steps_guide", json!({"flavour": "Architecture"}))["content"][0]["text"].as_str().unwrap().to_string();
+        for part in ["```architecture", "\"layers\"", "\"nodes\"", "\"edges\"", "\"status\"", "\"layer\""] {
+            assert!(text.contains(part), "{part}");
+        }
+    }
+
+    #[test]
+    fn review_target_goes_through_the_app_and_says_what_the_pane_shows() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let call = |args: Value| {
+            let msg = json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "review_target", "arguments": args}});
+            handle_message(&msg, &|req| {
+                seen.borrow_mut().push(req);
+                BridgeResponse { allow: true, message: None, updated_input: None, failed: false }
+            })
+            .unwrap()["result"]
+                .clone()
+        };
         let text = |r: &Value| r["content"][0]["text"].as_str().unwrap().to_string();
-        assert!(text(&tool_call("review_target", json!({"pr": 512}))).contains("#512"));
-        assert!(text(&tool_call("review_target", json!({"pr": null, "base": "feat/core"}))).contains("since feat/core"));
-        assert!(text(&tool_call("review_target", json!({}))).contains("built on"));
+        assert!(text(&call(json!({"pr": 512}))).contains("#512"));
+        assert!(text(&call(json!({"pr": null, "base": "feat/core"}))).contains("since feat/core"));
+        assert!(text(&call(json!({}))).contains("built on"));
+        let sent = seen.borrow().clone();
+        assert_eq!(sent.len(), 3);
+        assert!(sent.iter().all(|r| r.review && !r.network && !r.orchestra && r.tool_name == "review_target"));
+        assert_eq!(sent[1].input["base"], "feat/core");
+        // What isn't a pull request or a branch never reaches the app.
         for bad in [json!({"pr": "512"}), json!({"pr": 0}), json!({"base": "--output=x"}), json!({"base": "main..x"})] {
-            let r = tool_call("review_target", bad.clone());
+            let r = call(bad.clone());
             assert_eq!(r["isError"], true, "{bad}");
         }
+        assert_eq!(seen.borrow().len(), 3);
+        // And the app's own refusal is the model's error.
+        let msg = json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "review_target", "arguments": {"pr": 5}}});
+        let r = handle_message(&msg, &|_| BridgeResponse { allow: false, message: Some("No window.".into()), updated_input: None, failed: false }).unwrap();
+        assert_eq!((r["result"]["isError"].clone(), r["result"]["content"][0]["text"].clone()), (json!(true), json!("No window.")));
     }
 }
