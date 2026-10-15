@@ -37,9 +37,10 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// What every git command Lantern runs starts with. A repository's config is shared by its worktrees, so a worker can
 /// write to it from its own: nothing in it may run a program of its own while Lantern looks or commits. No filesystem
-/// monitor, no hooks, no pager. Filter and merge drivers still run: git-lfs is one, and without it a commit or a merge
-/// would take its pointer files for the content.
-const HARDENED: [&str; 6] = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat"];
+/// monitor, no hooks, no pager, and no going into submodules (a submodule's own git directory is the worker's to point
+/// anywhere). git hands these on to the git commands it runs itself. Filter and merge drivers still run: git-lfs is one,
+/// and without it a commit or a merge would take its pointer files for the content.
+const HARDENED: [&str; 8] = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat", "-c", "submodule.recurse=false"];
 
 /// Variables that would point git at another repository, index or config than the one it is run in.
 const REDIRECTS: [&str; 6] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
@@ -213,8 +214,8 @@ pub fn dirty(dir: &Path, path_env: Option<&str>) -> Result<Vec<String>, String> 
     Ok(run(dir, &["status", "--porcelain"], path_env)?.lines().map(String::from).collect())
 }
 
-/// Commits everything there is (so a worker's loose work isn't lost to a merge or a cleanup). Hooks are skipped: this is
-/// Lantern keeping the work safe, not the worker finishing it. False when there was nothing to commit.
+/// Commits everything there is, as a worker would. False when there was nothing to commit.
+#[cfg(test)]
 fn commit_all(at: At, message: &str, path_env: Option<&str>) -> Result<bool, String> {
     run_at(at, &["add", "-A"], path_env)?;
     if run_at(at, &["diff", "--no-ext-diff", "--cached", "--quiet"], path_env).is_ok() {
@@ -294,7 +295,7 @@ pub fn existing_worktree(repo: &Path, folder: &Path, branch: Option<&str>, path_
 /// The files a checked worktree has changed but not committed, by name: each untracked one on its own (not its folder),
 /// and a rename as the two names it touches.
 pub fn loose_files(wt: &Checked, path_env: Option<&str>) -> Result<Vec<String>, String> {
-    let out = run_raw_within(At::Worktree(wt), &["status", "--porcelain", "-z", "--untracked-files=all", "--no-renames"], path_env, GIT_TIMEOUT)?;
+    let out = run_raw_within(At::Worktree(wt), &["status", "--porcelain", "-z", "--untracked-files=all", "--no-renames", "--ignore-submodules=all"], path_env, GIT_TIMEOUT)?;
     // Each entry is "XY name".
     let mut names: Vec<String> = out.split('\0').filter_map(|e| e.get(3..)).filter(|n| !n.is_empty()).map(String::from).collect();
     names.sort();
@@ -335,7 +336,10 @@ pub enum Pinned {
 }
 
 /// Commits the worker's loose work, as long as the branch and its loose files are what the user was shown (`seen`), and
-/// returns the commit to merge. Checked again after the commit, since the worktree can change while it is made.
+/// returns the commit to merge. The commit is made on `seen.tip` and onto `branch` by name, whatever the worktree has
+/// checked out meanwhile, and only when it holds exactly the loose files that were shown and the branch hasn't moved;
+/// otherwise nothing is published. It is Lantern keeping the work safe, not the worker finishing it, so no hook runs
+/// and it isn't signed (a signing program is the repository config's to name).
 pub fn commit_snapshot(repo: &Path, wt: &Checked, branch: &str, seen: &Snapshot, message: &str, path_env: Option<&str>) -> Result<Pinned, String> {
     let now = match snapshot(repo, wt, branch, path_env) {
         Ok(now) => now,
@@ -350,13 +354,18 @@ pub fn commit_snapshot(repo: &Path, wt: &Checked, branch: &str, seen: &Snapshot,
     if seen.loose.is_empty() {
         return Ok(Pinned::Ready(seen.tip.clone()));
     }
-    commit_all(At::Worktree(wt), message, path_env)?;
-    let made = tip_of(repo, branch, path_env)?;
-    let parent = run(repo, &["rev-parse", "--verify", "-q", &format!("{made}^1")], path_env).unwrap_or_default();
-    let mut committed: Vec<String> = run_raw(repo, &["diff", "--no-ext-diff", "--name-only", "-z", "--no-renames", &seen.tip, &made], path_env)?.split('\0').filter(|n| !n.is_empty()).map(String::from).collect();
+    let at = At::Worktree(wt);
+    run_at(at, &["add", "-A"], path_env)?;
+    let tree = run_at(at, &["write-tree"], path_env)?;
+    let made = run_at(at, &["commit-tree", "--no-gpg-sign", "-p", &seen.tip, "-m", message, &tree], path_env)?;
+    let mut committed: Vec<String> = run_raw(repo, &["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "--no-renames", &seen.tip, &made], path_env)?.split('\0').filter(|n| !n.is_empty()).map(String::from).collect();
     committed.sort();
-    if parent != seen.tip || committed != seen.loose {
+    if committed != seen.loose {
         return Ok(Pinned::Changed("Its loose files changed while they were being committed.".into()));
+    }
+    // Moved from the commit the user was shown to this one, or not at all.
+    if run(repo, &["update-ref", "-m", message, &format!("refs/heads/{branch}"), &made, &seen.tip], path_env).is_err() {
+        return Ok(Pinned::Changed(format!("{branch} moved while its loose files were being committed.")));
     }
     Ok(Pinned::Ready(made))
 }
@@ -377,7 +386,7 @@ pub struct FileStat {
 
 pub fn branch_summary(repo: &Path, base: &str, branch: &str, path_env: Option<&str>) -> Result<BranchSummary, String> {
     let commits = run(repo, &["rev-list", "--count", &format!("{base}..{branch}")], path_env)?.parse().unwrap_or(0);
-    let numstat = run(repo, &["diff", "--numstat", &format!("{base}...{branch}")], path_env)?;
+    let numstat = run(repo, &["diff", "--no-ext-diff", "--no-textconv", "--numstat", &format!("{base}...{branch}")], path_env)?;
     let files = numstat
         .lines()
         .filter_map(|l| {
