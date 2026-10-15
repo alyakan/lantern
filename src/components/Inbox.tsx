@@ -1,5 +1,5 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
-import type { InboxItem } from "../lib/inbox";
+import { REQUEST_KINDS, type InboxItem } from "../lib/inbox";
 import { useAction } from "../lib/actions";
 import { elapsed } from "../lib/time";
 import { usePopover } from "../lib/usePopover";
@@ -87,7 +87,7 @@ export function Inbox({ items, onGo, onDecide }: InboxProps) {
           ) : (
             <ul className="menu-list">
               {items.map((it) => (
-                <li key={it.key} className="inbox-row">
+                <li key={`${it.key}:${it.requestId ?? ""}`} className="inbox-row">
                   <span className={`node-dot ${it.needsYou ? "waiting" : "unread"}`} aria-hidden />
                   <span className="inbox-text">
                     <span className="inbox-head">
@@ -102,19 +102,20 @@ export function Inbox({ items, onGo, onDecide }: InboxProps) {
                     <span className="inbox-need" title={it.need}>
                       {it.need}
                     </span>
+                    {it.detail !== null && <span className="inbox-full">{it.detail}</span>}
                   </span>
                   <span className="inbox-actions">
-                    {it.requestId && (
-                      <>
-                        <button className="primary" aria-label={`Allow ${it.title}`} onClick={() => onDecide(it, true)}>
-                          Allow
-                        </button>
-                        <button aria-label={`Deny ${it.title}`} onClick={() => onDecide(it, false)}>
-                          Deny
-                        </button>
-                      </>
+                    {it.requestId && it.canAllow && (
+                      <button className="primary" aria-label={`Allow ${it.title}`} onClick={() => onDecide(it, true)}>
+                        Allow
+                      </button>
                     )}
-                    <button data-go aria-label={`Go to ${it.title}`} onClick={() => go(it)}>
+                    {it.requestId && (
+                      <button aria-label={`Deny ${it.title}`} onClick={() => onDecide(it, false)}>
+                        Deny
+                      </button>
+                    )}
+                    <button data-go aria-label={`Go to ${it.title}`} title={REQUEST_KINDS.includes(it.kind) && !it.canAllow ? "Open it to see everything it will do" : undefined} onClick={() => go(it)}>
                       Go
                     </button>
                   </span>

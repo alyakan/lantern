@@ -4,7 +4,7 @@ import type { InboxItem } from "../lib/inbox";
 import { resetActionsForTest, runAction } from "../lib/actions";
 import { Inbox } from "./Inbox";
 
-const item = (over: Partial<InboxItem> & { slot: string }): InboxItem => ({ key: over.slot, kind: "permission", role: "chat", team: null, title: `Chat ${over.slot}`, where: "lantern", need: "Wants to use Bash: npm test", since: Date.now() - 180_000, requestId: `r-${over.slot}`, needsYou: true, ...over });
+const item = (over: Partial<InboxItem> & { slot: string }): InboxItem => ({ key: over.slot, kind: "permission", role: "chat", team: null, title: `Chat ${over.slot}`, where: "lantern", need: "Wants to use Bash: npm test", since: Date.now() - 180_000, requestId: `r-${over.slot}`, canAllow: true, detail: null, needsYou: true, ...over });
 
 function setup(items: InboxItem[]) {
   resetActionsForTest();
@@ -48,8 +48,8 @@ describe("Inbox", () => {
   });
 
   it("answers a plain permission in place, and only a plain one", () => {
-    const plain = item({ slot: "s1" });
-    const plan = item({ slot: "s2", kind: "plan", requestId: null });
+    const plain = item({ slot: "s1", detail: "npm test" });
+    const plan = item({ slot: "s2", kind: "plan", requestId: null, canAllow: false });
     const { toggle, onDecide } = setup([plain, plan]);
     fireEvent.click(toggle());
     expect(screen.getAllByRole("button", { name: /^Allow / })).toHaveLength(1);
@@ -57,6 +57,33 @@ describe("Inbox", () => {
     fireEvent.click(screen.getByRole("button", { name: "Deny Chat s1" }));
     expect(onDecide.mock.calls).toEqual([[plain, true], [plain, false]]);
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("shows the whole command where Allow is offered, and leaves Deny and Go where it isn't", () => {
+    const command = "npm run build -- --mode production --sourcemap --outDir dist/some/long/folder/name/that/would/never/fit/on/one/line";
+    const whole = item({ slot: "s1", detail: command });
+    const partial = item({ slot: "s2", need: "Wants to use Bash: npm test", canAllow: false });
+    const { toggle } = setup([whole, partial]);
+    fireEvent.click(toggle());
+    expect(screen.getByText(command)).toHaveClass("inbox-full");
+    expect(screen.getAllByRole("button", { name: /^Allow / })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Allow Chat s1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Deny Chat s2" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Go to Chat s2" })).toHaveAttribute("title", "Open it to see everything it will do");
+    expect(screen.getByRole("button", { name: "Go to Chat s1" })).not.toHaveAttribute("title");
+  });
+
+  it("replaces a row's buttons when its request changes, so a focused Allow can't answer the next one", () => {
+    resetActionsForTest();
+    const first = item({ slot: "s1", requestId: "r1", detail: "npm test" });
+    const { rerender } = render(<Inbox items={[first]} onGo={vi.fn()} onDecide={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /What needs you/ }));
+    const allow = screen.getByRole("button", { name: "Allow Chat s1" });
+    allow.focus();
+    rerender(<Inbox items={[{ ...first, requestId: "r2", detail: "rm -rf build" }]} onGo={vi.fn()} onDecide={vi.fn()} />);
+    expect(allow).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Allow Chat s1" })).not.toHaveFocus();
+    expect(screen.getByText("rm -rf build")).toBeInTheDocument();
   });
 
   it("opens on the first Go, and the arrow keys move between rows", () => {

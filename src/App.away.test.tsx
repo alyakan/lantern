@@ -93,7 +93,8 @@ describe("the needs-you inbox", () => {
     const dialog = await screen.findByRole("dialog", { name: "What needs you" });
     const row = within(dialog).getByRole("listitem");
     expect(row).toHaveTextContent("acme-api");
-    expect(row).toHaveTextContent("Wants to use Bash: npm test -- retry");
+    expect(row).toHaveTextContent("Wants to use Bash");
+    expect(within(row).getByText("npm test -- retry")).toBeInTheDocument();
     fireEvent.click(within(row).getByRole("button", { name: /^Allow / }));
     await waitFor(() => expect(calledWith(calls, "respond_permission")).toHaveLength(1));
     await waitFor(() => expect(within(dialog).getByText("Nothing is waiting for you.")).toBeInTheDocument());

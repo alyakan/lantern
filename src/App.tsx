@@ -1623,6 +1623,12 @@ export default function App() {
     onNewTeam: () => newOrchestra(),
     onReviewPr: () => setPrPicker(true),
   };
+  // The inbox's Allow and Deny answer the request the row named, and only while it is still waiting (one answered in the
+  // chat, or withdrawn, meanwhile is left alone; a later request is a new row).
+  const answerFromInbox = (item: InboxItem, allow: boolean) => {
+    const waiting = chats.slots[item.slot]?.items.some((it) => it.type === "permission" && it.id === item.requestId && it.decision === null);
+    if (item.requestId && waiting) decideIn(item.slot, item.requestId, allow);
+  };
   // The inbox's Go: the same place the sidebar's row for it goes to.
   const goToInbox = (item: InboxItem) => (item.role === "agent" && item.team ? sidebarHandlers.onAgent(item.slot, item.team) : item.role === "lead" ? sidebarHandlers.onTeam(item.slot) : sidebarHandlers.onChat(item.slot));
   // Picking something in the peeked sidebar takes you there and puts it away.
@@ -1751,7 +1757,7 @@ export default function App() {
           onShowFailure={showFailure}
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
-          inbox={{ items: inbox, onGo: goToInbox, onDecide: (item, allow) => item.requestId && decideIn(item.slot, item.requestId, allow) }}
+          inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox }}
         />
         <Hud event={hud} onOpenChat={switchTo} />
         <div className="app-body">

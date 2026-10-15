@@ -26,6 +26,13 @@ export interface InboxItem {
   since: number | null;
   /** The pending request, for a plain permission: what Allow and Deny answer. */
   requestId: string | null;
+  /**
+   * Allow may be offered: the row shows the whole request, so the user can see everything they would approve. False
+   * for anything it can't show whole (an edit, a long or multi-line command, a tool it doesn't know): Deny and Go only.
+   */
+  canAllow: boolean;
+  /** The whole request as the row shows it (never clipped), when `canAllow`. */
+  detail: string | null;
   /** It waits on an answer (the rest only finished unread). */
   needsYou: boolean;
 }
@@ -39,6 +46,54 @@ const pendingIn = (items: ChatItem[]): { at: number; item: Pending } | null => {
 
 /** The tools that aren't a plain permission: Allow and Deny can't answer them (each has its own card in the chat). */
 const KIND: Record<string, InboxKind> = { ExitPlanMode: "plan", Reproduce: "reproduce", [QUESTION_TOOL]: "question" };
+
+/** The kinds that are a request Claude is waiting on: Go opens its own card, which shows all of it. */
+export const REQUEST_KINDS: readonly InboxKind[] = ["permission", "question", "plan", "reproduce"];
+
+/** A command longer than this, or a web address longer than the second, is too much to approve from a row. */
+const COMMAND_MAX = 160;
+const URL_MAX = 200;
+const FULL_MAX = 600;
+
+/** Newlines, other control characters and the marks that reorder or hide text: none of them may be in what Allow approves. */
+const HIDING = /[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/;
+
+/** Bash's command: the other things its input may carry are only a note and a time limit, nothing that changes what runs. */
+const BASH_KEYS = ["command", "description", "timeout"];
+/** Tools that only read, with the inputs each takes: what a row may show whole. */
+const READ_ONLY: Record<string, string[]> = {
+  Read: ["file_path", "offset", "limit"],
+  Glob: ["pattern", "path"],
+  Grep: ["pattern", "path", "glob", "type", "output_mode", "-i", "-n", "-A", "-B", "-C", "head_limit", "multiline"],
+  LS: ["path", "ignore"],
+  WebSearch: ["query", "allowed_domains", "blocked_domains"],
+  WebFetch: ["url", "prompt"],
+};
+
+const text = (v: unknown): string => (typeof v === "string" ? v : JSON.stringify(v));
+
+/**
+ * What a row shows of a pending request when it is all of it, or null when Allow mustn't be offered. Only a short
+ * single-line Bash command and the read-only tools count; an edit or write, an unknown or MCP tool, a command with a
+ * newline or over 160 characters, and any input carrying something the row wouldn't show are all null.
+ */
+export function wholeRequest(toolName: string, input: unknown): string | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const o = input as Record<string, unknown>;
+  const keys = Object.keys(o);
+  if (toolName === "Bash") {
+    const command = o.command;
+    if (typeof command !== "string" || !command.trim() || command.length > COMMAND_MAX || HIDING.test(command)) return null;
+    return keys.every((k) => BASH_KEYS.includes(k)) ? command : null;
+  }
+  const allowed = READ_ONLY[toolName];
+  if (!allowed || keys.length === 0 || !keys.every((k) => allowed.includes(k))) return null;
+  if (toolName === "WebFetch" && (typeof o.url !== "string" || o.url.length > URL_MAX)) return null;
+  if (keys.some((k) => HIDING.test(text(o[k])))) return null;
+  // One value is shown as it is; several as "name: value" lines.
+  const shown = keys.length === 1 ? text(o[keys[0]]) : keys.map((k) => `${k}: ${text(o[k])}`).join("\n");
+  return shown.length > FULL_MAX ? null : shown;
+}
 
 /**
  * Everything waiting on the user across every open project and team: permission requests and questions, plans and
@@ -57,13 +112,16 @@ export function inboxItems(chats: Chats, open: Record<string, ProjectOpen>, opts
       for (const m of members) {
         const s = chats.slots[m.slot];
         if (!s) continue;
-        const base = { key: m.slot, slot: m.slot, role: m.role, team: lead, title: m.title, where: item.kind === "team" && m.role === "agent" ? `${labels[i]} · ${item.title}` : labels[i], requestId: null, since: null };
+        const base = { key: m.slot, slot: m.slot, role: m.role, team: lead, title: m.title, where: item.kind === "team" && m.role === "agent" ? `${labels[i]} · ${item.title}` : labels[i], requestId: null, canAllow: false, detail: null, since: null };
         const pending = pendingIn(s.items);
         if (pending) {
           const kind = KIND[pending.item.toolName] ?? "permission";
           const said = attentionFor(s.items.slice(0, pending.at + 1), s.folder, opts.describe);
           const more = s.items.filter((it) => it.type === "permission" && it.decision === null).length - 1;
-          out.push({ ...base, kind, need: `${said?.body ?? "Needs an answer"}${more > 0 ? ` (+${more} more)` : ""}`, since: pending.item.at ?? null, requestId: kind === "permission" ? pending.item.id : null, needsYou: true });
+          const whole = kind === "permission" ? wholeRequest(pending.item.toolName, pending.item.input) : null;
+          // Allowed from the row only when the row shows all of it, in full: then it says what, and the request itself follows.
+          const need = whole === null ? (said?.body ?? "Needs an answer") : `Wants to use ${pending.item.toolName}`;
+          out.push({ ...base, kind, need: `${need}${more > 0 ? ` (+${more} more)` : ""}`, since: pending.item.at ?? null, requestId: kind === "permission" ? pending.item.id : null, canAllow: whole !== null, detail: whole, needsYou: true });
           continue;
         }
         const proposal = m.role === "agent" && lead ? (chats.slots[lead]?.proposals ?? []).find((p) => p.worker === m.slot && p.status === "open") : undefined;

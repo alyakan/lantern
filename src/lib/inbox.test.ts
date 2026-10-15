@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type MergeProposal, type State } from "../store";
 import type { Chats } from "../sessions";
-import { inboxItems } from "./inbox";
+import { inboxItems, wholeRequest } from "./inbox";
 import { openProjects } from "./sidebar";
 
 const idle = (over: Partial<State> = {}): State => ({ ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/work/lantern", ...over });
@@ -22,7 +22,7 @@ describe("inboxItems", () => {
 
   it("lists a permission request with its project, what it wants and since when, answerable in place", () => {
     const [row] = list(chats({ s1: idle({ items: [said("Fix the build"), asks("p1", 100)] }) }));
-    expect(row).toMatchObject({ kind: "permission", slot: "s1", role: "chat", team: null, title: "Fix the build", where: "lantern", need: "Wants to use Bash: npm test", since: 100, requestId: "p1", needsYou: true });
+    expect(row).toMatchObject({ kind: "permission", slot: "s1", role: "chat", team: null, title: "Fix the build", where: "lantern", need: "Wants to use Bash", detail: "npm test", canAllow: true, since: 100, requestId: "p1", needsYou: true });
   });
 
   it("names a question or a plan as such and leaves it to its own card (no request to allow)", () => {
@@ -40,7 +40,7 @@ describe("inboxItems", () => {
 
   it("counts a second pending request in the same chat", () => {
     const [row] = list(chats({ s1: idle({ items: [said("x"), asks("p1", 5), asks("p2", 6)] }) }));
-    expect(row.need).toBe("Wants to use Bash: npm test (+1 more)");
+    expect(row.need).toBe("Wants to use Bash (+1 more)");
   });
 
   it("puts what needs you before what only finished, each oldest first", () => {
@@ -107,5 +107,69 @@ describe("inboxItems", () => {
     const open = openProjects(c, { titles: {}, drafts: {}, unread: {}, pinned: {} });
     const needs = Object.values(open).reduce((n, p) => n + p.needs, 0);
     expect(list(c).filter((r) => r.needsYou)).toHaveLength(needs);
+  });
+});
+
+describe("which requests Allow is offered for", () => {
+  const rowFor = (toolName: string, input: unknown) => list(chats({ s1: idle({ items: [said("x"), asks("p1", 1, toolName, input)] }) }))[0];
+
+  it("offers it for a short single-line command, and shows all of it", () => {
+    const row = rowFor("Bash", { command: "git status --short" });
+    expect(row).toMatchObject({ canAllow: true, detail: "git status --short", requestId: "p1" });
+  });
+
+  it("does not offer it when a command has a second line, however harmless the first looks", () => {
+    const row = rowFor("Bash", { command: "npm test\nrm -rf ~" });
+    expect(row).toMatchObject({ canAllow: false, detail: null, requestId: "p1" });
+    expect(row.need).toBe("Wants to use Bash: npm test");
+    expect(rowFor("Bash", { command: "npm test\r\nrm -rf ~" }).canAllow).toBe(false);
+    expect(rowFor("Bash", { command: "npm test\u2028rm -rf ~" }).canAllow).toBe(false);
+  });
+
+  it("does not offer it for a command over 160 characters, but does at 160", () => {
+    expect(rowFor("Bash", { command: `echo ${"a".repeat(155)}` }).canAllow).toBe(true);
+    expect(rowFor("Bash", { command: `echo ${"a".repeat(156)}` }).canAllow).toBe(false);
+  });
+
+  it("does not offer it for text that can reorder or hide what is shown", () => {
+    expect(wholeRequest("Bash", { command: "echo \u202eevil" })).toBeNull();
+    expect(wholeRequest("Bash", { command: "echo a\u200bb" })).toBeNull();
+  });
+
+  it("does not offer it when the input carries something the row doesn't show", () => {
+    expect(wholeRequest("Bash", { command: "ls", dangerouslyDisableSandbox: true })).toBeNull();
+    expect(wholeRequest("Bash", { command: "ls", run_in_background: true })).toBeNull();
+    expect(wholeRequest("Bash", { command: "ls", description: "List", timeout: 5000 })).toBe("ls");
+  });
+
+  it("does not offer it for edits, writes, MCP tools or anything unknown, which show only a path or a name", () => {
+    expect(rowFor("Write", { file_path: "/work/a.ts", content: "x".repeat(50) }).canAllow).toBe(false);
+    expect(rowFor("Edit", { file_path: "/work/a.ts", old_string: "a", new_string: "b" }).canAllow).toBe(false);
+    expect(rowFor("MultiEdit", { file_path: "/work/a.ts", edits: [] }).canAllow).toBe(false);
+    expect(rowFor("NotebookEdit", { notebook_path: "/work/a.ipynb", new_source: "x" }).canAllow).toBe(false);
+    expect(rowFor("mcp__github__delete_repo", { name: "app" }).canAllow).toBe(false);
+    expect(rowFor("Mystery", { command: "ls" }).canAllow).toBe(false);
+    // Deny is still there for all of them: the request id is kept.
+    expect(rowFor("Write", { file_path: "/work/a.ts", content: "x" }).requestId).toBe("p1");
+  });
+
+  it("offers it for the read-only tools, showing all their input", () => {
+    expect(rowFor("Read", { file_path: "/work/src/a.ts" })).toMatchObject({ canAllow: true, detail: "/work/src/a.ts" });
+    expect(rowFor("Grep", { pattern: "TODO", path: "/work/src" })).toMatchObject({ canAllow: true, detail: "pattern: TODO\npath: /work/src" });
+    expect(rowFor("Glob", { pattern: "**/*.ts" }).canAllow).toBe(true);
+    expect(rowFor("LS", { path: "/work" }).canAllow).toBe(true);
+    expect(rowFor("WebSearch", { query: "tauri caffeinate" }).canAllow).toBe(true);
+    expect(rowFor("WebFetch", { url: "https://example.com/a", prompt: "Summarise" })).toMatchObject({ canAllow: true, detail: "url: https://example.com/a\nprompt: Summarise" });
+  });
+
+  it("does not offer it for a web address over 200 characters, or a read with an extra input", () => {
+    expect(wholeRequest("WebFetch", { url: `https://example.com/${"a".repeat(190)}` })).toBeNull();
+    expect(wholeRequest("Read", { file_path: "/a", extra: 1 })).toBeNull();
+    expect(wholeRequest("Read", {})).toBeNull();
+    expect(wholeRequest("Bash", "ls")).toBeNull();
+  });
+
+  it("does not offer it for a plan, a question or a reproduction, which have no Allow here at all", () => {
+    expect(rowFor("ExitPlanMode", { plan: "x" })).toMatchObject({ canAllow: false, requestId: null });
   });
 });
