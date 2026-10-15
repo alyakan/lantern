@@ -9,7 +9,7 @@ import { savedModeOf } from "./workflow";
  */
 export type SavedTeamRole =
   | { role: "main" }
-  | { role: "worker"; name: string; parentSession: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; hidden?: boolean };
+  | { role: "worker"; name: string; parentSession: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; hidden?: boolean; model?: string };
 
 /** An open chat as saved for the next launch: its conversation (if it has one), where, and what was typed in its box. */
 export interface SavedChat {
@@ -39,7 +39,7 @@ export function chatsToSave(slots: Record<string, State>, active: string, drafts
     const orchestra: SavedTeamRole | undefined = s.orchestrator
       ? { role: "main" }
       : meta && parentSession
-        ? { role: "worker", name: meta.name, parentSession, branch: meta.branch, base: meta.base, isolation: meta.isolation, ...(meta.hidden ? { hidden: true } : {}) }
+        ? { role: "worker", name: meta.name, parentSession, branch: meta.branch, base: meta.base, isolation: meta.isolation, ...(meta.hidden ? { hidden: true } : {}), ...(s.model ? { model: s.model } : {}) }
         : undefined;
     return [{ sessionId, folder: s.folder, title: meta?.name ?? chatTitle(s, titles), draft, active: slot === active, ...(orchestra ? { orchestra } : {}) }];
   });

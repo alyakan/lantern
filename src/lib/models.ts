@@ -1,4 +1,10 @@
 /** The models on offer. `null` is Claude Code's own default (whatever `claude` picks without `--model`). */
+/**
+ * What an agent of a team runs on unless its Lead named a model (WORKER_MODEL in orchestra.rs). A restored agent with no
+ * model saved comes back on this, not on its project's own model: that is the Lead's, usually the dearest.
+ */
+export const AGENT_MODEL = "sonnet";
+
 export const MODEL_CHOICES: { value: string | null; label: string; hint: string }[] = [
   { value: null, label: "Default", hint: "Claude Code's setting" },
   { value: "opus", label: "Opus", hint: "Most capable" },

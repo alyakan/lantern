@@ -82,6 +82,7 @@ import { Canvas, newLayout } from "./components/Canvas";
 import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions } from "./lib/canvasContext";
 import { needingYou, orchestraNodes, teamMain, teamNodes } from "./lib/orchestraView";
 import "./styles.css";
+import { AGENT_MODEL } from "./lib/models";
 
 /** How many `name` steps have finished, subagents' included. */
 /** Commands the user ran from the chat box that have ended. */
@@ -111,7 +112,7 @@ function mergeOwner(chats: { slots: Record<string, { proposals: { worker: string
  */
 type TeamRole =
   | { role: "main" }
-  | { role: "worker"; parent: string; name: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; hidden?: boolean; parentReady?: Promise<boolean> };
+  | { role: "worker"; parent: string; name: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; hidden?: boolean; model?: string; parentReady?: Promise<boolean> };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -523,7 +524,8 @@ export default function App() {
         slot,
         claudePath,
         folder,
-        { mode, ...settingsFor(slot, h), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared" } } : {}) },
+        // An agent comes back on the model it had (or Sonnet, the agents' default), not on its project's own model.
+        { mode, ...settingsFor(slot, h), ...(as?.role === "worker" ? { model: as.model ?? AGENT_MODEL } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared" } } : {}) },
         sessionId,
       );
     // A worker waits for its main agent: if that one didn't open, this one stays closed too, under it, where Retry can try again.
@@ -598,7 +600,7 @@ export default function App() {
       const parent = opened[o.parentSession] ?? openMainOf(o.parentSession);
       // An agent only comes back inside its team: without its main agent it stays closed, never an ordinary chat.
       if (!parent) return Promise.resolve(false);
-      team = { role: "worker", parent: parent.slot, name: o.name, branch: o.branch, base: o.base, isolation: o.isolation, hidden: o.hidden, parentReady: parent.ready };
+      team = { role: "worker", parent: parent.slot, name: o.name, branch: o.branch, base: o.base, isolation: o.isolation, hidden: o.hidden, model: o.model, parentReady: parent.ready };
     }
     if (c.sessionId) return resumeIn(slot, c.folder, c.sessionId, false, team);
     // Typed in the box but never sent: a new chat in its folder, as a main agent again if it was one.

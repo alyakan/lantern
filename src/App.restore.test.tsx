@@ -19,12 +19,23 @@ const lastTime: SavedChat[] = [
   { sessionId: "3f1c2a", folder: OTHER, title: "Fix the login redirect", draft: "and log the state param", active: true },
 ];
 
-async function launch() {
+type Call = [string, Record<string, unknown> | undefined];
+
+/** Opens the app with the chats from last time on offer, recording every command it sends to the backend. */
+async function launch(): Promise<Call[]> {
   const { installMockBackend } = await import("./dev/mockBackend");
   installMockBackend();
+  const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args?: Record<string, unknown>, options?: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__;
+  const calls: Call[] = [];
+  const answer = internals.invoke;
+  internals.invoke = (cmd, args, options) => {
+    calls.push([cmd, args]);
+    return answer(cmd, args, options);
+  };
   const { default: App } = await import("./App");
   render(<App />);
   await screen.findByText(/(chats were|chat was) open when Lantern closed/);
+  return calls;
 }
 
 describe("restoring chats at launch", () => {
@@ -96,6 +107,29 @@ describe("restoring a team at launch", () => {
       expect(bySession.aaaa11.orchestra).toEqual({ role: "worker", name: "Login form", parentSession: "bbbb22", branch: "lantern/login-form", base: "main", isolation: "worktree" });
       expect(bySession.bbbb22.active).toBe(true);
     });
+  });
+
+  it("brings an agent back on the model it had, or Sonnet when none was saved, never on the project's own model", async () => {
+    // The project's harness runs its chats on Opus; the agents didn't.
+    localStorage.setItem("settings.model", JSON.stringify("opus"));
+    const withModel = team.map((c) => (c.orchestra?.role === "worker" ? { ...c, orchestra: { ...c.orchestra, model: "claude-haiku-5-5" } } : c));
+    localStorage.setItem("session.openChats", JSON.stringify(withModel));
+    const calls = await launch();
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+    await screen.findByRole("button", { name: "Canvas" });
+    const models = (id: string) => calls.filter(([c, a]) => c === "open_session" && a?.sessionId === id).map(([, a]) => (a?.settings as { model?: string }).model);
+    expect(models("aaaa11")).toEqual(["claude-haiku-5-5"]);
+    // The Lead keeps its own.
+    expect(models("bbbb22")).toEqual(["opus"]);
+  });
+
+  it("brings an agent saved before models were kept back on Sonnet", async () => {
+    localStorage.setItem("settings.model", JSON.stringify("opus"));
+    const calls = await launch();
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+    await screen.findByRole("button", { name: "Canvas" });
+    const open = calls.filter(([c, a]) => c === "open_session" && a?.sessionId === "aaaa11");
+    expect(open.map(([, a]) => (a?.settings as { model?: string }).model)).toEqual(["sonnet"]);
   });
 
   it("brings the workers back on the mode they had, not just the ones the user had looked at", async () => {
