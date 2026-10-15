@@ -527,7 +527,7 @@ button.ghost.context-compact, button.ghost.context-clear { height: 20px; padding
 /* Changes | Files as a macOS segmented control. */
 .pane-tabs { container-type: inline-size; display: flex; align-items: center; gap: 8px; height: 44px; flex: none; padding: 0 10px; }
 /* In the narrowest the pane gets, with every tab there is, the tabs tighten and the filter keeps a few letters. */
-@container (max-width: 440px) { .pane-tabs .pane-tabs-track button { padding: 0 7px; } }
+@container (max-width: 540px) { .pane-tabs .pane-tabs-track button { padding: 0 7px; } }
 /* Changes | Files | Tests: the same size as the pane's other pills (the Changes filter, Build | Learn | Review), not the
    title bar's larger capsules. */
 .pane-tabs-track { display: inline-flex; gap: 2px; height: 26px; align-items: center; padding: 0 2px; border-radius: 999px; background: var(--glass); border: 0.5px solid var(--glass-line); }
@@ -538,7 +538,7 @@ button.ghost.context-compact, button.ghost.context-clear { height: 20px; padding
 /* The Changes filter: a pill that opens a menu of what to show, each with what it means. */
 /* Both give way when the row is tight (five tabs and the filter in a narrow pane): the tabs down to their labels, the
    filter's name to an ellipsis, leaving its count. */
-.scope-anchor { position: relative; margin-left: auto; min-width: 0; }
+.scope-anchor { position: relative; flex: none; margin-left: auto; }
 .scope-button { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 26px; padding: 0 10px 0 12px; border: 0.5px solid var(--glass-line); border-radius: 999px; background: var(--glass); color: var(--text); font-size: calc(11.5px * var(--font-scale)); }
 .scope-button:hover:not(:disabled), .scope-button.pressed { background: var(--bg-hover); }
 .scope-label { min-width: 26px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -577,6 +577,8 @@ button.ghost.context-compact, button.ghost.context-clear { height: 20px; padding
 .jump-file { display: inline-flex; align-items: center; gap: 5px; flex: 0 1 auto; min-width: 48px; color: var(--text); white-space: nowrap; }
 .jump-file svg { flex: none; }
 .jump-file svg { color: var(--muted); }
+/* A narrow pane shows the file alone: its folders would push its name out of sight (the full path is the tooltip). */
+@container (max-width: 560px) { .review-bar .jump-dir, .review-bar .jump-sep { display: none; } }
 .picker-button[aria-expanded="true"] { background: var(--bg-hover); }
 .picker-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* Dropdown menus (session history), styled like VS Code's folder menu. */
@@ -1550,7 +1552,12 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .revert-undo { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: calc(12px * var(--font-scale)); }
 .revert-undo-text { min-width: 0; }
 .revert-undo-note { flex: 1; color: var(--muted); font-size: calc(11.5px * var(--font-scale)); }
-.revert-all { margin-left: 4px; }
+.revert-all { flex: none; display: inline-flex; align-items: center; gap: 5px; margin-left: 4px; white-space: nowrap; }
+/* Wide, it says Revert all; narrow, it's the arrow alone (named for VoiceOver and in its tooltip). */
+.revert-all svg { display: none; }
+@container (max-width: 520px) { .pane-tabs .revert-all { padding: 0 6px; } .pane-tabs .revert-all svg { display: block; } .pane-tabs .revert-all-label { display: none; } }
+/* The scope chip keeps its count and drops its word when there's no room for it. */
+@container (max-width: 460px) { .pane-tabs .scope-label { display: none; } .pane-tabs { gap: 6px; } .pane-tabs .pane-tabs-track button { padding: 0 5px; } .pane-tabs .revert-all { margin-left: 0; } }
 .summary-revert { margin-left: 4px; }
 
 /* The orchestra's canvas: agents as floating chats on a pannable, zoomable surface, tethered to the main agent. */
