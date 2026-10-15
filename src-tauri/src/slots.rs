@@ -2,7 +2,7 @@
 //! permission bridge, so a chat can keep working in the background while another one is open.
 
 use crate::changes::ChangeTracker;
-use crate::permission::bridge::PermissionBridge;
+use crate::permission::bridge::{CallerAuth, PermissionBridge};
 use crate::permission::rules::FolderRules;
 use crate::session::{Session, SessionConfig};
 use crate::ui_event::{Sink, UiEvent};
@@ -49,8 +49,16 @@ pub struct Slots {
 
 impl Slots {
     /// The slot with this id, created (with its permission bridge) the first time it's asked for.
-    /// `emit` sends a slot-tagged event to the UI; `folder_rules` are the folder rules every chat shares.
-    pub fn get_or_create(&self, id: &str, socket_dir: &std::path::Path, emit: impl Fn(SlotEvent) + Send + Sync + 'static, folder_rules: Arc<FolderRules>) -> Result<Arc<Slot>, String> {
+    /// `emit` sends a slot-tagged event to the UI; `folder_rules` are the folder rules every chat shares; `auth` says,
+    /// from the cell that will hold the chat's claude's pid, who may ask its bridge anything.
+    pub fn get_or_create(
+        &self,
+        id: &str,
+        socket_dir: &std::path::Path,
+        emit: impl Fn(SlotEvent) + Send + Sync + 'static,
+        folder_rules: Arc<FolderRules>,
+        auth: impl FnOnce(Arc<std::sync::atomic::AtomicU32>) -> CallerAuth,
+    ) -> Result<Arc<Slot>, String> {
         if !valid_slot(id) {
             return Err(format!("{id:?} is not a slot id."));
         }
@@ -59,8 +67,9 @@ impl Slots {
             return Ok(s.clone());
         }
         let socket = socket_dir.join(format!("lantern-{}-{id}.sock", std::process::id()));
-        let bridge = PermissionBridge::start(socket, tagged(id, emit), folder_rules).map_err(|e| e.to_string())?;
-        let slot = Arc::new(Slot { session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid: Arc::default() });
+        let claude_pid: Arc<std::sync::atomic::AtomicU32> = Arc::default();
+        let bridge = PermissionBridge::start(socket, tagged(id, emit), folder_rules, auth(claude_pid.clone())).map_err(|e| e.to_string())?;
+        let slot = Arc::new(Slot { session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid });
         slots.insert(id.to_string(), slot.clone());
         Ok(slot)
     }
@@ -117,6 +126,11 @@ mod tests {
     use super::*;
     use tokio::sync::mpsc;
 
+    /// The test itself is what connects here, in-process.
+    fn this_process(_: Arc<std::sync::atomic::AtomicU32>) -> CallerAuth {
+        Arc::new(|pid| pid == std::process::id())
+    }
+
     #[test]
     fn slot_ids_are_short_and_plain() {
         assert!(valid_slot("s1"));
@@ -136,12 +150,12 @@ mod tests {
         let emit = move |e: SlotEvent| {
             let _ = tx.send(e);
         };
-        let a = slots.get_or_create("s1", dir.path(), emit.clone(), rules.clone()).unwrap();
-        let again = slots.get_or_create("s1", dir.path(), emit.clone(), rules.clone()).unwrap();
+        let a = slots.get_or_create("s1", dir.path(), emit.clone(), rules.clone(), this_process).unwrap();
+        let again = slots.get_or_create("s1", dir.path(), emit.clone(), rules.clone(), this_process).unwrap();
         assert!(Arc::ptr_eq(&a, &again));
-        let b = slots.get_or_create("s2", dir.path(), emit, rules.clone()).unwrap();
+        let b = slots.get_or_create("s2", dir.path(), emit, rules.clone(), this_process).unwrap();
         assert_ne!(a.bridge.socket_path, b.bridge.socket_path, "each chat has its own permission socket");
-        assert!(slots.get_or_create("../bad", dir.path(), |_| {}, rules.clone()).is_err());
+        assert!(slots.get_or_create("../bad", dir.path(), |_| {}, rules.clone(), this_process).is_err());
 
         // A permission request on s1's socket reaches the UI tagged with s1.
         let socket = a.bridge.socket_path.display().to_string();
@@ -186,7 +200,7 @@ mod tests {
         let slots = Slots::default();
         let mut open = vec![];
         for id in ["s1", "s2"] {
-            let slot = slots.get_or_create(id, dir.path(), |_| {}, Arc::new(FolderRules::load(None))).unwrap();
+            let slot = slots.get_or_create(id, dir.path(), |_| {}, Arc::new(FolderRules::load(None)), this_process).unwrap();
             let session = Session::spawn(&cfg, Arc::new(|_: UiEvent| {}), Arc::new(|_: &str, _: Option<String>| {})).unwrap();
             *slot.session.lock().await = Some(session);
             open.push(slot);

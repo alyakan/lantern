@@ -292,16 +292,12 @@ impl orchestra::Host for AppHost {
 fn enroll(state: &AppState, id: &str, slot: &Slot, role: &Role) {
     if *role == Role::Main {
         state.orchestra.register_main(id);
-        // A call is the main agent's only when the process making it is this app's own helper, started directly by the
-        // chat's own claude: the OS says who is on the other end of the socket. A command the main agent ran (code a worker
-        // wrote, say) is another program, and a shell's single command can sit as close as a direct child, so both are
-        // required. Nothing in the process list or environment can pass for it.
-        let claude = slot.claude_pid.clone();
-        let from_this_chats_claude: permission::bridge::OrchestraAuth = Arc::new(move |caller| {
-            let main = claude.load(std::sync::atomic::Ordering::SeqCst);
-            main != 0 && process::is_child_of(caller, main) && process::runs_this_program(caller)
-        });
-        slot.bridge.set_orchestra(state.orchestra.handler(id.to_string()), from_this_chats_claude);
+        // Only this chat's own helper reaches the handler (see slot_for): a process this chat's claude started itself that
+        // runs Lantern's executable. That keeps out workers, their commands, other chats and anything else of the user's.
+        // It doesn't keep out the main agent itself: a command it runs that starts Lantern's executable directly (a shell
+        // runs a single command in its own place) is the same kind of process as the helper, and is let in. That gives
+        // the main agent nothing it can't already do with its own orchestra tools.
+        slot.bridge.set_orchestra(state.orchestra.handler(id.to_string()));
     } else {
         state.orchestra.forget(id);
     }
@@ -309,7 +305,10 @@ fn enroll(state: &AppState, id: &str, slot: &Slot, role: &Role) {
 
 /// The chat's slot, created on first use.
 fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, String> {
-    let slot = state.slots.get_or_create(slot, &std::env::temp_dir(), emitter(app), state.folder_rules.clone())?;
+    // Every request to the chat's bridge must come from its own claude's helper: a direct child of that claude running
+    // Lantern's own executable (see bridge::helper_of).
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let slot = state.slots.get_or_create(slot, &std::env::temp_dir(), emitter(app), state.folder_rules.clone(), move |claude| permission::bridge::helper_of(claude, exe))?;
     // Every chat's helper offers the network_* tools; they're answered here, for the chat's folder.
     let monitor = state.network.clone();
     slot.bridge.set_network(Arc::new(move |folder, tool, input| {

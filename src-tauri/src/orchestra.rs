@@ -1948,9 +1948,9 @@ mod tests {
         let (host, o, _repo, _wt) = setup();
         let dir = tempfile::tempdir().unwrap();
         let sock = dir.path().join("b.sock");
-        let bridge = PermissionBridge::start(sock.clone(), Arc::new(|_| {}), Arc::new(crate::permission::rules::FolderRules::load(None))).unwrap();
-        // The helper runs in this process here, so this process stands in for the main agent's claude.
-        bridge.set_orchestra(o.handler("s1".into()), Arc::new(|pid| crate::process::descends_from(pid, std::process::id())));
+        // The helper runs in this process here, so this process stands in for the main agent's claude's helper.
+        let bridge = PermissionBridge::start(sock.clone(), Arc::new(|_| {}), Arc::new(crate::permission::rules::FolderRules::load(None)), Arc::new(|pid| pid == std::process::id())).unwrap();
+        bridge.set_orchestra(o.handler("s1".into()));
         let lines = [
             json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "spawn_agent", "arguments": {"name": "Login", "brief": "Build it"}}}),
             json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "list_agents", "arguments": {}}}),
