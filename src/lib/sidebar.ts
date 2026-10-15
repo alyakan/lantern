@@ -76,23 +76,35 @@ export interface CompactChip {
   active: boolean;
   /** "Working", "Needs you", "Unread"… */
   status: string;
+  /** One or two capitals from the title, for the square. */
+  initials: string;
 }
 
 export interface CompactGroup {
   folder: string;
   /** The project's name (with its parent's when another open project has the same one). */
   label: string;
-  /** One or two capitals for the square. */
+  /** Two capitals of the project's name, for the label above its squares. */
   initials: string;
   chips: CompactChip[];
 }
 
-/** A project's initials: the first letters of its first two words (my-app: MA), or the first letter of a single word. */
-export function initials(label: string): string {
-  const words = label.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  const letters = words.length > 1 ? words.slice(0, 2).map((w) => w[0]) : [...(words[0] ?? "?")].slice(0, 1);
+const FILLER = new Set(["a", "an", "the", "of", "to", "for", "and", "in", "on"]);
+
+/**
+ * Capitals from a name: the first letters of its first two words (my-app: MA), skipping filler words (a, the, of, to,
+ * for…). A single word gives its first `single` letters (a project's name: two, so lantern is LA; a chat's title: one).
+ */
+export function initials(name: string, single = 1): string {
+  const words = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const kept = words.filter((w) => !FILLER.has(w.toLowerCase()));
+  const use = kept.length > 0 ? kept : words;
+  const letters = use.length > 1 ? use.slice(0, 2).map((w) => [...w][0]) : [...(use[0] ?? "?")].slice(0, single);
   return letters.join("").toUpperCase();
 }
+
+/** A chat's initials from its title: a chat or team with no title yet ("New chat", "New team") is N. */
+export const chatInitials = (title: string): string => (/^new (chat|team)$/i.test(title.trim()) ? "N" : initials(title));
 
 /**
  * What is open, as the compact sidebar lists it: the projects with something open, in the order the full sidebar lists
@@ -117,9 +129,10 @@ export function compactGroups(open: Record<string, ProjectOpen>, recent: RecentF
         unread: item.unread,
         active: item.active || (item.kind === "team" && item.agents.some((a) => a.active)),
         status: mark === "unread" ? "Unread" : DOT_LABEL[mark],
+        initials: chatInitials(item.title),
       };
     });
-    return { folder, label, initials: initials(names[i]), chips };
+    return { folder, label, initials: initials(names[i], 2), chips };
   });
 }
 

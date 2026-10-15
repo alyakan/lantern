@@ -36,16 +36,21 @@ function setup(over: Partial<React.ComponentProps<typeof SidebarCompact>> = {}) 
 const chipFor = (name: RegExp) => screen.getByRole("button", { name });
 
 describe("the compact sidebar", () => {
-  it("has a square for each open chat and team, but none for an agent, with the project's initials", async () => {
+  it("has a square for each open chat and team, but none for an agent, with the chat's initials, and a labelled line above each project", async () => {
     setup();
     await waitFor(() => expect(screen.getAllByRole("list")).toHaveLength(2));
     const lantern = screen.getByRole("list", { name: "lantern" });
     expect(within(lantern).getAllByRole("button")).toHaveLength(5);
-    expect(within(lantern).getAllByText("L")).toHaveLength(5);
-    expect(within(screen.getByRole("list", { name: "network-monitor" })).getByText("NM")).toBeInTheDocument();
+    // The title's initials: filler words skipped, a team by its Lead's title.
+    expect(within(lantern).getAllByRole("button").map((b) => b.textContent)).toEqual(["NT", "FR", "RN", "PD", "AS"]);
+    expect(within(screen.getByRole("list", { name: "network-monitor" })).getByText("RP")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /security pass/ })).toBeNull();
-    // A divider between the projects, none before the first.
-    expect(document.querySelectorAll(".cp-divider")).toHaveLength(1);
+    // Above each project's squares, its initials, with its name as the tooltip.
+    const labels = Array.from(document.querySelectorAll(".cp-project"));
+    expect(labels.map((l) => [l.textContent, l.getAttribute("title")])).toEqual([
+      ["LA", "lantern"],
+      ["NM", "network-monitor"],
+    ]);
   });
 
   it("marks what works, what needs you and what finished unread; a plain finished chat has no mark", async () => {

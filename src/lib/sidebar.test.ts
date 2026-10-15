@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { initialState, type State } from "../store";
 import type { Chats } from "../sessions";
 import type { RecentFolder } from "../types";
-import { compactGroups, initials, needsYou, openProjects, pastRows, sidebarProjects, type ProjectOpen, type SidebarChat, type SidebarItem } from "./sidebar";
+import { chatInitials, compactGroups, initials, needsYou, openProjects, pastRows, sidebarProjects, type ProjectOpen, type SidebarChat, type SidebarItem } from "./sidebar";
 
 const idle = (over: Partial<State> = {}): State => ({ ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/work/lantern", ...over });
 const asking = { type: "permission" as const, id: "p1", toolName: "Bash", input: {}, decision: null };
@@ -193,12 +193,24 @@ describe("needsYou", () => {
 });
 
 describe("initials", () => {
-  it("takes the first letters of the first two words, or the first letter of a single word", () => {
+  it("takes the first letters of the first two words, skipping filler, or the first letter(s) of a single word", () => {
     expect(initials("lantern")).toBe("L");
-    expect(initials("network-monitor")).toBe("NM");
+    expect(initials("lantern", 2)).toBe("LA");
+    expect(initials("network-monitor", 2)).toBe("NM");
     expect(initials("lumiform_ios app")).toBe("LI");
-    expect(initials("acme-api · projects")).toBe("AA");
+    expect(initials("acme-api · projects", 2)).toBe("AA");
+    expect(initials("Retry transient fetch errors")).toBe("RT");
+    expect(initials("ask me first")).toBe("AM");
+    expect(initials("Fix the login redirect")).toBe("FL");
+    expect(initials("Add a retry to fetchJson")).toBe("AR");
+    expect(initials("the")).toBe("T");
     expect(initials("")).toBe("?");
+  });
+
+  it("calls a chat or team with no title yet N", () => {
+    expect(chatInitials("New chat")).toBe("N");
+    expect(chatInitials("New team")).toBe("N");
+    expect(chatInitials("Network tab polish")).toBe("NT");
   });
 });
 
@@ -218,7 +230,7 @@ describe("compactGroups", () => {
     );
     expect(groups.map((g) => [g.label, g.initials, g.chips.map((c) => c.slot)])).toEqual([
       ["network-monitor", "NM", ["b"]],
-      ["lantern", "L", ["a", "lead"]],
+      ["lantern", "LA", ["a", "lead"]],
     ]);
     const [monitor, lantern] = groups;
     expect(monitor.chips[0]).toMatchObject({ team: false, status: "Unread" });
@@ -232,6 +244,6 @@ describe("compactGroups", () => {
   it("tells two projects of one name apart by their parent folder", () => {
     const groups = compactGroups({ "/a/app": open([chatItem("x")]), "/b/app": open([chatItem("y")]) }, []);
     expect(groups.map((g) => g.label).sort()).toEqual(["app · a", "app · b"]);
-    expect(groups.every((g) => g.initials === "A")).toBe(true);
+    expect(groups.every((g) => g.initials === "AP")).toBe(true);
   });
 });

@@ -39,7 +39,7 @@ function Chip({ chip, group, onClick, onTip }: { chip: CompactChip; group: Compa
     <li>
       <button className={`cp-chip${chip.active ? " current" : ""}${chip.team ? " team" : ""}`} aria-label={describe(chip, group)} aria-current={chip.active ? "true" : undefined} onClick={onClick} onMouseEnter={show} onFocus={show} onMouseLeave={() => onTip(null)} onBlur={() => onTip(null)}>
         <span className="cp-initials" aria-hidden>
-          {group.initials}
+          {chip.initials}
         </span>
         {chip.team && (
           <span className="cp-team" aria-hidden>
@@ -55,9 +55,9 @@ function Chip({ chip, group, onClick, onTip }: { chip: CompactChip; group: Compa
 }
 
 /**
- * The compact sidebar: a slim column with a square for each open chat and team (not for projects), the project's initials
+ * The compact sidebar: a slim column with a square for each open chat and team (not for projects), the chat's initials
  * on it and a mark for how it is: a ring while it works, an amber dot when it needs you, a blue dot when it finished
- * unread. The one on screen is lit; a thin line divides the projects; + starts a chat. A team is one square, for its Lead,
+ * unread. The one on screen is lit; each project's squares sit under a line labelled with its initials (its name is the tooltip); + starts a chat. A team is one square, for its Lead,
  * with the team's combined state. The column scrolls when there are more squares than fit.
  */
 export function SidebarCompact({ open, loadRecent, canNew, onNewChat, onChat, onTeam, onToggle, onPointerEnter, onPointerLeave }: Props) {
@@ -86,9 +86,11 @@ export function SidebarCompact({ open, loadRecent, canNew, onNewChat, onChat, on
         </button>
       </div>
       <nav className="cp-list" aria-label="Open chats" onScroll={() => setTip(null)}>
-        {groups.map((group, i) => (
+        {groups.map((group) => (
           <Fragment key={group.folder}>
-            {i > 0 && <hr className="cp-divider" />}
+            <div className="cp-project" title={group.label} aria-hidden>
+              <span>{group.initials}</span>
+            </div>
             <ul className="cp-group" aria-label={group.label}>
               {group.chips.map((chip) => (
                 <Chip key={chip.slot} chip={chip} group={group} onClick={() => (chip.team ? onTeam(chip.slot) : onChat(chip.slot))} onTip={showTip} />
