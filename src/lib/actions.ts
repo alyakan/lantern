@@ -15,8 +15,10 @@ const CATALOGUE = [
   { id: "open-folder", title: "Open Folder…", group: "File", key: "o", menu: true, native: true },
   // In the palette (and the folder menu and a project's ⋯ menu): no shortcut and no native menu item.
   { id: "relocate-folder", title: "Bring old chats here…", group: "File" },
-  // The left sidebar of every project, and its narrow rail: macOS's own ⌃⌘S (⌘0 is the canvas's Fit).
-  { id: "toggle-sidebar", title: "Show/Hide Sidebar", group: "View", key: "s", ctrl: true, menu: true, native: true },
+  // The left sidebar of every project, hidden or shown: macOS's own ⌃⌘S (⌘0 is the canvas's Fit). Compact is the slim
+  // column of open chats; both say what they do now (Hide or Show, Compact or Full) in the palette and the menu.
+  { id: "toggle-sidebar", title: "Hide Sidebar", group: "View", key: "s", ctrl: true, menu: true, native: true },
+  { id: "toggle-compact", title: "Compact Sidebar", group: "View", menu: true },
   // Only while there is a team: switches between its canvas and the chat view.
   { id: "toggle-canvas", title: "Switch Canvas and Chat View", group: "View", key: "c", shift: true },
   // Only while the canvas has focus (see Canvas.tsx).
@@ -74,6 +76,8 @@ export function shortcutLabel(def: Pick<ActionDef, "key" | "shift" | "ctrl">): s
 interface Handler {
   run: () => void;
   enabled: () => boolean;
+  /** What the palette calls it now, when that changes (Hide Sidebar, then Show Sidebar). */
+  title: () => string | undefined;
 }
 
 // The components that own each action, in the order they mounted. The newest owner wins, so one action has one handler.
@@ -114,17 +118,18 @@ let listening = false;
 
 /**
  * Makes an action available while the calling component is mounted: `run` when its shortcut or menu item is chosen,
- * and only while `enabled`. The latest `run` and `enabled` are the ones used, so no effect needs to re-register it.
+ * and only while `enabled`. The latest `run`, `enabled` and `title` (the palette's wording, if it changes) are the ones used,
+ * so no effect needs to re-register it.
  */
-export function useAction(id: ActionId, run: () => void, enabled = true): void {
-  const latest = useRef({ run, enabled });
-  latest.current = { run, enabled };
+export function useAction(id: ActionId, run: () => void, enabled = true, title?: string): void {
+  const latest = useRef({ run, enabled, title });
+  latest.current = { run, enabled, title };
   useEffect(() => {
     if (!listening) {
       listening = true;
       window.addEventListener("keydown", onKeyDown);
     }
-    const handler: Handler = { run: () => latest.current.run(), enabled: () => latest.current.enabled };
+    const handler: Handler = { run: () => latest.current.run(), enabled: () => latest.current.enabled, title: () => latest.current.title };
     const list = owners.get(id) ?? [];
     owners.set(id, [...list, handler]);
     return () => {
@@ -141,7 +146,7 @@ export function availableActions(): PaletteEntry[] {
     const list = owners.get(def.id);
     const handler = list?.[list.length - 1];
     if (!handler?.enabled()) return [];
-    return [{ id: def.id, title: def.title, group: def.group, shortcut: shortcutLabel(def), run: () => runAction(def.id) }];
+    return [{ id: def.id, title: handler.title() ?? def.title, group: def.group, shortcut: shortcutLabel(def), run: () => runAction(def.id) }];
   });
 }
 

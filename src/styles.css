@@ -898,7 +898,7 @@ button.json-more:hover { color: var(--text); }
 .json-null { color: var(--warn); }
 
 /* Step-by-step mode: pages side by side, one on screen, sliding between them. */
-.steps { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.steps-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* The flavour badge always keeps its full width. When the row is tight the page dots give
    way, down to three (46px: the current page's pill and two dots, which the rail keeps scrolled to); the pane itself
    can't be narrower than that (MIN_LEFT in SplitPane.tsx). The background count is dropped first. */
@@ -1905,8 +1905,8 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .plan-toggle.active { background: var(--seg-thumb); color: var(--text); box-shadow: 0 0.5px 1.5px rgba(0, 0, 0, 0.18), 0 0 0 0.5px rgba(0, 0, 0, 0.06); }
 .customize-menu { max-height: min(560px, calc(100vh - 140px)); }
 
-/* The window below the title bar: the sidebar of projects (or its rail), then the chat and the side panel. */
-.app-body { flex: 1; display: flex; min-height: 0; }
+/* The window below the title bar: the sidebar of projects, then the chat and the side panel. */
+.app-body { position: relative; flex: 1; display: flex; min-height: 0; }
 .app-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 /* Sidebar. It sits on the window like Xcode's navigator, with no card; the edge is a drag handle. Its width never takes the room
@@ -1917,10 +1917,9 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-new { position: relative; }
 .sb-new-button { display: inline-flex; align-items: center; gap: 6px; height: var(--pill-m); padding: 0 11px 0 9px; border: 0.5px solid var(--glass-line); border-radius: 999px; background: var(--glass); color: var(--text); font-size: calc(12.5px * var(--font-scale)); font-weight: 500; }
 .sb-new-button:hover:not(:disabled), .sb-new-button[aria-expanded="true"] { background: var(--bg-active); }
-.sb-new-button.compact { width: 34px; justify-content: center; padding: 0; }
 .sb-new-button .chev { color: var(--muted); }
-.sb-toggle, .sb-open-folder { color: var(--muted); }
-.sb-toggle:hover, .sb-open-folder:hover { color: var(--text); }
+.sb-toggle { color: var(--muted); }
+.sb-toggle:hover { color: var(--text); }
 .sb-menu { top: calc(100% + 4px); left: 0; min-width: 200px; }
 .sb-menu .menu-row { align-items: center; }
 .project-menu { left: auto; right: 4px; }
@@ -1972,9 +1971,11 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-pin.lead { width: 8px; }
 .sb-agents-wrap { list-style: none; }
 .sb-agents { list-style: none; margin: 0; padding: 0 0 0 14px; }
-.sb-close { position: absolute; right: 2px; width: 20px; height: 20px; display: none; place-items: center; border: none; border-radius: var(--radius-chip); background: var(--bg); color: var(--muted); font-size: calc(14px * var(--font-scale)); line-height: 1; }
-.sb-item.closable:hover .sb-close, .sb-close:focus-visible { display: grid; }
-.sb-close:hover { color: var(--text); }
+.sb-close { position: absolute; right: 2px; width: 20px; height: 20px; display: none; place-items: center; border: none; border-radius: var(--radius-chip); background: none; color: var(--muted); font-size: calc(14px * var(--font-scale)); line-height: 1; }
+.sb-item.closable:hover .sb-close, .sb-item.closable:focus-within .sb-close { display: grid; }
+/* The × has a place of its own at the row's end: the title truncates before it, and a pin or spinner stays beside it. */
+.sb-item.closable:hover .sb-row, .sb-item.closable:focus-within .sb-row { padding-right: 32px; }
+.sb-close:hover { background: var(--bg-active); color: var(--text); }
 .sb-more { flex: 1; height: 22px; padding: 0 6px 0 21px; border: none; background: none; text-align: left; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); }
 .sb-more:hover { color: var(--text); }
 .sb-note { padding: 3px 6px 3px 21px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
@@ -1986,14 +1987,48 @@ nav > .sb-note { padding-left: 8px; }
 .sb-resize:hover::after, .sidebar.dragging .sb-resize::after, .sb-resize:focus-visible::after { background: var(--line-strong); }
 .sb-resize:focus-visible { outline: none; }
 
-/* Minimized: a narrow rail with each project's initials, and a badge for what needs you there. */
-.sidebar.rail { width: 52px; min-width: 52px; max-width: 52px; align-items: center; gap: 8px; padding: 2px 0 8px 0; }
-.rail-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; margin: 0; padding: 4px 0; list-style: none; }
-.rail-project { position: relative; width: 34px; height: 34px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--glass); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); font-weight: 600; display: inline-flex; align-items: center; justify-content: center; padding: 0; line-height: 1; }
-.rail-project:not(.open) { color: var(--muted-text); border-style: dashed; }
-.rail-project:hover { background: var(--bg-active); }
-.rail-project.current { border-color: var(--muted); background: var(--bg-active); color: var(--text); }
-.rail-badge { position: absolute; top: -5px; right: -5px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--attn); color: #1f1f24; font-size: calc(10px * var(--font-scale)); font-weight: 700; line-height: 15px; text-align: center; }
+/* Hidden: the title bar's button brings it back, badged with what needs you. At the window's left edge an 8px strip waits for
+   the pointer, and the sidebar then slides in over the chat until the pointer leaves it. */
+.sidebar-toggle { position: relative; color: var(--muted); }
+.sidebar-toggle:hover { color: var(--text); }
+.sidebar-toggle-badge { position: absolute; top: -6px; right: -6px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--attn); color: #1f1f24; font-size: calc(10px * var(--font-scale)); font-weight: 700; line-height: 15px; text-align: center; }
+.sidebar-edge { position: absolute; z-index: 19; left: 0; top: 0; bottom: 0; width: 8px; }
+.sidebar-peek { position: absolute; z-index: 20; left: 0; top: 0; bottom: 0; display: flex; padding: 0 0 var(--edge) var(--edge); animation: peek-in 160ms cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.sidebar-peek[data-phase="out"] { pointer-events: none; animation: peek-out 160ms cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+.sidebar.peek { padding: 8px 0 8px 8px; border-radius: var(--radius-float); background: var(--bg); box-shadow: 0 0 0 0.5px var(--line-strong), var(--shadow); }
+@keyframes peek-in { from { transform: translateX(-100%); } }
+@keyframes peek-out { to { transform: translateX(-100%); } }
+@media (prefers-reduced-motion: reduce) { .sidebar-peek, .sidebar-peek[data-phase="out"] { animation: none; } }
+
+/* Compact: a slim column with a square for each open chat and team. Resting the pointer on it opens the full sidebar as a peek. */
+.sidebar-compact { position: relative; flex: none; width: 56px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 2px 0 8px var(--edge); }
+.cp-head { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding-bottom: 6px; }
+.cp-head button.cp-button { width: 32px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border-radius: var(--radius-chip); color: var(--muted); }
+.cp-head button.cp-button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.cp-list { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 6px; overflow-y: auto; overflow-x: hidden; padding: 4px 0; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.cp-list::-webkit-scrollbar { width: 4px; }
+.cp-list::-webkit-scrollbar-thumb { border-radius: 2px; background: var(--line-strong); }
+.cp-group { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.cp-project { flex: none; width: 100%; display: flex; align-items: center; gap: 4px; margin-top: 2px; color: var(--muted-text); font-size: calc(9.5px * var(--font-scale)); font-weight: 600; letter-spacing: 0.04em; line-height: 1; }
+.cp-project::before, .cp-project::after { content: ""; flex: 1; min-width: 3px; border-top: 1px solid var(--line-strong); }
+.cp-project:first-child::before { display: none; }
+.cp-chip { position: relative; width: 36px; height: 36px; padding: 0; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border: 0.5px solid var(--glass-line); border-radius: 10px; background: var(--glass); color: var(--text-2); font-size: calc(12.5px * var(--font-scale)); font-weight: 600; }
+.cp-chip:hover { background: var(--bg-hover); color: var(--text); }
+.cp-chip.current { background: var(--bg-active); color: var(--text); box-shadow: 0 0 0 1.5px var(--text-2); }
+.cp-initials { display: inline-flex; align-items: center; justify-content: center; line-height: 1; letter-spacing: 0.02em; }
+.cp-team { position: absolute; right: 3px; bottom: 3px; display: inline-flex; width: 9px; height: 9px; color: var(--muted); }
+.cp-team svg { width: 9px; height: 9px; fill: currentColor; }
+.cp-mark { position: absolute; top: 3px; right: 3px; box-sizing: border-box; width: 9px; height: 9px; border-radius: 50%; }
+.cp-mark.running { border: 1.5px solid color-mix(in srgb, var(--working) 28%, transparent); border-top-color: var(--working); animation: spin 0.8s linear infinite; }
+.cp-mark.waiting { background: var(--attn); box-shadow: 0 0 0 2px color-mix(in srgb, var(--attn) 30%, transparent); }
+.cp-mark.unread { background: var(--unread); }
+.cp-tip { position: fixed; z-index: 30; transform: translateY(-50%); max-width: 260px; padding: 6px 9px; border-radius: var(--radius-chip); background: var(--bg); box-shadow: 0 0 0 0.5px var(--line-strong), var(--shadow); pointer-events: none; font-size: calc(12px * var(--font-scale)); }
+.cp-tip-title { font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-tip-meta { margin-top: 1px; color: var(--muted-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-tip-status.running { color: var(--working); }
+.cp-tip-status.waiting { color: var(--attn-text); }
+.cp-tip-status.unread { color: var(--unread); }
+@media (prefers-reduced-motion: reduce) { .cp-mark.running { animation: none; } }
 
 /* History: one project's past chats, under the title bar. */
 .history-popover { position: fixed; z-index: 30; top: 52px; left: 50%; width: min(560px, calc(100vw - 48px)); transform: translateX(-50%); display: flex; }

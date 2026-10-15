@@ -145,7 +145,7 @@ The app becomes a canvas of floating chats tethered to the Lead:
 - Drag a title to move a window and its corner to resize it. Drag the background to pan; pinch or ⌘-scroll to zoom. Zoomed out, agents become cards, and a click zooms in.
 - An agent's permission prompts appear in its own window. The pill at the top ("1 agent needs you") takes you to the next one that does.
 - ⇧⌘C switches between the canvas and the chat view, and the sidebar lists the team with its agents under it.
-- A team comes back when Lantern reopens.
+- A team comes back when Lantern reopens, with the agents that were still going. An agent the Lead stopped, one whose worktree is gone, and one whose Lead isn't coming back are not reopened, and an agent's conversation is never listed among a project's past chats.
 
 The same canvas in the dark theme:
 
@@ -189,9 +189,30 @@ The sidebar has one group for every project: the ones with a chat open first, th
 - Hover a project for **+** (a new chat there) and **⋯**: New team, Bring old chats here…, Reveal in Finder and Remove from recents (which only hides it; Claude Code keeps the chats).
 - **New ▾** at the top starts a Chat (⌘N), a Team (⇧⌘N) or a PR review in the project on screen.
 
-**⌃⌘S** (View ▸ Show/Hide Sidebar) folds it to a narrow rail of project initials with the same badges, so a waiting chat is never hidden: a click on one goes straight to the chat that needs you. Drag the sidebar's edge to resize it. Its width and whether it's folded are remembered.
+The sidebar has three states: **Full** (above), **Compact** and **Hidden**.
 
-![The sidebar folded to a rail of project initials](images/sidebar-rail.png)
+**Compact** is the button at the top-right of the sidebar (View ▸ Compact sidebar, or Compact sidebar in the command palette). It becomes a slim column with a small square for each open chat and team, not for each project:
+
+- A square carries the initials of its chat's title (a new chat is N) and a mark: a spinning ring while it works, an amber dot when it needs you, a blue dot when it finished while you were away. The chat on screen is outlined. A team is one square (its Lead, with a small diamond) that shows the team's combined state, and an agent has no square of its own.
+- Hover a square for its title, project and status. Click it to switch to that chat, or to open a team's canvas.
+- Each project's squares sit under a thin line labelled with the project's initials (hover it for the full name), and **+** at the top starts a chat. When there are more squares than fit, the column scrolls.
+- The button at the top of the column (the same one) brings back the full sidebar.
+
+![The compact sidebar: a chat that works, two that need you (one a team), one finished unread, and a second project below its own label](images/sidebar-compact.png)
+
+Rest the pointer on the compact column for a moment and the full sidebar opens over the chat. Click a chat in it to go there, and it closes again, as it does when the pointer leaves it or you press Esc. To keep it open, use its top-right button.
+
+![The compact sidebar opened over the chat](images/sidebar-compact-peek.png)
+
+**Hidden**: **⌃⌘S** (View ▸ Hide sidebar, or Hide sidebar in the command palette) hides the sidebar completely, and the chat takes the whole width. A **Show sidebar** button then sits at the left of the title bar. When a chat or an agent needs you, it carries an amber badge with how many, so a waiting chat is never hidden: click it, or press ⌃⌘S again, to bring the sidebar back as it was (Full or Compact).
+
+![The sidebar hidden, with the title bar's button badged for the 2 chats that need you](images/sidebar-hidden.png)
+
+To look without showing it, rest the pointer on the window's left edge for a moment and the sidebar slides in over the chat, in the same way. To keep it open, use its top-right button or ⌃⌘S.
+
+![The hidden sidebar peeking in over the chat](images/sidebar-peek.png)
+
+Drag the sidebar's edge to resize it. Its width, whether it is Compact and whether it is hidden are each remembered, so showing it again restores it.
 
 The expanded sidebar is in most of the other screenshots on this page; the team canvas one shows a team with its agents nested under it.
 

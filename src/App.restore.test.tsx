@@ -20,7 +20,7 @@ async function launch() {
   installMockBackend();
   const { default: App } = await import("./App");
   render(<App />);
-  await screen.findByText("2 chats were open when Lantern closed");
+  await screen.findByText(/(chats were|chat was) open when Lantern closed/);
 }
 
 describe("restoring chats at launch", () => {
@@ -34,7 +34,7 @@ describe("restoring chats at launch", () => {
 
   it("brings every chat back, the one that was on screen on screen with its unsent text", async () => {
     await launch();
-    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
     await screen.findByText("Should the backoff have jitter so clients don't retry in lockstep?");
     expect(screen.getByRole("textbox")).toHaveValue("and log the state param");
     expect(screen.queryByText(/were open when Lantern closed/)).toBeNull();
@@ -81,7 +81,7 @@ describe("restoring a team at launch", () => {
 
   it("puts the main agent and its worker back together, and offers the canvas", async () => {
     await launch();
-    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
     // The chats are an orchestra again: the canvas can be shown.
     await screen.findByRole("button", { name: "Canvas" });
     // Saved as they are now, with the worker still naming its main agent by session.
@@ -97,7 +97,7 @@ describe("restoring a team at launch", () => {
   it("brings the workers back on the mode they had, not just the ones the user had looked at", async () => {
     localStorage.setItem("settings.modeBySession", JSON.stringify({ bbbb22: "auto", aaaa11: "auto" }));
     await launch();
-    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
     // Each window's title bar says its Permissions: the Lead's and the agent's.
     expect(await within(await screen.findByLabelText(/^Lead,/)).findByRole("button", { name: "Permissions: Auto" })).toBeInTheDocument();
@@ -109,7 +109,7 @@ describe("restoring a team at launch", () => {
   it("brings a worker with no saved mode back on Ask, as before modes were kept for it", async () => {
     localStorage.setItem("settings.modeBySession", JSON.stringify({ bbbb22: "auto" }));
     await launch();
-    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
     expect(await within(await screen.findByLabelText(/^Lead,/)).findByRole("button", { name: "Permissions: Auto" })).toBeInTheDocument();
     expect(await within(await screen.findByLabelText(/Agent Login form/)).findByRole("button", { name: "Permissions: Ask" })).toBeInTheDocument();
@@ -117,7 +117,7 @@ describe("restoring a team at launch", () => {
 
   it("keeps the side panel beside the canvas, shut until the user opens it, and remembers that", async () => {
     await launch();
-    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
     expect(await screen.findByLabelText(/Agent Login form/)).toBeInTheDocument();
     // The panel is there beside the canvas (its Changes tab is in the page), shut.
@@ -133,7 +133,7 @@ describe("restoring a team at launch", () => {
     const hiddenWorker: SavedChat = { ...team[0], orchestra: { ...(team[0].orchestra as Extract<NonNullable<SavedChat["orchestra"]>, { role: "worker" }>), hidden: true } };
     localStorage.setItem("session.openChats", JSON.stringify([hiddenWorker, team[1]]));
     await launch();
-    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
     await screen.findByRole("button", { name: "Canvas" });
     await waitFor(() => {
       const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
@@ -143,7 +143,7 @@ describe("restoring a team at launch", () => {
 
   it("restores what an older version saved, which has no such field, with the worker shown", async () => {
     await launch();
-    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
     await screen.findByRole("button", { name: "Canvas" });
     await waitFor(() => {
       const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
@@ -152,16 +152,51 @@ describe("restoring a team at launch", () => {
     });
   });
 
-  it("brings a worker back as an ordinary chat when its main agent is not restored with it", async () => {
-    localStorage.setItem("session.openChats", JSON.stringify([team[0], { ...team[1], sessionId: "cccc33", orchestra: undefined }]));
-    await launch();
-    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
-    await screen.findByText("Should the backoff have jitter so clients don't retry in lockstep?");
+  // What an older version left saved after a team ran: agents without a team, a worktree that was removed, and an
+  // agent's chat saved as an ordinary one.
+  it("never brings an agent back as a chat of its own, and drops what can't come back from the saved chats", async () => {
+    const worker = team[0].orchestra as Extract<NonNullable<SavedChat["orchestra"]>, { role: "worker" }>;
+    const AGENT_FOLDER = "/Users/you/Library/Application Support/io.github.alyakan.lantern/worktrees/acme-api/old-w2";
+    localStorage.setItem(
+      "session.openChats",
+      JSON.stringify([
+        team[0],
+        team[1],
+        // Its worktree was removed after the merge.
+        { ...team[0], sessionId: "dddd44", folder: `${WORKTREE}-gone`, title: "Removed", orchestra: { ...worker, name: "Removed" } },
+        // Its main agent isn't among the saved chats.
+        { ...team[0], sessionId: "eeee55", title: "Orphan", orchestra: { ...worker, name: "Orphan", parentSession: "zzzz99" } },
+        // Saved as an ordinary chat by a version that restored workers that way.
+        { sessionId: "ffff66", folder: AGENT_FOLDER, title: "Old agent chat", draft: "", active: false },
+        // Shared with its team's folder, and known to be an agent's.
+        { sessionId: "9b7e01", folder: FOLDER, title: "Shared agent", draft: "", active: false },
+        { sessionId: "3f1c2a", folder: OTHER, title: "A chat of the user's", draft: "", active: false },
+      ]),
+    );
+    localStorage.setItem("session.agentIds", JSON.stringify(["9b7e01"]));
+    const { installMockBackend } = await import("./dev/mockBackend");
+    installMockBackend();
+    const { default: App } = await import("./App");
+    render(<App />);
+    // The team and the user's own chat are offered, and nothing of the agents.
+    await screen.findByText("2 chats were open when Lantern closed");
+    expect(screen.queryByRole("button", { name: /Login form|Removed|Orphan|Old agent chat|Shared agent/ })).toBeNull();
+    // The saved list is cleaned on the first launch, apart from the worker that comes back with its team (and not yet its folder check).
     await waitFor(() => {
       const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
-      expect(saved).toHaveLength(2);
-      expect(saved.every((c) => !c.orchestra)).toBe(true);
+      expect(saved.map((c) => c.sessionId).sort()).toEqual(["3f1c2a", "aaaa11", "bbbb22"]);
     });
-    expect(screen.queryByRole("button", { name: "Canvas" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+    await screen.findByRole("button", { name: "Canvas" });
+    // The team's own agent is nested under it in the sidebar: no project of its own, no row among the chats.
+    const acme = await screen.findByRole("region", { name: "acme-api" });
+    expect(within(acme).getByTitle(/Login form/)).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /login-form|worktrees|old-w2/ })).toBeNull();
+    await waitFor(() => {
+      const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
+      expect(saved.map((c) => [c.sessionId, c.orchestra?.role ?? null]).sort()).toEqual([["3f1c2a", null], ["aaaa11", "worker"], ["bbbb22", "main"]]);
+    });
+    // The agents' conversations are remembered, so the past chats leave them out.
+    expect(JSON.parse(localStorage.getItem("session.agentIds") ?? "[]")).toEqual(expect.arrayContaining(["9b7e01", "aaaa11", "dddd44", "eeee55", "ffff66"]));
   });
 });

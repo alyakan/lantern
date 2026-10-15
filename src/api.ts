@@ -122,6 +122,8 @@ export const api = {
   /** Replays a past session into the chat and resumes it. A session only in a folder's old place is copied into the folder first. */
   openSession: (slot: string, claudePath: string, folder: string, settings: Settings, sessionId: string) =>
     invoke<OpenedSession>("open_session", { slot, claudePath, folder, settings, sessionId }),
+  /** Which of the folders no longer exist. */
+  foldersGone: (folders: string[]) => invoke<string[]>("folders_gone", { folders }),
   /** Where each folder was before it moved, as Lantern recorded it. */
   relocationsList: () => invoke<RelocationEntry[]>("relocations_list"),
   /** The recent folders that are gone, each with the place it probably moved to. */
@@ -178,6 +180,8 @@ export const api = {
   onUpdateState: (cb: (state: UpdateState) => void): Promise<UnlistenFn> => listen<UpdateState>("update-state", (e) => cb(e.payload)),
   /** "Lantern ▸ Check for Updates…" was chosen in the app menu. */
   onCheckForUpdates: (cb: () => void): Promise<UnlistenFn> => listen("check-for-updates", () => cb()),
+  /** The sidebar is now hidden, or compact: View's two sidebar items say what choosing them does. */
+  sidebarMenu: (hidden: boolean, compact: boolean) => invoke<void>("sidebar_menu", { hidden, compact }),
   /** A menu bar item backed by an action was chosen: the action's id (see src/lib/actions.ts). */
   onMenuAction: (cb: (id: string) => void): Promise<UnlistenFn> => listen<string>("menu-action", (e) => cb(e.payload)),
   /** A folder in File ▸ Open Recent was chosen. */

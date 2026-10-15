@@ -240,7 +240,7 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
 
 
   return (
-    <div className="steps">
+    <div className="steps-view">
       <div className="steps-head">
         <div className="steps-rail" ref={rail} role="tablist" aria-label="Pages">
           {pages.map((p, i) => (

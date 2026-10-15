@@ -33,6 +33,9 @@ export function chatsToSave(slots: Record<string, State>, active: string, drafts
     if (!s.folder || (!sessionId && !draft)) return [];
     const meta = agents[slot];
     const parentSession = meta ? (slots[meta.parent]?.sessionId ?? null) : null;
+    // An agent only comes back inside its team: one the Lead stopped, or whose Lead has no conversation to come back to,
+    // is left out (saved as it was, it would return as an ordinary chat).
+    if (meta && (!parentSession || s.leadStopped)) return [];
     const orchestra: SavedTeamRole | undefined = s.orchestrator
       ? { role: "main" }
       : meta && parentSession
@@ -61,6 +64,36 @@ export function withOffered(open: SavedChat[], offered: SavedChat[]): SavedChat[
   if (open.length === 0) return offered;
   const ids = new Set(open.map((c) => c.sessionId).filter(Boolean));
   return [...open, ...offered.filter((c) => !c.sessionId || !ids.has(c.sessionId)).map((c) => ({ ...c, active: false }))];
+}
+
+/** Whether a folder is one an agent worked in (its worktree), not one the user opened: see `is_agent_folder` in history.rs. */
+export function isAgentFolder(path: string): boolean {
+  const parts = path.split("/");
+  return parts.some((p, i) => p === "worktrees" && (parts[i - 1] === "io.github.alyakan.lantern" || parts[i - 1] === ".claude"));
+}
+
+/** The conversations of the agents in `saved`: what the past chats leave out, so an agent's is never listed as the user's. */
+export function agentSessionsOf(saved: SavedChat[]): string[] {
+  return saved.flatMap((c) => (c.sessionId && (c.orchestra?.role === "worker" || (!c.orchestra && isAgentFolder(c.folder))) ? [c.sessionId] : []));
+}
+
+/**
+ * The saved chats that are worth offering: an agent only with its team (a worker whose main agent isn't saved is dropped,
+ * and one an older version saved as an ordinary chat, which sits in an agent's worktree or is a known agent's
+ * conversation, too). Agents are only ever part of their team, never a chat of their own.
+ */
+export function restorable(chats: SavedChat[], agentSessions: ReadonlySet<string> = new Set()): SavedChat[] {
+  const mains = new Set(chats.filter((c) => c.orchestra?.role === "main" && c.sessionId).map((c) => c.sessionId));
+  return chats.filter((c) => {
+    if (c.orchestra?.role === "worker") return mains.has(c.orchestra.parentSession);
+    if (c.orchestra?.role === "main") return true;
+    return !isAgentFolder(c.folder) && !(c.sessionId && agentSessions.has(c.sessionId));
+  });
+}
+
+/** `chats` without the workers whose folders (a worktree removed after its merge) are gone. */
+export function withoutGone(chats: SavedChat[], gone: ReadonlySet<string>): SavedChat[] {
+  return chats.filter((c) => c.orchestra?.role !== "worker" || !gone.has(c.folder));
 }
 
 /** The one that was on screen first, then the rest as they were. */

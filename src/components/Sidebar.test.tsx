@@ -40,7 +40,7 @@ function setup(over: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
     onNewChat: vi.fn(),
     onNewTeam: vi.fn(),
     onReviewPr: vi.fn(),
-    onCollapsed: vi.fn(),
+    onToggle: vi.fn(),
     onWidth: vi.fn(),
     onRelocate: vi.fn(),
     onDismissMoved: vi.fn(),
@@ -48,7 +48,6 @@ function setup(over: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
   const loadSessions = vi.fn(async (folder: string) => (folder === LANTERN ? [past("p1", "Map tab layout", 90_000_000), past("p2", "Release flow notes", 5 * 86_400_000), past("p3", "Third", 6 * 86_400_000), past("p4", "Fourth", 7 * 86_400_000), past("p5", "Fifth", 8 * 86_400_000)] : [past("q1", "Old monitor work")]));
   const props: React.ComponentProps<typeof Sidebar> = {
     ...h,
-    collapsed: false,
     width: SIDEBAR_DEFAULT,
     open: { [LANTERN]: lanternOpen },
     currentFolder: LANTERN,
@@ -254,58 +253,25 @@ describe("New ▾", () => {
   });
 });
 
-describe("the rail", () => {
-  it("shows project initials with a badge for what needs you, so a waiting chat is never hidden", async () => {
-    setup({ collapsed: true, open: { [LANTERN]: lanternOpen, [MONITOR]: monitorOpen } });
-    const rail = await screen.findByRole("complementary", { name: "Projects" });
-    expect(rail).toHaveClass("rail");
-    expect(within(rail).getByRole("button", { name: "network-monitor, 2 need you" })).toHaveTextContent("NM2");
-    expect(within(rail).getByRole("button", { name: "lantern, 1 needs you" })).toHaveTextContent("La1");
-    expect(within(rail).getByRole("button", { name: "lumiform-ios" })).toHaveTextContent("LI");
-    // Nothing of the sidebar's lists is there, and no past chats are read.
-    expect(within(rail).queryByRole("region")).toBeNull();
-  });
-
-  it("reads no past chats while minimized", async () => {
-    const { loadSessions } = setup({ collapsed: true });
-    await screen.findByRole("button", { name: "lumiform-ios" });
-    // Its Lantern chats are open, but nothing is expanded on a rail.
-    expect(loadSessions).not.toHaveBeenCalled();
-  });
-
-  it("goes to the chat that needs you on a click, to a team's agent when that is what waits, and to the first chat otherwise", async () => {
-    const teamWaiting: ProjectOpen = { items: [{ kind: "team", ...chat("lead", "sweep", { state: "waiting" }), agents: [chat("a1", "sec", { state: "waiting" })] }], sessionIds: [], needs: 1, target: { slot: "a1", team: "lead" } };
-    const quiet: ProjectOpen = { items: [{ kind: "chat", ...chat("q1", "Quiet", { active: false }) }, { kind: "chat", ...chat("q2", "Shown", { active: true }) }], sessionIds: [], needs: 0, target: null };
-    const { h } = setup({ collapsed: true, open: { [LANTERN]: lanternOpen, [MONITOR]: teamWaiting, [IOS]: quiet } });
-    fireEvent.click(await screen.findByRole("button", { name: "lantern, 1 needs you" }));
-    expect(h.onChat).toHaveBeenLastCalledWith("s2");
-    fireEvent.click(screen.getByRole("button", { name: "network-monitor, 1 needs you" }));
-    expect(h.onAgent).toHaveBeenCalledWith("a1", "lead");
-    fireEvent.click(screen.getByRole("button", { name: "lumiform-ios" }));
-    expect(h.onChat).toHaveBeenLastCalledWith("q2");
-  });
-
-  it("brings the sidebar back, with that project open, for a project with nothing open", async () => {
-    const { h } = setup({ collapsed: true });
-    fireEvent.click(await screen.findByRole("button", { name: "network-monitor" }));
-    expect(h.onCollapsed).toHaveBeenCalledWith(false);
-  });
-
-  it("shows the sidebar from its button, and has the same New menu and Open folder", async () => {
-    const { h } = setup({ collapsed: true });
-    fireEvent.click(screen.getByRole("button", { name: "Show sidebar" }));
-    expect(h.onCollapsed).toHaveBeenCalledWith(false);
-    fireEvent.click(screen.getByRole("button", { name: "New" }));
-    expect(screen.getByRole("menuitem", { name: /^Chat/ })).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: "Escape" });
-    fireEvent.click(screen.getByRole("button", { name: "Open folder…" }));
-    expect(h.onOpenFolder).toHaveBeenCalled();
-  });
-
-  it("minimizes from the button in the sidebar", () => {
+describe("compacting", () => {
+  it("goes compact from the button in the sidebar", () => {
     const { h } = setup();
-    fireEvent.click(screen.getByRole("button", { name: "Hide sidebar" }));
-    expect(h.onCollapsed).toHaveBeenCalledWith(true);
+    fireEvent.click(screen.getByRole("button", { name: "Compact sidebar" }));
+    expect(h.onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers to keep it open while it only peeks in over the chat", () => {
+    const { h } = setup({ peek: true });
+    expect(screen.getByRole("complementary", { name: "Projects" })).toHaveClass("peek");
+    expect(screen.queryByRole("button", { name: "Compact sidebar" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Keep sidebar open" }));
+    expect(h.onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("is a plain sidebar otherwise, with no rail of initials", () => {
+    setup({ open: { [LANTERN]: lanternOpen, [MONITOR]: monitorOpen } });
+    expect(screen.getByRole("complementary", { name: "Projects" })).not.toHaveClass("peek");
+    expect(screen.queryByRole("button", { name: "network-monitor, 2 need you" })).toBeNull();
   });
 });
 

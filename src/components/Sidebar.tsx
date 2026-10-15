@@ -3,7 +3,7 @@ import type { MovedFolder, RecentFolder, SessionSummary } from "../types";
 import { usePersistentState } from "../lib/layout";
 import { ACTIONS, shortcutLabel } from "../lib/actions";
 import { relativeTime } from "../lib/time";
-import { sidebarProjects, type ProjectOpen, type SidebarChat, type SidebarItem, type SidebarProject } from "../lib/sidebar";
+import { DOT_LABEL, markOf, sidebarProjects, type ProjectOpen, type SidebarChat, type SidebarItem, type SidebarProject } from "../lib/sidebar";
 import { ChevronIcon, FolderOpenIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
 import { MovedNotice } from "./MovedFolders";
 import { moveFocus } from "./useMenuKeys";
@@ -14,7 +14,6 @@ export const SIDEBAR_MAX = 420;
 export const SIDEBAR_DEFAULT = 248;
 const clampWidth = (w: number) => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Math.round(w)));
 
-const DOT_LABEL = { running: "Working", waiting: "Needs you", draft: "Draft", done: "Done" } as const;
 const shortcut = (id: string) => {
   const def = ACTIONS.find((a) => a.id === id);
   return def ? shortcutLabel(def) : null;
@@ -43,8 +42,10 @@ export interface SidebarHandlers {
 }
 
 interface Props extends SidebarHandlers {
-  collapsed: boolean;
-  onCollapsed: (collapsed: boolean) => void;
+  /** Its button at the top: makes the sidebar compact, or (while it only peeks in over the chat) keeps it open. */
+  onToggle: () => void;
+  /** It slid in over the chat from the window's edge, rather than being shown. */
+  peek?: boolean;
   width: number;
   onWidth: (width: number) => void;
   /** What is open, by project (see openProjects), and the project on screen with its branch. */
@@ -85,7 +86,7 @@ function useDismiss(open: boolean, root: RefObject<HTMLElement | null>, close: (
 const menuKeys = (e: ReactKeyboardEvent<HTMLElement>) => void moveFocus(e, [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')]);
 
 /** New ▾: a chat or a team in the project on screen, or a review of one of its pull requests. */
-function NewMenu({ canNew, compact, onNewChat, onNewTeam, onReviewPr }: Pick<Props, "canNew" | "onNewChat" | "onNewTeam" | "onReviewPr"> & { compact?: boolean }) {
+function NewMenu({ canNew, onNewChat, onNewTeam, onReviewPr }: Pick<Props, "canNew" | "onNewChat" | "onNewTeam" | "onReviewPr">) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   useDismiss(open, root, () => setOpen(false));
@@ -104,14 +105,10 @@ function NewMenu({ canNew, compact, onNewChat, onNewTeam, onReviewPr }: Pick<Pro
   );
   return (
     <div className="sb-new" ref={root}>
-      <button className={`sb-new-button${compact ? " compact" : ""}`} aria-haspopup="menu" aria-expanded={open} aria-label="New" title="Start something new" disabled={!canNew} onClick={() => setOpen(!open)}>
+      <button className="sb-new-button" aria-haspopup="menu" aria-expanded={open} aria-label="New" title="Start something new" disabled={!canNew} onClick={() => setOpen(!open)}>
         <PlusIcon />
-        {!compact && (
-          <>
-            <span>New</span>
-            <span className="chev down" aria-hidden />
-          </>
-        )}
+        <span>New</span>
+        <span className="chev down" aria-hidden />
       </button>
       {open && (
         <div className="menu sb-menu" role="menu" aria-label="New" onKeyDown={menuKeys}>
@@ -126,10 +123,8 @@ function NewMenu({ canNew, compact, onNewChat, onNewTeam, onReviewPr }: Pick<Pro
 
 /** A state dot, for a chat that is working, needs you, finished unread, or is just open. */
 function Dot({ chat }: { chat: SidebarChat }) {
-  // Needing you beats an unread finish.
-  const unread = chat.unread && chat.state !== "waiting";
-  const kind = unread ? "unread" : chat.state;
-  const label = unread ? "Unread" : DOT_LABEL[chat.state];
+  const kind = markOf(chat);
+  const label = kind === "unread" ? "Unread" : DOT_LABEL[kind];
   return <span className={`sb-dot ${kind}`} role="img" aria-label={label} />;
 }
 
@@ -137,7 +132,7 @@ function ChatRow({ chat, onClick, onClose, team = false, label }: { chat: Sideba
   return (
     <li className={`sb-item${chat.closable && onClose ? " closable" : ""}`}>
       <button className={`sb-row${chat.active ? " current" : ""}${chat.unread ? " unread" : ""}`} aria-current={chat.active ? "true" : undefined} title={chat.title} onClick={onClick}>
-        {team ? <span className={`sb-team ${chat.unread && chat.state !== "waiting" ? "unread" : chat.state}`} role="img" aria-label={`${DOT_LABEL[chat.state]} team`}><TeamIcon /></span> : <Dot chat={chat} />}
+        {team ? <span className={`sb-team ${markOf(chat)}`} role="img" aria-label={`${DOT_LABEL[chat.state]} team`}><TeamIcon /></span> : <Dot chat={chat} />}
         <span className="sb-title">{label ?? chat.title}</span>
         {chat.pinned && <span className="sb-pin" role="img" aria-label="Pinned"><PinIcon /></span>}
         {chat.background > 0 && <span className="spinner" role="img" aria-label={`${chat.background} running in the background`} />}
@@ -269,11 +264,13 @@ function Project({ project, expanded, onToggle, current, branch, moved, onReloca
 /**
  * The left sidebar: one group per project (the ones with a chat open first, then the other recent folders), each with its
  * open chats and teams (agents nested under their team), pinned past chats and the latest few, and "Show all…". What
- * needs you rises to the top of its group and shows as a badge when the project is collapsed. Minimized, it is a narrow
- * rail of project initials with the same badges. Past chats are read only for an expanded project.
+ * needs you rises to the top of its group and shows as a badge when the project is collapsed. Compact or hidden, it isn't
+ * rendered in full (the compact column or the title bar says what needs you); the app may show it over the chat for a moment,
+ * as a peek. Past chats are read
+ * only for an expanded project.
  */
 export function Sidebar(props: Props) {
-  const { collapsed, onCollapsed, width, onWidth, open, currentFolder, branch, canNew, loadRecent, loadSessions, pinned, titles, hidden, moved, onRelocate, onDismissMoved, ...h } = props;
+  const { onToggle, peek, width, onWidth, open, currentFolder, branch, canNew, loadRecent, loadSessions, pinned, titles, hidden, moved, onRelocate, onDismissMoved, ...h } = props;
   const [recent, setRecent] = useState<RecentFolder[]>([]);
   const [past, setPast] = useState<Record<string, SessionSummary[] | undefined>>({});
   // A project the user opened or closed by hand; the others follow whether something is open in them.
@@ -292,8 +289,8 @@ export function Sidebar(props: Props) {
   const isExpanded = (p: SidebarProject) => by[p.folder] ?? (p.hasOpen || seenOpen.current.has(p.folder));
 
   // Past chats of the expanded projects, read when a project expands and again when its open chats change (one closed
-  // becomes a past chat; a new one gets its session). Collapsed projects are never read, nor is anything on the rail.
-  const wanted = (collapsed ? [] : projects.filter(isExpanded)).map((p) => `${p.folder}\t${(open[p.folder]?.sessionIds ?? []).join(",")}`);
+  // becomes a past chat; a new one gets its session). Collapsed projects are never read.
+  const wanted = projects.filter(isExpanded).map((p) => `${p.folder}\t${(open[p.folder]?.sessionIds ?? []).join(",")}`);
   const read = useRef<Record<string, string>>({});
   useEffect(() => {
     for (const entry of wanted) {
@@ -341,50 +338,13 @@ export function Sidebar(props: Props) {
   };
 
   const newMenu = { canNew, onNewChat: h.onNewChat, onNewTeam: h.onNewTeam, onReviewPr: h.onReviewPr };
-  const toggleTitle = `${collapsed ? "Show" : "Hide"} sidebar${shortcut("toggle-sidebar") ? ` (${shortcut("toggle-sidebar")})` : ""}`;
-
-  if (collapsed) {
-    const goTo = (p: SidebarProject) => {
-      // A waiting chat is one click away; otherwise the project's chat on screen, or its first; with none open, the sidebar.
-      const first = p.items.find((i) => i.active) ?? p.items[0];
-      if (p.target) return p.target.team ? h.onAgent(p.target.slot, p.target.team) : h.onChat(p.target.slot);
-      if (first) return first.kind === "team" ? h.onTeam(first.slot) : h.onChat(first.slot);
-      onCollapsed(false);
-      setBy({ ...by, [p.folder]: true });
-    };
-    return (
-      <aside className="sidebar rail" aria-label="Projects">
-        <button className="icon sb-toggle" aria-label="Show sidebar" title={toggleTitle} onClick={() => onCollapsed(false)}>
-          <SidebarIcon />
-        </button>
-        <NewMenu compact {...newMenu} />
-        <ul className="rail-list">
-          {projects.map((p) => (
-            <li key={p.folder}>
-              <button
-                className={`rail-project${p.folder === currentFolder ? " current" : ""}${p.hasOpen ? " open" : ""}`}
-                aria-label={p.needs > 0 ? `${p.label}, ${p.needs} ${p.needs === 1 ? "needs" : "need"} you` : p.label}
-                title={p.needs > 0 ? `${p.label}: ${p.needs} ${p.needs === 1 ? "needs" : "need"} you` : p.label}
-                onClick={() => goTo(p)}
-              >
-                {p.initials}
-                {p.needs > 0 && <span className="rail-badge" aria-hidden>{p.needs}</span>}
-              </button>
-            </li>
-          ))}
-        </ul>
-        <button className="icon sb-open-folder" aria-label="Open folder…" title="Open folder… (⌘O)" onClick={h.onOpenFolder}>
-          <FolderOpenIcon />
-        </button>
-      </aside>
-    );
-  }
+  const toggleLabel = peek ? "Keep sidebar open" : "Compact sidebar";
 
   return (
-    <aside className={`sidebar${dragWidth !== null ? " dragging" : ""}`} aria-label="Projects" style={{ width: dragWidth ?? width }}>
+    <aside className={`sidebar${peek ? " peek" : ""}${dragWidth !== null ? " dragging" : ""}`} aria-label="Projects" style={{ width: dragWidth ?? width }}>
       <div className="sb-head">
         <NewMenu {...newMenu} />
-        <button className="icon sb-toggle" aria-label="Hide sidebar" title={toggleTitle} onClick={() => onCollapsed(true)}>
+        <button className="icon sb-toggle" aria-label={toggleLabel} title={toggleLabel} onClick={onToggle}>
           <SidebarIcon />
         </button>
       </div>

@@ -69,6 +69,12 @@ pub(crate) fn scratch_dir() -> std::path::PathBuf {
 const DEFAULT_AGENT_LIMIT: usize = 3;
 const AGENT_LIMITS: std::ops::RangeInclusive<usize> = 1..=orchestra::MAX_WORKERS;
 
+/// The sidebar was hidden, shown, made compact or made full: View's two sidebar items now say what choosing them does.
+#[tauri::command]
+fn sidebar_menu(app: tauri::AppHandle, hidden: bool, compact: bool) -> Result<(), String> {
+    menu::sidebar_changed(&app, hidden, compact).map_err(|e| e.to_string())
+}
+
 /// The user changed how many agents may run at once (or the window started and says what it was set to).
 #[tauri::command]
 fn set_agent_limit(state: State<'_, AppState>, limit: usize) -> Result<(), String> {
@@ -1455,6 +1461,13 @@ async fn open_session(
     }
 }
 
+/// Which of these folders are gone (an agent's worktree is removed once its branch is merged), for leaving out the chats
+/// that were open in them when Lantern last closed.
+#[tauri::command]
+fn folders_gone(folders: Vec<String>) -> Vec<String> {
+    folders.into_iter().filter(|f| !std::path::Path::new(f).is_dir()).collect()
+}
+
 /// Where each folder was before it moved, as Lantern recorded it.
 #[tauri::command]
 fn relocations_list(state: State<'_, AppState>) -> Vec<relocate::Entry> {
@@ -1614,6 +1627,7 @@ pub fn run() {
             }
             // The menu bar (menu.rs), then its Open Recent list filled in from the history.
             app.manage(menu::RecentMenu::default());
+            app.manage(menu::SidebarMenu::default());
             menu::refresh(app.handle(), Vec::new())?;
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move { menu::refresh_recent(&handle).await });
@@ -1643,6 +1657,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             locate_claude,
+            sidebar_menu,
             user_name,
             start_session,
             restart_session,
@@ -1699,6 +1714,7 @@ pub fn run() {
             title_session,
             open_session,
             relocations_list,
+            folders_gone,
             moved_folder_candidates,
             old_locations,
             known_folders,
