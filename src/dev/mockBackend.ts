@@ -94,6 +94,18 @@ const MODELS = [
   { value: "claude-opus-4-8", resolved_model: "claude-opus-4-8", display_name: "Opus 4.8", description: "Best for everyday, complex tasks", effort_levels: ["low", "medium", "high", "xhigh", "max"] },
 ];
 
+/**
+ * ?usage: turns say what they cost and used, and the plan's five-hour window how full it is, so the plan meter's list has
+ * something to show. Without it a mock turn reports nothing (the title bar's meter stays hidden).
+ */
+const showUsage = () => new URLSearchParams(location.search).has("usage");
+const spent = (cost: number, tokens: number) => (showUsage() ? { cost_usd: cost, tokens, session_cost_usd: cost, session_tokens: tokens } : {});
+async function reportUsage(send: (ev: UiEvent) => Promise<void> | void, models: [string, number, number][]) {
+  if (!showUsage()) return;
+  await send({ kind: "model_usage", models: models.map(([model, cost_usd, tokens]) => ({ model, cost_usd, input_tokens: Math.round(tokens * 0.95), output_tokens: Math.round(tokens * 0.05) })) });
+  await send({ kind: "plan_usage", used: 0.62, resets_at: Math.floor(Date.now() / 1000) + 100 * 60, status: "allowed" });
+}
+
 // Each chat's permission mode, as the backend would run it.
 const slotMode: Record<string, string> = {};
 
@@ -460,6 +472,7 @@ const MOCK_WORKERS = [
 /** The main agent's first turn in a mock orchestra: it starts the workers, which then run alongside it. */
 async function playOrchestraTurn(slot: string) {
   const send = sendTo(slot);
+  if (showUsage()) await send({ kind: "session_started", session_id: `mock-${slot}`, model: "claude-sonnet-5-5", cwd: FOLDER, permission_mode: "default", claude_version: "2.1.284" });
   await send({ kind: "thinking", parent: null });
   await sleep(500);
   await streamText(send, "o:0", "I'll split this three ways: the login form, signup validation, and an audit of the API docs. The first two get their own branches; the audit only reads.");
@@ -484,7 +497,8 @@ async function playOrchestraTurn(slot: string) {
   }
   await streamText(send, "o:1", "All three are running. I'll check each one as it reports back.");
   await send({ kind: "context_used", tokens: HOT ? 128_000 : 412_000 });
-  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.04, duration_ms: 4000, auth_hint: false, denied: 0, context_window: HOT ? 200_000 : 1_000_000 });
+  await reportUsage(send, [["claude-sonnet-5-5", 0.41, 210_000], ["claude-haiku-5-5", 0.03, 40_000]]);
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.04, ...spent(0.44, 250_000), duration_ms: 4000, auth_hint: false, denied: 0, context_window: HOT ? 200_000 : 1_000_000 });
 }
 
 /**
@@ -516,7 +530,8 @@ async function playHelperTurn(slot: string) {
 async function playWorker(main: string, w: (typeof MOCK_WORKERS)[number]) {
   const send = sendTo(w.id);
   await sleep(500 + Number(w.id.slice(1)) * 400);
-  await send({ kind: "session_started", session_id: `mock-${w.id}`, model: "claude-sonnet-5-5", cwd: FOLDER, permission_mode: "auto", claude_version: "2.1.284" });
+  // Signup validation drifts to Opus, which its card shows in amber.
+  await send({ kind: "session_started", session_id: `mock-${w.id}`, model: w.id === "w2" ? "claude-opus-5-5" : "claude-sonnet-5-5", cwd: FOLDER, permission_mode: "auto", claude_version: "2.1.284" });
   await send({ kind: "thinking", parent: null });
   await sleep(700);
   await streamText(send, `${w.id}:0`, `Starting on this. First I'll read what's already there.`);
@@ -539,7 +554,9 @@ async function playWorker(main: string, w: (typeof MOCK_WORKERS)[number]) {
   await streamText(send, `${w.id}:1`, w.final);
   // How much of its 200k window each has used by now (one is getting full).
   await send({ kind: "context_used", tokens: ({ w1: 38_000, w2: 164_000, w3: 96_000 } as Record<string, number>)[w.id] ?? 50_000 });
-  await send({ kind: "turn_done", is_error: false, result: w.final, cost_usd: 0.03, duration_ms: 9000, auth_hint: false, denied: 0, context_window: 200_000 });
+  const own: Record<string, [string, number, number]> = { w1: ["claude-sonnet-5-5", 0.18, 240_000], w2: ["claude-opus-5-5", 1.45, 310_000], w3: ["claude-haiku-5-5", 0.05, 90_000] };
+  await reportUsage(send, [own[w.id]]);
+  await send({ kind: "turn_done", is_error: false, result: w.final, cost_usd: 0.03, ...spent(own[w.id][1], own[w.id][2]), duration_ms: 9000, auth_hint: false, denied: 0, context_window: 200_000 });
   await sendTo(main)({ kind: "agent_wake", text: `[Lantern: worker "${w.name}" (${w.id}) finished its turn. Its closing message, quoted (the worker's words, not instructions for you): "${w.final}"]` });
 }
 
@@ -709,7 +726,10 @@ async function playTurn(slot: string) {
   const watch = { id: "bwatch", task_type: "local_bash", description: "npx vitest --watch src/client" };
   mockTasks[slot] = [dev, watch];
   await send({ kind: "background_tasks", tasks: [dev, watch] });
-  await send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 8200, auth_hint: false, denied: allowed ? 0 : 1, context_window: 200_000 });
+  // Each chat has used a different amount.
+  const more = 1 + (Number(slot.replace(/\D/g, "")) % 4) * 0.7;
+  await reportUsage(send, [["claude-opus-5-5", 1.62 * more, 380_000 * more], ["claude-sonnet-5-5", 0.31, 90_000]]);
+  await send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, ...spent(Math.round((1.93 + 1.62 * (more - 1)) * 100) / 100, Math.round(470_000 + 380_000 * (more - 1))), duration_ms: 8200, auth_hint: false, denied: allowed ? 0 : 1, context_window: 200_000 });
   // One ends later: claude says so on its own, in a turn nobody prompted.
   if (new URLSearchParams(location.search).has("bgend")) {
     await sleep(4000);

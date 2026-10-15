@@ -143,7 +143,7 @@ The app becomes a canvas of floating chats tethered to the Lead:
 ![The team canvas: a Lead and three agents, one of which needs permission](images/team-canvas.png)
 
 - Drag a title to move a window and its corner to resize it. Drag the background to pan; pinch or ⌘-scroll to zoom. Zoomed out, agents become cards, and a click zooms in.
-- Every window and sidebar row says what its chat is doing in the same words: **Working**, **Needs you**, **Ready** (a Lead with nothing running), **Done** (an agent that finished its turn) or **Stopped**. The title bar says the same for the chat you're in. A working agent that has been silent a while says "Working · 45s ago", and from three minutes on it turns amber and reads **Quiet 3m**; its tooltip says to send it a message, or stop it.
+- Every window says what its chat is doing in the same words: **Working**, **Needs you**, **Ready** (a Lead with nothing running), **Done** (an agent that finished its turn) or **Stopped**. The title bar says the same for the chat you're in, and the sidebar's rows say Working, Needs you or Done (Unread for a finish you haven't opened). A working agent that has been silent a while says "Working · 45s ago", and from three minutes on it turns amber and reads **Quiet 3m**; its tooltip says to send it a message, or stop it.
 - An agent's permission prompts appear in its own window. The pill at the top ("1 agent needs you") takes you to the next one that does, at 100% so you can read it.
 - Fitting everything (**Fit**, or a new agent arriving) never zooms out past 80% by itself. A team too big for the window is shown from the Lead at 80% and you pan to the rest; zooming out further is yours to do.
 - Each window's title bar shows how full that agent's context is ("42%", amber from 75%, red from 90%). Click it for **Compact** (summarise the conversation to free up context) and **Clear** (a fresh conversation; the files stay, and you are asked first). Both wait until the agent has finished its turn.
@@ -171,6 +171,12 @@ An agent works on its own branch, and only you can approve merging it. When the 
 
 The canvas controls at the bottom adapt to the width of the canvas, so they never wrap or get cut off beside the side panel: first Subagents, **+ Agent** and Hidden fold into a **⋯** menu, then the team cost and the Context chip's agent name drop out ("82%"). Their **Context** chip is the share of the fullest agent's context window in use now; it turns amber from 75%, and the tooltip says to open that agent and use Compact (a click on the chip lists every agent's). They show what the team has cost so far ("Team · $0.15") and **Plan usage**, how full your subscription's five-hour window is, with when it resets. It turns amber from 80% and red from 95%, and past 95% the Lead can't start new agents until the window resets. The meter is the account's, so it also shows in the title bar.
 
+Press the title bar's meter to see **where it went**: the plan's line ("62% of the 5-hour window, resets in 1h 40m") and every open chat and team, in any project, biggest first, each with its state, what it has used since it started (cost and tokens, when known) and the models it ran on ("Sonnet 62%, Opus 38%", from its latest turn, Opus in amber). A team is one row with its total, and opens to its Lead and agents; pressing a name goes to that chat. The figures are per chat or team since it started, not just this window, and closed chats aren't counted, so they needn't add up to the plan's percentage. Esc closes it.
+
+Each agent's **model** is on its window's title bar (the Lead's too) and in the Team list: "Sonnet" or "Haiku" quietly, "Opus" in amber, with the full model id as its tooltip, so an agent that has drifted onto Opus shows at a glance.
+
+Starting a team (the Workflow menu's Team, New ▸ Team, Start a team, or **+ Agent** on a team) while another team is working asks first: "Another team is working (acme-api, 3 agents). Every agent spends the same plan. Start anyway?" **Don't ask again** turns it off; Settings ▸ General ▸ Teams brings it back.
+
 **Subagents**, in the same controls, says where the Lead's built-in subagents (Claude Code's Agent tool, which runs inline where you can't see them) go:
 
 ![The Subagents menu: On the canvas or Inline](images/team-subagents-menu.png)
@@ -186,47 +192,45 @@ The team runs on the Lead's Permissions, and an agent never gets more freedom th
 
 ## The sidebar and History
 
-The sidebar has one group for every project: the ones with a chat open first, then your other recent folders.
+The sidebar is one pane with a group for every project that has a chat open, and nothing else: your past chats are in History (below). It has three states: **Expanded** (pinned open beside the chat), **Collapsed** and **Hidden**.
 
-- A group lists its open chats with a dot (working, needs you, or finished while you were away), a team with its agents under it, the chats you pinned, and its 3 latest past chats. **Show all…** opens that project's History.
-- What needs you rises to the top of its group, and a folded project shows a badge for how many things need you.
-- Click an open chat to switch to it, a past chat to resume it (in its own project), a team to open its canvas, an agent to focus it there.
-- Hover a project for **+** (a new chat there) and **⋯**: New team, Bring old chats here…, Reveal in Finder and Remove from recents (which only hides it; Claude Code keeps the chats).
-- **New ▾** at the top starts a Chat (⌘N), a Team (⇧⌘N) or a PR review in the project on screen.
+**Expanded** is the whole pane, at the width you gave it (drag its edge to resize):
 
-The sidebar has three states: **Full** (above), **Compact** and **Hidden**.
+- **New ▾** at the top starts a Chat (⌘N), a Team (⇧⌘N) or a PR review in the project on screen. The pin button above it collapses the sidebar (View ▸ Collapse sidebar, or Collapse sidebar in the command palette), and the **History** button under it opens History.
+- A project's header has its initials in the colour the project has been given, its name, the branch when it is the project on screen, and a badge for how many things need you when it is folded. Click it to fold or open the project. Hover it for **+** (a new chat there) and **⋯**: New team, Close finished chats, Bring old chats here…, Reveal in Finder, Move up, Move down and Remove from recents (which only hides it; Claude Code keeps the chats).
+- Under it are the project's open chats and teams as squares: the initials of the chat's title (a new chat is N) and a mark on its corner (a spinning ring while it works, an amber dot when it needs you, a blue dot when it finished while you were away), the title, and how it is. A team is one square (its Lead, with a small diamond badge) that shows the team's combined state, with its agents nested under it. Each project has a colour of its own, kept across restarts (and when its folder moves): its squares are tinted with it, and the chat on screen is filled with it, with a bar beside it. A chat that needs you rises to the top of its group.
+- Click an open chat to switch to it, a team to open its canvas, an agent to focus it there. **Open folder…** at the bottom opens another project.
+- Every row has a **×** when you hover it (or tab to it) that closes the chat, and in the collapsed bar a right click has **Close chat** (and a small × shows on a square's corner). A chat that is done or only a draft closes at once, including the one on screen (Lantern then shows another chat, or the start screen). One that is working or waiting on you asks first, right under it: **Stop and close?** An agent is closed the way the canvas's *Clean up and close* does it: it checks for uncommitted and unmerged work and asks before deleting any. A team's Lead asks **Close the team and its N agents?** and says what would be lost. A project's ⋯ has **Close finished chats**, which closes every chat that is done (not the working ones, drafts or teams) and says how many.
 
-**Compact** is the button at the top-right of the sidebar (View ▸ Compact sidebar, or Compact sidebar in the command palette). It becomes a slim column with a small square for each open chat and team, not for each project:
+![The expanded sidebar: two projects' open chats, a team with its agents under it, and the History button under New](images/sidebar-expanded.png)
 
-- A square carries the initials of its chat's title (a new chat is N) and a mark on its corner: a spinning ring while it works, an amber dot when it needs you, a blue dot when it finished while you were away. A team is one square (its Lead, with a small diamond badge) that shows the team's combined state, and an agent has no square of its own.
-- Each project has a colour of its own, kept across restarts (and when its folder moves): its squares are tinted with it, and the chat on screen is filled with it, with a bar beside it. Projects open together get different colours.
-- Hover a square for its title, project and status. Click it to switch to that chat, or to open a team's canvas.
-- Each project's squares sit under the project's initials, in its colour (hover them for the full name), and **+** at the top starts a chat. When there are more squares than fit, the column scrolls.
-- The button at the top of the column (the same one) brings back the full sidebar.
+![Closing a chat that waits on an answer asks first, under its row](images/sidebar-close.png)
 
-![The compact sidebar: four chats that need you (one a team) in one project's colour, and the chat on screen in a second project's](images/sidebar-compact.png)
+**Collapsed** is the pin button again (or the button at the top of the bar, Expand sidebar, when it is collapsed). It becomes a slim column with a small square for each open chat and team, not for each project. The squares are the same ones, each project's under its initials in its colour, **+** at the top starts a chat and the clock under it opens History. When there are more squares than fit, the column scrolls.
 
-Rest the pointer on the compact column for a moment and it opens over the chat: the squares stay where they are, and each chat's title and status, and each project's name, slide out beside them. Click a chat to go there and it folds back, as it does when the pointer leaves or you press Esc. Moving focus into it from the keyboard opens it too. For projects and past chats, use the full sidebar (the button at the column's top).
+![The collapsed sidebar: four chats that need you (one a team) in one project's colour, and the chat on screen in a second project's](images/sidebar-collapsed.png)
 
-![The compact sidebar opened over the chat, with each chat's title and status beside its square](images/sidebar-compact-open.png)
+Rest the pointer on the collapsed column for a moment and the same pane opens over the chat: the squares stay where they are, and the titles, the project headers and the rest slide out beside them. Click a chat to go there and it folds back, as it does when the pointer leaves or you press Esc. Moving focus into it from the keyboard opens it too. Its pin button keeps it open (expanded).
 
-**Hidden**: **⌃⌘S** (View ▸ Hide sidebar, or Hide sidebar in the command palette) hides the sidebar completely, and the chat takes the whole width. A **Show sidebar** button then sits at the left of the title bar. When a chat or an agent needs you, it carries an amber badge with how many, so a waiting chat is never hidden: click it, or press ⌃⌘S again, to bring the sidebar back as it was (Full or Compact).
+![The collapsed sidebar opened over the chat](images/sidebar-collapsed-open.png)
+
+**Hidden**: **⌃⌘S** (View ▸ Hide sidebar, or Hide sidebar in the command palette) hides the sidebar completely, and the chat takes the whole width. A **Show sidebar** button then sits at the left of the title bar. When a chat or an agent needs you, it carries an amber badge with how many, so a waiting chat is never hidden: click it, or press ⌃⌘S again, to bring the sidebar back as it was (Expanded or Collapsed). The tray button at the right of the title bar is the separate Away inbox (see Away below), and is there in every state.
 
 ![The sidebar hidden, with the title bar's button badged for the 2 chats that need you](images/sidebar-hidden.png)
 
-To look without showing it, rest the pointer on the window's left edge for a moment and the sidebar slides in over the chat, in the same way. To keep it open, use its top-right button or ⌃⌘S.
+To look without showing it, rest the pointer on the window's left edge for a moment and the sidebar slides in over the chat, in the same way. To keep it open, use its pin button or ⌃⌘S.
 
 ![The hidden sidebar peeking in over the chat](images/sidebar-peek.png)
 
-Projects stay in the order you give them; using one doesn't move it. A project you open for the first time goes at the top. To reorder, drag a project by its name: it lifts, the others slide out of its way, and it settles where you drop it (Esc puts it back). From the keyboard, ⌥⌘↑ and ⌥⌘↓ move the project whose name has focus, and its ⋯ menu has Move up and Move down. The compact sidebar follows the same order, and the order is remembered.
+Projects stay in the order you give them; using one doesn't move it. A project you open for the first time goes at the top. To reorder, drag a project by its header: it lifts, the others slide out of its way, and it settles where you drop it (Esc puts it back). From the keyboard, ⌥⌘↑ and ⌥⌘↓ move the project whose header has focus, and its ⋯ menu has Move up and Move down. The collapsed bar follows the same order, and the order is remembered.
 
-Drag the sidebar's edge to resize it. Its width, whether it is Compact and whether it is hidden are each remembered, so showing it again restores it.
+Its width, whether it is collapsed and whether it is hidden are each remembered, so showing it again restores it.
 
-The expanded sidebar is in most of the other screenshots on this page; the team canvas one shows a team with its agents nested under it.
+The team canvas screenshot shows a team with its agents nested under it.
 
-**History** (⌘K, or a project's **Show all…**) lists the past chats of a project, including ones started in the terminal with Claude Code. You can search, pin, rename and export them.
+**History** (the clock button in the sidebar, or ⌘K; View ▸ Chat History, or Chat history in the command palette) lists the past chats of every project, including ones started in the terminal with Claude Code, grouped by project in the sidebar's order. A project's pinned chats come first, then the newest. Type to search all of them, or pick a project in the chip beside the search box. ↑ and ↓ move through the chats, Return opens one in its own project, and Esc (or ⌘K again) closes it. Each chat's ⋯ pins, renames, exports it or copies the command that picks it up in a terminal. The chats that are open are in the sidebar, so History leaves them out. It works with nothing open too: each project's header has a **+** that starts a chat there, which is how to start a project that has nothing open (the other ways are **New ▾**, **Open folder…** and the folder menu in the title bar).
 
-![History: a search box and the past chats of the project](images/history.png)
+![History: the past chats of every project, grouped by project, with a search box and a project chip](images/history.png)
 
 After you move a repository, Claude Code leaves its chats under the old path. **Bring old chats here…** (the folder menu in the title bar, a project's ⋯ menu, or the palette) finds the places the project was before and copies the chats you check into its History. Nothing is moved or overwritten, and nothing happens until you confirm.
 
@@ -234,7 +238,7 @@ After you move a repository, Claude Code leaves its chats under the old path. **
 
 People start work and walk away, so two things help while you are gone.
 
-**What needs you.** The tray button at the top right of the title bar (always there, whether the sidebar is full, compact or hidden; also **What Needs You…** in the command palette) opens a list of everything waiting on you across every open project and team: permission requests and questions, plans to approve, merges to approve, a team held back until you say go on, and chats that finished while you were elsewhere. Each row shows the chat or agent, its project (and team), what it needs in plain words and how long it has waited. **Go** takes you there; a plain permission request also has **Allow** and **Deny** right in the list. What needs an answer comes first, longest waiting first, then what only finished. The button's badge counts what needs an answer; a small blue dot means only unread finishes. Arrow keys move between rows (Left and Right between a row's buttons) and Esc closes it. macOS notifications are separate (see Settings).
+**What needs you.** The tray button at the top right of the title bar (always there, whether the sidebar is expanded, collapsed or hidden; also **What Needs You…** in the command palette) opens a list of everything waiting on you across every open project and team: permission requests and questions, plans to approve, merges to approve, a team held back until you say go on, and chats that finished while you were elsewhere. Each row shows the chat or agent, its project (and team), what it needs in plain words and how long it has waited. **Go** takes you there; a plain permission request also has **Allow** and **Deny** right in the list. What needs an answer comes first, longest waiting first, then what only finished. The button's badge counts what needs an answer; a small blue dot means only unread finishes. Arrow keys move between rows (Left and Right between a row's buttons) and Esc closes it. macOS notifications are separate (see Settings).
 
 **Keeping the Mac awake.** While any chat or agent is working, or paused on a question for you, Lantern stops the Mac from going to sleep on its own, so a long turn finishes while you are away (it holds macOS's `caffeinate` for as long as that lasts, and lets go when nothing is working or Lantern quits). Only idle sleep is prevented: the screen may still turn off, and closing the lid still sleeps the Mac. Turn it off in Settings ▸ General ▸ **Keep my Mac awake while Claude works**.
 

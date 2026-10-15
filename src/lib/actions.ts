@@ -15,12 +15,12 @@ const CATALOGUE = [
   { id: "open-folder", title: "Open Folder…", group: "File", key: "o", menu: true, native: true },
   // In the palette (and the folder menu and a project's ⋯ menu): no shortcut and no native menu item.
   { id: "relocate-folder", title: "Bring old chats here…", group: "File" },
-  // The left sidebar of every project, hidden or shown: macOS's own ⌃⌘S (⌘0 is the canvas's Fit). Compact is the slim
-  // column of open chats; both say what they do now (Hide or Show, Compact or Full) in the palette and the menu.
+  // The left sidebar of every project, hidden or shown: macOS's own ⌃⌘S (⌘0 is the canvas's Fit). Collapsed is the slim
+  // column of open chats; both say what they do now (Hide or Show, Collapse or Expand) in the palette and the menu.
   { id: "toggle-sidebar", title: "Hide Sidebar", group: "View", key: "s", ctrl: true, menu: true, native: true },
   // The title bar's inbox of what waits on you, across every project and team.
   { id: "show-inbox", title: "What Needs You…", group: "View" },
-  { id: "toggle-compact", title: "Compact Sidebar", group: "View", menu: true },
+  { id: "toggle-compact", title: "Collapse Sidebar", group: "View", menu: true },
   // Only while there is a team: switches between its canvas and the chat view.
   { id: "toggle-canvas", title: "Switch Canvas and Chat View", group: "View", key: "c", shift: true },
   // Only while the canvas has focus (see Canvas.tsx).

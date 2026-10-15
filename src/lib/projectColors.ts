@@ -1,5 +1,5 @@
 /**
- * Each project's colour in the compact sidebar. Picked to stay clear of the status colours (Claude's orange while it
+ * Each project's colour in the sidebar. Picked to stay clear of the status colours (Claude's orange while it
  * works, amber when it needs you, blue when it finished unread), and readable as a tint and as a fill in both themes.
  */
 export const PROJECT_COLORS = ["#5b5bd6", "#0f8a7e", "#c2255c", "#2b8a3e", "#9c36b5", "#0b7285", "#8d6e63", "#5c6b7a"];

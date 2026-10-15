@@ -1,9 +1,9 @@
 import { useContext, useState } from "react";
 import { useMenuInside } from "../lib/useMenuInside";
 import type { SessionSummary } from "../types";
-import { relativeTime } from "../lib/time";
 import { moveFocus } from "./useMenuKeys";
-import { SessionActionsContext, pinnedFirst, resumeCommand } from "../lib/sessionActions";
+import { SessionActionsContext, pinnedFirst } from "../lib/sessionActions";
+import { SessionList } from "./SessionList";
 
 interface Props {
   /** null while loading */
@@ -28,11 +28,6 @@ export function HistoryMenu({ sessions, exclude = [], project, onOpen, onClose, 
   const actions = useContext(SessionActionsContext);
   const listed = sessions?.filter((s) => !exclude.includes(s.id) && matches(s.title)) ?? null;
   const shown = listed && actions ? pinnedFirst(listed, actions.pinned) : listed;
-  // Which session's actions are open, a name being typed for one, the names saved here, and the one just copied.
-  const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<{ id: string; text: string } | null>(null);
-  const [names, setNames] = useState<Record<string, string>>({});
-  const [copied, setCopied] = useState<string | null>(null);
   // Opened from the chat box at the bottom of the window, it opens upward when it doesn't fit below.
   // The chat column clips what sticks out of it, so it also stays inside that column sideways.
   const { ref: root, style } = useMenuInside(true, [sessions === null, shown?.length ?? 0, !!oldSessions]);
@@ -70,77 +65,7 @@ export function HistoryMenu({ sessions, exclude = [], project, onOpen, onClose, 
       ) : shown.length === 0 ? (
         <div className="menu-empty">{q ? "No matching chats" : "No past chats in this folder"}</div>
       ) : (
-        <ul className="menu-list" aria-label="Past chats">
-          {shown.map((s) => {
-            const title = names[s.id] ?? s.title;
-            const pinned = !!actions?.pinned.includes(s.id);
-            const editing = renaming?.id === s.id ? renaming : null;
-            return (
-              <li key={s.id}>
-                {editing ? (
-                  <form
-                    className="session-rename"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      const name = editing.text.trim();
-                      if (!name || !actions) return;
-                      setRenaming(null);
-                      actions.onRename(s.id, name).then(() => setNames((all) => ({ ...all, [s.id]: name })), () => {});
-                    }}
-                  >
-                    <input
-                      aria-label="Name for this chat"
-                      autoFocus
-                      value={editing.text}
-                      onChange={(e) => setRenaming({ id: s.id, text: e.target.value })}
-                      onKeyDown={(e) => {
-                        if (e.key === "Escape") {
-                          e.stopPropagation();
-                          setRenaming(null);
-                        }
-                      }}
-                    />
-                    <button type="submit" className="link-button" disabled={!editing.text.trim()}>
-                      Save
-                    </button>
-                  </form>
-                ) : (
-                  <div className="session-row">
-                    <button className="menu-row" title={title} onClick={() => onOpen(s.id)}>
-                      <span className="menu-row-title">{title}</span>
-                      <span className="menu-row-meta">{pinned ? `Pinned · ${relativeTime(s.updated_ms)}` : relativeTime(s.updated_ms)}</span>
-                    </button>
-                    {actions && (
-                      <button className="icon session-more" aria-label={`Actions for ${title}`} aria-expanded={menuFor === s.id} onClick={() => setMenuFor(menuFor === s.id ? null : s.id)}>
-                        ⋯
-                      </button>
-                    )}
-                  </div>
-                )}
-                {actions && menuFor === s.id && !editing && (
-                  <div className="session-actions">
-                    <button className="link-button" onClick={() => setRenaming({ id: s.id, text: title })}>
-                      Rename
-                    </button>
-                    <button className="link-button" onClick={() => actions.onTogglePin(s.id)}>
-                      {pinned ? "Unpin" : "Pin to top"}
-                    </button>
-                    <button className="link-button" onClick={() => actions.onExport(s.id, title)}>
-                      Export as Markdown
-                    </button>
-                    <button
-                      className="link-button"
-                      title="The command that picks this chat up in a terminal"
-                      onClick={() => navigator.clipboard?.writeText(resumeCommand(actions.folder, s.id)).then(() => setCopied(s.id), () => {})}
-                    >
-                      {copied === s.id ? "Copied" : "Copy resume command"}
-                    </button>
-                  </div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+        <SessionList label="Past chats" sessions={shown} actions={actions} onOpen={onOpen} />
       )}
     </div>
   );

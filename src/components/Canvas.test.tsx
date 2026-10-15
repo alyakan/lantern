@@ -1135,6 +1135,35 @@ describe("the agents' title bars", () => {
   });
 });
 
+describe("the model on each agent's card", () => {
+  const withModels = () => {
+    let chats = team(2);
+    chats = chatsReducer(chats, { type: "in", slot: "s1", action: { type: "ui_event", event: { kind: "session_started", session_id: "x", model: "claude-sonnet-5-5", cwd: "/p", permission_mode: "default", claude_version: "2" } } });
+    chats = chatsReducer(chats, { type: "in", slot: "w1", action: { type: "ui_event", event: { kind: "session_started", session_id: "y", model: "claude-haiku-5-5", cwd: "/p", permission_mode: "default", claude_version: "2" } } });
+    return chatsReducer(chats, { type: "in", slot: "w2", action: { type: "ui_event", event: { kind: "session_started", session_id: "z", model: "claude-opus-5-5", cwd: "/p", permission_mode: "default", claude_version: "2" } } });
+  };
+
+  it("says the family on the Lead's and every worker's title bar, amber for Opus, with the full id as its tooltip", () => {
+    setup(withModels());
+    const chip = (card: HTMLElement) => card.querySelector(".node-head .model-chip") as HTMLElement;
+    expect(chip(screen.getByLabelText(/^Lead,/)).textContent).toBe("Sonnet");
+    const haiku = chip(screen.getByLabelText(/Agent Worker 1/));
+    expect([haiku.textContent, haiku.title, haiku.classList.contains("opus")]).toEqual(["Haiku", "Runs on claude-haiku-5-5", false]);
+    const opus = chip(screen.getByLabelText(/Agent Worker 2/));
+    expect([opus.textContent, opus.title, opus.classList.contains("opus")]).toEqual(["Opus", "Runs on claude-opus-5-5", true]);
+  });
+
+  it("is in the Team list too, and shows nothing for an agent whose model isn't known yet", () => {
+    setup(team(1));
+    expect(document.querySelector(".model-chip")).toBeNull();
+    cleanup();
+    setup(withModels());
+    fireEvent.click(screen.getByRole("button", { name: "Team" }));
+    const list = screen.getByRole("dialog", { name: "Team" });
+    expect([...list.querySelectorAll(".model-chip")].map((c) => c.textContent)).toEqual(["Sonnet", "Haiku", "Opus"]);
+  });
+});
+
 describe("the Team and Hidden lists", () => {
   it("come after their button, take focus into the list, and give it back to the button on Escape", () => {
     setup(team(1));

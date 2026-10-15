@@ -16,7 +16,7 @@ const RECENT_LIMIT: usize = 8;
 #[derive(Default)]
 pub struct RecentMenu(Mutex<Vec<String>>);
 
-/// How the sidebar is now (hidden, and compact when shown), which View ▸ Hide/Show Sidebar and Compact/Full Sidebar name.
+/// How the sidebar is now (hidden, and collapsed when shown), which View ▸ Hide/Show Sidebar and Collapse/Expand Sidebar name.
 #[derive(Default)]
 pub struct SidebarMenu(Mutex<(bool, bool)>);
 
@@ -31,7 +31,7 @@ pub const ACTIONS: &[(&str, &str, Option<&str>)] = &[
     ("search-files", "Search in Files…", Some("Shift+CmdOrCtrl+F")),
     ("find-in-file", "Find in File   ⌘F", None),
     ("toggle-sidebar", "Hide Sidebar", Some("Ctrl+CmdOrCtrl+S")),
-    ("toggle-compact", "Compact Sidebar", None),
+    ("toggle-compact", "Collapse Sidebar", None),
     ("toggle-changes", "Show/Hide Side Panel", Some("CmdOrCtrl+Backslash")),
     ("command-palette", "Command Palette…", Some("Shift+CmdOrCtrl+P")),
     ("settings", "Settings…", Some("CmdOrCtrl+Comma")),
@@ -53,7 +53,7 @@ fn label_of(id: &str) -> (&'static str, Option<&'static str>) {
 fn label_for(id: &str, hidden: bool, compact: bool) -> &'static str {
     match (id, hidden, compact) {
         ("toggle-sidebar", true, _) => "Show Sidebar",
-        ("toggle-compact", _, true) => "Full Sidebar",
+        ("toggle-compact", _, true) => "Expand Sidebar",
         _ => label_of(id).0,
     }
 }
@@ -199,7 +199,7 @@ pub fn refresh(_app: &AppHandle, _recent: Vec<String>) -> tauri::Result<()> {
     Ok(())
 }
 
-/// The sidebar changed (hidden, compact): the menu names what its two items do now.
+/// The sidebar changed (hidden, collapsed): the menu names what its two items do now.
 pub fn sidebar_changed(app: &AppHandle, hidden: bool, compact: bool) -> tauri::Result<()> {
     *app.state::<SidebarMenu>().0.lock().unwrap() = (hidden, compact);
     let recent = app.state::<RecentMenu>().0.lock().unwrap().clone();
@@ -319,8 +319,8 @@ mod tests {
     fn the_sidebar_items_name_what_choosing_them_does() {
         assert_eq!(label_for("toggle-sidebar", false, false), "Hide Sidebar");
         assert_eq!(label_for("toggle-sidebar", true, false), "Show Sidebar");
-        assert_eq!(label_for("toggle-compact", false, false), "Compact Sidebar");
-        assert_eq!(label_for("toggle-compact", false, true), "Full Sidebar");
+        assert_eq!(label_for("toggle-compact", false, false), "Collapse Sidebar");
+        assert_eq!(label_for("toggle-compact", false, true), "Expand Sidebar");
         assert_eq!(label_for("settings", true, true), "Settings…");
     }
 

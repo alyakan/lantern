@@ -9,6 +9,8 @@ import { openFind } from "./lib/editorFind";
 import { summarizeRequest } from "./lib/network";
 import { StartScreen } from "./components/StartScreen";
 import { ReviewPrDialog } from "./components/ReviewPrDialog";
+import { TeamWarning } from "./components/TeamWarning";
+import { usageRows, workingTeams, type WorkingTeam } from "./lib/usage";
 import { windowFocused } from "./lib/windowFocus";
 import { initialState, reducer, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
@@ -66,12 +68,11 @@ import { launchOf, migrateModeSettings, permissionsOf, PERMISSIONS_LABEL, WORKFL
 import { FileLinksProvider } from "./lib/fileLinks";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Hud, type HudEvent } from "./components/Hud";
-import { HistoryPopover } from "./components/HistoryPopover";
+import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover";
 import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
-import { needsYou, openProjects } from "./lib/sidebar";
+import { needsYou, openProjects, sidebarProjects } from "./lib/sidebar";
 import { anythingWorking } from "./lib/awake";
 import { inboxItems, type InboxItem } from "./lib/inbox";
-import { SidebarCompact } from "./components/SidebarCompact";
 import { usePeek } from "./lib/peek";
 import { MessageInput } from "./components/MessageInput";
 import { describeInput } from "./components/PermissionCard";
@@ -175,6 +176,9 @@ export default function App() {
   const customTheme = useMemo(() => readCustom(savedCustom), [savedCustom]);
   const [textSize, setTextSize] = usePersistentState<TextSize>("settings.textSize", "default");
   useEffect(() => applyTheme(theme, textSize, customTheme), [theme, textSize, customTheme]);
+  // Asking before a team starts while another is working ("Don't ask again" turns it off; General brings it back).
+  const [warnTeams, setWarnTeams] = usePersistentState<boolean>("settings.warnSecondTeam", true);
+  const [teamAsk, setTeamAsk] = useState<{ teams: WorkingTeam[]; go: () => void; cancel?: () => void } | null>(null);
   // Each open chat's preset.
   const [harnessBySlot, setHarnessBySlot] = useState<Record<string, string>>({});
   // Every open chat. The one on screen is `active`; the others keep running in the background.
@@ -360,7 +364,7 @@ export default function App() {
 
   /**
    * Leaving a chat keeps it open (running or not) so switching back is instant; only an empty chat with nothing typed
-   * is closed. Open chats are closed from the history menu.
+   * is closed. Open chats are closed from the sidebar.
    */
   const leave = (slot: string) => {
     const s = chats.slots[slot];
@@ -375,9 +379,17 @@ export default function App() {
     to(slot)({ type: "failed", text: "Claude didn't start." });
   };
 
-  const closeChat = (slot: string) => {
-    if (slot === active || !chats.slots[slot]) return;
-    forget(slot);
+  /**
+   * Closes chats from the sidebar, the one on screen too: the app then goes to another chat (a project's, else any), or
+   * to the start screen when none is left. Asking whether to stop something that is working is the sidebar's job.
+   */
+  const closeChats = (slots: string[]) => {
+    dispatchChats({ type: "close", slots, fresh: `s${++slotSeq.current}` });
+    for (const slot of slots) {
+      delete drafts.current[slot];
+      delete relaunch.current[slot];
+      api.closeSession(slot).catch(() => {});
+    }
   };
 
   const switchTo = (slot: string) => {
@@ -864,6 +876,16 @@ export default function App() {
     if (s.folder) setSubagentsBy({ ...subagentsBy, [s.folder]: subagents });
   };
 
+  /**
+   * Runs `go` (something that starts a team or one of its agents), after asking when a team other than `except`'s is
+   * working: every agent spends the same plan. `cancel` runs if it is turned down.
+   */
+  const askTeam = (except: string | null, go: () => void, cancel?: () => void) => {
+    const teams = warnTeams ? workingTeams(chats, except) : [];
+    if (teams.length === 0) go();
+    else setTeamAsk({ teams, go, cancel });
+  };
+
   /** A team's Lead still has agents on the canvas, which would be left with nobody to report to if it left Team. */
   const holdsAgents = (slot: string) => !!chats.slots[slot]?.orchestrator && Object.values(chats.agents).some((a) => a.parent === slot);
 
@@ -881,16 +903,20 @@ export default function App() {
       const leaving = s.orchestrator && workflow !== "team";
       if (leaving && holdsAgents(slot)) return to(slot)({ type: "notice", text: "This team still has agents. Close them first, then switch its Workflow." });
       const { mode, autoApprove, team } = launchOf(permissions, agent ? workflowOf(s) : workflow);
-      if (mode !== "steps") to(slot)({ type: "flavour_picked", flavour: null });
-      to(slot)({ type: "mode_changed", mode, autoApprove });
-      if (!agent) to(slot)({ type: "orchestrator_set", on: team });
-      if (s.folder) restart(slot, mode, settingsFor(slot).effort, { autoApprove, ...(agent ? {} : team && !s.orchestrator ? { team: true } : leaving ? { team: false } : {}) });
-      // Becoming a Lead: its agents will appear on the canvas, so that is where it goes.
-      if (team && !s.orchestrator) {
-        startSubagents(slot, s.folder ?? "");
-        focusAgent(slot);
-        setView("canvas");
-      }
+      const apply = () => {
+        if (mode !== "steps") to(slot)({ type: "flavour_picked", flavour: null });
+        to(slot)({ type: "mode_changed", mode, autoApprove });
+        if (!agent) to(slot)({ type: "orchestrator_set", on: team });
+        if (s.folder) restart(slot, mode, settingsFor(slot).effort, { autoApprove, ...(agent ? {} : team && !s.orchestrator ? { team: true } : leaving ? { team: false } : {}) });
+        // Becoming a Lead: its agents will appear on the canvas, so that is where it goes.
+        if (team && !s.orchestrator) {
+          startSubagents(slot, s.folder ?? "");
+          focusAgent(slot);
+          setView("canvas");
+        }
+      };
+      if (team && !s.orchestrator && !agent) askTeam(null, apply);
+      else apply();
     });
   const changePermissions = (permissions: Permissions, slot = active) => {
     const s = chats.slots[slot];
@@ -1121,8 +1147,10 @@ export default function App() {
   const newOrchestra = (inFolder: string | null = state.folder) => {
     const folder = inFolder;
     if (!folder) return;
-    startFresh(folder, false, true);
-    setView("canvas");
+    askTeam(null, () => {
+      startFresh(folder, false, true);
+      setView("canvas");
+    });
   };
   const doing = {
     send: sendIn,
@@ -1184,7 +1212,15 @@ export default function App() {
     // The backend has stopped it and told the main agent by the time this resolves; the chat goes from the app now.
     closeWorker: (worker: string, agreed?: CloseAgreed) => api.closeWorker(worker, agreed).then(() => forget(worker, true), (e) => Promise.reject(errText(e))),
     // The card comes from the backend's agent_spawned, like any worker's.
-    spawn: (main: string, worker: NewWorker) => api.spawnWorker(main, worker).then(() => {}, (e) => Promise.reject(errText(e))),
+    // "+ Agent" asks first when another team is working; turning that down leaves the form as it was.
+    spawn: (main: string, worker: NewWorker) =>
+      new Promise<void>((resolve, reject) =>
+        askTeam(
+          main,
+          () => api.spawnWorker(main, worker).then(() => resolve(), (e) => reject(errText(e))),
+          () => reject("Cancelled: nothing was started."),
+        ),
+      ),
     // Hiding the agent whose chat is on screen moves the rest of the app to its main agent, so it isn't about a card nobody sees.
     hide: (worker: string) => {
       const parent = chats.agents[worker]?.parent;
@@ -1590,9 +1626,10 @@ export default function App() {
       : null;
   const sessionActions = actionsFor(state.folder);
 
-  // The sidebar: every project, and the chats open in each. It is full, compact (a slim column of the open chats) or hidden:
-  // whether it is hidden and whether it is compact are saved apart (so showing it again returns to whichever it was), and so
-  // is its width. The first key is the one that once said "minimized to the rail": that is hidden now.
+  // The sidebar: every project, and the chats open in each. It is pinned open, collapsed (a slim column of the open chats that
+  // opens over the chat when the pointer rests on it) or hidden: whether it is hidden and whether it is collapsed ("compact")
+  // are saved apart (so showing it again returns to whichever it was), and so is its width. The first key is the one that
+  // once said "minimized to the rail": that is hidden now.
   const [sidebarHidden, setSidebarHidden] = usePersistentState("sidebar.collapsed", false);
   const [sidebarCompact, setSidebarCompact] = usePersistentState("sidebar.compact", false);
   const [projectColors, setProjectColors] = usePersistentState<Record<string, number>>("sidebar.projectColors", {});
@@ -1606,21 +1643,28 @@ export default function App() {
   const openByProject = openProjects(chats, { titles, drafts: drafts.current, unread, pinned: pinnedBy });
   const inbox = inboxItems(chats, openByProject, { unread, describe: describeInput });
   useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden), true, sidebarHidden ? "Show Sidebar" : "Hide Sidebar");
-  useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Full Sidebar" : "Compact Sidebar");
+  useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Expand Sidebar" : "Collapse Sidebar");
   useEffect(() => {
     api.sidebarMenu(sidebarHidden, sidebarCompact).catch(() => {});
   }, [sidebarHidden, sidebarCompact]);
-  // Compact, it opens over the chat when the pointer rests on it; hidden, when it rests on the window's left edge.
-  const sidebarPeek = usePeek(sidebarHidden || sidebarCompact);
-  // The peek's own button keeps the sidebar open: shown in full.
+  // Hidden, it slides in over the chat when the pointer rests on the window's left edge.
+  const sidebarPeek = usePeek(sidebarHidden);
+  // The peek's own button keeps the sidebar open: pinned.
   const keepSidebarOpen = () => {
     setSidebarHidden(false);
     setSidebarCompact(false);
   };
-  // History: one project's past chats, from "Show all…" or ⌘K (the project on screen).
-  const [history, setHistory] = useState<{ folder: string } | null>(null);
+  // History: the past chats of every project, from the sidebar's History button or ⌘K (a project's, filtered to it, from
+  // "Bring old chats here"). The projects are read when it opens, so it lists the ones the sidebar knows now.
+  const [history, setHistory] = useState<{ folder: string | null; projects: HistoryProject[] } | null>(null);
+  const openHistory = (folder: string | null = null) =>
+    loadRecentFolders().then(
+      (recent) => setHistory({ folder, projects: sidebarProjects({ recent, hidden: hiddenFolders, open: openByProject, order: projectOrder }).map((p) => ({ folder: p.folder, label: p.label })) }),
+      () => setHistory({ folder, projects: [] }),
+    );
+  const toggleHistory = () => (history ? setHistory(null) : void openHistory());
   const canStart = !!state.folder && state.status !== "starting";
-  useAction("session-history", () => state.folder && setHistory(history ? null : { folder: state.folder }), canStart);
+  useAction("session-history", toggleHistory, true);
   useAction("new-session", () => state.folder && startFresh(state.folder), canStart);
   const openChatIds = Object.values(chats.slots).flatMap((s) => (s.sessionId ? [s.sessionId] : []));
   const inTeam = (team: string) => teamMain(chats, active) === team;
@@ -1636,9 +1680,10 @@ export default function App() {
       focusAgent(slot);
       setView("canvas");
     },
-    onPast: (folder: string, id: string) => openSession(id, folder),
-    onCloseChat: closeChat,
-    onHistory: (folder: string) => setHistory({ folder }),
+    onCloseChats: closeChats,
+    closeCheck: doing.closeCheck,
+    closeWorker: doing.closeWorker,
+    onHistory: toggleHistory,
     onNewChatIn: (folder: string) => startFresh(folder),
     onNewTeamIn: (folder: string) => newOrchestra(folder),
     onBringOld: (folder: string) => setBringing({ destination: folder, from: null }),
@@ -1667,7 +1712,6 @@ export default function App() {
     onChat: then(sidebarHandlers.onChat),
     onTeam: then(sidebarHandlers.onTeam),
     onAgent: then(sidebarHandlers.onAgent),
-    onPast: then(sidebarHandlers.onPast),
     onHistory: then(sidebarHandlers.onHistory),
     onNewChatIn: then(sidebarHandlers.onNewChatIn),
     onNewTeamIn: then(sidebarHandlers.onNewTeamIn),
@@ -1688,13 +1732,12 @@ export default function App() {
     branch,
     canNew: canStart,
     loadRecent: loadRecentFolders,
-    loadSessions: listPast,
-    pinned: pinnedBy,
-    titles,
     hidden: hiddenFolders,
     moved: relocateMenu.moved,
     onRelocate: (from: MovedFolder) => relocateMenu.onRelocate(from),
     onDismissMoved: relocateMenu.onDismiss,
+    colors: projectColors,
+    onColors: setProjectColors,
   };
 
   const restartToUpdate = () => {
@@ -1783,39 +1826,23 @@ export default function App() {
           onClearFailures={() => setClearedFailures({ ...clearedFailures, [active]: failedKey })}
           onShowFailure={showFailure}
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
+          usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo }}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
           inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox }}
         />
         <Hud event={hud} onOpenChat={switchTo} />
         <div className="app-body">
-        {sidebarHidden || sidebarCompact ? (
+        {sidebarHidden ? (
           <>
-            {sidebarHidden ? (
-              sidebarPeek.phase !== "in" && <div className="sidebar-edge" aria-hidden onPointerEnter={(e) => !e.buttons && sidebarPeek.hover()} onPointerLeave={sidebarPeek.unhover} />
-            ) : (
-              <SidebarCompact
-                open={openByProject}
-                loadRecent={loadRecentFolders}
-                canNew={canStart}
-                onNewChat={sidebarHandlers.onNewChat}
-                onChat={sidebarHandlers.onChat}
-                onTeam={sidebarHandlers.onTeam}
-                colors={projectColors}
-                onColors={setProjectColors}
-                order={projectOrder}
-                onOrder={setProjectOrder}
-                onToggle={() => setSidebarCompact(false)}
-                width={sidebarWidth}
-              />
-            )}
+            {sidebarPeek.phase !== "in" && <div className="sidebar-edge" aria-hidden onPointerEnter={(e) => !e.buttons && sidebarPeek.hover()} onPointerLeave={sidebarPeek.unhover} />}
             {sidebarPeek.phase !== "off" && (
               <div className="sidebar-peek" data-phase={sidebarPeek.phase} onPointerLeave={sidebarPeek.close}>
-                <Sidebar {...peekHandlers} {...sidebarProps} peek onToggle={keepSidebarOpen} />
+                <Sidebar {...peekHandlers} {...sidebarProps} mode="peek" onToggle={keepSidebarOpen} />
               </div>
             )}
           </>
         ) : (
-          <Sidebar {...sidebarHandlers} {...sidebarProps} onToggle={() => setSidebarCompact(true)} />
+          <Sidebar {...sidebarHandlers} {...sidebarProps} mode={sidebarCompact ? "collapsed" : "pinned"} onToggle={() => setSidebarCompact(!sidebarCompact)} />
         )}
         <div className="app-main">
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
@@ -1930,7 +1957,7 @@ export default function App() {
           commands={state.commands}
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
-          general={{ keepAwake, onKeepAwake: setKeepAwake, notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize }}
+          general={{ keepAwake, onKeepAwake: setKeepAwake, notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize, warnTeams, onWarnTeams: setWarnTeams }}
           updates={{
             version: updates.version,
             state: updates.state,
@@ -1964,23 +1991,38 @@ export default function App() {
             pickFolder={() => open({ directory: true, multiple: false }).then((picked) => (typeof picked === "string" ? picked : null))}
             onClose={() => setBringing(null)}
             onRelocated={relocated}
-            onOpenHistory={bringing.destination ? () => { const folder = bringing.destination!; setBringing(null); setHistory({ folder }); } : undefined}
+            onOpenHistory={bringing.destination ? () => { const folder = bringing.destination!; setBringing(null); void openHistory(folder); } : undefined}
           />
         )}
         {history && (
-          <SessionActionsContext.Provider value={actionsFor(history.folder)}>
-            <HistoryPopover
-              folder={history.folder}
-              exclude={openChatIds}
-              load={() => listPast(history.folder)}
-              loadOld={() => api.oldLocations(history.folder)}
-              onBring={() => { const folder = history.folder; setHistory(null); setBringing({ destination: folder, from: null }); }}
-              onOpen={(id) => { const folder = history.folder; setHistory(null); openSession(id, folder); }}
-              onClose={() => setHistory(null)}
-            />
-          </SessionActionsContext.Provider>
+          <HistoryPopover
+            projects={history.projects}
+            initial={history.folder}
+            exclude={openChatIds}
+            load={listPast}
+            loadOld={(folder) => api.oldLocations(folder)}
+            actionsFor={actionsFor}
+            onBring={(folder) => { setHistory(null); setBringing({ destination: folder, from: null }); }}
+            onNewChat={(folder) => { setHistory(null); startFresh(folder); }}
+            onOpen={(id, folder) => { setHistory(null); openSession(id, folder); }}
+            onClose={() => setHistory(null)}
+          />
         )}
         {prPicker && state.folder && <ReviewPrDialog folder={state.folder} onPick={startReviewOf} onClose={() => setPrPicker(false)} />}
+        {teamAsk && (
+          <TeamWarning
+            teams={teamAsk.teams}
+            onStart={(dontAsk) => {
+              if (dontAsk) setWarnTeams(false);
+              setTeamAsk(null);
+              teamAsk.go();
+            }}
+            onCancel={() => {
+              setTeamAsk(null);
+              teamAsk.cancel?.();
+            }}
+          />
+        )}
         <ModeGuide
           open={guideAt}
           permissions={permissionsOf(state)}
