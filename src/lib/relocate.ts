@@ -44,6 +44,8 @@ export const NOT_FOLDER_KEYED = [
   "settings.theme",
   "settings.customTheme",
   "settings.textSize",
+  // Asking before a team starts while another is working.
+  "settings.warnSecondTeam",
   "review.collapsed",
   "review.canvasPanel",
   "review.ratio",

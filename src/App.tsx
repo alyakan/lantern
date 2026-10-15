@@ -9,6 +9,8 @@ import { openFind } from "./lib/editorFind";
 import { summarizeRequest } from "./lib/network";
 import { StartScreen } from "./components/StartScreen";
 import { ReviewPrDialog } from "./components/ReviewPrDialog";
+import { TeamWarning } from "./components/TeamWarning";
+import { usageRows, workingTeams, type WorkingTeam } from "./lib/usage";
 import { windowFocused } from "./lib/windowFocus";
 import { initialState, reducer, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
@@ -173,6 +175,9 @@ export default function App() {
   const customTheme = useMemo(() => readCustom(savedCustom), [savedCustom]);
   const [textSize, setTextSize] = usePersistentState<TextSize>("settings.textSize", "default");
   useEffect(() => applyTheme(theme, textSize, customTheme), [theme, textSize, customTheme]);
+  // Asking before a team starts while another is working ("Don't ask again" turns it off; General brings it back).
+  const [warnTeams, setWarnTeams] = usePersistentState<boolean>("settings.warnSecondTeam", true);
+  const [teamAsk, setTeamAsk] = useState<{ teams: WorkingTeam[]; go: () => void; cancel?: () => void } | null>(null);
   // Each open chat's preset.
   const [harnessBySlot, setHarnessBySlot] = useState<Record<string, string>>({});
   // Every open chat. The one on screen is `active`; the others keep running in the background.
@@ -870,6 +875,16 @@ export default function App() {
     if (s.folder) setSubagentsBy({ ...subagentsBy, [s.folder]: subagents });
   };
 
+  /**
+   * Runs `go` (something that starts a team or one of its agents), after asking when a team other than `except`'s is
+   * working: every agent spends the same plan. `cancel` runs if it is turned down.
+   */
+  const askTeam = (except: string | null, go: () => void, cancel?: () => void) => {
+    const teams = warnTeams ? workingTeams(chats, except) : [];
+    if (teams.length === 0) go();
+    else setTeamAsk({ teams, go, cancel });
+  };
+
   /** A team's Lead still has agents on the canvas, which would be left with nobody to report to if it left Team. */
   const holdsAgents = (slot: string) => !!chats.slots[slot]?.orchestrator && Object.values(chats.agents).some((a) => a.parent === slot);
 
@@ -887,16 +902,20 @@ export default function App() {
       const leaving = s.orchestrator && workflow !== "team";
       if (leaving && holdsAgents(slot)) return to(slot)({ type: "notice", text: "This team still has agents. Close them first, then switch its Workflow." });
       const { mode, autoApprove, team } = launchOf(permissions, agent ? workflowOf(s) : workflow);
-      if (mode !== "steps") to(slot)({ type: "flavour_picked", flavour: null });
-      to(slot)({ type: "mode_changed", mode, autoApprove });
-      if (!agent) to(slot)({ type: "orchestrator_set", on: team });
-      if (s.folder) restart(slot, mode, settingsFor(slot).effort, { autoApprove, ...(agent ? {} : team && !s.orchestrator ? { team: true } : leaving ? { team: false } : {}) });
-      // Becoming a Lead: its agents will appear on the canvas, so that is where it goes.
-      if (team && !s.orchestrator) {
-        startSubagents(slot, s.folder ?? "");
-        focusAgent(slot);
-        setView("canvas");
-      }
+      const apply = () => {
+        if (mode !== "steps") to(slot)({ type: "flavour_picked", flavour: null });
+        to(slot)({ type: "mode_changed", mode, autoApprove });
+        if (!agent) to(slot)({ type: "orchestrator_set", on: team });
+        if (s.folder) restart(slot, mode, settingsFor(slot).effort, { autoApprove, ...(agent ? {} : team && !s.orchestrator ? { team: true } : leaving ? { team: false } : {}) });
+        // Becoming a Lead: its agents will appear on the canvas, so that is where it goes.
+        if (team && !s.orchestrator) {
+          startSubagents(slot, s.folder ?? "");
+          focusAgent(slot);
+          setView("canvas");
+        }
+      };
+      if (team && !s.orchestrator && !agent) askTeam(null, apply);
+      else apply();
     });
   const changePermissions = (permissions: Permissions, slot = active) => {
     const s = chats.slots[slot];
@@ -1127,8 +1146,10 @@ export default function App() {
   const newOrchestra = (inFolder: string | null = state.folder) => {
     const folder = inFolder;
     if (!folder) return;
-    startFresh(folder, false, true);
-    setView("canvas");
+    askTeam(null, () => {
+      startFresh(folder, false, true);
+      setView("canvas");
+    });
   };
   const doing = {
     send: sendIn,
@@ -1190,7 +1211,15 @@ export default function App() {
     // The backend has stopped it and told the main agent by the time this resolves; the chat goes from the app now.
     closeWorker: (worker: string, agreed?: CloseAgreed) => api.closeWorker(worker, agreed).then(() => forget(worker, true), (e) => Promise.reject(errText(e))),
     // The card comes from the backend's agent_spawned, like any worker's.
-    spawn: (main: string, worker: NewWorker) => api.spawnWorker(main, worker).then(() => {}, (e) => Promise.reject(errText(e))),
+    // "+ Agent" asks first when another team is working; turning that down leaves the form as it was.
+    spawn: (main: string, worker: NewWorker) =>
+      new Promise<void>((resolve, reject) =>
+        askTeam(
+          main,
+          () => api.spawnWorker(main, worker).then(() => resolve(), (e) => reject(errText(e))),
+          () => reject("Cancelled: nothing was started."),
+        ),
+      ),
     // Hiding the agent whose chat is on screen moves the rest of the app to its main agent, so it isn't about a card nobody sees.
     hide: (worker: string) => {
       const parent = chats.agents[worker]?.parent;
@@ -1777,6 +1806,7 @@ export default function App() {
           onClearFailures={() => setClearedFailures({ ...clearedFailures, [active]: failedKey })}
           onShowFailure={showFailure}
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
+          usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo }}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
           inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox }}
         />
@@ -1898,7 +1928,7 @@ export default function App() {
           commands={state.commands}
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
-          general={{ keepAwake, onKeepAwake: setKeepAwake, notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize }}
+          general={{ keepAwake, onKeepAwake: setKeepAwake, notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize, warnTeams, onWarnTeams: setWarnTeams }}
           updates={{
             version: updates.version,
             state: updates.state,
@@ -1950,6 +1980,20 @@ export default function App() {
           />
         )}
         {prPicker && state.folder && <ReviewPrDialog folder={state.folder} onPick={startReviewOf} onClose={() => setPrPicker(false)} />}
+        {teamAsk && (
+          <TeamWarning
+            teams={teamAsk.teams}
+            onStart={(dontAsk) => {
+              if (dontAsk) setWarnTeams(false);
+              setTeamAsk(null);
+              teamAsk.go();
+            }}
+            onCancel={() => {
+              setTeamAsk(null);
+              teamAsk.cancel?.();
+            }}
+          />
+        )}
         <ModeGuide
           open={guideAt}
           permissions={permissionsOf(state)}

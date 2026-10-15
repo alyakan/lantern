@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { elapsed } from "./time";
 
 /**
  * How full the subscription's five-hour window is, as the latest chat to hear it from claude said (`rate_limit_event`).
@@ -39,6 +40,14 @@ export function planLine(p: PlanUsage): string {
   if (p.resetsAt === null) return pct;
   const at = new Date(p.resetsAt * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `${pct} · resets ${at}`;
+}
+
+/** "Plan: 62% of the 5-hour window, resets in 1h 40m". */
+export function planSentence(p: PlanUsage, now = Date.now()): string {
+  const pct = `Plan: ${Math.round(p.used * 100)}% of the 5-hour window`;
+  if (p.resetsAt === null) return pct;
+  const left = p.resetsAt * 1000 - now;
+  return left > 0 ? `${pct}, resets in ${elapsed(left)}` : `${pct}, resetting now`;
 }
 
 /** "warn" from PLAN_WARN, "stop" from PLAN_STOP, else "ok". */

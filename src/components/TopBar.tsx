@@ -1,4 +1,5 @@
 import { PlanMeter } from "./PlanMeter";
+import type { UsageRow } from "../lib/usage";
 import { useEffect, useRef, useState } from "react";
 import type { BackgroundTask, Status } from "../store";
 import { elapsed } from "../lib/time";
@@ -37,6 +38,8 @@ interface Props {
   onBringOld?: () => void;
   /** Orchestras: a main agent and the workers it runs. `exists`: there is one, so the canvas can be shown. */
   orchestra?: { view: "chat" | "canvas"; exists: boolean; attention: number; onView: (view: "chat" | "canvas") => void };
+  /** What the plan meter's popover lists: every open chat and team with what it has used (computed when it opens), and opening one. */
+  usage?: { rows: () => UsageRow[]; onOpen: (slot: string) => void };
   /** The sidebar, while it is hidden: a button at the left to show it again, badged with how many chats and agents need you. */
   sidebar?: { needs: number; onShow: () => void };
   /** What waits on you in every project and team (see Inbox): a button at the right with a popover. */
@@ -65,7 +68,7 @@ function taskKind(type: string): string {
 // Xcode's activity viewer: the folder and branch on the left (it opens the folder menu, like Xcode's scheme), what
 // Claude is doing on the right, and a progress bar along its bottom edge while it works. The projects, new chats and
 // teams, and past chats are in the sidebar.
-export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, mcpIssues = [], branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, onBringOld, orchestra, sidebar, inbox }: Props) {
+export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, mcpIssues = [], branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, onBringOld, orchestra, usage, sidebar, inbox }: Props) {
   // A working chat keeps running in the background when you switch away, so only a starting one blocks switching.
   const busy = status === "starting";
   const toggleLabel = reviewCollapsed ? "Show side panel" : "Hide side panel";
@@ -252,7 +255,7 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
         {menu === "folders" && <FolderMenu folder={folder} onBrowse={onOpenFolder} onClose={close} onKeyDown={folderKeys.onKeyDown} relocate={onBringOld ? { moved: [], onRelocate: () => onBringOld(), onDismiss: () => {} } : undefined} />}
       </div>
       <div className="topbar-side end" data-tauri-drag-region>
-        <PlanMeter />
+        <PlanMeter usage={usage} />
         <div className="toolbar-group">
           {inbox && <Inbox {...inbox} />}
           {onOpenSettings && (
