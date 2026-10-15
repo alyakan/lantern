@@ -66,7 +66,7 @@ export function markOf(chat: Pick<SidebarChat, "state" | "unread">): ChatDot | "
   return chat.unread && chat.state !== "waiting" ? "unread" : chat.state;
 }
 
-/** One open chat or team as the compact sidebar's square (a team is its Lead, with the team's combined state). */
+/** One open chat, team or agent as the sidebar's square (a team is its Lead, with the team's combined state). */
 export interface CompactChip {
   slot: string;
   team: boolean;
@@ -79,6 +79,11 @@ export interface CompactChip {
   status: string;
   /** One or two capitals from the title, for the square. */
   initials: string;
+  pinned: boolean;
+  /** How many tasks it still runs in the background. */
+  background: number;
+  /** It can be closed from the sidebar (see SidebarChat.closable). */
+  closable: boolean;
 }
 
 export interface CompactGroup {
@@ -107,8 +112,27 @@ export function initials(name: string, single = 1): string {
 /** A chat's initials from its title: a chat or team with no title yet ("New chat", "New team") is N. */
 export const chatInitials = (title: string): string => (/^new (chat|team)$/i.test(title.trim()) ? "N" : initials(title));
 
+/** An open chat, a team (its Lead, with its agents' state) or an agent, as a square with its status. */
+export function chipOf(item: SidebarChat | SidebarItem): CompactChip {
+  const mark = markOf(item);
+  const team = "kind" in item && item.kind === "team";
+  return {
+    slot: item.slot,
+    team,
+    title: item.title,
+    state: item.state,
+    unread: item.unread,
+    active: item.active || (team && "agents" in item && item.agents.some((a) => a.active)),
+    status: mark === "unread" ? "Unread" : DOT_LABEL[mark],
+    initials: chatInitials(item.title),
+    pinned: item.pinned,
+    background: item.background,
+    closable: item.closable,
+  };
+}
+
 /**
- * What is open, as the compact sidebar lists it: the projects with something open, in the order the full sidebar lists
+ * What is open, as the collapsed sidebar lists it: the projects with something open, in the order the sidebar lists
  * them (the recent list's), each with its chats and teams. An agent is never listed on its own, only inside its team.
  */
 export function compactGroups(open: Record<string, ProjectOpen>, recent: RecentFolder[], order: string[] = []): CompactGroup[] {
@@ -121,19 +145,7 @@ export function compactGroups(open: Record<string, ProjectOpen>, recent: RecentF
   return folders.map((folder, i) => {
     const parent = basename(folder.slice(0, Math.max(folder.lastIndexOf("/"), 0)) || "/");
     const label = names.filter((n) => n === names[i]).length > 1 ? `${names[i]} · ${parent}` : names[i];
-    const chips = open[folder].items.map((item): CompactChip => {
-      const mark = markOf(item);
-      return {
-        slot: item.slot,
-        team: item.kind === "team",
-        title: item.title,
-        state: item.state,
-        unread: item.unread,
-        active: item.active || (item.kind === "team" && item.agents.some((a) => a.active)),
-        status: mark === "unread" ? "Unread" : DOT_LABEL[mark],
-        initials: chatInitials(item.title),
-      };
-    });
+    const chips = open[folder].items.map(chipOf);
     return { folder, label, initials: initials(names[i], 2), chips };
   });
 }

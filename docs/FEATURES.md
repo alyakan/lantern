@@ -181,43 +181,39 @@ The team runs on the Lead's Permissions, and an agent never gets more freedom th
 
 ## The sidebar and History
 
-The sidebar has one group for every project: the ones with a chat open first, then your other recent folders.
+The sidebar is one pane with one group for every project: the ones with a chat open first, then your other recent folders. It has three states: **Expanded** (pinned open beside the chat), **Collapsed** and **Hidden**.
 
-- A group lists its open chats with a dot (working, needs you, or finished while you were away), a team with its agents under it, the chats you pinned, and its 3 latest past chats. **Show all…** opens that project's History.
-- What needs you rises to the top of its group, and a folded project shows a badge for how many things need you.
-- Click an open chat to switch to it, a past chat to resume it (in its own project), a team to open its canvas, an agent to focus it there.
-- Hover a project for **+** (a new chat there) and **⋯**: New team, Bring old chats here…, Reveal in Finder and Remove from recents (which only hides it; Claude Code keeps the chats).
-- **New ▾** at the top starts a Chat (⌘N), a Team (⇧⌘N) or a PR review in the project on screen.
+**Expanded** is the whole pane, at the width you gave it (drag its edge to resize):
 
-The sidebar has three states: **Full** (above), **Compact** and **Hidden**.
+- **New ▾** at the top starts a Chat (⌘N), a Team (⇧⌘N) or a PR review in the project on screen, and the pin button above it collapses the sidebar (View ▸ Collapse sidebar, or Collapse sidebar in the command palette).
+- A project's header has its initials in the colour the project has been given, its name, the branch when it is the project on screen, and a badge for how many things need you when it is folded. Click it to fold or open the project. Hover it for **+** (a new chat there) and **⋯**: New team, Bring old chats here…, Reveal in Finder, Move up, Move down and Remove from recents (which only hides it; Claude Code keeps the chats).
+- Under it are the project's open chats and teams as squares: the initials of the chat's title (a new chat is N) and a mark on its corner (a spinning ring while it works, an amber dot when it needs you, a blue dot when it finished while you were away), the title, and how it is. A team is one square (its Lead, with a small diamond badge) that shows the team's combined state, with its agents nested under it. Each project has a colour of its own, kept across restarts (and when its folder moves): its squares are tinted with it, and the chat on screen is filled with it, with a bar beside it. A chat that needs you rises to the top of its group, and one you can close has a **×** when you hover it.
+- Then the chats you pinned (with the pin icon) and the 3 latest past chats, each with how long ago. **Show all…** opens that project's History.
+- Click an open chat to switch to it, a past chat to resume it (in its own project), a team to open its canvas, an agent to focus it there. **Open folder…** at the bottom opens another project.
 
-**Compact** is the button at the top-right of the sidebar (View ▸ Compact sidebar, or Compact sidebar in the command palette). It becomes a slim column with a small square for each open chat and team, not for each project:
+![The expanded sidebar: two projects' open chats, a team with its agents under it, past chats, and the other recent projects folded](images/sidebar-expanded.png)
 
-- A square carries the initials of its chat's title (a new chat is N) and a mark on its corner: a spinning ring while it works, an amber dot when it needs you, a blue dot when it finished while you were away. A team is one square (its Lead, with a small diamond badge) that shows the team's combined state, and an agent has no square of its own.
-- Each project has a colour of its own, kept across restarts (and when its folder moves): its squares are tinted with it, and the chat on screen is filled with it, with a bar beside it. Projects open together get different colours.
-- Hover a square for its title, project and status. Click it to switch to that chat, or to open a team's canvas.
-- Each project's squares sit under the project's initials, in its colour (hover them for the full name), and **+** at the top starts a chat. When there are more squares than fit, the column scrolls.
-- The button at the top of the column (the same one) brings back the full sidebar.
+**Collapsed** is the pin button again (or the button at the top of the bar, Expand sidebar, when it is collapsed). It becomes a slim column with a small square for each open chat and team, not for each project. The squares are the same ones, each project's under its initials in its colour, and **+** at the top starts a chat. When there are more squares than fit, the column scrolls.
 
-![The compact sidebar: four chats that need you (one a team) in one project's colour, and the chat on screen in a second project's](images/sidebar-compact.png)
+![The collapsed sidebar: four chats that need you (one a team) in one project's colour, and the chat on screen in a second project's](images/sidebar-collapsed.png)
 
-Rest the pointer on the compact column for a moment and it opens over the chat: the squares stay where they are, and each chat's title and status, and each project's name, slide out beside them. Click a chat to go there and it folds back, as it does when the pointer leaves or you press Esc. Moving focus into it from the keyboard opens it too. For projects and past chats, use the full sidebar (the button at the column's top).
+Rest the pointer on the collapsed column for a moment and the same pane opens over the chat: the squares stay where they are, and the titles, the project headers, the past chats and the rest slide out beside them. Click a chat to go there and it folds back, as it does when the pointer leaves or you press Esc. Moving focus into it from the keyboard opens it too. Its pin button keeps it open (expanded).
 
-![The compact sidebar opened over the chat, with each chat's title and status beside its square](images/sidebar-compact-open.png)
+![The collapsed sidebar opened over the chat](images/sidebar-collapsed-open.png)
 
-**Hidden**: **⌃⌘S** (View ▸ Hide sidebar, or Hide sidebar in the command palette) hides the sidebar completely, and the chat takes the whole width. A **Show sidebar** button then sits at the left of the title bar. When a chat or an agent needs you, it carries an amber badge with how many, so a waiting chat is never hidden: click it, or press ⌃⌘S again, to bring the sidebar back as it was (Full or Compact).
+**Hidden**: **⌃⌘S** (View ▸ Hide sidebar, or Hide sidebar in the command palette) hides the sidebar completely, and the chat takes the whole width. A **Show sidebar** button then sits at the left of the title bar. When a chat or an agent needs you, it carries an amber badge with how many, so a waiting chat is never hidden: click it, or press ⌃⌘S again, to bring the sidebar back as it was (Expanded or Collapsed).
 
 ![The sidebar hidden, with the title bar's button badged for the 2 chats that need you](images/sidebar-hidden.png)
 
-To look without showing it, rest the pointer on the window's left edge for a moment and the sidebar slides in over the chat, in the same way. To keep it open, use its top-right button or ⌃⌘S.
+To look without showing it, rest the pointer on the window's left edge for a moment and the sidebar slides in over the chat, in the same way. To keep it open, use its pin button or ⌃⌘S.
 
 ![The hidden sidebar peeking in over the chat](images/sidebar-peek.png)
 
-Projects stay in the order you give them; using one doesn't move it. A project you open for the first time goes at the top. To reorder, drag a project by its name: it lifts, the others slide out of its way, and it settles where you drop it (Esc puts it back). From the keyboard, ⌥⌘↑ and ⌥⌘↓ move the project whose name has focus, and its ⋯ menu has Move up and Move down. The compact sidebar follows the same order, and the order is remembered.
+Projects stay in the order you give them; using one doesn't move it. A project you open for the first time goes at the top. To reorder, drag a project by its header: it lifts, the others slide out of its way, and it settles where you drop it (Esc puts it back). From the keyboard, ⌥⌘↑ and ⌥⌘↓ move the project whose header has focus, and its ⋯ menu has Move up and Move down. The collapsed bar follows the same order, and the order is remembered.
 
-Drag the sidebar's edge to resize it. Its width, whether it is Compact and whether it is hidden are each remembered, so showing it again restores it.
+A project's past chats are read only while it is open in the pane, so a long list of projects doesn't slow the start. Its width, whether it is collapsed and whether it is hidden are each remembered, so showing it again restores it.
 
-The expanded sidebar is in most of the other screenshots on this page; the team canvas one shows a team with its agents nested under it.
+The team canvas screenshot shows a team with its agents nested under it.
 
 **History** (⌘K, or a project's **Show all…**) lists the past chats of a project, including ones started in the terminal with Claude Code. You can search, pin, rename and export them.
 

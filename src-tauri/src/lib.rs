@@ -69,7 +69,7 @@ pub(crate) fn scratch_dir() -> std::path::PathBuf {
 const DEFAULT_AGENT_LIMIT: usize = 3;
 const AGENT_LIMITS: std::ops::RangeInclusive<usize> = 1..=orchestra::MAX_WORKERS;
 
-/// The sidebar was hidden, shown, made compact or made full: View's two sidebar items now say what choosing them does.
+/// The sidebar was hidden, shown, collapsed or expanded: View's two sidebar items now say what choosing them does.
 #[tauri::command]
 fn sidebar_menu(app: tauri::AppHandle, hidden: bool, compact: bool) -> Result<(), String> {
     menu::sidebar_changed(&app, hidden, compact).map_err(|e| e.to_string())

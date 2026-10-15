@@ -296,34 +296,34 @@ describe("the hidden sidebar", () => {
   });
 });
 
-describe("the compact sidebar", () => {
+describe("the collapsed sidebar", () => {
   const column = () => screen.findByRole("complementary", { name: "Open chats" });
   const full = () => screen.queryByRole("complementary", { name: "Projects" });
   // Whole-app tests run in real time: the pointer rests on the column for the peek's delay.
   const rest = () => new Promise((r) => setTimeout(r, 320));
 
-  it("is the sidebar's own button: a slim column of the open chats instead of the full sidebar, and the same button at its top goes back; it is remembered", async () => {
+  it("is the pin button's doing: a slim column of the open chats instead of the pinned sidebar, and the button at its top pins it again; it is remembered", async () => {
     await launch();
     await project("acme-api");
-    fireEvent.click(screen.getByRole("button", { name: "Compact sidebar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
     const slim = await column();
     expect(full()).toBeNull();
     expect(localStorage.getItem("sidebar.compact")).toBe("true");
     // The empty chat on screen is its one square, lit.
     expect(within(slim).getByRole("button", { name: /^New chat, acme-api/ })).toHaveAttribute("aria-current", "true");
-    fireEvent.click(within(slim).getByRole("button", { name: "Full sidebar" }));
+    fireEvent.click(within(slim).getByRole("button", { name: "Expand sidebar" }));
     expect(await project("acme-api")).toBeInTheDocument();
     expect(localStorage.getItem("sidebar.compact")).toBe("false");
   });
 
-  it("starts compact when it was left that way, and reads no past chats until it is full", async () => {
+  it("starts collapsed when it was left that way, and reads no past chats until it opens", async () => {
     localStorage.setItem("sidebar.compact", "true");
     const calls = await launch();
     await column();
     expect(calledWith(calls, "list_sessions")).toEqual([]);
   });
 
-  it("⌃⌘S hides it and brings it back as compact: hidden and compact are kept apart", async () => {
+  it("⌃⌘S hides it and brings it back collapsed: hidden and collapsed are kept apart", async () => {
     localStorage.setItem("sidebar.compact", "true");
     await launch();
     await column();
@@ -337,7 +337,7 @@ describe("the compact sidebar", () => {
     expect(localStorage.getItem("sidebar.collapsed")).toBe("false");
   });
 
-  it("an old saved 'collapsed' still means hidden, whatever the compact setting", async () => {
+  it("an old saved 'collapsed' still means hidden, whatever the collapsed setting", async () => {
     localStorage.setItem("sidebar.collapsed", "true");
     localStorage.setItem("sidebar.compact", "true");
     await launch();
@@ -354,19 +354,34 @@ describe("the compact sidebar", () => {
 
   describe("opening in place", () => {
     beforeEach(() => localStorage.setItem("sidebar.compact", "true"));
-    const panel = async () => (await column()).querySelector<HTMLElement>(".cp-panel")!;
+    const panel = async () => (await column()).querySelector<HTMLElement>(".sb-panel")!;
 
-    it("opens the column itself over the chat when the pointer rests on it, never a different sidebar, and closes when it leaves", async () => {
-      await launch();
+    it("opens the column itself over the chat when the pointer rests on it, with every project and past chats, and closes when it leaves", async () => {
+      const calls = await launch();
       const p = await panel();
       fireEvent.pointerEnter(p);
       expect(p).not.toHaveClass("expanded");
+      expect(calledWith(calls, "list_sessions")).toEqual([]);
       await rest();
       await waitFor(() => expect(p).toHaveClass("expanded"));
-      expect(full()).toBeNull();
+      // The same sidebar, wider: still collapsed as far as what is saved goes.
+      expect(full()).toHaveClass("collapsed");
+      expect(await within(await project("acme-api")).findByText("Fix the login redirect after OAuth callback")).toBeInTheDocument();
+      expect(await project("web-dashboard · projects")).toBeInTheDocument();
       expect(localStorage.getItem("sidebar.compact")).toBe("true");
       fireEvent.pointerLeave(p);
       expect(p).not.toHaveClass("expanded");
+    });
+
+    it("is pinned from its pin button while open over the chat, and then stays", async () => {
+      await launch();
+      const p = await panel();
+      fireEvent.pointerEnter(p);
+      await rest();
+      fireEvent.click(await screen.findByRole("button", { name: "Keep sidebar open" }));
+      await waitFor(() => expect(localStorage.getItem("sidebar.compact")).toBe("false"));
+      expect(full()).toHaveClass("pinned");
+      expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeInTheDocument();
     });
 
     it("does not open for a pointer that only crosses the column", async () => {

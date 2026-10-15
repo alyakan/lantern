@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import type { MovedFolder, RecentFolder, SessionSummary } from "../types";
 import { usePersistentState } from "../lib/layout";
 import { ACTIONS, shortcutLabel } from "../lib/actions";
 import { relativeTime } from "../lib/time";
-import { projectFolders, DOT_LABEL, markOf, sidebarProjects, type ProjectOpen, type SidebarChat, type SidebarItem, type SidebarProject } from "../lib/sidebar";
+import { basename } from "../lib/diff";
+import { PROJECT_COLORS, assignColors } from "../lib/projectColors";
+import { chipOf, compactGroups, initials, markOf, projectFolders, sidebarProjects, type CompactChip, type ProjectOpen, type SidebarProject } from "../lib/sidebar";
 import { ChevronIcon, FolderOpenIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
 import { MovedNotice } from "./MovedFolders";
 import { moveFocus } from "./useMenuKeys";
@@ -15,6 +17,13 @@ export const SIDEBAR_MIN = 200;
 export const SIDEBAR_MAX = 420;
 export const SIDEBAR_DEFAULT = 248;
 const clampWidth = (w: number) => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Math.round(w)));
+
+/** How long the pointer rests on the collapsed bar before it opens, so passing over it on the way to the chat doesn't. */
+export const OPEN_AFTER_MS = 220;
+/** How long the bar takes to close again (the stylesheet's width transition): its pane stays drawn until then. */
+const CLOSE_MS = 240;
+
+const reducedMotion = () => typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 const shortcut = (id: string) => {
   const def = ACTIONS.find((a) => a.id === id);
@@ -56,11 +65,17 @@ export interface SidebarMemory {
 
 export const sidebarMemory = (): SidebarMemory => ({ recent: [], past: {}, seenOpen: new Set() });
 
+/**
+ * pinned: kept open at the saved width, beside the chat. collapsed: a slim column of squares that opens over the chat while
+ * the pointer rests on it. peek: opened over the chat from the window's edge while the sidebar is hidden (the app slides it in).
+ */
+export type SidebarMode = "pinned" | "collapsed" | "peek";
+
 interface Props extends SidebarHandlers {
-  /** Its button at the top: makes the sidebar compact, or (while it only peeks in over the chat) keeps it open. */
+  mode: SidebarMode;
+  /** Its button at the top: pins it open (collapsed, or peeking in over the chat), or collapses it (pinned). */
   onToggle: () => void;
-  /** It slid in over the chat from the window's edge, rather than being shown. */
-  peek?: boolean;
+  /** How wide it is pinned, and how wide it opens over the chat. */
   width: number;
   onWidth: (width: number) => void;
   /** What is open, by project (see openProjects), and the project on screen with its branch. */
@@ -70,7 +85,7 @@ interface Props extends SidebarHandlers {
   /** New ▾ can start something (a project is open, and its chat isn't starting). */
   canNew: boolean;
   loadRecent: () => Promise<RecentFolder[]>;
-  /** Reads a project's past chats: called only for the projects that are expanded. */
+  /** Reads a project's past chats: called only for the projects that are expanded, and only while the pane is open. */
   loadSessions: (folder: string) => Promise<SessionSummary[]>;
   pinned: Record<string, string[]>;
   titles: Record<string, string>;
@@ -85,6 +100,19 @@ interface Props extends SidebarHandlers {
   /** The user's order of the projects (folder paths, see orderProjects), and saving a new one. */
   order?: string[];
   onOrder?: (order: string[]) => void;
+  /** Each project's colour, an index into PROJECT_COLORS by folder (saved by the app, see assignColors). */
+  colors: Record<string, number>;
+  /** The colours with a project new to them given one, to save. */
+  onColors: (colors: Record<string, number>) => void;
+}
+
+/** Focus that came from the keyboard (a click focuses a button too, and that shouldn't open the column). */
+function keyboardFocus(el: Element): boolean {
+  try {
+    return el.matches(":focus-visible");
+  } catch {
+    return false;
+  }
 }
 
 /** Closes a popover on a press outside it or Escape. */
@@ -141,24 +169,54 @@ function NewMenu({ canNew, onNewChat, onNewTeam, onReviewPr }: Pick<Props, "canN
   );
 }
 
-/** A state dot, for a chat that is working, needs you, finished unread, or is just open. */
-function Dot({ chat }: { chat: SidebarChat }) {
-  const kind = markOf(chat);
-  const label = kind === "unread" ? "Unread" : DOT_LABEL[kind];
-  return <span className={`sb-dot ${kind}`} role="img" aria-label={label} />;
-}
+/** What a row says to VoiceOver (and shows, once the pane is open): the title, the project and the status. */
+const describe = (chip: CompactChip, project: string, full: boolean) => {
+  const extra = full ? `${chip.pinned ? ", pinned" : ""}${chip.background > 0 ? `, ${chip.background} running in the background` : ""}` : "";
+  return `${chip.team ? "Team: " : ""}${chip.title}, ${project}, ${chip.status}${extra}`;
+};
 
-function ChatRow({ chat, onClick, onClose, team = false, label }: { chat: SidebarChat; onClick: () => void; onClose?: () => void; team?: boolean; label?: string }) {
+/**
+ * A chat's row: its square, and beside it (shown once the pane opens) its title and how it is. A team's square has a
+ * diamond on its corner. Open in full, the row also says when it is pinned or has tasks in the background, and a chat
+ * that can be closed has a × at its end.
+ */
+function ChatRow({ chip, project, onClick, onClose, full }: { chip: CompactChip; project: string; onClick: () => void; onClose?: () => void; full: boolean }) {
+  const mark = markOf(chip);
+  const title = chip.team ? `Team: ${chip.title}` : chip.title;
+  const closable = full && chip.closable && !!onClose;
   return (
-    <li className={`sb-item${chat.closable && onClose ? " closable" : ""}`}>
-      <button className={`sb-row${chat.active ? " current" : ""}${chat.unread ? " unread" : ""}`} aria-current={chat.active ? "true" : undefined} title={chat.title} onClick={onClick}>
-        {team ? <span className={`sb-team ${markOf(chat)}`} role="img" aria-label={`${DOT_LABEL[chat.state]} team`}><TeamIcon /></span> : <Dot chat={chat} />}
-        <span className="sb-title">{label ?? chat.title}</span>
-        {chat.pinned && <span className="sb-pin" role="img" aria-label="Pinned"><PinIcon /></span>}
-        {chat.background > 0 && <span className="spinner" role="img" aria-label={`${chat.background} running in the background`} />}
+    <li className={full ? `sb-item${closable ? " closable" : ""}` : undefined}>
+      <button className={`sb-row${chip.active ? " current" : ""}`} aria-label={describe(chip, project, full)} aria-current={chip.active ? "true" : undefined} title={full ? chip.title : undefined} onClick={onClick}>
+        <span className={`sb-chip${chip.active ? " current" : ""}${chip.team ? " team" : ""}`} aria-hidden>
+          <span className="sb-initials">{chip.initials}</span>
+          {chip.team && (
+            <span className="sb-team">
+              <TeamIcon />
+            </span>
+          )}
+          {mark === "running" && <span className="sb-mark running" />}
+          {mark === "waiting" && <span className="sb-mark waiting" />}
+          {mark === "unread" && <span className="sb-mark unread" />}
+        </span>
+        <span className="sb-text" aria-hidden>
+          {full ? (
+            <span className="sb-title-line">
+              <span className="sb-title">{title}</span>
+              {chip.pinned && (
+                <span className="sb-pin">
+                  <PinIcon />
+                </span>
+              )}
+              {chip.background > 0 && <span className="spinner" />}
+            </span>
+          ) : (
+            <span className="sb-title">{title}</span>
+          )}
+          <span className={`sb-status ${mark}`}>{chip.status}</span>
+        </span>
       </button>
-      {chat.closable && onClose && (
-        <button className="icon sb-close" aria-label={`Close ${chat.title}`} title={chat.state === "draft" ? "Close (discards the unsent text)" : "Close"} onClick={onClose}>
+      {closable && (
+        <button className="icon sb-close" aria-label={`Close ${chip.title}`} title={chip.state === "draft" ? "Close (discards the unsent text)" : "Close"} onClick={onClose}>
           ×
         </button>
       )}
@@ -166,21 +224,41 @@ function ChatRow({ chat, onClick, onClose, team = false, label }: { chat: Sideba
   );
 }
 
-function Item({ item, h }: { item: SidebarItem; h: SidebarHandlers }) {
-  if (item.kind === "chat") return <ChatRow chat={item} onClick={() => h.onChat(item.slot)} onClose={() => h.onCloseChat(item.slot)} />;
+function Item({ item, project, h }: { item: ProjectOpen["items"][number]; project: string; h: SidebarHandlers }) {
+  const chip = chipOf(item);
+  if (item.kind === "chat") return <ChatRow full chip={chip} project={project} onClick={() => h.onChat(item.slot)} onClose={() => h.onCloseChat(item.slot)} />;
   return (
     <>
-      <ChatRow chat={item} team label={`Team: ${item.title}`} onClick={() => h.onTeam(item.slot)} />
+      <ChatRow full chip={chip} project={project} onClick={() => h.onTeam(item.slot)} />
       {item.agents.length > 0 && (
         <li className="sb-agents-wrap">
           <ul className="sb-agents" aria-label={`Agents in ${item.title}`}>
             {item.agents.map((a) => (
-              <ChatRow key={a.slot} chat={a} onClick={() => h.onAgent(a.slot, item.slot)} />
+              <ChatRow key={a.slot} full chip={chipOf(a)} project={project} onClick={() => h.onAgent(a.slot, item.slot)} />
             ))}
           </ul>
         </li>
       )}
     </>
+  );
+}
+
+/** A past chat: no square, only its title and how long ago. */
+function PastRow({ title, meta, pinned, onClick }: { title: string; meta: string; pinned?: boolean; onClick: () => void }) {
+  return (
+    <li className="sb-item">
+      <button className="sb-row past" title={title} onClick={onClick}>
+        <span className="sb-lead">
+          {pinned && (
+            <span className="sb-pin" role="img" aria-label="Pinned">
+              <PinIcon />
+            </span>
+          )}
+        </span>
+        <span className="sb-title">{title}</span>
+        <span className="sb-meta">{meta}</span>
+      </button>
+    </li>
   );
 }
 
@@ -226,18 +304,6 @@ function ProjectMenu({ project, h, moves, onClose }: { project: SidebarProject; 
   );
 }
 
-function PastRow({ title, meta, pinned, onClick }: { title: string; meta: string; pinned?: boolean; onClick: () => void }) {
-  return (
-    <li className="sb-item">
-      <button className="sb-row past" title={title} onClick={onClick}>
-        {pinned ? <span className="sb-pin lead" role="img" aria-label="Pinned"><PinIcon /></span> : <span className="sb-dot none" aria-hidden />}
-        <span className="sb-title">{title}</span>
-        <span className="sb-meta">{meta}</span>
-      </button>
-    </li>
-  );
-}
-
 /** ⌥⌘↑ / ⌥⌘↓ on a project's header move it one place (the keyboard's way to reorder). */
 function moveByKey(e: ReactKeyboardEvent<HTMLElement>, moves: Moves) {
   if (!e.altKey || !e.metaKey || e.shiftKey || e.ctrlKey) return;
@@ -255,18 +321,26 @@ interface Reorder {
   moves: Moves;
 }
 
-function Project({ project, expanded, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, reorder }: { project: SidebarProject; expanded: boolean; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; reorder: Reorder }) {
+/**
+ * One project of the open pane: its header (the project's coloured initials, its name, the branch when it is the one on
+ * screen, what needs you when it is folded, and + and ⋯ while the pointer is on it), then its open chats and teams, its
+ * pinned and latest past chats, and "Show all…".
+ */
+function Project({ project, color, expanded, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, reorder }: { project: SidebarProject; color: string; expanded: boolean; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; reorder: Reorder }) {
   const [menu, setMenu] = useState(false);
   const { past } = project;
   const shown = past ? past.pinned.length + past.recent.length : 0;
   return (
-    <section className={`sb-project${current ? " current" : ""}${reorder.lifted ? " lifted" : ""}`} aria-label={project.label} data-reorder-id={project.folder} style={reorder.style}>
-      <div className="sb-project-row" {...reorder.handle}>
-        <button className="sb-project-toggle" aria-expanded={expanded} title={project.folder} onClick={onToggle} onKeyDown={(e) => moveByKey(e, reorder.moves)}>
-          <span className={`sb-chev${expanded ? " open" : ""}`}>
-            <ChevronIcon />
+    <section className={`sb-section${current ? " current" : ""}${reorder.lifted ? " lifted" : ""}`} aria-label={project.label} data-reorder-id={project.folder} style={{ ...reorder.style, "--pc": color } as CSSProperties}>
+      <div className="sb-header" {...reorder.handle}>
+        <button className="sb-header-toggle" aria-expanded={expanded} title={project.folder} onClick={onToggle} onKeyDown={(e) => moveByKey(e, reorder.moves)}>
+          <span className="sb-project-initials" aria-hidden>
+            {initials(basename(project.folder), 2)}
           </span>
           <span className="sb-name">{project.label}</span>
+          <span className={`sb-fold${expanded ? " open" : ""}`} aria-hidden>
+            <ChevronIcon />
+          </span>
           {current && branch && <span className="sb-branch">{branch}</span>}
           {!expanded && project.needs > 0 && (
             <span className="sb-badge" role="img" aria-label={`${project.needs} ${project.needs === 1 ? "needs" : "need"} you`}>
@@ -275,7 +349,7 @@ function Project({ project, expanded, onToggle, current, branch, moved, onReloca
             </span>
           )}
         </button>
-        <span className="sb-project-actions" data-no-drag>
+        <span className="sb-actions" data-no-drag>
           <button className="icon" aria-label={`New chat in ${project.label}`} title="New chat here" onClick={() => h.onNewChatIn(project.folder)}>
             <PlusIcon />
           </button>
@@ -287,41 +361,54 @@ function Project({ project, expanded, onToggle, current, branch, moved, onReloca
       </div>
       {moved && <MovedNotice moved={moved} label={project.label} onRelocate={onRelocate} onDismiss={onDismissMoved} />}
       {expanded && (
-        <ul className="sb-items">
-          {project.items.map((item) => (
-            <Item key={item.slot} item={item} h={h} />
-          ))}
-          {past?.pinned.map((r) => (
-            <PastRow key={r.id} title={r.title} meta={relativeTime(r.updated_ms)} pinned onClick={() => h.onPast(project.folder, r.id)} />
-          ))}
-          {past?.recent.map((r) => (
-            <PastRow key={r.id} title={r.title} meta={relativeTime(r.updated_ms)} onClick={() => h.onPast(project.folder, r.id)} />
-          ))}
-          {!past && <li className="sb-note">Loading…</li>}
-          {past && past.total > shown && (
-            <li className="sb-item">
-              <button className="sb-more" onClick={() => h.onHistory(project.folder)}>
-                {`Show all ${past.total}…`}
-              </button>
-            </li>
+        <>
+          {project.items.length > 0 && (
+            <ul className="sb-group">
+              {project.items.map((item) => (
+                <Item key={item.slot} item={item} project={project.label} h={h} />
+              ))}
+            </ul>
           )}
-          {past && project.items.length === 0 && past.total === 0 && <li className="sb-note">No chats yet</li>}
-        </ul>
+          <ul className="sb-past-list">
+            {past?.pinned.map((r) => (
+              <PastRow key={r.id} title={r.title} meta={relativeTime(r.updated_ms)} pinned onClick={() => h.onPast(project.folder, r.id)} />
+            ))}
+            {past?.recent.map((r) => (
+              <PastRow key={r.id} title={r.title} meta={relativeTime(r.updated_ms)} onClick={() => h.onPast(project.folder, r.id)} />
+            ))}
+            {!past && <li className="sb-note">Loading…</li>}
+            {past && past.total > shown && (
+              <li className="sb-item">
+                <button className="sb-more" onClick={() => h.onHistory(project.folder)}>
+                  {`Show all ${past.total}…`}
+                </button>
+              </li>
+            )}
+            {past && project.items.length === 0 && past.total === 0 && <li className="sb-note">No chats yet</li>}
+          </ul>
+        </>
       )}
     </section>
   );
 }
 
 /**
- * The left sidebar: one group per project (the ones with a chat open first, then the other recent folders), each with its
- * open chats and teams (agents nested under their team), pinned past chats and the latest few, and "Show all…". What
- * needs you rises to the top of its group and shows as a badge when the project is collapsed. Compact or hidden, it isn't
- * rendered in full (the compact column or the title bar says what needs you); the app may show it over the chat for a moment,
- * as a peek. Past chats are read
- * only for an expanded project.
+ * The left sidebar. Collapsed, it is a slim column with a square for each open chat and team (not for projects), the
+ * chat's initials on it and a mark for how it is: a ring while it works, an amber dot when it needs you, a blue dot when
+ * it finished unread. Each project has a colour of its own, kept across restarts: its squares are tinted with it, and the one
+ * on screen is filled with it and has a bar beside it. A team is one square, for its Lead, with the team's combined state.
+ *
+ * Open (pinned beside the chat, or over it), the same pane shows every project: its header, its open chats and teams (agents
+ * nested under their team), pinned past chats and the latest few, and "Show all…". What needs you rises to the top of its
+ * project and shows as a badge when the project is folded. Past chats are read only for an expanded project, and only while
+ * the pane is open.
+ *
+ * Resting the pointer on the collapsed column (or moving focus into it) opens it over the chat to the pinned width: the
+ * squares stay where they are, and the titles, statuses and the rest of the pane come in beside them. It closes when the
+ * pointer leaves, focus goes, Escape is pressed, or something is picked.
  */
 export function Sidebar(props: Props) {
-  const { onToggle, peek, width, onWidth, open, currentFolder, branch, canNew, loadRecent, loadSessions, pinned, titles, hidden, moved, onRelocate, onDismissMoved, memory, order = [], onOrder, ...h } = props;
+  const { mode, onToggle, width, onWidth, open, currentFolder, branch, canNew, loadRecent, loadSessions, pinned, titles, hidden, moved, onRelocate, onDismissMoved, memory, order = [], onOrder, colors: savedColors, onColors, ...handlers } = props;
   const [recent, setRecent] = useState<RecentFolder[]>(() => memory?.recent ?? []);
   const [past, setPast] = useState<Record<string, SessionSummary[] | undefined>>(() => memory?.past ?? {});
   if (memory) {
@@ -334,12 +421,32 @@ export function Sidebar(props: Props) {
   const seenOpen = useRef(memory?.seenOpen ?? new Set<string>());
   const [dragWidth, setDragWidth] = useState<number | null>(null);
 
+  // Collapsed, it opens over the chat after the pointer rests on it, or while focus is in it; then it takes a moment to close.
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const rest = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const floating = mode === "collapsed" && (hovered || focused);
+  const expanded = mode !== "collapsed" || floating;
+  // Closing, the pane stays drawn while its width shrinks, then the bar takes its place.
+  const full = expanded || closing;
+  const wasFloating = useRef(false);
+  wasFloating.current = floating;
+
   const openKey = Object.keys(open).sort().join("\n");
   useEffect(() => {
     loadRecent().then(setRecent, () => setRecent([]));
   }, [openKey]);
 
   const projects = useMemo(() => sidebarProjects({ recent, hidden, open, past, pinned, titles, order }), [recent, hidden, open, past, pinned, titles, order]);
+  const groups = useMemo(() => compactGroups(open, recent, order), [open, recent, order]);
+  // The projects with something open get their colours first, in the order the collapsed bar lists them, so what the bar
+  // shows doesn't depend on the others.
+  const colors = assignColors(projects.map((p) => p.folder), assignColors(groups.map((g) => g.folder), savedColors));
+  useEffect(() => {
+    if (colors !== savedColors) onColors(colors);
+  }, [colors, savedColors]);
   // A project new to the order is saved at the top, where it shows (only once the recents are read, so the order isn't
   // started from the open projects alone).
   const ordered = orderProjects(projectFolders(recent, hidden, open), order).order;
@@ -359,8 +466,8 @@ export function Sidebar(props: Props) {
   const isExpanded = (p: SidebarProject) => by[p.folder] ?? (p.hasOpen || seenOpen.current.has(p.folder));
 
   // Past chats of the expanded projects, read when a project expands and again when its open chats change (one closed
-  // becomes a past chat; a new one gets its session). Collapsed projects are never read.
-  const wanted = projects.filter(isExpanded).map((p) => `${p.folder}\t${(open[p.folder]?.sessionIds ?? []).join(",")}`);
+  // becomes a past chat; a new one gets its session). Folded projects are never read, nor any while only the bar shows.
+  const wanted = full ? projects.filter(isExpanded).map((p) => `${p.folder}\t${(open[p.folder]?.sessionIds ?? []).join(",")}`) : [];
   const read = useRef<Record<string, string>>({});
   useEffect(() => {
     for (const entry of wanted) {
@@ -381,6 +488,100 @@ export function Sidebar(props: Props) {
     run(folder);
   };
   const toggle = (p: SidebarProject) => setBy({ ...by, [p.folder]: !isExpanded(p) });
+
+  useEffect(
+    () => () => {
+      if (rest.current) clearTimeout(rest.current);
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+    },
+    [],
+  );
+  const stopClosing = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+    setClosing(false);
+  };
+  const enter = (e: { buttons: number }) => {
+    // Not while dragging something across it.
+    if (e.buttons || rest.current) return;
+    rest.current = setTimeout(() => {
+      rest.current = null;
+      stopClosing();
+      setHovered(true);
+    }, OPEN_AFTER_MS);
+  };
+  /** Puts the open bar away: the pointer left, Escape, or something was picked. */
+  const dismiss = () => {
+    if (rest.current) clearTimeout(rest.current);
+    rest.current = null;
+    setHovered(false);
+    setFocused(false);
+    if (wasFloating.current && !reducedMotion()) {
+      setClosing(true);
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+      closeTimer.current = setTimeout(stopClosing, CLOSE_MS);
+    }
+  };
+  const leave = () => {
+    // Not while a project is being dragged: the pointer may leave the bar and the drag goes on.
+    if (!reorder.drag) dismiss();
+  };
+  const onBlur = (e: FocusEvent<HTMLElement>) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
+  };
+  // Esc closes it, wherever focus is.
+  useEffect(() => {
+    if (!floating) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      dismiss();
+      (document.activeElement as HTMLElement | null)?.blur?.();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [floating]);
+  // Pinned or peeking, there is no bar to open.
+  useEffect(() => {
+    if (mode === "collapsed") return;
+    if (rest.current) clearTimeout(rest.current);
+    rest.current = null;
+    setHovered(false);
+    setFocused(false);
+    stopClosing();
+  }, [mode]);
+
+  // Picking something in the bar takes you there and puts the bar away (the app does the same for a peek).
+  const then = <A extends unknown[]>(run: (...args: A) => void) => (...args: A) => {
+    (document.activeElement as HTMLElement | null)?.blur?.();
+    dismiss();
+    run(...args);
+  };
+  const h: SidebarHandlers =
+    mode !== "collapsed"
+      ? handlers
+      : {
+          ...handlers,
+          onChat: then(handlers.onChat),
+          onTeam: then(handlers.onTeam),
+          onAgent: then(handlers.onAgent),
+          onPast: then(handlers.onPast),
+          onHistory: then(handlers.onHistory),
+          onNewChatIn: then(handlers.onNewChatIn),
+          onNewTeamIn: then(handlers.onNewTeamIn),
+          onBringOld: then(handlers.onBringOld),
+          onOpenFolder: then(handlers.onOpenFolder),
+          onNewChat: then(handlers.onNewChat),
+          onNewTeam: then(handlers.onNewTeam),
+          onReviewPr: then(handlers.onReviewPr),
+        };
+  const toggleBar = () => {
+    // Pinning it takes the open bar's place; collapsing it leaves nothing open.
+    if (rest.current) clearTimeout(rest.current);
+    rest.current = null;
+    setHovered(false);
+    setFocused(false);
+    onToggle();
+  };
 
   // Dragging the edge moves it here; the app hears the width once, on release (it would re-render the whole window per pixel).
   const dragFrom = useRef<{ x: number; w: number } | null>(null);
@@ -408,39 +609,79 @@ export function Sidebar(props: Props) {
   };
 
   const newMenu = { canNew, onNewChat: h.onNewChat, onNewTeam: h.onNewTeam, onReviewPr: h.onReviewPr };
-  const toggleLabel = peek ? "Keep sidebar open" : "Compact sidebar";
+  const pin = mode === "pinned" ? "Collapse sidebar" : full ? "Keep sidebar open" : "Expand sidebar";
+  const label = full ? "Projects" : "Open chats";
+  const shownWidth = dragWidth ?? width;
 
   return (
-    <aside className={`sidebar${peek ? " peek" : ""}${dragWidth !== null ? " dragging" : ""}${reorder.drag ? " reordering" : ""}`} aria-label="Projects" style={{ width: dragWidth ?? width }}>
-      <div className="sb-head">
-        <NewMenu {...newMenu} />
-        <button className="icon sb-toggle" aria-label={toggleLabel} title={toggleLabel} onClick={onToggle}>
-          <SidebarIcon />
-        </button>
+    <aside className={`sidebar ${mode}${dragWidth !== null ? " dragging" : ""}${reorder.drag ? " reordering" : ""}`} aria-label={label} style={mode === "collapsed" ? undefined : { width: shownWidth }}>
+      {/* Pinned and floating are different elements, so pinning or collapsing is at once, not a width transition. */}
+      <div
+        key={mode === "pinned" ? "pinned" : "floating"}
+        className={`sb-panel${expanded ? " expanded" : ""}`}
+        style={{ "--sb-open": `${shownWidth}px` } as CSSProperties}
+        onPointerEnter={mode === "collapsed" ? enter : undefined}
+        onPointerLeave={mode === "collapsed" ? leave : undefined}
+        onFocus={mode === "collapsed" ? (e) => keyboardFocus(e.target) && setFocused(true) : undefined}
+        onBlur={mode === "collapsed" ? onBlur : undefined}
+      >
+        <div className="sb-head">
+          <button className={`icon sb-button${mode === "pinned" ? " on" : ""}`} aria-label={pin} title={pin} onClick={toggleBar}>
+            {full ? <span className="sb-pin-glyph"><PinIcon /></span> : <SidebarIcon />}
+          </button>
+          {full ? (
+            <NewMenu {...newMenu} />
+          ) : (
+            <button className="icon sb-button" aria-label="New chat" title="New chat" disabled={!canNew} onClick={h.onNewChat}>
+              <PlusIcon />
+            </button>
+          )}
+        </div>
+        <nav className="sb-list" aria-label={label} ref={list} onClickCapture={reorder.onClickCapture}>
+          {full ? (
+            <>
+              {projects.map((p, i) => (
+                <Project
+                  key={p.folder}
+                  project={p}
+                  color={PROJECT_COLORS[colors[p.folder]]}
+                  expanded={isExpanded(p)}
+                  onToggle={() => toggle(p)}
+                  current={p.folder === currentFolder}
+                  branch={branch}
+                  moved={movedFor(p.folder)}
+                  onRelocate={onRelocate}
+                  onDismissMoved={onDismissMoved}
+                  h={{ ...h, onNewChatIn: opening(h.onNewChatIn), onNewTeamIn: opening(h.onNewTeamIn) }}
+                  reorder={{ handle: onOrder ? reorder.handle(p.folder) : {}, style: reorder.styleFor(p.folder), lifted: reorder.lifted === p.folder, moves: movesOf(p.folder, i) }}
+                />
+              ))}
+              {projects.length === 0 && <div className="sb-note">No projects yet. Open a folder to start.</div>}
+            </>
+          ) : (
+            groups.map((group) => (
+              <Fragment key={group.folder}>
+                <div className="sb-project" title={group.label} aria-hidden style={{ "--pc": PROJECT_COLORS[colors[group.folder]] } as CSSProperties}>
+                  <span className="sb-project-initials">{group.initials}</span>
+                  <span className="sb-project-name">{group.label}</span>
+                </div>
+                <ul className="sb-group" aria-label={group.label} style={{ "--pc": PROJECT_COLORS[colors[group.folder]] } as CSSProperties}>
+                  {group.chips.map((chip) => (
+                    <ChatRow key={chip.slot} chip={chip} project={group.label} full={false} onClick={() => (chip.team ? h.onTeam(chip.slot) : h.onChat(chip.slot))} />
+                  ))}
+                </ul>
+              </Fragment>
+            ))
+          )}
+        </nav>
+        {full && (
+          <button className="sb-foot" onClick={h.onOpenFolder}>
+            <FolderOpenIcon />
+            <span>Open folder…</span>
+          </button>
+        )}
       </div>
-      <nav className="sb-list" aria-label="Projects" ref={list} onClickCapture={reorder.onClickCapture}>
-        {projects.map((p, i) => (
-          <Project
-            key={p.folder}
-            project={p}
-            expanded={isExpanded(p)}
-            onToggle={() => toggle(p)}
-            current={p.folder === currentFolder}
-            branch={branch}
-            moved={movedFor(p.folder)}
-            onRelocate={onRelocate}
-            onDismissMoved={onDismissMoved}
-            h={{ ...h, onNewChatIn: opening(h.onNewChatIn), onNewTeamIn: opening(h.onNewTeamIn) }}
-            reorder={{ handle: onOrder ? reorder.handle(p.folder) : {}, style: reorder.styleFor(p.folder), lifted: reorder.lifted === p.folder, moves: movesOf(p.folder, i) }}
-          />
-        ))}
-        {projects.length === 0 && <div className="sb-note">No projects yet. Open a folder to start.</div>}
-      </nav>
-      <button className="sb-foot" onClick={h.onOpenFolder}>
-        <FolderOpenIcon />
-        <span>Open folder…</span>
-      </button>
-      <div className="sb-resize" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" aria-valuemin={SIDEBAR_MIN} aria-valuemax={SIDEBAR_MAX} aria-valuenow={dragWidth ?? width} tabIndex={0} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onKeyDown={onResizeKey} />
+      {mode === "pinned" && <div className="sb-resize" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" aria-valuemin={SIDEBAR_MIN} aria-valuemax={SIDEBAR_MAX} aria-valuenow={shownWidth} tabIndex={0} onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp} onKeyDown={onResizeKey} />}
     </aside>
   );
 }
