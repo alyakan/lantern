@@ -140,32 +140,51 @@ describe("the sidebar in the app", () => {
     expect(within(await project("acme-api")).queryByText(/Moved\?/)).toBeNull();
   });
 
-  it("minimizes to the rail with ⌃⌘S, and brings the sidebar back the same way; it is remembered", async () => {
+  it("hides completely with ⌃⌘S, leaving a Show sidebar button in the title bar, and brings it back the same way; it is remembered", async () => {
     await launch();
     await project("acme-api");
+    const bar = screen.getByRole("banner");
+    expect(within(bar).queryByRole("button", { name: /^Show sidebar/ })).toBeNull();
     fireEvent.keyDown(window, { key: "s", metaKey: true, ctrlKey: true });
-    const rail = await screen.findByRole("complementary", { name: "Projects" });
-    await waitFor(() => expect(rail).toHaveClass("rail"));
-    expect(within(rail).getByRole("button", { name: "acme-api" })).toHaveTextContent("AA");
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "Projects" })).toBeNull());
     expect(screen.queryByRole("region", { name: "acme-api" })).toBeNull();
     expect(localStorage.getItem("sidebar.collapsed")).toBe("true");
+    expect(within(bar).getByRole("button", { name: "Show sidebar" })).toBeInTheDocument();
     // A second press within a moment is the same keystroke arriving twice (webview and menu), so it waits.
     await new Promise((r) => setTimeout(r, 200));
     fireEvent.keyDown(window, { key: "s", metaKey: true, ctrlKey: true });
     expect(await screen.findByRole("region", { name: "acme-api" })).toBeInTheDocument();
     expect(localStorage.getItem("sidebar.collapsed")).toBe("false");
+    expect(within(bar).queryByRole("button", { name: /^Show sidebar/ })).toBeNull();
   });
 
-  it("starts on the rail when it was left there, and reads no past chats until it is opened", async () => {
+  it("hides from its own button, and the title bar's button shows it again", async () => {
+    await launch();
+    await project("acme-api");
+    fireEvent.click(screen.getByRole("button", { name: "Hide sidebar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show sidebar" }));
+    expect(await project("acme-api")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show sidebar" })).toBeNull();
+  });
+
+  it("starts hidden when it was left minimized (the old rail), and reads no past chats until it is shown", async () => {
     localStorage.setItem("sidebar.collapsed", "true");
     const calls = await launch();
-    const rail = await screen.findByRole("complementary", { name: "Projects" });
-    expect(rail).toHaveClass("rail");
-    await within(rail).findByRole("button", { name: "acme-api" });
+    const show = await screen.findByRole("button", { name: "Show sidebar" });
+    expect(screen.queryByRole("complementary", { name: "Projects" })).toBeNull();
     expect(calledWith(calls, "list_sessions")).toEqual([]);
-    fireEvent.click(within(rail).getByRole("button", { name: "Show sidebar" }));
+    fireEvent.click(show);
     await within(await project("acme-api")).findByText("Fix the login redirect after OAuth callback");
     expect(calledWith(calls, "list_sessions")).toEqual([{ folder: FOLDER }]);
+  });
+
+  it("keeps the sidebar's width apart, so showing it again restores it", async () => {
+    localStorage.setItem("sidebar.width", "300");
+    localStorage.setItem("sidebar.collapsed", "true");
+    await launch();
+    fireEvent.click(await screen.findByRole("button", { name: "Show sidebar" }));
+    await project("acme-api");
+    expect(screen.getByRole("complementary", { name: "Projects" })).toHaveStyle({ width: "300px" });
   });
 
   it("remembers the width it was dragged to", async () => {
@@ -184,6 +203,90 @@ describe("the sidebar in the app", () => {
     expect(JSON.parse(localStorage.getItem("sidebar.hidden") ?? "[]")).toEqual([OTHER]);
     // The other web-dashboard (the moved one) has the name to itself now.
     expect(await project("web-dashboard")).toBeInTheDocument();
+  });
+});
+
+describe("the hidden sidebar", () => {
+  const edge = () => document.querySelector(".sidebar-edge") as HTMLElement;
+  // Whole-app tests run in real time: the pointer rests on the edge for the peek's delay.
+  const rest = () => new Promise((r) => setTimeout(r, 320));
+
+  beforeEach(() => localStorage.setItem("sidebar.collapsed", "true"));
+
+  it("slides the sidebar in over the chat when the pointer rests on the left edge, and away when it leaves", async () => {
+    await launch();
+    await screen.findByRole("button", { name: "Show sidebar" });
+    fireEvent.pointerEnter(edge());
+    expect(screen.queryByRole("complementary", { name: "Projects" })).toBeNull();
+    await rest();
+    const peeked = await screen.findByRole("complementary", { name: "Projects" });
+    expect(peeked).toHaveClass("peek");
+    // It is over the chat: the app's own layout still has the whole width (hidden is still saved).
+    expect(localStorage.getItem("sidebar.collapsed")).toBe("true");
+    fireEvent.pointerLeave(peeked.parentElement!);
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "Projects" })).toBeNull());
+  });
+
+  it("does not open for a pointer that only crosses the edge", async () => {
+    await launch();
+    await screen.findByRole("button", { name: "Show sidebar" });
+    fireEvent.pointerEnter(edge());
+    fireEvent.pointerLeave(edge());
+    await rest();
+    expect(screen.queryByRole("complementary", { name: "Projects" })).toBeNull();
+  });
+
+  it("closes on Escape", async () => {
+    await launch();
+    await screen.findByRole("button", { name: "Show sidebar" });
+    fireEvent.pointerEnter(edge());
+    await rest();
+    await screen.findByRole("complementary", { name: "Projects" });
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "Projects" })).toBeNull());
+  });
+
+  it("goes to a chat picked in it, and puts itself away", async () => {
+    const calls = await launch();
+    await screen.findByRole("button", { name: "Show sidebar" });
+    fireEvent.pointerEnter(edge());
+    await rest();
+    const acme = await project("acme-api");
+    fireEvent.click(await within(acme).findByRole("button", { name: /Release flow notes|Fix the login redirect after OAuth callback/ }));
+    await waitFor(() => expect(calledWith(calls, "open_session").length).toBe(1));
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "Projects" })).toBeNull());
+    // Still hidden: picking is not pinning.
+    expect(screen.getByRole("button", { name: "Show sidebar" })).toBeInTheDocument();
+    expect(localStorage.getItem("sidebar.collapsed")).toBe("true");
+  });
+
+  it("is pinned from its own button: a normal sidebar again", async () => {
+    await launch();
+    await screen.findByRole("button", { name: "Show sidebar" });
+    fireEvent.pointerEnter(edge());
+    await rest();
+    fireEvent.click(await screen.findByRole("button", { name: "Keep sidebar open" }));
+    const shown = await screen.findByRole("complementary", { name: "Projects" });
+    expect(shown).not.toHaveClass("peek");
+    expect(localStorage.getItem("sidebar.collapsed")).toBe("false");
+    expect(screen.queryByRole("button", { name: "Show sidebar" })).toBeNull();
+  });
+
+  it("badges the title bar's button with what needs you", async () => {
+    localStorage.setItem("sidebar.collapsed", "false");
+    await launch();
+    await project("acme-api");
+    expect(screen.queryByRole("button", { name: /^Show sidebar/ })).toBeNull();
+    const box = screen.getByRole("textbox");
+    fireEvent.change(box, { target: { value: "ask me first" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await screen.findByText("Where should retries live?");
+    // Waiting in the sidebar's list too, so hide it and the count moves to the button.
+    fireEvent.click(screen.getByRole("button", { name: "Hide sidebar" }));
+    const show = await screen.findByRole("button", { name: "Show sidebar, 1 chat needs you" });
+    expect(show).toHaveTextContent("1");
+    fireEvent.click(show);
+    expect(await project("acme-api")).toBeInTheDocument();
   });
 });
 

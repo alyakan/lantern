@@ -67,7 +67,8 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Hud, type HudEvent } from "./components/Hud";
 import { HistoryPopover } from "./components/HistoryPopover";
 import { Sidebar, SIDEBAR_DEFAULT } from "./components/Sidebar";
-import { openProjects } from "./lib/sidebar";
+import { needsYou, openProjects } from "./lib/sidebar";
+import { usePeek } from "./lib/peek";
 import { MessageInput } from "./components/MessageInput";
 import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
@@ -1540,13 +1541,16 @@ export default function App() {
       : null;
   const sessionActions = actionsFor(state.folder);
 
-  // The sidebar: every project, and the chats open in each. The sidebar and its rail are one setting, saved; so is its width.
-  const [sidebarCollapsed, setSidebarCollapsed] = usePersistentState("sidebar.collapsed", false);
+  // The sidebar: every project, and the chats open in each. Whether it is hidden is saved, and so is its width (apart, so
+  // showing it again restores it). The key is the one that once said "minimized to the rail": that is hidden now.
+  const [sidebarHidden, setSidebarHidden] = usePersistentState("sidebar.collapsed", false);
   const [sidebarWidth, setSidebarWidth] = usePersistentState("sidebar.width", SIDEBAR_DEFAULT);
   // Projects removed from the recents here (Claude Code keeps their chats; one with a chat open is listed regardless).
   const [hiddenFolders, setHiddenFolders] = usePersistentState<string[]>("sidebar.hidden", []);
   const openByProject = openProjects(chats, { titles, drafts: drafts.current, unread, pinned: pinnedBy });
-  useAction("toggle-sidebar", () => setSidebarCollapsed(!sidebarCollapsed));
+  useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden));
+  // Hidden, it slides in over the chat when the pointer rests on the window's left edge.
+  const sidebarPeek = usePeek(sidebarHidden);
   // History: one project's past chats, from "Show all…" or ⌘K (the project on screen).
   const [history, setHistory] = useState<{ folder: string } | null>(null);
   const canStart = !!state.folder && state.status !== "starting";
@@ -1578,6 +1582,42 @@ export default function App() {
     onNewChat: () => state.folder && startFresh(state.folder),
     onNewTeam: () => newOrchestra(),
     onReviewPr: () => setPrPicker(true),
+  };
+  // Picking something in the peeked sidebar takes you there and puts it away.
+  const then = <A extends unknown[]>(run: (...args: A) => void) => (...args: A) => {
+    sidebarPeek.close();
+    run(...args);
+  };
+  const peekHandlers = {
+    ...sidebarHandlers,
+    onChat: then(sidebarHandlers.onChat),
+    onTeam: then(sidebarHandlers.onTeam),
+    onAgent: then(sidebarHandlers.onAgent),
+    onPast: then(sidebarHandlers.onPast),
+    onHistory: then(sidebarHandlers.onHistory),
+    onNewChatIn: then(sidebarHandlers.onNewChatIn),
+    onNewTeamIn: then(sidebarHandlers.onNewTeamIn),
+    onBringOld: then(sidebarHandlers.onBringOld),
+    onOpenFolder: then(sidebarHandlers.onOpenFolder),
+    onNewChat: then(sidebarHandlers.onNewChat),
+    onNewTeam: then(sidebarHandlers.onNewTeam),
+    onReviewPr: then(sidebarHandlers.onReviewPr),
+  };
+  const sidebarProps = {
+    width: sidebarWidth,
+    onWidth: setSidebarWidth,
+    open: openByProject,
+    currentFolder: state.folder,
+    branch,
+    canNew: canStart,
+    loadRecent: loadRecentFolders,
+    loadSessions: listPast,
+    pinned: pinnedBy,
+    titles,
+    hidden: hiddenFolders,
+    moved: relocateMenu.moved,
+    onRelocate: (from: MovedFolder) => relocateMenu.onRelocate(from),
+    onDismissMoved: relocateMenu.onDismiss,
   };
 
   const restartToUpdate = () => {
@@ -1665,28 +1705,22 @@ export default function App() {
           onClearFailures={() => setClearedFailures({ ...clearedFailures, [active]: failedKey })}
           onShowFailure={showFailure}
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
+          sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
         />
         <Hud event={hud} onOpenChat={switchTo} />
         <div className="app-body">
-        <Sidebar
-          {...sidebarHandlers}
-          collapsed={sidebarCollapsed}
-          onCollapsed={setSidebarCollapsed}
-          width={sidebarWidth}
-          onWidth={setSidebarWidth}
-          open={openByProject}
-          currentFolder={state.folder}
-          branch={branch}
-          canNew={canStart}
-          loadRecent={loadRecentFolders}
-          loadSessions={listPast}
-          pinned={pinnedBy}
-          titles={titles}
-          hidden={hiddenFolders}
-          moved={relocateMenu.moved}
-          onRelocate={(from) => relocateMenu.onRelocate(from)}
-          onDismissMoved={relocateMenu.onDismiss}
-        />
+        {sidebarHidden ? (
+          <>
+            {sidebarPeek.phase !== "in" && <div className="sidebar-edge" aria-hidden onPointerEnter={(e) => !e.buttons && sidebarPeek.hover()} onPointerLeave={sidebarPeek.unhover} />}
+            {sidebarPeek.phase !== "off" && (
+              <div className="sidebar-peek" data-phase={sidebarPeek.phase} onPointerLeave={sidebarPeek.close}>
+                <Sidebar {...peekHandlers} {...sidebarProps} peek onToggle={() => setSidebarHidden(false)} />
+              </div>
+            )}
+          </>
+        ) : (
+          <Sidebar {...sidebarHandlers} {...sidebarProps} onToggle={() => setSidebarHidden(true)} />
+        )}
         <div className="app-main">
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
         <SplitPane

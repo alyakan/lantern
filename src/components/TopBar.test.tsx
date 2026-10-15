@@ -49,6 +49,21 @@ describe("TopBar", () => {
     expect(screen.getByRole("button", { name: "Hide side panel" })).toBeInTheDocument();
   });
 
+  it("has a Show sidebar button only while the sidebar is hidden, badged with how many chats need you", () => {
+    const onShow = vi.fn();
+    const { rerender } = render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} />);
+    expect(screen.queryByRole("button", { name: /^Show sidebar/ })).toBeNull();
+    rerender(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} sidebar={{ needs: 0, onShow }} />);
+    const plain = screen.getByRole("button", { name: "Show sidebar" });
+    expect(plain).toHaveTextContent("");
+    fireEvent.click(plain);
+    expect(onShow).toHaveBeenCalledTimes(1);
+    rerender(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} sidebar={{ needs: 1, onShow }} />);
+    expect(screen.getByRole("button", { name: "Show sidebar, 1 chat needs you" })).toHaveTextContent("1");
+    rerender(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} sidebar={{ needs: 2, onShow }} />);
+    expect(screen.getByRole("button", { name: "Show sidebar, 2 chats need you" })).toHaveTextContent("2");
+  });
+
   it("opens a folder menu without the Recent list: Open folder… and Bring old chats here…", () => {
     const onOpenFolder = vi.fn();
     const onBringOld = vi.fn();

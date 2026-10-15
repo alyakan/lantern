@@ -42,7 +42,7 @@ export const NOT_FOLDER_KEYED = [
   "review.commitsOpen",
   "files.markdownView",
   "summary.exportResults",
-  // The sidebar: minimized to the rail, its width, and which projects were folded or opened by hand or removed from the
+  // The sidebar: hidden (once minimized to a rail), its width, and which projects were folded or opened by hand or removed from the
   // recents (lists of paths, not any one folder's state: a moved folder is simply a new project there).
   "sidebar.collapsed",
   "sidebar.width",

@@ -15,7 +15,7 @@ const CATALOGUE = [
   { id: "open-folder", title: "Open Folder…", group: "File", key: "o", menu: true, native: true },
   // In the palette (and the folder menu and a project's ⋯ menu): no shortcut and no native menu item.
   { id: "relocate-folder", title: "Bring old chats here…", group: "File" },
-  // The left sidebar of every project, and its narrow rail: macOS's own ⌃⌘S (⌘0 is the canvas's Fit).
+  // The left sidebar of every project, hidden or shown: macOS's own ⌃⌘S (⌘0 is the canvas's Fit).
   { id: "toggle-sidebar", title: "Show/Hide Sidebar", group: "View", key: "s", ctrl: true, menu: true, native: true },
   // Only while there is a team: switches between its canvas and the chat view.
   { id: "toggle-canvas", title: "Switch Canvas and Chat View", group: "View", key: "c", shift: true },

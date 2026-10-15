@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type State } from "../store";
 import type { Chats } from "../sessions";
-import { initials, openProjects, pastRows, sidebarProjects } from "./sidebar";
+import { needsYou, openProjects, pastRows, sidebarProjects } from "./sidebar";
 
 const idle = (over: Partial<State> = {}): State => ({ ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/work/lantern", ...over });
 const asking = { type: "permission" as const, id: "p1", toolName: "Bash", input: {}, decision: null };
@@ -183,12 +183,10 @@ describe("sidebarProjects", () => {
   });
 });
 
-describe("initials", () => {
-  it("takes the first letters of the first two words, or the first two letters of one", () => {
-    expect(initials("network-monitor")).toBe("NM");
-    expect(initials("lumiform_ios")).toBe("LI");
-    expect(initials("lantern")).toBe("La");
-    expect(initials("x")).toBe("X");
-    expect(initials("---")).toBe("?");
+describe("needsYou", () => {
+  it("adds up what waits on you in every project, chats and agents alike", () => {
+    const waiting = (needs: number) => ({ items: [], sessionIds: [], needs, target: null });
+    expect(needsYou({})).toBe(0);
+    expect(needsYou({ "/a": waiting(2), "/b": waiting(0), "/c": waiting(1) })).toBe(3);
   });
 });

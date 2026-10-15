@@ -47,7 +47,6 @@ export interface SidebarProject {
   folder: string;
   /** The folder's name, with its parent's when another project has the same one. */
   label: string;
-  initials: string;
   /** Open chats and teams; empty when none is open. */
   items: SidebarItem[];
   needs: number;
@@ -61,12 +60,9 @@ export interface SidebarProject {
 /** The latest past chats a project lists before "Show all…". */
 export const RECENT_PAST = 3;
 
-/** "network-monitor" → "NM", "lantern" → "La": what a project is called on the narrow rail. */
-export function initials(name: string): string {
-  const parts = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).replace(/^./u, (c) => c.toUpperCase());
-  return (parts[0][0] + parts[1][0]).toUpperCase();
+/** Everything that waits on you, in every project: what the title bar's button counts while the sidebar is hidden. */
+export function needsYou(open: Record<string, ProjectOpen>): number {
+  return Object.values(open).reduce((n, p) => n + p.needs, 0);
 }
 
 /**
@@ -156,7 +152,6 @@ export function sidebarProjects(input: { recent: RecentFolder[]; hidden: string[
     return {
       folder,
       label: names.filter((n) => n === names[i]).length > 1 ? `${names[i]} · ${parent}` : names[i],
-      initials: initials(names[i]),
       items: o?.items ?? [],
       needs: o?.needs ?? 0,
       target: o?.target ?? null,
