@@ -255,7 +255,11 @@ export function ArchitectureTab({ map, current, pageNames, onOpenPage }: TabProp
               <ArchGraphSvg layout={layout} current={current} opens={map.nodes} onOpen={onOpenPage} shown={shown} onShow={setShown} picked={picked} />
             </PanZoom>
           </div>
-          <NodePanel node={node} page={page} layer={layer} issues={issues} picked={picked} onPick={setPicked} onOpen={onOpenPage} />
+          {/* One height whatever the panel shows: if hovering a box changed it, the map would refit and move the box
+              from under the pointer, which would bring the issues back, and so on. */}
+          <div className={`arch-panel-slot${issues.length ? " tall" : ""}`}>
+            <NodePanel node={node} page={page} layer={layer} issues={issues} picked={picked} onPick={setPicked} onOpen={onOpenPage} />
+          </div>
         </>
       ) : map.kind === "mermaid" ? (
         <MermaidMap map={map} current={current} onOpenPage={onOpenPage} />

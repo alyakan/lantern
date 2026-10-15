@@ -1719,7 +1719,9 @@ button.arch-node:hover:not(:disabled) { background: var(--bg-hover); color: var(
 .arch-badge.new { background: color-mix(in srgb, var(--add) 16%, transparent); color: var(--add); }
 .arch-badge.changed { background: color-mix(in srgb, var(--sev-should) 18%, transparent); color: var(--sev-should); }
 .arch-badge.removed { background: color-mix(in srgb, var(--del) 14%, transparent); color: var(--del); }
-.arch-panel { flex: none; }
+.arch-panel-slot { flex: none; height: calc(84px * var(--font-scale)); }
+.arch-panel-slot.tall { height: calc(140px * var(--font-scale)); }
+.arch-panel { box-sizing: border-box; height: 100%; overflow-y: auto; }
 .arch-tab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .arch-panel-name { color: var(--text); font-size: calc(12.5px * var(--font-scale)); }
 .arch-panel-open { margin-left: auto; font-size: calc(12px * var(--font-scale)); }
@@ -1796,7 +1798,8 @@ button.arch-node:hover:not(:disabled) { background: var(--bg-hover); color: var(
 .arch-panel-layer { font-size: calc(11px * var(--font-scale)); color: var(--muted); }
 .arch-panel-issue { margin-top: 4px; color: var(--del); line-height: 1.5; }
 .arch-panel-hint { font-size: calc(11px * var(--font-scale)); color: var(--faint); }
-.arch-issues ul { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; max-height: 132px; overflow-y: auto; }
+.arch-issues { display: flex; flex-direction: column; overflow: hidden; }
+.arch-issues ul { list-style: none; flex: 1; min-height: 0; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; overflow-y: auto; }
 .arch-issues li { display: flex; gap: 6px; align-items: baseline; padding: 2px 6px; border-radius: var(--radius-chip); color: var(--text-2); line-height: 1.45; cursor: default; }
 .arch-issues li:hover, .arch-issues li.picked { background: var(--bg-hover); }
 .arch-issues li.marked .arch-issue-mark { color: var(--del); }
