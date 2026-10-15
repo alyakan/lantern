@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import { markdownComponents, pathBreaks, splitMention, useFileLinks } from "../lib/fileLinks";
 import { blockLanguage, CALLOUT_LABEL, filePaths, languageHint, languageName, parsePlanStep, rehypeCallouts, type CalloutKind, type PlanStep } from "../lib/markdown";
 import { lineKind } from "../lib/diff";
-import { usePrefersDark } from "../lib/theme";
+import { usePrefersDark, useThemeVersion } from "../lib/theme";
 import { DocIcon } from "./icons";
 import { DiagramLightbox, useDiagram } from "./Diagram";
 import { ArchitectureBlock } from "./ArchitectureTab";
@@ -142,21 +142,23 @@ function Pre({ node, children, ...rest }: ComponentProps<"pre"> & { node?: HNode
  */
 function useHighlight(code: string, language: string | null): string | null {
   const dark = usePrefersDark();
-  const [html, setHtml] = useState<{ code: string; dark: boolean; html: string } | null>(null);
+  // Another theme has other source colours, so the block is coloured again when the theme changes.
+  const look = useThemeVersion();
+  const [html, setHtml] = useState<{ code: string; dark: boolean; look: number; html: string } | null>(null);
   useEffect(() => {
     if (!language || !code.trim()) return;
     let live = true;
     const wait = setTimeout(() => {
       import("../monaco")
         .then((m) => m.colorize(code.replace(/\n$/, ""), language, dark))
-        .then((h) => live && setHtml({ code, dark, html: h }), () => {});
+        .then((h) => live && setHtml({ code, dark, look, html: h }), () => {});
     }, 150);
     return () => {
       live = false;
       clearTimeout(wait);
     };
-  }, [code, language, dark]);
-  return html && html.code === code && html.dark === dark ? html.html : null;
+  }, [code, language, dark, look]);
+  return html && html.code === code && html.dark === dark && html.look === look ? html.html : null;
 }
 
 const CALLOUT_ICON: Record<CalloutKind, string> = { note: "i", tip: "✦", important: "!", warning: "!", caution: "!" };

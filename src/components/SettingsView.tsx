@@ -6,7 +6,9 @@ import { describeConfig, displayName, groupSkills, iconOf, removable, sourceOf, 
 import { setChime, useChimeOn } from "../lib/chime";
 import { AGENT_LIMIT_MAX, AGENT_LIMIT_MIN, setAgentLimit, useAgentLimit } from "../lib/agentLimit";
 import { PAUSE_MS, type NotifyPrefs } from "../lib/notifyPrefs";
-import type { Appearance, TextSize } from "../lib/theme";
+import type { TextSize } from "../lib/theme";
+import type { CustomTheme, ThemeId } from "../lib/themes";
+import { ThemePicker } from "./ThemePicker";
 import { Md } from "./Md";
 import { NewSkillForm } from "./SkillForm";
 import { HarnessSettings, type HarnessSettingsProps } from "./HarnessSettings";
@@ -104,8 +106,10 @@ export function SettingsView({ open, onClose, harness, updates, general, ...page
 export interface GeneralSettingsProps {
   notify: NotifyPrefs;
   onNotify: (prefs: NotifyPrefs) => void;
-  appearance: Appearance;
-  onAppearance: (appearance: Appearance) => void;
+  theme: ThemeId;
+  onTheme: (theme: ThemeId) => void;
+  customTheme: CustomTheme;
+  onCustomTheme: (custom: CustomTheme) => void;
   textSize: TextSize;
   onTextSize: (size: TextSize) => void;
 }
@@ -119,7 +123,7 @@ const NOTIFY_EVENTS: { key: "finished" | "waiting" | "failed"; label: string }[]
 ];
 
 /** General: when Lantern tells you about Claude (notifications, a pause), the toasts' sound, and how the window looks. */
-function GeneralPage({ notify, onNotify, appearance, onAppearance, textSize, onTextSize }: GeneralSettingsProps) {
+function GeneralPage({ notify, onNotify, theme, onTheme, customTheme, onCustomTheme, textSize, onTextSize }: GeneralSettingsProps) {
   const sound = useChimeOn();
   const agentLimit = useAgentLimit();
   const paused = notify.pausedUntil > Date.now();
@@ -175,17 +179,7 @@ function GeneralPage({ notify, onNotify, appearance, onAppearance, textSize, onT
         <h3 id="general-look" className="general-title">
           Appearance
         </h3>
-        <Choices<Appearance>
-          legend="Theme"
-          name="appearance"
-          value={appearance}
-          onChange={onAppearance}
-          options={[
-            ["system", "Follow macOS"],
-            ["light", "Light"],
-            ["dark", "Dark"],
-          ]}
-        />
+        <ThemePicker theme={theme} onTheme={onTheme} custom={customTheme} onCustom={onCustomTheme} />
         <Choices<TextSize>
           legend="Text size"
           name="text-size"

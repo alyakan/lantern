@@ -33,7 +33,8 @@ import { LAST_FOLDER, OPEN_CHATS, migrateFolderState, withMovedNote, type Migrat
 import { BringOldSessionsDialog } from "./components/BringOldSessionsDialog";
 import { stepFile, usePersistentState } from "./lib/layout";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
-import { applyAppearance, type Appearance, type TextSize } from "./lib/theme";
+import { applyTheme, readCustomTheme, readTheme, type TextSize } from "./lib/theme";
+import { THEMES, isThemeId, readCustom, type CustomTheme, type ThemeId } from "./lib/themes";
 import { notify } from "./lib/notify";
 import { availableActions, runAction, useAction } from "./lib/actions";
 import type { PaletteEntry } from "./lib/palette";
@@ -161,9 +162,13 @@ export default function App() {
   const [harnessBySession, setHarnessBySession] = usePersistentState<Record<string, string>>("settings.harnessBySession", {});
   // General: which events are told about (and paused), the theme and the text size.
   const [notifyPrefs, setNotifyPrefs] = usePersistentState<NotifyPrefs>(NOTIFY_KEY, NOTIFY_DEFAULTS);
-  const [appearance, setAppearance] = usePersistentState<Appearance>("settings.appearance", "system");
+  const [savedTheme, setTheme] = usePersistentState<ThemeId>("settings.theme", readTheme());
+  const [savedCustom, setCustomTheme] = usePersistentState<CustomTheme>("settings.customTheme", readCustomTheme());
+  // What was saved may be anything (storage is editable): only a known theme and checked colours are used.
+  const theme = isThemeId(savedTheme) ? savedTheme : "system";
+  const customTheme = useMemo(() => readCustom(savedCustom), [savedCustom]);
   const [textSize, setTextSize] = usePersistentState<TextSize>("settings.textSize", "default");
-  useEffect(() => applyAppearance(appearance, textSize), [appearance, textSize]);
+  useEffect(() => applyTheme(theme, textSize, customTheme), [theme, textSize, customTheme]);
   // Each open chat's preset.
   const [harnessBySlot, setHarnessBySlot] = useState<Record<string, string>>({});
   // Every open chat. The one on screen is `active`; the others keep running in the background.
@@ -1414,7 +1419,8 @@ export default function App() {
     const tabs = (["general", "harness", "mcp", "skills", "permissions", "updates"] as SettingsTab[])
       .filter((t) => t !== "harness" || !!state.folder)
       .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
-    return [...availableActions(), ...permissions, ...workflows, ...harnesses, ...tabs];
+    const themes = THEMES.filter((t) => t.id !== theme && t.id !== "custom").map((t): PaletteEntry => ({ id: `theme:${t.id}`, title: `Theme: ${t.label}`, group: "Theme", shortcut: null, run: () => setTheme(t.id) }));
+    return [...availableActions(), ...permissions, ...workflows, ...harnesses, ...themes, ...tabs];
   };
   // The Work menu: Build, Debug and Design are Step by step in that flavour; Review a PR lists the open pull requests and
   // starts a review on the one chosen; Start a team makes an empty chat a team's Lead, and otherwise starts a new one.
@@ -1868,7 +1874,7 @@ export default function App() {
           commands={state.commands}
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
-          general={{ notify: notifyPrefs, onNotify: setNotifyPrefs, appearance, onAppearance: setAppearance, textSize, onTextSize: setTextSize }}
+          general={{ notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize }}
           updates={{
             version: updates.version,
             state: updates.state,

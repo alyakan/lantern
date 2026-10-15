@@ -39,7 +39,8 @@ export const NOT_FOLDER_KEYED = [
   // The folders whose "moved?" notice was dismissed: a list of old paths, not any one folder's state.
   "relocate.dismissed",
   "settings.harnessPresets",
-  "settings.appearance",
+  "settings.theme",
+  "settings.customTheme",
   "settings.textSize",
   "review.collapsed",
   "review.canvasPanel",

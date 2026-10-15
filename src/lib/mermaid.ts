@@ -2,6 +2,7 @@
  * Mermaid, for Architecture's diagrams. The library is big, so it loads the first time a diagram is drawn (as Monaco
  * does for code), and it runs in its strict security level: no scripts, no click handlers, no HTML in labels.
  */
+import { readColors } from "./theme";
 
 /**
  * How a node says what the change does to it, in the diagram's own words: `A[Auth service]:::changed`. Claude is told
@@ -71,14 +72,52 @@ const CACHE_MAX = 40;
 
 const load = () => (loaded ??= import("mermaid").then((m) => m.default));
 
+/** The tokens a diagram takes its colours from. */
+export const DIAGRAM_TOKENS = ["pane", "sidebar", "bg-subtle", "text", "text-2", "line-strong"];
+
+/**
+ * Mermaid's colours for a theme's tokens (as hex): nodes in the chat card's colour with the theme's line round them,
+ * its text, and edges in the secondary text. Empty when the tokens couldn't be read: mermaid's own light or dark stays.
+ */
+export function diagramVariables(c: Record<string, string>): Record<string, string> {
+  if (!DIAGRAM_TOKENS.every((t) => c[t])) return {};
+  return {
+    background: c.pane,
+    primaryColor: c.sidebar,
+    primaryTextColor: c.text,
+    primaryBorderColor: c["line-strong"],
+    secondaryColor: c["bg-subtle"],
+    tertiaryColor: c.pane,
+    lineColor: c["text-2"],
+    textColor: c.text,
+    mainBkg: c.sidebar,
+    nodeBorder: c["line-strong"],
+    clusterBkg: c["bg-subtle"],
+    clusterBorder: c["line-strong"],
+    edgeLabelBackground: c.pane,
+    titleColor: c.text,
+  };
+}
+
 /** The diagram as SVG markup; rejects with mermaid's message when the source isn't valid. */
 export function renderDiagram(source: string, dark: boolean): Promise<string> {
-  const key = `${dark ? "d" : "l"}:${source}`;
+  // Light and Dark (and macOS's own) keep mermaid's built-in looks; every other theme gets its own colours on mermaid's base.
+  const named = document.documentElement.dataset.theme;
+  const vars = named === "light" || named === "dark" || named === "system" || !named ? {} : diagramVariables(readColors(DIAGRAM_TOKENS));
+  const themed = Object.keys(vars).length > 0;
+  const key = `${dark ? "d" : "l"}:${themed ? JSON.stringify(vars) : ""}:${source}`;
   const hit = cache.get(key);
   if (hit) return Promise.resolve(hit);
   const run = async () => {
     const mermaid = await load();
-    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "default", fontFamily: "inherit", flowchart: { htmlLabels: true, useMaxWidth: false } });
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: "strict",
+      theme: themed ? "base" : dark ? "dark" : "default",
+      themeVariables: themed ? { darkMode: dark, ...vars } : undefined,
+      fontFamily: "inherit",
+      flowchart: { htmlLabels: true, useMaxWidth: false },
+    });
     const id = `lantern-diagram-${++counter}`;
     try {
       await mermaid.parse(source);
