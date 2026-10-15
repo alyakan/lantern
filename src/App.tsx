@@ -69,6 +69,8 @@ import { Hud, type HudEvent } from "./components/Hud";
 import { HistoryPopover } from "./components/HistoryPopover";
 import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects } from "./lib/sidebar";
+import { anythingWorking } from "./lib/awake";
+import { inboxItems, type InboxItem } from "./lib/inbox";
 import { SidebarCompact } from "./components/SidebarCompact";
 import { usePeek } from "./lib/peek";
 import { MessageInput } from "./components/MessageInput";
@@ -162,6 +164,9 @@ export default function App() {
   const [harnessBySession, setHarnessBySession] = usePersistentState<Record<string, string>>("settings.harnessBySession", {});
   // General: which events are told about (and paused), the theme and the text size.
   const [notifyPrefs, setNotifyPrefs] = usePersistentState<NotifyPrefs>(NOTIFY_KEY, NOTIFY_DEFAULTS);
+  // Keep the Mac from idle sleep while anything works (see anythingWorking); anything but off means on.
+  const [keepAwakeSaved, setKeepAwake] = usePersistentState<boolean>("settings.keepAwake", true);
+  const keepAwake = keepAwakeSaved !== false;
   const [savedTheme, setTheme] = usePersistentState<ThemeId>("settings.theme", readTheme());
   const [savedCustom, setCustomTheme] = usePersistentState<CustomTheme>("settings.customTheme", readCustomTheme());
   // What was saved may be anything (storage is editable): only a known theme and checked colours are used.
@@ -1270,9 +1275,14 @@ export default function App() {
   const saveOpen = () => save(toCurrentFolders(withOffered(chatsToSave(chats.slots, active, drafts.current, titles, chats.agents), offer), moves ?? []));
   useEffect(saveOpen, [chats.slots, chats.agents, active, titles, offer, moves]);
 
+  const working = anythingWorking(chats);
+  useEffect(() => {
+    api.keepAwake(working, keepAwake).catch(() => {});
+  }, [working, keepAwake]);
+
   const announced = useRef<Record<string, string>>({});
   // Chats that finished in the background and haven't been looked at since: a blue dot, like an unread message.
-  const [unread, setUnread] = useState<Record<string, true>>({});
+  const [unread, setUnread] = useState<Record<string, number>>({});
   useEffect(() => {
     setUnread(({ [active]: _seen, ...rest }) => rest);
   }, [active]);
@@ -1292,7 +1302,7 @@ export default function App() {
       if (wanted && (!windowFocused() || slot !== chats.active)) notify(a.title, a.body, a.kind);
       // Another chat finished or needs an answer: say so in the window too, and let the toast take you there.
       if (slot !== chats.active) {
-        if (a.kind === "finished" || a.kind === "failed") setUnread((u) => ({ ...u, [slot]: true }));
+        if (a.kind === "finished" || a.kind === "failed") setUnread((u) => ({ ...u, [slot]: Date.now() }));
         const project = s.folder && s.folder !== state.folder ? basename(s.folder) : null;
         if (wanted) setHud({ key: Date.now(), kind: a.kind, body: a.body, chat: { slot, title: chats.agents[slot]?.name ?? chatTitle(s, titles), project } });
       }
@@ -1568,6 +1578,7 @@ export default function App() {
   // Projects removed from the recents here (Claude Code keeps their chats; one with a chat open is listed regardless).
   const [hiddenFolders, setHiddenFolders] = usePersistentState<string[]>("sidebar.hidden", []);
   const openByProject = openProjects(chats, { titles, drafts: drafts.current, unread, pinned: pinnedBy });
+  const inbox = inboxItems(chats, openByProject, { unread, describe: describeInput });
   useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden), true, sidebarHidden ? "Show Sidebar" : "Hide Sidebar");
   useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Full Sidebar" : "Compact Sidebar");
   useEffect(() => {
@@ -1612,6 +1623,8 @@ export default function App() {
     onNewTeam: () => newOrchestra(),
     onReviewPr: () => setPrPicker(true),
   };
+  // The inbox's Go: the same place the sidebar's row for it goes to.
+  const goToInbox = (item: InboxItem) => (item.role === "agent" && item.team ? sidebarHandlers.onAgent(item.slot, item.team) : item.role === "lead" ? sidebarHandlers.onTeam(item.slot) : sidebarHandlers.onChat(item.slot));
   // Picking something in the peeked sidebar takes you there and puts it away.
   const then = <A extends unknown[]>(run: (...args: A) => void) => (...args: A) => {
     sidebarPeek.close();
@@ -1738,6 +1751,7 @@ export default function App() {
           onShowFailure={showFailure}
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
+          inbox={{ items: inbox, onGo: goToInbox, onDecide: (item, allow) => item.requestId && decideIn(item.slot, item.requestId, allow) }}
         />
         <Hud event={hud} onOpenChat={switchTo} />
         <div className="app-body">
@@ -1874,7 +1888,7 @@ export default function App() {
           commands={state.commands}
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
-          general={{ notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize }}
+          general={{ keepAwake, onKeepAwake: setKeepAwake, notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize }}
           updates={{
             version: updates.version,
             state: updates.state,

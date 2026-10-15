@@ -247,6 +247,14 @@ export const SidebarIcon = () => (
   </svg>
 );
 
+// A tray with a notch: what is waiting for you.
+export const InboxIcon = () => (
+  <svg width="15" height="13" viewBox="0 0 16 14" {...base}>
+    <path d="M1.2 8.6 3.4 2.2c.15-.5.6-.8 1.1-.8h7c.5 0 .95.3 1.1.8l2.2 6.4v2.6c0 .66-.54 1.2-1.2 1.2H2.4c-.66 0-1.2-.54-1.2-1.2z" />
+    <path d="M1.2 8.6h3.6c.3 1.2 1.1 1.9 3.2 1.9s2.9-.7 3.2-1.9h3.6" />
+  </svg>
+);
+
 // A diamond: a team, in the sidebar.
 export const TeamIcon = () => (
   <svg width="11" height="11" viewBox="0 0 11 11" {...base}>

@@ -107,6 +107,15 @@ export function initials(name: string, single = 1): string {
 /** A chat's initials from its title: a chat or team with no title yet ("New chat", "New team") is N. */
 export const chatInitials = (title: string): string => (/^new (chat|team)$/i.test(title.trim()) ? "N" : initials(title));
 
+/** Each folder's name for a list of projects: the folder's name, with its parent's when another one in the list has the same. */
+export function projectLabels(folders: string[]): string[] {
+  const names = folders.map(basename);
+  return folders.map((folder, i) => {
+    const parent = basename(folder.slice(0, Math.max(folder.lastIndexOf("/"), 0)) || "/");
+    return names.filter((n) => n === names[i]).length > 1 ? `${names[i]} · ${parent}` : names[i];
+  });
+}
+
 /**
  * What is open, as the compact sidebar lists it: the projects with something open, in the order the full sidebar lists
  * them (the recent list's), each with its chats and teams. An agent is never listed on its own, only inside its team.
@@ -118,9 +127,9 @@ export function compactGroups(open: Record<string, ProjectOpen>, recent: RecentF
     .sort((a, b) => rank(a) - rank(b));
   const folders = orderProjects(newest, order).listed;
   const names = folders.map(basename);
+  const labels = projectLabels(folders);
   return folders.map((folder, i) => {
-    const parent = basename(folder.slice(0, Math.max(folder.lastIndexOf("/"), 0)) || "/");
-    const label = names.filter((n) => n === names[i]).length > 1 ? `${names[i]} · ${parent}` : names[i];
+    const label = labels[i];
     const chips = open[folder].items.map((item): CompactChip => {
       const mark = markOf(item);
       return {
@@ -151,7 +160,7 @@ export function needsYou(open: Record<string, ProjectOpen>): number {
  * listed on its own, whatever its worktree's folder is); a chat with no folder yet isn't listed. Within a project the
  * chats that need you come first, the rest keep the order they were opened in.
  */
-export function openProjects(chats: Chats, opts: { titles: Record<string, string>; drafts: Record<string, string>; unread: Record<string, true>; pinned: Record<string, string[]> }): Record<string, ProjectOpen> {
+export function openProjects(chats: Chats, opts: { titles: Record<string, string>; drafts: Record<string, string>; unread: Record<string, number>; pinned: Record<string, string[]> }): Record<string, ProjectOpen> {
   const out: Record<string, ProjectOpen> = {};
   const pinnedIn = (folder: string | null, id: string | null) => !!folder && !!id && (opts.pinned[folder] ?? []).includes(id);
   const nodes = orchestraNodes(chats, () => "Lead");
@@ -233,14 +242,13 @@ export function projectFolders(recent: RecentFolder[], hidden: string[], open: R
 export function sidebarProjects(input: { recent: RecentFolder[]; hidden: string[]; open: Record<string, ProjectOpen>; past: Record<string, SessionSummary[] | undefined>; pinned: Record<string, string[]>; titles: Record<string, string>; order?: string[] }): SidebarProject[] {
   const { recent, hidden, open, past, pinned, titles } = input;
   const folders = orderProjects(projectFolders(recent, hidden, open), input.order ?? []).listed;
-  const names = folders.map(basename);
+  const labels = projectLabels(folders);
   return folders.map((folder, i) => {
     const o = open[folder];
     const sessions = past[folder];
-    const parent = basename(folder.slice(0, Math.max(folder.lastIndexOf("/"), 0)) || "/");
     return {
       folder,
-      label: names.filter((n) => n === names[i]).length > 1 ? `${names[i]} · ${parent}` : names[i],
+      label: labels[i],
       items: o?.items ?? [],
       needs: o?.needs ?? 0,
       target: o?.target ?? null,
