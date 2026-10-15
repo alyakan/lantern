@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { alpha, contrast, ensureContrast, isDark, isHex, luminance, mix, parseHex, readableOn, toHex } from "./color";
+import { alpha, contrast, ensureContrast, isDark, isHex, luminance, mix, normalizeHex, parseHex, readableOn, toHex } from "./color";
 
 describe("colour sums", () => {
   it("reads and writes hex, short or long, dropping an alpha", () => {
@@ -46,5 +46,13 @@ describe("colour sums", () => {
     expect(contrast(lifted, "#ffffff")).toBeGreaterThanOrEqual(7);
     expect(contrast(ensureContrast("#444444", "#222222", 4.5), "#222222")).toBeGreaterThanOrEqual(4.5);
     expect(ensureContrast("#777777", "#ffffff", 21)).toBe("#000000");
+  });
+});
+
+describe("normalizeHex", () => {
+  it("lets through #rgb and #rrggbb only, as lower-case #rrggbb", () => {
+    expect(normalizeHex("#ABC")).toBe("#aabbcc");
+    expect(normalizeHex("#1F1F24")).toBe("#1f1f24");
+    for (const bad of ["#abcd", "#aabbccdd", "abc", "red", "#abc ", " #abc", "#abc\n", "#abg", "#abc;", 5, null, undefined, {}]) expect(normalizeHex(bad), String(bad)).toBeNull();
   });
 });

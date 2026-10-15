@@ -85,7 +85,8 @@ export function applyTheme(theme: ThemeId, size: TextSize, customTheme: CustomTh
   root.dataset.theme = theme;
   delete root.dataset.scheme;
   if (theme === "custom") {
-    const tokens = deriveTokens(customTheme);
+    // Whatever got here, only validated hex colours and fixed strings reach the page.
+    const tokens = deriveTokens(readCustom(customTheme));
     for (const [name, value] of Object.entries(tokens)) {
       root.style.setProperty(name, value);
       custom.push(name);

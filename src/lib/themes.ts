@@ -3,7 +3,7 @@
  * token sets in styles.css (data-theme on <html>); "custom" is computed here from the few colours the user picks and set
  * on <html> as inline custom properties (see applyTheme).
  */
-import { alpha, contrast, ensureContrast, isDark, isHex, mix, readableOn } from "./color";
+import { alpha, contrast, ensureContrast, isDark, mix, normalizeHex, readableOn } from "./color";
 
 export type ThemeId = "system" | "light" | "dark" | "terminal" | "solarized" | "nord" | "paper" | "custom";
 export type Scheme = "light" | "dark";
@@ -63,7 +63,7 @@ export const CUSTOM_DEFAULT: CustomTheme = { ...DARK_PICKS, mono: false, square:
 /** The custom theme with its colours checked: a saved one that isn't made of hex colours falls back to the default. */
 export function readCustom(value: unknown): CustomTheme {
   const v = (value ?? {}) as Partial<CustomTheme>;
-  const colour = (c: unknown, fallback: string) => (typeof c === "string" && isHex(c) ? c : fallback);
+  const colour = (c: unknown, fallback: string) => normalizeHex(c) ?? fallback;
   return {
     bg: colour(v.bg, CUSTOM_DEFAULT.bg),
     panel: colour(v.panel, CUSTOM_DEFAULT.panel),

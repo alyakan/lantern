@@ -131,3 +131,31 @@ describe("textContrast", () => {
     expect(textContrast({ bg: "#ffffff", panel: "#ffffff", text: "#7a7a7a" }).ok).toBe(false);
   });
 });
+
+describe("a custom theme that came from storage or anywhere else", () => {
+  const HOSTILE = ["red", "#12", "#12345", "#1234567", "#12345678", "url(https://evil.test/x)", "#fff; background: url(x)", "#fff}", "#fff /*", "var(--x)", "expression(1)", "#ggg", "", " #ffffff", "#ffffff\n", 12, null, undefined, {}, [], ["#ffffff"], true];
+
+  it("keeps only strict hex colours (#rgb or #rrggbb), written out as #rrggbb in lower case", () => {
+    expect(readCustom({ bg: "#ABC", panel: "#A1B2C3" })).toMatchObject({ bg: "#aabbcc", panel: "#a1b2c3" });
+    for (const bad of HOSTILE) expect(readCustom({ bg: bad, text: bad, accent: bad })).toEqual(CUSTOM_DEFAULT);
+  });
+
+  it("takes anything that isn't an object for no custom theme at all", () => {
+    for (const junk of [null, undefined, "junk", 7, true, [], [1, 2], () => 1]) expect(readCustom(junk)).toEqual(CUSTOM_DEFAULT);
+  });
+
+  it("takes the monospace and square switches only when they are exactly true", () => {
+    for (const bad of ["true", 1, "yes", {}, [true]]) expect(readCustom({ mono: bad, square: bad })).toMatchObject({ mono: false, square: false });
+  });
+
+  it("derives tokens made only of hex colours, fixed shadows and percentages, whatever the picks were", () => {
+    const allowed = /^(#[0-9a-f]{6}([0-9a-f]{2})?|\d+%|0|light|dark|var\(--mono\)|(0 0 0 0\.5px|0 1[02]px 3[02]px|0 4px 16px)[0-9a-z ().,\-]*)$/;
+    for (const bad of HOSTILE) {
+      const tokens = deriveTokens(readCustom({ bg: bad, panel: bad, text: bad, text2: bad, accent: bad, line: bad, mono: true, square: true }));
+      for (const [name, value] of Object.entries(tokens)) {
+        expect(value, name).toMatch(allowed);
+        expect(value, name).not.toMatch(/[;{}<>"'\\]|url|expression|\/\*/);
+      }
+    }
+  });
+});

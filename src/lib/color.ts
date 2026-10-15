@@ -14,7 +14,7 @@ const byte = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(1
 
 export const toHex = ([r, g, b]: Rgb) => `#${byte(r)}${byte(g)}${byte(b)}`;
 
-export const isHex = (value: string) => /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value.trim());
+export const isHex = (value: string) => normalizeHex(value) !== null;
 
 /** `a` with `amount` (0–1) of `b` mixed in. */
 export function mix(a: string, b: string, amount: number): string {
@@ -58,4 +58,11 @@ export function ensureContrast(color: string, bg: string, min: number, toward = 
     if (contrast(next, bg) >= min) return next;
   }
   return target;
+}
+
+/** A hex colour as "#rrggbb" in lower case (a short "#rgb" is expanded), or null when it isn't one: nothing else is let through. */
+export function normalizeHex(value: unknown): string | null {
+  if (typeof value !== "string" || !/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(value)) return null;
+  const h = value.slice(1).toLowerCase();
+  return `#${h.length === 3 ? [...h].map((c) => c + c).join("") : h}`;
 }

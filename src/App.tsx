@@ -34,7 +34,7 @@ import { BringOldSessionsDialog } from "./components/BringOldSessionsDialog";
 import { stepFile, usePersistentState } from "./lib/layout";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyTheme, readCustomTheme, readTheme, type TextSize } from "./lib/theme";
-import { THEMES, type CustomTheme, type ThemeId } from "./lib/themes";
+import { THEMES, isThemeId, readCustom, type CustomTheme, type ThemeId } from "./lib/themes";
 import { notify } from "./lib/notify";
 import { availableActions, runAction, useAction } from "./lib/actions";
 import type { PaletteEntry } from "./lib/palette";
@@ -161,8 +161,11 @@ export default function App() {
   const [harnessBySession, setHarnessBySession] = usePersistentState<Record<string, string>>("settings.harnessBySession", {});
   // General: which events are told about (and paused), the theme and the text size.
   const [notifyPrefs, setNotifyPrefs] = usePersistentState<NotifyPrefs>(NOTIFY_KEY, NOTIFY_DEFAULTS);
-  const [theme, setTheme] = usePersistentState<ThemeId>("settings.theme", readTheme());
-  const [customTheme, setCustomTheme] = usePersistentState<CustomTheme>("settings.customTheme", readCustomTheme());
+  const [savedTheme, setTheme] = usePersistentState<ThemeId>("settings.theme", readTheme());
+  const [savedCustom, setCustomTheme] = usePersistentState<CustomTheme>("settings.customTheme", readCustomTheme());
+  // What was saved may be anything (storage is editable): only a known theme and checked colours are used.
+  const theme = isThemeId(savedTheme) ? savedTheme : "system";
+  const customTheme = useMemo(() => readCustom(savedCustom), [savedCustom]);
   const [textSize, setTextSize] = usePersistentState<TextSize>("settings.textSize", "default");
   useEffect(() => applyTheme(theme, textSize, customTheme), [theme, textSize, customTheme]);
   // Each open chat's preset.

@@ -165,3 +165,46 @@ describe("cssToHex", () => {
     expect(cssToHex("var(--x)")).toBeNull();
   });
 });
+
+describe("a corrupt or hostile saved theme", () => {
+  afterEach(reset);
+
+  it("can't break startup: unreadable JSON falls back to the defaults", () => {
+    localStorage.setItem("settings.theme", "{not json");
+    localStorage.setItem("settings.customTheme", "}}}");
+    expect(() => applySaved()).not.toThrow();
+    expect(readTheme()).toBe("system");
+    expect(readCustomTheme()).toEqual(CUSTOM_DEFAULT);
+    expect(root.dataset.theme).toBe("system");
+  });
+
+  it("falls back to the default for values of the wrong type or shape", () => {
+    for (const bad of [null, 5, [], {}, "<script>", { x: 1 }]) {
+      localStorage.setItem("settings.theme", JSON.stringify(bad));
+      expect(readTheme(), JSON.stringify(bad)).toBe("system");
+    }
+    for (const bad of [null, 5, "red", [], [1, 2, 3]]) {
+      localStorage.setItem("settings.customTheme", JSON.stringify(bad));
+      expect(readCustomTheme(), JSON.stringify(bad)).toEqual(CUSTOM_DEFAULT);
+    }
+  });
+
+  it("never writes anything but validated colours to <html>, even when handed an unchecked custom theme", () => {
+    const evil = { bg: "red; background: url(https://evil.test)", panel: "url(x)", text: "#fff;}", text2: "</style>", accent: "var(--x)", line: "#12", mono: "yes", square: 1 } as never;
+    applyTheme("custom", "default", evil);
+    const written = [...Array(root.style.length).keys()].map((i) => root.style[i as never] as string).map((n) => [n, root.style.getPropertyValue(n)]);
+    expect(written.length).toBeGreaterThan(30);
+    for (const [name, value] of written) {
+      expect(value, name).not.toMatch(/url|evil|<|>|[;{}]|var\(--x\)/);
+    }
+    // The default custom theme is what shows: its colours, not the hostile ones.
+    expect(root.style.getPropertyValue("--bg")).toBe(CUSTOM_DEFAULT.bg);
+    expect(root.style.getPropertyValue("--ui")).toBe("");
+    expect(root.style.getPropertyValue("--radius")).toBe("");
+  });
+
+  it("does not take a theme id that isn't one", () => {
+    localStorage.setItem("settings.theme", JSON.stringify("custom\" onload=\"x"));
+    expect(readTheme()).toBe("system");
+  });
+});
