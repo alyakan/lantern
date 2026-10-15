@@ -1,4 +1,3 @@
-import { PlanMeter } from "./PlanMeter";
 import { memo, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
   bounds,
@@ -338,7 +337,6 @@ function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onSho
         <button className="canvas-fit" aria-label="Fit everything" title="Fit everything in view" onClick={onFit}>
           Fit
         </button>
-        <PlanMeter />
         <Team nodes={nodes} onGoTo={onGoTo} />
         <HiddenAgents nodes={nodes.filter((n) => n.hidden)} onShow={onShow} />
         {main && <SubagentsMenu main={main} />}
