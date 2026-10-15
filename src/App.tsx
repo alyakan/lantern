@@ -1506,6 +1506,8 @@ export default function App() {
     if (pinned) setPinnedBy(pinned);
     const colors = take<Record<string, number>>("sidebar.projectColors");
     if (colors) setProjectColors(colors);
+    const order = take<string[]>("sidebar.projectOrder");
+    if (order) setProjectOrder(order);
     const last = take<string>(LAST_FOLDER);
     if (last) setLastFolder(last);
     if (changed[OPEN_CHATS]) setOffer((chats) => chats.map((c) => (c.folder === old ? { ...c, folder: next } : c)));
@@ -1550,6 +1552,8 @@ export default function App() {
   const [sidebarHidden, setSidebarHidden] = usePersistentState("sidebar.collapsed", false);
   const [sidebarCompact, setSidebarCompact] = usePersistentState("sidebar.compact", false);
   const [projectColors, setProjectColors] = usePersistentState<Record<string, number>>("sidebar.projectColors", {});
+  // The user's order of the projects (see orderProjects).
+  const [projectOrder, setProjectOrder] = usePersistentState<string[]>("sidebar.projectOrder", []);
   // What the sidebar last listed, so showing it again (a peek mounts a new one) starts from that instead of empty.
   const sidebarMemoryRef = useRef(sidebarMemory());
   const [sidebarWidth, setSidebarWidth] = usePersistentState("sidebar.width", SIDEBAR_DEFAULT);
@@ -1622,6 +1626,8 @@ export default function App() {
   };
   const sidebarProps = {
     memory: sidebarMemoryRef.current,
+    order: projectOrder,
+    onOrder: setProjectOrder,
     width: sidebarWidth,
     onWidth: setSidebarWidth,
     open: openByProject,
@@ -1741,6 +1747,7 @@ export default function App() {
                 onTeam={sidebarHandlers.onTeam}
                 colors={projectColors}
                 onColors={setProjectColors}
+                order={projectOrder}
                 onToggle={() => setSidebarCompact(false)}
                 onPointerEnter={(e) => !e.buttons && sidebarPeek.hover()}
                 onPointerLeave={sidebarPeek.unhover}

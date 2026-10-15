@@ -1931,7 +1931,12 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-menu .menu-row { align-items: center; }
 .project-menu { left: auto; right: 4px; }
 .sb-list { flex: 1; min-height: 0; overflow-y: auto; padding-right: 6px; }
-.sb-project { margin-bottom: 2px; }
+.sb-project { margin-bottom: 2px; border-radius: 8px; transition: box-shadow 0.16s, background 0.16s, scale 0.16s; }
+/* Dragging a project to reorder: it lifts off the list (the others slide out of its way, see useReorder). */
+.sidebar.reordering, .sidebar.reordering * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
+.sidebar.reordering .sb-project-row .sb-project-actions { display: none; }
+.sb-project.lifted { background: var(--bg); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16), 0 0 0 0.5px var(--line-strong); scale: 1.015; }
+@media (prefers-reduced-motion: reduce) { .sb-project { transition: none; } .sb-project.lifted { scale: none; } }
 .sb-project-row { position: relative; display: flex; align-items: center; }
 .sb-project-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; height: 26px; padding: 0 6px 0 2px; border: none; background: none; border-radius: var(--radius-chip); color: var(--text); font-weight: 600; text-align: left; }
 .sb-project-toggle:hover { background: var(--bg-hover); }

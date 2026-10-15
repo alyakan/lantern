@@ -213,6 +213,8 @@ To look without showing it, rest the pointer on the window's left edge for a mom
 
 ![The hidden sidebar peeking in over the chat](images/sidebar-peek.png)
 
+Projects stay in the order you give them; using one doesn't move it. A project you open for the first time goes at the top. To reorder, drag a project by its name: it lifts, the others slide out of its way, and it settles where you drop it (Esc puts it back). From the keyboard, ⌥⌘↑ and ⌥⌘↓ move the project whose name has focus, and its ⋯ menu has Move up and Move down. The compact sidebar follows the same order, and the order is remembered.
+
 Drag the sidebar's edge to resize it. Its width, whether it is Compact and whether it is hidden are each remembered, so showing it again restores it.
 
 The expanded sidebar is in most of the other screenshots on this page; the team canvas one shows a team with its agents nested under it.

@@ -14,6 +14,12 @@ export const FOLDER_RECORDS = [
   "sidebar.projectColors",
 ] as const;
 
+/** Lantern's lists of folders that name the folder itself: the moved folder takes the old one's place in them. */
+export const FOLDER_LISTS = [
+  // The user's order of the sidebar's projects.
+  "sidebar.projectOrder",
+] as const;
+
 /** The folder that was open last, reopened at launch. */
 export const LAST_FOLDER = "settings.lastFolder";
 /** The chats open when Lantern last closed, each with the folder it was in. */
@@ -103,6 +109,11 @@ export function migrateFolderState(store: KeyValueStore, old: string, next: stri
     const saved = readJson(store, key);
     if (!isRecord(saved) || !(old in saved) || next in saved) continue;
     changed[key] = { ...saved, [next]: saved[old] };
+  }
+  for (const key of FOLDER_LISTS) {
+    const saved = readJson(store, key);
+    if (!Array.isArray(saved) || !saved.includes(old) || saved.includes(next)) continue;
+    changed[key] = saved.map((f) => (f === old ? next : f));
   }
   if (readJson(store, LAST_FOLDER) === old) changed[LAST_FOLDER] = next;
   const chats = readJson(store, OPEN_CHATS);

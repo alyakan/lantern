@@ -19,6 +19,8 @@ interface Props {
   colors: Record<string, number>;
   /** The colours with a project new to them given one, to save. */
   onColors: (colors: Record<string, number>) => void;
+  /** The user's order of the projects, as the full sidebar lists them (see orderProjects). */
+  order?: string[];
   /** Its button at the top: back to the full sidebar. */
   onToggle: () => void;
   /** The pointer resting on the column opens the full sidebar over the chat (see usePeek). */
@@ -67,14 +69,14 @@ function Chip({ chip, group, onClick, onTip }: { chip: CompactChip; group: Compa
  * + starts a chat. A team is one square, for its Lead, with the team's combined state. The column scrolls when there are
  * more squares than fit.
  */
-export function SidebarCompact({ open, loadRecent, canNew, onNewChat, onChat, onTeam, colors: savedColors, onColors, onToggle, onPointerEnter, onPointerLeave }: Props) {
+export function SidebarCompact({ open, loadRecent, canNew, onNewChat, onChat, onTeam, colors: savedColors, onColors, order, onToggle, onPointerEnter, onPointerLeave }: Props) {
   const [recent, setRecent] = useState<RecentFolder[]>([]);
   const [tip, setTip] = useState<Tip | null>(null);
   const openKey = Object.keys(open).sort().join("\n");
   useEffect(() => {
     loadRecent().then(setRecent, () => setRecent([]));
   }, [openKey]);
-  const groups = useMemo(() => compactGroups(open, recent), [open, recent]);
+  const groups = useMemo(() => compactGroups(open, recent, order), [open, recent, order]);
   const colors = assignColors(groups.map((g) => g.folder), savedColors);
   useEffect(() => {
     if (colors !== savedColors) onColors(colors);

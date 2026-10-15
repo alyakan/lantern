@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import type { MovedFolder, RecentFolder, SessionSummary } from "../types";
 import { usePersistentState } from "../lib/layout";
 import { ACTIONS, shortcutLabel } from "../lib/actions";
 import { relativeTime } from "../lib/time";
-import { DOT_LABEL, markOf, sidebarProjects, type ProjectOpen, type SidebarChat, type SidebarItem, type SidebarProject } from "../lib/sidebar";
+import { projectFolders, DOT_LABEL, markOf, sidebarProjects, type ProjectOpen, type SidebarChat, type SidebarItem, type SidebarProject } from "../lib/sidebar";
 import { ChevronIcon, FolderOpenIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
 import { MovedNotice } from "./MovedFolders";
 import { moveFocus } from "./useMenuKeys";
+import { moveProject, orderProjects } from "../lib/projectOrder";
+import { useReorder } from "../lib/useReorder";
 
 /** The sidebar's width in pixels: what Show/Hide Sidebar and the drag edge keep between these. */
 export const SIDEBAR_MIN = 200;
@@ -80,6 +82,9 @@ interface Props extends SidebarHandlers {
   onDismissMoved: (old: string) => void;
   /** What it showed last time (see SidebarMemory); without it, it starts empty. */
   memory?: SidebarMemory;
+  /** The user's order of the projects (folder paths, see orderProjects), and saving a new one. */
+  order?: string[];
+  onOrder?: (order: string[]) => void;
 }
 
 /** Closes a popover on a press outside it or Escape. */
@@ -179,7 +184,13 @@ function Item({ item, h }: { item: SidebarItem; h: SidebarHandlers }) {
   );
 }
 
-function ProjectMenu({ project, h, onClose }: { project: SidebarProject; h: SidebarHandlers; onClose: () => void }) {
+/** Moving a project up or down one place (None: it's already at that end). */
+interface Moves {
+  up: (() => void) | null;
+  down: (() => void) | null;
+}
+
+function ProjectMenu({ project, h, moves, onClose }: { project: SidebarProject; h: SidebarHandlers; moves: Moves; onClose: () => void }) {
   const root = useRef<HTMLDivElement>(null);
   useDismiss(true, root, onClose);
   useEffect(() => {
@@ -200,6 +211,14 @@ function ProjectMenu({ project, h, onClose }: { project: SidebarProject; h: Side
       <button role="menuitem" className="menu-row" onClick={pick(() => h.onReveal(project.folder))}>
         <span className="menu-row-title">Reveal in Finder</span>
       </button>
+      <button role="menuitem" className="menu-row" disabled={!moves.up} onClick={pick(() => moves.up?.())}>
+        <span className="menu-row-title">Move up</span>
+        <kbd className="menu-row-key">⌥⌘↑</kbd>
+      </button>
+      <button role="menuitem" className="menu-row" disabled={!moves.down} onClick={pick(() => moves.down?.())}>
+        <span className="menu-row-title">Move down</span>
+        <kbd className="menu-row-key">⌥⌘↓</kbd>
+      </button>
       <button role="menuitem" className="menu-row" title="Only hides it here: the chats stay in Claude Code" onClick={pick(() => h.onRemove(project.folder))}>
         <span className="menu-row-title">Remove from recents</span>
       </button>
@@ -219,14 +238,31 @@ function PastRow({ title, meta, pinned, onClick }: { title: string; meta: string
   );
 }
 
-function Project({ project, expanded, onToggle, current, branch, moved, onRelocate, onDismissMoved, h }: { project: SidebarProject; expanded: boolean; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers }) {
+/** ⌥⌘↑ / ⌥⌘↓ on a project's header move it one place (the keyboard's way to reorder). */
+function moveByKey(e: ReactKeyboardEvent<HTMLElement>, moves: Moves) {
+  if (!e.altKey || !e.metaKey || e.shiftKey || e.ctrlKey) return;
+  const move = e.key === "ArrowUp" ? moves.up : e.key === "ArrowDown" ? moves.down : undefined;
+  if (move === undefined) return;
+  e.preventDefault();
+  move?.();
+}
+
+/** How a project takes part in reordering: its header is the handle, and where it's drawn while one is dragged. */
+interface Reorder {
+  handle: Pick<React.DOMAttributes<HTMLElement>, "onPointerDown" | "onPointerMove" | "onPointerUp">;
+  style: CSSProperties | undefined;
+  lifted: boolean;
+  moves: Moves;
+}
+
+function Project({ project, expanded, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, reorder }: { project: SidebarProject; expanded: boolean; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; reorder: Reorder }) {
   const [menu, setMenu] = useState(false);
   const { past } = project;
   const shown = past ? past.pinned.length + past.recent.length : 0;
   return (
-    <section className={`sb-project${current ? " current" : ""}`} aria-label={project.label}>
-      <div className="sb-project-row">
-        <button className="sb-project-toggle" aria-expanded={expanded} title={project.folder} onClick={onToggle}>
+    <section className={`sb-project${current ? " current" : ""}${reorder.lifted ? " lifted" : ""}`} aria-label={project.label} data-reorder-id={project.folder} style={reorder.style}>
+      <div className="sb-project-row" {...reorder.handle}>
+        <button className="sb-project-toggle" aria-expanded={expanded} title={project.folder} onClick={onToggle} onKeyDown={(e) => moveByKey(e, reorder.moves)}>
           <span className={`sb-chev${expanded ? " open" : ""}`}>
             <ChevronIcon />
           </span>
@@ -239,7 +275,7 @@ function Project({ project, expanded, onToggle, current, branch, moved, onReloca
             </span>
           )}
         </button>
-        <span className="sb-project-actions">
+        <span className="sb-project-actions" data-no-drag>
           <button className="icon" aria-label={`New chat in ${project.label}`} title="New chat here" onClick={() => h.onNewChatIn(project.folder)}>
             <PlusIcon />
           </button>
@@ -247,7 +283,7 @@ function Project({ project, expanded, onToggle, current, branch, moved, onReloca
             ⋯
           </button>
         </span>
-        {menu && <ProjectMenu project={project} h={h} onClose={() => setMenu(false)} />}
+        {menu && <ProjectMenu project={project} h={h} moves={reorder.moves} onClose={() => setMenu(false)} />}
       </div>
       {moved && <MovedNotice moved={moved} label={project.label} onRelocate={onRelocate} onDismiss={onDismissMoved} />}
       {expanded && (
@@ -285,7 +321,7 @@ function Project({ project, expanded, onToggle, current, branch, moved, onReloca
  * only for an expanded project.
  */
 export function Sidebar(props: Props) {
-  const { onToggle, peek, width, onWidth, open, currentFolder, branch, canNew, loadRecent, loadSessions, pinned, titles, hidden, moved, onRelocate, onDismissMoved, memory, ...h } = props;
+  const { onToggle, peek, width, onWidth, open, currentFolder, branch, canNew, loadRecent, loadSessions, pinned, titles, hidden, moved, onRelocate, onDismissMoved, memory, order = [], onOrder, ...h } = props;
   const [recent, setRecent] = useState<RecentFolder[]>(() => memory?.recent ?? []);
   const [past, setPast] = useState<Record<string, SessionSummary[] | undefined>>(() => memory?.past ?? {});
   if (memory) {
@@ -303,7 +339,22 @@ export function Sidebar(props: Props) {
     loadRecent().then(setRecent, () => setRecent([]));
   }, [openKey]);
 
-  const projects = useMemo(() => sidebarProjects({ recent, hidden, open, past, pinned, titles }), [recent, hidden, open, past, pinned, titles]);
+  const projects = useMemo(() => sidebarProjects({ recent, hidden, open, past, pinned, titles, order }), [recent, hidden, open, past, pinned, titles, order]);
+  // A project new to the order is saved at the top, where it shows (only once the recents are read, so the order isn't
+  // started from the open projects alone).
+  const ordered = orderProjects(projectFolders(recent, hidden, open), order).order;
+  const loaded = recent.length > 0;
+  useEffect(() => {
+    if (loaded && ordered !== order) onOrder?.(ordered);
+  }, [loaded, ordered, order]);
+  const listed = projects.map((p) => p.folder);
+  const moveTo = (folder: string, index: number) => onOrder?.(moveProject(ordered, listed, folder, index));
+  const list = useRef<HTMLElement>(null);
+  const reorder = useReorder(listed, list, moveTo);
+  const movesOf = (folder: string, i: number): Moves => ({
+    up: onOrder && i > 0 ? () => moveTo(folder, i - 1) : null,
+    down: onOrder && i < listed.length - 1 ? () => moveTo(folder, i + 1) : null,
+  });
   for (const p of projects) if (p.hasOpen) seenOpen.current.add(p.folder);
   const isExpanded = (p: SidebarProject) => by[p.folder] ?? (p.hasOpen || seenOpen.current.has(p.folder));
 
@@ -360,16 +411,28 @@ export function Sidebar(props: Props) {
   const toggleLabel = peek ? "Keep sidebar open" : "Compact sidebar";
 
   return (
-    <aside className={`sidebar${peek ? " peek" : ""}${dragWidth !== null ? " dragging" : ""}`} aria-label="Projects" style={{ width: dragWidth ?? width }}>
+    <aside className={`sidebar${peek ? " peek" : ""}${dragWidth !== null ? " dragging" : ""}${reorder.drag ? " reordering" : ""}`} aria-label="Projects" style={{ width: dragWidth ?? width }}>
       <div className="sb-head">
         <NewMenu {...newMenu} />
         <button className="icon sb-toggle" aria-label={toggleLabel} title={toggleLabel} onClick={onToggle}>
           <SidebarIcon />
         </button>
       </div>
-      <nav className="sb-list" aria-label="Projects">
-        {projects.map((p) => (
-          <Project key={p.folder} project={p} expanded={isExpanded(p)} onToggle={() => toggle(p)} current={p.folder === currentFolder} branch={branch} moved={movedFor(p.folder)} onRelocate={onRelocate} onDismissMoved={onDismissMoved} h={{ ...h, onNewChatIn: opening(h.onNewChatIn), onNewTeamIn: opening(h.onNewTeamIn) }} />
+      <nav className="sb-list" aria-label="Projects" ref={list} onClickCapture={reorder.onClickCapture}>
+        {projects.map((p, i) => (
+          <Project
+            key={p.folder}
+            project={p}
+            expanded={isExpanded(p)}
+            onToggle={() => toggle(p)}
+            current={p.folder === currentFolder}
+            branch={branch}
+            moved={movedFor(p.folder)}
+            onRelocate={onRelocate}
+            onDismissMoved={onDismissMoved}
+            h={{ ...h, onNewChatIn: opening(h.onNewChatIn), onNewTeamIn: opening(h.onNewTeamIn) }}
+            reorder={{ handle: onOrder ? reorder.handle(p.folder) : {}, style: reorder.styleFor(p.folder), lifted: reorder.lifted === p.folder, moves: movesOf(p.folder, i) }}
+          />
         ))}
         {projects.length === 0 && <div className="sb-note">No projects yet. Open a folder to start.</div>}
       </nav>

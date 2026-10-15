@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Sidebar, SIDEBAR_DEFAULT, SIDEBAR_MAX, sidebarMemory } from "./Sidebar";
 import type { ProjectOpen, SidebarChat } from "../lib/sidebar";
@@ -206,7 +206,7 @@ describe("clicking in the sidebar", () => {
     const { h } = setup();
     fireEvent.click(await screen.findByRole("button", { name: "More for network-monitor" }));
     const menu = screen.getByRole("menu", { name: "network-monitor actions" });
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["New team", "Bring old chats here…", "Reveal in Finder", "Remove from recents"]);
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["New team", "Bring old chats here…", "Reveal in Finder", "Move up⌥⌘↑", "Move down⌥⌘↓", "Remove from recents"]);
     fireEvent.click(within(menu).getByRole("menuitem", { name: "New team" }));
     expect(h.onNewTeamIn).toHaveBeenCalledWith(MONITOR);
     expect(screen.queryByRole("menu", { name: "network-monitor actions" })).toBeNull();
@@ -307,5 +307,103 @@ describe("resizing", () => {
   it("is as wide as it was saved", () => {
     setup({ width: 311 });
     expect(screen.getByRole("complementary", { name: "Projects" })).toHaveStyle({ width: "311px" });
+  });
+});
+
+describe("reordering projects", () => {
+  const ORDER = [LANTERN, MONITOR, IOS];
+  // jsdom has no PointerEvent, so pointer events would carry no coordinates: one on top of MouseEvent, for these tests.
+  const had = window.PointerEvent;
+  beforeAll(() => {
+    window.PointerEvent ??= class extends MouseEvent {
+      pointerId: number;
+      constructor(type: string, init: PointerEventInit = {}) {
+        super(type, init);
+        this.pointerId = init.pointerId ?? 0;
+      }
+    } as unknown as typeof PointerEvent;
+  });
+  afterAll(() => {
+    window.PointerEvent = had;
+  });
+  const header = (name: string) => within(project(name)).getByRole("button", { name: new RegExp(`^${name}`) }).parentElement!;
+
+  /** Lays the projects out by hand (jsdom has none): lantern 200 tall, then the other two 30 each. */
+  function layout() {
+    const heights: Record<string, number> = { lantern: 200, "network-monitor": 30, "lumiform-ios": 30 };
+    let top = 0;
+    for (const region of screen.getAllByRole("region")) {
+      const name = region.getAttribute("aria-label")!;
+      const [t, h] = [top, heights[name]];
+      region.getBoundingClientRect = () => ({ top: t, bottom: t + h, height: h }) as DOMRect;
+      top += h;
+    }
+  }
+
+  it("lists projects in the saved order, not with the open one first, and saves a new one at the top", async () => {
+    const onOrder = vi.fn();
+    setup({ order: [MONITOR, LANTERN], onOrder });
+    await waitFor(() => expect(screen.getAllByRole("region")).toHaveLength(3));
+    expect(screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"))).toEqual(["lumiform-ios", "network-monitor", "lantern"]);
+    expect(onOrder).toHaveBeenCalledWith([IOS, MONITOR, LANTERN]);
+  });
+
+  it("moves a project up or down from its ⋯ menu, which has no Move up at the top", async () => {
+    const onOrder = vi.fn();
+    setup({ order: ORDER, onOrder });
+    fireEvent.click(await screen.findByRole("button", { name: "More for lantern" }));
+    expect(screen.getByRole("menuitem", { name: /Move up/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("menuitem", { name: /Move down/ }));
+    expect(onOrder).toHaveBeenLastCalledWith([MONITOR, LANTERN, IOS]);
+  });
+
+  it("moves the focused project with ⌥⌘↑ and ⌥⌘↓", async () => {
+    const onOrder = vi.fn();
+    setup({ order: ORDER, onOrder });
+    const ios = await within(await screen.findByRole("region", { name: "lumiform-ios" })).findByRole("button", { name: /^lumiform-ios/ });
+    fireEvent.keyDown(ios, { key: "ArrowUp", altKey: true, metaKey: true });
+    expect(onOrder).toHaveBeenLastCalledWith([LANTERN, IOS, MONITOR]);
+    fireEvent.keyDown(ios, { key: "ArrowUp", metaKey: true });
+    expect(onOrder).toHaveBeenCalledTimes(1);
+  });
+
+  it("drags a project by its header to a new place, settling it there before saving, and the release isn't a click", async () => {
+    const onOrder = vi.fn();
+    setup({ order: ORDER, onOrder });
+    await waitFor(() => expect(screen.getAllByRole("region")).toHaveLength(3));
+    layout();
+    const row = header("network-monitor");
+    fireEvent.pointerDown(row, { pointerId: 1, clientY: 210, button: 0 });
+    fireEvent.pointerMove(row, { pointerId: 1, clientY: 200, buttons: 1 });
+    // It lifts, and lantern (which it is now over) makes room by moving down.
+    expect(project("network-monitor")).toHaveClass("lifted");
+    fireEvent.pointerMove(window, { pointerId: 1, clientY: 60, buttons: 1 });
+    expect(project("network-monitor").style.transform).toBe("translateY(-150px)");
+    expect(project("lantern").style.transform).toBe("translateY(30px)");
+    expect(project("lumiform-ios").style.transform).toBe("translateY(0px)");
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    fireEvent.click(within(row).getByRole("button", { name: /^network-monitor/ }));
+    expect(within(project("network-monitor")).getByRole("button", { name: /^network-monitor/ })).toHaveAttribute("aria-expanded", "false");
+    expect(onOrder).not.toHaveBeenCalled();
+    await waitFor(() => expect(onOrder).toHaveBeenCalledWith([MONITOR, LANTERN, IOS]));
+    expect(project("network-monitor")).not.toHaveClass("lifted");
+  });
+
+  it("treats a press that barely moves as a click, and puts a dragged project back on Escape", async () => {
+    const onOrder = vi.fn();
+    setup({ order: ORDER, onOrder });
+    await waitFor(() => expect(screen.getAllByRole("region")).toHaveLength(3));
+    layout();
+    const row = header("network-monitor");
+    fireEvent.pointerDown(row, { pointerId: 1, clientY: 210, button: 0 });
+    fireEvent.pointerMove(row, { pointerId: 1, clientY: 212, buttons: 1 });
+    expect(project("network-monitor")).not.toHaveClass("lifted");
+    fireEvent.pointerUp(row, { pointerId: 1 });
+    fireEvent.pointerDown(row, { pointerId: 1, clientY: 210, button: 0 });
+    fireEvent.pointerMove(row, { pointerId: 1, clientY: 150, buttons: 1 });
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(project("network-monitor")).not.toHaveClass("lifted"));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(onOrder).not.toHaveBeenCalled();
   });
 });
