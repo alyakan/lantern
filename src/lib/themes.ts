@@ -1,11 +1,11 @@
 /**
- * The themes: what Settings offers, and the custom theme's colours. Light, Dark, Terminal, Solarized, Nord and Paper are
+ * The themes: what Settings offers, and the custom theme's colours. Light, Dark, Terminal, Fallout, Solarized, Nord and Paper are
  * token sets in styles.css (data-theme on <html>); "custom" is computed here from the few colours the user picks and set
  * on <html> as inline custom properties (see applyTheme).
  */
 import { alpha, contrast, ensureContrast, isDark, mix, normalizeHex, readableOn } from "./color";
 
-export type ThemeId = "system" | "light" | "dark" | "terminal" | "solarized" | "nord" | "paper" | "custom";
+export type ThemeId = "system" | "light" | "dark" | "terminal" | "fallout" | "solarized" | "nord" | "paper" | "custom";
 export type Scheme = "light" | "dark";
 
 /** The six colours a custom theme is made from; every other colour is derived from them. */
@@ -46,7 +46,8 @@ export const THEMES: ThemeInfo[] = [
   { id: "system", label: "Follow macOS", scheme: null, picks: null },
   { id: "light", label: "Light", scheme: "light", picks: LIGHT_PICKS },
   { id: "dark", label: "Dark", scheme: "dark", picks: DARK_PICKS },
-  { id: "terminal", label: "Terminal", scheme: "dark", picks: pick("#050a06", "#0a130c", "#5df08a", "#43c46c", "#8dffae", "#14301c") },
+  { id: "terminal", label: "Terminal", scheme: "dark", picks: pick("#0d1117", "#11161d", "#d3d8e0", "#a9b1bb", "#58a6ff", "#21262d") },
+  { id: "fallout", label: "Fallout", scheme: "dark", picks: pick("#020a04", "#051009", "#2adb5f", "#229e4e", "#c4ffd8", "#11401f") },
   { id: "solarized", label: "Solarized Dark", scheme: "dark", picks: pick("#002b36", "#073642", "#a2b1b1", "#93a1a1", "#2aa198", "#0f3f4c") },
   { id: "nord", label: "Nord", scheme: "dark", picks: pick("#2e3440", "#3b4252", "#eceff4", "#d8dee9", "#88c0d0", "#3f4759") },
   { id: "paper", label: "Paper", scheme: "light", picks: pick("#fbf6ec", "#f3ecdc", "#2b2620", "#52483d", "#6b3f1d", "#e4dac6") },
@@ -76,12 +77,13 @@ export function readCustom(value: unknown): CustomTheme {
   };
 }
 
-/** The custom editor's starting point: the theme that's on now, as six colours (and Terminal's monospace, square look). */
+/** The custom editor's starting point: the theme that's on now, as six colours (and Terminal's and Fallout's monospace, square look). */
 export function startingPoint(theme: ThemeId, macDark: boolean, saved: CustomTheme): CustomTheme {
   if (theme === "custom") return saved;
   const info = THEMES.find((t) => t.id === theme);
   const picks = info?.picks ?? (macDark ? DARK_PICKS : LIGHT_PICKS);
-  return { ...picks, mono: theme === "terminal", square: theme === "terminal" };
+  const terminal = theme === "terminal" || theme === "fallout";
+  return { ...picks, mono: terminal, square: terminal };
 }
 
 /** Whether a theme is dark; "system" asks macOS (`macDark`), and "custom" its own background. */
@@ -115,6 +117,10 @@ export function deriveTokens(c: CustomTheme): Record<string, string> {
   // Readable on both surfaces text sits on: moved toward the text colour, which reads on both, so one fix doesn't undo the other.
   const reads = (colour: string, min: number) => ensureContrast(ensureContrast(colour, c.panel, min, c.text), c.bg, min, c.text);
   const muted = mix(c.text2, c.bg, 0.4);
+  // Bold and headings read brighter than the text; the accent (links, code, quotes) is moved until it reads on every surface it sits on.
+  const strong = ensureContrast(mix(c.text, dark ? "#ffffff" : "#000000", 0.45), c.panel, 4.5, c.text);
+  const chip = dark ? mix(c.panel, "#000000", 0.28) : mix(c.panel, c.text, 0.1);
+  const accentText = ensureContrast(reads(c.accent, 4.5), chip, 4.5, c.text);
   const t: Record<string, string> = {
     bg: c.bg,
     pane: c.bg,
@@ -140,6 +146,15 @@ export function deriveTokens(c: CustomTheme): Record<string, string> {
     "accent-text": readableOn(c.accent),
     "info-bg": mix(c.bg, c.text, 0.04),
     "code-bg": dark ? mix(c.bg, "#000000", 0.35) : mix(c.bg, c.text, 0.07),
+    "md-strong": strong,
+    "md-strong-weight": "700",
+    "md-heading": strong,
+    "md-link": reads(c.accent, 4.5),
+    "md-link-line": reads(c.accent, 4.5),
+    "md-code-bg": chip,
+    "md-code-text": accentText,
+    "md-quote-bar": mix(c.line, c.accent, 0.7),
+    "md-marker": reads(c.accent, 3),
     "pc-tint": dark ? "24%" : "13%",
     "pc-ink": dark ? "45%" : "78%",
     shadow: dark ? "0 12px 32px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.35)" : "0 10px 30px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06)",

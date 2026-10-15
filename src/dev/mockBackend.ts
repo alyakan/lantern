@@ -581,6 +581,36 @@ async function playWorkerReply(slot: string) {
   await send({ kind: "turn_done", is_error: false, result: "Understood, I'll fold that in.", cost_usd: 0.01, duration_ms: 1500, auth_hint: false, denied: 0, context_window: 200_000 });
 }
 
+/** `?markup`: the turn's last message uses every kind of markdown, for checking a theme's text styles. */
+const MARKUP_REPLY = [
+  "## What changed",
+  "",
+  "`fetchJson` now **retries transient failures** with *exponential backoff*, as the [retry policy](https://example.com/retries) asks.",
+  "",
+  "> Retries are limited to 429 and 5xx gateway errors, so a 404 still fails fast.",
+  "",
+  "### The loop",
+  "",
+  "```ts",
+  "export async function fetchJson(url: string, attempts = 3) {",
+  "  for (let i = 1; ; i++) {",
+  "    const res = await fetch(url); // 429, 502, 503 or 504 retries",
+  "    if (res.ok) return res.json();",
+  "  }",
+  "}",
+  "```",
+  "",
+  "- Delay doubles each time: `250 * 2 ** i` ms",
+  "- Gives up after **3 attempts**",
+  "- Run `npm test -- retry` to check it",
+  "",
+  "| Status | Retried | Why |",
+  "| --- | --- | --- |",
+  "| 429 | yes | **rate limited** |",
+  "| 404 | no | `not found` stays an error |",
+  "",
+].join("\n");
+
 async function playTurn(slot: string) {
   const send = sendTo(slot);
   await send({ kind: "session_started", session_id: `mock-${slot}`, model: "claude-opus-5-5", cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
@@ -668,7 +698,8 @@ async function playTurn(slot: string) {
       },
     });
   }
-  await streamText(send, "m2:0", allowed ? "Done. `fetchJson` now retries 429 and 5xx gateway errors up to 3 times with backoff, and the retry tests pass." : "Done. I didn't run the tests since you denied it.");
+  const markup = new URLSearchParams(location.search).has("markup");
+  await streamText(send, "m2:0", markup ? MARKUP_REPLY : allowed ? "Done. `fetchJson` now retries 429 and 5xx gateway errors up to 3 times with backoff, and the retry tests pass." : "Done. I didn't run the tests since you denied it.");
   await send({ kind: "context_used", tokens: 61_480 });
   // The dev server and a watcher keep running after the turn, like run_in_background commands.
   const dev = { id: "bdev1", task_type: "local_bash", description: "npm run dev -- --port 5173" };
