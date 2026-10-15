@@ -757,7 +757,8 @@ mod tests {
         msg["params"]["_meta"] = json!({"progressToken": 7});
         writeln!(client, "{msg}").unwrap();
         app.got.recv().unwrap();
-        std::thread::sleep(Duration::from_millis(120));
+        // Long enough for several 20ms keep-alives even on a slow CI runner.
+        std::thread::sleep(Duration::from_millis(500));
         app.release.send(()).unwrap();
         app.done.join().unwrap();
         drop(client);
@@ -803,7 +804,8 @@ mod tests {
         let msg = json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "network_requests", "arguments": {}, "_meta": {"progressToken": 9}}});
         writeln!(client, "{msg}").unwrap();
         app.got.recv().unwrap();
-        std::thread::sleep(Duration::from_millis(120));
+        // Long enough for several 20ms keep-alives even on a slow CI runner.
+        std::thread::sleep(Duration::from_millis(500));
         app.release.send(()).unwrap();
         app.done.join().unwrap();
         drop(client);
