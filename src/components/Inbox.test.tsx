@@ -78,16 +78,39 @@ describe("Inbox", () => {
     act(() => {
       vi.advanceTimersByTime(400);
     });
-    expect(screen.getByRole("button", { name: "Allow Chat s1" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Allow Chat s1" })).toHaveAttribute("aria-disabled", "false");
     rerender(<Inbox items={[{ ...first, requestId: "r2", detail: "rm -rf build" }]} onGo={vi.fn()} onDecide={onDecide} />);
     const next = screen.getByRole("button", { name: "Allow Chat s1" });
-    expect(next).toBeDisabled();
+    expect(next).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(next);
     expect(onDecide).not.toHaveBeenCalled();
     act(() => {
       vi.advanceTimersByTime(400);
     });
-    expect(next).toBeEnabled();
+    expect(next).toHaveAttribute("aria-disabled", "false");
+  });
+
+  it("keeps Allow dead on the row that moves up when the one above it is answered, so a double click can't approve it", () => {
+    resetActionsForTest();
+    const onDecide = vi.fn();
+    const one = item({ slot: "s1", requestId: "r1", detail: "npm test" });
+    const two = item({ slot: "s2", requestId: "r2", detail: "rm -rf build" });
+    const { rerender } = render(<Inbox items={[one, two]} onGo={vi.fn()} onDecide={onDecide} />);
+    fireEvent.click(screen.getByRole("button", { name: /What needs you/ }));
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Allow Chat s1" }));
+    expect(onDecide).toHaveBeenCalledTimes(1);
+    // The first row is answered and gone: the second takes its place under the pointer.
+    rerender(<Inbox items={[two]} onGo={vi.fn()} onDecide={onDecide} />);
+    fireEvent.click(screen.getByRole("button", { name: "Allow Chat s2" }));
+    expect(onDecide).toHaveBeenCalledTimes(1);
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Allow Chat s2" }));
+    expect(onDecide).toHaveBeenCalledTimes(2);
   });
 
   it("shows the whole command where Allow is offered, and leaves Deny and Go where it isn't", () => {

@@ -96,7 +96,7 @@ describe("the needs-you inbox", () => {
     expect(row).toHaveTextContent("Wants to use Bash");
     expect(within(row).getByText("npm test -- retry")).toBeInTheDocument();
     // Allow stays dead for a moment after a row appears.
-    await waitFor(() => expect(within(row).getByRole("button", { name: /^Allow / })).toBeEnabled());
+    await waitFor(() => expect(within(row).getByRole("button", { name: /^Allow / })).toHaveAttribute("aria-disabled", "false"), { timeout: 10_000 });
     fireEvent.click(within(row).getByRole("button", { name: /^Allow / }));
     await waitFor(() => expect(calledWith(calls, "respond_permission")).toHaveLength(1), { timeout: 10_000 });
     await waitFor(() => expect(within(dialog).getByText("Nothing is waiting for you.")).toBeInTheDocument(), { timeout: 10_000 });

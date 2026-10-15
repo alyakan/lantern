@@ -21,7 +21,11 @@ const ARM_MS = 400;
 
 const label = (n: number) => (n > 0 ? `What needs you, ${n} waiting` : "What needs you");
 
-/** Rows are keyed by their request, so a new request is a new button, and it can't be pressed until it has been on screen a moment. */
+/**
+ * Rows are keyed by their request, and the button by its place in the list too: a new request, or a row that moved up
+ * under the pointer when the one above it was answered, is a new button, and it can't be pressed until it has been on
+ * screen a moment. (aria-disabled rather than disabled, so a button that is only waiting doesn't flash grey.)
+ */
 function AllowButton({ title, onAllow }: { title: string; onAllow: () => void }) {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
@@ -29,7 +33,7 @@ function AllowButton({ title, onAllow }: { title: string; onAllow: () => void })
     return () => clearTimeout(timer);
   }, []);
   return (
-    <button className="primary" aria-label={`Allow ${title}`} disabled={!armed} onClick={onAllow}>
+    <button className="primary" aria-label={`Allow ${title}`} aria-disabled={!armed} onClick={() => armed && onAllow()}>
       Allow
     </button>
   );
@@ -103,7 +107,7 @@ export function Inbox({ items, onGo, onDecide }: InboxProps) {
             <div className="menu-empty">Nothing is waiting for you.</div>
           ) : (
             <ul className="menu-list">
-              {items.map((it) => (
+              {items.map((it, at) => (
                 <li key={`${it.key}:${it.requestId ?? ""}`} className="inbox-row">
                   <span className={`node-dot ${it.needsYou ? "waiting" : "unread"}`} aria-hidden />
                   <span className="inbox-text">
@@ -122,7 +126,7 @@ export function Inbox({ items, onGo, onDecide }: InboxProps) {
                     {it.detail !== null && <span className="inbox-full">{it.detail}</span>}
                   </span>
                   <span className="inbox-actions">
-                    {it.requestId && it.canAllow && <AllowButton title={it.title} onAllow={() => onDecide(it, true)} />}
+                    {it.requestId && it.canAllow && <AllowButton key={at} title={it.title} onAllow={() => onDecide(it, true)} />}
                     {it.requestId && (
                       <button aria-label={`Deny ${it.title}`} onClick={() => onDecide(it, false)}>
                         Deny
