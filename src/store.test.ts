@@ -353,6 +353,16 @@ describe("reducer", () => {
     expect(reducer({ ...running, sessionId: "s" }, { type: "folder_opened", folder: "/q" }).sessionId).toBeNull();
   });
 
+  it("keeps what review_target set the Changes pane to, until the conversation starts over", () => {
+    let s = ev(running, { kind: "review_target", pr: 512, base: null });
+    expect(s.reviewTarget).toEqual({ pr: 512, base: null });
+    s = ev(s, { kind: "review_target", pr: null, base: "feat/core" });
+    expect(s.reviewTarget).toEqual({ pr: null, base: "feat/core" });
+    expect(s.items).toEqual([]);
+    expect(ev(s, { kind: "conversation_reset" }).reviewTarget).toBeNull();
+    expect(reducer(s, { type: "folder_opened", folder: "/q" }).reviewTarget).toBeNull();
+  });
+
   it("unknown events and parse errors go to debug, not the chat", () => {
     let s = ev(running, { kind: "unknown", raw: { type: "new" } });
     s = ev(s, { kind: "parse_error", line: "garbage" });

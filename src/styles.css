@@ -1526,6 +1526,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
   background-image: radial-gradient(circle, color-mix(in srgb, var(--text) 16%, transparent) 1px, transparent 1.3px);
   background-size: calc(28px * var(--zoom, 1)) calc(28px * var(--zoom, 1));
   background-position: var(--vx, 0) var(--vy, 0); }
+.split-left .canvas { margin: 0; }
 .canvas.panning { cursor: grabbing; }
 .canvas-world { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; will-change: transform; }
 .canvas-world.animating { transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
@@ -1624,6 +1625,8 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .merge-files { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; font: calc(11.5px * var(--font-scale)) var(--mono); }
 .merge-files li { display: flex; gap: 8px; }
 .merge-files li span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.merge-files li .merge-file { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: none; background: none; padding: 0; text-align: left; color: inherit; font: inherit; }
+.merge-files li .merge-file:hover { text-decoration: underline; text-underline-offset: 2px; }
 .merge-more { color: var(--muted-text); font-family: var(--ui); }
 .merge-summary { margin: 0; line-height: 1.45; color: var(--text-2); }
 .merge-from { color: var(--muted-text); }
@@ -1631,6 +1634,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .merge-problem { margin: 0; color: var(--del); font-size: calc(12px * var(--font-scale)); line-height: 1.4; }
 .merge-actions { display: flex; gap: 8px; }
 .merge-actions button { height: 28px; padding: 0 13px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--field); color: var(--text); font-size: calc(12.5px * var(--font-scale)); }
+.merge-actions .merge-review { margin-right: auto; }
 .merge-actions .merge-approve { border-color: transparent; background: var(--accent); color: var(--accent-text); font-weight: 600; }
 .merge-actions button:disabled { opacity: 0.55; }
 

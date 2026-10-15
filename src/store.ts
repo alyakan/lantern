@@ -139,6 +139,8 @@ export interface State {
   autoStreak: number;
   /** The merges the main agent asked for, oldest first. */
   proposals: MergeProposal[];
+  /** What Claude last set the Changes pane to compare with review_target, as Lantern was told live (a reopened chat has none until it calls it again; see reviewTargetOf). */
+  reviewTarget: { pr: number | null; base: string | null } | null;
   /**
    * What this chat has cost in dollars: `costBase` from claude processes that have since ended (a restart starts the
    * count again), plus `costSeen`, the running total the current one last reported (claude's total_cost_usd counts the
@@ -231,6 +233,7 @@ export const initialState: State = {
   wakes: [],
   autoStreak: 0,
   proposals: [],
+  reviewTarget: null,
   costBase: 0,
   costSeen: 0,
   tokenBase: 0,
@@ -371,7 +374,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], costBase: 0, costSeen: 0, tokenBase: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, flavourStart: null, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -497,7 +500,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       return { ...state, mcpTools: ev.tools };
     // /clear: a new conversation in the same folder. Changed files stay listed; the edits are still on disk.
     case "conversation_reset":
-      return { ...state, items: [], sessionId: null, contextUsed: null, thinking: false, cleared: true };
+      return { ...state, items: [], sessionId: null, contextUsed: null, thinking: false, cleared: true, reviewTarget: null };
     case "turn_done": {
       const banner: Banner | null = ev.auth_hint
         ? { kind: "auth", text: "Claude isn't logged in. Run `claude /login` in a terminal, then send your message again.", action: null }
@@ -571,6 +574,8 @@ function applyEvent(state: State, ev: UiEvent): State {
     // The main agent's mode was lowered, so this worker's was too (its claude restarted on the same conversation).
     case "agent_mode":
       return { ...state, mode: ev.mode };
+    case "review_target":
+      return { ...state, reviewTarget: { pr: ev.pr, base: ev.base } };
     case "merge_proposed": {
       const proposal: MergeProposal = { worker: ev.worker, name: ev.name, branch: ev.branch, into: ev.into, summary: ev.summary, commits: ev.commits, files: ev.files, uncommitted: ev.uncommitted, loose: ev.loose, status: "open", problem: null, attempts: 0 };
       return { ...state, proposals: [...state.proposals.filter((p) => p.worker !== ev.worker), proposal] };

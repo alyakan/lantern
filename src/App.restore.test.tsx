@@ -114,6 +114,20 @@ describe("restoring a team at launch", () => {
     expect(await screen.findByText("login-form · Ask")).toBeInTheDocument();
   });
 
+  it("keeps the side panel beside the canvas, shut until the user opens it, and remembers that", async () => {
+    await launch();
+    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Show the canvas" }));
+    expect(await screen.findByText("login-form · Ask")).toBeInTheDocument();
+    // The panel is there beside the canvas (its Changes tab is in the page), shut.
+    expect(screen.getByRole("tab", { name: /^Changes/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show changes" }));
+    expect(await screen.findByRole("button", { name: "Hide changes" })).toBeInTheDocument();
+    // Still the canvas, now with the panel open beside it; and the choice is kept for the next time.
+    expect(screen.getByText("login-form · Ask")).toBeInTheDocument();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("review.canvasPanel") ?? "false")).toBe(true));
+  });
+
   it("keeps a worker the user hid hidden across a restart", async () => {
     const hiddenWorker: SavedChat = { ...team[0], orchestra: { ...(team[0].orchestra as Extract<NonNullable<SavedChat["orchestra"]>, { role: "worker" }>), hidden: true } };
     localStorage.setItem("session.openChats", JSON.stringify([hiddenWorker, team[1]]));

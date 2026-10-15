@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } fro
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RevertOutcome } from "./api";
 import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
-import { guidesByFlavour, pageNote, withPageNote, type Guides } from "./lib/pageNote";
+import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
 import { summarizeRequest } from "./lib/network";
 import { StepsIntro } from "./components/StepsIntro";
@@ -183,12 +183,19 @@ export default function App() {
   // Whether the right pane is hidden, per project like the mode. The old app-wide setting is the default.
   const [collapsedDefault, setCollapsedDefault] = usePersistentState("review.collapsed", false);
   const [collapsedBy, setCollapsedBy] = usePersistentState<Record<string, boolean>>("review.collapsedByFolder", {});
-  const reviewCollapsed = (state.folder ? collapsedBy[state.folder] : undefined) ?? collapsedDefault;
-  const setReviewCollapsed = (collapsed: boolean) => (state.folder ? setCollapsedBy({ ...collapsedBy, [state.folder]: collapsed }) : setCollapsedDefault(collapsed));
+  // On the canvas the panel is one setting for the whole team: which agent's chat is on screen there changes as agents are
+  // clicked, and each has a folder of its own.
+  const showCanvas = view === "canvas" && teamMain(chats, active) !== null;
+  const [canvasPanel, setCanvasPanel] = usePersistentState("review.canvasPanel", false);
+  const reviewCollapsed = showCanvas ? !canvasPanel : ((state.folder ? collapsedBy[state.folder] : undefined) ?? collapsedDefault);
+  const setReviewCollapsed = (collapsed: boolean) => (showCanvas ? setCanvasPanel(!collapsed) : state.folder ? setCollapsedBy({ ...collapsedBy, [state.folder]: collapsed }) : setCollapsedDefault(collapsed));
   const [splitRatio, setSplitRatio] = usePersistentState("review.ratio", 0.5);
   // The Changes pane's filter: everything this chat changed, or only what the last turn changed.
   const [changeScope, setChangeScope] = usePersistentState<ChangeScope>("review.scope", "session");
   const [turnFiles, setTurnFiles] = useState<ChangedFile[]>([]);
+  // The agent whose branch a merge card asked to see in Changes, and the base to compare it with (null: Lantern finds it);
+  // `key` brings the Changes tab up each time.
+  const [branchPeek, setBranchPeek] = useState<{ slot: string; base: string | null; key: number } | null>(null);
   // Step-by-step mode shows the conversation as pages; the page on screen picks the turn whose changes the Changes pane
   // shows.
   const [pageRange, setPageRange] = useState<{ from: number; to: number } | null>(null);
@@ -681,18 +688,23 @@ export default function App() {
   // A flavour picked since the chat's last message goes with this one, in a note telling Claude.
   // `draft`: the box's text as sent, with its paste placeholders (kept on the message so Edit can bring them back).
   // `auto`: sent by Lantern from agents' notes, not typed by the user.
+  const mapNoted = useRef<Record<string, string>>({});
   const sendIn = (slot: string, text: string, draft?: string, auto = false) => {
     const pick = chats.slots[slot]?.flavourPick ?? null;
     const chat = chats.slots[slot];
     // Claude's last reply looked like a page Lantern couldn't read: it hears so with this message, and the headings.
     const unread = chat && chat.mode === "steps" && !pick ? pageNote(chat.items, chatFlavour(chat), guides) : null;
+    // The latest Architecture Overview's map doesn't read, so the Map tab can't draw it: said once for each Overview.
+    const map = chat && chat.mode === "steps" ? architectureMap(pagesOf(chat.items)) : null;
+    const broken = map?.kind === "broken" && mapNoted.current[slot] !== map.page ? mapNote(map) : null;
+    if (map?.kind === "broken" && broken) mapNoted.current[slot] = map.page;
     to(slot)({ type: "user_sent", text, ...(auto ? { auto } : {}), ...(pick ? { switchedTo: pick } : {}), ...(draft ? { draft } : {}) });
     // Commands run since the last message go first, so Claude sees what they printed; skills named mid-message get
     // a note so Claude uses them.
     const items = chats.slots[slot]?.items ?? [];
     const noted = withSkillNote(text, skillNames(slot));
     // Files reverted since the last message: Claude is told, so it doesn't act on what it last wrote.
-    const reverted = withRevertNote(withPageNote(unread, pick ? withFlavourNote(pick, noted, guides[pick]?.text) : noted), chats.slots[slot]?.revertNotes ?? []);
+    const reverted = withRevertNote(withPageNote([unread, broken].filter(Boolean).join("\n\n") || null, pick ? withFlavourNote(pick, noted, guides[pick]?.text) : noted), chats.slots[slot]?.revertNotes ?? []);
     // A chat opened from a place the folder moved from: Claude is told once that the paths in earlier messages are old.
     const moved = withMovedNote(reverted, chats.slots[slot]?.movedFrom ?? null, chats.slots[slot]?.folder ?? null);
     api.sendMessage(slot, withShellContext(items, moved)).then(
@@ -893,14 +905,16 @@ export default function App() {
   // "PR #N" while a pull request is reviewed: its files against its base. Picked when the review names its PR.
   // Reviewing with no PR named (a local branch): "Branch", its commits since it left its base. What Claude set with
   // mcp__lantern__review_target comes first, in any flavour; without it, the review's own text says.
-  const reviewTarget = useMemo(() => reviewTargetOf(state.items), [state.items]);
-  const reviewing = (flavour === "review" || reviewTarget !== null) && state.items.length > 0;
-  const reviewPr = !reviewing ? null : reviewTarget ? reviewTarget.pr : prNumberOf(state.items);
+  const reviewTarget = useMemo(() => state.reviewTarget ?? reviewTargetOf(state.items), [state.reviewTarget, state.items]);
+  // A merge card's "Review diff": this agent's branch against its base, whatever the chat is about.
+  const peek = branchPeek?.slot === active ? branchPeek : null;
+  const reviewing = ((flavour === "review" || reviewTarget !== null) && state.items.length > 0) || peek !== null;
+  const reviewPr = peek || !reviewing ? null : reviewTarget ? reviewTarget.pr : prNumberOf(state.items);
   const reviewBranch = reviewing && reviewPr === null;
   const hints = reviewing ? reviewHints(state.items, state.folder) : [];
   const hintKey = hints.join("\n");
   // A local branch stacked on another: the base the review's Frame names (null: the backend works it out).
-  const reviewBase = !reviewing ? null : reviewTarget ? reviewTarget.base : baseBranchOf(state.items);
+  const reviewBase = !reviewing ? null : peek ? peek.base : reviewTarget ? reviewTarget.base : baseBranchOf(state.items);
   const scope: ChangeScope = (changeScope === "pr" && reviewPr === null) || (changeScope === "branch" && !reviewBranch) ? "session" : changeScope;
   const prPicked = useRef<string | null>(null);
   useEffect(() => {
@@ -1029,7 +1043,22 @@ export default function App() {
     },
     declineMerge: (worker: string) => {
       const main = mergeOwner(chats, worker);
-      api.declineMerge(worker).catch((e) => main && to(main)({ type: "ui_event", event: { kind: "merge_resolved", worker, outcome: "failed", detail: errText(e) } }));
+      return api.declineMerge(worker).then(
+        () => {},
+        (e) => {
+          if (main) to(main)({ type: "ui_event", event: { kind: "merge_resolved", worker, outcome: "failed", detail: errText(e) } });
+        },
+      );
+    },
+    // The worker's chat is the one on screen (its folder is the branch's worktree), in the panel's Changes on the branch since it
+    // left its base, at the file when one is named.
+    reviewMerge: (worker: string, file?: string) => {
+      if (!chats.slots[worker]?.folder) return;
+      focusAgent(worker);
+      setBranchPeek({ slot: worker, base: chats.agents[worker]?.base ?? null, key: Date.now() });
+      setChangeScope("branch");
+      setReviewFile(file ?? null);
+      setReviewCollapsed(false);
     },
     removeWorktree: (worker: string) => api.discardWorktree(worker, false).catch((e) => Promise.reject(errText(e))),
     closeCheck: (worker: string) => api.closeWorkerCheck(worker).catch((e) => Promise.reject(errText(e))),
@@ -1067,6 +1096,7 @@ export default function App() {
       restart: (slot) => doingRef.current.restart(slot),
       approveMerge: (worker) => doingRef.current.approveMerge(worker),
       declineMerge: (worker) => doingRef.current.declineMerge(worker),
+      reviewMerge: (worker, file) => doingRef.current.reviewMerge(worker, file),
       removeWorktree: (worker) => doingRef.current.removeWorktree(worker),
       spawn: (main, worker) => doingRef.current.spawn(main, worker),
       closeCheck: (worker) => doingRef.current.closeCheck(worker),
@@ -1188,7 +1218,6 @@ export default function App() {
   const mains = Object.values(chats.slots).filter((s) => s.orchestrator).length;
   const nodes = team ? teamNodes(orchestraNodes(chats, (_slot, s) => (mains > 1 && s.folder ? `Main agent · ${basename(s.folder)}` : "Main agent")), team) : [];
   const inOrchestra = team !== null;
-  const showCanvas = view === "canvas" && inOrchestra;
   const attention = needingYou(nodes, chats.slots);
   useAction("toggle-canvas", () => setView((v) => (v === "canvas" ? "chat" : "canvas")), inOrchestra);
 
@@ -1474,20 +1503,20 @@ export default function App() {
         />
         <Hud event={hud} onOpenChat={switchTo} />
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
-        {showCanvas ? (
-          <ChatStoreContext.Provider value={chatStore}>
-            <NodeActionsContext.Provider value={nodeActions}>
-              <ErrorBoundary name="canvas">
-                <Canvas nodes={nodes} layout={canvasLayout.current} activeSlot={active} attention={attention} onFocus={canvasFocus} onOpen={canvasOpen} />
-              </ErrorBoundary>
-            </NodeActionsContext.Provider>
-          </ChatStoreContext.Provider>
-        ) : (
         <SplitPane
           ratio={splitRatio}
           collapsed={reviewCollapsed}
           onRatio={setSplitRatio}
           left={
+            showCanvas ? (
+              <ChatStoreContext.Provider value={chatStore}>
+                <NodeActionsContext.Provider value={nodeActions}>
+                  <ErrorBoundary name="canvas">
+                    <Canvas nodes={nodes} layout={canvasLayout.current} activeSlot={active} attention={attention} onFocus={canvasFocus} onOpen={canvasOpen} />
+                  </ErrorBoundary>
+                </NodeActionsContext.Provider>
+              </ChatStoreContext.Provider>
+            ) : (
             <section className="chat-pane">
               {hero ? (
                 <div className="hero-wrap">
@@ -1525,6 +1554,7 @@ export default function App() {
                 </>
               )}
             </section>
+            )
           }
           right={
             <ErrorBoundary name="review pane">
@@ -1535,6 +1565,7 @@ export default function App() {
                 folder={state.folder}
                 ready={state.status !== "starting"}
                 files={shownFiles}
+                changesKey={peek?.key}
                 scope={scope}
                 onScope={setChangeScope}
                 scopeCounts={{ turn: turnFiles.length, session: state.changedFiles.length, git: gitFiles?.error ? null : (gitFiles?.files.length ?? null), pr: shownPr?.error ? null : (shownPr?.files.length ?? null), branch: shownBranch?.error ? null : (shownBranch?.files.length ?? null) }}
@@ -1570,7 +1601,6 @@ export default function App() {
             </ErrorBoundary>
           }
         />
-        )}
         <SettingsView
           open={settingsAt}
           onClose={() => setSettingsAt(null)}

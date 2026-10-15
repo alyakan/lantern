@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChatItem } from "../store";
-import { guidesByFlavour, pageNote, readPageNote, withPageNote } from "./pageNote";
+import { guidesByFlavour, mapNote, pageNote, readPageNote, withPageNote } from "./pageNote";
+import { architectureMap } from "./architecture";
 import { flavourNote, readFlavourNote, withFlavourNote } from "./flavour";
 import { pagesOf, pageLabel, parseHeading } from "./steps";
 
@@ -61,6 +62,27 @@ describe("pageNote", () => {
     const note = pageNote([u("u1", "Next"), a("a1", "## Review · Odd [thing]")], "review", guides);
     expect(readPageNote(withPageNote(note, "Next"))).toBe("Next");
     expect(readPageNote("Next")).toBe("Next");
+  });
+});
+
+describe("mapNote", () => {
+  const overview = (block: string) => architectureMap(pagesOf([u("u1", "map it"), a("a1", `# Overview — x\n\n\`\`\`architecture\n${block}\n\`\`\``)]));
+
+  it("tells Claude why the Overview's block can't be drawn, and to rewrite it from steps_guide's schema", () => {
+    const note = mapNote(overview("{nodes"))!;
+    expect(note).toBe("[Lantern: your Overview's architecture block didn't read (It isn't valid JSON.), so the Map tab can't draw it. Rewrite the Overview with a block that matches steps_guide's schema. (end of Lantern's note)]");
+  });
+
+  it("says nothing when the map reads or there is none", () => {
+    expect(mapNote(overview('{"layers": [{"id": "ui", "label": "UI"}], "nodes": [{"id": "a", "label": "A", "layer": "ui"}], "edges": []}'))).toBeNull();
+    expect(mapNote(null)).toBeNull();
+  });
+
+  it("comes off the message as the user wrote it, alone or after a page note", () => {
+    const broken = mapNote(overview("{nodes"))!;
+    expect(readPageNote(withPageNote(broken, "Next"))).toBe("Next");
+    const unread = pageNote([u("u1", "Next"), a("a1", "## Review · Odd [thing]")], "review", guides)!;
+    expect(readPageNote(withPageNote(`${unread}\n\n${broken}`, "Next"))).toBe("Next");
   });
 });
 

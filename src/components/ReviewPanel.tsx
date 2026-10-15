@@ -31,6 +31,8 @@ interface Props {
   /** The session has started, so the backend knows which folder may be browsed. */
   ready: boolean;
   files: ChangedFile[];
+  /** Changed to bring the Changes tab up (a merge card asking for a branch's diff). */
+  changesKey?: number;
   /** Which changes `files` holds: the whole session's, or the last turn's. */
   scope?: ChangeScope;
   onScope?: (scope: ChangeScope) => void;
@@ -112,6 +114,9 @@ export function ReviewPanel(props: Props) {
   useEffect(() => {
     if (props.architecture?.openKey) setTab("map");
   }, [props.architecture?.openKey]);
+  useEffect(() => {
+    if (props.changesKey) setTab("changes");
+  }, [props.changesKey]);
   useEffect(() => {
     const req = props.openRequest;
     if (!req) return;

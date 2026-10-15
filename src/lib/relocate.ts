@@ -32,6 +32,7 @@ export const NOT_FOLDER_KEYED = [
   "settings.appearance",
   "settings.textSize",
   "review.collapsed",
+  "review.canvasPanel",
   "review.ratio",
   "review.scope",
   "review.tab",

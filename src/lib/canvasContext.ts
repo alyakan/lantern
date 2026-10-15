@@ -78,7 +78,10 @@ export interface NodeActions {
   restart(slot: string): void;
   /** The user's answer to a worker's merge proposal: merge its branch into the main checkout, or not yet. */
   approveMerge(worker: string): void;
-  declineMerge(worker: string): void;
+  /** Resolves once the answer is on its way; the card shows busy until then. */
+  declineMerge(worker: string): Promise<void>;
+  /** Opens the side panel's Changes on the worker's branch against its base, at `file`'s diff when one is named. */
+  reviewMerge(worker: string, file?: string): void;
   /** What was typed in the agent's box and not sent, which the app keeps (the full-size chat box reads the same). */
   draft(slot: string): string;
   setDraft(slot: string, text: string): void;
