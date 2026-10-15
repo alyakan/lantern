@@ -182,10 +182,15 @@ describe("a layered map in the Map tab", () => {
     expect(container.querySelectorAll(".arch-edge.skip")).toHaveLength(1);
     expect(container.querySelectorAll(".arch-edge.issue")).toHaveLength(1);
     expect(container.querySelectorAll(".arch-crossing").length).toBeGreaterThan(10);
-    // Hovering a box shows what it is, its layer and its issue.
+    // Hovering a box shows what it is, its layer and its issue, in the same tall slot the list was in (a slot that
+    // changed size would refit the map and move the box from under the pointer).
+    const slot = container.querySelector(".arch-panel-slot")!;
+    expect(slot).toHaveClass("tall");
     fireEvent.mouseEnter(box(/^Window events/));
     expect(screen.getByText("Testo implementation", { selector: ".arch-panel-layer" })).toBeInTheDocument();
     expect(screen.getByText(/two jobs in one type/, { selector: ".arch-panel-issue" })).toBeInTheDocument();
+    expect(container.querySelector(".arch-panel-slot")).toBe(slot);
+    expect(slot).toHaveClass("tall");
   });
 });
 
