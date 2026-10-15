@@ -147,7 +147,9 @@ async function playArchitecture(slot: string, text: string) {
 /** Step by step: the flavour each chat is in, what Claude suggested, and the task it was suggested for. */
 const flavourOfSlot: Record<string, string> = {};
 const suggestedFor: Record<string, { flavour: string; task: string }> = {};
-const LABEL: Record<string, string> = { build: "Build", learn: "Learn", review: "Review", debug: "Debug", architecture: "Architecture" };
+const LABEL: Record<string, string> = { build: "Build", learn: "Build, explaining as you go", review: "Review", debug: "Debug", architecture: "Design" };
+/** What a flavour's name in a note or answer is: Learn is Build explaining as you go, and Architecture is Design. */
+const flavourId = (word: string) => ({ learn: "learn", teach: "learn", design: "architecture" })[word.toLowerCase()] ?? word.toLowerCase();
 
 /** What Claude would suggest for a task. */
 function suggestionFor(text: string): { flavour: string; why: string } {
@@ -165,18 +167,18 @@ function suggestionFor(text: string): { flavour: string; why: string } {
 async function playStepByStep(slot: string, raw: string) {
   const send = sendTo(slot);
   const done = () => send({ kind: "turn_done", is_error: false, result: "ok", cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0, duration_ms: 1400, auth_hint: false, denied: 0, context_window: 200_000 });
-  const note = /^\[Lantern: this chat switched to (Build|Learn|Review|Debug|Architecture)\b[^\]]*\]\s*/.exec(raw);
+  const note = /^\[Lantern: this chat switched to (Build|Learn|Review|Debug|Design|Architecture)\b(, explaining as you go)?[^\]]*\]\s*/.exec(raw);
   const text = note ? raw.slice(note[0].length) : raw;
   if (stepPage[slot] === undefined && flavourOfSlot[slot] === undefined && !note) {
     await send({ kind: "session_started", session_id: `mock-${slot}`, model: "claude-opus-5-5", cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
   }
-  const start = /^start (build|learn|review|debug|architecture)\b/i.exec(text.trim());
+  const start = /^start (build|learn|review|debug|design|architecture)\b(, explaining as you go)?/i.exec(text.trim());
   let task = text;
   if (note) {
-    flavourOfSlot[slot] = note[1].toLowerCase();
+    flavourOfSlot[slot] = note[2] && flavourId(note[1]) === "build" ? "learn" : flavourId(note[1]);
     delete stepPage[slot];
   } else if (start && suggestedFor[slot]) {
-    flavourOfSlot[slot] = start[1].toLowerCase();
+    flavourOfSlot[slot] = start[2] && flavourId(start[1]) === "build" ? "learn" : flavourId(start[1]);
     task = suggestedFor[slot].task;
     delete suggestedFor[slot];
     delete stepPage[slot];
@@ -686,7 +688,17 @@ const SESSIONS = [
   { id: "3f1c2a", title: "Fix the login redirect after OAuth callback", updated_ms: Date.now() - 2 * HOUR, prompts: 6 },
   { id: "9b7e01", title: "Add retries with backoff to fetchJson", updated_ms: Date.now() - 26 * HOUR, prompts: 3 },
   { id: "c0ffee", title: "Refactor the settings screen into smaller components", updated_ms: Date.now() - 4 * 24 * HOUR, prompts: 11 },
+  { id: "a11ce5", title: "Why does the build fail on CI but not locally?", updated_ms: Date.now() - 6 * 24 * HOUR, prompts: 4 },
+  { id: "b0b0b0", title: "Release flow notes", updated_ms: Date.now() - 9 * 24 * HOUR, prompts: 8 },
 ];
+// The other recent projects' chats, for the sidebar (which reads a project's chats when it is expanded).
+const OTHER_SESSIONS: Record<string, { id: string; title: string; updated_ms: number; prompts: number }[]> = {
+  "/Users/you/projects/web-dashboard": [
+    { id: "d4a501", title: "Chart tooltips clip at the edge", updated_ms: Date.now() - 3 * HOUR, prompts: 3 },
+    { id: "d4a502", title: "Dark mode for the settings page", updated_ms: Date.now() - 2 * 24 * HOUR, prompts: 5 },
+  ],
+  "/Users/you/src/infra": [{ id: "1f0a01", title: "Rotate the staging credentials", updated_ms: Date.now() - 5 * 24 * HOUR, prompts: 2 }],
+};
 
 // The places the demo project's sessions came from, as old_locations finds them: one still there, one gone, one already
 // brought over (so its sessions are in History), and one whose copy fails the first time (so a retry shows).
@@ -1004,9 +1016,19 @@ export function installMockBackend() {
             sendTo(String(a.slot))({ kind: "mcp_tools", tools: MCP_TOOLS });
           }, 50);
           return null;
-        case "restart_session":
-          slotMode[String(a.slot)] = String(a.mode);
+        case "restart_session": {
+          const slot = String(a.slot);
+          slotMode[slot] = String(a.mode);
+          // Workflow Team makes the chat the Lead of a team; leaving it ends that (the real backend refuses while it has agents).
+          if (a.team === true) mockMain = slot;
+          else if (a.team === false && mockMain === slot) mockMain = null;
+          // An agent never has more freedom than its Lead: asking for Auto under a Lead on Ask is lowered, and the window told.
+          if (mockMain && slot !== mockMain && a.mode === "auto" && slotMode[mockMain] !== "auto") {
+            slotMode[slot] = "ask";
+            setTimeout(() => void sendTo(slot)({ kind: "agent_mode", mode: "ask" }), 30);
+          }
           return null;
+        }
         case "apply_harness":
           return null;
         case "close_session":
@@ -1130,9 +1152,10 @@ export function installMockBackend() {
           // A short stand-in for the backend's own (args::flavour_guide): enough for the notes to show their headings.
           return [
             { flavour: "Build", text: "Build: plan one step per page, then build one step per page.", headings: ["# Frame — <the task in a few words>", "# Plan step N — <step title>", "# Plan complete — N steps", "# Step N of M — <step title>", "# Done — <what was built>"] },
+            { flavour: "Explain", text: "Explain as you go: explain the why on every page.", headings: [] },
             { flavour: "Review", text: "Review: one changed file per page, then the summary.", headings: ["# Frame — <the PR's title>", "# File N of M — <path> (+added −removed)", "# Summary — <files reviewed, findings accepted, findings dropped>"] },
           ];
-        case "set_agent_choice":
+        case "set_subagents":
         case "set_agent_limit":
           return null;
         case "list_permission_rules":
@@ -1146,9 +1169,9 @@ export function installMockBackend() {
         case "set_model":
           return null;
         case "recent_folders":
-          return new Promise((r) => setTimeout(() => r([FOLDER, "/Users/you/projects/web-dashboard", "/Users/you/src/infra", "/Users/you/notes"].map((path, i) => ({ path, updated_ms: Date.now() - i * 3_600_000 }))), 100));
+          return new Promise((r) => setTimeout(() => r([FOLDER, "/Users/you/projects/web-dashboard", "/Users/you/src/infra", "/Users/you/notes", "/Users/you/Documents/Github/web-dashboard"].map((path, i) => ({ path, updated_ms: Date.now() - i * 3_600_000 }))), 100));
         case "list_sessions":
-          return new Promise((r) => setTimeout(() => r(SESSIONS), 150));
+          return new Promise((r) => setTimeout(() => r(a.folder === FOLDER ? SESSIONS : (OTHER_SESSIONS[String(a.folder)] ?? [])), 150));
         case "rename_session": {
           const session = SESSIONS.find((s) => s.id === a.sessionId);
           if (session) session.title = String(a.title);
@@ -1158,6 +1181,10 @@ export function installMockBackend() {
           return mockNetwork();
         case "network_response":
           return mockResponse(a.id as string);
+        case "network_rewatch":
+          mockWatches = [...mockWatches.filter((w) => w.label !== a.label), { label: String(a.label), method: (a.method as string | null) ?? "GET", url: String(a.url) }];
+          void emit("network-changed");
+          return undefined;
         case "network_unwatch":
           mockWatches = mockWatches.filter((w) => w.label !== a.label);
           void emit("network-changed");
@@ -1171,6 +1198,14 @@ export function installMockBackend() {
         case "moved_folder_candidates":
           // A folder from before it moved, and the one place it's at now (the same name, and the only such folder).
           return [{ old: "/Users/you/Documents/Github/web-dashboard", suggested: "/Users/you/projects/web-dashboard" }];
+        case "list_open_prs":
+          // ?prs=missing shows what the picker says when gh isn't installed.
+          if (new URLSearchParams(location.search).get("prs") === "missing") return Promise.reject("The GitHub CLI (gh) isn't installed. Install it from cli.github.com, then run `gh auth login` in a terminal.");
+          return [
+            { number: 128, title: "Retry fetchJson with backoff", author: "ada", branch: "feat/retry-fetch", draft: false },
+            { number: 127, title: "Fix the crash saving a form with an empty title", author: "grace", branch: "fix/empty-title", draft: false },
+            { number: 121, title: "Draft: move the settings screen to tabs", author: "ada", branch: "wip/settings-tabs", draft: true },
+          ];
         case "old_locations":
           return a.folder === FOLDER ? OLD_LOCATIONS : [];
         case "known_folders":

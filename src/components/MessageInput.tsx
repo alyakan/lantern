@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { Status } from "../store";
-import type { FoundFile, ModelOption, Mode, RecentFolder, SessionSummary, SkillEntry, SlashCommand } from "../types";
+import type { FoundFile, ModelOption, RecentFolder, SessionSummary, SkillEntry, SlashCommand } from "../types";
 import { basename } from "../lib/diff";
 import { useShortcut } from "../lib/shortcuts";
 import { matchCommands } from "../lib/slash";
@@ -9,14 +9,13 @@ import { describeCommands, replaceTrigger, sections as menuSections, triggerAt, 
 import { CompletionMenu, type McpIssue } from "./CompletionMenu";
 import { ArrowUpIcon, BranchIcon, FolderIcon, SparkIcon } from "./icons";
 import { ContextMeter } from "./ContextMeter";
-import { EFFORT_LEVELS, EffortPicker } from "./EffortPicker";
+import { EFFORT_LEVELS } from "../lib/effort";
 import { FolderPill, type RelocateMenu } from "./FolderPill";
-import { ModeMenu } from "./ModeMenu";
+import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
 import type { Flavour } from "../lib/flavour";
-import { ModelPicker } from "./ModelPicker";
-import { HarnessPicker } from "./HarnessPicker";
+import type { Permissions, Workflow } from "../lib/workflow";
+import { ModelsPicker } from "./ModelsPicker";
 import type { Harness } from "../lib/harness";
-import type { OpenChat } from "./HistoryMenu";
 import { SessionPill } from "./SessionPill";
 import { UpdateButton } from "./UpdateButton";
 
@@ -36,10 +35,15 @@ interface Props {
   onCancelStart?: () => void;
   /** "!" at the start of the box turns it into a terminal: Enter runs the rest as a shell command in the folder. */
   onRun?: (command: string) => void;
-  mode?: Mode;
-  /** Step by step's flavour, which the mode chip names too. */
+  /** The chat's two settings, as chips under the box: Permissions (Ask or Auto) and Workflow (Chat, Step by step or Team). */
+  permissions?: Permissions;
+  workflow?: Workflow;
+  /** Step by step's flavour, which the Workflow chip names too. */
   flavour?: Flavour | null;
-  onModeChange?: (mode: Mode) => void;
+  onPermissionsChange?: (permissions: Permissions) => void;
+  onWorkflowChange?: (workflow: Workflow) => void;
+  /** A Lead that still has agents: its Workflow stays Team until they are closed. */
+  holdsAgents?: boolean;
   model?: string | null;
   branch?: string | null;
   /** Empty conversation: float the composer in the middle with a folder pill above it. */
@@ -47,18 +51,18 @@ interface Props {
   folder?: string | null;
   onOpenFolder?: () => void;
   /** Shown next to the folder pill in the empty state: pick a past session to continue. */
-  sessions?: { load: () => Promise<SessionSummary[]>; currentId: string | null; onOpen: (id: string) => void; open?: OpenChat[]; onSwitch?: (slot: string) => void };
+  sessions?: { load: () => Promise<SessionSummary[]>; exclude: string[]; onOpen: (id: string) => void };
   /** The folder capsule's menu: recent folders to switch to. */
   folders?: { load: () => Promise<RecentFolder[]>; onPick: (path: string) => void; relocate?: RelocateMenu };
   /** The chat's queued messages; without it the box keeps its own queue. */
   queue?: { items: string[]; set: (next: string[]) => void };
   /** Context use and timing for the footer meter. */
   usage?: { used: number | null; window: number; lastTurnMs: number | null; actions?: { onCompact: () => void; onClear: () => void }; session?: { cost: number | null; tokens: number } };
-  /** The model chip becomes a picker: what the user chose (null = default) and how to change it. */
+  /** The Models chip: the model the user chose (null = default) and how to change it. */
   models?: { chosen: string | null; onChoose: (model: string | null) => void; defaultModel?: string | null; ids?: Record<string, string>; options?: ModelOption[] };
-  /** Thinking effort: the chosen level (null = default) and how to change it. */
+  /** Thinking effort, under the chip's Customize…: the chosen level (null = default) and how to change it. */
   effort?: { chosen: string | null; onChoose: (level: string | null) => void };
-  /** The chat's harness (which models do what) and the presets to switch to. */
+  /** The chat's harness (which models do what) and the presets the Models chip lists. */
   harness?: { presets: Harness[]; chosen: string; onChoose: (id: string) => void; onEdit?: () => void };
   /** What "/" offers: claude's slash commands and skills. */
   commands?: SlashCommand[];
@@ -77,7 +81,7 @@ interface Props {
   history?: { entries: string[]; remember: (entry: string) => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, mode, flavour = null, onModeChange, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, harness, update, history }: Props) {
+export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, harness, update, history }: Props) {
   // A draft with big pastes in it comes back as the box had it: their placeholders, and the text they stand for.
   const [restored] = useState(() => decodeDraft(draft?.initial ?? ""));
   const [text, setTextState] = useState(restored.text);
@@ -375,7 +379,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               <span>{folder ? basename(folder) : "Open folder"}</span>
             </button>
           )}
-          {sessions && folder && <SessionPill loadSessions={sessions.load} currentId={sessions.currentId} onOpen={sessions.onOpen} openChats={sessions.open} onSwitch={sessions.onSwitch} disabled={status === "starting"} />}
+          {sessions && folder && <SessionPill loadSessions={sessions.load} exclude={sessions.exclude} onOpen={sessions.onOpen} disabled={status === "starting"} />}
         </div>
       )}
       {queued.length > 0 && (
@@ -519,7 +523,20 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           {terminal ? (
             <span className="terminal-hint">Claude sees the output with your next message · backspace to leave</span>
           ) : models ? (
-            <ModelPicker running={model ?? null} chosen={models.chosen} defaultModel={models.defaultModel} ids={models.ids} options={models.options} onChoose={models.onChoose} disabled={busy} />
+            <ModelsPicker
+              running={model ?? null}
+              chosen={models.chosen}
+              onChoose={models.onChoose}
+              defaultModel={models.defaultModel}
+              ids={models.ids}
+              options={models.options}
+              effort={effort && effortLevels.length > 0 ? { ...effort, levels: effortLevels } : undefined}
+              presets={harness?.presets}
+              preset={harness?.chosen}
+              onPreset={harness?.onChoose}
+              onEdit={harness?.onEdit}
+              disabled={busy}
+            />
           ) : (
             model && (
               <span className="composer-item" title="Model">
@@ -528,8 +545,6 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               </span>
             )
           )}
-          {!terminal && effort && effortLevels.length > 0 && <EffortPicker chosen={effort.chosen} levels={effortLevels} onChoose={effort.onChoose} disabled={busy} />}
-          {!terminal && harness && <HarnessPicker {...harness} disabled={busy} />}
           <div className="spacer" />
           {usage && <ContextMeter used={usage.used} window={usage.window} running={running} lastTurnMs={usage.lastTurnMs} actions={usage.actions} session={usage.session} />}
           {terminal ? (
@@ -559,9 +574,10 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           )}
         </div>
       </div>
-      {(mode || branch || update) && (
+      {(permissions || branch || update) && (
         <div className="composer-meta">
-          {mode && onModeChange && <ModeMenu mode={mode} flavour={flavour} onChange={onModeChange} disabled={busy} />}
+          {permissions && onPermissionsChange && <PermissionsMenu permissions={permissions} onChange={onPermissionsChange} disabled={busy} />}
+          {workflow && onWorkflowChange && <WorkflowMenu workflow={workflow} flavour={flavour} onChange={onWorkflowChange} disabled={busy} holdsAgents={holdsAgents} />}
           <div className="spacer" />
           {update && <UpdateButton {...update} />}
           {branch && (

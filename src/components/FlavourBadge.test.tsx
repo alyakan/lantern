@@ -23,9 +23,38 @@ describe("FlavourBadge", () => {
     fireEvent.keyDown(rows[0], { key: "ArrowDown" });
     expect(rows[1]).toHaveFocus();
     fireEvent.keyDown(rows[1], { key: "End" });
-    expect(rows[rows.length - 1]).toHaveFocus();
-    fireEvent.keyDown(rows[rows.length - 1], { key: "Escape" });
+    // The last row is Explain as you go, below the flavours.
+    expect(screen.getByRole("menuitemcheckbox", { name: /Explain as you go/ })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitemcheckbox", { name: /Explain as you go/ }), { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
     expect(badge).toHaveFocus();
+  });
+
+  it("lists Design, not Architecture, and no Learn flavour", () => {
+    render(<FlavourBadge flavour="build" onPick={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Build/ }));
+    expect(screen.getAllByRole("menuitemradio").map((r) => r.querySelector(".menu-row-title")?.textContent)).toEqual(["Build", "Review", "Debug", "Design"]);
+  });
+
+  it("turns Explain as you go on and off for Build and Debug, and shows it on the badge", () => {
+    const onPick = vi.fn();
+    const { rerender } = render(<FlavourBadge flavour="debug" onPick={onPick} />);
+    fireEvent.click(screen.getByRole("button", { name: /Debug/ }));
+    const option = screen.getByRole("menuitemcheckbox", { name: /Explain as you go/ });
+    expect(option).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(option);
+    expect(onPick).toHaveBeenLastCalledWith("debug", true);
+    rerender(<FlavourBadge flavour="debug" explain onPick={onPick} />);
+    expect(screen.getByRole("button", { name: /Debug/ })).toHaveTextContent("explaining");
+    fireEvent.click(screen.getByRole("button", { name: /Debug/ }));
+    expect(screen.getByRole("menuitemcheckbox", { name: /Explain as you go/ })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /Explain as you go/ }));
+    expect(onPick).toHaveBeenLastCalledWith("debug", false);
+  });
+
+  it("offers Explain as you go only where it applies", () => {
+    render(<FlavourBadge flavour="review" onPick={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Review/ }));
+    expect(screen.getByRole("menuitemcheckbox", { name: /Explain as you go/ })).toBeDisabled();
   });
 });

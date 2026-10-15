@@ -1,6 +1,7 @@
 /**
- * How Claude may act: ask before actions, auto-approve, or step by step (a page per message, in a flavour: see
- * lib/flavour.ts).
+ * How a chat launches: Permissions Ask, Permissions Auto, or the Step by step workflow (a page per message, in a flavour:
+ * see lib/flavour.ts), whose own Permissions are `auto_approve`. A chat's two settings, Permissions and Workflow, are
+ * read from this with lib/workflow.ts.
  */
 export type Mode = "ask" | "auto" | "steps";
 
@@ -91,6 +92,8 @@ export type UiEvent =
    * "changed" (what changed since it was proposed: nothing was merged and the proposal is gone). */
   /** The subscription's five-hour window (the account's, whichever chat says): `used` 0–1, `resets_at` unix seconds. */
   | { kind: "plan_usage"; used: number; resets_at: number | null; status: string }
+  /** The chat's review_target call: what the Changes pane compares (a pull request, or the checked-out branch against `base`; null: Lantern finds it). */
+  | { kind: "review_target"; pr: number | null; base: string | null }
   | { kind: "merge_resolved"; worker: string; outcome: "merged" | "conflicts" | "declined" | "failed" | "changed"; detail: string }
   | { kind: "unknown"; raw: unknown }
   | { kind: "parse_error"; line: string };
@@ -426,4 +429,13 @@ export interface NetworkDetail {
   request_body: NetworkBody;
   response_headers: { name: string; value: string }[];
   response_body: NetworkBody;
+}
+
+/** An open pull request, as the "Review a PR" picker lists it (from `gh pr list`). */
+export interface OpenPr {
+  number: number;
+  title: string;
+  author: string;
+  branch: string;
+  draft: boolean;
 }

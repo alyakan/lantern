@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatItem } from "../store";
-import { andNext, isApproval, isQuestion, movesOn, pageLabel, pagesOf, pageTitle, parseHeading, promptText, startedFlavour, stayedIn } from "./steps";
+import { andNext, isApproval, isQuestion, movesOn, pageLabel, pagesOf, pageTitle, parseHeading, promptText, startedChoice, startedFlavour, stayedIn } from "./steps";
 
 describe("parseHeading", () => {
   it("reads each kind of heading the prompt asks for", () => {
@@ -38,13 +38,24 @@ describe("parseHeading", () => {
     expect(parseHeading("# Switch to Architecture — you asked how it fits together")).toMatchObject({ kind: "switch", flavour: "architecture", title: "you asked how it fits together" });
     expect(pageLabel(parseHeading("# Overview — x"))).toBe("Overview");
     expect(pageLabel(parseHeading("# Part 2 of 5 — x"))).toBe("Part 2 of 5");
+    expect(startedFlavour("Start Design.")).toBe("architecture");
+    expect(stayedIn("Stay in Design.")).toBe(true);
+    // Architecture is Design's old name, still read from Claude and from saved chats.
+    expect(parseHeading("# Switch to Design — you asked how it fits together")).toMatchObject({ kind: "switch", flavour: "architecture" });
     expect(startedFlavour("Start Architecture.")).toBe("architecture");
     expect(stayedIn("Stay in Architecture.")).toBe(true);
   });
 
   it("tells answers to a suggestion apart, and counts them as moving on", () => {
     expect(startedFlavour("Start Debug.")).toBe("debug");
-    expect(startedFlavour("start learn")).toBe("learn");
+    // Learn is Build with Explain as you go.
+    expect(startedChoice("start learn")).toEqual({ flavour: "build", explain: true });
+    expect(startedChoice("Start Debug, explaining as you go.")).toEqual({ flavour: "debug", explain: true });
+    expect(startedChoice("Start Debug.")).toEqual({ flavour: "debug", explain: false });
+    expect(parseHeading("# Switch to Build, explaining as you go — you want to learn")).toMatchObject({ kind: "switch", flavour: "build", explain: true, title: "you want to learn" });
+    expect(parseHeading("# Switch to Learn — you want to learn")).toMatchObject({ kind: "switch", flavour: "build", explain: true });
+    expect(parseHeading("# Switch to Build — x")).not.toHaveProperty("explain");
+    expect(stayedIn("Stay in Build, explaining as you go.")).toBe(true);
     expect(startedFlavour("Start debugging the parser")).toBeNull();
     expect(stayedIn("Stay in Build.")).toBe(true);
     expect(movesOn("Start Review.") && movesOn("Stay in Build.")).toBe(true);

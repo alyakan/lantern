@@ -195,6 +195,23 @@ describe("reducer", () => {
     expect(s.items[0]).toMatchObject({ type: "user", text: "map it", switchedTo: "architecture" });
   });
 
+  it("a message replayed from a Learn (or explaining) chat is Build with Explain as you go on, and keeps it when sent", () => {
+    const old = ev(initialState, { kind: "user_text", text: "[Lantern: this chat switched to Learn. The user picked it. How Learn works:\n\nLearn: …\n\n(end of Lantern's note)]\n\nteach me" });
+    expect(old.items[0]).toMatchObject({ type: "user", text: "teach me", switchedTo: "build", explained: true });
+    const noted = ev(initialState, { kind: "user_text", text: "[Lantern: this chat switched to Debug, explaining as you go. The user picked it.]\n\nit crashes" });
+    expect(noted.items[0]).toMatchObject({ switchedTo: "debug", explained: true });
+    const plain = ev(initialState, { kind: "user_text", text: "[Lantern: this chat switched to Debug. The user picked it.]\n\nit crashes" });
+    expect(plain.items[0]).not.toHaveProperty("explained");
+    // Sent from the box: the pick (and its option) is used up with the message.
+    let t = reducer(initialState, { type: "flavour_picked", flavour: "build", explain: true });
+    expect(t).toMatchObject({ flavourPick: "build", explainPick: true });
+    t = reducer(t, { type: "user_sent", text: "go", switchedTo: "build", explained: true });
+    expect(t).toMatchObject({ flavourPick: null, explainPick: false });
+    expect(t.items[0]).toMatchObject({ switchedTo: "build", explained: true });
+    // Taking the pick back takes the option with it.
+    expect(reducer(reducer(initialState, { type: "flavour_picked", flavour: "build", explain: true }), { type: "flavour_picked", flavour: null })).toMatchObject({ flavourPick: null, explainPick: false });
+  });
+
   it("turn_done clears a retry banner", () => {
     let s = ev(running, { kind: "retrying", attempt: 1, max_retries: 10, error: "overloaded" });
     expect(s.banner?.kind).toBe("info");
@@ -353,6 +370,16 @@ describe("reducer", () => {
     expect(reducer({ ...running, sessionId: "s" }, { type: "folder_opened", folder: "/q" }).sessionId).toBeNull();
   });
 
+  it("keeps what review_target set the Changes pane to, until the conversation starts over", () => {
+    let s = ev(running, { kind: "review_target", pr: 512, base: null });
+    expect(s.reviewTarget).toEqual({ pr: 512, base: null });
+    s = ev(s, { kind: "review_target", pr: null, base: "feat/core" });
+    expect(s.reviewTarget).toEqual({ pr: null, base: "feat/core" });
+    expect(s.items).toEqual([]);
+    expect(ev(s, { kind: "conversation_reset" }).reviewTarget).toBeNull();
+    expect(reducer(s, { type: "folder_opened", folder: "/q" }).reviewTarget).toBeNull();
+  });
+
   it("unknown events and parse errors go to debug, not the chat", () => {
     let s = ev(running, { kind: "unknown", raw: { type: "new" } });
     s = ev(s, { kind: "parse_error", line: "garbage" });
@@ -388,5 +415,29 @@ describe("turn numbers", () => {
     expect(s.items[0]).toMatchObject({ type: "user", turn: 3 });
     const replayed = reducer(s, { type: "history_loaded", sessionId: "x", events: [{ kind: "user_text", text: "one" }, { kind: "user_text", text: "two" }] });
     expect(replayed.items.map((it) => (it.type === "user" ? it.turn : "-"))).toEqual([undefined, 0]);
+  });
+});
+
+describe("Permissions and Workflow", () => {
+  it("keeps Step by step's Permissions with the mode, and Auto and Ask say theirs with the mode itself", () => {
+    let s: State = { ...initialState, folder: "/p", status: "idle" };
+    s = reducer(s, { type: "mode_changed", mode: "steps", autoApprove: true });
+    expect(s).toMatchObject({ mode: "steps", autoApprove: true });
+    // A change that doesn't say keeps what Step by step had.
+    expect(reducer(s, { type: "mode_changed", mode: "steps" }).autoApprove).toBe(true);
+    // Out of Step by step, Auto is the mode; there is no auto-approve left over to come back.
+    s = reducer(s, { type: "mode_changed", mode: "auto", autoApprove: false });
+    expect(s).toMatchObject({ mode: "auto", autoApprove: false });
+    expect(reducer(s, { type: "mode_changed", mode: "steps" }).autoApprove).toBe(false);
+  });
+
+  it("lowers an agent's Permissions to Ask when its Lead's are lower, auto-approve included", () => {
+    const agent: State = { ...initialState, folder: "/wt", status: "idle", mode: "steps", autoApprove: true };
+    expect(ev(agent, { kind: "agent_mode", mode: "ask" })).toMatchObject({ mode: "ask", autoApprove: false });
+  });
+
+  it("holds a team's Subagents setting on its Lead, on the canvas until the user says otherwise", () => {
+    expect(initialState.subagents).toBe("canvas");
+    expect(reducer(initialState, { type: "subagents_set", subagents: "inline" }).subagents).toBe("inline");
   });
 });

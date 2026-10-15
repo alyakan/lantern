@@ -3,22 +3,35 @@ import type { ChatItem, State } from "../store";
 import type { CloseCheck } from "../types";
 
 /** What an agent on the canvas is doing, in the words a product owner would use. */
-export type NodeStatus = "starting" | "working" | "waiting" | "idle" | "ended";
+export type NodeStatus = "starting" | "working" | "waiting" | "held" | "idle" | "ended" | "failed";
 
 export const STATUS_LABEL: Record<NodeStatus, string> = {
   starting: "Starting",
   working: "Working",
   waiting: "Needs you",
+  held: "Needs you · updates held",
   idle: "Idle",
   ended: "Stopped",
+  failed: "Stopped · error",
 };
+
+/**
+ * What a card or a row says about its agent: "Idle" is "Ready" for the lead (its team is waiting on it) and "Done" for a
+ * worker that finished its turn, and a worker whose branch the lead asked the user to merge is "Ready to merge".
+ */
+export function statusLabel(status: NodeStatus, role: "main" | "worker", readyToMerge = false): string {
+  if (status !== "idle") return STATUS_LABEL[status];
+  return readyToMerge ? "Ready to merge" : role === "main" ? "Ready" : "Done";
+}
 
 export function nodeStatus(s: State): NodeStatus {
   if (s.items.some((it) => it.type === "permission" && it.decision === null)) return "waiting";
-  if (s.status === "ended") return "ended";
+  // Stopped is quiet; only one that stopped on an error says so in red.
+  if (s.status === "ended") return s.banner?.kind === "error" ? "failed" : "ended";
   if (s.status === "running" || s.thinking) return "working";
   if (s.status === "starting" || s.status === "locating") return "starting";
-  return "idle";
+  // A lead whose workers' updates the loop guard holds back is waiting for the user to say go on (see wakesPaused).
+  return wakesPaused(s) ? "held" : "idle";
 }
 
 export interface OrchestraNode {
@@ -97,8 +110,8 @@ export function readyToMerge(nodes: OrchestraNode[], slots: Record<string, State
 /** The agents that are waiting on the user (a permission prompt, or a merge to approve), in canvas order. */
 export function needingYou(nodes: OrchestraNode[], slots: Record<string, State>): string[] {
   const merges = readyToMerge(nodes, slots);
-  // A main agent whose workers' updates are held back by the loop guard is waiting for the user to say go on.
-  return nodes.filter((n) => slots[n.slot] && (nodeStatus(slots[n.slot]) === "waiting" || merges.has(n.slot) || wakesPaused(slots[n.slot]))).map((n) => n.slot);
+  // A lead whose workers' updates are held back by the loop guard ("held") is waiting for the user to say go on.
+  return nodes.filter((n) => slots[n.slot] && (["waiting", "held"].includes(nodeStatus(slots[n.slot])) || merges.has(n.slot))).map((n) => n.slot);
 }
 
 /** Dollars for a screen: "$0.42", "$12.30", "<$0.01" for something that cost a little, nothing for nothing. */

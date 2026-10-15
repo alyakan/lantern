@@ -1,19 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import type { SessionSummary } from "../types";
-import { HistoryMenu, type OpenChat } from "./HistoryMenu";
+import { HistoryMenu } from "./HistoryMenu";
 import { ClockIcon } from "./icons";
 
 interface Props {
   loadSessions: () => Promise<SessionSummary[]>;
-  currentId: string | null;
+  /** The session ids of the chats that are open (the sidebar has them, so the list leaves them out). */
+  exclude?: string[];
   onOpen: (id: string) => void;
   disabled?: boolean;
-  openChats?: OpenChat[];
-  onSwitch?: (slot: string) => void;
 }
 
 // The capsule next to the folder picker above the composer: pick a past session to continue, like VS Code's project menu.
-export function SessionPill({ loadSessions, currentId, onOpen, disabled, openChats, onSwitch }: Props) {
+export function SessionPill({ loadSessions, exclude, onOpen, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -34,24 +33,19 @@ export function SessionPill({ loadSessions, currentId, onOpen, disabled, openCha
 
   return (
     <div className="pill-anchor" ref={root}>
-      <button className="pill" aria-haspopup="dialog" aria-expanded={open} disabled={disabled} title="Continue a past session" onClick={toggle}>
+      <button className="pill" aria-haspopup="dialog" aria-expanded={open} disabled={disabled} title="Continue a past chat" onClick={toggle}>
         <ClockIcon />
-        <span>New session</span>
+        <span>New chat</span>
         <span className="chev down" aria-hidden />
       </button>
       {open && (
         <HistoryMenu
           sessions={sessions}
-          currentId={currentId}
+          exclude={exclude}
           onClose={() => setOpen(false)}
           onOpen={(id) => {
             setOpen(false);
             onOpen(id);
-          }}
-          open={openChats}
-          onSwitch={(slot) => {
-            setOpen(false);
-            onSwitch?.(slot);
           }}
         />
       )}

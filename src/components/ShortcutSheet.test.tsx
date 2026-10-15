@@ -17,7 +17,7 @@ describe("the shortcut sheet", () => {
   it("lists the groups in the order of the menu bar, and leaves out what has no shortcut", () => {
     render(<ShortcutSheet available={[]} onClose={() => {}} />);
     const groups = screen.getAllByRole("region").map((g) => g.getAttribute("aria-label"));
-    expect(groups).toEqual(["File", "View", "Search", "Chat", "Help"]);
+    expect(groups).toEqual(["File", "View", "Search", "Work", "Chat", "Help"]);
     // Report a Bug… is in the menu, but it has no shortcut to show.
     expect(screen.queryByText("Report a Bug…")).toBeNull();
   });
@@ -25,7 +25,7 @@ describe("the shortcut sheet", () => {
   it("dims the shortcuts that can't be used right now, and says why", () => {
     render(<ShortcutSheet available={["settings"]} onClose={() => {}} />);
     expect(screen.getByText("Settings…").closest("li")).not.toHaveClass("off");
-    const dimmed = screen.getByText("Session History").closest("li");
+    const dimmed = screen.getByText("Chat History").closest("li");
     expect(dimmed).toHaveClass("off");
     expect(dimmed).toHaveAttribute("title", "Not available right now");
   });

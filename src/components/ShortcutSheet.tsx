@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { ACTIONS, shortcutLabel, type ActionGroup } from "../lib/actions";
 
 /** The groups in the order the sheet lists them. */
-const GROUPS: ActionGroup[] = ["File", "View", "Search", "Chat", "Help"];
+const GROUPS: ActionGroup[] = ["File", "View", "Search", "Work", "Chat", "Help"];
 
 interface Props {
   /** The actions that can run now; the others are listed too, dimmed. */

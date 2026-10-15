@@ -5,7 +5,7 @@ export function PlanMeter() {
   const plan = usePlanUsage();
   if (!plan) return null;
   const level = planLevel(plan);
-  const title = level === "stop" ? "Nearly used up: no new workers start until it resets." : level === "warn" ? "Getting close to the plan's five-hour limit." : "The plan's five-hour window, for every chat and team.";
+  const title = level === "stop" ? "Nearly used up: no new agents start until it resets." : level === "warn" ? "Getting close to the plan's five-hour limit." : "The plan's five-hour window, for every chat and team.";
   return (
     <span className={`plan-meter ${level}`} role="status" title={title}>
       {planLine(plan)}

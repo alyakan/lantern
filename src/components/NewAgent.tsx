@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { usePopover } from "../lib/usePopover";
 import { useNodeActions } from "../lib/canvasContext";
 import { MODEL_CHOICES } from "../lib/models";
-import { useDismiss } from "../lib/useDismiss";
 import type { NewWorker } from "../types";
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : "That didn't work.");
@@ -26,9 +26,8 @@ export function NewAgent({ main }: { main: string }) {
   const [form, setForm] = useState<Form>(EMPTY);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
   const task = useRef<HTMLTextAreaElement>(null);
-  useDismiss(open, box, () => !busy && setOpen(false));
+  const { box, button, id } = usePopover(open, () => !busy && setOpen(false), false);
   useEffect(() => {
     if (open) task.current?.focus();
   }, [open]);
@@ -37,7 +36,7 @@ export function NewAgent({ main }: { main: string }) {
   const submit = () => {
     if (busy) return;
     if (!form.task.trim()) {
-      setProblem("Say what the worker should do.");
+      setProblem("Say what the agent should do.");
       task.current?.focus();
       return;
     }
@@ -57,8 +56,12 @@ export function NewAgent({ main }: { main: string }) {
 
   return (
     <div className="canvas-team" ref={box}>
+      <button ref={button} className="canvas-fit" aria-expanded={open} aria-haspopup="dialog" aria-controls={open ? id : undefined} title="Start an agent yourself" onClick={() => setOpen(!open)}>
+        + Agent
+      </button>
       {open && (
         <form
+          id={id}
           className="new-agent canvas-overlay"
           role="dialog"
           aria-label="New agent"
@@ -90,7 +93,7 @@ export function NewAgent({ main }: { main: string }) {
             <input value={form.name} maxLength={60} placeholder="Named from the task" onChange={(e) => set({ name: e.target.value })} />
           </label>
           <fieldset>
-            <legend>Isolation</legend>
+            <legend>Where it works</legend>
             <label className="new-agent-choice">
               <input type="radio" name="isolation" checked={form.isolation === "worktree"} onChange={() => set({ isolation: "worktree" })} />
               Own worktree
@@ -126,9 +129,6 @@ export function NewAgent({ main }: { main: string }) {
           </div>
         </form>
       )}
-      <button className="canvas-fit" aria-expanded={open} aria-haspopup="dialog" title="Start a worker yourself" onClick={() => setOpen(!open)}>
-        + Agent
-      </button>
     </div>
   );
 }

@@ -13,7 +13,7 @@ describe("EditLine", () => {
   it("opens the change in the review panel from its name", () => {
     const onOpen = vi.fn();
     render(<EditLine edit={edit} folder="/p" onOpen={onOpen} />);
-    fireEvent.click(screen.getByTitle("Show in the review panel"));
+    fireEvent.click(screen.getByTitle("Show in the side panel"));
     expect(onOpen).toHaveBeenCalledWith("/p/src/a.ts");
   });
 

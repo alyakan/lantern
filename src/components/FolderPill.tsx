@@ -68,17 +68,18 @@ export function FolderPill({ folder, loadRecent, onPick, onBrowse, disabled, rel
 }
 
 /**
- * The dropdown itself, shared by this capsule and the title bar's folder pill. `recent` is null while loading. The arrow
- * keys are the caller's (`onKeyDown`), since focus goes back to whichever button opened the menu.
+ * The dropdown itself, shared by this capsule and the title bar's folder pill. `recent` is null while loading, and
+ * undefined for a menu with no list of folders (the title bar's: the sidebar lists them). The arrow keys are the caller's
+ * (`onKeyDown`), since focus goes back to whichever button opened the menu.
  */
-export function FolderMenu({ folder, recent, onPick, onBrowse, onClose, onKeyDown, relocate }: { folder: string | null; recent: RecentFolder[] | null; onPick: (path: string) => void; onBrowse: () => void; onClose: () => void; onKeyDown?: (e: ReactKeyboardEvent<HTMLElement>) => void; relocate?: RelocateMenu }) {
+export function FolderMenu({ folder, recent, onPick, onBrowse, onClose, onKeyDown, relocate }: { folder: string | null; recent?: RecentFolder[] | null; onPick?: (path: string) => void; onBrowse: () => void; onClose: () => void; onKeyDown?: (e: ReactKeyboardEvent<HTMLElement>) => void; relocate?: RelocateMenu }) {
   const choose = (act: () => void) => {
     onClose();
     act();
   };
   return (
     <div className="menu folder-menu" role="menu" aria-label="Folders" onKeyDown={onKeyDown}>
-      {relocate && relocate.moved.length > 0 && (
+      {recent !== undefined && relocate && relocate.moved.length > 0 && (
         <>
           <div className="menu-heading">Moved?</div>
           <ul className="menu-list moved-folders" aria-label="Folders that may have moved">
@@ -87,7 +88,7 @@ export function FolderMenu({ folder, recent, onPick, onBrowse, onClose, onKeyDow
                 <button role="menuitem" className="menu-row" title={m.old} onClick={() => choose(() => relocate.onRelocate(m))}>
                   <FolderIcon />
                   <span className="menu-row-title">
-                    {`${basename(m.old)} was moved? Bring its sessions to ${m.suggested ? basename(m.suggested) : "a folder"}…`}
+                    {`${basename(m.old)} was moved? Bring its chats to ${m.suggested ? basename(m.suggested) : "a folder"}…`}
                     <span className="menu-row-path">{m.suggested ?? `Was in ${parentOf(m.old)}`}</span>
                   </span>
                 </button>
@@ -100,34 +101,38 @@ export function FolderMenu({ folder, recent, onPick, onBrowse, onClose, onKeyDow
           <div className="menu-sep" />
         </>
       )}
-      <div className="menu-heading">Recent</div>
-      {recent === null ? (
-        <div className="menu-empty">Loading…</div>
-      ) : recent.length === 0 ? (
-        <div className="menu-empty">No recent folders</div>
-      ) : (
-        <ul className="menu-list">
-          {recent.map((r) => (
-            <li key={r.path}>
-              <button role="menuitem" className={`menu-row${r.path === folder ? " current" : ""}`} title={r.path} onClick={() => choose(() => r.path !== folder && onPick(r.path))}>
-                <FolderIcon />
-                <span className="menu-row-title">
-                  {basename(r.path)}
-                  <span className="menu-row-path">{parentOf(r.path)}</span>
-                </span>
-                {r.path === folder && <span className="menu-row-meta">Current</span>}
-              </button>
-            </li>
-          ))}
-        </ul>
+      {recent !== undefined && (
+        <>
+          <div className="menu-heading">Recent</div>
+          {recent === null ? (
+            <div className="menu-empty">Loading…</div>
+          ) : recent.length === 0 ? (
+            <div className="menu-empty">No recent folders</div>
+          ) : (
+            <ul className="menu-list">
+              {recent.map((r) => (
+                <li key={r.path}>
+                  <button role="menuitem" className={`menu-row${r.path === folder ? " current" : ""}`} title={r.path} onClick={() => choose(() => r.path !== folder && onPick?.(r.path))}>
+                    <FolderIcon />
+                    <span className="menu-row-title">
+                      {basename(r.path)}
+                      <span className="menu-row-path">{parentOf(r.path)}</span>
+                    </span>
+                    {r.path === folder && <span className="menu-row-meta">Current</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="menu-sep" />
+        </>
       )}
-      <div className="menu-sep" />
       <button role="menuitem" className="menu-row" onClick={() => choose(onBrowse)}>
         <span className="menu-row-title">Open folder…</span>
       </button>
       {relocate && (
         <button role="menuitem" className="menu-row" onClick={() => choose(() => relocate.onRelocate(null))}>
-          <span className="menu-row-title">Bring old sessions here…</span>
+          <span className="menu-row-title">Bring old chats here…</span>
         </button>
       )}
     </div>

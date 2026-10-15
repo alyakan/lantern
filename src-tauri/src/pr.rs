@@ -58,6 +58,68 @@ pub fn repo_for(folder: &Path, hints: &[String]) -> Result<PathBuf, String> {
     Ok(repos.iter().find(|r| ahead(r)).unwrap_or(&repos[0]).clone())
 }
 
+/// An open pull request, as the start screen's picker lists it.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct OpenPr {
+    pub number: u32,
+    pub title: String,
+    pub author: String,
+    pub branch: String,
+    pub draft: bool,
+}
+
+/// What `gh pr list --json number,title,author,headRefName,isDraft` printed, as the picker shows it. Newest first, as gh has them.
+pub fn parse_open_prs(json: &[u8]) -> Result<Vec<OpenPr>, String> {
+    let list: Vec<serde_json::Value> = serde_json::from_slice(json).map_err(|e| format!("gh pr list: {e}"))?;
+    Ok(list
+        .iter()
+        .filter_map(|pr| {
+            Some(OpenPr {
+                number: u32::try_from(pr["number"].as_u64()?).ok()?,
+                title: pr["title"].as_str().unwrap_or("").to_string(),
+                author: pr["author"]["login"].as_str().unwrap_or("").to_string(),
+                branch: pr["headRefName"].as_str().unwrap_or("").to_string(),
+                draft: pr["isDraft"].as_bool().unwrap_or(false),
+            })
+        })
+        .collect())
+}
+
+/// What to tell the user when `gh pr list` couldn't list: gh isn't installed, isn't logged in, or the folder isn't a
+/// GitHub repository. Anything else gets gh's own first line.
+pub fn list_error(spawn_error: Option<&std::io::Error>, stderr: &str) -> String {
+    if spawn_error.is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) {
+        return "The GitHub CLI (gh) isn't installed. Install it from cli.github.com, then run `gh auth login` in a terminal.".to_string();
+    }
+    let lower = stderr.to_lowercase();
+    if lower.contains("gh auth login") || lower.contains("not logged in") || lower.contains("authentication") {
+        return "gh isn't logged in to GitHub. Run `gh auth login` in a terminal, then try again.".to_string();
+    }
+    if lower.contains("not a git repository") || lower.contains("no git remotes") || lower.contains("known github host") || lower.contains("could not determine base repo") {
+        return "This folder isn't a GitHub repository, so there are no pull requests to list.".to_string();
+    }
+    let line = stderr.lines().map(str::trim).find(|l| !l.is_empty());
+    match (spawn_error, line) {
+        (Some(e), _) => format!("Couldn't run gh: {e}"),
+        (None, Some(line)) => format!("gh couldn't list the pull requests: {line}"),
+        (None, None) => "gh couldn't list the pull requests.".to_string(),
+    }
+}
+
+/// The folder's repository's open pull requests, from `gh pr list`.
+pub fn open_prs(folder: &Path, path_env: Option<&str>) -> Result<Vec<OpenPr>, String> {
+    let mut cmd = Command::new("gh");
+    cmd.current_dir(folder).args(["pr", "list", "--state", "open", "--limit", "30", "--json", "number,title,author,headRefName,isDraft"]);
+    if let Some(path) = path_env {
+        cmd.env("PATH", path);
+    }
+    match cmd.output() {
+        Err(e) => Err(list_error(Some(&e), "")),
+        Ok(out) if !out.status.success() => Err(list_error(None, &String::from_utf8_lossy(&out.stderr))),
+        Ok(out) => parse_open_prs(&out.stdout),
+    }
+}
+
 /// Looks the PR up with `gh` and fetches it and its base from the remote of the repository `gh` resolved it in: a
 /// fork's `refs/pull/N/head` is in the base repository, not in the fork's origin.
 pub fn resolve(folder: &Path, number: u32, path_env: Option<&str>) -> Result<PrRange, String> {
@@ -254,6 +316,27 @@ mod tests {
         let out = Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
         assert!(out.status.success(), "git {args:?}");
         String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn lists_open_prs_from_gh_json() {
+        let json = br#"[{"number": 12, "title": "Add search", "author": {"login": "ada"}, "headRefName": "feat/search", "isDraft": false},
+                         {"number": 9, "title": "WIP", "author": {"login": "bob"}, "headRefName": "wip", "isDraft": true}]"#;
+        let prs = parse_open_prs(json).unwrap();
+        assert_eq!(prs.len(), 2);
+        assert_eq!((prs[0].number, prs[0].title.as_str(), prs[0].author.as_str(), prs[0].branch.as_str(), prs[0].draft), (12, "Add search", "ada", "feat/search", false));
+        assert!(prs[1].draft);
+        assert!(parse_open_prs(b"[]").unwrap().is_empty());
+        assert!(parse_open_prs(b"not json").is_err());
+    }
+
+    #[test]
+    fn says_why_gh_could_not_list() {
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert!(list_error(Some(&missing), "").contains("isn't installed"));
+        assert!(list_error(None, "To get started with GitHub CLI, please run:  gh auth login").contains("isn't logged in"));
+        assert!(list_error(None, "none of the git remotes configured for this repository point to a known GitHub host").contains("isn't a GitHub repository"));
+        assert!(list_error(None, "\nrate limited\n").contains("rate limited"));
     }
 
     #[test]

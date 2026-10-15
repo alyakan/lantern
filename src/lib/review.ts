@@ -106,9 +106,10 @@ export function baseBranchOf(items: readonly { type: string; text?: string }[]):
 }
 
 /**
- * What Claude last set the Changes pane to show with mcp__lantern__review_target (its card header says it, "pr=512
- * base=auto", see stream_parser::summarize): a pull request, or the checked-out branch against a base (null: Lantern
- * finds it). Null when it never called it; then the review's text is read instead (prNumberOf, baseBranchOf).
+ * What Claude set the Changes pane to show with mcp__lantern__review_target, read from the transcript (its card header
+ * says it, "pr=512 base=auto", see stream_parser::summarize): a pull request, or the checked-out branch against a base
+ * (null: Lantern finds it). Only for a chat reopened from disk: a live call reaches the window as a review_target event
+ * (State.reviewTarget). Null when it never called it; then the review's text is read instead (prNumberOf, baseBranchOf).
  */
 export function reviewTargetOf(items: readonly ChatItem[]): { pr: number | null; base: string | null } | null {
   let found: { pr: number | null; base: string | null } | null = null;

@@ -230,3 +230,25 @@ export const GearIcon = () => (
     <circle cx="7" cy="7" r="4.2" />
   </svg>
 );
+
+// Xcode's "show/hide navigator": a window with its left-hand pane marked.
+export const SidebarIcon = () => (
+  <svg width="15" height="13" viewBox="0 0 16 14" {...base}>
+    <rect x="0.65" y="0.65" width="14.7" height="12.7" rx="2.5" />
+    <line x1="6" y1="1" x2="6" y2="13" />
+  </svg>
+);
+
+// A diamond: a team, in the sidebar.
+export const TeamIcon = () => (
+  <svg width="11" height="11" viewBox="0 0 11 11" {...base}>
+    <path d="M5.5 1 10 5.5 5.5 10 1 5.5z" />
+  </svg>
+);
+
+// A pushpin: a pinned chat.
+export const PinIcon = () => (
+  <svg width="10" height="11" viewBox="0 0 10 11" {...base}>
+    <path d="M3.2 1h3.6l-.5 3 1.7 1.7H2L3.7 4zM5 5.7V10" />
+  </svg>
+);

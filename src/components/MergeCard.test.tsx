@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { NodeActionsContext, type NodeActions } from "../lib/canvasContext";
 import type { MergeProposal } from "../store";
@@ -26,7 +26,7 @@ const proposal: MergeProposal = {
 
 const actions = (over: Partial<NodeActions> = {}): NodeActions => ({
   send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(),
-  approveMerge: vi.fn(), declineMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), spawn: vi.fn(() => Promise.resolve()), closeCheck: vi.fn(() => Promise.resolve({ worktree: true, branch: null, uncommitted: 0, unmerged_commits: 0 })), closeWorker: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(),
+  approveMerge: vi.fn(), declineMerge: vi.fn(() => Promise.resolve()), reviewMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), spawn: vi.fn(() => Promise.resolve()), closeCheck: vi.fn(() => Promise.resolve({ worktree: true, branch: null, uncommitted: 0, unmerged_commits: 0 })), closeWorker: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), setPermissions: vi.fn(), setWorkflow: vi.fn(), setSubagents: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(),
   ...over,
 });
 
@@ -47,7 +47,7 @@ describe("the merge card", () => {
     expect(screen.getByText(/3 commits · 3 files/)).toBeTruthy();
     expect(screen.getByText("+147")).toBeTruthy();
     expect(screen.getByText("−1")).toBeTruthy();
-    expect(screen.getByText(/The main agent says:/).parentElement!.textContent).toContain("Adds the form. 6 tests pass.");
+    expect(screen.getByText(/The Lead says:/).parentElement!.textContent).toContain("Adds the form. 6 tests pass.");
   });
 
   it("lists the files only on request, and a few of many", () => {
@@ -93,14 +93,51 @@ describe("the merge card", () => {
 
   it("says why a proposal that changed under the user is gone", () => {
     show({ ...proposal, status: "declined", problem: "lantern/login-form has commits it didn't have when the merge was proposed." });
-    expect(screen.getByRole("status").textContent).toBe("Not merged: lantern/login-form. lantern/login-form has commits it didn't have when the merge was proposed. The main agent can ask again.");
+    expect(screen.getByRole("status").textContent).toBe("Not merged: lantern/login-form. lantern/login-form has commits it didn't have when the merge was proposed. The Lead can ask again.");
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it("shows a declined proposal as a quiet line", () => {
+  it("rings a card that has just arrived, and not one drawn again later", () => {
+    const { container } = render(
+      <NodeActionsContext.Provider value={actions()}>
+        <MergeCard proposal={{ ...proposal, at: Date.now() }} />
+      </NodeActionsContext.Provider>,
+    );
+    expect(container.querySelector(".merge-card")).toHaveClass("arrive");
+    cleanup();
+    const old = render(
+      <NodeActionsContext.Provider value={actions()}>
+        <MergeCard proposal={{ ...proposal, at: Date.now() - 60_000 }} />
+      </NodeActionsContext.Provider>,
+    );
+    expect(old.container.querySelector(".merge-card")).not.toHaveClass("arrive");
+  });
+
+  it("says the user's own not-yet as a quiet line", () => {
     show({ ...proposal, status: "declined" });
-    expect(screen.getByRole("status").textContent).toBe("Not merged: lantern/login-form. The main agent can ask again.");
+    expect(screen.getByRole("status").textContent).toBe("You said not yet; the lead was told.");
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("shows Not yet as busy while the answer is sent, then lets go", async () => {
+    let sent!: () => void;
+    const declineMerge = vi.fn(() => new Promise<void>((resolve) => (sent = resolve)));
+    const { a } = show(proposal, actions({ declineMerge }));
+    fireEvent.click(screen.getByRole("button", { name: "Not yet" }));
+    expect(a.declineMerge).toHaveBeenCalledWith("w1");
+    expect((screen.getByRole("button", { name: "Sending…" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Approve merge" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => sent());
+    expect((screen.getByRole("button", { name: "Not yet" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("opens the branch's diff in the side panel, whole or at one file", () => {
+    const { a } = show(proposal);
+    fireEvent.click(screen.getByRole("button", { name: "Review diff" }));
+    expect(a.reviewMerge).toHaveBeenLastCalledWith("w1");
+    fireEvent.click(screen.getByRole("button", { name: "Show files" }));
+    fireEvent.click(screen.getByRole("button", { name: "src/App.tsx" }));
+    expect(a.reviewMerge).toHaveBeenLastCalledWith("w1", "src/App.tsx");
   });
 
   it("shows a merged one, with a way to clear the worktree, whose failure is shown", async () => {
@@ -125,10 +162,11 @@ describe("which merges an agent shows", () => {
     expect(visibleProposals(all, null).map((x) => x.branch)).toEqual(["b", "c"]);
   });
 
-  it("leaves a declined one out, so no answered line stays above the composer", () => {
-    const all = [p({ worker: "w1", status: "declined" }), p({ worker: "w2", status: "open", branch: "c" })];
-    expect(visibleProposals(all, null).map((x) => x.branch)).toEqual(["c"]);
-    expect(visibleProposals(all, "w1")).toEqual([]);
+  it("keeps the user's not-yet until the lead proposes again, and drops a proposal that changed under them", () => {
+    const all = [p({ worker: "w1", status: "declined" }), p({ worker: "w2", status: "open", branch: "c" }), p({ worker: "w3", status: "declined", problem: "It changed.", branch: "d" })];
+    expect(visibleProposals(all, null).map((x) => x.worker)).toEqual(["w1", "w2"]);
+    expect(visibleProposals(all, "w1").map((x) => x.worker)).toEqual(["w1"]);
+    expect(visibleProposals(all, "w3")).toEqual([]);
   });
 
   it("brings a worker's merge back when the main agent asks again", () => {

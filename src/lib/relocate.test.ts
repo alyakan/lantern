@@ -22,35 +22,35 @@ const NEXT = "/Users/you/dev/Github/acme-api";
 describe("migrateFolderState", () => {
   it("gives the new folder each per-folder entry of the old one", () => {
     const store = memoryStore({
-      "settings.modeByFolder": { [OLD]: "steps", "/other": "ask" },
-      "settings.autoApproveByFolder": { [OLD]: true },
+      "settings.permissionsByFolder": { [OLD]: "auto", "/other": "ask" },
+      "settings.workflowByFolder": { [OLD]: "steps" },
+      "settings.subagentsByFolder": { [OLD]: "inline" },
       "settings.promptHistory": { [OLD]: ["fix the retry"] },
       "settings.harnessByFolder": { [OLD]: "max" },
       "review.collapsedByFolder": { [OLD]: true },
       "settings.pinnedSessions": { [OLD]: ["s1"] },
-      "settings.orchestraModeByFolder": { [OLD]: "ask" },
     });
     const changed = migrateFolderState(store, OLD, NEXT);
     expect(Object.keys(changed).sort()).toEqual([...FOLDER_RECORDS].sort());
-    expect(read(store, "settings.modeByFolder")).toEqual({ [OLD]: "steps", "/other": "ask", [NEXT]: "steps" });
-    expect(read(store, "settings.autoApproveByFolder")).toEqual({ [OLD]: true, [NEXT]: true });
+    expect(read(store, "settings.permissionsByFolder")).toEqual({ [OLD]: "auto", "/other": "ask", [NEXT]: "auto" });
+    expect(read(store, "settings.workflowByFolder")).toEqual({ [OLD]: "steps", [NEXT]: "steps" });
+    expect(read(store, "settings.subagentsByFolder")).toEqual({ [OLD]: "inline", [NEXT]: "inline" });
     expect(read(store, "settings.promptHistory")).toEqual({ [OLD]: ["fix the retry"], [NEXT]: ["fix the retry"] });
     expect(read(store, "settings.harnessByFolder")).toEqual({ [OLD]: "max", [NEXT]: "max" });
     expect(read(store, "review.collapsedByFolder")).toEqual({ [OLD]: true, [NEXT]: true });
     expect(read(store, "settings.pinnedSessions")).toEqual({ [OLD]: ["s1"], [NEXT]: ["s1"] });
-    expect(read(store, "settings.orchestraModeByFolder")).toEqual({ [OLD]: "ask", [NEXT]: "ask" });
     // What was returned is what was written.
-    expect(changed["settings.modeByFolder"]).toEqual(read(store, "settings.modeByFolder"));
+    expect(changed["settings.permissionsByFolder"]).toEqual(read(store, "settings.permissionsByFolder"));
   });
 
   it("keeps an entry the new folder already has", () => {
-    const store = memoryStore({ "settings.modeByFolder": { [OLD]: "steps", [NEXT]: "ask" } });
+    const store = memoryStore({ "settings.permissionsByFolder": { [OLD]: "auto", [NEXT]: "ask" } });
     expect(migrateFolderState(store, OLD, NEXT)).toEqual({});
-    expect(read(store, "settings.modeByFolder")).toEqual({ [OLD]: "steps", [NEXT]: "ask" });
+    expect(read(store, "settings.permissionsByFolder")).toEqual({ [OLD]: "auto", [NEXT]: "ask" });
   });
 
   it("does nothing for a folder with no saved state, and ignores a key that doesn't read back", () => {
-    const store = memoryStore({ "settings.modeByFolder": { "/other": "ask" } });
+    const store = memoryStore({ "settings.permissionsByFolder": { "/other": "ask" } });
     store.data.set("settings.promptHistory", "{not json");
     expect(migrateFolderState(store, OLD, NEXT)).toEqual({});
     expect(store.data.get("settings.promptHistory")).toBe("{not json");
@@ -86,7 +86,7 @@ describe("migrateFolderState", () => {
         throw new Error("quota");
       },
     };
-    expect(migrateFolderState(store, OLD, NEXT)["settings.modeByFolder"]).toEqual({ [OLD]: "steps", [NEXT]: "steps" });
+    expect(migrateFolderState(store, OLD, NEXT)["settings.permissionsByFolder"]).toEqual({ [OLD]: "steps", [NEXT]: "steps" });
   });
 });
 

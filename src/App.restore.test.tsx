@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { clearMocks } from "@tauri-apps/api/mocks";
 import type { SavedChat } from "./lib/restore";
 
@@ -83,7 +83,7 @@ describe("restoring a team at launch", () => {
     await launch();
     fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
     // The chats are an orchestra again: the canvas can be shown.
-    await screen.findByRole("button", { name: "Show the canvas" });
+    await screen.findByRole("button", { name: "Canvas" });
     // Saved as they are now, with the worker still naming its main agent by session.
     await waitFor(() => {
       const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
@@ -98,9 +98,10 @@ describe("restoring a team at launch", () => {
     localStorage.setItem("settings.modeBySession", JSON.stringify({ bbbb22: "auto", aaaa11: "auto" }));
     await launch();
     fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Show the canvas" }));
-    expect(await screen.findByText("Runs the team · Auto")).toBeInTheDocument();
-    expect(await screen.findByText("login-form · Auto")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
+    // Each window's title bar says its Permissions: the Lead's and the agent's.
+    expect(await within(await screen.findByLabelText(/^Lead,/)).findByRole("button", { name: "Permissions: Auto" })).toBeInTheDocument();
+    expect(await within(await screen.findByLabelText(/Agent Login form/)).findByRole("button", { name: "Permissions: Auto" })).toBeInTheDocument();
     // Still saved under both sessions for the next restart.
     expect(JSON.parse(localStorage.getItem("settings.modeBySession") ?? "{}")).toMatchObject({ bbbb22: "auto", aaaa11: "auto" });
   });
@@ -109,9 +110,23 @@ describe("restoring a team at launch", () => {
     localStorage.setItem("settings.modeBySession", JSON.stringify({ bbbb22: "auto" }));
     await launch();
     fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Show the canvas" }));
-    expect(await screen.findByText("Runs the team · Auto")).toBeInTheDocument();
-    expect(await screen.findByText("login-form · Ask")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
+    expect(await within(await screen.findByLabelText(/^Lead,/)).findByRole("button", { name: "Permissions: Auto" })).toBeInTheDocument();
+    expect(await within(await screen.findByLabelText(/Agent Login form/)).findByRole("button", { name: "Permissions: Ask" })).toBeInTheDocument();
+  });
+
+  it("keeps the side panel beside the canvas, shut until the user opens it, and remembers that", async () => {
+    await launch();
+    fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
+    expect(await screen.findByLabelText(/Agent Login form/)).toBeInTheDocument();
+    // The panel is there beside the canvas (its Changes tab is in the page), shut.
+    expect(screen.getByRole("tab", { name: /^Changes/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show side panel" }));
+    expect(await screen.findByRole("button", { name: "Hide side panel" })).toBeInTheDocument();
+    // Still the canvas, now with the panel open beside it; and the choice is kept for the next time.
+    expect(screen.getByLabelText(/Agent Login form/)).toBeInTheDocument();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("review.canvasPanel") ?? "false")).toBe(true));
   });
 
   it("keeps a worker the user hid hidden across a restart", async () => {
@@ -119,7 +134,7 @@ describe("restoring a team at launch", () => {
     localStorage.setItem("session.openChats", JSON.stringify([hiddenWorker, team[1]]));
     await launch();
     fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
-    await screen.findByRole("button", { name: "Show the canvas" });
+    await screen.findByRole("button", { name: "Canvas" });
     await waitFor(() => {
       const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
       expect(saved.find((c) => c.sessionId === "aaaa11")?.orchestra).toMatchObject({ role: "worker", hidden: true });
@@ -129,7 +144,7 @@ describe("restoring a team at launch", () => {
   it("restores what an older version saved, which has no such field, with the worker shown", async () => {
     await launch();
     fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
-    await screen.findByRole("button", { name: "Show the canvas" });
+    await screen.findByRole("button", { name: "Canvas" });
     await waitFor(() => {
       const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
       expect(saved.find((c) => c.sessionId === "aaaa11")?.orchestra).toMatchObject({ role: "worker", name: "Login form" });
@@ -147,6 +162,6 @@ describe("restoring a team at launch", () => {
       expect(saved).toHaveLength(2);
       expect(saved.every((c) => !c.orchestra)).toBe(true);
     });
-    expect(screen.queryByRole("button", { name: "Show the canvas" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Canvas" })).toBeNull();
   });
 });

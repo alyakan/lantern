@@ -32,7 +32,7 @@ describe("ActivityGroup", () => {
     const onOpenFile = vi.fn();
     render(<ActivityGroup steps={[tool("1", "Task", { children: [tool("s", "Edit", { edit })] })]} folder="/p" onDecide={() => {}} onOpenFile={onOpenFile} />);
     fireEvent.click(screen.getByRole("button", { name: /1 file changed/ }));
-    fireEvent.click(screen.getByTitle("Show in the review panel"));
+    fireEvent.click(screen.getByTitle("Show in the side panel"));
     expect(onOpenFile).toHaveBeenCalledWith("/p/src/b.ts");
   });
 

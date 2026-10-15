@@ -9,6 +9,8 @@ export interface Harness {
   effort: string | null;
   advisor: string | null;
   subagent: string | null;
+  /** Custom only: the preset it was made from, so the chip can say "Balanced, changed" rather than just "Custom". */
+  from?: string;
 }
 
 export const DEFAULT_HARNESS = "default";
@@ -76,6 +78,14 @@ export function summary(h: Harness): string {
   if (h.id === DEFAULT_HARNESS) return "Your model and effort, Claude Code's own settings";
   const parts = [name(h.model) ?? "Default model", h.advisor ? `${name(h.advisor)} advisor` : "no advisor", h.subagent ? `${name(h.subagent)} subagents` : null];
   return parts.filter(Boolean).join(" · ");
+}
+
+/**
+ * What picking a model or effort in a chat on `h` makes it: Custom, that preset with the change (a Custom one stays
+ * Custom and keeps what it was made from).
+ */
+export function customOf(h: Harness, patch: Partial<Harness>): Harness {
+  return { ...h, ...patch, id: CUSTOM_HARNESS, name: "Custom", from: h.id === CUSTOM_HARNESS ? h.from : h.name };
 }
 
 /** The presets to offer: Default first, then the saved ones (built-ins as edited, then your own). */

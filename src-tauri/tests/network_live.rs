@@ -30,7 +30,7 @@ async fn claude_watches_reads_and_summarizes_a_captured_response() {
                 Err(t) => (false, t),
             };
             eprintln!("[{}] {}", if allow { "ok" } else { "error" }, text.lines().next().unwrap_or(""));
-            BridgeResponse { allow, message: Some(text), updated_input: None }
+            BridgeResponse { allow, message: Some(text), updated_input: None, failed: false }
         })
     }));
 

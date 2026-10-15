@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChatItem } from "../store";
-import { guidesByFlavour, pageNote, readPageNote, withPageNote } from "./pageNote";
+import { guidesByFlavour, mapNote, pageNote, readPageNote, withPageNote } from "./pageNote";
+import { architectureMap } from "./architecture";
 import { flavourNote, readFlavourNote, withFlavourNote } from "./flavour";
 import { pagesOf, pageLabel, parseHeading } from "./steps";
 
@@ -64,14 +65,35 @@ describe("pageNote", () => {
   });
 });
 
+describe("mapNote", () => {
+  const overview = (block: string) => architectureMap(pagesOf([u("u1", "map it"), a("a1", `# Overview — x\n\n\`\`\`architecture\n${block}\n\`\`\``)]));
+
+  it("tells Claude why the Overview's block can't be drawn, and to rewrite it from steps_guide's schema", () => {
+    const note = mapNote(overview("{nodes"))!;
+    expect(note).toBe("[Lantern: your Overview's architecture block didn't read (It isn't valid JSON.), so the Map tab can't draw it. Rewrite the Overview with a block that matches steps_guide's schema. (end of Lantern's note)]");
+  });
+
+  it("says nothing when the map reads or there is none", () => {
+    expect(mapNote(overview('{"layers": [{"id": "ui", "label": "UI"}], "nodes": [{"id": "a", "label": "A", "layer": "ui"}], "edges": []}'))).toBeNull();
+    expect(mapNote(null)).toBeNull();
+  });
+
+  it("comes off the message as the user wrote it, alone or after a page note", () => {
+    const broken = mapNote(overview("{nodes"))!;
+    expect(readPageNote(withPageNote(broken, "Next"))).toBe("Next");
+    const unread = pageNote([u("u1", "Next"), a("a1", "## Review · Odd [thing]")], "review", guides)!;
+    expect(readPageNote(withPageNote(`${unread}\n\n${broken}`, "Next"))).toBe("Next");
+  });
+});
+
 describe("the switch note", () => {
   it("carries the flavour's own instructions, brackets and all, and still reads back", () => {
-    const guide = 'Architecture: … {"nodes": [{"id": "a"}], "edges": []} …';
-    const note = flavourNote("architecture", guide);
-    expect(note).toContain("How Architecture works, from Lantern's instructions:");
+    const guide = 'Design: … {"nodes": [{"id": "a"}], "edges": []} …';
+    const note = flavourNote("architecture", { guide });
+    expect(note).toContain("How Design works, from Lantern's instructions:");
     expect(note).toContain(guide);
-    expect(readFlavourNote(withFlavourNote("architecture", "map it", guide))).toEqual({ text: "map it", flavour: "architecture" });
+    expect(readFlavourNote(withFlavourNote("architecture", "map it", { guide }))).toEqual({ text: "map it", flavour: "architecture", explain: false });
     // Without a guide (and in older chats), the short note is as it was.
-    expect(readFlavourNote(withFlavourNote("review", "go"))).toEqual({ text: "go", flavour: "review" });
+    expect(readFlavourNote(withFlavourNote("review", "go"))).toEqual({ text: "go", flavour: "review", explain: false });
   });
 });

@@ -112,7 +112,7 @@ export function BringOldSessionsDialog({ destination, from = null, pickFolder, o
   const total = bringing.reduce((n, r) => n + r.sessions, 0);
   const busy = phase === "running";
   const nothingFound = ready && detected.length === 0 && !seeded;
-  const heading = detected.length > 0 || seeded ? `Lantern found sessions from earlier locations of "${basename(dest ?? "")}":` : "Sessions from the place you chose:";
+  const heading = detected.length > 0 || seeded ? `Lantern found chats from earlier locations of "${basename(dest ?? "")}":` : "Chats from the place you chose:";
 
   // What each checked place would bring besides its sessions, read only, for the Details. Asked once per place.
   const pathsKey = rows
@@ -195,12 +195,12 @@ export function BringOldSessionsDialog({ destination, from = null, pickFolder, o
         }}
       >
         <div className="revert-title" id={titleId}>
-          {dest ? `Bring old sessions into ${basename(dest)}` : "Bring old sessions into a project"}
+          {dest ? `Bring old chats into ${basename(dest)}` : "Bring old chats into a project"}
         </div>
 
         {!dest && (
           <>
-            <p className="revert-text">Choose the project folder these sessions belong to.</p>
+            <p className="revert-text">Choose the project folder these chats belong to.</p>
             <div className="revert-actions">
               <button type="button" onClick={onClose}>
                 Cancel
@@ -226,18 +226,18 @@ export function BringOldSessionsDialog({ destination, from = null, pickFolder, o
                 {error}
               </div>
             )}
-            {!error && !ready && <div className="menu-empty">Looking for sessions…</div>}
+            {!error && !ready && <div className="menu-empty">Looking for chats…</div>}
 
             {ready && phase === "done" && (
               <p className="revert-text" role="status">
-                Done: {count(broughtSessions, "session is", "sessions are")} in History now.
+                Done: {count(broughtSessions, "chat is", "chats are")} in History now.
               </p>
             )}
 
             {ready && phase !== "done" && rows.length > 0 && (
               <>
                 <p className="revert-text">{heading}</p>
-                <ul className="menu-list bring-list" aria-label="Places with sessions">
+                <ul className="menu-list bring-list" aria-label="Places with chats">
                   {rows.map((row) => (
                     <li key={row.path}>
                       <label className={`bring-row${row.already ? " done" : ""}`} title={row.path}>
@@ -245,7 +245,7 @@ export function BringOldSessionsDialog({ destination, from = null, pickFolder, o
                         <span className="bring-row-text">
                           <span className="bring-row-path">{middleTruncate(tildePath(row.path))}</span>
                           <span className="bring-row-meta">
-                            {row.already ? `${count(row.sessions, "session", "sessions")}, already brought over` : `${count(row.sessions, "session", "sessions")}, ${relativeTime(row.updated_ms)}`}
+                            {row.already ? `${count(row.sessions, "chat", "chats")}, already brought over` : `${count(row.sessions, "chat", "chats")}, ${relativeTime(row.updated_ms)}`}
                             {!row.exists && <span className="bring-gone">folder no longer exists</span>}
                           </span>
                         </span>
@@ -258,7 +258,7 @@ export function BringOldSessionsDialog({ destination, from = null, pickFolder, o
 
             {ready && phase !== "done" && nothingFound && (
               <>
-                <p className="revert-text">No old sessions found under the name "{basename(dest)}".</p>
+                <p className="revert-text">No old chats found under the name "{basename(dest)}".</p>
                 <p className="bring-heading" id={`${choiceGroup}-heading`}>
                   Where was it before?
                 </p>
@@ -281,7 +281,7 @@ export function BringOldSessionsDialog({ destination, from = null, pickFolder, o
                 {known === null ? (
                   <div className="menu-empty">Loading folders…</div>
                 ) : matches.length === 0 ? (
-                  <div className="menu-empty">{known.length <= 1 ? "No other folders have sessions." : "No folder matches."}</div>
+                  <div className="menu-empty">{known.length <= 1 ? "No other folders have chats." : "No folder matches."}</div>
                 ) : (
                   <ul className="menu-list bring-list" role="radiogroup" aria-labelledby={`${choiceGroup}-heading`}>
                     {matches.map((f) => (
@@ -291,7 +291,7 @@ export function BringOldSessionsDialog({ destination, from = null, pickFolder, o
                           <span className="bring-row-text">
                             <span className="bring-row-path">{middleTruncate(tildePath(f.path))}</span>
                             <span className="bring-row-meta">
-                              {`${count(f.sessions, "session", "sessions")}, ${relativeTime(f.updated_ms)}`}
+                              {`${count(f.sessions, "chat", "chats")}, ${relativeTime(f.updated_ms)}`}
                               {!f.exists && <span className="bring-gone">folder no longer exists</span>}
                             </span>
                           </span>
@@ -305,7 +305,7 @@ export function BringOldSessionsDialog({ destination, from = null, pickFolder, o
 
             {ready && phase !== "done" && (
               <>
-                <p className="revert-text">Your old session files stay where they are: Lantern copies what's needed.</p>
+                <p className="revert-text">Your old chats stay where they are: Lantern copies what's needed.</p>
                 <details className="bring-details">
                   <summary>Details</summary>
                   <label className="bring-option">
@@ -328,7 +328,7 @@ export function BringOldSessionsDialog({ destination, from = null, pickFolder, o
 
             {Object.keys(failures).length > 0 && (
               <div className="revert-error" role="alert">
-                <div>Some sessions weren't brought over:</div>
+                <div>Some chats weren't brought over:</div>
                 <ul className="bring-failures">
                   {Object.entries(failures).map(([path, reason]) => (
                     <li key={path} title={path}>
@@ -360,7 +360,7 @@ export function BringOldSessionsDialog({ destination, from = null, pickFolder, o
                   Cancel
                 </button>
                 <button type="submit" className="primary" ref={primaryRef} disabled={!ready || total === 0 || busy}>
-                  {busy ? "Bringing sessions…" : `Bring ${count(total, "session", "sessions")} here`}
+                  {busy ? "Bringing chats…" : `Bring ${count(total, "chat", "chats")} here`}
                 </button>
               </>
             )}

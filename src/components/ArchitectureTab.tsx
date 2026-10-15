@@ -4,7 +4,7 @@ import type { ArchitectureMap } from "../lib/architecture";
 import { MapDiagram, useDiagram } from "./Diagram";
 import { svgSize } from "../lib/mermaid";
 import { useArchitecturePane } from "../lib/architecturePane";
-import { PanZoom } from "./PanZoom";
+import { PanZoom, useReveal } from "./PanZoom";
 
 export const CHANGE_LABEL: Record<Change, string> = { new: "New", changed: "Changed", removed: "Removed" };
 export const STATUS_LABEL: Record<Status, string> = { done: "Done", "in-progress": "In progress", planned: "Planned" };
@@ -26,6 +26,8 @@ interface GraphProps {
   onShow?: (id: string | null) => void;
   /** An issue picked from the list: its box or arrow is lit. */
   picked?: MapIssue | null;
+  /** A box a page's chip named: it is lit and brought into view, each time `key` changes. */
+  reveal?: { id: string; key: number } | null;
 }
 
 /**
@@ -33,8 +35,20 @@ interface GraphProps {
  * (its colour how far it's built, a ⚠ when Claude found a problem with it), and each arrow marked where it crosses from
  * one layer into the next. An arrow that goes around a layer is drawn in amber; one Claude found a problem with, in red.
  */
-export function ArchGraphSvg({ layout, current, opens, onOpen, shown = null, onShow, picked = null }: GraphProps) {
+export function ArchGraphSvg({ layout, current, opens, onOpen, shown = null, onShow, picked = null, reveal = null }: GraphProps) {
   const svg = useRef<SVGSVGElement>(null);
+  const panTo = useReveal();
+  const rectOf = (n: PlacedNode) => ({ x: n.x - n.w / 2, y: n.y - n.h / 2, w: n.w, h: n.h });
+  useEffect(() => {
+    const n = reveal && layout.nodes.find((x) => x.id === reveal.id);
+    if (n) panTo?.(rectOf(n));
+  }, [reveal?.key]);
+  // The page on screen changed: its box is brought into view, easing there (not at all when it already is in view).
+  const litKey = current.join(",");
+  useEffect(() => {
+    const n = layout.nodes.find((x) => current.includes(x.id));
+    if (n) panTo?.(rectOf(n));
+  }, [litKey]);
   const focused = layout.nodes.some((n) => current.includes(n.id)) || picked !== null;
   const lit = (id: string) => current.includes(id) || picked?.node === id;
   const onKey = (e: KeyboardEvent, n: PlacedNode) => {
@@ -42,7 +56,12 @@ export function ArchGraphSvg({ layout, current, opens, onOpen, shown = null, onS
     if (dir) {
       e.preventDefault();
       const to = nearest(layout.nodes, n.id, dir);
-      if (to) svg.current?.querySelector<SVGGElement>(`[data-node=${JSON.stringify(to)}]`)?.focus();
+      if (to) {
+        // The focus moves (without the browser scrolling the clipped surface), and the map follows it.
+        svg.current?.querySelector<SVGGElement>(`[data-node=${JSON.stringify(to)}]`)?.focus({ preventScroll: true });
+        const target = layout.nodes.find((x) => x.id === to);
+        if (target) panTo?.(rectOf(target));
+      }
     } else if ((e.key === "Enter" || e.key === " ") && opens[n.id]) {
       e.preventDefault();
       onOpen?.(opens[n.id]);
@@ -101,6 +120,7 @@ export function ArchGraphSvg({ layout, current, opens, onOpen, shown = null, onS
             transform={`translate(${n.x - n.w / 2}, ${n.y - n.h / 2})`}
             tabIndex={0}
             role="button"
+            aria-disabled={page ? undefined : true}
             aria-label={`${n.label}${said.length ? `, ${said.join(", ")}` : ""}`}
             onMouseEnter={() => onShow?.(n.id)}
             onMouseLeave={() => onShow?.(null)}
@@ -183,6 +203,8 @@ function NodePanel({ node, page, layer, issues, picked, onPick, onOpen }: { node
 
 interface TabProps {
   map: ArchitectureMap;
+  /** A box to light and bring into view (a part's "On the map" chip), each time `box.key` changes. */
+  box?: { id: string; key: number } | null;
   current: string[];
   /** Each page's name ("Part 2 of 3 — Retry policy"), for the panel's link. */
   pageNames: Record<string, string>;
@@ -216,7 +238,7 @@ function Legend({ layout }: { layout: ArchLayout }) {
 }
 
 /** The right pane's Architecture tab: the latest Overview's map, on a surface you can move around. */
-export function ArchitectureTab({ map, current, pageNames, onOpenPage }: TabProps) {
+export function ArchitectureTab({ map, box, current, pageNames, onOpenPage }: TabProps) {
   // Laid out both ways; the one that shows bigger in the pane is drawn (a pane is usually taller than it is wide). A map
   // with layers has one way: its bands, top to bottom.
   const both = useMemo(() => (map.kind === "native" ? { LR: layoutArchitecture(map.spec, "LR"), TB: layoutArchitecture(map.spec, "TB") } : null), [map]);
@@ -237,6 +259,10 @@ export function ArchitectureTab({ map, current, pageNames, onOpenPage }: TabProp
   const issues = useMemo(() => (layout ? issuesOf(layout) : []), [layout]);
   const [shown, setShown] = useState<string | null>(null);
   const [picked, setPicked] = useState<MapIssue | null>(null);
+  // A chip on a page named a box: it is the one looked at now.
+  useEffect(() => {
+    if (box) setShown(box.id);
+  }, [box?.key]);
   const node = layout?.nodes.find((n) => n.id === shown) ?? null;
   const page = node && map.nodes[node.id] ? { key: map.nodes[node.id], name: pageNames[map.nodes[node.id]] ?? "Its page" } : null;
   const layer = node?.layer && map.kind === "native" ? (map.spec.layers.find((l) => l.id === node.layer)?.label ?? null) : null;
@@ -252,7 +278,7 @@ export function ArchitectureTab({ map, current, pageNames, onOpenPage }: TabProp
         <>
           <div ref={body} className="arch-tab-body">
             <PanZoom width={layout.width} height={layout.height} label="Architecture map" fitKey={direction + map.page + JSON.stringify(map.kind === "native" ? map.spec : "")}>
-              <ArchGraphSvg layout={layout} current={current} opens={map.nodes} onOpen={onOpenPage} shown={shown} onShow={setShown} picked={picked} />
+              <ArchGraphSvg layout={layout} current={current} opens={map.nodes} onOpen={onOpenPage} shown={shown} onShow={setShown} picked={picked} reveal={box} />
             </PanZoom>
           </div>
           {/* One height whatever the panel shows: if hovering a box changed it, the map would refit and move the box
@@ -292,7 +318,7 @@ function MermaidMap({ map, current, onOpenPage }: { map: Extract<ArchitectureMap
 export function ArchitectureBlock({ text }: { text: string }) {
   const read = useMemo(() => parseArchitecture(text), [text]);
   const layout = useMemo(() => ("spec" in read ? layoutArchitecture(read.spec) : null), [read]);
-  const openPane = useArchitecturePane();
+  const pane = useArchitecturePane();
   if (!layout) {
     return (
       <div className="code-block">
@@ -309,13 +335,14 @@ export function ArchitectureBlock({ text }: { text: string }) {
     <div className="code-block arch-block">
       <div className="code-block-head">
         <span className="code-block-lang">Architecture map{issues ? ` · ${issues === 1 ? "1 issue" : `${issues} issues`}` : ""}</span>
-        {openPane && (
-          <button className="code-block-copy arch-block-open" onClick={openPane}>
+        {pane && (
+          <button className="code-block-copy arch-block-open" onClick={() => pane.open()}>
             Open in the pane
           </button>
         )}
       </div>
-      <div className="arch-block-body" onClick={openPane ?? undefined}>
+      {/* A click on the picture is the mouse's way to the same button; the keyboard has the button. */}
+      <div className="arch-block-body" onClick={pane ? () => pane.open() : undefined}>
         <ArchGraphSvg layout={layout} current={[]} opens={{}} />
       </div>
     </div>

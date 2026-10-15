@@ -9,9 +9,9 @@ import { MergeCard } from "./MergeCard";
 import { NodeComposer } from "./NodeComposer";
 
 /**
- * The merges to show for an agent: open ones, and the latest merged one for each worker (as a quiet line, with its
- * clear-the-worktree button). A declined one leaves nothing: the main agent can ask again, and its "Not merged" line
- * would otherwise sit above the composer for good. A main agent shows every worker's; a worker shows its own.
+ * The merges to show for an agent: open ones, and the latest answered one for each worker as a quiet line (a merged one
+ * with its clear-the-worktree button, one the user said "not yet" to until the lead proposes again). A proposal that was
+ * dropped because the branch changed leaves nothing. A main agent shows every worker's; a worker shows its own.
  */
 export function visibleProposals(all: MergeProposal[], worker: string | null): MergeProposal[] {
   const mine = worker ? all.filter((p) => p.worker === worker) : all;
@@ -20,9 +20,9 @@ export function visibleProposals(all: MergeProposal[], worker: string | null): M
     .reverse()
     .filter((p) => {
       if (p.status === "open") return true;
-      if (p.status === "declined") return false;
       if (seen.has(p.worker)) return false;
       seen.add(p.worker);
+      if (p.status === "declined" && p.problem) return false;
       return !mine.some((q) => q.worker === p.worker && q.status === "open");
     })
     .reverse();
@@ -68,9 +68,9 @@ export const NodeBody = memo(function NodeBody({ slot, parent }: { slot: string;
       {wakesPaused(state) && (
         <div className="node-banner info" role="status">
           <span>
-            {state.wakes.length === 1 ? "1 update from the workers is" : `${state.wakes.length} updates from the workers are`} held back: {WAKE_LIMIT} replies in a row went out without you, and this keeps the team from running on unwatched.
+            {state.wakes.length === 1 ? "1 update from the agents is" : `${state.wakes.length} updates from the agents are`} held back: {WAKE_LIMIT} replies in a row went out without you, and this keeps the team from running on unwatched.
           </span>
-          <button onClick={() => actions.send(slot, "Carry on with the latest updates from the workers.")}>Pass them on</button>
+          <button onClick={() => actions.send(slot, "Carry on with the latest updates from the agents.")}>Pass them on</button>
         </div>
       )}
       {state.banner && (

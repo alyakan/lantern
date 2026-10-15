@@ -20,15 +20,21 @@ pub struct RecentMenu(Mutex<Vec<String>>);
 /// accelerator is run by the webview's keydown; its label carries the shortcut instead, so the menu can't swallow a key
 /// Monaco or a text field needs.
 pub const ACTIONS: &[(&str, &str, Option<&str>)] = &[
-    ("new-session", "New Session", Some("CmdOrCtrl+N")),
+    ("new-session", "New Chat", Some("CmdOrCtrl+N")),
     ("open-folder", "Open Folder…", Some("CmdOrCtrl+O")),
-    ("session-history", "Session History   ⌘K", None),
+    ("session-history", "Chat History   ⌘K", None),
     ("find-file", "Find File…", Some("CmdOrCtrl+P")),
     ("search-files", "Search in Files…", Some("Shift+CmdOrCtrl+F")),
     ("find-in-file", "Find in File   ⌘F", None),
-    ("toggle-changes", "Toggle Changes Pane", Some("CmdOrCtrl+Backslash")),
+    ("toggle-sidebar", "Show/Hide Sidebar", Some("Ctrl+CmdOrCtrl+S")),
+    ("toggle-changes", "Show/Hide Side Panel", Some("CmdOrCtrl+Backslash")),
     ("command-palette", "Command Palette…", Some("Shift+CmdOrCtrl+P")),
     ("settings", "Settings…", Some("CmdOrCtrl+Comma")),
+    ("work-build", "Build", None),
+    ("work-review-pr", "Review a PR…", None),
+    ("work-debug", "Debug", None),
+    ("work-design", "Design", None),
+    ("work-team", "Start a Team", Some("Shift+CmdOrCtrl+N")),
     ("keyboard-shortcuts", "Keyboard Shortcuts   ⌘/", None),
     ("report-bug", "Report a Bug…", None),
 ];
@@ -136,6 +142,7 @@ fn build(app: &AppHandle, recent: &[String]) -> tauri::Result<Menu<Wry>> {
             &action("search-files")?,
             &action("find-in-file")?,
             &separator()?,
+            &action("toggle-sidebar")?,
             &action("toggle-changes")?,
             &action("command-palette")?,
             &separator()?,
@@ -143,6 +150,12 @@ fn build(app: &AppHandle, recent: &[String]) -> tauri::Result<Menu<Wry>> {
             &separator()?,
             &PredefinedMenuItem::fullscreen(app, None)?,
         ],
+    )?;
+    let work = Submenu::with_items(
+        app,
+        "Work",
+        true,
+        &[&action("work-build")?, &action("work-review-pr")?, &action("work-debug")?, &action("work-design")?, &separator()?, &action("work-team")?],
     )?;
     let window = Submenu::with_id_and_items(
         app,
@@ -153,7 +166,7 @@ fn build(app: &AppHandle, recent: &[String]) -> tauri::Result<Menu<Wry>> {
     )?;
     let help = Submenu::with_id_and_items(app, HELP_SUBMENU_ID, "Help", true, &[&action("keyboard-shortcuts")?, &action("report-bug")?])?;
 
-    Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window, &help])
+    Menu::with_items(app, &[&app_menu, &file, &edit, &view, &work, &window, &help])
 }
 
 /// Sets the menu bar with `recent` as Open Recent's folders, and remembers them for the items that open them.
@@ -209,6 +222,7 @@ mod tests {
         id: String,
         key: Option<String>,
         shift: bool,
+        ctrl: bool,
         menu: bool,
         native: bool,
     }
@@ -220,7 +234,7 @@ mod tests {
             .filter_map(|line| {
                 let id = between(line, "id: \"")?;
                 let key = between(line, "key: \"").map(|k| if k == "\\\\" { "\\".to_string() } else { k });
-                Some(Def { id, key, shift: line.contains("shift: true"), menu: line.contains("menu: true"), native: line.contains("native: true") })
+                Some(Def { id, key, shift: line.contains("shift: true"), ctrl: line.contains("ctrl: true"), menu: line.contains("menu: true"), native: line.contains("native: true") })
             })
             .collect()
     }
@@ -241,7 +255,7 @@ mod tests {
             "/" => "Slash".to_string(),
             other => other.to_uppercase(),
         };
-        format!("{}CmdOrCtrl+{name}", if def.shift { "Shift+" } else { "" })
+        format!("{}{}CmdOrCtrl+{name}", if def.ctrl { "Ctrl+" } else { "" }, if def.shift { "Shift+" } else { "" })
     }
 
     #[test]
@@ -283,8 +297,9 @@ mod tests {
         let line = r#"  { id: "toggle-changes", title: "Toggle Changes Pane", group: "View", key: "\\", menu: true, native: true },"#;
         assert_eq!(between(line, "id: \""), Some("toggle-changes".into()));
         assert_eq!(between(line, "key: \""), Some("\\\\".into()));
-        assert_eq!(accelerator_for(&Def { id: "x".into(), key: Some("\\".into()), shift: false, menu: true, native: true }), "CmdOrCtrl+Backslash");
-        assert_eq!(accelerator_for(&Def { id: "x".into(), key: Some("p".into()), shift: true, menu: true, native: true }), "Shift+CmdOrCtrl+P");
+        assert_eq!(accelerator_for(&Def { id: "x".into(), key: Some("\\".into()), shift: false, ctrl: false, menu: true, native: true }), "CmdOrCtrl+Backslash");
+        assert_eq!(accelerator_for(&Def { id: "x".into(), key: Some("p".into()), shift: true, ctrl: false, menu: true, native: true }), "Shift+CmdOrCtrl+P");
+        assert_eq!(accelerator_for(&Def { id: "x".into(), key: Some("s".into()), shift: false, ctrl: true, menu: true, native: true }), "Ctrl+CmdOrCtrl+S");
     }
 
     #[test]

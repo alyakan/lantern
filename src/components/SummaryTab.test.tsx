@@ -31,7 +31,7 @@ describe("SummaryTab step reverts", () => {
     render(<SummaryTab slot="s1" summary={summary(step({ range: null }))} changed={[]} running={false} onOpenPage={vi.fn()} revert={controls()} />);
     const button = screen.getByRole("button", { name: "Revert" });
     expect(button).toBeDisabled();
-    expect(button).toHaveAttribute("title", "This step's changes aren't known: the session was reopened after it.");
+    expect(button).toHaveAttribute("title", "This step's changes aren't known: the chat was reopened after it.");
   });
 
   it("is off while Claude works, and absent without the controls", async () => {

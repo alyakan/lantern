@@ -22,7 +22,7 @@ describe("chatsToSave", () => {
       { sessionId: "a", folder: "/p", title: "Retry flaky uploads", draft: "", active: false },
       { sessionId: "b", folder: "/other", title: "Fix b", draft: "half a prompt", active: true },
       // Typed but never sent: no conversation to resume, just the folder and the text.
-      { sessionId: null, folder: "/p", title: "New session", draft: "never sent", active: false },
+      { sessionId: null, folder: "/p", title: "New chat", draft: "never sent", active: false },
     ]);
   });
 });
@@ -143,6 +143,11 @@ describe("sessionModesToSave", () => {
     let c = team();
     c = chatsReducer(c, { type: "in", slot: "w1", action: { type: "ui_event", event: { kind: "agent_mode", mode: "ask" } } });
     expect(sessionModesToSave(c.slots, { old: "steps", "worker-1": "auto" })).toEqual({ old: "steps", "main-1": "auto", "worker-1": "ask" });
+  });
+
+  it("saves Step by step with Auto Permissions as its own mode, so reopening the session brings both settings back", () => {
+    const slots = { s1: { ...talked("steps-1"), mode: "steps" as const, autoApprove: true }, s2: { ...talked("steps-2"), mode: "steps" as const } };
+    expect(sessionModesToSave(slots, {})).toEqual({ "steps-1": "steps:auto", "steps-2": "steps" });
   });
 
   it("saves nothing new when every mode is already there, and skips chats with no session yet", () => {

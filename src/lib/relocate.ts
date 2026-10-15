@@ -3,13 +3,13 @@
  * folder's path (what usePersistentState saved for it); migrateFolderState gives the new path the old one's entry.
  */
 export const FOLDER_RECORDS = [
-  "settings.modeByFolder",
-  "settings.autoApproveByFolder",
+  "settings.permissionsByFolder",
+  "settings.workflowByFolder",
+  "settings.subagentsByFolder",
   "settings.promptHistory",
   "settings.harnessByFolder",
   "review.collapsedByFolder",
   "settings.pinnedSessions",
-  "settings.orchestraModeByFolder",
 ] as const;
 
 /** The folder that was open last, reopened at launch. */
@@ -32,6 +32,7 @@ export const NOT_FOLDER_KEYED = [
   "settings.appearance",
   "settings.textSize",
   "review.collapsed",
+  "review.canvasPanel",
   "review.ratio",
   "review.scope",
   "review.tab",
@@ -39,6 +40,12 @@ export const NOT_FOLDER_KEYED = [
   "review.commitsOpen",
   "files.markdownView",
   "summary.exportResults",
+  // The sidebar: minimized to the rail, its width, and which projects were folded or opened by hand or removed from the
+  // recents (lists of paths, not any one folder's state: a moved folder is simply a new project there).
+  "sidebar.collapsed",
+  "sidebar.width",
+  "sidebar.expanded",
+  "sidebar.hidden",
 ] as const;
 
 /**

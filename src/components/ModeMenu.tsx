@@ -1,19 +1,48 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Mode } from "../types";
 import type { Flavour } from "../lib/flavour";
 import { useModeGuide } from "../lib/modeGuide";
-import { BoltIcon, InfoIcon, ShieldIcon, StepsIcon } from "./icons";
-import { modeName } from "./ModeGuide";
+import { PERMISSIONS_LABEL, type Permissions, type Workflow, WORKFLOW_LABEL } from "../lib/workflow";
+import { BoltIcon, InfoIcon, OrchestraIcon, ShieldIcon, SparkIcon, StepsIcon } from "./icons";
+import { workflowName, type GuideKey } from "./ModeGuide";
 import { useMenuKeys } from "./useMenuKeys";
 
-const MODES: { value: Mode; label: string; hint: string; icon: ReactNode }[] = [
-  { value: "ask", label: "Ask before actions", hint: "Edits apply; commands and other actions ask you first", icon: <ShieldIcon /> },
-  { value: "auto", label: "Auto-approve", hint: "A classifier approves most actions; you're rarely asked", icon: <BoltIcon /> },
-  { value: "steps", label: "Step by step", hint: "One page at a time: Claude suggests whether to build, teach, review or debug, and you start it", icon: <StepsIcon /> },
+const PERMISSION_ROWS: { value: Permissions; hint: string; icon: ReactNode }[] = [
+  { value: "ask", hint: "Edits apply; commands and other actions ask you first", icon: <ShieldIcon /> },
+  { value: "auto", hint: "A classifier approves most actions; you're rarely asked", icon: <BoltIcon /> },
 ];
 
-// Under the chat box: how much Claude may do on its own. It opens a menu upwards, like the model chip.
-export function ModeMenu({ mode, flavour = null, onChange, disabled }: { mode: Mode; flavour?: Flavour | null; onChange: (mode: Mode) => void; disabled?: boolean }) {
+const WORKFLOW_ROWS: { value: Workflow; hint: string; icon: ReactNode }[] = [
+  { value: "chat", hint: "A plain conversation: Claude works as you ask", icon: <SparkIcon /> },
+  { value: "steps", hint: "One page at a time: Claude suggests whether to build, review, debug or design, and you start it", icon: <StepsIcon /> },
+  { value: "team", hint: "This chat becomes the Lead of a team: it starts agents that work in parallel, each in a chat of its own", icon: <OrchestraIcon /> },
+];
+
+interface Row<T extends string> {
+  value: T;
+  label: string;
+  hint: string;
+  icon: ReactNode;
+  /** Why it can't be picked now; the row is shown but off. */
+  off?: string;
+}
+
+interface MenuProps<T extends string> {
+  /** The menu's name, for assistive tech: "Permissions" or "Workflow". */
+  name: string;
+  value: T;
+  /** The chip's text. */
+  text: string;
+  rows: Row<T>[];
+  onChange: (value: T) => void;
+  disabled?: boolean;
+  /** A title bar's chip: small, with no icon, and a menu that opens downwards. */
+  compact?: boolean;
+  /** The "How the modes work…" page this menu's row opens on. */
+  guideKey: GuideKey;
+}
+
+// A chip with a menu: under the chat box it opens upwards like the model chip, on a canvas title bar downwards.
+function SettingMenu<T extends string>({ name, value, text, rows, onChange, disabled, compact, guideKey }: MenuProps<T>) {
   const [open, setOpen] = useState(false);
   const guide = useModeGuide();
   const root = useRef<HTMLDivElement>(null);
@@ -31,31 +60,41 @@ export function ModeMenu({ mode, flavour = null, onChange, disabled }: { mode: M
     };
   }, [open]);
 
-  const current = MODES.find((m) => m.value === mode) ?? MODES[0];
+  const current = rows.find((r) => r.value === value) ?? rows[0];
   return (
-    <div className="model-picker mode-menu-anchor" ref={root}>
-      <button className="meta-item mode-chip" aria-haspopup="menu" aria-expanded={open} disabled={disabled} title={current.hint} onClick={() => setOpen(!open)}>
-        {current.icon}
-        {modeName(mode, flavour)}
+    <div className={`model-picker mode-menu-anchor${compact ? " compact" : ""}`} ref={root}>
+      <button
+        className={compact ? "node-chip" : "meta-item mode-chip"}
+        aria-label={`${name}: ${text}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={disabled}
+        title={`${name}: ${current.hint}`}
+        onClick={() => setOpen(!open)}
+      >
+        {!compact && current.icon}
+        {text}
         <span className="chev down" aria-hidden />
       </button>
       {open && (
-        <div className="menu model-menu mode-menu" role="menu" aria-label="Permission mode" onKeyDown={keys.onKeyDown}>
-          {MODES.map((m) => (
+        <div className={`menu model-menu mode-menu${compact ? " below" : ""}`} role="menu" aria-label={name} onKeyDown={keys.onKeyDown}>
+          {rows.map((r) => (
             <button
-              key={m.value}
+              key={r.value}
               role="menuitemradio"
-              aria-checked={m.value === mode}
-              className={`menu-row${m.value === mode ? " current" : ""}`}
+              aria-checked={r.value === value}
+              disabled={!!r.off}
+              title={r.off}
+              className={`menu-row${r.value === value ? " current" : ""}`}
               onClick={() => {
                 setOpen(false);
-                if (m.value !== mode) onChange(m.value);
+                if (r.value !== value) onChange(r.value);
               }}
             >
-              <span className="mode-icon">{m.icon}</span>
+              <span className="mode-icon">{r.icon}</span>
               <span className="mode-text">
-                <span className="menu-row-title">{m.label}</span>
-                <span className="mode-hint">{m.hint}</span>
+                <span className="menu-row-title">{r.label}</span>
+                <span className="mode-hint">{r.off ?? r.hint}</span>
               </span>
             </button>
           ))}
@@ -67,7 +106,7 @@ export function ModeMenu({ mode, flavour = null, onChange, disabled }: { mode: M
                 className="menu-row mode-menu-more"
                 onClick={() => {
                   setOpen(false);
-                  guide(mode === "steps" && flavour ? flavour : mode);
+                  guide(guideKey);
                 }}
               >
                 <span className="mode-icon">
@@ -81,4 +120,37 @@ export function ModeMenu({ mode, flavour = null, onChange, disabled }: { mode: M
       )}
     </div>
   );
+}
+
+interface PermissionsProps {
+  permissions: Permissions;
+  onChange: (permissions: Permissions) => void;
+  disabled?: boolean;
+  compact?: boolean;
+}
+
+/** Permissions: how much Claude may do without asking (Ask or Auto), the same in every workflow. */
+export function PermissionsMenu({ permissions, onChange, disabled, compact }: PermissionsProps) {
+  const rows = PERMISSION_ROWS.map((r) => ({ ...r, label: PERMISSIONS_LABEL[r.value] }));
+  return <SettingMenu name="Permissions" value={permissions} text={PERMISSIONS_LABEL[permissions]} rows={rows} onChange={onChange} disabled={disabled} compact={compact} guideKey={permissions} />;
+}
+
+interface WorkflowProps {
+  workflow: Workflow;
+  /** Step by step's flavour, shown with it. */
+  flavour?: Flavour | null;
+  onChange: (workflow: Workflow) => void;
+  disabled?: boolean;
+  compact?: boolean;
+  /** An agent of a team: its workflow is Chat or Step by step, and the team is its Lead's. */
+  agent?: boolean;
+  /** A Lead that still has agents: it stays in Team until they are closed. */
+  holdsAgents?: boolean;
+}
+
+/** Workflow: how the work is shaped (Chat, Step by step or Team). */
+export function WorkflowMenu({ workflow, flavour = null, onChange, disabled, compact, agent, holdsAgents }: WorkflowProps) {
+  const held = holdsAgents ? "This team still has agents. Close them first." : undefined;
+  const rows: Row<Workflow>[] = WORKFLOW_ROWS.filter((r) => !(agent && r.value === "team")).map((r) => ({ ...r, label: WORKFLOW_LABEL[r.value], off: r.value !== "team" ? held : undefined }));
+  return <SettingMenu name="Workflow" value={workflow} text={workflowName(workflow, flavour)} rows={rows} onChange={onChange} disabled={disabled} compact={compact} guideKey={workflow === "steps" && flavour ? flavour : workflow} />;
 }

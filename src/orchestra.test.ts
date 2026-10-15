@@ -74,7 +74,7 @@ describe("a worker the main agent starts", () => {
     const stopped = ev({ ...main, status: "running", items: [{ type: "tool", id: "t", name: "Bash", summary: "", status: "running", output: null, edit: null, children: [] }] }, { kind: "agent_stopped", reason: null });
     expect(stopped.status).toBe("ended");
     expect(stopped.stopRequested).toBe(false); // App restarts an ended chat that has stopRequested
-    expect(stopped.banner).toEqual({ kind: "info", text: expect.stringContaining("stopped this worker"), action: "restart" });
+    expect(stopped.banner).toEqual({ kind: "info", text: expect.stringContaining("stopped this agent"), action: "restart" });
     expect(stopped.items[0]).toMatchObject({ status: "error" });
     const failed = ev(main, { kind: "agent_stopped", reason: "It didn't start: claude is not installed" });
     expect(failed.banner).toEqual({ kind: "error", text: "It didn't start: claude is not installed", action: null });

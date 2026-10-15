@@ -3,19 +3,20 @@ import { CollapsibleText } from "./CollapsibleText";
 import { Md } from "./Md";
 import { AWAY_FROM_END, JumpToLatest } from "./JumpToLatest";
 import { useSlot } from "../lib/slot";
-import { FLAVOUR_LABEL, FLAVOURS, type Flavour } from "../lib/flavour";
+import { FLAVOUR_LABEL, FLAVOURS, flavourName, type Flavour } from "../lib/flavour";
 import { FlavourBadge } from "./FlavourBadge";
 import { FLAVOUR_ICON } from "./ModeGuide";
 import { recallScroll, rememberScroll } from "../lib/scrollMemory";
 import { messageTime } from "../lib/time";
 import { initials, useUserName } from "../lib/userName";
 import type { State } from "../store";
-import { isApproval, movesOn, pageLabel, pagesOf, pageTitle, promptText, startedFlavour, startText, stayedIn, stayText, type StepPage, type StepTurn } from "../lib/steps";
+import { isApproval, movesOn, pageLabel, pagesOf, pageTitle, promptText, startedChoice, startedFlavour, startText, stayedIn, stayText, type StepPage, type StepTurn } from "../lib/steps";
 import { mattersToTask } from "../lib/commands";
 import type { BackgroundRun, ChatItem, ToolItem } from "../store";
 import { workingVerb } from "../lib/verbs";
 import { ChatStream, type StreamHandlers } from "./ChatStream";
 import { isVerdictNext, parseReviewFile, splitFileTitle, verdictMessage, withoutCue, type ReviewFile, type Verdict } from "../lib/review";
+import { unreadReply } from "../lib/pageNote";
 import { ReviewFileHeader, ReviewFileView, ReviewSummaryTable, type ReviewedFinding } from "./ReviewPages";
 import { ArchitecturePartView } from "./ArchitecturePages";
 import { parseArchitecturePart, type ArchitecturePart } from "../lib/architecture";
@@ -50,11 +51,11 @@ interface Props extends StreamHandlers {
   onSend?: (text: string) => void;
   /** The flavour Step by step is in (one picked and not yet sent included); null before one is chosen. */
   flavour: Flavour | null;
-  /** Pick a flavour from the header's badge: Claude is told with the next message. */
-  onPickFlavour: (flavour: Flavour) => void;
+  /** Explain as you go is on (Build and Debug). */
+  explain?: boolean;
+  /** Pick a flavour (and Explain as you go) from the header's badge: Claude is told with the next message. */
+  onPickFlavour: (flavour: Flavour, explain?: boolean) => void;
   /** Claude Code's auto mode approves actions instead of the app asking; each step is still reviewed as a page. */
-  autoApprove?: boolean;
-  onAutoApprove?: (on: boolean) => void;
   /** The page on screen changed: the turns whose changes the Changes pane should show (null: not all known). */
   onPage: (range: { from: number; to: number } | null) => void;
   /** The page that's on screen (once a slide has come to rest): the Map tab lights the boxes it covers. */
@@ -70,7 +71,7 @@ const isTyping = (el: Element | null) => !!el && (el instanceof HTMLInputElement
 // Step-by-step mode's view of the conversation: a page per step, side by side, one on screen. Questions about a step
 // and changes to it stay on its page; Previous and Next (or ← →) slide between pages, and on the newest page Next
 // approves the step and Claude carries on.
-export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPage, onShown, onReviewFile, autoApprove = false, onAutoApprove, jump = null, ...handlers }: Props) {
+export function StepsView({ state, flavour, explain = false, onNext, onSend, onPickFlavour, onPage, onShown, onReviewFile, jump = null, ...handlers }: Props) {
   // A revision you undid: the page shows the version you went back to, until Claude revises the step again.
   const [kept, setKept] = useState<Record<string, { turn: number; over: number }>>({});
   const claudes = pagesOf(state.items);
@@ -198,7 +199,7 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
   const review = flavour === "review";
   const arch = flavour === "architecture";
   const newest = at === last;
-  const teach = flavour === "learn";
+  const teach = explain;
   // Review: whether a file has come yet, so Next opens the first one or the next.
   const filesSoFar = review && pages.slice(0, at + 1).some((p) => p.heading?.kind === "file");
 
@@ -212,6 +213,11 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
       return { ...all, [pageKey]: page };
     });
   const currentReview = page ? (reviewOf(page)?.findings ?? partOf(page)?.concerns ?? null) : null;
+  // A part's concerns the user has answered (agreed or rejected), of all it has.
+  const concernCount = page ? (partOf(page)?.concerns.length ?? 0) : 0;
+  const answeredCount = page ? Object.keys(verdicts[page.key] ?? {}).length : 0;
+  // The latest reply, when it looked like a page but Lantern couldn't read it as one: said under the newest page.
+  const unread = !!flavour && unreadReply(state.items) !== null && !running;
   const next = () => {
     const message = currentReview ? verdictMessage(currentReview, verdicts[page.key]) : "Next";
     onNext(message === "Next." ? "Next" : message);
@@ -248,13 +254,7 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
           </span>
         )}
         <div className="spacer" />
-        <FlavourBadge flavour={flavour} onPick={onPickFlavour} disabled={running} />
-        {onAutoApprove && (
-          <button className={`steps-auto${autoApprove ? " on" : ""}`} role="switch" aria-checked={autoApprove} disabled={running} title={autoApprove ? "Auto-approve is on: Claude Code's auto mode approves routine actions and stops risky ones. Click to be asked instead." : "Commands and other actions ask you first. Click to auto-approve them (you still review every step)."} onClick={() => onAutoApprove(!autoApprove)}>
-            <span className="steps-auto-knob" aria-hidden />
-            Auto-approve
-          </button>
-        )}
+        <FlavourBadge flavour={flavour} explain={explain} onPick={onPickFlavour} disabled={running} />
       </div>
 
       <div className="steps-viewport" ref={viewport}>
@@ -288,6 +288,7 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
                   runs={state.backgroundRuns}
                   latest={latestOf.get(p.key) ?? p.main}
                   onUpdate={i === last && !running && onSend ? () => onSend(UPDATE_STEP) : undefined}
+                  unread={i === last && unread}
                   onKeep={(turn, over) => setKept((all) => ({ ...all, [p.key]: { turn, over } }))}
                   {...handlers}
                 />}
@@ -316,9 +317,16 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
             // The suggestion's card has the answers.
             <span className="steps-hint">Start it, or pick another</span>
           ) : (
-            <button className="primary" disabled={waiting || heading?.kind === "done" || heading?.kind === "summary"} title={review ? "Send your verdicts and go on to the next file" : arch ? "Send your verdicts and go on" : heading?.kind === "plan-complete" ? "Lock the plan: Claude builds exactly these steps, and asks before changing them" : heading?.kind === "plan-update" ? "Approve this change to the locked plan" : "Approve this page and go on to the next"} onClick={next}>
+            <>
+            {arch && heading?.kind === "part" && concernCount > 0 && (
+              <span className="steps-answered" aria-live="polite">
+                {answeredCount} of {concernCount} concern{concernCount === 1 ? "" : "s"} answered
+              </span>
+            )}
+            <button className="primary" disabled={waiting || heading?.kind === "done" || heading?.kind === "summary"} title={review ? "Send your verdicts and go on to the next file" : arch ? (heading?.kind === "frame" ? "Go on to the Overview" : heading?.kind === "overview" ? "Go on to the first part" : heading?.kind === "part" && heading.n === heading.total ? "Send your verdicts and go on to the Summary" : "Send your verdicts and go on to the next part") : heading?.kind === "plan-complete" ? "Lock the plan: Claude builds exactly these steps, and asks before changing them" : heading?.kind === "plan-update" ? "Approve this change to the locked plan" : "Approve this page and go on to the next"} onClick={next}>
               {heading?.kind === "done" || heading?.kind === "summary" ? "Done" : heading?.kind === "plan-complete" ? "Lock plan →" : heading?.kind === "plan-update" ? "Approve update →" : review ? (heading?.kind === "file" && heading.n === heading.total ? "Summary →" : filesSoFar ? "Next file →" : "First file →") : arch ? (heading?.kind === "frame" ? "Overview →" : heading?.kind === "overview" ? "First part →" : heading?.kind === "part" && heading.n === heading.total ? "Summary →" : "Next part →") : flavour === "debug" ? "Next →" : "Next step →"}
             </button>
+            </>
           )
         ) : (
           <button className="ghost" onClick={() => go(at + 1)}>
@@ -332,6 +340,8 @@ export function StepsView({ state, flavour, onNext, onSend, onPickFlavour, onPag
 
 interface PageProps extends StreamHandlers {
   page: StepPage;
+  /** The latest reply looked like a page but wasn't one of the flavour's headings: Lantern says so under it. */
+  unread?: boolean;
   first: boolean;
   live: boolean;
   teach: boolean;
@@ -358,7 +368,7 @@ interface PageProps extends StreamHandlers {
   onUpdate?: () => void;
 }
 
-function Page({ page, first, live, teach, review, arch, suggestion, verdicts, onVerdict, summary, folder, latest, runs, onKeep, onUpdate, ...handlers }: PageProps) {
+function Page({ page, unread, first, live, teach, review, arch, suggestion, verdicts, onVerdict, summary, folder, latest, runs, onKeep, onUpdate, ...handlers }: PageProps) {
   const h = page.heading;
   const opening = page.turns[0];
   const asked = opening.prompt.auto ? null : first ? opening.prompt.text : justMovesOn(opening.prompt.text) ? null : promptText(opening.prompt.text);
@@ -424,7 +434,7 @@ function Page({ page, first, live, teach, review, arch, suggestion, verdicts, on
         <ChatStream items={mainItems} folder={folder} live={live && page.main === page.turns.length - 1} {...handlers} />
         {reviewFile && <ReviewFileView file={reviewFile} verdicts={verdicts} onVerdict={onVerdict} />}
         {part && <ArchitecturePartView part={part} verdicts={verdicts} onVerdict={onVerdict} />}
-        {h?.kind === "switch" && h.flavour && suggestion && <SuggestionCard flavour={h.flavour} why={h.title} {...suggestion} />}
+        {h?.kind === "switch" && h.flavour && suggestion && <SuggestionCard flavour={h.flavour} explain={!!h.explain} why={h.title} {...suggestion} />}
         {summary && <ReviewSummaryTable rows={summary.rows} onAction={summary.onAction} busy={summary.busy} architecture={summary.architecture} />}
       </div>
       <StepCommands page={page} runs={runs} />
@@ -454,6 +464,11 @@ function Page({ page, first, live, teach, review, arch, suggestion, verdicts, on
           })}
         </div>
       )}
+      {unread && (
+        <p className="step-unread" role="status">
+          Lantern couldn't show this as a page; it will tell Claude with your next message.
+        </p>
+      )}
     </div>
   );
 }
@@ -462,16 +477,18 @@ function Page({ page, first, live, teach, review, arch, suggestion, verdicts, on
  * Claude's suggestion to work in a flavour: start it, stay in the one you're in, or start another. Once answered, it
  * says how.
  */
-function SuggestionCard({ flavour, why, current, answer, onAnswer }: { flavour: Flavour; why: string; current: Flavour | null; answer: string | null; onAnswer?: (text: string) => void }) {
+function SuggestionCard({ flavour, explain, why, current, answer, onAnswer }: { flavour: Flavour; explain: boolean; why: string; current: Flavour | null; answer: string | null; onAnswer?: (text: string) => void }) {
   const label = FLAVOUR_LABEL[flavour];
-  const started = answer === null ? null : startedFlavour(answer) ?? (isApproval(answer) ? flavour : null);
-  const outcome = answer === null ? null : started ? `You started ${FLAVOUR_LABEL[started]}` : stayedIn(answer) ? "You kept going as before" : "You answered in the chat";
+  // "Build, explaining as you go" when Claude suggests the option too.
+  const named = flavourName(flavour, explain);
+  const started = answer === null ? null : startedChoice(answer) ?? (isApproval(answer) ? { flavour, explain } : null);
+  const outcome = answer === null ? null : started ? `You started ${flavourName(started.flavour, started.explain)}` : stayedIn(answer) ? "You kept going as before" : "You answered in the chat";
   return (
     <div className={`suggestion${outcome ? " answered" : ""}`} role="group" aria-label={`Claude suggests ${label}`}>
       <div className="suggestion-head">
         <span className="suggestion-icon">{FLAVOUR_ICON[flavour]}</span>
         <span>
-          Claude suggests <strong>{label}</strong>
+          Claude suggests <strong>{named}</strong>
         </span>
       </div>
       {why && <p className="suggestion-why">{why}</p>}
@@ -480,8 +497,8 @@ function SuggestionCard({ flavour, why, current, answer, onAnswer }: { flavour: 
       ) : (
         onAnswer && (
           <div className="suggestion-actions">
-            <button className="primary" onClick={() => onAnswer(startText(label))}>
-              Start {label}
+            <button className="primary" onClick={() => onAnswer(startText(label, explain))}>
+              Start {named}
             </button>
             {current && current !== flavour && <button onClick={() => onAnswer(stayText(FLAVOUR_LABEL[current]))}>Stay in {FLAVOUR_LABEL[current]}</button>}
             <span className="suggestion-others">

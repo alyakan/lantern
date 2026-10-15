@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
-import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -77,8 +77,11 @@ export const api = {
   shellInput: (slot: string, id: string, text: string) => invoke<void>("shell_input", { slot, id, text }),
   stopShell: (slot: string, id: string) => invoke<void>("stop_shell", { slot, id }),
   interrupt: (slot: string) => invoke<void>("interrupt", { slot }),
-  /** `autoApprove`: Step by step's auto-approve (null keeps the chat's current setting). */
-  restartSession: (slot: string, mode: Mode, effort: string | null, autoApprove: boolean | null = null) => invoke<void>("restart_session", { slot, mode, effort, autoApprove }),
+  /**
+   * `autoApprove`: Permissions Auto on Step by step (null keeps the chat's current setting). `team`: Workflow Team, which
+   * makes the chat the Lead of a team (true) or an ordinary chat again (false); null leaves its role alone.
+   */
+  restartSession: (slot: string, mode: Mode, effort: string | null, autoApprove: boolean | null = null, team: boolean | null = null) => invoke<void>("restart_session", { slot, mode, effort, autoApprove, team }),
   /** `turn`: with the "turn" scope, which turn (the latest when null); `toTurn`: the end of a range of turns from it. */
   /** `pr`: with the "pr" scope, the pull request's number. */
   /** `base`: with the "branch" scope, the branch it is compared with (null: Lantern works it out). */
@@ -96,7 +99,8 @@ export const api = {
   /** Step by step's flavours as the prompt Claude runs with has them: each one's instructions and its pages' headings. */
   stepsGuide: () => invoke<FlavourGuide[]>("steps_guide"),
   /** Where the main agent's helpers run from now on in this chat (null: ask each time again). */
-  setAgentChoice: (slot: string, choice: "canvas" | "inline" | null) => invoke<void>("set_agent_choice", { slot, choice }),
+  /** The team's Subagents setting, on its Lead: where the Lead's built-in helpers run. */
+  setSubagents: (slot: string, subagents: "canvas" | "inline") => invoke<void>("set_subagents", { slot, subagents }),
   /** Makes an "Always allow" rule from a card (the request itself is answered by respondPermission). */
   addPermissionRule: (slot: string, rule: NewRule) => invoke<void>("add_permission_rule", { slot, rule }),
   /** The rules Settings lists: this chat's (when `slot` is open) and every folder's. */
@@ -124,6 +128,8 @@ export const api = {
   movedFolderCandidates: () => invoke<MovedFolder[]>("moved_folder_candidates"),
   /** The places the folder was before whose sessions can be brought over: named like it, or already brought over. */
   oldLocations: (folder: string) => invoke<OldLocation[]>("old_locations", { folder }),
+  /** The open pull requests of the folder's repository (gh); rejects with a message for the user when gh is missing, logged out or the folder isn't on GitHub. */
+  openPrs: (folder: string) => invoke<OpenPr[]>("list_open_prs", { folder }),
   /** Every folder with sessions, gone ones included, for choosing where a folder was before. */
   knownFolders: () => invoke<FolderSessions[]>("known_folders"),
   /** What moving `old` to `next` would bring over. Nothing is changed. */
@@ -182,6 +188,7 @@ export const api = {
   networkResponse: (folder: string, id: string) => invoke<NetworkDetail>("network_response", { folder, id }),
   /** Removes a watch; false if the folder had none by that label. */
   networkUnwatch: (folder: string, label: string) => invoke<boolean>("network_unwatch", { folder, label }),
+  networkRewatch: (folder: string, label: string, method: string | null, url: string) => invoke<void>("network_rewatch", { folder, label, method, url }),
   /** A folder's Network tab has something new: a match, a summary, a watch, or Network Monitor going up or down. */
   onNetworkChanged: (cb: () => void): Promise<UnlistenFn> => listen("network-changed", () => cb()),
   onUiEvent: (cb: (slot: string, event: UiEvent) => void): Promise<UnlistenFn> =>

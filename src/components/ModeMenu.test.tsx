@@ -1,31 +1,83 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { ModeMenu } from "./ModeMenu";
+import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
 import { PermissionCard } from "./PermissionCard";
 
-describe("ModeMenu", () => {
-  it("offers ask before actions, auto-approve and step by step, and switches", () => {
+describe("PermissionsMenu", () => {
+  it("offers Ask and Auto, and switches", () => {
     const onChange = vi.fn();
-    render(<ModeMenu mode="ask" onChange={onChange} />);
-    fireEvent.click(screen.getByRole("button", { name: /Ask before actions/ }));
-    expect(screen.getAllByRole("menuitemradio").map((r) => r.querySelector(".menu-row-title")?.textContent)).toEqual(["Ask before actions", "Auto-approve", "Step by step"]);
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Step by step/ }));
-    expect(onChange).toHaveBeenCalledWith("steps");
+    render(<PermissionsMenu permissions="ask" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: /Permissions: Ask/ }));
+    expect(screen.getAllByRole("menuitemradio").map((r) => r.querySelector(".menu-row-title")?.textContent)).toEqual(["Ask", "Auto"]);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Auto/ }));
+    expect(onChange).toHaveBeenCalledWith("auto");
   });
 
-  it("moves between the modes with the arrow keys, and gives focus back to its chip when it closes", () => {
-    render(<ModeMenu mode="ask" onChange={() => {}} />);
-    const chip = screen.getByRole("button", { name: /Ask before actions/ });
+  it("does not call back for the setting the chat is already on", () => {
+    const onChange = vi.fn();
+    render(<PermissionsMenu permissions="auto" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: /Permissions: Auto/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Auto/ }));
+    expect(onChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("WorkflowMenu", () => {
+  it("offers Chat, Step by step and Team, and switches", () => {
+    const onChange = vi.fn();
+    render(<WorkflowMenu workflow="chat" onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: /Workflow: Chat/ }));
+    expect(screen.getAllByRole("menuitemradio").map((r) => r.querySelector(".menu-row-title")?.textContent)).toEqual(["Chat", "Step by step", "Team"]);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Team/ }));
+    expect(onChange).toHaveBeenCalledWith("team");
+  });
+
+  it("says nothing about teaching, and never the old mode names", () => {
+    render(<WorkflowMenu workflow="chat" onChange={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Workflow/ }));
+    const text = screen.getByRole("menu").textContent ?? "";
+    expect(text).not.toMatch(/teach|Auto-approve|Ask before actions/);
+    expect(text).toMatch(/build, review, debug or design/);
+  });
+
+  it("names Step by step's flavour on its chip", () => {
+    render(<WorkflowMenu workflow="steps" flavour="review" onChange={() => {}} />);
+    expect(screen.getByRole("button", { name: "Workflow: Step by step · Review" })).toBeInTheDocument();
+  });
+
+  it("keeps a team's Lead in Team while it has agents, and offers an agent no Team at all", () => {
+    const { rerender } = render(<WorkflowMenu workflow="team" holdsAgents onChange={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Workflow: Team/ }));
+    expect(screen.getByRole("menuitemradio", { name: /^Chat/ })).toBeDisabled();
+    expect(screen.getByRole("menuitemradio", { name: /^Step by step/ })).toBeDisabled();
+    expect(screen.getByRole("menuitemradio", { name: /^Team/ })).toBeEnabled();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    rerender(<WorkflowMenu workflow="chat" agent onChange={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /Workflow: Chat/ }));
+    expect(screen.getAllByRole("menuitemradio").map((r) => r.querySelector(".menu-row-title")?.textContent)).toEqual(["Chat", "Step by step"]);
+  });
+
+  it("moves between the rows with the arrow keys, and gives focus back to its chip when it closes", () => {
+    render(<WorkflowMenu workflow="chat" onChange={() => {}} />);
+    const chip = screen.getByRole("button", { name: /Workflow: Chat/ });
     fireEvent.click(chip);
-    const [ask, auto, steps] = screen.getAllByRole("menuitemradio");
-    expect(ask).toHaveFocus();
-    fireEvent.keyDown(ask, { key: "ArrowDown" });
-    expect(auto).toHaveFocus();
-    fireEvent.keyDown(auto, { key: "End" });
+    const [chat, steps, team] = screen.getAllByRole("menuitemradio");
+    expect(chat).toHaveFocus();
+    fireEvent.keyDown(chat, { key: "ArrowDown" });
     expect(steps).toHaveFocus();
-    fireEvent.keyDown(steps, { key: "Escape" });
+    fireEvent.keyDown(steps, { key: "End" });
+    expect(team).toHaveFocus();
+    fireEvent.keyDown(team, { key: "Escape" });
     expect(screen.queryByRole("menu")).toBeNull();
     expect(chip).toHaveFocus();
+  });
+
+  it("a title bar's chips are compact, with their menus below", () => {
+    render(<WorkflowMenu workflow="chat" compact onChange={() => {}} />);
+    const chip = screen.getByRole("button", { name: /Workflow: Chat/ });
+    expect(chip).toHaveClass("node-chip");
+    fireEvent.click(chip);
+    expect(screen.getByRole("menu")).toHaveClass("below");
   });
 });
 

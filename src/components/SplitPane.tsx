@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode, type TransitionEvent } from "react";
 import { clampRatio } from "../lib/layout";
 
-// The chat pane: Step by step's header (the flavour badge, the auto-approve switch and three page dots) has to fit. Keep
+// The chat pane: Step by step's header (the flavour badge and three page dots) has to fit. Keep
 // in sync with .split-left in styles.css.
 const MIN_LEFT = 384;
-// The side pane: its tabs (Changes, Files, Summary, Agents, Tests) and the Changes filter have to fit on one row.
+// The side pane: its tabs (Changes, Files, Plan, Activity, Tests, Network) and the Changes filter have to fit on one row.
 const MIN_RIGHT = 420;
 const DURATION = 220; // keep in sync with .split-side.animating in styles.css
 
@@ -119,7 +119,7 @@ export function SplitPane({ left, right, ratio, collapsed, onRatio }: Props) {
               className="split-handle"
               role="separator"
               aria-orientation="vertical"
-              aria-label="Resize the review panel"
+              aria-label="Resize the side panel"
               aria-valuenow={Math.round(ratio * 100)}
               tabIndex={0}
               title="Drag to resize, double-click to reset"

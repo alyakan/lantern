@@ -2,14 +2,12 @@ import { PlanMeter } from "./PlanMeter";
 import { useEffect, useRef, useState } from "react";
 import type { BackgroundTask, Status } from "../store";
 import { elapsed } from "../lib/time";
-import type { OldLocation, RecentFolder, SessionSummary } from "../types";
 import { basename } from "../lib/diff";
 import { useAction } from "../lib/actions";
-import { FolderMenu, type RelocateMenu } from "./FolderPill";
+import { FolderMenu } from "./FolderPill";
 import { useMenuKeys } from "./useMenuKeys";
-import { HistoryMenu, type OpenChat } from "./HistoryMenu";
 import type { ActivityStatus } from "../lib/status";
-import { BranchIcon, CanvasIcon, ClockIcon, FailIcon, FolderIcon, GearIcon, OrchestraIcon, PaneIcon, PlusIcon, WaitIcon } from "./icons";
+import { BranchIcon, CanvasIcon, FailIcon, FolderIcon, GearIcon, PaneIcon } from "./icons";
 
 interface Props {
   folder: string | null;
@@ -20,24 +18,11 @@ interface Props {
   onToggleReview: () => void;
   /** Opens Settings (MCP servers, skills). */
   onOpenSettings?: () => void;
-  sessionId?: string | null;
-  loadSessions?: () => Promise<SessionSummary[]>;
-  onOpenSession?: (id: string) => void;
-  onNewSession?: () => void;
-  /** With these, the folder pill opens the recent-folders menu instead of the folder dialog. */
-  loadRecent?: () => Promise<RecentFolder[]>;
-  onPickFolder?: (path: string) => void;
-  /** Chats open in the background, and how to switch to one. */
-  openChats?: OpenChat[];
-  onSwitchChat?: (slot: string) => void;
-  /** Closes an open chat that isn't on screen. */
-  onCloseChat?: (slot: string) => void;
   branch?: string | null;
   /** What the activity viewer says on its right. */
   activity?: ActivityStatus;
-  /** Counts beside the status, like Xcode's warnings and errors: failed steps in the latest turn, and other chats
-   * waiting for an answer. */
-  issues?: { failed: number; waiting: number };
+  /** A count beside the status, like Xcode's errors: failed steps in the latest turn. */
+  issues?: { failed: number };
   /** What this chat's claude still runs in the background (commands, agents); a count beside the status lists them. */
   background?: BackgroundTask[];
   /** Stops one of them; it leaves the list when claude says it's gone. */
@@ -45,12 +30,10 @@ interface Props {
   onShowFailure?: () => void;
   /** Hides the failure count until something else fails. */
   onClearFailures?: () => void;
-  /** The folder menu's relocation parts (see FolderPill). */
-  relocate?: RelocateMenu;
-  /** The places this folder's sessions came from that aren't brought over (loaded when History opens), and opens the dialog for them. */
-  bringOld?: { load: () => Promise<OldLocation[]>; onOpen: () => void };
+  /** The folder menu's "Bring old chats here…" (the projects, their recents and moved notices are in the sidebar). */
+  onBringOld?: () => void;
   /** Orchestras: a main agent and the workers it runs. `exists`: there is one, so the canvas can be shown. */
-  orchestra?: { view: "chat" | "canvas"; exists: boolean; attention: number; onView: (view: "chat" | "canvas") => void; onNew: () => void };
+  orchestra?: { view: "chat" | "canvas"; exists: boolean; attention: number; onView: (view: "chat" | "canvas") => void };
 }
 
 /** How long a stopped task may stay listed before its Stop comes back. */
@@ -66,27 +49,21 @@ function taskKind(type: string): string {
 
 // No native title bar: the traffic lights sit in the left gutter and the bar drags the window. In the centre, like
 // Xcode's activity viewer: the folder and branch on the left (it opens the folder menu, like Xcode's scheme), what
-// Claude is doing on the right, and a progress bar along its bottom edge while it works.
-export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, sessionId = null, loadSessions, onOpenSession, onNewSession, loadRecent, onPickFolder, openChats = [], onSwitchChat, onCloseChat, branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, relocate, bringOld, orchestra }: Props) {
+// Claude is doing on the right, and a progress bar along its bottom edge while it works. The projects, new chats and
+// teams, and past chats are in the sidebar.
+export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, onBringOld, orchestra }: Props) {
   // A working chat keeps running in the background when you switch away, so only a starting one blocks switching.
   const busy = status === "starting";
-  const backgroundRunning = openChats.some((c) => c.state === "running" || c.state === "waiting" || !!c.background);
-  const backgroundUnread = openChats.some((c) => c.unread && c.state === "done");
-  const toggleLabel = reviewCollapsed ? "Show changes" : "Hide changes";
-  const canUseSessions = !!folder && !busy;
+  const toggleLabel = reviewCollapsed ? "Show side panel" : "Hide side panel";
   // At most one of the title bar's menus is open.
-  const [menu, setMenu] = useState<"history" | "folders" | "background" | null>(null);
-  const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
-  const [recent, setRecent] = useState<RecentFolder[] | null>(null);
-  const [oldPlaces, setOldPlaces] = useState<OldLocation[] | null>(null);
+  const [menu, setMenu] = useState<"folders" | "background" | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const close = () => setMenu(null);
   // The button that opened the menu: closing it (Escape, a pick) puts focus back there, not on the page.
   const opener = useRef<HTMLButtonElement | null>(null);
   const folderButton = useRef<HTMLButtonElement>(null);
-  const historyButton = useRef<HTMLButtonElement>(null);
-  // The folder menu's arrow keys, once its list has loaded; the first button with a menu in the title is the folder one.
-  const folderKeys = useMenuKeys(menu === "folders" && recent !== null, root);
+  // The folder menu's arrow keys; the first button with a menu in the title is the folder one.
+  const folderKeys = useMenuKeys(menu === "folders", root);
   useEffect(() => {
     const active = document.activeElement;
     if (!menu && (!active || active === document.body)) opener.current?.focus();
@@ -105,8 +82,8 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
   }, [menu]);
 
   useEffect(() => {
-    if (busy || (menu === "history" && !canUseSessions)) close();
-  }, [busy, canUseSessions]);
+    if (busy) close();
+  }, [busy]);
   useEffect(() => {
     if (menu === "background" && background.length === 0) close();
   }, [background.length]);
@@ -137,20 +114,6 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
     return () => clearInterval(id);
   }, [menu]);
 
-  const toggleHistory = () => {
-    if (menu === "history") return close();
-    opener.current = historyButton.current;
-    setSessions(null);
-    setOldPlaces(null);
-    setMenu("history");
-    loadSessions?.().then(setSessions, () => setSessions([]));
-    bringOld?.load().then(setOldPlaces, () => setOldPlaces([]));
-  };
-  // The old sessions the History offers to bring over: those of places not brought over yet.
-  const toBring = (oldPlaces ?? []).filter((p) => !p.already).reduce((n, p) => n + p.sessions, 0);
-
-  useAction("new-session", () => onNewSession?.(), canUseSessions && !!onNewSession);
-  useAction("session-history", toggleHistory, canUseSessions && !!loadSessions);
   useAction(
     "open-folder",
     () => {
@@ -160,13 +123,12 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
     !busy,
   );
 
+  // With a folder open its menu has Open folder… and Bring old chats here…; with none, the button opens the dialog.
   const toggleFolders = () => {
-    if (!loadRecent || !onPickFolder) return onOpenFolder();
+    if (!folder) return onOpenFolder();
     if (menu === "folders") return close();
     opener.current = folderButton.current;
-    setRecent(null);
     setMenu("folders");
-    loadRecent().then(setRecent, () => setRecent([]));
   };
 
   return (
@@ -174,7 +136,7 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
       <div className="topbar-side" data-tauri-drag-region />
       <div className="title-center" ref={root}>
         <div className={`viewer${activity?.working ? " working" : ""}`}>
-          <button ref={folderButton} className={`viewer-scheme${menu === "folders" ? " pressed" : ""}`} aria-haspopup="menu" aria-expanded={menu === "folders"} onClick={toggleFolders} disabled={busy} title={folder ? `${folder}\nClick to switch folders (⌘O opens one)` : "Open a folder for Claude to work in (⌘O)"}>
+          <button ref={folderButton} className={`viewer-scheme${menu === "folders" ? " pressed" : ""}`} aria-haspopup="menu" aria-expanded={menu === "folders"} onClick={toggleFolders} disabled={busy} title={folder ? folder : "Open a folder for Claude to work in (⌘O)"}>
             <FolderIcon />
             <span className="viewer-name">{folder ? basename(folder) : "Open folder…"}</span>
             {folder && branch && (
@@ -201,12 +163,6 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
               {background.length}
             </button>
           )}
-          {!!issues?.waiting && (
-            <button className="viewer-issue" title={`${issues.waiting} other chat${issues.waiting === 1 ? " is" : "s are"} waiting for you`} disabled={!canUseSessions} onClick={toggleHistory}>
-              <WaitIcon />
-              {issues.waiting}
-            </button>
-          )}
           {!!issues?.failed && (
             <span className="viewer-issue-group">
               <button className="viewer-issue failed" title={`${issues.failed} step${issues.failed === 1 ? "" : "s"} failed in this turn. Click to show.`} onClick={onShowFailure}>
@@ -228,11 +184,11 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
           )}
           {activity?.working && <span className="viewer-progress" aria-hidden />}
         </div>
-        <div className="toolbar-group">
-          {orchestra?.exists && (
+        {orchestra?.exists && (
+          <div className="toolbar-group">
             <button
-              className={`icon${orchestra.view === "canvas" ? " pressed" : ""}`}
-              aria-label={orchestra.view === "canvas" ? "Show the chat" : "Show the canvas"}
+              className={`icon canvas-toggle${orchestra.view === "canvas" ? " pressed" : ""}`}
+              aria-label={orchestra.attention > 0 ? `Canvas, ${orchestra.attention === 1 ? "1 agent needs" : `${orchestra.attention} agents need`} you` : "Canvas"}
               aria-pressed={orchestra.view === "canvas"}
               title={orchestra.view === "canvas" ? "Back to the chat (⇧⌘C)" : "Show the canvas (⇧⌘C)"}
               onClick={() => orchestra.onView(orchestra.view === "canvas" ? "chat" : "canvas")}
@@ -240,24 +196,8 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
               <CanvasIcon />
               {orchestra.attention > 0 && orchestra.view !== "canvas" && <span className="dot" aria-hidden="true" />}
             </button>
-          )}
-          {orchestra && (
-            <button className="icon" aria-label="New orchestra" title="New orchestra: a main agent that runs workers" disabled={!canUseSessions} onClick={orchestra.onNew}>
-              <OrchestraIcon />
-            </button>
-          )}
-          {onNewSession && (
-            <button className="icon" aria-label="New session" title="New session (⌘N)" disabled={!canUseSessions} onClick={onNewSession}>
-              <PlusIcon />
-            </button>
-          )}
-          {loadSessions && onOpenSession && (
-            <button ref={historyButton} className={`icon${menu === "history" ? " pressed" : ""}`} aria-label="Session history" aria-expanded={menu === "history"} title="Session history (⌘K)" disabled={!canUseSessions} onClick={toggleHistory}>
-              <ClockIcon />
-              {(backgroundUnread || backgroundRunning) && <span className={`dot${backgroundUnread ? " unread" : ""}`} aria-hidden="true" />}
-            </button>
-          )}
-        </div>
+          </div>
+        )}
         {menu === "background" && (
           <div className="menu background-menu" role="dialog" aria-label="Background tasks">
             <div className="menu-heading">Running in the background</div>
@@ -282,25 +222,7 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
             <div className="background-note">Claude is told when each one ends, and may reply on its own then. Stop in the chat box ends the turn only; these keep running.</div>
           </div>
         )}
-        {menu === "history" && onOpenSession && (
-          <HistoryMenu
-            sessions={sessions}
-            currentId={sessionId}
-            onClose={close}
-            onOpen={(id) => {
-              close();
-              if (id !== sessionId) onOpenSession(id);
-            }}
-            open={openChats}
-            onSwitch={(slot) => {
-              close();
-              onSwitchChat?.(slot);
-            }}
-            onCloseChat={onCloseChat}
-            oldSessions={bringOld && toBring > 0 ? { count: toBring, onOpen: () => { close(); bringOld.onOpen(); } } : null}
-          />
-        )}
-        {menu === "folders" && onPickFolder && <FolderMenu folder={folder} recent={recent} onPick={onPickFolder} onBrowse={onOpenFolder} onClose={close} onKeyDown={folderKeys.onKeyDown} relocate={relocate} />}
+        {menu === "folders" && <FolderMenu folder={folder} onBrowse={onOpenFolder} onClose={close} onKeyDown={folderKeys.onKeyDown} relocate={onBringOld ? { moved: [], onRelocate: () => onBringOld(), onDismiss: () => {} } : undefined} />}
       </div>
       <div className="topbar-side end" data-tauri-drag-region>
         <PlanMeter />

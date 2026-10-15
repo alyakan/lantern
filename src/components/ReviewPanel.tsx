@@ -4,7 +4,7 @@ import { relativeTime } from "../lib/time";
 import type { ChangedFile, TestRunItem } from "../store";
 import { parseLocation } from "../lib/testRuns";
 import { TestsTab } from "./TestsTab";
-import { NetworkTab, useNetworkView } from "./NetworkTab";
+import { NetworkEmpty, NetworkTab, useNetworkView } from "./NetworkTab";
 import type { NetworkItem } from "../types";
 import { basename, dirOf, relativeTo } from "../lib/diff";
 import { usePersistentState } from "../lib/layout";
@@ -13,6 +13,7 @@ import { DocIcon } from "./icons";
 import { moveFocus, useMenuKeys } from "./useMenuKeys";
 import { FilesTab } from "./FilesTab";
 import { AgentsTab } from "./AgentsTab";
+import { TabEmpty } from "./TabEmpty";
 import { ArchitectureTab } from "./ArchitectureTab";
 import type { ArchitectureMap } from "../lib/architecture";
 import { SummaryTab, type ExportDoc } from "./SummaryTab";
@@ -31,6 +32,8 @@ interface Props {
   /** The session has started, so the backend knows which folder may be browsed. */
   ready: boolean;
   files: ChangedFile[];
+  /** Changed to bring the Changes tab up (a merge card asking for a branch's diff). */
+  changesKey?: number;
   /** Which changes `files` holds: the whole session's, or the last turn's. */
   scope?: ChangeScope;
   onScope?: (scope: ChangeScope) => void;
@@ -44,7 +47,7 @@ interface Props {
   pr?: number | null;
   /** A local branch being reviewed (null while it's read): adds a "Branch" filter, with its commits above the diff. */
   branch?: BranchReview | null;
-  /** This chat's test runs; the Tests tab shows once there's one. */
+  /** This chat's test runs; the Tests tab says so until there's one. */
   testRuns?: TestRunItem[];
   /** Open a file: in Changes if it's one of `files`, otherwise the Files preview (at a line); `key` changes each time. */
   openRequest?: { path: string; line: number | null; key: number } | null;
@@ -54,17 +57,19 @@ interface Props {
   onSaved?: () => void;
   /** Show this run in the Tests tab (from the chat); `key` changes for every request. */
   focusRun?: { id: string; key: number } | null;
-  /** The Agents tab: the latest turn's agent tree, cost per model, and `openKey`, changed to bring the tab up. */
+  /** The Activity tab: the latest turn's agent tree, cost per model, and `openKey`, changed to bring the tab up. */
   agents?: { tree: AgentTree; graph: AgentGraph; usage: ModelCost[]; openKey: number };
-  /** The Summary tab, in a Step-by-step chat that has a step to show: the plan so far, and how to open a row's page. */
+  /** The Plan tab, in a Step-by-step chat that has a step to show: the plan so far, and how to open a row's page. */
   summary?: { slot: string; data: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void; doc?: ExportDoc };
   /**
-   * The Map tab, once a Step-by-step chat has an Architecture Overview: its map, the boxes the page on screen covers, each
+   * The Plan tab's map, once a Step-by-step chat has an Architecture Overview: its map, the boxes the page on screen covers, each
    * page's name, how to open one, and `openKey`, changed to bring the tab up.
    */
-  architecture?: { map: ArchitectureMap; current: string[]; pageNames: Record<string, string>; onOpenPage: (page: string) => void; openKey: number };
+  architecture?: { map: ArchitectureMap; current: string[]; pageNames: Record<string, string>; onOpenPage: (page: string) => void; openKey: number; box?: { id: string; key: number } | null };
   /** The Network tab's Summarize: asks Claude in this chat about one request (absent: no chat to ask). */
   onSummarizeRequest?: (item: NetworkItem) => void;
+  /** Claude is in the middle of a turn in this chat. */
+  chatBusy?: boolean;
   /** Reverting Claude's edits: offered on the Changes views and the Summary's steps; the undo of the last one. */
   revert?: RevertControls;
   selected: string | null;
@@ -77,19 +82,40 @@ interface Props {
 const LAYOUT_LABEL: Record<DiffLayout, string> = { inline: "Unified", split: "Split" };
 const NEXT_LAYOUT: Record<DiffLayout, DiffLayout> = { inline: "split", split: "inline" };
 
-type Tab = "changes" | "files" | "tests" | "agents" | "summary" | "map" | "network";
+/** The side panel's tabs, always these and always in this order; one with nothing to show says so. */
+export type Tab = "changes" | "files" | "plan" | "activity" | "tests" | "network";
+const TABS: { id: Tab; label: string }[] = [
+  { id: "changes", label: "Changes" },
+  { id: "files", label: "Files" },
+  { id: "plan", label: "Plan" },
+  { id: "activity", label: "Activity" },
+  { id: "tests", label: "Tests" },
+  { id: "network", label: "Network" },
+];
 /** Each tab's button, which its panel is labelled by. */
 const tabId = (t: Tab) => `review-${t}-tab`;
 
+/** The tab a saved name stands for: Summary and Map became Plan, Agents became Activity; anything unknown is Changes. */
+export function migrateTab(saved: string): Tab {
+  if (saved === "summary" || saved === "map") return "plan";
+  if (saved === "agents") return "activity";
+  return TABS.some((t) => t.id === saved) ? (saved as Tab) : "changes";
+}
+
 export function ReviewPanel(props: Props) {
-  const [savedTab, setTab] = usePersistentState<Tab>("review.tab", "changes");
+  const [savedTab, setTab] = usePersistentState<string>("review.tab", "changes");
   const count = props.files.length;
   const runs = props.testRuns ?? [];
-  // The folder's watched requests: the Network tab shows once there's a watch or a summary.
+  // The folder's watched requests: the Network tab lists them once there's a watch or a summary, and explains itself until then.
   const network = useNetworkView(props.folder);
   const hasNetwork = !!network && (network.watches.length > 0 || network.items.length > 0);
-  // The saved tab is shared by every chat: one that has no tests, or no steps, opens on Changes instead.
-  const tab: Tab = (savedTab === "tests" && runs.length === 0) || (savedTab === "summary" && !props.summary) || (savedTab === "map" && !props.architecture) || (savedTab === "network" && !hasNetwork) ? "changes" : savedTab;
+  // Every tab is always there, so the saved tab (shared by every chat) is always valid; one saved under an old name moves to its new one.
+  const tab = migrateTab(savedTab);
+  useEffect(() => {
+    if (savedTab !== tab) setTab(tab);
+  }, [savedTab]);
+  // With both a map and a plan (a Design chat), Plan shows one at a time: the map first.
+  const [planView, setPlanView] = useState<"map" | "plan">("map");
   const [shownRun, setShownRun] = useState<string | null>(null);
   const [reveal, setReveal] = useState<{ path: string; line: number | null; key: number } | null>(null);
   // A mention of a changed file at a line (a review finding): its diff scrolls there.
@@ -107,11 +133,17 @@ export function ReviewPanel(props: Props) {
     if (props.searchKey) setTab("files");
   }, [props.searchKey?.key]);
   useEffect(() => {
-    if (props.agents?.openKey) setTab("agents");
+    if (props.agents?.openKey) setTab("activity");
   }, [props.agents?.openKey]);
   useEffect(() => {
-    if (props.architecture?.openKey) setTab("map");
+    if (props.architecture?.openKey) {
+      setTab("plan");
+      setPlanView("map");
+    }
   }, [props.architecture?.openKey]);
+  useEffect(() => {
+    if (props.changesKey) setTab("changes");
+  }, [props.changesKey]);
   useEffect(() => {
     const req = props.openRequest;
     if (!req) return;
@@ -135,7 +167,7 @@ export function ReviewPanel(props: Props) {
   const scopeRevert = revertFor(props.scope ?? "session", props.stepRange);
   // "Revert all" is for the chat's changes or the last message's, not a step's (which the Summary offers).
   const allRevert = scopeRevert !== null && scopeRevert !== "unknown" && !(scopeRevert.scope === "turn" && scopeRevert.turn !== null) ? scopeRevert : null;
-  const revertOff = scopeRevert === "unknown" ? "This step's changes aren't known: the session was reopened after it." : (rv?.blocked ?? null);
+  const revertOff = scopeRevert === "unknown" ? "This step's changes aren't known: the chat was reopened after it." : (rv?.blocked ?? null);
   const fileRevert = rv && scopeRevert !== null ? { off: revertOff, onFile: (file: ChangedFile) => scopeRevert !== "unknown" && setReverting({ title: `Revert ${basename(relativeTo(file.path, props.folder))}?`, files: [file], request: scopeRevert }) } : undefined;
   return (
     <aside className="review">
@@ -151,41 +183,15 @@ export function ReviewPanel(props: Props) {
             if (to !== null) tabs[to].click();
           }}
         >
-          <button id={tabId("changes")} role="tab" tabIndex={tab === "changes" ? 0 : -1} aria-selected={tab === "changes"} className={tab === "changes" ? "active" : ""} onClick={() => setTab("changes")}>
-            Changes
-            {count > 0 && <span className="tab-count">{count}</span>}
-          </button>
-          <button id={tabId("files")} role="tab" tabIndex={tab === "files" ? 0 : -1} aria-selected={tab === "files"} className={tab === "files" ? "active" : ""} onClick={() => setTab("files")}>
-            Files
-          </button>
-          {props.summary && (
-            <button id={tabId("summary")} role="tab" tabIndex={tab === "summary" ? 0 : -1} aria-selected={tab === "summary"} className={tab === "summary" ? "active" : ""} onClick={() => setTab("summary")}>
-              Summary
+          {TABS.map(({ id, label }) => (
+            <button key={id} id={tabId(id)} role="tab" tabIndex={tab === id ? 0 : -1} aria-selected={tab === id} className={tab === id ? "active" : ""} title={TAB_TITLE[id]} onClick={() => setTab(id)}>
+              {label}
+              {id === "changes" && count > 0 && <span className="tab-count">{count}</span>}
+              {id === "activity" && props.agents?.tree.live && <span className="tab-live" aria-label="working" />}
+              {id === "tests" && latestRun?.outcome === "failed" && <span className="tab-count failed">{latestRun.failed || "!"}</span>}
+              {id === "network" && hasNetwork && network.items.length > 0 && <span className="tab-count">{network.items.length}</span>}
             </button>
-          )}
-          {props.architecture && (
-            <button id={tabId("map")} role="tab" tabIndex={tab === "map" ? 0 : -1} aria-selected={tab === "map"} className={tab === "map" ? "active" : ""} title="The architecture map" onClick={() => setTab("map")}>
-              Map
-            </button>
-          )}
-          {props.agents && (
-            <button id={tabId("agents")} role="tab" tabIndex={tab === "agents" ? 0 : -1} aria-selected={tab === "agents"} className={tab === "agents" ? "active" : ""} onClick={() => setTab("agents")}>
-              Agents
-              {props.agents.tree.live && <span className="tab-live" aria-label="working" />}
-            </button>
-          )}
-          {runs.length > 0 && (
-            <button id={tabId("tests")} role="tab" tabIndex={tab === "tests" ? 0 : -1} aria-selected={tab === "tests"} className={tab === "tests" ? "active" : ""} onClick={() => setTab("tests")}>
-              Tests
-              {latestRun?.outcome === "failed" && <span className="tab-count failed">{latestRun.failed || "!"}</span>}
-            </button>
-          )}
-          {hasNetwork && (
-            <button id={tabId("network")} role="tab" tabIndex={tab === "network" ? 0 : -1} aria-selected={tab === "network"} className={tab === "network" ? "active" : ""} title="Requests matching this folder's watches, from Network Monitor" onClick={() => setTab("network")}>
-              Network
-              {network.items.length > 0 && <span className="tab-count">{network.items.length}</span>}
-            </button>
-          )}
+          ))}
         </div>
         {tab === "changes" && props.onScope && <ScopeMenu {...props} onScope={props.onScope} />}
         {tab === "changes" && allRevert && rv && count > 0 && (
@@ -237,29 +243,24 @@ export function ReviewPanel(props: Props) {
           />
         </div>
       )}
-      {tab === "summary" && props.summary && (
-        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("summary")}>
-          <SummaryTab slot={props.summary.slot} summary={props.summary.data} changed={props.summary.changed} running={props.summary.running} onOpenPage={props.summary.onOpenPage} doc={props.summary.doc} revert={rv} />
+      {tab === "plan" && (
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("plan")}>
+          <PlanTab {...props} view={planView} onView={setPlanView} />
         </div>
       )}
-      {tab === "map" && props.architecture && (
-        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("map")}>
-          <ArchitectureTab map={props.architecture.map} current={props.architecture.current} pageNames={props.architecture.pageNames} onOpenPage={props.architecture.onOpenPage} />
-        </div>
-      )}
-      {tab === "agents" && props.agents && (
-        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("agents")}>
-          <AgentsTab tree={props.agents.tree} graph={props.agents.graph} usage={props.agents.usage} />
+      {tab === "activity" && (
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("activity")}>
+          {props.agents ? <AgentsTab tree={props.agents.tree} graph={props.agents.graph} usage={props.agents.usage} /> : <TabEmpty title="Activity">Each turn's subagents and tools show here.</TabEmpty>}
         </div>
       )}
       {tab === "tests" && (
         <div className="tab-body" role="tabpanel" aria-labelledby={tabId("tests")}>
-          <TestsTab runs={runs} selected={shownRun} onSelect={setShownRun} onOpenLocation={openLocation} />
+          {runs.length > 0 ? <TestsTab runs={runs} selected={shownRun} onSelect={setShownRun} onOpenLocation={openLocation} /> : <TabEmpty title="Tests">Test runs show here when Claude runs your tests.</TabEmpty>}
         </div>
       )}
-      {tab === "network" && network && props.folder && (
+      {tab === "network" && (
         <div className="tab-body" role="tabpanel" aria-labelledby={tabId("network")}>
-          <NetworkTab folder={props.folder} view={network} onSummarize={props.onSummarizeRequest ?? null} />
+          {hasNetwork && props.folder ? <NetworkTab folder={props.folder} view={network} onSummarize={props.onSummarizeRequest ?? null} busy={props.chatBusy} /> : <NetworkEmpty link={network?.link ?? null} />}
         </div>
       )}
       {/* Kept mounted while hidden so the tree keeps its expanded folders across tab switches. */}
@@ -282,6 +283,43 @@ export function ReviewPanel(props: Props) {
   );
 }
 
+const TAB_TITLE: Record<Tab, string | undefined> = {
+  changes: undefined,
+  files: undefined,
+  plan: "The plan so far, and the architecture map in a Design chat",
+  activity: "Each turn's agents, models and tools",
+  tests: undefined,
+  network: "Requests matching this folder's watches, from Network Monitor",
+};
+
+/**
+ * Plan: the architecture map in a Design chat (the plan so far under a toggle), the plan and progress in any Step by
+ * step chat, and a note about Step by step in a chat with neither.
+ */
+function PlanTab({ summary, architecture, view, onView, revert }: Props & { view: "map" | "plan"; onView: (v: "map" | "plan") => void }) {
+  if (!summary && !architecture) return <TabEmpty title="Plan">Step by step chats show their plan here: the pages Claude has planned and where it is in them. Start one from the Workflow menu under the message box.</TabEmpty>;
+  const showMap = !!architecture && (view === "map" || !summary);
+  return (
+    <>
+      {architecture && summary && (
+        <div className="review-bar plan-bar" role="group" aria-label="Plan view">
+          <button className={`plan-toggle${showMap ? " active" : ""}`} aria-pressed={showMap} onClick={() => onView("map")}>
+            Map
+          </button>
+          <button className={`plan-toggle${showMap ? "" : " active"}`} aria-pressed={!showMap} onClick={() => onView("plan")}>
+            Plan
+          </button>
+        </div>
+      )}
+      {showMap && architecture ? (
+        <ArchitectureTab map={architecture.map} current={architecture.current} pageNames={architecture.pageNames} onOpenPage={architecture.onOpenPage} box={architecture.box} />
+      ) : (
+        summary && <SummaryTab slot={summary.slot} summary={summary.data} changed={summary.changed} running={summary.running} onOpenPage={summary.onOpenPage} doc={summary.doc} revert={revert} />
+      )}
+    </>
+  );
+}
+
 function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr, branch, selected, follow, refreshKey, onSelect, onFollow, onEdit, diffLine, fileRevert }: Props & { diffLine: { path: string; line: number; key: number } | null; onEdit: (path: string) => void; fileRevert?: { off: string | null; onFile: (file: ChangedFile) => void } }) {
   const [layout, setLayout] = usePersistentState<DiffLayout>("review.diffLayout", "inline");
   const found = files.findIndex((f) => f.path === selected);
@@ -293,7 +331,7 @@ function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr,
       scope === "git" ? (gitError ?? "Nothing uncommitted") :
       scope === "pr" ? (gitError ?? `Fetching pull request #${pr}…`) :
       scope === "branch" ? (gitError ?? "Reading the branch…") :
-      scope !== "turn" ? "No changes yet" : stepRange === null ? "This step's changes aren't known: the session was reopened after it" : stepRange !== undefined ? "No changes in this step" : "No changes in the last turn";
+      scope !== "turn" ? "No changes yet" : stepRange === null ? "This step's changes aren't known: the chat was reopened after it" : stepRange !== undefined ? "No changes in this step" : "No changes in the last turn";
     return <div className="empty">{empty}</div>;
   }
 
@@ -339,7 +377,7 @@ function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr,
   );
 }
 
-const SCOPE_LABEL: Record<Exclude<ChangeScope, "pr" | "turn">, string> = { branch: "This branch", session: "Session", git: "Uncommitted" };
+const SCOPE_LABEL: Record<Exclude<ChangeScope, "pr" | "turn">, string> = { branch: "This branch", session: "This chat", git: "Uncommitted" };
 
 /** Which changes the Changes tab shows, as a menu: each option with its count and what it means. */
 function ScopeMenu({ scope = "session", onScope, pr, branch, stepRange, scopeCounts }: Props & { onScope: (scope: ChangeScope) => void }) {

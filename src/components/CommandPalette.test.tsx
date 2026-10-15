@@ -6,7 +6,7 @@ import type { PaletteEntry } from "../lib/palette";
 const entries = (): PaletteEntry[] => [
   { id: "settings", title: "Settings…", group: "View", shortcut: "⌘,", run: vi.fn() },
   { id: "session-history", title: "Session History", group: "View", shortcut: "⌘K", run: vi.fn() },
-  { id: "mode:auto", title: "Switch to Auto-approve", group: "Mode", shortcut: null, run: vi.fn() },
+  { id: "permissions:auto", title: "Permissions: Auto", group: "Permissions", shortcut: null, run: vi.fn() },
 ];
 
 const rows = () => screen.getAllByRole("option");
@@ -15,7 +15,7 @@ const search = () => screen.getByRole("combobox", { name: "Search commands" });
 describe("the command palette", () => {
   it("lists every entry with its shortcut, and the first one picked", () => {
     render(<CommandPalette entries={entries()} onClose={() => {}} />);
-    expect(rows().map((r) => r.textContent)).toEqual(["Settings…View⌘,", "Session HistoryView⌘K", "Switch to Auto-approveMode"]);
+    expect(rows().map((r) => r.textContent)).toEqual(["Settings…View⌘,", "Session HistoryView⌘K", "Permissions: AutoPermissions"]);
     expect(within(rows()[0]).getByText("⌘,")).toBeInTheDocument();
     expect(rows()[0]).toHaveAttribute("aria-selected", "true");
     expect(rows()[2]).toHaveAttribute("aria-selected", "false");

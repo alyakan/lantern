@@ -29,7 +29,7 @@ export function EditLine({ edit, counts, folder, onOpen }: { edit: EditInfo; cou
         <button className="edit-toggle" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} the change to ${name}`} onClick={() => setOpen(!open)}>
           <span className="chev" aria-hidden />
         </button>
-        <button className="edit-line" title="Show in the review panel" onClick={() => onOpen(edit.path)}>
+        <button className="edit-line" title="Show in the side panel" onClick={() => onOpen(edit.path)}>
           <span className="edit-icon" aria-hidden>
             ✎
           </span>

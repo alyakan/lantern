@@ -212,7 +212,7 @@ function GeneralPage({ notify, onNotify, appearance, onAppearance, textSize, onT
             ))}
           </select>
         </label>
-        <span className="settings-muted">Every worker spends the same plan. A lead asking for one more is told to wait for one to finish.</span>
+        <span className="settings-muted">Every agent spends the same plan. A Lead asking for one more is told to wait for one to finish.</span>
       </section>
     </>
   );

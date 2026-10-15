@@ -50,7 +50,7 @@ export function ContextMeter({ used, window, running, lastTurnMs, actions, sessi
   const details = [
     used !== null && `${used.toLocaleString()} of ${window.toLocaleString()} tokens of context used`,
     lastTurnMs !== null && `Last turn took ${formatDuration(lastTurnMs)}`,
-    session && usageLine(session.cost, session.tokens) && `Session so far: ${usageLine(session.cost, session.tokens)}`,
+    session && usageLine(session.cost, session.tokens) && `This chat so far: ${usageLine(session.cost, session.tokens)}`,
   ].filter(Boolean).join("\n");
   const label = `${percent}% of context used${note ? `, ${note.toLowerCase()}` : ""}`;
   const showActions = !!actions && !running && (level !== null || open);
