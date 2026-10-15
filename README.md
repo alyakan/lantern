@@ -1,5 +1,9 @@
 # Lantern for Claude Code
 
+[![Tests and build](https://github.com/alyakan/lantern/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/alyakan/lantern/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/alyakan/lantern)](https://github.com/alyakan/lantern/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 A Mac app for the `claude` CLI you already have: see what Claude is doing as cards and diffs, and steer it one reviewable step at a time. **[See all features →](docs/FEATURES.md)**
 
 ![A Lantern chat: tool calls as cards, the edit as a diff, and the file open in the side panel](docs/images/chat-cards.png)
