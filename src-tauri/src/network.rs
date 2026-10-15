@@ -625,7 +625,8 @@ impl Monitor {
                 let text = s("summary").ok_or("Give the summary (markdown).")?;
                 let id = self.resolve_id(Some(folder), id)?;
                 let tx = self.detail(Some(folder), &id).map(|d| d.transaction.clone()).or_else(|_| self.store.summaries(folder).into_iter().find(|s| s.id == id).map(|s| summary_tx(&s)).ok_or(Fault::NotFound)).map_err(|f| f.explain())?;
-                self.store.summarize(folder, Summary { id: tx.id.clone(), method: tx.method.clone(), url: tx.url.clone(), status: tx.status, started_at: tx.started_at, text: text.to_string(), written_at: now_ms() });
+                // Kept as Claude saw it: the file is no place for the credentials a URL can carry.
+                self.store.summarize(folder, Summary { id: tx.id.clone(), method: tx.method.clone(), url: visible_url(&tx.url), status: tx.status, started_at: tx.started_at, text: text.to_string(), written_at: now_ms() });
                 self.changed();
                 Ok(format!("Saved. The summary of {} {} shows in the Network tab.", tx.method, visible_url(&tx.url)))
             }
@@ -678,12 +679,24 @@ fn summary_tx(s: &Summary) -> Tx {
 
 // MARK: - What Claude reads
 
+/// A name as it is judged: lower case, without the `-` and `_` that split its words, so `private_key`, `privateKey` and
+/// `Private-Key` are one name.
+fn normalized(name: &str) -> String {
+    name.chars().filter(|c| !matches!(c, '-' | '_')).flat_map(char::to_lowercase).collect()
+}
+
 /// Names (of headers, query parameters and JSON keys) whose values are credentials: what Claude reads has them redacted,
 /// so they don't land in the conversation. The Network tab, which stays on this Mac, shows them as they are.
 fn secret_name(name: &str) -> bool {
-    let n = name.to_ascii_lowercase().replace('-', "_");
-    matches!(n.as_str(), "authorization" | "proxy_authorization" | "cookie" | "set_cookie" | "sig" | "signature" | "otp" | "pin" | "pwd" | "passwd" | "auth" | "jwt" | "bearer")
-        || ["token", "secret", "api_key", "apikey", "password", "session", "credential", "private_key"].iter().any(|w| n.contains(w))
+    let n = normalized(name);
+    matches!(n.as_str(), "authorization" | "proxyauthorization" | "cookie" | "setcookie" | "sig" | "otp" | "pin" | "pwd" | "passwd" | "auth" | "jwt" | "bearer")
+        || ["token", "secret", "apikey", "password", "passphrase", "session", "credential", "privatekey", "accesskey", "signature"].iter().any(|w| n.contains(w))
+}
+
+/// Names that are credentials as a URL's or a form's parameters, besides `secret_name`'s: a bare `key` (an API key), and
+/// OAuth's `code`. Not as JSON keys or headers, where both mostly mean something else (an error's code, a record's key).
+fn secret_param(name: &str) -> bool {
+    secret_name(name) || matches!(normalized(name).as_str(), "key" | "code")
 }
 
 /// The URL with its credentials redacted: a `user:password@` before the host, and credential parameters anywhere after
@@ -714,7 +727,7 @@ fn redact_pairs(text: &str, separators: &[char]) -> String {
         let end = rest.find(separators).unwrap_or(rest.len());
         let pair = &rest[..end];
         match pair.split_once('=') {
-            Some((k, v)) if !v.is_empty() && secret_name(&percent_decode(k)) => out.push_str(&format!("{k}=<redacted>")),
+            Some((k, v)) if !v.is_empty() && secret_param(&percent_decode(k)) => out.push_str(&format!("{k}=<redacted>")),
             _ => out.push_str(pair),
         }
         let Some(sep) = rest[end..].chars().next() else { break };
@@ -764,7 +777,7 @@ fn redact_text(text: &str) -> String {
     let text = scheme_token.replace_all(&text, "${1}${2}<redacted>");
     let text = json_pair.replace_all(&text, |c: &regex::Captures| if secret_name(&c[1]) { format!("\"{}\"{}\"<redacted>\"", &c[1], &c[2]) } else { c[0].to_string() });
     let text = header_line.replace_all(&text, |c: &regex::Captures| if secret_name(&c[2]) { format!("{}<redacted>", &c[1]) } else { c[0].to_string() });
-    eq_pair.replace_all(&text, |c: &regex::Captures| if secret_name(&percent_decode(&c[1])) { format!("{}=<redacted>", &c[1]) } else { c[0].to_string() }).into_owned()
+    eq_pair.replace_all(&text, |c: &regex::Captures| if secret_param(&percent_decode(&c[1])) { format!("{}=<redacted>", &c[1]) } else { c[0].to_string() }).into_owned()
 }
 
 /// The URL as Claude may see it, and as searches and watches match it: matching the raw one would let a search for
@@ -1110,9 +1123,18 @@ mod tests {
     }
 
     fn monitor() -> (Arc<Fake>, Monitor) {
+        monitor_on(Store::load(None))
+    }
+
+    /// One that keeps what it saves in `path`.
+    fn monitor_with_store(path: std::path::PathBuf) -> (Arc<Fake>, Monitor) {
+        monitor_on(Store::load(Some(path)))
+    }
+
+    fn monitor_on(store: Store) -> (Arc<Fake>, Monitor) {
         let fake = Arc::new(Fake::default());
         *fake.instance.lock().unwrap() = "run-1".into();
-        (fake.clone(), Monitor::new(Store::load(None), Box::new(fake)))
+        (fake.clone(), Monitor::new(store, Box::new(fake)))
     }
 
     const A: &str = "aaaaaaaa-0000-0000-0000-000000000001";
@@ -1312,7 +1334,41 @@ mod tests {
         let cut_json = r#"{"user": "sam", "access_token" : "t5\"x", "expires": 3600, "refresh_token": 99"#;
         let out = redact_text(cut_json);
         assert!(!out.contains("t5") && !out.contains("99") && out.contains(r#""user": "sam""#) && out.contains(r#""expires": 3600"#), "{out}");
-        assert_eq!(redact_text("callback?code=1&client_secret=s6 done"), "callback?code=1&client_secret=<redacted> done");
+        // OAuth's code is a credential in a URL too.
+        assert_eq!(redact_text("callback?code=1&client_secret=s6 done"), "callback?code=<redacted>&client_secret=<redacted> done");
+    }
+
+    #[test]
+    fn credentials_are_found_however_their_names_are_cased_or_split() {
+        for name in ["privateKey", "PRIVATE-KEY", "private_key", "accessKey", "aws_access_key_id", "passphrase", "Passphrase", "clientSecret", "X-Amz-Signature", "x-goog-signature", "X-Amz-Credential", "refreshToken", "Set-Cookie"] {
+            assert!(secret_name(name), "{name}");
+        }
+        for name in ["key", "code", "content-type", "page", "user", "pinned", "keyboard"] {
+            assert!(!secret_name(name), "{name}");
+        }
+        // In a URL: a bare key, OAuth's code and cloud storage signatures, in the query and the fragment.
+        assert_eq!(
+            redact_url("https://x/a?key=k1&code=c1&X-Amz-Signature=s1&X-Goog-Signature=s2&page=2#privateKey=p1"),
+            "https://x/a?key=<redacted>&code=<redacted>&X-Amz-Signature=<redacted>&X-Goog-Signature=<redacted>&page=2#privateKey=<redacted>"
+        );
+        assert_eq!(redact_pairs("user=sam&passPhrase=hunter2&key=k", &['&']), "user=sam&passPhrase=<redacted>&key=<redacted>");
+        // As headers and JSON keys, with `key` and `code` left alone there: an error's code isn't a credential.
+        let text = headers_text(&[Header { name: "X-Amz-Signature".into(), value: "abc".into() }, Header { name: "X-Goog-Signature".into(), value: "def".into() }, Header { name: "Code".into(), value: "200".into() }]);
+        assert!(!text.contains("abc") && !text.contains("def") && text.contains("Code: 200"), "{text}");
+        let mut v = json!({"privateKey": "pk", "accessKey": "ak", "passphrase": "pp", "code": 404, "key": "users/1"});
+        redact_json(&mut v);
+        assert_eq!(v, json!({"privateKey": "<redacted, 2 chars>", "accessKey": "<redacted, 2 chars>", "passphrase": "<redacted, 2 chars>", "code": 404, "key": "users/1"}));
+    }
+
+    #[test]
+    fn a_summary_keeps_the_url_as_claude_saw_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (fake, m) = monitor_with_store(dir.path().join("network.json"));
+        fake.add(tx(A, 1, "GET", "https://u:p@x/cb?code=c1&access_token=t1&page=2", "completed"), "{}");
+        m.call(Some("/p"), "network_summarize", &json!({"id": A, "summary": "ok"})).unwrap();
+        let stored = std::fs::read_to_string(dir.path().join("network.json")).unwrap();
+        assert!(!stored.contains("c1") && !stored.contains("t1") && !stored.contains("u:p"), "{stored}");
+        assert!(stored.contains("page=2"), "{stored}");
     }
 
     #[test]
