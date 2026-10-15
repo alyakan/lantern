@@ -37,10 +37,14 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(180);
 
 /// What every git command Lantern runs starts with. A repository's config is shared by its worktrees, so a worker can
 /// write to it from its own: nothing in it may run a program of its own while Lantern looks or commits. No filesystem
-/// monitor, no hooks, no pager, and no going into submodules (a submodule's own git directory is the worker's to point
-/// anywhere). git hands these on to the git commands it runs itself. Filter and merge drivers still run: git-lfs is one,
-/// and without it a commit or a merge would take its pointer files for the content.
-const HARDENED: [&str; 8] = ["-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat", "-c", "submodule.recurse=false"];
+/// monitor, no hooks, no pager, no signing (`gpg.program` is a program the config names), and no going into submodules
+/// (a submodule's own git directory is the worker's to point anywhere). git hands these on to the git commands it runs
+/// itself. Filter and merge drivers still run: git-lfs is one, and without it a commit or a merge would take its pointer
+/// files for the content.
+const HARDENED: [&str; 12] = [
+    "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat", "-c", "submodule.recurse=false",
+    "-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false",
+];
 
 /// Variables that would point git at another repository, index or config than the one it is run in.
 const REDIRECTS: [&str; 6] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
@@ -451,7 +455,7 @@ pub fn merge(repo: &Path, into: &str, commit: &str, message: &str, path_env: Opt
         let more = if clobbered.len() > 5 { format!(" and {} more", clobbered.len() - 5) } else { String::new() };
         return Err(format!("The merge would overwrite files you keep out of git ({}{more}). Move them aside, then approve the merge again.", shown.join(", ")));
     }
-    match run(repo, &["merge", "--no-ff", "-m", message, commit], path_env) {
+    match run(repo, &["merge", "--no-ff", "--no-gpg-sign", "-m", message, commit], path_env) {
         Ok(_) => Ok(Merged::Into(into.to_string())),
         Err(e) => {
             let conflicts: Vec<String> = run(repo, &["diff", "--name-only", "--diff-filter=U"], path_env).unwrap_or_default().lines().map(String::from).collect();
@@ -874,6 +878,10 @@ mod tests {
             tripwire(&hooks.join(hook), &marker);
         }
         run(&wt.folder, &["config", "core.hooksPath", &hooks.display().to_string()], None).unwrap();
+        // A signing program: the merge commit would otherwise run it in the main checkout.
+        tripwire(&scratch.path().join("sign.sh"), &marker);
+        run(&wt.folder, &["config", "commit.gpgSign", "true"], None).unwrap();
+        run(&wt.folder, &["config", "gpg.program", &scratch.path().join("sign.sh").display().to_string()], None).unwrap();
         std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
         let checked = verify_worktree(main.path(), &wt.root, None).unwrap();
         let seen = snapshot(main.path(), &checked, &wt.branch, None).unwrap();
