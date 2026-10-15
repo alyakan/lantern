@@ -898,7 +898,7 @@ button.json-more:hover { color: var(--text); }
 .json-null { color: var(--warn); }
 
 /* Step-by-step mode: pages side by side, one on screen, sliding between them. */
-.steps { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.steps-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* The flavour badge always keeps its full width. When the row is tight the page dots give
    way, down to three (46px: the current page's pill and two dots, which the rail keeps scrolled to); the pane itself
    can't be narrower than that (MIN_LEFT in SplitPane.tsx). The background count is dropped first. */
@@ -1972,9 +1972,11 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-pin.lead { width: 8px; }
 .sb-agents-wrap { list-style: none; }
 .sb-agents { list-style: none; margin: 0; padding: 0 0 0 14px; }
-.sb-close { position: absolute; right: 2px; width: 20px; height: 20px; display: none; place-items: center; border: none; border-radius: var(--radius-chip); background: var(--bg); color: var(--muted); font-size: calc(14px * var(--font-scale)); line-height: 1; }
-.sb-item.closable:hover .sb-close, .sb-close:focus-visible { display: grid; }
-.sb-close:hover { color: var(--text); }
+.sb-close { position: absolute; right: 2px; width: 20px; height: 20px; display: none; place-items: center; border: none; border-radius: var(--radius-chip); background: none; color: var(--muted); font-size: calc(14px * var(--font-scale)); line-height: 1; }
+.sb-item.closable:hover .sb-close, .sb-item.closable:focus-within .sb-close { display: grid; }
+/* The × has a place of its own at the row's end: the title truncates before it, and a pin or spinner stays beside it. */
+.sb-item.closable:hover .sb-row, .sb-item.closable:focus-within .sb-row { padding-right: 32px; }
+.sb-close:hover { background: var(--bg-active); color: var(--text); }
 .sb-more { flex: 1; height: 22px; padding: 0 6px 0 21px; border: none; background: none; text-align: left; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); }
 .sb-more:hover { color: var(--text); }
 .sb-note { padding: 3px 6px 3px 21px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
