@@ -119,12 +119,12 @@ describe("the Work menu in the command palette", () => {
     return screen.findByRole("dialog", { name: /Command palette/i });
   };
 
-  it("lists Build, Review a PR…, Debug, Design and Start a Team (⇧⌘N), and runs them", async () => {
+  it("lists Build, Review a PR…, Debug, Design and Start a team (⇧⌘N), and runs them", async () => {
     const calls = await launch();
     const palette = await openPalette();
     const titles = within(palette).getAllByRole("option").map((o) => o.textContent ?? "");
-    for (const title of ["Build", "Review a PR…", "Debug", "Design", "Start a Team"]) expect(titles.some((t) => t.startsWith(title)), title).toBe(true);
-    expect(titles.find((t) => t.startsWith("Start a Team"))).toContain("⇧⌘N");
+    for (const title of ["Build", "Review a PR…", "Debug", "Design", "Start a team"]) expect(titles.some((t) => t.startsWith(title)), title).toBe(true);
+    expect(titles.find((t) => t.startsWith("Start a team"))).toContain("⇧⌘N");
     fireEvent.click(within(palette).getAllByRole("option").find((o) => o.textContent?.startsWith("Design"))!);
     await waitFor(() => expect(last(calls, "restart_session")).toMatchObject({ mode: "steps" }));
     expect(await screen.findByRole("button", { name: "Workflow: Step by step · Design" })).toBeInTheDocument();

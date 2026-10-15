@@ -24,6 +24,7 @@ import type { ModelCost } from "../types";
 import type { DiffLayout, Reveal } from "./FullDiff";
 import { RevertDialog } from "./RevertDialog";
 import { revertFor, type RevertControls, type RevertRequest } from "../lib/revert";
+import { useMenuInside } from "../lib/useMenuInside";
 
 const FullDiff = lazy(() => import("./FullDiff"));
 
@@ -386,6 +387,7 @@ function ScopeMenu({ scope = "session", onScope, pr, branch, stepRange, scopeCou
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const keys = useMenuKeys(open, root);
+  const inside = useMenuInside(open);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
@@ -423,7 +425,7 @@ function ScopeMenu({ scope = "session", onScope, pr, branch, stepRange, scopeCou
         <span className="scope-chevron" aria-hidden />
       </button>
       {open && (
-        <div className="menu scope-menu" role="menu" aria-label="Show changes from" onKeyDown={keys.onKeyDown}>
+        <div className="menu scope-menu" ref={inside.ref} style={inside.style} role="menu" aria-label="Show changes from" onKeyDown={keys.onKeyDown}>
           {options.map((s) => (
             <button
               key={s}
@@ -485,6 +487,7 @@ function FilePicker({ files, current, folder, onSelect }: { files: ChangedFile[]
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const keys = useMenuKeys(open, root);
+  const inside = useMenuInside(open);
 
   useEffect(() => {
     if (!open) return;
@@ -510,7 +513,7 @@ function FilePicker({ files, current, folder, onSelect }: { files: ChangedFile[]
       </button>
       {open && (
         // The same dropdown as the folder, session and model menus.
-        <div className="menu file-menu">
+        <div className="menu file-menu" ref={inside.ref} style={inside.style}>
           {/* The options are the buttons themselves: a button can't sit inside an option. */}
           <div className="menu-list" role="listbox" aria-label="Changed files" onKeyDown={keys.onKeyDown}>
             {files.map((f) => {

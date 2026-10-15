@@ -50,7 +50,7 @@ describe("openProjects", () => {
         },
         { agents: { a1: meta("lead", "security pass"), a2: meta("lead", "ui pass") } },
       ),
-      { ...opts, unread: { a2: true } },
+      { ...opts, unread: { a2: 1 } },
     );
     expect(Object.keys(open)).toEqual(["/work/lantern"]);
     const [team, ...rest] = open["/work/lantern"].items;

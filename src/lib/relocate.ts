@@ -39,6 +39,8 @@ export const NOT_FOLDER_KEYED = [
   // The folders whose "moved?" notice was dismissed: a list of old paths, not any one folder's state.
   "relocate.dismissed",
   "settings.harnessPresets",
+  // Keep the Mac awake while Claude works (Settings → General).
+  "settings.keepAwake",
   "settings.theme",
   "settings.customTheme",
   "settings.textSize",

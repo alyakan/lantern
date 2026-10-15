@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { FoundFile } from "../types";
 import { SECTION_TITLE, type CommandKind, type MenuCommand } from "../lib/complete";
 import { scrollWithin } from "../lib/scrollWithin";
+import { useMenuInside } from "../lib/useMenuInside";
 
 /** An MCP server that needs something before Claude can use it. */
 export interface McpIssue {
@@ -26,19 +27,23 @@ interface Props {
 }
 
 /** Opens above the chat box while a "/" or "@" word is typed, anywhere in the message. */
-export function CompletionMenu({ kind, sections, files, pick, onPickCommand, onPickFile, onHover, hint, issues = [], onOpenSettings }: Props) {
+export function CompletionMenu({ kind, sections: given, files, pick, onPickCommand, onPickFile, onHover, hint, issues = [], onOpenSettings }: Props) {
   const list = useRef<HTMLUListElement>(null);
+  // Capped to the room above the box (an empty chat's box is mid-window), so the list keeps as many rows as fit.
+  const inside = useMenuInside(true, [kind, given.length, files.length, issues.length, !!hint]);
   useEffect(() => {
     const item = list.current?.querySelector(`[data-index="${pick}"]`);
     if (list.current && item instanceof HTMLElement) scrollWithin(list.current, item, "nearest");
   }, [pick]);
+  // A heading with no rows under it says nothing: leave it out.
+  const sections = given.filter((s) => s.items.length > 0);
   const commands = sections.flatMap((s) => s.items);
   const picked = kind === "/" ? commands[pick] : undefined;
   let index = 0;
   // mousedown would take focus from the box; the click still picks.
   const keep = (e: { preventDefault: () => void }) => e.preventDefault();
   return (
-    <div className="menu slash-menu" onMouseDown={keep}>
+    <div className="menu slash-menu" ref={inside.ref} style={inside.style} onMouseDown={keep}>
       {kind === "/" && issues.length > 0 && (
         <button className="slash-issue" onClick={onOpenSettings} title="Open Settings to fix it">
           <span className="slash-issue-dot" aria-hidden />

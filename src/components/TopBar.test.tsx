@@ -15,13 +15,22 @@ describe("TopBar", () => {
   });
 
   it("shows the folder, branch and status like Xcode's activity viewer, with a progress bar while working", () => {
-    const { rerender } = render(<TopBar {...base} folder="/work/acme-api" branch="main" reviewCollapsed={false} onToggleReview={() => {}} activity={{ text: "Claude is working", detail: null, working: true }} />);
+    const { rerender } = render(<TopBar {...base} folder="/work/acme-api" branch="main" reviewCollapsed={false} onToggleReview={() => {}} activity={{ text: "Working", detail: null, working: true }} />);
     expect(screen.getByRole("button", { name: /acme-api/ })).toHaveTextContent("acme-apimain");
-    expect(screen.getByRole("status")).toHaveTextContent("Claude is working");
+    expect(screen.getByRole("status")).toHaveTextContent("Working");
     expect(document.querySelector(".viewer-progress")).not.toBeNull();
-    rerender(<TopBar {...base} folder="/work/acme-api" branch="main" reviewCollapsed={false} onToggleReview={() => {}} activity={{ text: "Finished", detail: "Today at 7:22 PM", working: false }} />);
-    expect(screen.getByRole("status")).toHaveTextContent("Finished | Today at 7:22 PM");
+    rerender(<TopBar {...base} folder="/work/acme-api" branch="main" reviewCollapsed={false} onToggleReview={() => {}} activity={{ text: "Done", detail: "Today at 7:22 PM", working: false }} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Done | Today at 7:22 PM");
     expect(document.querySelector(".viewer-progress")).toBeNull();
+  });
+
+  it("puts a warning dot on the Settings gear while an MCP server is down, and says which", () => {
+    const { rerender } = render(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} onOpenSettings={() => {}} />);
+    expect(screen.getByRole("button", { name: "Settings" }).querySelector(".dot")).toBeNull();
+    rerender(<TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} onOpenSettings={() => {}} mcpIssues={["sentry needs you to log in", "postgres couldn't connect"]} />);
+    const gear = screen.getByRole("button", { name: "Settings, sentry needs you to log in, postgres couldn't connect" });
+    expect(gear.querySelector(".dot.warn")).not.toBeNull();
+    expect(gear).toHaveAttribute("title", "Settings (⌘,): sentry needs you to log in · postgres couldn't connect");
   });
 
   it("counts failed steps in the viewer, and the count shows the failure; there is no waiting badge (the sidebar has it)", () => {

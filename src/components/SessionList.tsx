@@ -49,7 +49,10 @@ export function SessionList({ label, sessions, actions, onOpen }: Props) {
                   value={editing.text}
                   onChange={(e) => setRenaming({ id: s.id, text: e.target.value })}
                   onKeyDown={(e) => {
-                    if (e.key === "Escape") setRenaming(null);
+                    if (e.key === "Escape") {
+                      e.stopPropagation();
+                      setRenaming(null);
+                    }
                   }}
                 />
                 <button type="submit" className="link-button" disabled={!editing.text.trim()}>

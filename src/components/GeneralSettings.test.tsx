@@ -16,6 +16,8 @@ describe("Settings' General page", () => {
     localStorage.clear();
     notify = { ...NOTIFY_DEFAULTS };
     general = {
+      keepAwake: true,
+      onKeepAwake: vi.fn(),
       notify,
       onNotify: vi.fn(),
       theme: "system",
@@ -34,6 +36,14 @@ describe("Settings' General page", () => {
     expect(tabs[0]).toHaveTextContent("General");
     expect(tabs[0]).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
+  });
+
+  it("offers keeping the Mac awake, on by default, and says when it is turned off", () => {
+    view();
+    const box = screen.getByRole("checkbox", { name: "Keep my Mac awake while Claude works" });
+    expect(box).toBeChecked();
+    fireEvent.click(box);
+    expect(general.onKeepAwake).toHaveBeenCalledWith(false);
   });
 
   it("turns notifications off as a whole", () => {
@@ -91,9 +101,11 @@ describe("Settings' General page", () => {
   it("offers every preset theme, Follow macOS and Custom", () => {
     view();
     const names = within(screen.getByRole("group", { name: "Theme" })).getAllByRole("radio").map((r) => r.closest("label")?.textContent);
-    expect(names).toEqual(["Follow macOS", "Light", "Dark", "Terminal", "Solarized Dark", "Nord", "Paper", "Custom"]);
+    expect(names).toEqual(["Follow macOS", "Light", "Dark", "Terminal", "Fallout", "Solarized Dark", "Nord", "Paper", "Custom"]);
     fireEvent.click(screen.getByLabelText("Terminal"));
     expect(general.onTheme).toHaveBeenCalledWith("terminal");
+    fireEvent.click(screen.getByLabelText("Fallout"));
+    expect(general.onTheme).toHaveBeenCalledWith("fallout");
   });
 
   describe("Customize…", () => {

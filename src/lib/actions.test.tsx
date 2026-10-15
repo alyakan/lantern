@@ -89,9 +89,9 @@ describe("the Work menu", () => {
 
   it("uses the wording its owner gives it now (Show Sidebar once it is hidden), else the catalogue's", () => {
     const { rerender } = render(<Owner id="toggle-sidebar" run={() => {}} />);
-    expect(availableActions().map((e) => e.title)).toEqual(["Hide Sidebar"]);
+    expect(availableActions().map((e) => e.title)).toEqual(["Hide sidebar"]);
     rerender(<Owner id="toggle-sidebar" run={() => {}} title="Show Sidebar" />);
-    expect(availableActions().map((e) => e.title)).toEqual(["Show Sidebar"]);
+    expect(availableActions().map((e) => e.title)).toEqual(["Show sidebar"]);
   });
 });
 

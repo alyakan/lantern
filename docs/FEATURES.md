@@ -71,7 +71,7 @@ Under the box:
 In the box:
 
 - Type `/` for skills, commands and MCP prompts, and `@` to point Claude at a file.
-- Start a message with `!` and the box becomes a terminal: `!git status` runs in the chat's folder and Claude sees the output with your next message. Long-running commands (a dev server) keep going until you stop them, and a prompt such as a password is answered in place.
+- Start a message with `!` and the box becomes a terminal: `!git status` runs in the chat's folder and Claude sees the output with your next message (the hint under the box says so, and that backspace leaves the terminal). Long-running commands (a dev server) keep going until you stop them, and a prompt such as a password is answered in place.
 - Pasting more than a few lines shows `[Pasted text #1 · 120 lines]`; the whole text is still sent.
 - Send while Claude is working and the message is queued until its turn ends.
 
@@ -143,7 +143,12 @@ The app becomes a canvas of floating chats tethered to the Lead:
 ![The team canvas: a Lead and three agents, one of which needs permission](images/team-canvas.png)
 
 - Drag a title to move a window and its corner to resize it. Drag the background to pan; pinch or ⌘-scroll to zoom. Zoomed out, agents become cards, and a click zooms in.
-- An agent's permission prompts appear in its own window. The pill at the top ("1 agent needs you") takes you to the next one that does.
+- Every window says what its chat is doing in the same words: **Working**, **Needs you**, **Ready** (a Lead with nothing running), **Done** (an agent that finished its turn) or **Stopped**. The title bar says the same for the chat you're in, and the sidebar's rows say Working, Needs you or Done (Unread for a finish you haven't opened). A working agent that has been silent a while says "Working · 45s ago", and from three minutes on it turns amber and reads **Quiet 3m**; its tooltip says to send it a message, or stop it.
+- An agent's permission prompts appear in its own window. The pill at the top ("1 agent needs you") takes you to the next one that does, at 100% so you can read it.
+- Fitting everything (**Fit**, or a new agent arriving) never zooms out past 80% by itself. A team too big for the window is shown from the Lead at 80% and you pan to the rest; zooming out further is yours to do.
+- Each window's title bar shows how full that agent's context is ("42%", amber from 75%, red from 90%). Click it for **Compact** (summarise the conversation to free up context) and **Clear** (a fresh conversation; the files stay, and you are asked first). Both wait until the agent has finished its turn.
+- The **Context** chip in the toolbar opens a list of every agent with its share as a bar, its tokens, and Compact and Clear on its row. **Compact all above 60%** compacts every agent over that which is free, and says how many it skipped because they were busy. A name in the list goes to that agent.
+- The title bar names the project (the Lead's folder, not an agent's worktree) and says where the team stands, like "4 working, 1 needs you", "all idle" or "1 failed".
 - ⇧⌘C switches between the canvas and the chat view, and the sidebar lists the team with its agents under it.
 - A team comes back when Lantern reopens, with the agents that were still going. An agent the Lead stopped, one whose worktree is gone, and one whose Lead isn't coming back are not reopened, and an agent's conversation is never listed among a project's past chats.
 
@@ -164,7 +169,7 @@ An agent works on its own branch, and only you can approve merging it. When the 
 
 ### Usage
 
-The canvas controls at the bottom show what the team has cost so far ("Team · $0.15") and **Plan usage**, how full your subscription's five-hour window is, with when it resets. It turns amber from 80% and red from 95%, and past 95% the Lead can't start new agents until the window resets. The meter is the account's, so it also shows in the title bar.
+The canvas controls at the bottom adapt to the width of the canvas, so they never wrap or get cut off beside the side panel: first Subagents, **+ Agent** and Hidden fold into a **⋯** menu, then the team cost and the Context chip's agent name drop out ("82%"). Their **Context** chip is the share of the fullest agent's context window in use now; it turns amber from 75%, and the tooltip says to open that agent and use Compact (a click on the chip lists every agent's). They show what the team has cost so far ("Team · $0.15") and **Plan usage**, how full your subscription's five-hour window is, with when it resets. It turns amber from 80% and red from 95%, and past 95% the Lead can't start new agents until the window resets. The meter is the account's, so it also shows in the title bar.
 
 **Subagents**, in the same controls, says where the Lead's built-in subagents (Claude Code's Agent tool, which runs inline where you can't see them) go:
 
@@ -203,7 +208,7 @@ Rest the pointer on the collapsed column for a moment and the same pane opens ov
 
 ![The collapsed sidebar opened over the chat](images/sidebar-collapsed-open.png)
 
-**Hidden**: **⌃⌘S** (View ▸ Hide sidebar, or Hide sidebar in the command palette) hides the sidebar completely, and the chat takes the whole width. A **Show sidebar** button then sits at the left of the title bar. When a chat or an agent needs you, it carries an amber badge with how many, so a waiting chat is never hidden: click it, or press ⌃⌘S again, to bring the sidebar back as it was (Expanded or Collapsed).
+**Hidden**: **⌃⌘S** (View ▸ Hide sidebar, or Hide sidebar in the command palette) hides the sidebar completely, and the chat takes the whole width. A **Show sidebar** button then sits at the left of the title bar. When a chat or an agent needs you, it carries an amber badge with how many, so a waiting chat is never hidden: click it, or press ⌃⌘S again, to bring the sidebar back as it was (Expanded or Collapsed). The tray button at the right of the title bar is the separate Away inbox (see Away below), and is there in every state.
 
 ![The sidebar hidden, with the title bar's button badged for the 2 chats that need you](images/sidebar-hidden.png)
 
@@ -217,11 +222,19 @@ Its width, whether it is collapsed and whether it is hidden are each remembered,
 
 The team canvas screenshot shows a team with its agents nested under it.
 
-**History** (the clock button in the sidebar, or ⌘K; View ▸ Chat History, or Chat History in the command palette) lists the past chats of every project, including ones started in the terminal with Claude Code, grouped by project in the sidebar's order. A project's pinned chats come first, then the newest. Type to search all of them, or pick a project in the chip beside the search box. ↑ and ↓ move through the chats, Return opens one in its own project, and Esc (or ⌘K again) closes it. Each chat's ⋯ pins, renames, exports it or copies the command that picks it up in a terminal. The chats that are open are in the sidebar, so History leaves them out. It works with nothing open too: each project's header has a **+** that starts a chat there, which is how to start a project that has nothing open (the other ways are **New ▾**, **Open folder…** and the folder menu in the title bar).
+**History** (the clock button in the sidebar, or ⌘K; View ▸ Chat History, or Chat history in the command palette) lists the past chats of every project, including ones started in the terminal with Claude Code, grouped by project in the sidebar's order. A project's pinned chats come first, then the newest. Type to search all of them, or pick a project in the chip beside the search box. ↑ and ↓ move through the chats, Return opens one in its own project, and Esc (or ⌘K again) closes it. Each chat's ⋯ pins, renames, exports it or copies the command that picks it up in a terminal. The chats that are open are in the sidebar, so History leaves them out. It works with nothing open too: each project's header has a **+** that starts a chat there, which is how to start a project that has nothing open (the other ways are **New ▾**, **Open folder…** and the folder menu in the title bar).
 
 ![History: the past chats of every project, grouped by project, with a search box and a project chip](images/history.png)
 
 After you move a repository, Claude Code leaves its chats under the old path. **Bring old chats here…** (the folder menu in the title bar, a project's ⋯ menu, or the palette) finds the places the project was before and copies the chats you check into its History. Nothing is moved or overwritten, and nothing happens until you confirm.
+
+## Away
+
+People start work and walk away, so two things help while you are gone.
+
+**What needs you.** The tray button at the top right of the title bar (always there, whether the sidebar is expanded, collapsed or hidden; also **What Needs You…** in the command palette) opens a list of everything waiting on you across every open project and team: permission requests and questions, plans to approve, merges to approve, a team held back until you say go on, and chats that finished while you were elsewhere. Each row shows the chat or agent, its project (and team), what it needs in plain words and how long it has waited. **Go** takes you there; a plain permission request also has **Allow** and **Deny** right in the list. What needs an answer comes first, longest waiting first, then what only finished. The button's badge counts what needs an answer; a small blue dot means only unread finishes. Arrow keys move between rows (Left and Right between a row's buttons) and Esc closes it. macOS notifications are separate (see Settings).
+
+**Keeping the Mac awake.** While any chat or agent is working, or paused on a question for you, Lantern stops the Mac from going to sleep on its own, so a long turn finishes while you are away (it holds macOS's `caffeinate` for as long as that lasts, and lets go when nothing is working or Lantern quits). Only idle sleep is prevented: the screen may still turn off, and closing the lid still sleeps the Mac. Turn it off in Settings ▸ General ▸ **Keep my Mac awake while Claude works**.
 
 ## The side panel
 
@@ -260,31 +273,34 @@ A few things to know:
 
 ![Settings, on the General tab](images/settings.png)
 
-- **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, the theme (see below), the text size, and **Agents running at once** for teams.
-- **Harness**: the model presets (who is the Lead, the advisor and the subagents) that the Models chip offers.
-- **MCP servers**: your servers with their status. Log in, reconnect, turn off, add, edit or remove them (through Claude Code's own settings). A secret never goes into the project's committed `.mcp.json`.
+- **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, keeping the Mac awake while Claude works, the theme (see below), the text size, and **Agents running at once** for teams.
+- **Models**: the model presets (who is the Lead, the advisor and the subagents) that the Models chip offers.
+- **MCP servers**: your servers with their status. Log in, reconnect, turn off, add, edit or remove them (through Claude Code's own settings). When one is down or needs you to log in, a small amber dot sits on the Settings gear in the title bar (hover it to see which), and the `/` menu says so too. A secret never goes into the project's committed `.mcp.json`.
 - **Skills**: the project's and plugins' skills, each with a preview of its file.
-- **Permissions**: the rules you saved with **Always allow…**, by folder or chat.
+- **Allow rules**: the rules you saved with **Always allow…**, each on one line with its scope (this chat or this folder), what it covers and a **Remove** button. (The tab isn't called Permissions, so it can't be mistaken for the Permissions chip under the chat box.)
 - **Updates**: Lantern updates itself. When a new release is out, "Update ready" appears under the chat box; click it to restart onto the new version, or leave it and it installs when you quit. **Lantern ▸ Check for Updates…** looks right now.
 
 ### Themes
 
 Settings ▸ General ▸ Theme picks how Lantern looks, with a small preview of each:
 
-![The theme picker in Settings, with Terminal and Nord among the choices](images/themes-picker.png)
+![The theme picker in Settings, with Terminal, Fallout and Nord among the choices](images/themes-picker.png)
 
 - **Follow macOS**, **Light** and **Dark**, as before.
-- **Terminal**: near-black with phosphor-green text, amber for "working", monospace everywhere, square corners and thin lines instead of shadows.
+- **Terminal**: a modern terminal scheme (think Warp or Ghostty): near-black with a cool tint, light text, monospace everywhere, square corners and thin lines instead of shadows. Colour is used the way syntax highlighting does: green for what you typed and for additions, yellow for "working", red for errors and removals, blue for links, purple for emphasis. **Bold** is white, `inline code` is an orange chip, headings are cyan and a quote has a purple bar.
+- **Fallout**: a Pip-Boy terminal, all phosphor green on green-black, in three levels: bright for headings and bold (with a soft glow), normal for text, dim for what is secondary. Inline code and code headers are in reverse video (dark on bright green), code blocks and what you send sit in boxes (what you send starts with a `>` prompt), small labels are in capitals, the cursor in the chat box is a block, and faint scanlines and a darkened edge sit over the window. They are still, don't catch clicks, and text keeps its contrast (4.5:1 or more).
 - **Solarized Dark**, **Nord** and **Paper** (a warm light theme): colours only.
 - **Custom**: **Customize…** opens six colour pickers (background, panels, text, secondary text, accent and lines), a **Monospace everywhere** switch and a **Rounded or Square** corners choice. It starts from the theme you have now, the app changes as you pick, and it warns you when your text colour would be hard to read on your background (under 4.5:1). The rest of the colours are worked out from your six.
 
 The code editor and diffs, diagrams and shell output follow the theme, and a chosen theme is on before the first screen is drawn, so nothing flashes the default.
 
-![Terminal: a chat with a diff, in green on near-black](images/theme-terminal.png)
+![Terminal: a chat with every kind of markdown, and its diff](images/theme-terminal.png)
+
+![Fallout: the same chat in phosphor green](images/theme-fallout.png)
 
 ## Keyboard shortcuts and the command palette
 
-**⇧⌘P** opens the command palette: every action in Lantern by name, with its shortcut, plus ones with no shortcut such as "Permissions: Auto", "Workflow: Team", "Use the Max harness" and "Settings: Skills".
+**⇧⌘P** opens the command palette: every action in Lantern by name, with its shortcut (titles in sentence case, like "Chat history"), plus ones with no shortcut such as "Permissions: Auto", "Workflow: Team", "Models: Max" and "Settings: Skills".
 
 ![The command palette](images/command-palette.png)
 

@@ -16,7 +16,7 @@ import { UpdatesPage, type UpdatesPageProps } from "./UpdatesPage";
 import { PermissionRules } from "./PermissionRules";
 
 export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions";
-export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Harness", updates: "Updates", permissions: "Permissions" };
+export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules" };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -104,6 +104,9 @@ export function SettingsView({ open, onClose, harness, updates, general, ...page
 }
 
 export interface GeneralSettingsProps {
+  /** Keep the Mac from idle sleep while a chat or agent works. */
+  keepAwake: boolean;
+  onKeepAwake: (on: boolean) => void;
   notify: NotifyPrefs;
   onNotify: (prefs: NotifyPrefs) => void;
   theme: ThemeId;
@@ -123,7 +126,7 @@ const NOTIFY_EVENTS: { key: "finished" | "waiting" | "failed"; label: string }[]
 ];
 
 /** General: when Lantern tells you about Claude (notifications, a pause), the toasts' sound, and how the window looks. */
-function GeneralPage({ notify, onNotify, theme, onTheme, customTheme, onCustomTheme, textSize, onTextSize }: GeneralSettingsProps) {
+function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme, customTheme, onCustomTheme, textSize, onTextSize }: GeneralSettingsProps) {
   const sound = useChimeOn();
   const agentLimit = useAgentLimit();
   const paused = notify.pausedUntil > Date.now();
@@ -165,6 +168,16 @@ function GeneralPage({ notify, onNotify, theme, onTheme, customTheme, onCustomTh
             </button>
           )}
         </div>
+      </section>
+      <section className="general-section" aria-labelledby="general-awake">
+        <h3 id="general-awake" className="general-title">
+          Away
+        </h3>
+        <label className="general-option">
+          <input type="checkbox" checked={keepAwake} onChange={(e) => onKeepAwake(e.target.checked)} />
+          <span>Keep my Mac awake while Claude works</span>
+        </label>
+        <span className="settings-muted">Stops the Mac from going to sleep on its own while any chat or agent is working, so a long turn finishes while you're away. The screen may still turn off, and closing the lid still sleeps the Mac.</span>
       </section>
       <section className="general-section" aria-labelledby="general-sound">
         <h3 id="general-sound" className="general-title">

@@ -238,6 +238,16 @@ describe("clicking in the open sidebar", () => {
     expect(h.onNewChatIn).toHaveBeenCalledWith(IOS);
   });
 
+  it("closes a project's ⋯ menu on Escape, with focus back on the ⋯ button", () => {
+    setup();
+    const more = screen.getByRole("button", { name: "More for lantern" });
+    fireEvent.click(more);
+    expect(within(screen.getByRole("menu", { name: "lantern actions" })).getAllByRole("menuitem")[0]).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "lantern actions" })).toBeNull();
+    expect(more).toHaveFocus();
+  });
+
   it("has a ⋯ menu per project: New team, Close finished chats, Bring old chats here…, Reveal in Finder, Remove from recents", () => {
     const { h } = setup({ open: { [LANTERN]: lanternOpen, [MONITOR]: monitorOpen } });
     fireEvent.click(screen.getByRole("button", { name: "More for network-monitor" }));
@@ -460,6 +470,16 @@ describe("New ▾", () => {
     fireEvent.click(screen.getByRole("button", { name: "New" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Review a PR…" }));
     expect(h.onReviewPr).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes on Escape, with focus back on the New button", () => {
+    setup();
+    const button = screen.getByRole("button", { name: "New" });
+    fireEvent.click(button);
+    expect(within(screen.getByRole("menu", { name: "New" })).getAllByRole("menuitem")[0]).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "New" })).toBeNull();
+    expect(button).toHaveFocus();
   });
 
   it("is off when nothing can be started (no project open, or its chat is starting)", () => {

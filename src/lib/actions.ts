@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { PaletteEntry } from "./palette";
+import { sentenceCase, type PaletteEntry } from "./palette";
 
 /**
  * Every action Lantern offers by name: the macOS menu bar, the keyboard shortcuts, the command palette and the cheat
@@ -18,6 +18,8 @@ const CATALOGUE = [
   // The left sidebar of every project, hidden or shown: macOS's own ⌃⌘S (⌘0 is the canvas's Fit). Collapsed is the slim
   // column of open chats; both say what they do now (Hide or Show, Collapse or Expand) in the palette and the menu.
   { id: "toggle-sidebar", title: "Hide Sidebar", group: "View", key: "s", ctrl: true, menu: true, native: true },
+  // The title bar's inbox of what waits on you, across every project and team.
+  { id: "show-inbox", title: "What Needs You…", group: "View" },
   { id: "toggle-compact", title: "Collapse Sidebar", group: "View", menu: true },
   // Only while there is a team: switches between its canvas and the chat view.
   { id: "toggle-canvas", title: "Switch Canvas and Chat View", group: "View", key: "c", shift: true },
@@ -50,7 +52,7 @@ const CATALOGUE = [
 /** The catalogue, typed as plain entries (the ids are checked against the literal list above). */
 export const ACTIONS: readonly ActionDef[] = CATALOGUE;
 
-export type ActionGroup = "File" | "View" | "Search" | "Chat" | "Work" | "Help" | "Mode" | "Harness" | "Settings";
+export type ActionGroup = "File" | "View" | "Search" | "Chat" | "Work" | "Help" | "Mode" | "Models" | "Settings";
 
 export interface ActionDef {
   id: string;
@@ -146,7 +148,7 @@ export function availableActions(): PaletteEntry[] {
     const list = owners.get(def.id);
     const handler = list?.[list.length - 1];
     if (!handler?.enabled()) return [];
-    return [{ id: def.id, title: handler.title() ?? def.title, group: def.group, shortcut: shortcutLabel(def), run: () => runAction(def.id) }];
+    return [{ id: def.id, title: sentenceCase(handler.title() ?? def.title), group: def.group, shortcut: shortcutLabel(def), run: () => runAction(def.id) }];
   });
 }
 

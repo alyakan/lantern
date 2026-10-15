@@ -29,13 +29,22 @@ describe("PermissionRules", () => {
   it("lists each rule with its scope, tool and what it covers", async () => {
     listMock.mockResolvedValue([folderRule, chatRule]);
     render(<PermissionRules slot="s1" />);
-    const list = await screen.findByRole("list", { name: "Permission rules" });
+    const list = await screen.findByRole("list", { name: "Allow rules" });
     expect(list.textContent).toContain("This folder");
     expect(list.textContent).toContain("/repo · Bash");
     expect(list.textContent).toContain("npm test …");
     expect(list.textContent).toContain("This chat");
     expect(list.textContent).toContain("/repo/src/");
     expect(listMock).toHaveBeenCalledWith("s1");
+  });
+
+  it("lays each rule out as one row: its scope, what it covers, and Remove at the end", async () => {
+    listMock.mockResolvedValue([folderRule]);
+    render(<PermissionRules slot="s1" />);
+    const row = (await screen.findByRole("list", { name: "Allow rules" })).querySelector("li") as HTMLElement;
+    expect([...row.children].map((c) => c.tagName)).toEqual(["SPAN", "SPAN", "BUTTON"]);
+    expect(row.lastElementChild).toHaveTextContent("Remove");
+    expect(row.querySelector(".rule-text")).toHaveAttribute("title", "/repo · Bash · npm test …");
   });
 
   it("removes a rule and lists the rest", async () => {

@@ -10,6 +10,7 @@ import { MovedNotice } from "./MovedFolders";
 import { moveFocus } from "./useMenuKeys";
 import { moveProject, orderProjects } from "../lib/projectOrder";
 import { useReorder } from "../lib/useReorder";
+import { useMenuInside } from "../lib/useMenuInside";
 
 /** The sidebar's width in pixels: what Show/Hide Sidebar and the drag edge keep between these. */
 export const SIDEBAR_MIN = 200;
@@ -111,12 +112,16 @@ function keyboardFocus(el: Element): boolean {
   }
 }
 
-/** Closes a popover on a press outside it or Escape. */
-function useDismiss(open: boolean, root: RefObject<HTMLElement | null>, close: () => void) {
+/** Closes a popover on a press outside it or Escape; Escape puts focus back on `opener`, the button that opened it. */
+function useDismiss(open: boolean, root: RefObject<HTMLElement | null>, close: () => void, opener?: () => HTMLElement | null | undefined) {
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && close();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      close();
+      opener?.()?.focus();
+    };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -133,7 +138,9 @@ const menuKeys = (e: ReactKeyboardEvent<HTMLElement>) => void moveFocus(e, [...e
 function NewMenu({ canNew, onNewChat, onNewTeam, onReviewPr }: Pick<Props, "canNew" | "onNewChat" | "onNewTeam" | "onReviewPr">) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
-  useDismiss(open, root, () => setOpen(false));
+  useDismiss(open, root, () => setOpen(false), () => root.current?.querySelector<HTMLElement>("[aria-haspopup]"));
+  // The sidebar clips what sticks out of it, so the menu stays inside it.
+  const { ref: menuRef, style: menuStyle } = useMenuInside(open);
   useEffect(() => {
     if (open) root.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   }, [open]);
@@ -155,7 +162,7 @@ function NewMenu({ canNew, onNewChat, onNewTeam, onReviewPr }: Pick<Props, "canN
         <span className="chev down" aria-hidden />
       </button>
       {open && (
-        <div className="menu sb-menu" role="menu" aria-label="New" onKeyDown={menuKeys}>
+        <div className="menu sb-menu" role="menu" aria-label="New" ref={menuRef} style={menuStyle} onKeyDown={menuKeys}>
           {item("Chat", "new-session", onNewChat)}
           {item("Team", "work-team", onNewTeam)}
           {item("Review a PR…", null, onReviewPr)}
@@ -332,8 +339,8 @@ interface Moves {
 }
 
 function ProjectMenu({ group, h, moves, finished, onClose, onClosed }: { group: CompactGroup; h: SidebarHandlers; moves: Moves; finished: string[]; onClose: () => void; onClosed: (count: number) => void }) {
-  const root = useRef<HTMLDivElement>(null);
-  useDismiss(true, root, onClose);
+  const { ref: root, style } = useMenuInside(true);
+  useDismiss(true, root, onClose, () => root.current?.parentElement?.querySelector<HTMLElement>('[aria-haspopup="menu"]'));
   useEffect(() => {
     root.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
   }, []);
@@ -342,7 +349,7 @@ function ProjectMenu({ group, h, moves, finished, onClose, onClosed }: { group: 
     run();
   };
   return (
-    <div className="menu sb-menu project-menu" role="menu" aria-label={`${group.label} actions`} ref={root} onKeyDown={menuKeys}>
+    <div className="menu sb-menu project-menu" role="menu" aria-label={`${group.label} actions`} ref={root} style={style} onKeyDown={menuKeys}>
       <button role="menuitem" className="menu-row" onClick={pick(() => h.onNewTeamIn(group.folder))}>
         <span className="menu-row-title">New team</span>
       </button>
