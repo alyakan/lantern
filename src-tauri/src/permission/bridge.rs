@@ -510,7 +510,10 @@ mod tests {
         for req in [orchestra_call(), network, request(), reproduce, question, review] {
             let socket = socket.clone();
             let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &req)).await.unwrap();
-            assert!(!reply.allow && reply.message.unwrap().contains("Not authorized"));
+            // Refused: told so, or (when the bridge hangs up before it has read the request, which it does, so the client's
+            // write can hit a closed socket) simply failed. Either way it was denied and nothing ran.
+            assert!(!reply.allow, "an unauthorized call was allowed");
+            assert!(reply.failed || reply.message.as_deref().is_some_and(|m| m.contains("Not authorized")), "{reply:?}");
         }
         assert!(!reached.load(Ordering::SeqCst), "an unauthorized call ran a tool");
         assert!(tokio::time::timeout(Duration::from_millis(100), rx.recv()).await.is_err(), "a card or an auto-allow was shown");
