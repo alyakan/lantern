@@ -286,7 +286,7 @@ export interface Settings {
   orchestrator?: boolean;
   /** Reopen the chat as a worker of an open main agent (a team restored after Lantern was closed). */
   /** `branch`: the one Lantern made for it (null when it shares the folder); its worktree's HEAD is the worker's to switch. */
-  worker?: { name: string; parent: string; branch: string | null };
+  worker?: { name: string; parent: string; branch: string | null; shared: boolean };
 }
 
 /** A file search result (see files::find): the file, and which characters of `rel` matched. */

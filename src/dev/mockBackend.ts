@@ -1133,6 +1133,7 @@ export function installMockBackend() {
             { flavour: "Review", text: "Review: one changed file per page, then the summary.", headings: ["# Frame — <the PR's title>", "# File N of M — <path> (+added −removed)", "# Summary — <files reviewed, findings accepted, findings dropped>"] },
           ];
         case "set_agent_choice":
+        case "set_agent_limit":
           return null;
         case "list_permission_rules":
           // A couple of rules, so Settings has something to show in the browser preview.

@@ -54,6 +54,22 @@ pub struct AppState {
     prs: std::sync::Mutex<std::collections::HashMap<(std::path::PathBuf, u32), (std::time::Instant, pr::PrRange)>>,
     /// Network Monitor's captured traffic, as the network_* tools and the Network tab read it (see network.rs).
     network: Arc<network::Monitor>,
+    /// How many workers may run at once across all of Lantern (Settings → General; the window sends it).
+    agent_limit: std::sync::atomic::AtomicUsize,
+}
+
+/// The user's limit on agents running at once until the window says otherwise, and the range it may be set in.
+const DEFAULT_AGENT_LIMIT: usize = 3;
+const AGENT_LIMITS: std::ops::RangeInclusive<usize> = 1..=orchestra::MAX_WORKERS;
+
+/// The user changed how many agents may run at once (or the window started and says what it was set to).
+#[tauri::command]
+fn set_agent_limit(state: State<'_, AppState>, limit: usize) -> Result<(), String> {
+    if !AGENT_LIMITS.contains(&limit) {
+        return Err(format!("The limit is between {} and {}.", AGENT_LIMITS.start(), AGENT_LIMITS.end()));
+    }
+    state.agent_limit.store(limit, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
 }
 
 /// How long a looked-up PR is used before it's fetched again (it may have new commits).
@@ -198,6 +214,10 @@ impl orchestra::Host for AppHost {
         args::capped_mode(ceiling, false, ceiling, &capabilities_of(provider)).0
     }
 
+    fn agent_limit(&self) -> usize {
+        self.app.state::<AppState>().agent_limit.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     fn worktree_root(&self) -> std::path::PathBuf {
         self.app.path().app_local_data_dir().unwrap_or_else(|_| std::env::temp_dir()).join("worktrees")
     }
@@ -234,7 +254,7 @@ impl orchestra::Host for AppHost {
             if req.model.is_some() {
                 cfg.model = req.model;
             }
-            cfg.helper = helper_config(&s, Role::Worker { name: req.name })?;
+            cfg.helper = helper_config(&s, Role::Worker { name: req.name, read_only: req.read_only })?;
             cfg.path_env = login_path(&state).await;
             launch(&self.app, &req.slot, &s, cfg, true).await?;
             // The main agent's mode may have been lowered while this one started (the mode it was given was read before):
@@ -421,6 +441,9 @@ struct WorkerSettings {
     /// Its worktree's HEAD is the worker's to switch, so this is what says which branch is the worker's.
     #[serde(default)]
     branch: Option<String>,
+    /// It works in its main agent's folder, so it reads and doesn't edit (see Role::Worker).
+    #[serde(default)]
+    shared: bool,
 }
 
 fn checked_effort(effort: Option<String>) -> Result<Option<String>, String> {
@@ -452,7 +475,7 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
             slot,
             match (settings.orchestrator, settings.worker) {
                 (true, _) => Role::Main,
-                (false, Some(w)) => Role::Worker { name: w.name },
+                (false, Some(w)) => Role::Worker { name: w.name, read_only: w.shared },
                 (false, None) => Role::Normal,
             },
         )?,
@@ -1542,7 +1565,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, agent_limit: DEFAULT_AGENT_LIMIT.into() });
             app.manage(updates::Updates::default());
             if updates::checks_enabled() {
                 tauri::async_runtime::spawn(updates::watch(app.handle().clone()));
@@ -1645,7 +1668,8 @@ pub fn run() {
             copy_diagnostics,
             orchestra_close_check,
             orchestra_close_worker,
-            orchestra_spawn
+            orchestra_spawn,
+            set_agent_limit
         ])
         .build(tauri::generate_context!())
         .expect("error while building Lantern")
@@ -1712,7 +1736,7 @@ mod tests {
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into() }, providers: vec![] },
+            helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![] },
             path_env: None,
         }
     }

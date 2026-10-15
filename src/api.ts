@@ -47,6 +47,8 @@ export const api = {
   /** What closing a worker would throw away. Nothing is stopped or removed by asking. */
   closeWorkerCheck: (worker: string) => invoke<CloseCheck>("orchestra_close_check", { worker }),
   /** Stops a worker and removes its worktree and branch (and tells its main agent). Work that would be thrown away needs `agreed`: the numbers the user confirmed, which a worker that has gone on since is refused over. */
+  /** How many workers may run at once across all of Lantern (Settings → General). */
+  setAgentLimit: (limit: number) => invoke<void>("set_agent_limit", { limit }),
   closeWorker: (worker: string, agreed?: CloseAgreed) => invoke<void>("orchestra_close_worker", { worker, agreed: agreed ?? null }),
   /** Starts a worker for the main agent `main`, as the user's own doing (the main agent is told). Resolves to the worker's id. */
   spawnWorker: (main: string, w: NewWorker) => invoke<string>("orchestra_spawn", { main, task: w.task, name: w.name, isolation: w.isolation, model: w.model }),

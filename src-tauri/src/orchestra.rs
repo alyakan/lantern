@@ -20,6 +20,9 @@ use std::time::{Duration, Instant};
 
 /// Workers one main agent may have going at once (stopped and ended ones don't count).
 pub const MAX_WORKERS: usize = 6;
+/// The model a Claude worker runs on when spawn_agent names none: the main agent's (often Opus) is more than most
+/// workers' jobs need, and every worker spends the user's plan.
+pub const WORKER_MODEL: &str = "sonnet";
 /// How long a worker waits on the user before the main agent hears of it: most prompts are answered in seconds.
 const WAIT_NOTICE: Duration = Duration::from_secs(60);
 const READ_DEFAULT: usize = 30;
@@ -46,6 +49,8 @@ pub struct SpawnRequest {
     pub model: Option<String>,
     /// The mode it starts in (see args::worker_mode): never more autonomous than the main agent.
     pub mode: crate::args::Mode,
+    /// It works in the main agent's folder, so it may read but not edit.
+    pub read_only: bool,
 }
 
 /// What the user agreed to lose when they confirmed closing a worker (see `Orchestra::close_worker`).
@@ -93,6 +98,8 @@ pub trait Host: Send + Sync + 'static {
     fn worker_mode(&self, main: &str, provider: ProviderId) -> crate::args::Mode;
     /// Where workers' worktrees go (outside the project, so they don't show up in it).
     fn worktree_root(&self) -> PathBuf;
+    /// How many workers may run at once across all of Lantern, every team and project (the user's setting).
+    fn agent_limit(&self) -> usize;
     fn path_env(&self) -> Fut<'_, Option<String>>;
     /// Creates the worker's chat, starts its claude in `folder` in Auto mode, and sends it its brief.
     fn spawn_worker(&self, req: SpawnRequest) -> Fut<'_, Result<(), String>>;
@@ -460,7 +467,9 @@ impl Orchestra {
             None => None,
         };
         let provider = self.worker_provider(main, &args["provider"]).await?;
+        let model = model.or_else(|| (provider == ProviderId::Claude).then(|| WORKER_MODEL.to_string()));
         let folder = self.host.main_folder(main)?;
+        let limit = self.host.agent_limit();
         // The place is taken under the same lock that counts the others, so two calls can't both find room for the last one.
         // Its worktree is filled in once there is one.
         let id = {
@@ -468,6 +477,11 @@ impl Orchestra {
             let live = inner.workers.values().filter(|w| w.parent == main && w.status.live()).count();
             if live >= MAX_WORKERS {
                 return Err(format!("{live} workers are already going (the most is {MAX_WORKERS}). Wait for one to finish, or stop_agent one."));
+            }
+            // Every team's, in every project: they all spend the same plan.
+            let running = inner.workers.values().filter(|w| matches!(w.status, Status::Working | Status::Waiting)).count();
+            if running >= limit {
+                return Err(format!("{running} agent{} running across Lantern (your limit in Settings). Wait for one to finish, or stop_agent one.", if running == 1 { " is" } else { "s are" }));
             }
             inner.next += 1;
             let id = format!("w{}", inner.next);
@@ -544,7 +558,7 @@ impl Orchestra {
                 provider: Some(provider.info()),
             },
         );
-        let req = SpawnRequest { parent: main.to_string(), slot: id.clone(), name: name.clone(), brief, folder: run_folder.clone(), provider, model, mode };
+        let req = SpawnRequest { parent: main.to_string(), slot: id.clone(), name: name.clone(), brief, folder: run_folder.clone(), provider, model, mode, read_only: worktree.is_none() };
         if let Err(e) = self.host.spawn_worker(req).await {
             release(self, &id);
             self.host.emit(&id, UiEvent::AgentStopped { reason: Some(format!("It didn't start: {e}")) });
@@ -1113,6 +1127,8 @@ mod tests {
         /// The provider the main agent runs on (Claude by default) and the others whose CLI is installed.
         main_provider: Mutex<ProviderId>,
         installed: Mutex<Vec<ProviderId>>,
+        /// The user's limit on agents running at once across Lantern (None: as many as a team may have).
+        limit: Mutex<Option<usize>>,
     }
 
     impl Host for FakeHost {
@@ -1138,6 +1154,9 @@ mod tests {
         }
         fn worktree_root(&self) -> PathBuf {
             self.worktrees.lock().unwrap().clone()
+        }
+        fn agent_limit(&self) -> usize {
+            self.limit.lock().unwrap().unwrap_or(MAX_WORKERS)
         }
         fn path_env(&self) -> Fut<'_, Option<String>> {
             Box::pin(async { None })
@@ -2177,7 +2196,7 @@ mod tests {
         let (host, o, repo, _w) = setup();
         o.spawn_for_user("s1", "Read the code", Some(" Research "), "shared", None).await.unwrap();
         assert_eq!(host.spawned.lock().unwrap()[0].folder, repo.path());
-        assert!(host.spawned.lock().unwrap()[0].model.is_none());
+        assert_eq!(host.spawned.lock().unwrap()[0].model.as_deref(), Some(WORKER_MODEL));
         assert_eq!(host.wakes(), vec!["[Lantern: the user started worker \"Research\" (w1) themselves, in your folder; you didn't start it. Its task, in the user's words (quoted): \"Read the code\"]"]);
     }
 
@@ -2291,5 +2310,37 @@ mod tests {
         assert!(!wt.root.exists());
         assert_eq!(branches_like(repo.path(), "users-work"), "users-work");
         assert!(host.wakes().last().unwrap().contains("isn't one Lantern made, so it was kept"), "{:?}", host.wakes());
+    }
+
+    #[tokio::test]
+    async fn a_worker_runs_on_sonnet_unless_the_main_agent_names_a_model_and_a_shared_one_is_read_only() {
+        let (host, o, _r, _w) = setup();
+        spawn(&o, "default").await;
+        call(&o, "spawn_agent", json!({"name": "hard", "brief": "y", "model": "opus"})).await.unwrap();
+        call(&o, "spawn_agent", json!({"name": "reader", "brief": "y", "isolation": "shared"})).await.unwrap();
+        let spawned = host.spawned.lock().unwrap().clone();
+        assert_eq!(spawned.iter().map(|r| r.model.as_deref()).collect::<Vec<_>>(), [Some("sonnet"), Some("opus"), Some("sonnet")]);
+        assert_eq!(spawned.iter().map(|r| r.read_only).collect::<Vec<_>>(), [false, false, true]);
+        // Another provider's workers get its own default, not a Claude model.
+        *host.installed.lock().unwrap() = vec![ProviderId::Fake];
+        call(&o, "spawn_agent", json!({"name": "other", "brief": "y", "provider": "fake"})).await.unwrap();
+        assert_eq!(host.spawned.lock().unwrap()[3].model, None);
+    }
+
+    #[tokio::test]
+    async fn the_users_limit_on_agents_running_across_lantern_holds_for_every_team() {
+        let (host, o, _r, _w) = setup();
+        *host.limit.lock().unwrap() = Some(2);
+        o.register_main("s2");
+        spawn(&o, "a").await;
+        o.call("s2", "spawn_agent", &json!({"name": "b", "brief": "y", "isolation": "shared"})).await.unwrap();
+        let err = call(&o, "spawn_agent", json!({"name": "c", "brief": "y"})).await.unwrap_err();
+        assert_eq!(err, "2 agents are running across Lantern (your limit in Settings). Wait for one to finish, or stop_agent one.");
+        // One that finished its turn is no longer running.
+        o.observe("w1", &done("Done."));
+        assert!(call(&o, "spawn_agent", json!({"name": "c", "brief": "y"})).await.is_ok());
+        // The user starting one is told to close one instead.
+        let err = o.spawn_for_user("s1", "x", None, "shared", None).await.unwrap_err();
+        assert!(err.contains("your limit in Settings") && err.contains("or close one"), "{err}");
     }
 }

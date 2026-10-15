@@ -23,9 +23,9 @@ fn orchestra_tool_list() -> Vec<Value> {
             "inputSchema": {"type": "object", "properties": {
                 "name": {"type": "string", "description": "A short name for the worker (a few words), shown on the canvas and used for its branch."},
                 "brief": {"type": "string", "description": "The task: goal, files or areas involved, constraints, how to verify, what done looks like."},
-                "isolation": {"type": "string", "enum": ["worktree", "shared"], "description": "worktree (default): its own git worktree and branch. shared: your folder, only for work that writes nothing."},
+                "isolation": {"type": "string", "enum": ["worktree", "shared"], "description": "worktree (default): its own git worktree and branch. shared: your folder, read-only (it can't edit files), for research or review."},
                 "provider": {"type": "string", "description": "Which agent provider runs it, from the providers your instructions list; omit to use yours. Only a listed one is available."},
-                "model": {"type": "string", "description": "A model for it, as the provider that runs it names models (for claude: sonnet, opus, haiku…); omit to use yours, or that provider's default when it isn't yours."}
+                "model": {"type": "string", "description": "A model for it, as the provider that runs it names models (for claude: sonnet, opus, haiku…); omit for claude's sonnet (another provider's default when it isn't claude). Use opus only for work that needs it: every worker spends the user's plan."}
             }, "required": ["name", "brief"]}
         }),
         json!({

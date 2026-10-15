@@ -4,6 +4,7 @@ import { api } from "../api";
 import type { McpServer, McpServerSpec, SkillEntry, SlashCommand } from "../types";
 import { describeConfig, displayName, groupSkills, iconOf, removable, sourceOf, statusOf, toolsOf, withoutFrontmatter } from "../lib/mcp";
 import { setChime, useChimeOn } from "../lib/chime";
+import { AGENT_LIMIT_MAX, AGENT_LIMIT_MIN, setAgentLimit, useAgentLimit } from "../lib/agentLimit";
 import { PAUSE_MS, type NotifyPrefs } from "../lib/notifyPrefs";
 import type { Appearance, TextSize } from "../lib/theme";
 import { Md } from "./Md";
@@ -120,6 +121,7 @@ const NOTIFY_EVENTS: { key: "finished" | "waiting" | "failed"; label: string }[]
 /** General: when Lantern tells you about Claude (notifications, a pause), the toasts' sound, and how the window looks. */
 function GeneralPage({ notify, onNotify, appearance, onAppearance, textSize, onTextSize }: GeneralSettingsProps) {
   const sound = useChimeOn();
+  const agentLimit = useAgentLimit();
   const paused = notify.pausedUntil > Date.now();
   const set = (patch: Partial<NotifyPrefs>) => onNotify({ ...notify, ...patch });
   return (
@@ -195,6 +197,22 @@ function GeneralPage({ notify, onNotify, appearance, onAppearance, textSize, onT
             ["large", "Large"],
           ]}
         />
+      </section>
+      <section className="general-section" aria-labelledby="general-agents">
+        <h3 id="general-agents" className="general-title">
+          Teams
+        </h3>
+        <label className="general-option">
+          <span>Agents running at once (all teams)</span>
+          <select aria-label="Agents running at once (all teams)" value={agentLimit} onChange={(e) => setAgentLimit(Number(e.target.value))}>
+            {Array.from({ length: AGENT_LIMIT_MAX - AGENT_LIMIT_MIN + 1 }, (_, i) => AGENT_LIMIT_MIN + i).map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="settings-muted">Every worker spends the same plan. A lead asking for one more is told to wait for one to finish.</span>
       </section>
     </>
   );

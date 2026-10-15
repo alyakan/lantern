@@ -1,3 +1,4 @@
+import { pushAgentLimit } from "./lib/agentLimit";
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RevertOutcome } from "./api";
@@ -212,6 +213,10 @@ export default function App() {
   // A test run the chat asked the right pane to show.
   const [focusRun, setFocusRun] = useState<{ id: string; key: number } | null>(null);
   const [branch, setBranch] = useState<string | null>(null);
+  // The backend checks the user's limit on agents running at once: it learns it from here.
+  useEffect(() => {
+    void pushAgentLimit();
+  }, []);
   // When each chat's last turn ended, for the title bar's "Finished | Today at 19:22".
   const [finishedAt, setFinishedAt] = useState<Record<string, Date>>({});
   // The pop-up shown when the chat on screen finishes a turn.
@@ -482,7 +487,7 @@ export default function App() {
         slot,
         claudePath,
         folder,
-        { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder), ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch } } : {}) },
+        { mode, ...settingsFor(slot, h), auto_approve: autoFor(folder), ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared" } } : {}) },
         sessionId,
       );
     // A worker waits for its main agent: if that one didn't open, this one comes back as an ordinary chat.
