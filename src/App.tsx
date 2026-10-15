@@ -66,7 +66,7 @@ import { FileLinksProvider } from "./lib/fileLinks";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Hud, type HudEvent } from "./components/Hud";
 import { HistoryPopover } from "./components/HistoryPopover";
-import { Sidebar, SIDEBAR_DEFAULT } from "./components/Sidebar";
+import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects } from "./lib/sidebar";
 import { SidebarCompact } from "./components/SidebarCompact";
 import { usePeek } from "./lib/peek";
@@ -1547,6 +1547,8 @@ export default function App() {
   // is its width. The first key is the one that once said "minimized to the rail": that is hidden now.
   const [sidebarHidden, setSidebarHidden] = usePersistentState("sidebar.collapsed", false);
   const [sidebarCompact, setSidebarCompact] = usePersistentState("sidebar.compact", false);
+  // What the sidebar last listed, so showing it again (a peek mounts a new one) starts from that instead of empty.
+  const sidebarMemoryRef = useRef(sidebarMemory());
   const [sidebarWidth, setSidebarWidth] = usePersistentState("sidebar.width", SIDEBAR_DEFAULT);
   // Projects removed from the recents here (Claude Code keeps their chats; one with a chat open is listed regardless).
   const [hiddenFolders, setHiddenFolders] = usePersistentState<string[]>("sidebar.hidden", []);
@@ -1616,6 +1618,7 @@ export default function App() {
     onReviewPr: then(sidebarHandlers.onReviewPr),
   };
   const sidebarProps = {
+    memory: sidebarMemoryRef.current,
     width: sidebarWidth,
     onWidth: setSidebarWidth,
     open: openByProject,

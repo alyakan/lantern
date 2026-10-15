@@ -41,6 +41,19 @@ export interface SidebarHandlers {
   onReviewPr: () => void;
 }
 
+/**
+ * What the sidebar last showed, kept by the app across the sidebar being shown again (each peek is a new one): it starts
+ * from this instead of an empty list, and reads it all again behind it, so it doesn't flash empty and fill in.
+ */
+export interface SidebarMemory {
+  recent: RecentFolder[];
+  past: Record<string, SessionSummary[] | undefined>;
+  /** The projects that had something open (see seenOpen). */
+  seenOpen: Set<string>;
+}
+
+export const sidebarMemory = (): SidebarMemory => ({ recent: [], past: {}, seenOpen: new Set() });
+
 interface Props extends SidebarHandlers {
   /** Its button at the top: makes the sidebar compact, or (while it only peeks in over the chat) keeps it open. */
   onToggle: () => void;
@@ -65,6 +78,8 @@ interface Props extends SidebarHandlers {
   moved: MovedFolder[];
   onRelocate: (from: MovedFolder) => void;
   onDismissMoved: (old: string) => void;
+  /** What it showed last time (see SidebarMemory); without it, it starts empty. */
+  memory?: SidebarMemory;
 }
 
 /** Closes a popover on a press outside it or Escape. */
@@ -270,13 +285,17 @@ function Project({ project, expanded, onToggle, current, branch, moved, onReloca
  * only for an expanded project.
  */
 export function Sidebar(props: Props) {
-  const { onToggle, peek, width, onWidth, open, currentFolder, branch, canNew, loadRecent, loadSessions, pinned, titles, hidden, moved, onRelocate, onDismissMoved, ...h } = props;
-  const [recent, setRecent] = useState<RecentFolder[]>([]);
-  const [past, setPast] = useState<Record<string, SessionSummary[] | undefined>>({});
+  const { onToggle, peek, width, onWidth, open, currentFolder, branch, canNew, loadRecent, loadSessions, pinned, titles, hidden, moved, onRelocate, onDismissMoved, memory, ...h } = props;
+  const [recent, setRecent] = useState<RecentFolder[]>(() => memory?.recent ?? []);
+  const [past, setPast] = useState<Record<string, SessionSummary[] | undefined>>(() => memory?.past ?? {});
+  if (memory) {
+    memory.recent = recent;
+    memory.past = past;
+  }
   // A project the user opened or closed by hand; the others follow whether something is open in them.
   const [by, setBy] = usePersistentState<Record<string, boolean>>("sidebar.expanded", {});
   // A project that had something open stays open when its last chat closes, so the list doesn't fold up under the pointer.
-  const seenOpen = useRef(new Set<string>());
+  const seenOpen = useRef(memory?.seenOpen ?? new Set<string>());
   const [dragWidth, setDragWidth] = useState<number | null>(null);
 
   const openKey = Object.keys(open).sort().join("\n");
