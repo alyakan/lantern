@@ -19,10 +19,13 @@ interface Form {
  * "+ Agent": the user starts a worker themselves, without asking the main agent to. A small form opens over the canvas
  * (the task, an optional name, where it works, and which model); the worker is started exactly as the main agent's would
  * be, so whatever stops that (the limit on workers, no git for a worktree) is said here, in the form.
+ * `shown`: another control (the canvas's "⋯" menu) opens the form, so there is no button here and that decides when it is open.
  */
-export function NewAgent({ main }: { main: string }) {
+export function NewAgent({ main, shown }: { main: string; shown?: { open: boolean; setOpen: (open: boolean) => void } }) {
   const actions = useNodeActions();
-  const [open, setOpen] = useState(false);
+  const [openOwn, setOpenOwn] = useState(false);
+  const open = shown ? shown.open : openOwn;
+  const setOpen = shown ? shown.setOpen : setOpenOwn;
   const [form, setForm] = useState<Form>(EMPTY);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -56,9 +59,11 @@ export function NewAgent({ main }: { main: string }) {
 
   return (
     <div className="canvas-team" ref={box}>
-      <button ref={button} className="canvas-fit" aria-expanded={open} aria-haspopup="dialog" aria-controls={open ? id : undefined} title="Start an agent yourself" onClick={() => setOpen(!open)}>
-        + Agent
-      </button>
+      {!shown && (
+        <button ref={button} className="canvas-fit" aria-expanded={open} aria-haspopup="dialog" aria-controls={open ? id : undefined} title="Start an agent yourself" onClick={() => setOpen(!open)}>
+          + Agent
+        </button>
+      )}
       {open && (
         <form
           id={id}

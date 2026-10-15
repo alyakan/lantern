@@ -429,14 +429,14 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 .title-center .dot.unread { background: var(--unread); }
 /* Xcode's activity viewer: "acme-api › main" on the left, the status on the right, a progress bar underneath. */
 .viewer { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 14px 0 3px; border-radius: var(--radius-pill); background: var(--glass); border: 0.5px solid var(--glass-line); overflow: hidden; }
-.viewer-scheme { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; margin-right: auto; height: 26px; padding: 0 10px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text); font-size: calc(12.5px * var(--font-scale)); font-weight: 500; }
+.viewer-scheme { display: inline-flex; align-items: center; gap: 6px; flex: 0 4 auto; min-width: 0; margin-right: auto; height: 26px; padding: 0 10px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text); font-size: calc(12.5px * var(--font-scale)); font-weight: 500; }
 .viewer-scheme:hover:not(:disabled), .viewer-scheme.pressed { background: var(--bg-hover); }
 .viewer-scheme:disabled { opacity: 1; }
 .viewer-scheme svg { flex: none; color: var(--muted); }
 .viewer-name, .viewer-branch { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .viewer-branch { font-weight: 400; color: var(--text-2); }
 .viewer-crumb { flex: none; width: 5px; height: 5px; margin: 0 2px 0 0; border-right: 1.3px solid var(--faint); border-bottom: 1.3px solid var(--faint); transform: rotate(-45deg); }
-.viewer-status { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.viewer-status { flex: 0 0 auto; max-width: 55%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--text-2); font-variant-numeric: tabular-nums; }
 .viewer-detail { color: var(--muted); }
 .viewer.working .viewer-status { color: var(--working); }
 /* While Claude works, an orange glint runs along the viewer's bottom edge. */
@@ -1809,7 +1809,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .summary-revert { margin-left: 4px; }
 
 /* The orchestra's canvas: agents as floating chats on a pannable, zoomable surface, tethered to the main agent. */
-.canvas { position: relative; flex: 1; min-height: 0; margin: 0 var(--edge) var(--edge); overflow: hidden; overflow: clip; border-radius: var(--radius-float); box-shadow: var(--card-shadow); cursor: grab; touch-action: none; overscroll-behavior: none;
+.canvas { container: canvas / inline-size; position: relative; flex: 1; min-height: 0; margin: 0 var(--edge) var(--edge); overflow: hidden; overflow: clip; border-radius: var(--radius-float); box-shadow: var(--card-shadow); cursor: grab; touch-action: none; overscroll-behavior: none;
   background-color: var(--bg-subtle);
   background-image: radial-gradient(circle, color-mix(in srgb, var(--text) 16%, transparent) 1px, transparent 1.3px);
   background-size: calc(28px * var(--zoom, 1)) calc(28px * var(--zoom, 1));
@@ -1862,6 +1862,9 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .node-head .icon { font-size: calc(16px * var(--font-scale)); line-height: 1; }
 .node-status { flex: none; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); white-space: nowrap; }
 .node-quiet { color: var(--muted-text); font-variant-numeric: tabular-nums; }
+/* Working but silent for minutes: amber, and the tooltip says what to do. */
+.canvas-node.stuck .node-status { color: var(--warn); font-weight: 600; font-variant-numeric: tabular-nums; }
+.node-dot.working.stuck { background: var(--warn); animation: none; }
 /* A window's Permissions and Workflow, on its title bar: small chips whose menus open downwards over the chat. */
 .node-settings { flex: none; display: inline-flex; align-items: center; gap: 4px; }
 .node-chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; margin: 0; padding: 0 7px; border: 0.5px solid var(--glass-line); border-radius: var(--radius-pill); background: var(--glass); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); font-weight: 500; white-space: nowrap; }
@@ -1912,12 +1915,28 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .canvas.summary .node-summary-line { font-size: calc(13px / var(--zoom)); -webkit-line-clamp: 8; }
 .canvas.summary .node-summary-note { font-size: calc(12px / var(--zoom)); }
 
-.canvas-controls { position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--field); box-shadow: var(--card-shadow); cursor: default; }
+.canvas-controls { position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 2px; max-width: calc(100% - 24px); padding: 3px; white-space: nowrap; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--field); box-shadow: var(--card-shadow); cursor: default; }
 .canvas-controls .icon { width: var(--pill-s); height: var(--pill-s); font-size: calc(17px * var(--font-scale)); line-height: 1; border-radius: 50%; }
 .canvas-zoom { min-width: 42px; text-align: center; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
 .canvas-fit { height: var(--pill-s); padding: 0 11px; border: none; border-radius: var(--radius-pill); background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
 .canvas-fit:hover { background: var(--bg-hover); color: var(--text); }
 .canvas-context { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.canvas-context-who { display: inline-block; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
+.canvas-ctl-wide { display: flex; align-items: center; gap: 2px; }
+.canvas-controls .canvas-ctl-more, .canvas-ctl-short { display: none; }
+.canvas-more-head { padding: 6px 10px 2px; font-size: calc(11px * var(--font-scale)); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted-text); }
+.canvas-more-list { width: 300px; }
+/* The toolbar never wraps or gets cut off: as the canvas narrows (the side panel is open) the least used controls fold into "⋯", then the Context chip and Team shorten. */
+@container canvas (max-width: 859px) {
+  .canvas-ctl-wide { display: none; }
+  .canvas-controls .canvas-ctl-more { display: inline-flex; }
+}
+@container canvas (max-width: 599px) {
+  .canvas-ctl-long { display: none; }
+  .canvas-ctl-short { display: inline; }
+}
+/* A list that opens from the toolbar fits in a narrow canvas. */
+.canvas-team-list, .new-agent { max-width: calc(100cqw - 24px); white-space: normal; }
 .canvas-context.warn { color: var(--warn); }
 .canvas-context.full { color: var(--del); font-weight: 600; }
 /* The plan's five-hour window: quiet until it gets close. */

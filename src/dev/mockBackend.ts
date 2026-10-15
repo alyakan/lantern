@@ -9,7 +9,8 @@ import { TESTO_MAP } from "../lib/testoMap";
 // The next patch release, which the update checks find.
 const NEXT_VERSION = APP_VERSION.replace(/\d+$/, (patch) => String(Number(patch) + 1));
 
-const FOLDER = "/Users/you/projects/acme-api";
+// With &project=name the project folder has that name (a long one, to see the title bar cope).
+const FOLDER = `/Users/you/projects/${new URLSearchParams(typeof location === "undefined" ? "" : location.search).get("project") ?? "acme-api"}`;
 const FILE = `${FOLDER}/src/client/retry.ts`;
 // With &more the demo turn also writes a test file and hits a failing typecheck, for the file tabs and failure count.
 const MORE = new URLSearchParams(location.search).has("more");
@@ -1059,6 +1060,8 @@ export function installMockBackend() {
           const worktree = a.isolation === "worktree";
           const name = String(a.name ?? "").trim() || String(a.task).split(/\s+/).slice(0, 5).join(" ");
           void sendTo(String(a.main))({ kind: "agent_spawned", worker: id, name, brief: String(a.task), folder: worktree ? `/Users/you/Library/Application Support/lantern/worktrees/web-app/${id}` : FOLDER, branch: worktree ? `lantern/${id}` : null, base: worktree ? "main" : null, isolation: worktree ? "worktree" : "shared", mode: slotMode[String(a.main)] === "auto" ? "auto" : "ask" });
+          // It starts thinking, which is also its first word: a card that then says nothing for minutes shows as quiet.
+          void sleep(150).then(() => sendTo(id)({ kind: "thinking", parent: null }));
           return id;
         }
         case "run_shell":

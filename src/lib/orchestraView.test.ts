@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type State } from "../store";
 import { chatsReducer, initialChats, type Chats } from "../sessions";
-import { money, needingYou, nodeStatus, orchestraNodes, readyToMerge, statusLabel, STATUS_LABEL, summaryLine, teamMain, teamNodes, lostText, tokens, usage } from "./orchestraView";
+import { money, needingYou, teamActivity, nodeStatus, orchestraNodes, readyToMerge, statusLabel, STATUS_LABEL, summaryLine, teamMain, teamNodes, lostText, tokens, usage } from "./orchestraView";
 import { WAKE_LIMIT } from "../sessions";
 
 const base: State = { ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/p" };
@@ -35,6 +35,31 @@ describe("a lead whose updates are held", () => {
     // Notes waiting but the loop guard not reached, or a lead that is working: nothing held.
     expect(nodeStatus({ ...held, autoStreak: 0 })).toBe("idle");
     expect(nodeStatus({ ...held, status: "running" })).toBe("working");
+  });
+});
+
+describe("teamActivity", () => {
+  const say = (c: Chats) => teamActivity(orchestraNodes(c, name), c.slots);
+  const set = (c: Chats, slot: string, s: Partial<State>): Chats => ({ ...c, slots: { ...c.slots, [slot]: { ...c.slots[slot], ...s } } });
+  // A new worker starts out working: these two have finished their turn.
+  const team3 = (): Chats => set(set(spawn(spawn(initialChats(main), "w1", "One"), "w2", "Two"), "w1", { status: "idle", thinking: false }), "w2", { status: "idle", thinking: false });
+
+  it("says all idle when nobody is doing anything", () => {
+    expect(say(team3())).toEqual({ text: "all idle", detail: null, working: false });
+  });
+
+  it("counts who is working and who needs the user, and runs the progress bar while anyone works", () => {
+    const asking: Partial<State> = { status: "running", items: [{ type: "permission", id: "p", toolName: "Bash", input: {}, decision: null }] };
+    const c = set(set(set(team3(), "s1", { status: "running" }), "w1", { status: "running" }), "w2", asking);
+    expect(say(c)).toEqual({ text: "2 working, 1 needs you", detail: null, working: true });
+    // Only the one that needs the user: the bar doesn't run.
+    expect(say(set(team3(), "w2", asking))).toEqual({ text: "1 needs you", detail: null, working: false });
+  });
+
+  it("counts failed and stopped agents", () => {
+    const failed: Partial<State> = { status: "ended", banner: { kind: "error", text: "boom" } as State["banner"] };
+    expect(say(set(team3(), "w1", failed)).text).toBe("1 failed");
+    expect(say(set(set(team3(), "w1", failed), "w2", { status: "ended" })).text).toBe("1 failed, 1 stopped");
   });
 });
 

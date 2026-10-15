@@ -24,6 +24,8 @@ export interface View extends Point {
 
 export const MIN_ZOOM = 0.2;
 export const MAX_ZOOM = 1.6;
+/** Fitting never zooms out past this by itself: a team too big for the window is shown at this size, and the user pans. */
+export const READABLE_ZOOM = 0.8;
 /** Below this zoom a chat is too small to read, so agents show as summary cards instead. */
 export const SUMMARY_ZOOM = 0.5;
 /** A pinch that hovers around SUMMARY_ZOOM mustn't swap cards and chats back and forth: cards start below this, chats return above SUMMARY_EXIT. */
@@ -62,12 +64,19 @@ export function bounds(boxes: Box[]): Box | null {
   return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
 }
 
-/** A view that shows all of `boxes` in `viewport`, centred, never zoomed in past 1 (a lone agent isn't blown up). */
+/**
+ * A view that shows all of `boxes` in `viewport`, centred, never zoomed in past 1 (a lone agent isn't blown up) and never
+ * out past READABLE_ZOOM. When everything wouldn't fit at that, it shows what does from the top left (the main agent
+ * first) and the rest is a pan away.
+ */
 export function fitView(boxes: Box[], viewport: Size, padding = 56): View {
   const b = bounds(boxes);
   if (!b || viewport.w <= 0 || viewport.h <= 0) return { x: 0, y: 0, zoom: 1 };
-  const zoom = clampZoom(Math.min(1, (viewport.w - 2 * padding) / b.w, (viewport.h - 2 * padding) / b.h));
-  return { zoom, x: (viewport.w - b.w * zoom) / 2 - b.x * zoom, y: (viewport.h - b.h * zoom) / 2 - b.y * zoom };
+  const zoom = clampZoom(Math.max(READABLE_ZOOM, Math.min(1, (viewport.w - 2 * padding) / b.w, (viewport.h - 2 * padding) / b.h)));
+  // Along an axis where it fits it is centred; where it doesn't, it starts at the edge with a little room (less than the padding, which is for a view that shows everything).
+  const edge = Math.min(padding, 24);
+  const place = (room: number, size: number, at: number) => (size * zoom + 2 * padding > room ? edge - at * zoom : (room - size * zoom) / 2 - at * zoom);
+  return { zoom, x: place(viewport.w, b.w, b.x), y: place(viewport.h, b.h, b.y) };
 }
 
 /** A view with `box` centred in `viewport` at `zoom` (to bring an agent that needs you into sight). */

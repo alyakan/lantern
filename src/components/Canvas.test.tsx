@@ -186,6 +186,18 @@ describe("the canvas", () => {
     expect(onFocus).toHaveBeenLastCalledWith("w1");
   });
 
+  it("frames the agent that needs you at 100%, however far out the view was", () => {
+    const { layout } = setup(team(2), { attention: ["w1"] });
+    const canvas = screen.getByTestId("canvas");
+    act(() => {
+      fireEvent.wheel(canvas, { ctrlKey: true, deltaY: 600 });
+    });
+    expect(layout.view!.zoom).toBeLessThan(SUMMARY_ZOOM);
+    fireEvent.click(screen.getByRole("button", { name: /1 agent needs you/ }));
+    expect(layout.view!.zoom).toBe(1);
+    expect(canvas.classList.contains("summary")).toBe(false);
+  });
+
   it("has no pill when nobody needs you", () => {
     setup(team(1));
     expect(screen.queryByRole("button", { name: /need/ })).toBeNull();
@@ -435,9 +447,14 @@ describe("oversight", () => {
     chats.slots.w2 = { ...chats.slots.w2, contextUsed: 190_000, contextWindow: 200_000 };
     const { onFocus } = setup(chats);
     const chip = screen.getByRole("button", { name: /^Context:/ });
-    expect(chip.textContent).toBe("Context 95% · Worker 2");
+    // Wide: "Context 95% · Worker 2"; narrow (the stylesheet's container query swaps them): just "95%".
+    expect(chip.querySelector(".canvas-ctl-long")?.textContent).toBe("Context 95% · Worker 2");
+    expect(chip.querySelector(".canvas-ctl-short")?.textContent).toBe("95%");
     expect(chip).toHaveAccessibleName("Context: Worker 2 95% used, nearly full");
     expect(chip).toHaveClass("full");
+    // The tooltip says what the number is and what to do about it.
+    expect(chip.getAttribute("title")).toContain("share of Worker 2's context window in use now");
+    expect(chip.getAttribute("title")).toContain("At 75% or more, open that agent and use Compact");
     expect(chip.getAttribute("title")).toContain("Lead: 25% (50,000 of 200,000 tokens)");
     expect(chip.getAttribute("title")).toContain("Worker 1: 50% (100,000 of 200,000 tokens)");
     fireEvent.click(chip);
@@ -453,7 +470,7 @@ describe("oversight", () => {
     chats.slots.w1 = { ...chats.slots.w1, contextUsed: 20_000 };
     setup(chats);
     const chip = screen.getByRole("button", { name: /^Context:/ });
-    expect(chip.textContent).toBe("Context 78%");
+    expect(chip.querySelector(".canvas-ctl-long")?.textContent).toBe("Context 78%");
     expect(chip).toHaveClass("warn");
     expect(chip).toHaveAccessibleName("Context: Lead 78% used, getting full");
   });
@@ -823,6 +840,72 @@ describe("starting an agent from the canvas", () => {
     setup(chats);
     expect(screen.getAllByRole("region")).toHaveLength(1); // an orphaned worker
     expect(screen.queryByRole("button", { name: "+ Agent" })).toBeNull();
+  });
+});
+
+describe("an agent at work that has gone quiet", () => {
+  const working = (quietMs: number) => {
+    const chats = team(1);
+    chats.slots.w1 = { ...chats.slots.w1, status: "running", activityAt: Date.now() - quietMs };
+    return chats;
+  };
+
+  it("says how long it has been, and from three minutes on turns amber and says what to do", () => {
+    setup(working(45_000));
+    const card = screen.getByLabelText(/Agent Worker 1/);
+    expect(card).toHaveTextContent("Working · 45s ago");
+    expect(card).not.toHaveClass("stuck");
+    cleanup();
+    setup(working(200_000));
+    const stuck = screen.getByLabelText(/Agent Worker 1, Quiet 3m/);
+    expect(stuck).toHaveClass("stuck");
+    expect(stuck.querySelector(".node-status")).toHaveTextContent("Quiet 3m");
+    expect(stuck.querySelector(".node-status")?.getAttribute("title")).toMatch(/send it a message, or stop it/);
+  });
+});
+
+describe("the toolbar when the canvas is narrow", () => {
+  it("has a ⋯ menu with the folded controls: roles, arrow keys, Escape and focus back", async () => {
+    const { acts } = setup(hidden(team(2), "w2"));
+    const more = screen.getByRole("button", { name: "More canvas controls" });
+    expect(more).toHaveAttribute("aria-haspopup", "menu");
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(more);
+    const menu = screen.getByRole("menu", { name: "More canvas controls" });
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    // It opens on the checked radio (where the Lead's subagents run now), and the arrow keys move through the items.
+    const items = [...menu.querySelectorAll<HTMLElement>('[role^="menuitem"]')];
+    expect(items.map((i) => i.getAttribute("role"))).toEqual(["menuitemradio", "menuitemradio", "menuitem", "menuitem"]);
+    expect(within(menu).getByRole("menuitemradio", { name: /On the canvas/ })).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(items[1]).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "End" });
+    expect(within(menu).getByRole("menuitem", { name: /Show Worker 2/ })).toHaveFocus();
+    fireEvent.click(items[1]);
+    expect(acts.setSubagents).toHaveBeenCalledWith("s1", "inline");
+    // Escape closes it and puts focus back on the button.
+    fireEvent.click(more);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "More canvas controls" })).toBeNull();
+    expect(more).toHaveFocus();
+  });
+
+  it("starts an agent from the menu, and puts a hidden one back", async () => {
+    const { acts } = setup(hidden(team(2), "w2"));
+    const more = screen.getByRole("button", { name: "More canvas controls" });
+    fireEvent.click(more);
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: /Show Worker 2/ }));
+    expect(acts.show).toHaveBeenCalledWith("w2");
+    fireEvent.click(more);
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: /\+ Agent/ }));
+    // Two forms can exist (the toolbar's own and this one's); only this one is open.
+    const form = screen.getByRole("dialog", { name: "New agent" });
+    fireEvent.change(within(form).getByLabelText("Task"), { target: { value: "Check the docs" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Start agent" }));
+    expect(acts.spawn).toHaveBeenCalledWith("s1", { task: "Check the docs", name: null, isolation: "worktree", model: null });
+    // Started, the form goes and focus returns to "⋯".
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "New agent" })).toBeNull());
+    await waitFor(() => expect(more).toHaveFocus());
   });
 });
 
