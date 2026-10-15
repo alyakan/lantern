@@ -1615,6 +1615,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .node-meta svg { flex: none; }
 .node-head .icon { font-size: calc(16px * var(--font-scale)); line-height: 1; }
 .node-status { flex: none; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); white-space: nowrap; }
+.node-quiet { color: var(--muted-text); font-variant-numeric: tabular-nums; }
 /* A window's Permissions and Workflow, on its title bar: small chips whose menus open downwards over the chat. */
 .node-settings { flex: none; display: inline-flex; align-items: center; gap: 4px; }
 .node-chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; margin: 0; padding: 0 7px; border: 0.5px solid var(--glass-line); border-radius: 999px; background: var(--glass); color: var(--text-2); font-size: calc(11.5px * var(--font-scale)); font-weight: 500; white-space: nowrap; }

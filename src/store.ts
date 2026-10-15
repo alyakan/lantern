@@ -200,6 +200,8 @@ export interface State {
   lastEdited: string | null;
   follow: boolean;
   thinking: boolean;
+  /** When Claude last said or did anything (any event from its run): how long a working agent has been quiet. */
+  activityAt: number | null;
   banner: Banner | null;
   stopRequested: boolean;
   /** A worker the main agent stopped (stop_agent), until it is restarted: it isn't brought back at launch. */
@@ -282,6 +284,7 @@ export const initialState: State = {
   lastEdited: null,
   follow: true,
   thinking: false,
+  activityAt: null,
   banner: null,
   stopRequested: false,
   leadStopped: false,
@@ -628,8 +631,11 @@ function applyEvent(state: State, ev: UiEvent): State {
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
-    case "ui_event":
-      return applyEvent(state, action.event);
+    case "ui_event": {
+      // An event it doesn't know leaves the chat as it is (and isn't counted as Claude doing something).
+      const next = applyEvent(state, action.event);
+      return next === state ? state : { ...next, activityAt: Date.now() };
+    }
     case "claude_found":
       return { ...state, claudePath: action.path, setupError: null, status: state.folder ? state.status : "no_folder" };
     case "claude_missing":
