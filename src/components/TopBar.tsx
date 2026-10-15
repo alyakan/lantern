@@ -19,6 +19,8 @@ interface Props {
   onToggleReview: () => void;
   /** Opens Settings (MCP servers, skills). */
   onOpenSettings?: () => void;
+  /** MCP servers that are down or need a login ("sentry needs you to log in"): the Settings button wears a warning dot. */
+  mcpIssues?: string[];
   branch?: string | null;
   /** What the activity viewer says on its right. */
   activity?: ActivityStatus;
@@ -63,7 +65,7 @@ function taskKind(type: string): string {
 // Xcode's activity viewer: the folder and branch on the left (it opens the folder menu, like Xcode's scheme), what
 // Claude is doing on the right, and a progress bar along its bottom edge while it works. The projects, new chats and
 // teams, and past chats are in the sidebar.
-export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, onBringOld, orchestra, sidebar, inbox }: Props) {
+export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, mcpIssues = [], branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, onBringOld, orchestra, sidebar, inbox }: Props) {
   // A working chat keeps running in the background when you switch away, so only a starting one blocks switching.
   const busy = status === "starting";
   const toggleLabel = reviewCollapsed ? "Show side panel" : "Hide side panel";
@@ -254,8 +256,14 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
         <div className="toolbar-group">
           {inbox && <Inbox {...inbox} />}
           {onOpenSettings && (
-            <button className="icon" aria-label="Settings" title="Settings (⌘,)" onClick={onOpenSettings}>
+            <button
+              className="icon settings-button"
+              aria-label={mcpIssues.length ? `Settings, ${mcpIssues.join(", ")}` : "Settings"}
+              title={mcpIssues.length ? `Settings (⌘,): ${mcpIssues.join(" · ")}` : "Settings (⌘,)"}
+              onClick={onOpenSettings}
+            >
               <GearIcon />
+              {mcpIssues.length > 0 && <span className="dot warn" aria-hidden="true" />}
             </button>
           )}
           <button className={`icon pane-toggle${reviewCollapsed ? "" : " active"}`} aria-label={toggleLabel} aria-pressed={!reviewCollapsed} title={`${toggleLabel} (⌘\\)`} onClick={onToggleReview}>

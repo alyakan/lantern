@@ -3,6 +3,7 @@ import type { TestRunItem } from "../store";
 import type { TestCase } from "../types";
 import { caseKey, compareRuns, formatMs, previousRun, runSummary } from "../lib/testRuns";
 import { FailIcon, HudCheckIcon } from "./icons";
+import { useMenuInside } from "../lib/useMenuInside";
 
 interface Props {
   runs: TestRunItem[];
@@ -131,6 +132,7 @@ export function Fold({ title, count, open: initial = false, children }: { title:
 function RunPicker({ runs, current, onSelect }: { runs: TestRunItem[]; current: TestRunItem; onSelect: (id: string) => void }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const inside = useMenuInside(open);
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => !root.current?.contains(e.target as Node) && setOpen(false);
@@ -151,7 +153,7 @@ function RunPicker({ runs, current, onSelect }: { runs: TestRunItem[]; current: 
         <span className="chev down" aria-hidden />
       </button>
       {open && (
-        <div className="menu file-menu run-menu">
+        <div className="menu file-menu run-menu" ref={inside.ref} style={inside.style}>
           <ul className="menu-list" role="listbox" aria-label="Test runs">
             {[...runs].reverse().map((r) => (
               <li key={r.id} role="option" aria-selected={r.id === current.id}>
