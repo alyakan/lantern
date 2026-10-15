@@ -589,8 +589,10 @@ button.ghost.context-compact, button.ghost.context-clear { height: 20px; padding
 /* Under a capsule above the composer, the menu opens from the capsule's left edge. */
 .pill-anchor { position: relative; }
 .pill-anchor .history-menu { right: auto; width: 440px; max-width: calc(100vw - 48px); }
-.folder-menu { top: calc(100% + 6px); left: 0; width: 380px; max-width: calc(100vw - 48px); max-height: 420px; }
+.folder-menu { top: calc(100% + 6px); left: 0; width: 380px; max-width: calc(100vw - 48px); max-height: 420px; overflow-y: auto; }
 .folder-menu.has-moved { max-height: min(480px, calc(100vh - 24px)); }
+/* Capped to fit the window, the whole menu scrolls as one: no part of it is squeezed to nothing. */
+.folder-menu > * { flex-shrink: 0; }
 .folder-menu .menu-row { align-items: center; }
 .folder-menu .menu-row svg { flex: none; color: var(--muted); }
 .menu-heading { padding: 6px 8px 4px; font-size: calc(11px * var(--font-scale)); color: var(--muted); }
