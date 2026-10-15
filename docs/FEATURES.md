@@ -14,6 +14,8 @@ Lantern is a Mac app for the `claude` CLI you already use. This page walks throu
 
 ## Getting started
 
+The first time (and whenever no folder is open) Lantern shows one **Open folder…** button, your recent projects as cards (name, where it is, when you last used it; a click opens it), and a line saying Claude Code is installed and signed in. If `claude` isn't signed in, the line says so, with the fix (run `claude` in a terminal and type `/login`) and **Check again**; if Lantern can't find `claude` at all, it says that and how to install it. The side panel isn't there until a folder is open.
+
 Open a folder (⌘O, or **Open folder…** at the bottom of the sidebar) and you land on the start screen. It shows the box, for saying what you're after in your own words, and five cards:
 
 ![The start screen: the message box and cards for Build, Review a PR, Debug, Design and Start a team](images/start-screen.png)
@@ -79,6 +81,8 @@ In the box:
 
 In Step by step, Claude writes one page per message and stops. You use **Next** to approve a page, ask about it in the box (the answer stays on the page), or ask for a change, and only that page is rewritten. **Send & next** (⌘Enter) sends a change and approves in one go. **Previous** goes back.
 
+The header names the stages: **Frame → Plan → Build → Done** for Build (Debug has Frame, Evidence, Fix, Done; Review has Frame, Files, Summary; Design has Frame, Overview, Parts, Summary). The stage you're in is lit and holds a dot for each of its pages, earlier stages are checked, and clicking one goes back to it. The ← → keys move between pages as before.
+
 Claude suggests how to work from your task, and starts when you say so. You can also pick a flavour yourself from the badge in the header, or from a card on the start screen.
 
 ### Build
@@ -90,6 +94,8 @@ Claude frames the task, plans one step per page (the files, the change, how to c
 **Explain as you go** is an option on Build and Debug: every page also covers the why, with what else it could have been. Turn it on from the card, or from the flavour menu in the header at any time.
 
 ![A Build plan page with a "Why this way" section, and the plan in the side panel](images/build-explain.png)
+
+When the last step is built, the **Done** page ends on what to do next, as buttons: **Review the changes** (opens the side panel on Changes with everything the chat changed), **Commit…** and **Open a pull request…** (each shows the message it would send Claude and sends it only after you confirm; Lantern runs no git itself), **Export the plan** (the same export as the Plan tab's) and **Start something new** (a new chat in this project).
 
 The plan is always in the side panel's **Plan** tab: each step, what was done, the files it changed, and whether it's built. A click opens the step's page, and **Export** copies or saves the plan as markdown.
 

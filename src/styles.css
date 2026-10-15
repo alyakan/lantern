@@ -1347,7 +1347,7 @@ button.steps-phase:not(:disabled):hover { color: var(--text); }
 .steps-phase-sep { flex: none; width: 12px; height: 1px; background: var(--line-strong); }
 .steps-phase.current .steps-rail { margin-left: 2px; }
 @container (max-width: 470px) { .steps-phase:not(.current) .steps-phase-name { display: none; } .steps-phase-sep { width: 6px; } }
-@container (max-width: 380px) { .steps-phase.current .steps-phase-name { display: none; } }
+@container (max-width: 300px) { .steps-phase.current .steps-phase-name { display: none; } }
 /* Still running in the background, beside the phase (the title bar's count, where you're looking). */
 .steps-background { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--working) 12%, transparent); color: var(--working); font-size: calc(11px * var(--font-scale)); }
 .steps-background .spinner { width: 9px; height: 9px; border-color: color-mix(in srgb, var(--working) 30%, transparent); border-top-color: var(--working); }
@@ -1404,7 +1404,7 @@ button.steps-phase:not(:disabled):hover { color: var(--text); }
 .handoff-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .handoff-actions > button, .handoff-export .summary-export-button { height: var(--pill-m); padding: 0 14px; border-radius: var(--radius-pill); font-size: calc(12.5px * var(--font-scale)); }
 .handoff-actions > button[aria-expanded="true"] { background: var(--bg-active); }
-.handoff-export { margin-left: 0; max-width: none; }
+.handoff-actions .handoff-export { margin-left: 0; max-width: none; }
 .handoff-export .summary-export-button { border: 1px solid var(--line-strong); background: var(--field); color: var(--text); }
 .handoff-export .summary-export-button:hover, .handoff-export .summary-export-button[aria-expanded="true"] { background: var(--bg-hover); }
 .handoff-export .summary-export-menu { right: auto; left: 0; }

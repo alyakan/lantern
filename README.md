@@ -23,8 +23,8 @@ A Mac app for the `claude` CLI you already have: see what Claude is doing as car
 Lantern needs macOS and [Claude Code](https://docs.claude.com/en/docs/claude-code), installed and logged in. Lantern runs your `claude` CLI and never handles authentication itself.
 
 1. Download the latest `.dmg` from [Releases](../../releases), open it and drag Lantern to Applications. The app is signed and notarized by Apple, so it opens like any other Mac app.
-2. Open Lantern. It finds `claude` by itself, with no setup screen.
-3. Open a folder (⌘O). You land on a start screen: say what you're after, or pick **Build**, **Review a PR**, **Debug**, **Design** or **Start a team**.
+2. Open Lantern. It finds `claude` by itself and checks it's signed in; if it isn't, it says how to fix that.
+3. Open a folder (⌘O, or pick a recent project). You land on a start screen: say what you're after, or pick **Build**, **Review a PR**, **Debug**, **Design** or **Start a team**.
 
 Lantern updates itself: when a new release is out, "Update ready" appears under the chat box.
 
