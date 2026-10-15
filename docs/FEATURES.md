@@ -201,9 +201,9 @@ The sidebar has three states: **Full** (above), **Compact** and **Hidden**.
 
 ![The compact sidebar: four chats that need you (one a team) in one project's colour, and the chat on screen in a second project's](images/sidebar-compact.png)
 
-Rest the pointer on the compact column for a moment and the full sidebar opens over the chat. Click a chat in it to go there, and it closes again, as it does when the pointer leaves it or you press Esc. To keep it open, use its top-right button.
+Rest the pointer on the compact column for a moment and it opens over the chat: the squares stay where they are, and each chat's title and status, and each project's name, slide out beside them. Click a chat to go there and it folds back, as it does when the pointer leaves or you press Esc. Moving focus into it from the keyboard opens it too. For projects and past chats, use the full sidebar (the button at the column's top).
 
-![The compact sidebar opened over the chat](images/sidebar-compact-peek.png)
+![The compact sidebar opened over the chat, with each chat's title and status beside its square](images/sidebar-compact-open.png)
 
 **Hidden**: **⌃⌘S** (View ▸ Hide sidebar, or Hide sidebar in the command palette) hides the sidebar completely, and the chat takes the whole width. A **Show sidebar** button then sits at the left of the title bar. When a chat or an agent needs you, it carries an amber badge with how many, so a waiting chat is never hidden: click it, or press ⌃⌘S again, to bring the sidebar back as it was (Full or Compact).
 

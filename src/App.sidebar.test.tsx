@@ -352,59 +352,51 @@ describe("the compact sidebar", () => {
     expect(calledWith(calls, "sidebar_menu").slice(-1)[0]).toEqual({ hidden: false, compact: true });
   });
 
-  describe("peek", () => {
+  describe("opening in place", () => {
     beforeEach(() => localStorage.setItem("sidebar.compact", "true"));
+    const panel = async () => (await column()).querySelector<HTMLElement>(".cp-panel")!;
 
-    it("opens the full sidebar over the chat when the pointer rests on the column, and away when it leaves", async () => {
+    it("opens the column itself over the chat when the pointer rests on it, never a different sidebar, and closes when it leaves", async () => {
       await launch();
-      const slim = await column();
-      fireEvent.pointerEnter(slim);
-      expect(full()).toBeNull();
+      const p = await panel();
+      fireEvent.pointerEnter(p);
+      expect(p).not.toHaveClass("expanded");
       await rest();
-      const peeked = await screen.findByRole("complementary", { name: "Projects" });
-      expect(peeked).toHaveClass("peek");
+      await waitFor(() => expect(p).toHaveClass("expanded"));
+      expect(full()).toBeNull();
       expect(localStorage.getItem("sidebar.compact")).toBe("true");
-      fireEvent.pointerLeave(peeked.parentElement!);
-      await waitFor(() => expect(full()).toBeNull());
+      fireEvent.pointerLeave(p);
+      expect(p).not.toHaveClass("expanded");
     });
 
     it("does not open for a pointer that only crosses the column", async () => {
       await launch();
-      const slim = await column();
-      fireEvent.pointerEnter(slim);
-      fireEvent.pointerLeave(slim);
+      const p = await panel();
+      fireEvent.pointerEnter(p);
+      fireEvent.pointerLeave(p);
       await rest();
-      expect(full()).toBeNull();
+      expect(p).not.toHaveClass("expanded");
     });
 
     it("closes on Escape", async () => {
       await launch();
-      fireEvent.pointerEnter(await column());
+      const p = await panel();
+      fireEvent.pointerEnter(p);
       await rest();
-      await screen.findByRole("complementary", { name: "Projects" });
+      await waitFor(() => expect(p).toHaveClass("expanded"));
       fireEvent.keyDown(document, { key: "Escape" });
-      await waitFor(() => expect(full()).toBeNull());
+      await waitFor(() => expect(p).not.toHaveClass("expanded"));
     });
 
-    it("goes to a chat picked in it, and puts itself away, still compact", async () => {
-      const calls = await launch();
-      fireEvent.pointerEnter(await column());
-      await rest();
-      const acme = await project("acme-api");
-      fireEvent.click(await within(acme).findByRole("button", { name: /Release flow notes|Fix the login redirect after OAuth callback/ }));
-      await waitFor(() => expect(calledWith(calls, "open_session").length).toBe(1));
-      await waitFor(() => expect(full()).toBeNull());
-      expect(localStorage.getItem("sidebar.compact")).toBe("true");
-    });
-
-    it("is kept open from its own button: the full sidebar again", async () => {
+    it("goes to a chat picked in it and closes, still compact", async () => {
       await launch();
-      fireEvent.pointerEnter(await column());
+      const p = await panel();
+      fireEvent.pointerEnter(p);
       await rest();
-      fireEvent.click(await screen.findByRole("button", { name: "Keep sidebar open" }));
-      expect(await project("acme-api")).toBeInTheDocument();
-      expect(full()).not.toHaveClass("peek");
-      expect(localStorage.getItem("sidebar.compact")).toBe("false");
+      await waitFor(() => expect(p).toHaveClass("expanded"));
+      fireEvent.click(within(p).getByRole("button", { name: /^New chat, acme-api/ }));
+      expect(p).not.toHaveClass("expanded");
+      expect(localStorage.getItem("sidebar.compact")).toBe("true");
     });
   });
 });
