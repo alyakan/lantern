@@ -1680,6 +1680,9 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .canvas-zoom { min-width: 42px; text-align: center; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }
 .canvas-fit { height: var(--pill-s); padding: 0 11px; border: none; border-radius: 999px; background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
 .canvas-fit:hover { background: var(--bg-hover); color: var(--text); }
+.canvas-context { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.canvas-context.warn { color: var(--warn); }
+.canvas-context.full { color: var(--del); font-weight: 600; }
 /* The plan's five-hour window: quiet until it gets close. */
 .plan-meter { align-self: center; padding: 0 8px; color: var(--text-2); font-size: calc(12px * var(--font-scale)); white-space: nowrap; }
 .plan-meter.warn { color: var(--warn); }

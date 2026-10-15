@@ -35,6 +35,7 @@ import { BranchIcon, ChevronIcon, OpenOutIcon } from "./icons";
 import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
 import { SubagentsMenu } from "./SubagentsMenu";
 import { useQuiet } from "../lib/quiet";
+import { FULL_AT, WARN_AT } from "./ContextMeter";
 
 /** Where agents sit and how the canvas is framed. The app keeps it, so leaving the canvas and coming back finds it as it was. */
 export interface CanvasLayout {
@@ -231,6 +232,42 @@ const TetherLine = memo(function TetherLine({ slot, d, fresh }: { slot: string; 
 export const UPDATE_REQUEST =
   "Give me a short status report in plain language: for each agent, what it has done, what it is doing now, and anything blocked or waiting for my decision. Look at each agent's latest work first if you need to. No code unless I ask.";
 
+/** A chat's window when it hasn't said (before its first turn ends): what the chat's own meter assumes. */
+const DEFAULT_WINDOW = 200_000;
+
+/**
+ * The team's context, in the toolbar: how full the fullest agent's context is (the Lead's, until another is fuller),
+ * saying whose when it isn't the Lead's. Warns in amber and red at the same points a chat's own meter does, in words as
+ * well as colour; the tooltip lists everyone. A click goes to that agent, where Compact and Clear are. A chat's context
+ * is what it holds now, so it drops when the agent compacts.
+ */
+function TeamContext({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string) => void }) {
+  const states = useChatStates(nodes.map((n) => n.slot));
+  const rows = nodes.flatMap((n, i) => {
+    const used = states[i]?.contextUsed;
+    if (used === null || used === undefined) return [];
+    const window = states[i]?.contextWindow || DEFAULT_WINDOW;
+    return [{ node: n, used, window, percent: Math.round(Math.min(used / window, 1) * 100) }];
+  });
+  if (rows.length === 0) return null;
+  // The first of equals: the Lead comes first.
+  const fullest = rows.reduce((a, b) => (b.percent > a.percent ? b : a));
+  const level = fullest.percent >= FULL_AT ? "full" : fullest.percent >= WARN_AT ? "warn" : null;
+  const note = level === "full" ? "nearly full" : level === "warn" ? "getting full" : null;
+  const whose = fullest.node.role === "main" ? "" : ` · ${fullest.node.name}`;
+  const details = rows.map((r) => `${r.node.name}: ${r.percent}% (${r.used.toLocaleString()} of ${r.window.toLocaleString()} tokens)`).join("\n");
+  return (
+    <button
+      className={`canvas-fit canvas-context${level ? ` ${level}` : ""}`}
+      aria-label={`Context: ${fullest.node.name} ${fullest.percent}% used${note ? `, ${note}` : ""}`}
+      title={`Context used, by agent (it drops when one compacts). Click to go to the fullest.\n${details}`}
+      onClick={() => onGoTo(fullest.node.slot)}
+    >
+      Context {fullest.percent}%{whose}
+    </button>
+  );
+}
+
 function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string) => void }) {
   const [open, setOpen] = useState(false);
   const actions = useNodeActions();
@@ -337,6 +374,7 @@ function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onSho
         <button className="canvas-fit" aria-label="Fit everything" title="Fit everything in view" onClick={onFit}>
           Fit
         </button>
+        <TeamContext nodes={nodes} onGoTo={onGoTo} />
         <Team nodes={nodes} onGoTo={onGoTo} />
         <HiddenAgents nodes={nodes.filter((n) => n.hidden)} onShow={onShow} />
         {main && <SubagentsMenu main={main} />}

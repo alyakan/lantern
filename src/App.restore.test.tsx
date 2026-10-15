@@ -3,6 +3,10 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { clearMocks } from "@tauri-apps/api/mocks";
 import type { SavedChat } from "./lib/restore";
 
+// These render the whole app against the mock backend, which a loaded CI runner can take longer than
+// vitest's default 5 s to do.
+vi.setConfig({ testTimeout: 30_000 });
+
 // The editor isn't needed here, and doesn't load in jsdom.
 // The diff and file viewers load lazily and may still ask for its theme names before a test ends.
 vi.mock("./monaco", () => ({ LIGHT_THEME: "lantern-light", DARK_THEME: "lantern-dark" }));
