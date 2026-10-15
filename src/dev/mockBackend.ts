@@ -777,7 +777,8 @@ const REPLAY: UiEvent[] = [
 ];
 
 // /?mock=demo drives the UI by itself (open folder, send a message) so headless screenshots show a real turn;
-// /?mock=ready stops after opening the folder; /?mock=history opens the folder and then the history menu.
+// /?mock=ready stops after opening the folder; /?mock=history opens the folder and then the history menu;
+// /?mock=nofolder stays on the first-launch screen.
 // Add &allow to also approve the permission prompt and finish the turn.
 function autoplay(allow: boolean, openOnly: boolean, history = false) {
   const until = async <T,>(find: () => T | null | undefined): Promise<T> => {
@@ -789,8 +790,7 @@ function autoplay(allow: boolean, openOnly: boolean, history = false) {
   };
   void (async () => {
     if (new URLSearchParams(location.search).has("folders")) return;
-    (await until(() => document.querySelector<HTMLButtonElement>(".composer-pills .pill"))).click();
-    (await until(() => [...document.querySelectorAll<HTMLButtonElement>(".folder-menu .menu-row")].find((b) => b.textContent === "Open folder…"))).click();
+    (await until(() => document.querySelector<HTMLButtonElement>(".welcome-open"))).click();
     if (history) {
       const pill = new URLSearchParams(location.search).has("pill");
       const selector = pill ? '.composer-pills .pill[title="Continue a past session"]:not(:disabled)' : 'button[aria-label="Session history"]:not(:disabled)';
@@ -1011,8 +1011,11 @@ export function installMockBackend() {
     (cmd, args) => {
       const a = (args ?? {}) as Record<string, unknown>;
       switch (cmd) {
+        // ?mock=nofolder is the first launch: ?claude=missing has no claude to find, ?login=out has one that isn't logged in.
         case "locate_claude":
-          return "/Users/you/.local/bin/claude";
+          return new URLSearchParams(location.search).get("claude") === "missing" ? Promise.reject("Could not find the `claude` CLI. Install Claude Code, or enter its path.") : "/Users/you/.local/bin/claude";
+        case "claude_login":
+          return new URLSearchParams(location.search).get("login") === "out" ? { logged_in: false, account: null } : { logged_in: true, account: "sam@acme.dev" };
         case "user_name":
           return "Sam Rivera";
         case "branch_review":

@@ -77,6 +77,7 @@ import { MessageInput } from "./components/MessageInput";
 import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { SetupScreen } from "./components/SetupScreen";
+import { Welcome } from "./components/Welcome";
 import { RestoreCard } from "./components/RestoreCard";
 import { agentSessionsOf, chatsToSave, currentFolder, loadSaved, restorable, save, screenFirst, sessionModesToSave, toCurrentFolders, withOffered, withoutGone, type SavedChat } from "./lib/restore";
 import { SplitPane } from "./components/SplitPane";
@@ -1094,7 +1095,7 @@ export default function App() {
     setReviewCollapsed(false);
   };
 
-  useAction("toggle-changes", () => setReviewCollapsed(!reviewCollapsed));
+  useAction("toggle-changes", () => setReviewCollapsed(!reviewCollapsed), !!state.folder);
 
   // The orchestra. Agents on the canvas are chats like any other, so what they can do is the app's own, for their slot.
   // Another agent is the one the rest of the app (the title bar, shortcuts) is about now. Unlike switching chats, this
@@ -1364,6 +1365,8 @@ export default function App() {
   // have their own flow.
   const resendHandlers = state.status === "idle" && !stepsMode ? { onEdit: editInBox, onResend: (p: { text: string; draft?: string }) => sendIn(active, p.text, p.draft) } : undefined;
   const hero = state.items.length === 0 && !state.thinking;
+  // At launch the last project is on its way back: say so, rather than flashing the screen for having none.
+  const openingLast = !state.folder && lastFolder !== null && !reopened.current;
   // The Activity tab: the latest turn's tree. It comes up by itself the first time a chat's turn uses a subagent or the
   // advisor; after that it's left where you put it.
   // Live while Claude works, and while anything it started runs on in the background (a workflow, a subagent).
@@ -1382,6 +1385,23 @@ export default function App() {
   // The Plan tab's map: the latest Architecture Overview's map, lit for the page on screen. A new Overview (not one already
   // there when the chat was opened) brings the tab up.
   const archMap = useMemo(() => (stepPages ? architectureMap(stepPages) : null), [stepPages]);
+  // The Done page's "Review the changes": the side panel on Changes, showing everything this chat changed.
+  const [changesAsked, setChangesAsked] = useState(0);
+  const handoff = stepsView && state.folder
+    ? {
+        slot: active,
+        summary: stepsSummary,
+        changed: state.changedFiles,
+        doc: { pages: stepPages ?? [], title: chatTitle(state, titles), folder: state.folder },
+        running: state.status === "running",
+        onReviewChanges: () => {
+          setChangeScope("session");
+          setReviewCollapsed(false);
+          setChangesAsked((n) => n + 1);
+        },
+        onStartNew: () => startFresh(state.folder!),
+      }
+    : undefined;
   const [shownPage, setShownPage] = useState<{ slot: string; page: string } | null>(null);
   const shownCovers = useMemo(() => {
     const p = shownPage?.slot === active ? stepPages?.find((x) => x.key === shownPage.page) : undefined;
@@ -1751,7 +1771,7 @@ export default function App() {
           changeCount={state.changedFiles.length}
           reviewCollapsed={reviewCollapsed}
           onOpenFolder={openFolder}
-          onToggleReview={() => setReviewCollapsed(!reviewCollapsed)}
+          onToggleReview={state.folder ? () => setReviewCollapsed(!reviewCollapsed) : undefined}
           onOpenSettings={() => setSettingsAt("general")}
           mcpIssues={(mcpIssues[active] ?? []).map((i) => `${i.name} ${i.problem}`)}
           onBringOld={bringHere}
@@ -1801,7 +1821,7 @@ export default function App() {
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
         <SplitPane
           ratio={splitRatio}
-          collapsed={reviewCollapsed}
+          collapsed={reviewCollapsed || !state.folder}
           onRatio={setSplitRatio}
           left={
             showCanvas ? (
@@ -1814,7 +1834,16 @@ export default function App() {
               </ChatStoreContext.Provider>
             ) : (
             <section className="chat-pane">
-              {hero ? (
+              {!state.folder ? (
+                // Until a folder is open: open one, or pick a recent project. No box, no side panel.
+                openingLast ? (
+                  <div className="center muted">Opening {basename(lastFolder!)}…</div>
+                ) : (
+                  <Welcome claudePath={state.claudePath ?? ""} loadRecent={loadRecentFolders} skip={[...hiddenFolders, ...relocateMenu.moved.map((m) => m.old)]} onOpenFolder={openFolder} onPick={(path) => startFresh(path)}>
+                    {offeredTop.length > 0 && state.claudePath && <RestoreCard chats={offeredTop} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />}
+                  </Welcome>
+                )
+              ) : hero ? (
                 <div className="hero-wrap">
                   <div className="hero-stack">
                     {offeredTop.length > 0 && state.claudePath && (
@@ -1831,7 +1860,7 @@ export default function App() {
                     <ArchitecturePane.Provider value={state.folder ? openArchitecture : null}>
                     <FileLinksProvider key={active} slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention}>
                       {stepsView ? (
-                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} explain={explain} onPickFlavour={pickFlavour} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} />
+                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} explain={explain} onPickFlavour={pickFlavour} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} />
                       ) : (
                         <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} />
                       )}
@@ -1854,7 +1883,7 @@ export default function App() {
                 ready={state.status !== "starting"}
                 files={shownFiles}
                 chatBusy={state.status === "running"}
-                changesKey={peek?.key}
+                changesKey={peek?.key ?? (changesAsked || undefined)}
                 scope={scope}
                 onScope={setChangeScope}
                 scopeCounts={{ turn: turnFiles.length, session: state.changedFiles.length, git: gitFiles?.error ? null : (gitFiles?.files.length ?? null), pr: shownPr?.error ? null : (shownPr?.files.length ?? null), branch: shownBranch?.error ? null : (shownBranch?.files.length ?? null) }}

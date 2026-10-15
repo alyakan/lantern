@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { CollapsibleText } from "./CollapsibleText";
 import { Md } from "./Md";
 import { AWAY_FROM_END, JumpToLatest } from "./JumpToLatest";
@@ -20,6 +20,8 @@ import { unreadReply } from "../lib/pageNote";
 import { ReviewFileHeader, ReviewFileView, ReviewSummaryTable, type ReviewedFinding } from "./ReviewPages";
 import { ArchitecturePartView } from "./ArchitecturePages";
 import { parseArchitecturePart, type ArchitecturePart } from "../lib/architecture";
+import { PHASES, phasesOf } from "../lib/phases";
+import { DoneHandoff, type Handoff } from "./DoneHandoff";
 
 /** What "Update the step with this" sends. */
 export const UPDATE_STEP = "Update the step with this: write the whole step again under its heading, in the same format as before, with what we just discussed worked in and everything else kept.";
@@ -64,6 +66,8 @@ interface Props extends StreamHandlers {
   onReviewFile?: (path: string) => void;
   /** The Summary tab asked for this page; `key` changes with every request, so asking again for the same page works. */
   jump?: { page: string; key: number } | null;
+  /** What the Done page hands off to (the side panel, the export, a new chat); without it the page has no actions. */
+  handoff?: Handoff;
 }
 
 const isTyping = (el: Element | null) => !!el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el as HTMLElement).isContentEditable);
@@ -71,7 +75,7 @@ const isTyping = (el: Element | null) => !!el && (el instanceof HTMLInputElement
 // Step-by-step mode's view of the conversation: a page per step, side by side, one on screen. Questions about a step
 // and changes to it stay on its page; Previous and Next (or ← →) slide between pages, and on the newest page Next
 // approves the step and Claude carries on.
-export function StepsView({ state, flavour, explain = false, onNext, onSend, onPickFlavour, onPage, onShown, onReviewFile, jump = null, ...handlers }: Props) {
+export function StepsView({ state, flavour, explain = false, onNext, onSend, onPickFlavour, onPage, onShown, onReviewFile, jump = null, handoff, ...handlers }: Props) {
   // A revision you undid: the page shows the version you went back to, until Claude revises the step again.
   const [kept, setKept] = useState<Record<string, { turn: number; over: number }>>({});
   const claudes = pagesOf(state.items);
@@ -196,6 +200,10 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
   }, [at, last]);
 
   const heading = page?.heading;
+  // The flavour's stages, and the one each page is in; a chat with no flavour yet follows Build's.
+  const phases = PHASES[flavour ?? "build"];
+  const phaseOf = phasesOf(flavour ?? "build", pages);
+  const phaseAt = phaseOf[at] ?? 0;
   const review = flavour === "review";
   const arch = flavour === "architecture";
   const newest = at === last;
@@ -242,11 +250,43 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
   return (
     <div className="steps-view">
       <div className="steps-head">
-        <div className="steps-rail" ref={rail} role="tablist" aria-label="Pages">
-          {pages.map((p, i) => (
-            <button key={p.key} role="tab" aria-selected={i === at} aria-label={`${pageLabel(p.heading)}${pageTitle(p) ? `: ${pageTitle(p)}` : ""}`} title={`${pageLabel(p.heading)}${pageTitle(p) ? ` — ${pageTitle(p)}` : ""}`} className={`steps-dot${i === at ? " current" : ""}${p.heading?.kind === "step" || p.heading?.kind === "done" || p.heading?.kind === "file" || p.heading?.kind === "fix" ? " build" : ""}${p.heading?.kind === "switch" ? " switch" : ""}`} onClick={() => go(i)} />
-          ))}
-        </div>
+        <nav className="steps-phases" aria-label="Progress">
+          {phases.map((phase, n) => {
+            const where = n === phaseAt ? "current" : n < phaseAt ? "past" : "next";
+            const first = phaseOf.indexOf(n);
+            return (
+              <Fragment key={phase.name}>
+                {n > 0 && <span className="steps-phase-sep" aria-hidden />}
+                {where === "current" ? (
+                  <div className="steps-phase current" aria-current="step">
+                    <span className="steps-phase-mark" aria-hidden>
+                      {n + 1}
+                    </span>
+                    <span className="steps-phase-name">{phase.name}</span>
+                    {/* The pages of this stage: the dots go between them. */}
+                    {phaseOf.filter((x) => x === n).length > 1 && (
+                    <div className="steps-rail" ref={rail} role="tablist" aria-label="Pages">
+                      {pages.map((p, i) =>
+                        phaseOf[i] !== n ? null : (
+                          <button key={p.key} role="tab" aria-selected={i === at} aria-label={`${pageLabel(p.heading)}${pageTitle(p) ? `: ${pageTitle(p)}` : ""}`} title={`${pageLabel(p.heading)}${pageTitle(p) ? ` — ${pageTitle(p)}` : ""}`} className={`steps-dot${i === at ? " current" : ""}${p.heading?.kind === "step" || p.heading?.kind === "done" || p.heading?.kind === "file" || p.heading?.kind === "fix" ? " build" : ""}${p.heading?.kind === "switch" ? " switch" : ""}`} onClick={() => go(i)} />
+                        ),
+                      )}
+                    </div>
+                    )}
+                  </div>
+                ) : (
+                  <button className={`steps-phase ${where}`} disabled={first < 0} title={first < 0 ? `${phase.name}: not reached yet` : `Go to ${phase.name}`} onClick={() => go(first)}>
+                    <span className="steps-phase-mark" aria-hidden>
+                      {where === "past" ? "✓" : n + 1}
+                    </span>
+                    <span className="steps-phase-name">{phase.name}</span>
+                    {where === "past" && <span className="sr-only"> (done)</span>}
+                  </button>
+                )}
+              </Fragment>
+            );
+          })}
+        </nav>
         {state.backgroundTasks.length > 0 && (
           <span className="steps-background" title={`Still running in the background:\n${state.backgroundTasks.map((t) => t.description).join("\n")}`}>
             <span className="spinner" aria-hidden />
@@ -284,6 +324,8 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
                   verdicts={verdicts[p.key]}
                   onVerdict={i === last && !running ? (index, v) => setVerdict(p.key, index, v) : undefined}
                   summary={p.heading?.kind === "summary" && onSend ? { rows: arch ? concerns : reviewed, onAction: onSend, busy: running, architecture: arch } : null}
+                  handoff={p.heading?.kind === "done" ? handoff : undefined}
+                  onHandoffSend={i === last && !running ? onSend : undefined}
                   folder={state.folder}
                   runs={state.backgroundRuns}
                   latest={latestOf.get(p.key) ?? p.main}
@@ -302,8 +344,8 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
         <button className="ghost" disabled={at === 0} onClick={() => go(at - 1)}>
           ← Previous
         </button>
-        <span className="steps-count">
-          {at + 1} / {pages.length}
+        <span className="sr-only" role="status">
+          Page {at + 1} of {pages.length}
         </span>
         {newest ? (
           running ? (
@@ -357,6 +399,9 @@ interface PageProps extends StreamHandlers {
   onVerdict?: (index: number, v: Verdict | null) => void;
   /** Review's summary page: every finding with its verdict, and the actions after the review. */
   summary?: { rows: ReviewedFinding[]; onAction: (text: string) => void; busy: boolean; architecture?: boolean } | null;
+  /** The Done page: where the work goes from here, and how to message Claude (only on the newest page, when idle). */
+  handoff?: Handoff;
+  onHandoffSend?: (text: string) => void;
   folder: string | null;
   /** Which turn holds Claude's latest version of the step, whichever one the page shows. */
   latest: number;
@@ -368,7 +413,7 @@ interface PageProps extends StreamHandlers {
   onUpdate?: () => void;
 }
 
-function Page({ page, unread, first, live, teach, review, arch, suggestion, verdicts, onVerdict, summary, folder, latest, runs, onKeep, onUpdate, ...handlers }: PageProps) {
+function Page({ page, unread, first, live, teach, review, arch, suggestion, verdicts, onVerdict, summary, handoff, onHandoffSend, folder, latest, runs, onKeep, onUpdate, ...handlers }: PageProps) {
   const h = page.heading;
   const opening = page.turns[0];
   const asked = opening.prompt.auto ? null : first ? opening.prompt.text : justMovesOn(opening.prompt.text) ? null : promptText(opening.prompt.text);
@@ -437,6 +482,7 @@ function Page({ page, unread, first, live, teach, review, arch, suggestion, verd
         {h?.kind === "switch" && h.flavour && suggestion && <SuggestionCard flavour={h.flavour} explain={!!h.explain} why={h.title} {...suggestion} />}
         {summary && <ReviewSummaryTable rows={summary.rows} onAction={summary.onAction} busy={summary.busy} architecture={summary.architecture} />}
       </div>
+      {handoff && <DoneHandoff handoff={handoff} onSend={onHandoffSend} />}
       <StepCommands page={page} runs={runs} />
       {page.turns.length > 1 && (
         <div className="step-thread" aria-label="Discussion">

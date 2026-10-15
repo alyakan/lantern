@@ -16,7 +16,8 @@ interface Props {
   changeCount: number;
   reviewCollapsed: boolean;
   onOpenFolder: () => void;
-  onToggleReview: () => void;
+  /** Shows and hides the side panel; none until a folder is open (there is no panel before then). */
+  onToggleReview?: () => void;
   /** Opens Settings (MCP servers, skills). */
   onOpenSettings?: () => void;
   /** MCP servers that are down or need a login ("sentry needs you to log in"): the Settings button wears a warning dot. */
@@ -266,10 +267,12 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
               {mcpIssues.length > 0 && <span className="dot warn" aria-hidden="true" />}
             </button>
           )}
-          <button className={`icon pane-toggle${reviewCollapsed ? "" : " active"}`} aria-label={toggleLabel} aria-pressed={!reviewCollapsed} title={`${toggleLabel} (⌘\\)`} onClick={onToggleReview}>
-            <PaneIcon />
-            {reviewCollapsed && changeCount > 0 && <span className="dot" aria-hidden="true" />}
-          </button>
+          {onToggleReview && (
+            <button className={`icon pane-toggle${reviewCollapsed ? "" : " active"}`} aria-label={toggleLabel} aria-pressed={!reviewCollapsed} title={`${toggleLabel} (⌘\\)`} onClick={onToggleReview}>
+              <PaneIcon />
+              {reviewCollapsed && changeCount > 0 && <span className="dot" aria-hidden="true" />}
+            </button>
+          )}
         </div>
       </div>
     </header>

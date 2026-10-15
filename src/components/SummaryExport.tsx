@@ -13,7 +13,7 @@ const baseName = (path: string) => path.split("/").pop() ?? path;
  * The Summary tab's Export button: the finished plan as markdown, copied or saved as a file. A menu choice says whether
  * the document has what each step did or only the plan; the outcome is said beside the button for a few seconds.
  */
-export function SummaryExport({ markdown, fileName }: { markdown: (results: boolean) => string; fileName: string }) {
+export function SummaryExport({ markdown, fileName, label = "Export", className = "" }: { markdown: (results: boolean) => string; fileName: string; label?: string; className?: string }) {
   const [open, setOpen] = useState(false);
   const [results, setResults] = usePersistentState("summary.exportResults", true);
   const [status, setStatus] = useState<Status | null>(null);
@@ -60,7 +60,7 @@ export function SummaryExport({ markdown, fileName }: { markdown: (results: bool
   };
 
   return (
-    <div className="summary-export" ref={root}>
+    <div className={`summary-export${className ? ` ${className}` : ""}`} ref={root}>
       {status && (
         <span className={`summary-export-status${status.kind === "failed" ? " failed" : ""}`} role="status">
           {status.kind === "copied" && "Copied"}
@@ -76,7 +76,7 @@ export function SummaryExport({ markdown, fileName }: { markdown: (results: bool
         </span>
       )}
       <button className="summary-export-button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)} title="Export the plan as markdown">
-        Export
+        {label}
         <span className="chev down" aria-hidden />
       </button>
       {open && (
