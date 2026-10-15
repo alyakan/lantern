@@ -3,6 +3,7 @@ import type { RecentFolder } from "../types";
 import { PROJECT_COLORS, assignColors } from "../lib/projectColors";
 import { compactGroups, markOf, type CompactChip, type CompactGroup, type ProjectOpen } from "../lib/sidebar";
 import { PlusIcon, SidebarIcon, TeamIcon } from "./icons";
+import { orderProjects } from "../lib/projectOrder";
 
 interface Props {
   /** What is open, by project (see openProjects). */
@@ -19,8 +20,10 @@ interface Props {
   colors: Record<string, number>;
   /** The colours with a project new to them given one, to save. */
   onColors: (colors: Record<string, number>) => void;
-  /** The user's order of the projects, as the full sidebar lists them (see orderProjects). */
+  /** The user's order of the projects, as the full sidebar lists them (see orderProjects), and saving it when a project
+   * new to it opens here. */
   order?: string[];
+  onOrder?: (order: string[]) => void;
   /** Its button at the top: back to the full sidebar. */
   onToggle: () => void;
   /** The pointer resting on the column opens the full sidebar over the chat (see usePeek). */
@@ -69,7 +72,7 @@ function Chip({ chip, group, onClick, onTip }: { chip: CompactChip; group: Compa
  * + starts a chat. A team is one square, for its Lead, with the team's combined state. The column scrolls when there are
  * more squares than fit.
  */
-export function SidebarCompact({ open, loadRecent, canNew, onNewChat, onChat, onTeam, colors: savedColors, onColors, order, onToggle, onPointerEnter, onPointerLeave }: Props) {
+export function SidebarCompact({ open, loadRecent, canNew, onNewChat, onChat, onTeam, colors: savedColors, onColors, order, onOrder, onToggle, onPointerEnter, onPointerLeave }: Props) {
   const [recent, setRecent] = useState<RecentFolder[]>([]);
   const [tip, setTip] = useState<Tip | null>(null);
   const openKey = Object.keys(open).sort().join("\n");
@@ -78,6 +81,12 @@ export function SidebarCompact({ open, loadRecent, canNew, onNewChat, onChat, on
   }, [openKey]);
   const groups = useMemo(() => compactGroups(open, recent, order), [open, recent, order]);
   const colors = assignColors(groups.map((g) => g.folder), savedColors);
+  // A project opened while the sidebar is compact is saved at the top, where it shows, so it stays there. Only once there
+  // is an order: the first one is made by the full sidebar, from every recent project, not just the open ones.
+  const ordered = order && order.length > 0 ? orderProjects(groups.map((g) => g.folder), order).order : order;
+  useEffect(() => {
+    if (onOrder && ordered && ordered !== order) onOrder(ordered);
+  }, [ordered, order]);
   useEffect(() => {
     if (colors !== savedColors) onColors(colors);
   }, [colors, savedColors]);

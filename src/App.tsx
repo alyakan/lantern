@@ -1748,6 +1748,7 @@ export default function App() {
                 colors={projectColors}
                 onColors={setProjectColors}
                 order={projectOrder}
+                onOrder={setProjectOrder}
                 onToggle={() => setSidebarCompact(false)}
                 onPointerEnter={(e) => !e.buttons && sidebarPeek.hover()}
                 onPointerLeave={sidebarPeek.unhover}

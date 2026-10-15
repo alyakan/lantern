@@ -72,6 +72,19 @@ describe("the compact sidebar", () => {
     expect(onColors).not.toHaveBeenCalled();
   });
 
+  it("lists projects in the saved order, and saves one new to it at the top, but doesn't start the order itself", async () => {
+    const onOrder = vi.fn();
+    const props = { loadRecent: vi.fn().mockResolvedValue([]), canNew: true, colors: {}, onColors: vi.fn(), onNewChat: vi.fn(), onChat: vi.fn(), onTeam: vi.fn(), onToggle: vi.fn() };
+    const { unmount } = render(<SidebarCompact open={open} order={[MONITOR]} onOrder={onOrder} {...props} />);
+    expect(screen.getAllByRole("list").map((l) => l.getAttribute("aria-label"))).toEqual(["lantern", "network-monitor"]);
+    await waitFor(() => expect(onOrder).toHaveBeenCalledWith([LANTERN, MONITOR]));
+    unmount();
+    const none = vi.fn();
+    render(<SidebarCompact open={open} order={[]} onOrder={none} {...props} />);
+    await act(async () => {});
+    expect(none).not.toHaveBeenCalled();
+  });
+
   it("marks what works, what needs you and what finished unread; a plain finished chat has no mark", async () => {
     setup();
     await screen.findByRole("list", { name: "lantern" });
