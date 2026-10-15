@@ -151,6 +151,11 @@ impl Status {
     fn live(self) -> bool {
         !matches!(self, Status::Ended | Status::Stopped)
     }
+    /// Not changing its worktree: it finished its turn, or it isn't running at all (stopped, or ended), so what is in
+    /// its branch now is what a merge takes.
+    fn settled(self) -> bool {
+        matches!(self, Status::Idle | Status::Stopped | Status::Ended)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -718,9 +723,10 @@ impl Orchestra {
             (w.worktree.clone(), w.name.clone(), w.status)
         };
         let wt = wt.ok_or("That agent shares your folder, so there is no branch to merge.")?;
-        // What the user is asked to merge must be all there is: a worker still going would change it under their feet.
-        if status != Status::Idle {
-            return Err(format!("Agent {id} (\"{name}\") is {}. Wait until it has finished its turn, then propose the merge.", status.label()));
+        // What the user is asked to merge must be all there is: a worker still going would change it under their feet. One
+        // that stopped won't, so its work can be merged too.
+        if !status.settled() {
+            return Err(format!("Agent {id} (\"{name}\") is {}. Wait until it has finished its turn (or stop it), then propose the merge.", status.label()));
         }
         let repo = self.host.main_folder(main)?;
         let env = self.host.path_env().await;
@@ -831,7 +837,7 @@ impl Orchestra {
             return Err("There is no merge proposal waiting for that agent.".into());
         }
         // Merging takes whatever is in its worktree, so it mustn't be in the middle of changing it.
-        if w.status != Status::Idle {
+        if !w.status.settled() {
             return Err(format!("{} is {}. Wait until it has finished its turn, then approve the merge.", w.name, w.status.label()));
         }
         let wt = w.worktree.clone().ok_or("That agent shares the main folder, so it has no branch.")?;
@@ -1832,6 +1838,18 @@ mod tests {
         assert!(!repo.path().join("b.txt").exists());
         // The proposal is still there once it has finished.
         o.observe("w1", &done("Done again."));
+        o.approve_merge("w1").await.unwrap();
+        assert!(repo.path().join("b.txt").is_file());
+    }
+
+    #[tokio::test]
+    async fn a_stopped_worker_can_have_its_branch_proposed_and_merged() {
+        let (_h, o, repo, _wt) = setup();
+        spawn(&o, "login").await;
+        commit_in_worktree(&o, "w1", "b.txt", "b\n");
+        // Stopped mid-turn: it won't change its branch any more, so what it has can be merged.
+        call(&o, "stop_agent", json!({"id": "w1"})).await.unwrap();
+        call(&o, "propose_merge", json!({"id": "w1", "summary": "x"})).await.unwrap();
         o.approve_merge("w1").await.unwrap();
         assert!(repo.path().join("b.txt").is_file());
     }
