@@ -327,6 +327,10 @@ fn run_helper_with(mut input: impl BufRead + Send, output: impl Write, socket: O
                         called_off.set(true);
                         let _ = stream.shutdown(Shutdown::Both);
                     }
+                    // MCP's keep-alive is answered at once, even while a card waits: the client is checking the helper is there.
+                    Ok(Heard::Message(msg)) if msg["method"] == "ping" && msg.get("id").is_some() => {
+                        let _ = send(&json!({"jsonrpc": "2.0", "id": msg["id"], "result": {}}));
+                    }
                     // A request still queued that is called off is dropped before it is ever shown.
                     Ok(Heard::Message(msg)) if msg["method"] == "notifications/cancelled" => {
                         let id = &msg["params"]["requestId"];
@@ -781,6 +785,21 @@ mod tests {
         app.done.join().unwrap();
         drop(client);
         assert_eq!(ids(&helper.join().unwrap()), vec![json!(2)]);
+    }
+
+    #[test]
+    fn a_ping_is_answered_at_once_while_a_card_waits() {
+        let app = fake_app("ping", Some(BridgeResponse { allow: true, message: None, updated_input: None, failed: false }));
+        let (mut client, helper) = helper_on(app.socket.clone());
+        writeln!(client, "{}", call("Bash", json!({"command": "ls"}))).unwrap();
+        app.got.recv().unwrap();
+        writeln!(client, r#"{{"jsonrpc":"2.0","id":5,"method":"ping"}}"#).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        app.release.send(()).unwrap();
+        app.done.join().unwrap();
+        drop(client);
+        // The ping's answer comes before the card's.
+        assert_eq!(ids(&helper.join().unwrap()), vec![json!(5), json!(2)]);
     }
 
     #[test]
