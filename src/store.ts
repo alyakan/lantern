@@ -683,8 +683,10 @@ export function reducer(state: State, action: Action): State {
     case "flavour_picked":
       return { ...state, flavourPick: action.flavour, explainPick: !!action.flavour && !!action.explain };
     case "permission_decided":
+      // The agent was waiting on the user, not quiet: its clock starts again from the answer.
       return {
         ...state,
+        activityAt: Date.now(),
         items: state.items.map((it): ChatItem => (it.type === "permission" && it.id === action.id ? { ...it, decision: action.allow ? "allowed" : "denied", note: action.note } : it)),
       };
     case "stop_requested":

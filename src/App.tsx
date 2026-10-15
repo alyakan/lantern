@@ -83,7 +83,7 @@ import { SplitPane } from "./components/SplitPane";
 import { TopBar } from "./components/TopBar";
 import { Canvas, newLayout } from "./components/Canvas";
 import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions } from "./lib/canvasContext";
-import { needingYou, orchestraNodes, teamMain, teamNodes } from "./lib/orchestraView";
+import { needingYou, orchestraNodes, teamActivity, teamMain, teamNodes } from "./lib/orchestraView";
 import "./styles.css";
 import { AGENT_MODEL } from "./lib/models";
 
@@ -201,7 +201,8 @@ export default function App() {
   const [collapsedBy, setCollapsedBy] = usePersistentState<Record<string, boolean>>("review.collapsedByFolder", {});
   // On the canvas the panel is one setting for the whole team: which agent's chat is on screen there changes as agents are
   // clicked, and each has a folder of its own.
-  const showCanvas = view === "canvas" && teamMain(chats, active) !== null;
+  const canvasMain = view === "canvas" ? teamMain(chats, active) : null;
+  const showCanvas = canvasMain !== null;
   const [canvasPanel, setCanvasPanel] = usePersistentState("review.canvasPanel", false);
   const reviewCollapsed = showCanvas ? !canvasPanel : ((state.folder ? collapsedBy[state.folder] : undefined) ?? collapsedDefault);
   const setReviewCollapsed = (collapsed: boolean) => (showCanvas ? setCanvasPanel(!collapsed) : state.folder ? setCollapsedBy({ ...collapsedBy, [state.folder]: collapsed }) : setCollapsedDefault(collapsed));
@@ -1124,6 +1125,8 @@ export default function App() {
   };
   const doing = {
     send: sendIn,
+    // The canvas asked the user already (its Clear is confirmed in the menu), so this doesn't ask again.
+    clear: (slot: string) => sendIn(slot, "/clear"),
     stop: stopIn,
     queue: (slot: string, items: string[]) => to(slot)({ type: "queue_set", items }),
     decide: decideIn,
@@ -1204,6 +1207,7 @@ export default function App() {
   const nodeActions = useMemo<NodeActions>(
     () => ({
       send: (slot, text) => doingRef.current.send(slot, text),
+      clear: (slot) => doingRef.current.clear(slot),
       stop: (slot) => doingRef.current.stop(slot),
       queue: (slot, items) => doingRef.current.queue(slot, items),
       decide: (slot, id, allow, note, answered) => doingRef.current.decide(slot, id, allow, note, answered),
@@ -1243,14 +1247,16 @@ export default function App() {
 
   // The branch can change between turns (Claude may check out one), so re-read it whenever a turn ends.
   const idle = state.status === "idle";
+  // The title bar names the project: on a team's canvas that's the Lead's folder, not the folder of whichever agent is on screen.
+  const titleFolder = canvasMain ? (chats.slots[canvasMain]?.folder ?? state.folder) : state.folder;
   useEffect(() => {
-    if (!state.folder) return setBranch(null);
+    if (!titleFolder) return setBranch(null);
     let live = true;
-    api.gitBranch(state.folder).then((b) => live && setBranch(b), () => live && setBranch(null));
+    api.gitBranch(titleFolder).then((b) => live && setBranch(b), () => live && setBranch(null));
     return () => {
       live = false;
     };
-  }, [state.folder, idle]);
+  }, [titleFolder, idle]);
 
   // Tell the user when a turn ends or Claude needs a permission answer, if they're in another app or another chat.
   // Item ids restart in every session, so the session id is part of what counts as "already announced".
@@ -1740,7 +1746,7 @@ export default function App() {
     <SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}>
       <div className="app">
         <TopBar
-          folder={state.folder}
+          folder={titleFolder}
           status={state.status}
           changeCount={state.changedFiles.length}
           reviewCollapsed={reviewCollapsed}
@@ -1750,7 +1756,7 @@ export default function App() {
           mcpIssues={(mcpIssues[active] ?? []).map((i) => `${i.name} ${i.problem}`)}
           onBringOld={bringHere}
           branch={branch}
-          activity={activityStatus(state, finishedAt[active] ?? null)}
+          activity={showCanvas ? teamActivity(nodes, chats.slots) : activityStatus(state, finishedAt[active] ?? null)}
           issues={{ failed }}
           background={state.backgroundTasks}
           onStopTask={(id) => api.stopTask(active, id)}

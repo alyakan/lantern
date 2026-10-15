@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
-import { QUIET_AFTER_MS, shortSpan, useQuiet } from "./quiet";
+import { QUIET_AFTER_MS, STUCK_AFTER_MS, shortSpan, useQuiet } from "./quiet";
 
 afterEach(() => vi.useRealTimers());
 
@@ -15,7 +15,10 @@ describe("how long an agent at work has been quiet", () => {
     const { result, rerender } = renderHook(({ since, working }) => useQuiet(since, working), { initialProps: { since: 100_000 as number | null, working: true } });
     expect(result.current).toBeNull();
     act(() => vi.advanceTimersByTime(QUIET_AFTER_MS + 5_000));
-    expect(result.current).toBe("20s");
+    expect(result.current).toEqual({ span: "20s", stuck: false });
+    // Three minutes without a word is stuck, as far as anyone can tell.
+    act(() => vi.advanceTimersByTime(STUCK_AFTER_MS));
+    expect(result.current).toEqual({ span: "3m", stuck: true });
     // A new event starts it again.
     rerender({ since: Date.now(), working: true });
     expect(result.current).toBeNull();
