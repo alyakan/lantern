@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { clearMocks } from "@tauri-apps/api/mocks";
 
+// These render the whole app against the mock backend, which a loaded CI runner can take longer than
+// vitest's default 5 s to do.
+vi.setConfig({ testTimeout: 30_000 });
+
 // The editor isn't needed here, and doesn't load in jsdom.
 vi.mock("./monaco", () => ({ LIGHT_THEME: "lantern-light", DARK_THEME: "lantern-dark" }));
 vi.mock("@monaco-editor/react", () => ({ default: () => null, DiffEditor: () => null, loader: { config: () => {} } }));
