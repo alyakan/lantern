@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Flavour } from "../lib/flavour";
 import { useModeGuide } from "../lib/modeGuide";
+import { useMenuInside } from "../lib/useMenuInside";
 import { PERMISSIONS_LABEL, type Permissions, type Workflow, WORKFLOW_LABEL } from "../lib/workflow";
 import { BoltIcon, InfoIcon, OrchestraIcon, ShieldIcon, SparkIcon, StepsIcon } from "./icons";
 import { workflowName, type GuideKey } from "./ModeGuide";
@@ -47,6 +48,8 @@ function SettingMenu<T extends string>({ name, value, text, rows, onChange, disa
   const guide = useModeGuide();
   const root = useRef<HTMLDivElement>(null);
   const keys = useMenuKeys(open, root);
+  // The chat column clips what sticks out of it, so the menu stays inside it sideways and inside the window vertically.
+  const { ref: menu, style: menuStyle } = useMenuInside(open);
 
   useEffect(() => {
     if (!open) return;
@@ -77,7 +80,7 @@ function SettingMenu<T extends string>({ name, value, text, rows, onChange, disa
         <span className="chev down" aria-hidden />
       </button>
       {open && (
-        <div className={`menu model-menu mode-menu${compact ? " below" : ""}`} role="menu" aria-label={name} onKeyDown={keys.onKeyDown}>
+        <div className={`menu model-menu mode-menu${compact ? " below" : ""}`} ref={menu} style={menuStyle} role="menu" aria-label={name} onKeyDown={keys.onKeyDown}>
           {rows.map((r) => (
             <button
               key={r.value}

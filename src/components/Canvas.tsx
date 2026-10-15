@@ -35,8 +35,9 @@ import { NodeBody } from "./NodeBody";
 import { BranchIcon, ChevronIcon, OpenOutIcon } from "./icons";
 import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
 import { SubagentsMenu } from "./SubagentsMenu";
+import { CanvasOverflow } from "./CanvasOverflow";
 import { useQuiet } from "../lib/quiet";
-import { FULL_AT, WARN_AT } from "./ContextMeter";
+import { NodeContext, TeamContext } from "./ContextControls";
 
 /** Where agents sit and how the canvas is framed. The app keeps it, so leaving the canvas and coming back finds it as it was. */
 export interface CanvasLayout {
@@ -143,14 +144,16 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
   const folded = collapsed;
   // A worker whose branch the main agent has asked the user to merge: that is what it is waiting on, and it's theirs to answer.
   const ready = !!parent && !!owner?.proposals.some((p) => p.worker === slot && p.status === "open");
-  const label = statusLabel(status, role, ready);
-  // A card at work that's been quiet a while says how long, so a long think can be told from a stuck one.
+  // A card at work that's been quiet a while says how long, so a long think can be told from a stuck one; from three minutes
+  // on it turns amber and says what to do, since the agent may be stuck.
   const quiet = useQuiet(state?.activityAt ?? null, status === "working");
+  const stuck = !!quiet?.stuck;
+  const label = stuck ? `Quiet ${quiet.span}` : statusLabel(status, role, ready);
   const spent = state ? usage(totalCost(state), totalTokens(state)) : "";
   const actions = useNodeActions();
   return (
     <section
-      className={`canvas-node ${role} ${status}${ready ? " ready" : ""}${focused ? " focused" : ""}${folded ? " folded" : ""}${fresh ? " enter" : ""}`}
+      className={`canvas-node ${role} ${status}${stuck ? " stuck" : ""}${ready ? " ready" : ""}${focused ? " focused" : ""}${folded ? " folded" : ""}${fresh ? " enter" : ""}`}
       data-node={slot}
       aria-label={`${role === "main" ? name : `Agent ${name}`}, ${label}`}
       style={{ transform: `translate(${box.x}px, ${box.y}px)`, width: box.w, height: folded ? (summary ? `calc(${SUMMARY_HEAD}px / var(--zoom))` : COLLAPSED_HEIGHT) : box.h, zIndex: z }}
@@ -170,7 +173,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
           if (e.key === "Enter" && e.target === e.currentTarget) onOpen(slot);
         }}
       >
-        <span className={`node-dot ${status}`} aria-hidden />
+        <span className={`node-dot ${status}${stuck ? " stuck" : ""}`} aria-hidden />
         <span className="node-titles">
           <span className="node-name" title={name}>
             {name}
@@ -181,6 +184,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
             {[role === "main" ? "Runs the team" : branch ? branch.replace(/^lantern\//, "") : "Shared folder", spent || null].filter(Boolean).join(" · ")}
           </span>
         </span>
+        {state && !folded && <NodeContext slot={slot} name={name} />}
         {/* Both settings are on every window's title bar, so a team's Permissions can be changed from the canvas. */}
         {state && !folded && (
           <span className="node-settings">
@@ -188,9 +192,9 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
             <WorkflowMenu compact workflow={workflowOf(state)} agent={role === "worker"} holdsAgents={holdsAgents} onChange={(w) => actions.setWorkflow(slot, w)} disabled={isBusy(state)} />
           </span>
         )}
-        <span className="node-status" title={quiet ? `Its last step was ${quiet} ago` : undefined}>
+        <span className="node-status" title={stuck ? `No word from it for ${quiet.span}. It may be stuck: send it a message, or stop it.` : quiet ? `Its last step was ${quiet.span} ago` : undefined}>
           {label}
-          {quiet && <span className="node-quiet"> · {quiet} ago</span>}
+          {quiet && !stuck && <span className="node-quiet"> · {quiet.span} ago</span>}
         </span>
         {role === "worker" && (
           <button className="icon" aria-label={`More for ${name}`} aria-haspopup="menu" title="More: hide, or clean up and close" onClick={(e) => onMore(e, slot)}>
@@ -234,42 +238,6 @@ const TetherLine = memo(function TetherLine({ slot, d, fresh }: { slot: string; 
 export const UPDATE_REQUEST =
   "Give me a short status report in plain language: for each agent, what it has done, what it is doing now, and anything blocked or waiting for my decision. Look at each agent's latest work first if you need to. No code unless I ask.";
 
-/** A chat's window when it hasn't said (before its first turn ends): what the chat's own meter assumes. */
-const DEFAULT_WINDOW = 200_000;
-
-/**
- * The team's context, in the toolbar: how full the fullest agent's context is (the Lead's, until another is fuller),
- * saying whose when it isn't the Lead's. Warns in amber and red at the same points a chat's own meter does, in words as
- * well as colour; the tooltip lists everyone. A click goes to that agent, where Compact and Clear are. A chat's context
- * is what it holds now, so it drops when the agent compacts.
- */
-function TeamContext({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string) => void }) {
-  const states = useChatStates(nodes.map((n) => n.slot));
-  const rows = nodes.flatMap((n, i) => {
-    const used = states[i]?.contextUsed;
-    if (used === null || used === undefined) return [];
-    const window = states[i]?.contextWindow || DEFAULT_WINDOW;
-    return [{ node: n, used, window, percent: Math.round(Math.min(used / window, 1) * 100) }];
-  });
-  if (rows.length === 0) return null;
-  // The first of equals: the Lead comes first.
-  const fullest = rows.reduce((a, b) => (b.percent > a.percent ? b : a));
-  const level = fullest.percent >= FULL_AT ? "full" : fullest.percent >= WARN_AT ? "warn" : null;
-  const note = level === "full" ? "nearly full" : level === "warn" ? "getting full" : null;
-  const whose = fullest.node.role === "main" ? "" : ` · ${fullest.node.name}`;
-  const details = rows.map((r) => `${r.node.name}: ${r.percent}% (${r.used.toLocaleString()} of ${r.window.toLocaleString()} tokens)`).join("\n");
-  return (
-    <button
-      className={`canvas-fit canvas-context${level ? ` ${level}` : ""}`}
-      aria-label={`Context: ${fullest.node.name} ${fullest.percent}% used${note ? `, ${note}` : ""}`}
-      title={`Context used, by agent (it drops when one compacts). Click to go to the fullest.\n${details}`}
-      onClick={() => onGoTo(fullest.node.slot)}
-    >
-      Context {fullest.percent}%{whose}
-    </button>
-  );
-}
-
 function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string) => void }) {
   const [open, setOpen] = useState(false);
   const actions = useNodeActions();
@@ -302,7 +270,7 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
   return (
     <div className="canvas-team" ref={box}>
       <button ref={button} className="canvas-fit" aria-expanded={open} aria-haspopup="dialog" aria-controls={open ? id : undefined} aria-label="Team" title="Everyone on the team, and what it has cost" onClick={() => setOpen(!open)}>
-        Team{total ? ` · ${total}` : ""}
+        Team{total && <span className="canvas-ctl-long"> · {total}</span>}
       </button>
       {open && (
         <div id={id} ref={list} className="canvas-team-list" role="dialog" aria-label="Team">
@@ -380,9 +348,13 @@ function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onSho
         </button>
         <TeamContext nodes={nodes} onGoTo={onGoTo} />
         <Team nodes={nodes} onGoTo={onGoTo} />
-        <HiddenAgents nodes={nodes.filter((n) => n.hidden)} onShow={onShow} />
-        {main && <SubagentsMenu main={main} />}
-        {main && <NewAgent main={main} />}
+        {/* Below a width the rest fold into "⋯" (the canvas's container query decides which shows). */}
+        <div className="canvas-ctl-wide">
+          <HiddenAgents nodes={nodes.filter((n) => n.hidden)} onShow={onShow} />
+          {main && <SubagentsMenu main={main} />}
+          {main && <NewAgent main={main} />}
+        </div>
+        {main && <CanvasOverflow main={main} hidden={nodes.filter((n) => n.hidden)} onShow={onShow} />}
       </div>
     </>
   );
@@ -771,9 +743,9 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     // An agent that was hidden is put back first: there is nothing to go to otherwise.
     if (nodes.some((n) => n.slot === slot && n.hidden)) actions.show(slot);
     layout.touched = true;
-    // Big enough to read, but never past what fits: an agent taller than the canvas is shown whole, however small that is.
+    // At 100%, however small the view was, but never past what fits: an agent taller than the canvas is shown whole, however small that is.
     const fits = size.current.w > 0 && size.current.h > 0 ? Math.min(1, (size.current.w - 48) / box.w, (size.current.h - 48) / shown(slot).h) : 1;
-    apply(centerOn(shown(slot), size.current, clampZoom(Math.min(Math.max(view.current.zoom, SUMMARY_ZOOM + 0.2), fits))), true);
+    apply(centerOn(shown(slot), size.current, clampZoom(fits)), true);
     onFocus(slot);
     bringToFront(slot);
   }, [layout, nodes, actions, apply, onFocus, bringToFront]);

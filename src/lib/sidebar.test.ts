@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { initialState, type State } from "../store";
 import type { Chats } from "../sessions";
 import type { RecentFolder } from "../types";
-import { chatInitials, compactGroups, initials, needsYou, openProjects, pastRows, sidebarProjects, type ProjectOpen, type SidebarChat, type SidebarItem } from "./sidebar";
+import { chatInitials, compactGroups, initials, needsYou, openProjects, sidebarProjects, type ProjectOpen, type SidebarChat, type SidebarItem } from "./sidebar";
 
 const idle = (over: Partial<State> = {}): State => ({ ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/work/lantern", ...over });
 const asking = { type: "permission" as const, id: "p1", toolName: "Bash", input: {}, decision: null };
@@ -50,7 +50,7 @@ describe("openProjects", () => {
         },
         { agents: { a1: meta("lead", "security pass"), a2: meta("lead", "ui pass") } },
       ),
-      { ...opts, unread: { a2: true } },
+      { ...opts, unread: { a2: 1 } },
     );
     expect(Object.keys(open)).toEqual(["/work/lantern"]);
     const [team, ...rest] = open["/work/lantern"].items;
@@ -86,7 +86,7 @@ describe("openProjects", () => {
     ]);
   });
 
-  it("calls an empty Lead a new team, lists no chat without a folder, and marks pinned and closable chats", () => {
+  it("calls an empty Lead a new team, lists no chat without a folder, and marks pinned chats", () => {
     const open = openProjects(
       chats({ s1: idle({ items: [said("current")], sessionId: "c" }), lead: idle({ orchestrator: true }), blank: idle({ folder: null }), s4: idle({ items: [said("done one")], sessionId: "d" }), s5: idle({ items: [said("running")], status: "running" }) }),
       { ...opts, pinned: { "/work/lantern": ["d"] }, drafts: { s5: "" } },
@@ -94,10 +94,8 @@ describe("openProjects", () => {
     const items = open["/work/lantern"].items;
     expect(items.map((i) => i.title)).toEqual(["current", "New team", "done one", "running"]);
     const byTitle = Object.fromEntries(items.map((i) => [i.title, i]));
-    expect(byTitle["done one"]).toMatchObject({ pinned: true, closable: true, active: false });
-    expect(byTitle["current"]).toMatchObject({ active: true, closable: false });
-    expect(byTitle["running"].closable).toBe(false);
-    expect(byTitle["New team"].closable).toBe(false);
+    expect(byTitle["done one"]).toMatchObject({ pinned: true, active: false });
+    expect(byTitle["current"]).toMatchObject({ active: true, pinned: false });
   });
 
   it("uses a chat's title once one is made, and an unsent draft is a draft", () => {
@@ -106,30 +104,6 @@ describe("openProjects", () => {
       ["Named chat", "done"],
       ["typing", "draft"],
     ]);
-  });
-});
-
-describe("pastRows", () => {
-  const sessions = [
-    { id: "a", title: "Oldest", updated_ms: 1, prompts: 1 },
-    { id: "b", title: "Newest", updated_ms: 50, prompts: 1 },
-    { id: "c", title: "Second", updated_ms: 40, prompts: 1 },
-    { id: "d", title: "Third", updated_ms: 30, prompts: 1 },
-    { id: "e", title: "Fourth", updated_ms: 20, prompts: 1 },
-    { id: "open", title: "Open now", updated_ms: 60, prompts: 1 },
-  ];
-
-  it("lists the pinned chats and the 3 most recent, and counts the rest for Show all", () => {
-    const rows = pastRows(sessions, ["open"], ["a"], {});
-    expect(rows.pinned.map((r) => r.id)).toEqual(["a"]);
-    expect(rows.recent.map((r) => r.id)).toEqual(["b", "c", "d"]);
-    expect(rows.total).toBe(5);
-  });
-
-  it("leaves out a chat that is open, and prefers a renamed title", () => {
-    const rows = pastRows(sessions, ["open", "b"], [], { c: "Renamed" });
-    expect(rows.recent.map((r) => r.title)).toEqual(["Renamed", "Third", "Fourth"]);
-    expect(rows.total).toBe(4);
   });
 });
 
@@ -143,7 +117,7 @@ describe("sidebarProjects", () => {
   const project = (folder: string, state = idle({ folder, items: [said("x")] })) => openProjects(chats({ [folder]: state }), opts)[folder];
 
   it("puts projects with an open chat first, in the order of the recent list, then the other recent folders", () => {
-    const projects = sidebarProjects({ recent, hidden: [], open: { "/work/lumiform-ios": project("/work/lumiform-ios"), "/work/lantern": project("/work/lantern") }, past: {}, pinned: {}, titles: {} });
+    const projects = sidebarProjects({ recent, hidden: [], open: { "/work/lumiform-ios": project("/work/lumiform-ios"), "/work/lantern": project("/work/lantern") } });
     expect(projects.map((p) => [p.label, p.hasOpen])).toEqual([
       ["lantern", true],
       ["lumiform-ios", true],
@@ -153,32 +127,25 @@ describe("sidebarProjects", () => {
   });
 
   it("lists a project that isn't in the recents yet ahead of the rest", () => {
-    const projects = sidebarProjects({ recent, hidden: [], open: { "/work/new-one": project("/work/new-one"), "/work/lantern": project("/work/lantern") }, past: {}, pinned: {}, titles: {} });
+    const projects = sidebarProjects({ recent, hidden: [], open: { "/work/new-one": project("/work/new-one"), "/work/lantern": project("/work/lantern") } });
     expect(projects.map((p) => p.label).slice(0, 2)).toEqual(["new-one", "lantern"]);
   });
 
   it("hides a removed project unless a chat is open in it", () => {
     const hidden = ["/work/old", "/work/lantern"];
-    const without = sidebarProjects({ recent, hidden, open: {}, past: {}, pinned: {}, titles: {} });
+    const without = sidebarProjects({ recent, hidden, open: {} });
     expect(without.map((p) => p.label)).toEqual(["network-monitor", "lumiform-ios"]);
-    const withChat = sidebarProjects({ recent, hidden, open: { "/work/lantern": project("/work/lantern") }, past: {}, pinned: {}, titles: {} });
+    const withChat = sidebarProjects({ recent, hidden, open: { "/work/lantern": project("/work/lantern") } });
     expect(withChat[0].label).toBe("lantern");
   });
 
-  it("reads past chats only for a project that has them loaded", () => {
-    const past = { "/work/lantern": [{ id: "p", title: "Map tab layout", updated_ms: 9, prompts: 1 }] };
-    const [lantern, monitor] = sidebarProjects({ recent, hidden: [], open: { "/work/lantern": project("/work/lantern") }, past, pinned: { "/work/lantern": ["p"] }, titles: {} });
-    expect(lantern.past?.pinned.map((r) => r.title)).toEqual(["Map tab layout"]);
-    expect(monitor.past).toBeNull();
-  });
-
   it("tells two projects with the same folder name apart by their parent", () => {
-    const projects = sidebarProjects({ recent: [{ path: "/a/web", updated_ms: 2 }, { path: "/b/web", updated_ms: 1 }, { path: "/c/api", updated_ms: 0 }], hidden: [], open: {}, past: {}, pinned: {}, titles: {} });
+    const projects = sidebarProjects({ recent: [{ path: "/a/web", updated_ms: 2 }, { path: "/b/web", updated_ms: 1 }, { path: "/c/api", updated_ms: 0 }], hidden: [], open: {} });
     expect(projects.map((p) => p.label)).toEqual(["web · a", "web · b", "api"]);
   });
 
   it("carries the needs-you count and where to go for a collapsed project's badge", () => {
-    const [p] = sidebarProjects({ recent, hidden: [], open: { "/work/lantern": project("/work/lantern", idle({ items: [said("q"), asking] })) }, past: {}, pinned: {}, titles: {} });
+    const [p] = sidebarProjects({ recent, hidden: [], open: { "/work/lantern": project("/work/lantern", idle({ items: [said("q"), asking] })) } });
     expect(p.needs).toBe(1);
     expect(p.target).toEqual({ slot: "/work/lantern", team: null });
   });
@@ -215,7 +182,7 @@ describe("initials", () => {
 });
 
 describe("compactGroups", () => {
-  const item = (slot: string, over: Partial<SidebarChat> = {}): SidebarChat => ({ slot, title: slot, state: "done", unread: false, background: 0, sessionId: null, active: false, pinned: false, closable: false, ...over });
+  const item = (slot: string, over: Partial<SidebarChat> = {}): SidebarChat => ({ slot, title: slot, state: "done", unread: false, background: 0, sessionId: null, active: false, pinned: false, ...over });
   const chatItem = (slot: string, over: Partial<SidebarChat> = {}): SidebarItem => ({ kind: "chat", ...item(slot, over) });
   const open = (items: SidebarItem[]): ProjectOpen => ({ items, sessionIds: [], needs: 0, target: null });
 

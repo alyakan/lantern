@@ -16,6 +16,7 @@ export function SessionPill({ loadSessions, exclude, onOpen, disabled }: Props) 
   const [open, setOpen] = useState(false);
   const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
   const root = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -33,7 +34,7 @@ export function SessionPill({ loadSessions, exclude, onOpen, disabled }: Props) 
 
   return (
     <div className="pill-anchor" ref={root}>
-      <button className="pill" aria-haspopup="dialog" aria-expanded={open} disabled={disabled} title="Continue a past chat" onClick={toggle}>
+      <button className="pill" ref={button} aria-haspopup="dialog" aria-expanded={open} disabled={disabled} title="Continue a past chat" onClick={toggle}>
         <ClockIcon />
         <span>New chat</span>
         <span className="chev down" aria-hidden />
@@ -42,7 +43,11 @@ export function SessionPill({ loadSessions, exclude, onOpen, disabled }: Props) 
         <HistoryMenu
           sessions={sessions}
           exclude={exclude}
-          onClose={() => setOpen(false)}
+          onClose={() => {
+            // Escape: back to the button, so the keyboard isn't left on nothing.
+            setOpen(false);
+            button.current?.focus();
+          }}
           onOpen={(id) => {
             setOpen(false);
             onOpen(id);

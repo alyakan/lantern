@@ -84,7 +84,7 @@ export type ChatItem =
   | ToolItem
   | ShellItem
   /** `autoRule`: a rule allowed it with no card (decision is then "allowed"); `scope` is where that rule applies. */
-  | { type: "permission"; id: string; toolName: string; input: unknown; decision: "allowed" | "denied" | null; note?: string; autoRule?: { scope: RuleScope; rule: Rule } }
+  | { type: "permission"; id: string; toolName: string; input: unknown; decision: "allowed" | "denied" | null; note?: string; at?: number; autoRule?: { scope: RuleScope; rule: Rule } }
   /** What the turn cost and used (see lib/cost.ts): each null when not known. */
   | { type: "turn"; id: string; isError: boolean; stopped: boolean; result: string | null; durationMs: number | null; denied: number; cost?: number | null; tokens?: number | null };
 
@@ -555,7 +555,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       };
     }
     case "permission_requested":
-      return { ...state, items: [...state.items, { type: "permission", id: ev.request_id, toolName: ev.tool_name, input: ev.input, decision: null }] };
+      return { ...state, items: [...state.items, { type: "permission", id: ev.request_id, toolName: ev.tool_name, input: ev.input, decision: null, at: Date.now() }] };
     case "permission_auto_allowed":
       return {
         ...state,
@@ -683,8 +683,10 @@ export function reducer(state: State, action: Action): State {
     case "flavour_picked":
       return { ...state, flavourPick: action.flavour, explainPick: !!action.flavour && !!action.explain };
     case "permission_decided":
+      // The agent was waiting on the user, not quiet: its clock starts again from the answer.
       return {
         ...state,
+        activityAt: Date.now(),
         items: state.items.map((it): ChatItem => (it.type === "permission" && it.id === action.id ? { ...it, decision: action.allow ? "allowed" : "denied", note: action.note } : it)),
       };
     case "stop_requested":

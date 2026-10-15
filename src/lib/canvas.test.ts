@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inSummary, bounds, centerOn, clampZoom, firstBox, fitView, GAP, MAIN_SIZE, MAX_ZOOM, MIN_NODE, MIN_ZOOM, moveBox, overlaps, panBy, placeWorker, resizeBox, SUMMARY_ZOOM, tether, toScreen, toWorld, WORKER_SIZE, zoomAt, type Box, type View } from "./canvas";
+import { inSummary, bounds, centerOn, clampZoom, firstBox, fitView, GAP, READABLE_ZOOM, MAIN_SIZE, MAX_ZOOM, MIN_NODE, MIN_ZOOM, moveBox, overlaps, panBy, placeWorker, resizeBox, SUMMARY_ZOOM, tether, toScreen, toWorld, WORKER_SIZE, zoomAt, type Box, type View } from "./canvas";
 
 const view: View = { x: 100, y: 50, zoom: 0.5 };
 
@@ -36,8 +36,8 @@ describe("the view", () => {
   });
 
   it("fits every agent into the viewport, centred, and never zooms in past 1", () => {
-    const boxes: Box[] = [firstBox(), { x: 800, y: -300, ...WORKER_SIZE }, { x: 800, y: 900, ...WORKER_SIZE }];
-    const viewport = { w: 1200, h: 800 };
+    const boxes: Box[] = [firstBox(), { x: 800, y: -50, ...WORKER_SIZE }, { x: 800, y: 150, ...WORKER_SIZE }];
+    const viewport = { w: 1400, h: 800 };
     const v = fitView(boxes, viewport);
     const b = bounds(boxes)!;
     const tl = toScreen(v, { x: b.x, y: b.y });
@@ -52,6 +52,16 @@ describe("the view", () => {
     expect(fitView([{ x: 0, y: 0, w: 300, h: 200 }], { w: 2000, h: 2000 }).zoom).toBe(1);
     expect(fitView([], viewport)).toEqual({ x: 0, y: 0, zoom: 1 });
     expect(fitView(boxes, { w: 0, h: 0 })).toEqual({ x: 0, y: 0, zoom: 1 });
+  });
+
+  it("doesn't zoom out of readable by itself: it shows what fits from the main agent and leaves the rest to a pan", () => {
+    const boxes: Box[] = [firstBox()];
+    for (let i = 0; i < 8; i++) boxes.push(placeWorker(boxes, boxes[0]));
+    const viewport = { w: 1100, h: 800 };
+    const v = fitView(boxes, viewport);
+    expect(v.zoom).toBe(READABLE_ZOOM);
+    // The main agent starts at the top left, with a little room.
+    expect(toScreen(v, { x: 0, y: 0 })).toEqual({ x: 24, y: 24 });
   });
 
   it("centres an agent that needs you", () => {

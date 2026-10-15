@@ -29,7 +29,7 @@ function team(workers = 2): Chats {
   return c;
 }
 
-const actions = (over: Partial<NodeActions> = {}): NodeActions => ({ send: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(() => Promise.resolve()), reviewMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), spawn: vi.fn(() => Promise.resolve()), closeCheck: vi.fn(() => Promise.resolve({ worktree: true, branch: null, uncommitted: 0, unmerged_commits: 0 })), closeWorker: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), setPermissions: vi.fn(), setWorkflow: vi.fn(), setSubagents: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(), ...over });
+const actions = (over: Partial<NodeActions> = {}): NodeActions => ({ send: vi.fn(), clear: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(() => Promise.resolve()), reviewMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), spawn: vi.fn(() => Promise.resolve()), closeCheck: vi.fn(() => Promise.resolve({ worktree: true, branch: null, uncommitted: 0, unmerged_commits: 0 })), closeWorker: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), setPermissions: vi.fn(), setWorkflow: vi.fn(), setSubagents: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(), ...over });
 
 function setup(chats: Chats, extra: { attention?: string[]; layout?: ReturnType<typeof newLayout>; actions?: Partial<NodeActions> } = {}) {
   const store = createChatStore();
@@ -184,6 +184,18 @@ describe("the canvas", () => {
     expect(onFocus).toHaveBeenLastCalledWith("w2");
     fireEvent.click(pill);
     expect(onFocus).toHaveBeenLastCalledWith("w1");
+  });
+
+  it("frames the agent that needs you at 100%, however far out the view was", () => {
+    const { layout } = setup(team(2), { attention: ["w1"] });
+    const canvas = screen.getByTestId("canvas");
+    act(() => {
+      fireEvent.wheel(canvas, { ctrlKey: true, deltaY: 600 });
+    });
+    expect(layout.view!.zoom).toBeLessThan(SUMMARY_ZOOM);
+    fireEvent.click(screen.getByRole("button", { name: /1 agent needs you/ }));
+    expect(layout.view!.zoom).toBe(1);
+    expect(canvas.classList.contains("summary")).toBe(false);
   });
 
   it("has no pill when nobody needs you", () => {
@@ -435,13 +447,39 @@ describe("oversight", () => {
     chats.slots.w2 = { ...chats.slots.w2, contextUsed: 190_000, contextWindow: 200_000 };
     const { onFocus } = setup(chats);
     const chip = screen.getByRole("button", { name: /^Context:/ });
-    expect(chip.textContent).toBe("Context 95% · Worker 2");
+    // Wide: "Context 95% · Worker 2"; narrow (the stylesheet's container query swaps them): just "95%".
+    expect(chip.querySelector(".canvas-ctl-long")?.textContent).toBe("Context 95% · Worker 2");
+    expect(chip.querySelector(".canvas-ctl-short")?.textContent).toBe("95%");
     expect(chip).toHaveAccessibleName("Context: Worker 2 95% used, nearly full");
     expect(chip).toHaveClass("full");
-    expect(chip.getAttribute("title")).toContain("Lead: 25% (50,000 of 200,000 tokens)");
-    expect(chip.getAttribute("title")).toContain("Worker 1: 50% (100,000 of 200,000 tokens)");
+    // The tooltip says what the number is and what to do about it.
+    expect(chip.getAttribute("title")).toContain("share of Worker 2's context window in use now");
+    expect(chip.getAttribute("title")).toContain("At 75% or more, open that agent and use Compact");
+    // A click lists every agent, with its share as a bar and its tokens; a click on a name goes there.
     fireEvent.click(chip);
+    const list = screen.getByRole("dialog", { name: "Context by agent" });
+    expect(within(list).getAllByRole("meter").map((m) => [m.getAttribute("aria-label"), m.getAttribute("aria-valuenow")])).toEqual([
+      ["Lead context used", "25"],
+      ["Worker 1 context used", "50"],
+      ["Worker 2 context used", "95"],
+    ]);
+    expect(within(list).getByTitle("100,000 of 200,000 tokens")).toHaveTextContent("100k of 200k");
+    fireEvent.click(within(list).getByRole("button", { name: "Worker 2" }));
     expect(onFocus).toHaveBeenCalledWith("w2");
+    expect(screen.queryByRole("dialog", { name: "Context by agent" })).toBeNull();
+  });
+
+  it("closes the context list on Escape and puts focus back on the chip", () => {
+    const chats = team(1);
+    chats.slots.s1 = { ...chats.slots.s1, contextUsed: 50_000, contextWindow: 200_000 };
+    setup(chats);
+    const chip = screen.getByRole("button", { name: /^Context:/ });
+    expect(chip).toHaveAttribute("aria-haspopup", "dialog");
+    fireEvent.click(chip);
+    expect(screen.getByRole("button", { name: /Compact all above 60%/ })).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Context by agent" })).toBeNull();
+    expect(chip).toHaveFocus();
   });
 
   it("shows the Lead's context on its own while it is the fullest, and nothing before any agent has used any", () => {
@@ -453,7 +491,7 @@ describe("oversight", () => {
     chats.slots.w1 = { ...chats.slots.w1, contextUsed: 20_000 };
     setup(chats);
     const chip = screen.getByRole("button", { name: /^Context:/ });
-    expect(chip.textContent).toBe("Context 78%");
+    expect(chip.querySelector(".canvas-ctl-long")?.textContent).toBe("Context 78%");
     expect(chip).toHaveClass("warn");
     expect(chip).toHaveAccessibleName("Context: Lead 78% used, getting full");
   });
@@ -729,7 +767,7 @@ describe("cleaning up and closing an agent", () => {
     expect(dialog.textContent).toContain("It has 3 uncommitted files and 2 commits that aren't merged.");
     expect(dialog.textContent).toContain("lantern/w1");
     // Cancel is the default: it has the focus, and a press of Enter there cancels.
-    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" })));
     expect(acts.closeWorker).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("alertdialog")).toBeNull();
@@ -823,6 +861,208 @@ describe("starting an agent from the canvas", () => {
     setup(chats);
     expect(screen.getAllByRole("region")).toHaveLength(1); // an orphaned worker
     expect(screen.queryByRole("button", { name: "+ Agent" })).toBeNull();
+  });
+});
+
+/** The agents have finished their turns (a new worker starts out working), with these contexts used (of 200k). */
+function withContext(used: Record<string, number>, busy: string[] = [], workers = 2): Chats {
+  const chats = team(workers);
+  for (const slot of Object.keys(chats.slots)) {
+    chats.slots[slot] = { ...chats.slots[slot], status: busy.includes(slot) ? "running" : "idle", thinking: false, contextUsed: used[slot] ?? 10_000, contextWindow: 200_000 };
+  }
+  return chats;
+}
+
+describe("an agent's context on its title bar", () => {
+  const chip = (name: string) => screen.getByRole("button", { name: new RegExp(`^${name} context,`) });
+  const menuOf = () => screen.getByRole("menu", { name: /context$/ });
+
+  it("shows the share, amber from 75% and red from 90%, in words too", () => {
+    setup(withContext({ s1: 40_000, w1: 150_000, w2: 190_000 }));
+    expect(chip("Lead")).toHaveTextContent("20%");
+    expect(chip("Lead")).not.toHaveClass("warn");
+    expect(chip("Worker 1")).toHaveClass("warn");
+    expect(chip("Worker 1")).toHaveAccessibleName("Worker 1 context, 75% used, getting full");
+    expect(chip("Worker 2")).toHaveClass("full");
+    expect(chip("Worker 2")).toHaveAccessibleName("Worker 2 context, 95% used, nearly full");
+  });
+
+  it("has no chip before the agent has said how much it has used", () => {
+    const chats = team(1);
+    setup(chats);
+    expect(screen.queryByRole("button", { name: /Worker 1 context,/ })).toBeNull();
+  });
+
+  it("compacts the agent it belongs to", () => {
+    const { acts } = setup(withContext({ w1: 150_000 }));
+    fireEvent.click(chip("Worker 1"));
+    const compact = within(menuOf()).getByRole("menuitem", { name: /Compact/ });
+    expect(compact).toHaveTextContent("Summarise the conversation to free up context");
+    expect(compact).toHaveFocus();
+    fireEvent.click(compact);
+    expect(acts.send).toHaveBeenCalledWith("w1", "/compact");
+    expect(screen.queryByRole("menu", { name: /context$/ })).toBeNull();
+  });
+
+  it("asks before it clears, and clears only when told to", () => {
+    const { acts } = setup(withContext({ w1: 150_000 }));
+    fireEvent.click(chip("Worker 1"));
+    fireEvent.click(within(menuOf()).getByRole("menuitem", { name: /Clear/ }));
+    expect(acts.clear).not.toHaveBeenCalled();
+    expect(menuOf()).toHaveTextContent("Worker 1 forgets this conversation. The files it changed stay as they are.");
+    // Keep it: nothing is cleared, and the menu goes back to Compact and Clear.
+    expect(within(menuOf()).getByRole("menuitem", { name: "Keep it" })).toHaveFocus();
+    fireEvent.click(within(menuOf()).getByRole("menuitem", { name: "Keep it" }));
+    expect(acts.clear).not.toHaveBeenCalled();
+    fireEvent.click(within(menuOf()).getByRole("menuitem", { name: /Clear/ }));
+    fireEvent.click(within(menuOf()).getByRole("menuitem", { name: "Clear it" }));
+    expect(acts.clear).toHaveBeenCalledWith("w1");
+    expect(acts.send).not.toHaveBeenCalled();
+  });
+
+  it("can't compact or clear an agent that is working or waiting on you, and says to wait", () => {
+    const chats = withContext({ w1: 150_000, w2: 150_000 }, ["w1"]);
+    chats.slots.w2 = { ...chats.slots.w2, status: "running", items: [{ type: "permission", id: "p", toolName: "Bash", input: {}, decision: null }] };
+    const { acts } = setup(chats);
+    for (const name of ["Worker 1", "Worker 2"]) {
+      fireEvent.click(chip(name));
+      const compact = within(menuOf()).getByRole("menuitem", { name: /Compact/ });
+      expect(compact).toHaveAttribute("aria-disabled", "true");
+      expect(compact).toHaveTextContent("Wait until it has finished its turn");
+      fireEvent.click(compact);
+      fireEvent.click(within(menuOf()).getByRole("menuitem", { name: /Clear/ }));
+      expect(screen.queryByText(/forgets this conversation/)).toBeNull();
+      fireEvent.click(chip(name));
+    }
+    expect(acts.send).not.toHaveBeenCalled();
+    expect(acts.clear).not.toHaveBeenCalled();
+  });
+
+  it("closes on Escape and gives focus back to the chip", () => {
+    setup(withContext({ w1: 150_000 }));
+    fireEvent.click(chip("Worker 1"));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: /context$/ })).toBeNull();
+    expect(chip("Worker 1")).toHaveFocus();
+  });
+});
+
+describe("the toolbar's list of every agent's context", () => {
+  const open = () => {
+    fireEvent.click(screen.getByRole("button", { name: /^Context:/ }));
+    return screen.getByRole("dialog", { name: "Context by agent" });
+  };
+
+  it("compacts and clears from a row, with the same rules and a confirmation for Clear", () => {
+    const { acts } = setup(withContext({ s1: 40_000, w1: 150_000, w2: 100_000 }, ["w2"]));
+    const list = open();
+    fireEvent.click(within(list).getByRole("button", { name: "Compact Worker 1" }));
+    expect(acts.send).toHaveBeenCalledWith("w1", "/compact");
+    // Working: both buttons are there but do nothing, and say why.
+    const busy = within(list).getByRole("button", { name: "Compact Worker 2" });
+    expect(busy).toHaveAttribute("aria-disabled", "true");
+    expect(busy).toHaveAttribute("title", "Wait until it has finished its turn");
+    fireEvent.click(busy);
+    fireEvent.click(within(list).getByRole("button", { name: "Clear Worker 2" }));
+    expect(within(list).queryByText("Clear it?")).toBeNull();
+    expect(acts.send).toHaveBeenCalledTimes(1);
+    // Clear asks first.
+    fireEvent.click(within(list).getByRole("button", { name: "Clear Worker 1" }));
+    expect(acts.clear).not.toHaveBeenCalled();
+    fireEvent.click(within(list).getByRole("button", { name: "Keep Worker 1's conversation" }));
+    expect(within(list).queryByText("Clear it?")).toBeNull();
+    fireEvent.click(within(list).getByRole("button", { name: "Clear Worker 1" }));
+    fireEvent.click(within(list).getByRole("button", { name: "Yes, clear Worker 1" }));
+    expect(acts.clear).toHaveBeenCalledWith("w1");
+  });
+
+  it("compacts everyone above 60% that is free, and says how many it skipped because they were busy", () => {
+    // Lead 70% (free), Worker 1 61% (free), Worker 2 90% (working), Worker 3 60% (free, but not above 60%), Worker 4 30%.
+    const { acts } = setup(withContext({ s1: 140_000, w1: 122_000, w2: 180_000, w3: 120_000, w4: 60_000 }, ["w2"], 4));
+    const list = open();
+    fireEvent.click(within(list).getByRole("button", { name: "Compact all above 60%" }));
+    expect((acts.send as ReturnType<typeof vi.fn>).mock.calls).toEqual([["s1", "/compact"], ["w1", "/compact"]]);
+    expect(within(list).getByRole("status")).toHaveTextContent("Compacting 2 agents. Skipped 1 that is busy.");
+  });
+
+  it("says when everything above 60% is busy, and does nothing when nothing is above it", () => {
+    const busy = setup(withContext({ w1: 180_000 }, ["w1"]));
+    fireEvent.click(within(open()).getByRole("button", { name: "Compact all above 60%" }));
+    expect(busy.acts.send).not.toHaveBeenCalled();
+    expect(within(screen.getByRole("dialog", { name: "Context by agent" })).getByRole("status")).toHaveTextContent("Skipped 1 that is busy.");
+    busy.unmount();
+    const low = setup(withContext({ w1: 20_000 }));
+    const list = open();
+    const all = within(list).getByRole("button", { name: "Compact all above 60%" });
+    expect(all).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(all);
+    expect(low.acts.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("an agent at work that has gone quiet", () => {
+  const working = (quietMs: number) => {
+    const chats = team(1);
+    chats.slots.w1 = { ...chats.slots.w1, status: "running", activityAt: Date.now() - quietMs };
+    return chats;
+  };
+
+  it("says how long it has been, and from three minutes on turns amber and says what to do", () => {
+    setup(working(45_000));
+    const card = screen.getByLabelText(/Agent Worker 1/);
+    expect(card).toHaveTextContent("Working · 45s ago");
+    expect(card).not.toHaveClass("stuck");
+    cleanup();
+    setup(working(200_000));
+    const stuck = screen.getByLabelText(/Agent Worker 1, Quiet 3m/);
+    expect(stuck).toHaveClass("stuck");
+    expect(stuck.querySelector(".node-status")).toHaveTextContent("Quiet 3m");
+    expect(stuck.querySelector(".node-status")?.getAttribute("title")).toMatch(/send it a message, or stop it/);
+  });
+});
+
+describe("the toolbar when the canvas is narrow", () => {
+  it("has a ⋯ menu with the folded controls: roles, arrow keys, Escape and focus back", async () => {
+    const { acts } = setup(hidden(team(2), "w2"));
+    const more = screen.getByRole("button", { name: "More canvas controls" });
+    expect(more).toHaveAttribute("aria-haspopup", "menu");
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(more);
+    const menu = screen.getByRole("menu", { name: "More canvas controls" });
+    expect(more).toHaveAttribute("aria-expanded", "true");
+    // It opens on the checked radio (where the Lead's subagents run now), and the arrow keys move through the items.
+    const items = [...menu.querySelectorAll<HTMLElement>('[role^="menuitem"]')];
+    expect(items.map((i) => i.getAttribute("role"))).toEqual(["menuitemradio", "menuitemradio", "menuitem", "menuitem"]);
+    expect(within(menu).getByRole("menuitemradio", { name: /On the canvas/ })).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(items[1]).toHaveFocus();
+    fireEvent.keyDown(menu, { key: "End" });
+    expect(within(menu).getByRole("menuitem", { name: /Show Worker 2/ })).toHaveFocus();
+    fireEvent.click(items[1]);
+    expect(acts.setSubagents).toHaveBeenCalledWith("s1", "inline");
+    // Escape closes it and puts focus back on the button.
+    fireEvent.click(more);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "More canvas controls" })).toBeNull();
+    expect(more).toHaveFocus();
+  });
+
+  it("starts an agent from the menu, and puts a hidden one back", async () => {
+    const { acts } = setup(hidden(team(2), "w2"));
+    const more = screen.getByRole("button", { name: "More canvas controls" });
+    fireEvent.click(more);
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: /Show Worker 2/ }));
+    expect(acts.show).toHaveBeenCalledWith("w2");
+    fireEvent.click(more);
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: /\+ Agent/ }));
+    // Two forms can exist (the toolbar's own and this one's); only this one is open.
+    const form = screen.getByRole("dialog", { name: "New agent" });
+    fireEvent.change(within(form).getByLabelText("Task"), { target: { value: "Check the docs" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Start agent" }));
+    expect(acts.spawn).toHaveBeenCalledWith("s1", { task: "Check the docs", name: null, isolation: "worktree", model: null });
+    // Started, the form goes and focus returns to "⋯".
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "New agent" })).toBeNull());
+    await waitFor(() => expect(more).toHaveFocus());
   });
 });
 

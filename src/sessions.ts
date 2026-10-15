@@ -39,7 +39,12 @@ export type ChatsAction =
   /** A worker is taken off the canvas, or put back on it. */
   | { type: "set_hidden"; slot: string; hidden: boolean }
   /** A worker was closed from its card: its chat goes, and if it was on screen the main agent is. */
-  | { type: "close_agent"; slot: string };
+  | { type: "close_agent"; slot: string }
+  /**
+   * Chats closed from the sidebar, the one on screen too: the project's other chat (else any other) takes its place, or
+   * `fresh`, a new empty chat (the start screen), when none is left.
+   */
+  | { type: "close"; slots: string[]; fresh: string };
 
 export const FIRST_SLOT = "s1";
 
@@ -97,6 +102,18 @@ export function chatsReducer(chats: Chats, action: ChatsAction): Chats {
       const parent = chats.agents[action.slot]?.parent;
       const left = chats.active === action.slot && parent && chats.slots[parent] ? { ...chats, active: parent } : chats;
       return chatsReducer(left, { type: "remove", slot: action.slot });
+    }
+    case "close": {
+      const gone = action.slots.filter((slot) => chats.slots[slot]);
+      if (gone.length === 0) return chats;
+      let left = chats;
+      if (gone.includes(chats.active)) {
+        const rest = Object.keys(chats.slots).filter((slot) => !gone.includes(slot));
+        const folder = chats.slots[chats.active].folder;
+        const next = rest.find((slot) => !chats.agents[slot] && chats.slots[slot].folder === folder) ?? rest.find((slot) => !chats.agents[slot]) ?? rest[0];
+        left = next ? { ...chats, active: next } : chatsReducer(chatsReducer(chats, { type: "add", slot: action.fresh }), { type: "activate", slot: action.fresh });
+      }
+      return gone.reduce((all, slot) => chatsReducer(all, { type: "remove", slot }), left);
     }
     case "remove": {
       if (action.slot === chats.active || !chats.slots[action.slot]) return chats;

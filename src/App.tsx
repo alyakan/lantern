@@ -68,10 +68,11 @@ import { launchOf, migrateModeSettings, permissionsOf, PERMISSIONS_LABEL, WORKFL
 import { FileLinksProvider } from "./lib/fileLinks";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Hud, type HudEvent } from "./components/Hud";
-import { HistoryPopover } from "./components/HistoryPopover";
+import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover";
 import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
-import { needsYou, openProjects } from "./lib/sidebar";
-import { SidebarCompact } from "./components/SidebarCompact";
+import { needsYou, openProjects, sidebarProjects } from "./lib/sidebar";
+import { anythingWorking } from "./lib/awake";
+import { inboxItems, type InboxItem } from "./lib/inbox";
 import { usePeek } from "./lib/peek";
 import { MessageInput } from "./components/MessageInput";
 import { describeInput } from "./components/PermissionCard";
@@ -83,7 +84,7 @@ import { SplitPane } from "./components/SplitPane";
 import { TopBar } from "./components/TopBar";
 import { Canvas, newLayout } from "./components/Canvas";
 import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions } from "./lib/canvasContext";
-import { needingYou, orchestraNodes, teamMain, teamNodes } from "./lib/orchestraView";
+import { needingYou, orchestraNodes, teamActivity, teamMain, teamNodes } from "./lib/orchestraView";
 import "./styles.css";
 import { AGENT_MODEL } from "./lib/models";
 
@@ -164,6 +165,9 @@ export default function App() {
   const [harnessBySession, setHarnessBySession] = usePersistentState<Record<string, string>>("settings.harnessBySession", {});
   // General: which events are told about (and paused), the theme and the text size.
   const [notifyPrefs, setNotifyPrefs] = usePersistentState<NotifyPrefs>(NOTIFY_KEY, NOTIFY_DEFAULTS);
+  // Keep the Mac from idle sleep while anything works (see anythingWorking); anything but off means on.
+  const [keepAwakeSaved, setKeepAwake] = usePersistentState<boolean>("settings.keepAwake", true);
+  const keepAwake = keepAwakeSaved !== false;
   const [savedTheme, setTheme] = usePersistentState<ThemeId>("settings.theme", readTheme());
   const [savedCustom, setCustomTheme] = usePersistentState<CustomTheme>("settings.customTheme", readCustomTheme());
   // What was saved may be anything (storage is editable): only a known theme and checked colours are used.
@@ -201,7 +205,8 @@ export default function App() {
   const [collapsedBy, setCollapsedBy] = usePersistentState<Record<string, boolean>>("review.collapsedByFolder", {});
   // On the canvas the panel is one setting for the whole team: which agent's chat is on screen there changes as agents are
   // clicked, and each has a folder of its own.
-  const showCanvas = view === "canvas" && teamMain(chats, active) !== null;
+  const canvasMain = view === "canvas" ? teamMain(chats, active) : null;
+  const showCanvas = canvasMain !== null;
   const [canvasPanel, setCanvasPanel] = usePersistentState("review.canvasPanel", false);
   const reviewCollapsed = showCanvas ? !canvasPanel : ((state.folder ? collapsedBy[state.folder] : undefined) ?? collapsedDefault);
   const setReviewCollapsed = (collapsed: boolean) => (showCanvas ? setCanvasPanel(!collapsed) : state.folder ? setCollapsedBy({ ...collapsedBy, [state.folder]: collapsed }) : setCollapsedDefault(collapsed));
@@ -241,7 +246,7 @@ export default function App() {
   useEffect(() => {
     void pushAgentLimit();
   }, []);
-  // When each chat's last turn ended, for the title bar's "Finished | Today at 19:22".
+  // When each chat's last turn ended, for the title bar's "Done | Today at 19:22".
   const [finishedAt, setFinishedAt] = useState<Record<string, Date>>({});
   // The pop-up shown when the chat on screen finishes a turn.
   const [hud, setHud] = useState<HudEvent | null>(null);
@@ -358,7 +363,7 @@ export default function App() {
 
   /**
    * Leaving a chat keeps it open (running or not) so switching back is instant; only an empty chat with nothing typed
-   * is closed. Open chats are closed from the history menu.
+   * is closed. Open chats are closed from the sidebar.
    */
   const leave = (slot: string) => {
     const s = chats.slots[slot];
@@ -373,9 +378,17 @@ export default function App() {
     to(slot)({ type: "failed", text: "Claude didn't start." });
   };
 
-  const closeChat = (slot: string) => {
-    if (slot === active || !chats.slots[slot]) return;
-    forget(slot);
+  /**
+   * Closes chats from the sidebar, the one on screen too: the app then goes to another chat (a project's, else any), or
+   * to the start screen when none is left. Asking whether to stop something that is working is the sidebar's job.
+   */
+  const closeChats = (slots: string[]) => {
+    dispatchChats({ type: "close", slots, fresh: `s${++slotSeq.current}` });
+    for (const slot of slots) {
+      delete drafts.current[slot];
+      delete relaunch.current[slot];
+      api.closeSession(slot).catch(() => {});
+    }
   };
 
   const switchTo = (slot: string) => {
@@ -1140,6 +1153,8 @@ export default function App() {
   };
   const doing = {
     send: sendIn,
+    // The canvas asked the user already (its Clear is confirmed in the menu), so this doesn't ask again.
+    clear: (slot: string) => sendIn(slot, "/clear"),
     stop: stopIn,
     queue: (slot: string, items: string[]) => to(slot)({ type: "queue_set", items }),
     decide: decideIn,
@@ -1228,6 +1243,7 @@ export default function App() {
   const nodeActions = useMemo<NodeActions>(
     () => ({
       send: (slot, text) => doingRef.current.send(slot, text),
+      clear: (slot) => doingRef.current.clear(slot),
       stop: (slot) => doingRef.current.stop(slot),
       queue: (slot, items) => doingRef.current.queue(slot, items),
       decide: (slot, id, allow, note, answered) => doingRef.current.decide(slot, id, allow, note, answered),
@@ -1267,14 +1283,16 @@ export default function App() {
 
   // The branch can change between turns (Claude may check out one), so re-read it whenever a turn ends.
   const idle = state.status === "idle";
+  // The title bar names the project: on a team's canvas that's the Lead's folder, not the folder of whichever agent is on screen.
+  const titleFolder = canvasMain ? (chats.slots[canvasMain]?.folder ?? state.folder) : state.folder;
   useEffect(() => {
-    if (!state.folder) return setBranch(null);
+    if (!titleFolder) return setBranch(null);
     let live = true;
-    api.gitBranch(state.folder).then((b) => live && setBranch(b), () => live && setBranch(null));
+    api.gitBranch(titleFolder).then((b) => live && setBranch(b), () => live && setBranch(null));
     return () => {
       live = false;
     };
-  }, [state.folder, idle]);
+  }, [titleFolder, idle]);
 
   // Tell the user when a turn ends or Claude needs a permission answer, if they're in another app or another chat.
   // Item ids restart in every session, so the session id is part of what counts as "already announced".
@@ -1299,9 +1317,14 @@ export default function App() {
   const saveOpen = () => save(toCurrentFolders(withOffered(chatsToSave(chats.slots, active, drafts.current, titles, chats.agents), offer), moves ?? []));
   useEffect(saveOpen, [chats.slots, chats.agents, active, titles, offer, moves]);
 
+  const working = anythingWorking(chats);
+  useEffect(() => {
+    api.keepAwake(working, keepAwake).catch(() => {});
+  }, [working, keepAwake]);
+
   const announced = useRef<Record<string, string>>({});
   // Chats that finished in the background and haven't been looked at since: a blue dot, like an unread message.
-  const [unread, setUnread] = useState<Record<string, true>>({});
+  const [unread, setUnread] = useState<Record<string, number>>({});
   useEffect(() => {
     setUnread(({ [active]: _seen, ...rest }) => rest);
   }, [active]);
@@ -1321,7 +1344,7 @@ export default function App() {
       if (wanted && (!windowFocused() || slot !== chats.active)) notify(a.title, a.body, a.kind);
       // Another chat finished or needs an answer: say so in the window too, and let the toast take you there.
       if (slot !== chats.active) {
-        if (a.kind === "finished" || a.kind === "failed") setUnread((u) => ({ ...u, [slot]: true }));
+        if (a.kind === "finished" || a.kind === "failed") setUnread((u) => ({ ...u, [slot]: Date.now() }));
         const project = s.folder && s.folder !== state.folder ? basename(s.folder) : null;
         if (wanted) setHud({ key: Date.now(), kind: a.kind, body: a.body, chat: { slot, title: chats.agents[slot]?.name ?? chatTitle(s, titles), project } });
       }
@@ -1431,7 +1454,7 @@ export default function App() {
   const [guideAt, setGuideAt] = useState<GuideKey | null>(null);
   const [settingsAt, setSettingsAt] = useState<SettingsTab | null>(null);
   useAction("settings", () => setSettingsAt(settingsAt ?? "general"));
-  // ⇧⌘P: every action that can run, and the things that aren't shortcuts: switching Permissions, Workflow or harness, and each Settings
+  // ⇧⌘P: every action that can run, and the things that aren't shortcuts: switching Permissions, Workflow or Models, and each Settings
   // page. Listed as they are when the palette opens.
   const [palette, setPalette] = useState<PaletteEntry[] | null>(null);
   const paletteEntries = (): PaletteEntry[] => {
@@ -1444,7 +1467,7 @@ export default function App() {
       .map((w): PaletteEntry => ({ id: `workflow:${w}`, title: `Workflow: ${WORKFLOW_LABEL[w]}${w === "steps" ? "…" : ""}`, group: "Workflow", shortcut: null, run: () => changeWorkflow(w) }));
     const harnesses = presets
       .filter((h) => ready && h.id !== harnessOf(active).id)
-      .map((h): PaletteEntry => ({ id: `harness:${h.id}`, title: `Use the ${h.name} harness`, group: "Harness", shortcut: null, run: () => switchHarness(h) }));
+      .map((h): PaletteEntry => ({ id: `harness:${h.id}`, title: `Models: ${h.name}`, group: "Models", shortcut: null, run: () => switchHarness(h) }));
     const tabs = (["general", "harness", "mcp", "skills", "permissions", "updates"] as SettingsTab[])
       .filter((t) => t !== "harness" || !!state.folder)
       .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
@@ -1583,9 +1606,10 @@ export default function App() {
       : null;
   const sessionActions = actionsFor(state.folder);
 
-  // The sidebar: every project, and the chats open in each. It is full, compact (a slim column of the open chats) or hidden:
-  // whether it is hidden and whether it is compact are saved apart (so showing it again returns to whichever it was), and so
-  // is its width. The first key is the one that once said "minimized to the rail": that is hidden now.
+  // The sidebar: every project, and the chats open in each. It is pinned open, collapsed (a slim column of the open chats that
+  // opens over the chat when the pointer rests on it) or hidden: whether it is hidden and whether it is collapsed ("compact")
+  // are saved apart (so showing it again returns to whichever it was), and so is its width. The first key is the one that
+  // once said "minimized to the rail": that is hidden now.
   const [sidebarHidden, setSidebarHidden] = usePersistentState("sidebar.collapsed", false);
   const [sidebarCompact, setSidebarCompact] = usePersistentState("sidebar.compact", false);
   const [projectColors, setProjectColors] = usePersistentState<Record<string, number>>("sidebar.projectColors", {});
@@ -1597,22 +1621,30 @@ export default function App() {
   // Projects removed from the recents here (Claude Code keeps their chats; one with a chat open is listed regardless).
   const [hiddenFolders, setHiddenFolders] = usePersistentState<string[]>("sidebar.hidden", []);
   const openByProject = openProjects(chats, { titles, drafts: drafts.current, unread, pinned: pinnedBy });
+  const inbox = inboxItems(chats, openByProject, { unread, describe: describeInput });
   useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden), true, sidebarHidden ? "Show Sidebar" : "Hide Sidebar");
-  useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Full Sidebar" : "Compact Sidebar");
+  useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Expand Sidebar" : "Collapse Sidebar");
   useEffect(() => {
     api.sidebarMenu(sidebarHidden, sidebarCompact).catch(() => {});
   }, [sidebarHidden, sidebarCompact]);
-  // Compact, it opens over the chat when the pointer rests on it; hidden, when it rests on the window's left edge.
-  const sidebarPeek = usePeek(sidebarHidden || sidebarCompact);
-  // The peek's own button keeps the sidebar open: shown in full.
+  // Hidden, it slides in over the chat when the pointer rests on the window's left edge.
+  const sidebarPeek = usePeek(sidebarHidden);
+  // The peek's own button keeps the sidebar open: pinned.
   const keepSidebarOpen = () => {
     setSidebarHidden(false);
     setSidebarCompact(false);
   };
-  // History: one project's past chats, from "Show all…" or ⌘K (the project on screen).
-  const [history, setHistory] = useState<{ folder: string } | null>(null);
+  // History: the past chats of every project, from the sidebar's History button or ⌘K (a project's, filtered to it, from
+  // "Bring old chats here"). The projects are read when it opens, so it lists the ones the sidebar knows now.
+  const [history, setHistory] = useState<{ folder: string | null; projects: HistoryProject[] } | null>(null);
+  const openHistory = (folder: string | null = null) =>
+    loadRecentFolders().then(
+      (recent) => setHistory({ folder, projects: sidebarProjects({ recent, hidden: hiddenFolders, open: openByProject, order: projectOrder }).map((p) => ({ folder: p.folder, label: p.label })) }),
+      () => setHistory({ folder, projects: [] }),
+    );
+  const toggleHistory = () => (history ? setHistory(null) : void openHistory());
   const canStart = !!state.folder && state.status !== "starting";
-  useAction("session-history", () => state.folder && setHistory(history ? null : { folder: state.folder }), canStart);
+  useAction("session-history", toggleHistory, true);
   useAction("new-session", () => state.folder && startFresh(state.folder), canStart);
   const openChatIds = Object.values(chats.slots).flatMap((s) => (s.sessionId ? [s.sessionId] : []));
   const inTeam = (team: string) => teamMain(chats, active) === team;
@@ -1628,9 +1660,10 @@ export default function App() {
       focusAgent(slot);
       setView("canvas");
     },
-    onPast: (folder: string, id: string) => openSession(id, folder),
-    onCloseChat: closeChat,
-    onHistory: (folder: string) => setHistory({ folder }),
+    onCloseChats: closeChats,
+    closeCheck: doing.closeCheck,
+    closeWorker: doing.closeWorker,
+    onHistory: toggleHistory,
     onNewChatIn: (folder: string) => startFresh(folder),
     onNewTeamIn: (folder: string) => newOrchestra(folder),
     onBringOld: (folder: string) => setBringing({ destination: folder, from: null }),
@@ -1641,6 +1674,14 @@ export default function App() {
     onNewTeam: () => newOrchestra(),
     onReviewPr: () => setPrPicker(true),
   };
+  // The inbox's Allow and Deny answer the request the row named, and only while it is still waiting (one answered in the
+  // chat, or withdrawn, meanwhile is left alone; a later request is a new row).
+  const answerFromInbox = (item: InboxItem, allow: boolean) => {
+    const waiting = chats.slots[item.slot]?.items.some((it) => it.type === "permission" && it.id === item.requestId && it.decision === null);
+    if (item.requestId && waiting) decideIn(item.slot, item.requestId, allow);
+  };
+  // The inbox's Go: the same place the sidebar's row for it goes to.
+  const goToInbox = (item: InboxItem) => (item.role === "agent" && item.team ? sidebarHandlers.onAgent(item.slot, item.team) : item.role === "lead" ? sidebarHandlers.onTeam(item.slot) : sidebarHandlers.onChat(item.slot));
   // Picking something in the peeked sidebar takes you there and puts it away.
   const then = <A extends unknown[]>(run: (...args: A) => void) => (...args: A) => {
     sidebarPeek.close();
@@ -1651,7 +1692,6 @@ export default function App() {
     onChat: then(sidebarHandlers.onChat),
     onTeam: then(sidebarHandlers.onTeam),
     onAgent: then(sidebarHandlers.onAgent),
-    onPast: then(sidebarHandlers.onPast),
     onHistory: then(sidebarHandlers.onHistory),
     onNewChatIn: then(sidebarHandlers.onNewChatIn),
     onNewTeamIn: then(sidebarHandlers.onNewTeamIn),
@@ -1672,13 +1712,12 @@ export default function App() {
     branch,
     canNew: canStart,
     loadRecent: loadRecentFolders,
-    loadSessions: listPast,
-    pinned: pinnedBy,
-    titles,
     hidden: hiddenFolders,
     moved: relocateMenu.moved,
     onRelocate: (from: MovedFolder) => relocateMenu.onRelocate(from),
     onDismissMoved: relocateMenu.onDismiss,
+    colors: projectColors,
+    onColors: setProjectColors,
   };
 
   const restartToUpdate = () => {
@@ -1750,16 +1789,17 @@ export default function App() {
     <SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}>
       <div className="app">
         <TopBar
-          folder={state.folder}
+          folder={titleFolder}
           status={state.status}
           changeCount={state.changedFiles.length}
           reviewCollapsed={reviewCollapsed}
           onOpenFolder={openFolder}
           onToggleReview={() => setReviewCollapsed(!reviewCollapsed)}
           onOpenSettings={() => setSettingsAt("general")}
+          mcpIssues={(mcpIssues[active] ?? []).map((i) => `${i.name} ${i.problem}`)}
           onBringOld={bringHere}
           branch={branch}
-          activity={activityStatus(state, finishedAt[active] ?? null)}
+          activity={showCanvas ? teamActivity(nodes, chats.slots) : activityStatus(state, finishedAt[active] ?? null)}
           issues={{ failed }}
           background={state.backgroundTasks}
           onStopTask={(id) => api.stopTask(active, id)}
@@ -1768,37 +1808,21 @@ export default function App() {
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
           usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo }}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
+          inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox }}
         />
         <Hud event={hud} onOpenChat={switchTo} />
         <div className="app-body">
-        {sidebarHidden || sidebarCompact ? (
+        {sidebarHidden ? (
           <>
-            {sidebarHidden ? (
-              sidebarPeek.phase !== "in" && <div className="sidebar-edge" aria-hidden onPointerEnter={(e) => !e.buttons && sidebarPeek.hover()} onPointerLeave={sidebarPeek.unhover} />
-            ) : (
-              <SidebarCompact
-                open={openByProject}
-                loadRecent={loadRecentFolders}
-                canNew={canStart}
-                onNewChat={sidebarHandlers.onNewChat}
-                onChat={sidebarHandlers.onChat}
-                onTeam={sidebarHandlers.onTeam}
-                colors={projectColors}
-                onColors={setProjectColors}
-                order={projectOrder}
-                onOrder={setProjectOrder}
-                onToggle={() => setSidebarCompact(false)}
-                width={sidebarWidth}
-              />
-            )}
+            {sidebarPeek.phase !== "in" && <div className="sidebar-edge" aria-hidden onPointerEnter={(e) => !e.buttons && sidebarPeek.hover()} onPointerLeave={sidebarPeek.unhover} />}
             {sidebarPeek.phase !== "off" && (
               <div className="sidebar-peek" data-phase={sidebarPeek.phase} onPointerLeave={sidebarPeek.close}>
-                <Sidebar {...peekHandlers} {...sidebarProps} peek onToggle={keepSidebarOpen} />
+                <Sidebar {...peekHandlers} {...sidebarProps} mode="peek" onToggle={keepSidebarOpen} />
               </div>
             )}
           </>
         ) : (
-          <Sidebar {...sidebarHandlers} {...sidebarProps} onToggle={() => setSidebarCompact(true)} />
+          <Sidebar {...sidebarHandlers} {...sidebarProps} mode={sidebarCompact ? "collapsed" : "pinned"} onToggle={() => setSidebarCompact(!sidebarCompact)} />
         )}
         <div className="app-main">
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
@@ -1904,7 +1928,7 @@ export default function App() {
           commands={state.commands}
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
-          general={{ notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize, warnTeams, onWarnTeams: setWarnTeams }}
+          general={{ keepAwake, onKeepAwake: setKeepAwake, notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize, warnTeams, onWarnTeams: setWarnTeams }}
           updates={{
             version: updates.version,
             state: updates.state,
@@ -1938,21 +1962,22 @@ export default function App() {
             pickFolder={() => open({ directory: true, multiple: false }).then((picked) => (typeof picked === "string" ? picked : null))}
             onClose={() => setBringing(null)}
             onRelocated={relocated}
-            onOpenHistory={bringing.destination ? () => { const folder = bringing.destination!; setBringing(null); setHistory({ folder }); } : undefined}
+            onOpenHistory={bringing.destination ? () => { const folder = bringing.destination!; setBringing(null); void openHistory(folder); } : undefined}
           />
         )}
         {history && (
-          <SessionActionsContext.Provider value={actionsFor(history.folder)}>
-            <HistoryPopover
-              folder={history.folder}
-              exclude={openChatIds}
-              load={() => listPast(history.folder)}
-              loadOld={() => api.oldLocations(history.folder)}
-              onBring={() => { const folder = history.folder; setHistory(null); setBringing({ destination: folder, from: null }); }}
-              onOpen={(id) => { const folder = history.folder; setHistory(null); openSession(id, folder); }}
-              onClose={() => setHistory(null)}
-            />
-          </SessionActionsContext.Provider>
+          <HistoryPopover
+            projects={history.projects}
+            initial={history.folder}
+            exclude={openChatIds}
+            load={listPast}
+            loadOld={(folder) => api.oldLocations(folder)}
+            actionsFor={actionsFor}
+            onBring={(folder) => { setHistory(null); setBringing({ destination: folder, from: null }); }}
+            onNewChat={(folder) => { setHistory(null); startFresh(folder); }}
+            onOpen={(id, folder) => { setHistory(null); openSession(id, folder); }}
+            onClose={() => setHistory(null)}
+          />
         )}
         {prPicker && state.folder && <ReviewPrDialog folder={state.folder} onPick={startReviewOf} onClose={() => setPrPicker(false)} />}
         {teamAsk && (

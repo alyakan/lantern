@@ -7,13 +7,13 @@ const dark: CustomTheme = { ...DARK_PICKS, mono: false, square: false };
 
 describe("the themes", () => {
   it("lists Follow macOS, Light and Dark, then the presets, then Custom", () => {
-    expect(THEMES.map((t) => t.id)).toEqual(["system", "light", "dark", "terminal", "solarized", "nord", "paper", "custom"]);
+    expect(THEMES.map((t) => t.id)).toEqual(["system", "light", "dark", "terminal", "fallout", "solarized", "nord", "paper", "custom"]);
     expect(THEMES.every((t) => t.label)).toBe(true);
   });
 
   it("says which are dark and which light", () => {
     const scheme = Object.fromEntries(THEMES.map((t) => [t.id, t.scheme]));
-    expect(scheme).toMatchObject({ light: "light", dark: "dark", terminal: "dark", solarized: "dark", nord: "dark", paper: "light", system: null });
+    expect(scheme).toMatchObject({ light: "light", dark: "dark", terminal: "dark", fallout: "dark", solarized: "dark", nord: "dark", paper: "light", system: null });
   });
 
   it("knows a theme id from anything else", () => {
@@ -43,6 +43,7 @@ describe("the custom theme's colours", () => {
   it("start from the theme that's on", () => {
     expect(startingPoint("paper", true, CUSTOM_DEFAULT)).toEqual({ ...THEMES.find((t) => t.id === "paper")!.picks, mono: false, square: false });
     expect(startingPoint("terminal", false, CUSTOM_DEFAULT)).toMatchObject({ mono: true, square: true });
+    expect(startingPoint("fallout", false, CUSTOM_DEFAULT)).toMatchObject({ mono: true, square: true });
     // Follow macOS: whichever macOS is showing.
     expect(startingPoint("system", true, CUSTOM_DEFAULT)).toEqual(dark);
     expect(startingPoint("system", false, CUSTOM_DEFAULT)).toEqual(light);
@@ -54,7 +55,7 @@ describe("the custom theme's colours", () => {
 
 describe("deriveTokens", () => {
   // Every token styles.css gives each theme, from the six colours.
-  const COLOUR_TOKENS = ["bg", "pane", "sidebar", "field", "glass", "glass-line", "seg-track", "seg-thumb", "bg-subtle", "bg-hover", "bg-active", "bg-user", "line", "line-strong", "text", "text-2", "muted", "faint", "muted-text", "accent", "accent-soft", "accent-text", "working", "unread", "attn", "attn-text", "add", "del", "warn", "sev-blocker", "sev-should", "sev-should-text", "info-bg", "error-bg", "auth-bg", "code-bg", "pc-tint", "pc-ink", "shadow", "card-shadow"];
+  const COLOUR_TOKENS = ["bg", "pane", "sidebar", "field", "glass", "glass-line", "seg-track", "seg-thumb", "bg-subtle", "bg-hover", "bg-active", "bg-user", "line", "line-strong", "text", "text-2", "muted", "faint", "muted-text", "accent", "accent-soft", "accent-text", "working", "unread", "attn", "attn-text", "add", "del", "warn", "sev-blocker", "sev-should", "sev-should-text", "info-bg", "error-bg", "auth-bg", "code-bg", "pc-tint", "pc-ink", "shadow", "card-shadow", "md-strong", "md-heading", "md-link", "md-code-bg", "md-code-text", "md-quote-bar", "md-marker"];
 
   it("gives every colour token from just the six picks", () => {
     for (const c of [light, dark, { ...light, bg: "#fbf6ec", panel: "#f3ecdc" }]) {
@@ -91,6 +92,19 @@ describe("deriveTokens", () => {
         for (const n of ["working", "unread", "attn", "sev-blocker", "sev-should"]) expect(contrast(t[`--${n}`], surface), `${n} on ${surface} in ${c.bg}`).toBeGreaterThanOrEqual(3);
       }
     }
+  });
+
+  it("styles bold, headings, links and inline code so they read on the surfaces they sit on, and bold stands out from the text", () => {
+    const hard: CustomTheme[] = [light, dark, { ...dark, bg: "#6b6b6b", panel: "#707070", text: "#ffffff", text2: "#eeeeee" }, { ...light, bg: "#c8c8c8", panel: "#b8b8b8", text: "#000000", text2: "#222222" }, { ...dark, accent: "#303030" }];
+    for (const c of hard) {
+      const t = deriveTokens(c);
+      for (const surface of [c.bg, c.panel]) for (const n of ["md-strong", "md-heading", "md-link"]) expect(contrast(t[`--${n}`], surface), `${n} on ${surface} in ${c.bg}`).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(t["--md-code-text"], t["--md-code-bg"]), `code in ${c.bg}`).toBeGreaterThanOrEqual(4.5);
+      expect(t["--md-code-bg"], `chip in ${c.bg}`).not.toBe(t["--sidebar"]);
+    }
+    // Bold is further from the background than the text is: brighter on a dark theme, darker on a light one.
+    expect(contrast(deriveTokens(dark)["--md-strong"], dark.bg)).toBeGreaterThan(contrast(dark.text, dark.bg));
+    expect(contrast(deriveTokens(light)["--md-strong"], light.bg)).toBeGreaterThan(contrast(light.text, light.bg));
   });
 
   it("makes text on the accent readable", () => {
@@ -149,7 +163,7 @@ describe("a custom theme that came from storage or anywhere else", () => {
   });
 
   it("derives tokens made only of hex colours, fixed shadows and percentages, whatever the picks were", () => {
-    const allowed = /^(#[0-9a-f]{6}([0-9a-f]{2})?|\d+%|0|light|dark|var\(--mono\)|(0 0 0 0\.5px|0 1[02]px 3[02]px|0 4px 16px)[0-9a-z ().,\-]*)$/;
+    const allowed = /^(#[0-9a-f]{6}([0-9a-f]{2})?|\d+%|\d+|light|dark|var\(--mono\)|(0 0 0 0\.5px|0 1[02]px 3[02]px|0 4px 16px)[0-9a-z ().,\-]*)$/;
     for (const bad of HOSTILE) {
       const tokens = deriveTokens(readCustom({ bg: bad, panel: bad, text: bad, text2: bad, accent: bad, line: bad, mono: true, square: true }));
       for (const [name, value] of Object.entries(tokens)) {

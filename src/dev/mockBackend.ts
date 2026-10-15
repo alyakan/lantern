@@ -9,8 +9,11 @@ import { TESTO_MAP } from "../lib/testoMap";
 // The next patch release, which the update checks find.
 const NEXT_VERSION = APP_VERSION.replace(/\d+$/, (patch) => String(Number(patch) + 1));
 
-const FOLDER = "/Users/you/projects/acme-api";
+// With &project=name the project folder has that name (a long one, to see the title bar cope).
+const FOLDER = `/Users/you/projects/${new URLSearchParams(typeof location === "undefined" ? "" : location.search).get("project") ?? "acme-api"}`;
 const FILE = `${FOLDER}/src/client/retry.ts`;
+// With &hot the Lead's context is well used (a 200k window at 64%) and so is a started agent's: for the Context list and Compact.
+const HOT = typeof location !== "undefined" && new URLSearchParams(location.search).has("hot");
 // With &more the demo turn also writes a test file and hits a failing typecheck, for the file tabs and failure count.
 const MORE = new URLSearchParams(location.search).has("more");
 const TEST_FILE = `${FOLDER}/src/client/retry.test.ts`;
@@ -361,7 +364,7 @@ async function playTeamTurn(slot: string) {
   await send({ kind: "thinking", parent: null });
   await sleep(500);
   await advise("adv1");
-  await streamText(send, "tm:0", "Splitting this up: an explorer maps the auth code, a researcher checks the OAuth spec, and a worker updates the fixtures and runs the tests.");
+  await streamText(send, "tm:0", "Splitting this up: an explorer maps the auth code, a researcher checks the OAuth spec, and an agent updates the fixtures and runs the tests.");
   const agents: [string, string, string, string][] = [
     ["ag-w", "general-purpose", "Update JWT fixtures and run auth tests", "claude-sonnet-5-5"],
     ["ag-e", "Explore", "Map the auth module and its callers", "claude-haiku-5-5"],
@@ -493,9 +496,9 @@ async function playOrchestraTurn(slot: string) {
     void playWorker(slot, w);
   }
   await streamText(send, "o:1", "All three are running. I'll check each one as it reports back.");
-  await send({ kind: "context_used", tokens: 412_000 });
+  await send({ kind: "context_used", tokens: HOT ? 128_000 : 412_000 });
   await reportUsage(send, [["claude-sonnet-5-5", 0.41, 210_000], ["claude-haiku-5-5", 0.03, 40_000]]);
-  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.04, ...spent(0.44, 250_000), duration_ms: 4000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.04, ...spent(0.44, 250_000), duration_ms: 4000, auth_hint: false, denied: 0, context_window: HOT ? 200_000 : 1_000_000 });
 }
 
 /**
@@ -583,7 +586,7 @@ async function playOrchestraWake(slot: string, text: string) {
     });
     await send({ kind: "tool_finished", parent: null, tool_use_id: "merge-1", is_error: false, output: "Asked the user to merge lantern/login-form into main." });
   }
-  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.02, duration_ms: 2500, auth_hint: false, denied: 0, context_window: 1_000_000 });
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.02, duration_ms: 2500, auth_hint: false, denied: 0, context_window: HOT ? 200_000 : 1_000_000 });
 }
 
 /** How many workers' notes the mock main agent has been told of, per chat. */
@@ -597,6 +600,36 @@ async function playWorkerReply(slot: string) {
   await streamText(send, `${slot}:r${Date.now()}`, "Understood, I'll fold that in.");
   await send({ kind: "turn_done", is_error: false, result: "Understood, I'll fold that in.", cost_usd: 0.01, duration_ms: 1500, auth_hint: false, denied: 0, context_window: 200_000 });
 }
+
+/** `?markup`: the turn's last message uses every kind of markdown, for checking a theme's text styles. */
+const MARKUP_REPLY = [
+  "## What changed",
+  "",
+  "`fetchJson` now **retries transient failures** with *exponential backoff*, as the [retry policy](https://example.com/retries) asks.",
+  "",
+  "> Retries are limited to 429 and 5xx gateway errors, so a 404 still fails fast.",
+  "",
+  "### The loop",
+  "",
+  "```ts",
+  "export async function fetchJson(url: string, attempts = 3) {",
+  "  for (let i = 1; ; i++) {",
+  "    const res = await fetch(url); // 429, 502, 503 or 504 retries",
+  "    if (res.ok) return res.json();",
+  "  }",
+  "}",
+  "```",
+  "",
+  "- Delay doubles each time: `250 * 2 ** i` ms",
+  "- Gives up after **3 attempts**",
+  "- Run `npm test -- retry` to check it",
+  "",
+  "| Status | Retried | Why |",
+  "| --- | --- | --- |",
+  "| 429 | yes | **rate limited** |",
+  "| 404 | no | `not found` stays an error |",
+  "",
+].join("\n");
 
 async function playTurn(slot: string) {
   const send = sendTo(slot);
@@ -685,7 +718,8 @@ async function playTurn(slot: string) {
       },
     });
   }
-  await streamText(send, "m2:0", allowed ? "Done. `fetchJson` now retries 429 and 5xx gateway errors up to 3 times with backoff, and the retry tests pass." : "Done. I didn't run the tests since you denied it.");
+  const markup = new URLSearchParams(location.search).has("markup");
+  await streamText(send, "m2:0", markup ? MARKUP_REPLY : allowed ? "Done. `fetchJson` now retries 429 and 5xx gateway errors up to 3 times with backoff, and the retry tests pass." : "Done. I didn't run the tests since you denied it.");
   await send({ kind: "context_used", tokens: 61_480 });
   // The dev server and a watcher keep running after the turn, like run_in_background commands.
   const dev = { id: "bdev1", task_type: "local_bash", description: "npm run dev -- --port 5173" };
@@ -1079,6 +1113,11 @@ export function installMockBackend() {
           const worktree = a.isolation === "worktree";
           const name = String(a.name ?? "").trim() || String(a.task).split(/\s+/).slice(0, 5).join(" ");
           void sendTo(String(a.main))({ kind: "agent_spawned", worker: id, name, brief: String(a.task), folder: worktree ? `/Users/you/Library/Application Support/lantern/worktrees/web-app/${id}` : FOLDER, branch: worktree ? `lantern/${id}` : null, base: worktree ? "main" : null, isolation: worktree ? "worktree" : "shared", mode: slotMode[String(a.main)] === "auto" ? "auto" : "ask" });
+          // It starts thinking, which is also its first word: a card that then says nothing for minutes shows as quiet.
+          void sleep(150).then(async () => {
+            await sendTo(id)({ kind: "thinking", parent: null });
+            if (HOT) await sendTo(id)({ kind: "context_used", tokens: 150_000 });
+          });
           return id;
         }
         case "run_shell":
@@ -1180,6 +1219,7 @@ export function installMockBackend() {
           ];
         case "set_subagents":
         case "set_agent_limit":
+        case "keep_awake":
         case "sidebar_menu":
           return null;
         case "list_permission_rules":

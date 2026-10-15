@@ -3,7 +3,7 @@ import type { ModelOption } from "../types";
 import { choiceName, MODEL_CHOICES, modelLabel } from "../lib/models";
 import { EFFORT_HINT, EFFORT_LEVELS, effortLabel } from "../lib/effort";
 import { CUSTOM_HARNESS, DEFAULT_HARNESS, summary, type Harness } from "../lib/harness";
-import { useMenuShift } from "../lib/menuShift";
+import { useMenuInside } from "../lib/useMenuInside";
 import { SparkIcon } from "./icons";
 import { useMenuKeys } from "./useMenuKeys";
 
@@ -61,7 +61,7 @@ export function ModelsPicker({ running, chosen, onChoose, defaultModel = null, i
   const [view, setView] = useState<"presets" | "customize">("presets");
   const [showOlder, setShowOlder] = useState(false);
   const root = useRef<HTMLDivElement>(null);
-  const { ref: menu, style: menuStyle } = useMenuShift(open);
+  const { ref: menu, style: menuStyle } = useMenuInside(open, [view, showOlder]);
   const keys = useMenuKeys(open, root);
   const withPresets = !!presets && !!onPreset;
   const shownView = withPresets ? view : "customize";

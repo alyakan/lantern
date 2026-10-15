@@ -3,6 +3,7 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
 import { usePersistentState } from "../lib/layout";
 import { useMenuKeys } from "./useMenuKeys";
+import { useMenuInside } from "../lib/useMenuInside";
 
 type Status = { kind: "copied" } | { kind: "saved"; path: string } | { kind: "failed"; message: string };
 
@@ -18,6 +19,7 @@ export function SummaryExport({ markdown, fileName }: { markdown: (results: bool
   const [status, setStatus] = useState<Status | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const keys = useMenuKeys(open, root);
+  const inside = useMenuInside(open);
 
   useEffect(() => {
     if (!open) return;
@@ -78,7 +80,7 @@ export function SummaryExport({ markdown, fileName }: { markdown: (results: bool
         <span className="chev down" aria-hidden />
       </button>
       {open && (
-        <div className="menu summary-export-menu" role="menu" aria-label="Export" onKeyDown={keys.onKeyDown}>
+        <div className="menu summary-export-menu" ref={inside.ref} style={inside.style} role="menu" aria-label="Export" onKeyDown={keys.onKeyDown}>
           <button role="menuitem" className="menu-row" onClick={() => void copy()}>
             <span className="menu-row-title">Copy as Markdown</span>
           </button>

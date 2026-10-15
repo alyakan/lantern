@@ -32,6 +32,41 @@ describe("chatsReducer", () => {
     expect(Object.keys(c.slots)).toEqual(["s2"]);
     expect(chatsReducer(c, { type: "activate", slot: "nope" }).active).toBe("s2");
   });
+
+  describe("close (from the sidebar)", () => {
+    const three = () => {
+      let c = chatsReducer(initialChats({ ...ready, folder: "/a" }), { type: "add", slot: "s2" });
+      c = chatsReducer(c, { type: "in", slot: "s2", action: { type: "folder_opened", folder: "/b" } });
+      c = chatsReducer(c, { type: "add", slot: "s3" });
+      return chatsReducer(c, { type: "in", slot: "s3", action: { type: "folder_opened", folder: "/a" } });
+    };
+
+    it("closes chats that are not on screen, and leaves the one that is", () => {
+      const c = chatsReducer(three(), { type: "close", slots: ["s2", "s3", "gone"], fresh: "s9" });
+      expect(Object.keys(c.slots)).toEqual(["s1"]);
+      expect(c.active).toBe("s1");
+    });
+
+    it("closes the chat on screen too: another chat of its project takes its place, else any other", () => {
+      let c = chatsReducer(three(), { type: "close", slots: ["s1"], fresh: "s9" });
+      expect(c.active).toBe("s3");
+      expect(Object.keys(c.slots)).toEqual(["s2", "s3"]);
+      c = chatsReducer(three(), { type: "close", slots: ["s1", "s3"], fresh: "s9" });
+      expect(c.active).toBe("s2");
+    });
+
+    it("opens a new empty chat (the start screen) when none is left", () => {
+      const c = chatsReducer(initialChats(ready), { type: "close", slots: ["s1"], fresh: "s9" });
+      expect(Object.keys(c.slots)).toEqual(["s9"]);
+      expect(c.active).toBe("s9");
+      expect(c.slots.s9.folder).toBeNull();
+    });
+
+    it("does nothing for chats that aren't open", () => {
+      const c = initialChats(ready);
+      expect(chatsReducer(c, { type: "close", slots: ["nope"], fresh: "s9" })).toBe(c);
+    });
+  });
 });
 
 describe("queuesToSend", () => {

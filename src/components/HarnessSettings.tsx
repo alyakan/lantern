@@ -34,7 +34,7 @@ export function HarnessSettings({ saved, onSave, folder, folderDefault, onFolder
     <>
       <div className="settings-head">
         <div>
-          <h2 className="mode-guide-title">Harness</h2>
+          <h2 className="mode-guide-title">Models</h2>
           <p className="mode-guide-summary">
             Which model does what. The main model works through the task, the advisor is a stronger model Claude consults before committing to a plan, when an error keeps coming back, and before
             calling it done, and subagents take delegated searches and lookups. Pick a preset from the chip under the chat box.
@@ -56,7 +56,7 @@ export function HarnessSettings({ saved, onSave, folder, folderDefault, onFolder
           </select>
         </label>
       )}
-      <ul className="settings-list" aria-label="Harness presets">
+      <ul className="settings-list" aria-label="Model presets">
         {all.map((h) => {
           const open = editing === h.id && h.id !== DEFAULT_HARNESS;
           const pairing = validAdvisor(h, fallbackModel);
