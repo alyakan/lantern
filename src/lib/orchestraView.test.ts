@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type State } from "../store";
 import { chatsReducer, initialChats, type Chats } from "../sessions";
-import { money, needingYou, nodeStatus, orchestraNodes, readyToMerge, summaryLine, teamMain, teamNodes, lostText, tokens, usage } from "./orchestraView";
+import { money, needingYou, nodeStatus, orchestraNodes, readyToMerge, statusLabel, STATUS_LABEL, summaryLine, teamMain, teamNodes, lostText, tokens, usage } from "./orchestraView";
+import { WAKE_LIMIT } from "../sessions";
 
 const base: State = { ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/p" };
 const main: State = { ...base, orchestrator: true };
@@ -19,6 +20,38 @@ describe("nodeStatus", () => {
     const asking: State = { ...base, status: "running", items: [{ type: "permission", id: "p", toolName: "Bash", input: {}, decision: null }] };
     expect(nodeStatus(asking)).toBe("waiting");
     expect(nodeStatus({ ...asking, items: [{ type: "permission", id: "p", toolName: "Bash", input: {}, decision: "allowed" }] })).toBe("working");
+  });
+});
+
+describe("a lead whose updates are held", () => {
+  const held: State = { ...main, wakes: ["[Lantern: agent \"a\" finished]"], autoStreak: WAKE_LIMIT };
+
+  it("is its own status, not Idle, and needs the user", () => {
+    expect(nodeStatus(held)).toBe("held");
+    expect(STATUS_LABEL.held).toBe("Needs you · updates held");
+    expect(statusLabel("held", "main")).toBe("Needs you · updates held");
+    const c = initialChats(held);
+    expect(needingYou(orchestraNodes(c, name), c.slots)).toEqual(["s1"]);
+    // Notes waiting but the loop guard not reached, or a lead that is working: nothing held.
+    expect(nodeStatus({ ...held, autoStreak: 0 })).toBe("idle");
+    expect(nodeStatus({ ...held, status: "running" })).toBe("working");
+  });
+});
+
+describe("statusLabel", () => {
+  it("says Ready for an idle lead and Done for a worker that finished its turn", () => {
+    expect(statusLabel("idle", "main")).toBe("Ready");
+    expect(statusLabel("idle", "worker")).toBe("Done");
+    expect(statusLabel("idle", "worker", true)).toBe("Ready to merge");
+    expect(statusLabel("working", "worker")).toBe("Working");
+    expect(statusLabel("waiting", "main", true)).toBe("Needs you");
+  });
+
+  it("keeps a stopped agent quiet, and calls only one that stopped on an error that", () => {
+    expect(nodeStatus({ ...base, status: "ended" })).toBe("ended");
+    expect(nodeStatus({ ...base, status: "ended", banner: { kind: "info", text: "Stopped by the lead.", action: "restart" } })).toBe("ended");
+    expect(nodeStatus({ ...base, status: "ended", banner: { kind: "error", text: "Claude stopped unexpectedly.", action: "restart" } })).toBe("failed");
+    expect(statusLabel("failed", "worker")).toBe("Stopped · error");
   });
 });
 

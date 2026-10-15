@@ -1158,6 +1158,10 @@ export function installMockBackend() {
           return mockNetwork();
         case "network_response":
           return mockResponse(a.id as string);
+        case "network_rewatch":
+          mockWatches = [...mockWatches.filter((w) => w.label !== a.label), { label: String(a.label), method: (a.method as string | null) ?? "GET", url: String(a.url) }];
+          void emit("network-changed");
+          return undefined;
         case "network_unwatch":
           mockWatches = mockWatches.filter((w) => w.label !== a.label);
           void emit("network-changed");

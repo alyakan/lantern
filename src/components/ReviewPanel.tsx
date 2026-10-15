@@ -67,6 +67,8 @@ interface Props {
   architecture?: { map: ArchitectureMap; current: string[]; pageNames: Record<string, string>; onOpenPage: (page: string) => void; openKey: number };
   /** The Network tab's Summarize: asks Claude in this chat about one request (absent: no chat to ask). */
   onSummarizeRequest?: (item: NetworkItem) => void;
+  /** Claude is in the middle of a turn in this chat. */
+  chatBusy?: boolean;
   /** Reverting Claude's edits: offered on the Changes views and the Summary's steps; the undo of the last one. */
   revert?: RevertControls;
   selected: string | null;
@@ -264,7 +266,7 @@ export function ReviewPanel(props: Props) {
       )}
       {tab === "network" && network && props.folder && (
         <div className="tab-body" role="tabpanel" aria-labelledby={tabId("network")}>
-          <NetworkTab folder={props.folder} view={network} onSummarize={props.onSummarizeRequest ?? null} />
+          <NetworkTab folder={props.folder} view={network} onSummarize={props.onSummarizeRequest ?? null} busy={props.chatBusy} />
         </div>
       )}
       {/* Kept mounted while hidden so the tree keeps its expanded folders across tab switches. */}

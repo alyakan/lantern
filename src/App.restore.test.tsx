@@ -83,7 +83,7 @@ describe("restoring a team at launch", () => {
     await launch();
     fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
     // The chats are an orchestra again: the canvas can be shown.
-    await screen.findByRole("button", { name: "Show the canvas" });
+    await screen.findByRole("button", { name: "Canvas" });
     // Saved as they are now, with the worker still naming its main agent by session.
     await waitFor(() => {
       const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
@@ -98,7 +98,7 @@ describe("restoring a team at launch", () => {
     localStorage.setItem("settings.modeBySession", JSON.stringify({ bbbb22: "auto", aaaa11: "auto" }));
     await launch();
     fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Show the canvas" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
     expect(await screen.findByText("Runs the team · Auto")).toBeInTheDocument();
     expect(await screen.findByText("login-form · Auto")).toBeInTheDocument();
     // Still saved under both sessions for the next restart.
@@ -109,7 +109,7 @@ describe("restoring a team at launch", () => {
     localStorage.setItem("settings.modeBySession", JSON.stringify({ bbbb22: "auto" }));
     await launch();
     fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Show the canvas" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
     expect(await screen.findByText("Runs the team · Auto")).toBeInTheDocument();
     expect(await screen.findByText("login-form · Ask")).toBeInTheDocument();
   });
@@ -117,7 +117,7 @@ describe("restoring a team at launch", () => {
   it("keeps the side panel beside the canvas, shut until the user opens it, and remembers that", async () => {
     await launch();
     fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Show the canvas" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
     expect(await screen.findByText("login-form · Ask")).toBeInTheDocument();
     // The panel is there beside the canvas (its Changes tab is in the page), shut.
     expect(screen.getByRole("tab", { name: /^Changes/ })).toBeInTheDocument();
@@ -133,7 +133,7 @@ describe("restoring a team at launch", () => {
     localStorage.setItem("session.openChats", JSON.stringify([hiddenWorker, team[1]]));
     await launch();
     fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
-    await screen.findByRole("button", { name: "Show the canvas" });
+    await screen.findByRole("button", { name: "Canvas" });
     await waitFor(() => {
       const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
       expect(saved.find((c) => c.sessionId === "aaaa11")?.orchestra).toMatchObject({ role: "worker", hidden: true });
@@ -143,7 +143,7 @@ describe("restoring a team at launch", () => {
   it("restores what an older version saved, which has no such field, with the worker shown", async () => {
     await launch();
     fireEvent.click(screen.getByRole("button", { name: "Restore all" }));
-    await screen.findByRole("button", { name: "Show the canvas" });
+    await screen.findByRole("button", { name: "Canvas" });
     await waitFor(() => {
       const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
       expect(saved.find((c) => c.sessionId === "aaaa11")?.orchestra).toMatchObject({ role: "worker", name: "Login form" });
@@ -161,6 +161,6 @@ describe("restoring a team at launch", () => {
       expect(saved).toHaveLength(2);
       expect(saved.every((c) => !c.orchestra)).toBe(true);
     });
-    expect(screen.queryByRole("button", { name: "Show the canvas" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Canvas" })).toBeNull();
   });
 });

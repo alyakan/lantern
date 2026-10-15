@@ -238,6 +238,21 @@ describe("TopBar", () => {
     expect(screen.queryByText(/from before you moved/)).not.toBeInTheDocument();
   });
 
+  it("has a canvas toggle that is always called Canvas, says whether it is on, and counts the agents that need you", () => {
+    const onView = vi.fn();
+    const orchestra = { view: "chat" as const, exists: true, attention: 0, onView, onNew: () => {} };
+    const { rerender } = render(<TopBar {...base} reviewCollapsed={false} onToggleReview={() => {}} orchestra={orchestra} />);
+    const toggle = screen.getByRole("button", { name: "Canvas" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+    expect(onView).toHaveBeenCalledWith("canvas");
+    rerender(<TopBar {...base} reviewCollapsed={false} onToggleReview={() => {}} orchestra={{ ...orchestra, attention: 2 }} />);
+    expect(screen.getByRole("button", { name: "Canvas, 2 agents need you" })).toBeInTheDocument();
+    rerender(<TopBar {...base} reviewCollapsed={false} onToggleReview={() => {}} orchestra={{ ...orchestra, view: "canvas", attention: 1 }} />);
+    const on = screen.getByRole("button", { name: "Canvas, 1 agent needs you" });
+    expect(on).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("hides an open review panel", () => {
     const onToggleReview = vi.fn();
     render(<TopBar {...base} reviewCollapsed={false} onToggleReview={onToggleReview} />);

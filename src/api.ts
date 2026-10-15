@@ -182,6 +182,7 @@ export const api = {
   networkResponse: (folder: string, id: string) => invoke<NetworkDetail>("network_response", { folder, id }),
   /** Removes a watch; false if the folder had none by that label. */
   networkUnwatch: (folder: string, label: string) => invoke<boolean>("network_unwatch", { folder, label }),
+  networkRewatch: (folder: string, label: string, method: string | null, url: string) => invoke<void>("network_rewatch", { folder, label, method, url }),
   /** A folder's Network tab has something new: a match, a summary, a watch, or Network Monitor going up or down. */
   onNetworkChanged: (cb: () => void): Promise<UnlistenFn> => listen("network-changed", () => cb()),
   onUiEvent: (cb: (slot: string, event: UiEvent) => void): Promise<UnlistenFn> =>

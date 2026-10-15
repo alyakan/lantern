@@ -19,8 +19,9 @@ import {
   type View,
 } from "../lib/canvas";
 import { useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
-import { lostText, nodeStatus, readyToMerge, STATUS_LABEL, summaryLine, usage, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
-import { useDismiss } from "../lib/useDismiss";
+import { useAction } from "../lib/actions";
+import { lostText, nodeStatus, readyToMerge, statusLabel, summaryLine, usage, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
+import { usePopover } from "../lib/usePopover";
 import { totalCost, totalTokens, type State } from "../store";
 import type { CloseAgreed, CloseCheck } from "../types";
 import { AgentMenu, type AgentMenuItem } from "./AgentMenu";
@@ -65,6 +66,9 @@ export function placeNodes(layout: CanvasLayout, nodes: { slot: string; role: "m
 
 /** A folded agent shows its title bar only. */
 const COLLAPSED_HEIGHT = 52;
+/** Zoomed out into cards, a title bar is drawn at a size that reads on screen (see `.canvas.summary .node-head`), so a folded card is that tall in the canvas's own units. */
+const SUMMARY_HEAD = 40;
+const foldedHeight = (zoom: number) => (zoom < SUMMARY_ZOOM ? SUMMARY_HEAD / zoom : COLLAPSED_HEIGHT);
 /** Room the agent menu needs, so one opened near an edge is moved in. */
 const MENU_SIZE = { w: 270, h: 120 };
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : "That didn't work.");
@@ -103,6 +107,8 @@ interface FrameProps {
   onPress: (slot: string) => void;
   /** The right button was pressed on a worker's card. */
   onMenu: (e: ReactMouseEvent<HTMLElement>, slot: string) => void;
+  /** Its "more" button was pressed: the same menu, from the button. */
+  onMore: (e: ReactMouseEvent<HTMLElement>, slot: string) => void;
 }
 
 /** The agent's latest words and state, for the card that stands in for its chat when zoomed out or folded. */
@@ -118,25 +124,37 @@ function SummaryBody({ slot }: { slot: string }) {
   );
 }
 
-const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, focused, summary, collapsed, onGrab, onDrag, onRelease, onToggle, onOpen, onPress, onMenu }: FrameProps) {
+const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, focused, summary, collapsed, onGrab, onDrag, onRelease, onToggle, onOpen, onPress, onMenu, onMore }: FrameProps) {
   const state = useChatState(slot);
   const owner = useChatState(parent ?? slot);
   const status: NodeStatus = state ? nodeStatus(state) : "ended";
   const folded = collapsed;
   // A worker whose branch the main agent has asked the user to merge: that is what it is waiting on, and it's theirs to answer.
   const ready = !!parent && !!owner?.proposals.some((p) => p.worker === slot && p.status === "open");
-  const label = ready && status === "idle" ? "Ready to merge" : STATUS_LABEL[status];
+  const label = statusLabel(status, role, ready);
   const spent = state ? usage(totalCost(state), totalTokens(state)) : "";
   return (
     <section
       className={`canvas-node ${role} ${status}${ready ? " ready" : ""}${focused ? " focused" : ""}${folded ? " folded" : ""}`}
       data-node={slot}
       aria-label={`${role === "main" ? "Main agent" : "Worker"} ${name}, ${label}`}
-      style={{ transform: `translate(${box.x}px, ${box.y}px)`, width: box.w, height: folded ? COLLAPSED_HEIGHT : box.h, zIndex: z }}
+      style={{ transform: `translate(${box.x}px, ${box.y}px)`, width: box.w, height: folded ? (summary ? `calc(${SUMMARY_HEAD}px / var(--zoom))` : COLLAPSED_HEIGHT) : box.h, zIndex: z }}
       onPointerDownCapture={() => onPress(slot)}
       onContextMenu={role === "worker" ? (e) => onMenu(e, slot) : undefined}
     >
-      <header className="node-head" onPointerDown={(e) => onGrab(e, slot, "move")} onPointerMove={onDrag} onPointerUp={onRelease} onPointerCancel={onRelease} onDoubleClick={() => onToggle(slot)}>
+      <header
+        className="node-head"
+        tabIndex={0}
+        onPointerDown={(e) => onGrab(e, slot, "move")}
+        onPointerMove={onDrag}
+        onPointerUp={onRelease}
+        onPointerCancel={onRelease}
+        onDoubleClick={() => onToggle(slot)}
+        onKeyDown={(e) => {
+          // Enter on the title bar itself (not on a button in it) opens the agent full size.
+          if (e.key === "Enter" && e.target === e.currentTarget) onOpen(slot);
+        }}
+      >
         <span className={`node-dot ${status}`} aria-hidden />
         <span className="node-titles">
           <span className="node-name" title={name}>
@@ -148,6 +166,11 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
           </span>
         </span>
         <span className="node-status">{label}</span>
+        {role === "worker" && (
+          <button className="icon" aria-label={`More for ${name}`} aria-haspopup="menu" title="More: hide, or clean up and close" onClick={(e) => onMore(e, slot)}>
+            ⋯
+          </button>
+        )}
         <button className="icon" aria-label={folded ? `Expand ${name}` : `Collapse ${name}`} title={folded ? "Expand" : "Collapse to its title"} onClick={() => onToggle(slot)}>
           <ChevronIcon up={!folded} />
         </button>
@@ -182,7 +205,6 @@ export const UPDATE_REQUEST =
 
 function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string) => void }) {
   const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
   const actions = useNodeActions();
   const states = useChatStates(nodes.map((n) => n.slot));
   const bySlot: Record<string, State> = {};
@@ -207,19 +229,22 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
     onGoTo(main.slot);
   };
 
-  // Closes when you click anywhere else or press Escape.
-  useDismiss(open, box, () => setOpen(false));
+  // Closes when you click anywhere else or press Escape (which puts focus back on the button).
+  const { box, button, list, id } = usePopover(open, () => setOpen(false));
 
   return (
     <div className="canvas-team" ref={box}>
+      <button ref={button} className="canvas-fit" aria-expanded={open} aria-haspopup="dialog" aria-controls={open ? id : undefined} aria-label="Team" title="Everyone on the team, and what it has cost" onClick={() => setOpen(!open)}>
+        Team{total ? ` · ${total}` : ""}
+      </button>
       {open && (
-        <div className="canvas-team-list" role="dialog" aria-label="Team">
+        <div id={id} ref={list} className="canvas-team-list" role="dialog" aria-label="Team">
           <ul>
             {nodes.map((n) => {
               const s = bySlot[n.slot];
               if (!s) return null;
               const status = nodeStatus(s);
-              const label = ready.has(n.slot) && status === "idle" ? "Ready to merge" : STATUS_LABEL[status];
+              const label = statusLabel(status, n.role, ready.has(n.slot));
               const spent = usage(totalCost(s), totalTokens(s));
               return (
                 <li key={n.slot}>
@@ -250,9 +275,6 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
           )}
         </div>
       )}
-      <button className="canvas-fit" aria-expanded={open} aria-label="Team" title="Everyone on the team, and what it has cost" onClick={() => setOpen(!open)}>
-        Team{total ? ` · ${total}` : ""}
-      </button>
     </div>
   );
 }
@@ -288,6 +310,42 @@ function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onSho
   );
 }
 
+/**
+ * One visually hidden live region for the whole canvas: it says when an agent starts needing you (a prompt, or a lead whose
+ * updates are held) and when a merge arrives, since a card's colour is all a screen reader's user would otherwise miss.
+ * Nothing is said for what was already waiting when the canvas opened.
+ */
+function Announcer({ nodes }: { nodes: OrchestraNode[] }) {
+  const states = useChatStates(nodes.map((n) => n.slot));
+  const seen = useRef<Set<string> | null>(null);
+  const [said, setSaid] = useState("");
+  const now = new Map<string, string>();
+  nodes.forEach((n, i) => {
+    const s = states[i];
+    if (!s) return;
+    const status = nodeStatus(s);
+    if (status === "waiting") now.set(`${n.slot}:waiting`, `${n.name} needs you.`);
+    if (status === "held") now.set(`${n.slot}:held`, `${n.name} needs you: its updates are held.`);
+  });
+  states.forEach((s) => {
+    for (const p of s?.proposals ?? []) if (p.status === "open") now.set(`${p.worker}:merge:${p.branch}`, `A merge of ${p.name} is ready for you.`);
+  });
+  const key = [...now.keys()].join("|");
+  useEffect(() => {
+    const before = seen.current;
+    seen.current = new Set(now.keys());
+    if (!before) return;
+    const fresh = [...now].filter(([k]) => !before.has(k)).map(([, text]) => text);
+    if (fresh.length) setSaid(fresh.join(" "));
+    // `now` is rebuilt every render; its keys are what changes.
+  }, [key]);
+  return (
+    <div className="sr-only" role="status" aria-live="polite">
+      {said}
+    </div>
+  );
+}
+
 const sameSize = (a: Size, b: Size) => a.w === b.w && a.h === b.h;
 
 /**
@@ -301,6 +359,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   const world = useRef<HTMLDivElement>(null);
   const size = useRef<Size>({ w: 0, h: 0 });
   const view = useRef<View>(layout.view ?? { x: 0, y: 0, zoom: 1 });
+  const paintTethersRef = useRef<() => void>(() => {});
   const [zoomPct, setZoomPct] = useState(view.current.zoom);
   const [summary, setSummary] = useState(view.current.zoom < SUMMARY_ZOOM);
   const nextAttention = useRef(0);
@@ -328,6 +387,8 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       vp.style.setProperty("--vx", `${v.x}px`);
       vp.style.setProperty("--vy", `${v.y}px`);
     }
+    // A folded card's height depends on the zoom once it is a card, and its tether meets it.
+    if (Object.values(layout.collapsed).some(Boolean)) paintTethersRef.current();
     // Only these two things in React depend on the zoom: the label, and whether agents are cards. Both are cheap.
     setSummary((prev) => (prev === v.zoom < SUMMARY_ZOOM ? prev : v.zoom < SUMMARY_ZOOM));
     setZoomPct((prev) => (Math.round(prev * 100) === Math.round(v.zoom * 100) ? prev : v.zoom));
@@ -382,8 +443,9 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
         apply(zoomAt(view.current, Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.004)), at));
         return;
       }
-      // Over an agent's chat the wheel scrolls it; anywhere else (a card, a title, the background) it pans.
-      if ((e.target as Element).closest(".node-chat, .canvas-overlay")) return;
+      // Over an agent's chat, its merge cards or composer, or a list or form that floats over the canvas, the wheel scrolls
+      // that; anywhere else (a card, a title, the background) it pans.
+      if ((e.target as Element).closest(".node-chat, .node-merges, .node-composer, .canvas-team-list, .canvas-overlay")) return;
       e.preventDefault();
       touch();
       apply(panBy(view.current, -e.deltaX, -e.deltaY));
@@ -454,11 +516,26 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   // Moving and resizing agents: painted onto the elements each frame, committed when released.
   const drag = useRef<{ id: number; kind: "move" | "resize"; slot: string; x: number; y: number; box: Box; zoom: number } | null>(null);
   /** An agent as the canvas shows it: a folded one is only its title bar tall, and its tether meets that. */
-  const shown = (slot: string): Box => {
+  const shown = (slot: string, zoom = view.current.zoom): Box => {
     const b = layout.boxes[slot];
-    return layout.collapsed[slot] ? { ...b, h: COLLAPSED_HEIGHT } : b;
+    return layout.collapsed[slot] ? { ...b, h: foldedHeight(zoom) } : b;
   };
   const frame = useRef(0);
+  const nodesNow = useRef(nodes);
+  nodesNow.current = nodes;
+  /** Redraws every tether from where the agents are now (a folded card's height depends on the zoom when zoomed out). */
+  const paintTethers = useCallback(() => {
+    const w = world.current;
+    if (!w) return;
+    const zoom = view.current.zoom;
+    for (const n of nodesNow.current) {
+      const line = n.parent && layout.boxes[n.parent] && layout.boxes[n.slot] ? w.querySelector(`[data-tether="${n.slot}"]`) : null;
+      if (!line) continue;
+      const at = (slot: string): Box => (layout.collapsed[slot] ? { ...layout.boxes[slot], h: foldedHeight(zoom) } : layout.boxes[slot]);
+      line.setAttribute("d", tether(at(n.parent!), at(n.slot)).d);
+    }
+  }, [layout]);
+  paintTethersRef.current = paintTethers;
   const paint = useCallback(() => {
     frame.current = 0;
     const w = world.current;
@@ -470,11 +547,9 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       el.style.transform = `translate(${box.x}px, ${box.y}px)`;
       el.style.width = `${box.w}px`;
       if (!layout.collapsed[n.slot]) el.style.height = `${box.h}px`;
-      const parent = n.parent ? layout.boxes[n.parent] : undefined;
-      const line = parent && w.querySelector(`[data-tether="${n.slot}"]`);
-      if (parent && line) line.setAttribute("d", tether(layout.collapsed[n.parent!] ? { ...parent, h: COLLAPSED_HEIGHT } : parent, layout.collapsed[n.slot] ? { ...box, h: COLLAPSED_HEIGHT } : box).d);
     }
-  }, [layout, nodes]);
+    paintTethers();
+  }, [layout, nodes, paintTethers]);
 
   const bringToFront = useCallback((slot: string) => {
     if (layout.order[layout.order.length - 1] === slot) return;
@@ -522,17 +597,24 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
 
   // The menu of a worker's card (right-click), placed where it was opened.
   const [menu, setMenu] = useState<{ slot: string; x: number; y: number } | null>(null);
+  const openMenuAt = useCallback((slot: string, from: { left: number; top: number }) => {
+    const at = viewport.current?.getBoundingClientRect();
+    if (!at) return;
+    const room = (at: number, edge: number, size: number) => (size > 0 ? Math.max(8, Math.min(at, size - edge)) : at);
+    setMenu({ slot, x: room(from.left - at.left, MENU_SIZE.w, size.current.w), y: room(from.top - at.top, MENU_SIZE.h, size.current.h) });
+  }, []);
   const onMenu = useCallback((e: ReactMouseEvent<HTMLElement>, slot: string) => {
     // The box where the user types, and text they have picked, keep the browser's own menu (copy, paste).
     if ((e.target as Element).closest("textarea, input") || window.getSelection()?.toString()) return;
     e.preventDefault();
-    const at = viewport.current?.getBoundingClientRect();
-    if (!at) return;
     // From the keyboard (the menu key) there is no pointer: it opens at the card's corner.
-    const from = e.clientX === 0 && e.clientY === 0 ? e.currentTarget.getBoundingClientRect() : { left: e.clientX, top: e.clientY };
-    const room = (at: number, edge: number, size: number) => (size > 0 ? Math.max(8, Math.min(at, size - edge)) : at);
-    setMenu({ slot, x: room(from.left - at.left, MENU_SIZE.w, size.current.w), y: room(from.top - at.top, MENU_SIZE.h, size.current.h) });
-  }, []);
+    openMenuAt(slot, e.clientX === 0 && e.clientY === 0 ? e.currentTarget.getBoundingClientRect() : { left: e.clientX, top: e.clientY });
+  }, [openMenuAt]);
+  // The "more" button: the same menu, just under the button.
+  const onMore = useCallback((e: ReactMouseEvent<HTMLElement>, slot: string) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    openMenuAt(slot, { left: r.left, top: r.bottom + 4 });
+  }, [openMenuAt]);
   // "Clean up and close": asked what would be lost first. Nothing to lose closes at once; otherwise the user is asked, and
   // until they say yes nothing is stopped or removed.
   const [closing, setClosing] = useState<{ slot: string; check: CloseCheck } | null>(null);
@@ -610,6 +692,19 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     if (attention.length === 0) return;
     goTo(attention[nextAttention.current++ % attention.length]);
   };
+  // While the canvas has focus: ⌘= ⌘− ⌘0 zoom and fit, ⌘] ⌘[ go to the next and the previous agent.
+  const [hasFocus, setHasFocus] = useState(false);
+  const cycle = (delta: number) => {
+    const slots = shownSlots.current;
+    if (slots.length === 0) return;
+    const at = slots.indexOf(activeSlot);
+    goTo(slots[(at + delta + slots.length * 2) % slots.length]);
+  };
+  useAction("canvas-zoom-in", () => zoomBy(1.25), hasFocus);
+  useAction("canvas-zoom-out", () => zoomBy(1 / 1.25), hasFocus);
+  useAction("canvas-fit", () => { layout.touched = false; fit(true); }, hasFocus);
+  useAction("canvas-next-agent", () => cycle(1), hasFocus);
+  useAction("canvas-previous-agent", () => cycle(-1), hasFocus);
 
   const initial = view.current;
   return (
@@ -618,6 +713,8 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       ref={viewport}
       data-testid="canvas"
       style={{ "--zoom": initial.zoom, "--vx": `${initial.x}px`, "--vy": `${initial.y}px` } as CSSProperties}
+      onFocus={() => setHasFocus(true)}
+      onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setHasFocus(false)}
       onPointerDown={onBackgroundDown}
       onPointerMove={onBackgroundMove}
       onPointerUp={onBackgroundUp}
@@ -651,9 +748,11 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
             onOpen={onOpen}
             onPress={onPress}
             onMenu={onMenu}
+            onMore={onMore}
           />
         ))}
       </div>
+      <Announcer nodes={nodes} />
       <Controls zoom={zoomPct} attention={attention.length} nodes={nodes} onZoom={zoomBy} onFit={() => { layout.touched = false; fit(true); }} onNext={next} onGoTo={goTo} onShow={actions.show} main={nodes.find((n) => n.role === "main")?.slot} />
       {problem && (
         <div className="canvas-problem canvas-overlay" role="alert">

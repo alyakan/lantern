@@ -7,7 +7,7 @@ const PAGE = 100;
 // has; only the first level is open, and children are only drawn once their parent opens, so a big response stays cheap.
 export function JsonTree({ value }: { value: unknown }) {
   return (
-    <div className="json-tree" role="tree" aria-label="Response JSON">
+    <div className="json-tree" role="group" aria-label="Response JSON">
       <Node name={null} value={value} depth={0} />
     </div>
   );
@@ -20,7 +20,7 @@ function Node({ name, value, depth }: { name: string | null; value: unknown; dep
   const key = name !== null && <span className="json-key">{name}</span>;
   if (!container) {
     return (
-      <div className="json-row" role="treeitem" style={{ paddingLeft: depth * 14 + 16 }}>
+      <div className="json-row" style={{ paddingLeft: depth * 14 + 16 }}>
         {key}
         {key && <span className="json-colon">: </span>}
         <Scalar value={value} />
@@ -30,8 +30,8 @@ function Node({ name, value, depth }: { name: string | null; value: unknown; dep
   const entries: [string, unknown][] = Array.isArray(value) ? value.map((v, i) => [String(i), v]) : Object.entries(value as Record<string, unknown>);
   const size = Array.isArray(value) ? `[${entries.length}]` : `{${entries.length}}`;
   return (
-    <div role="treeitem" aria-expanded={open}>
-      <button className="json-row json-toggle" style={{ paddingLeft: depth * 14 }} onClick={() => setOpen(!open)}>
+    <div>
+      <button className="json-row json-toggle" aria-expanded={open} style={{ paddingLeft: depth * 14 }} onClick={() => setOpen(!open)}>
         <span className="chev" aria-hidden />
         {key}
         {key && <span className="json-colon">: </span>}
@@ -39,7 +39,7 @@ function Node({ name, value, depth }: { name: string | null; value: unknown; dep
         {!open && entries.length > 0 && <span className="json-peek">{peek(value)}</span>}
       </button>
       {open && (
-        <div role="group">
+        <div>
           {entries.slice(0, shown).map(([k, v]) => (
             <Node key={k} name={k} value={v} depth={depth + 1} />
           ))}

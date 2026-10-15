@@ -371,6 +371,12 @@ async fn network_response(state: State<'_, AppState>, folder: String, id: String
     .map_err(|e| e.to_string())?
 }
 
+/// Puts back a watch the user just removed from the Network tab (its Undo).
+#[tauri::command]
+fn network_rewatch(state: State<'_, AppState>, folder: String, label: String, method: Option<String>, url: String) {
+    state.network.watch(&permission::rules::folder_key(std::path::Path::new(&folder)), network::Watch { label, method, url });
+}
+
 #[tauri::command]
 fn network_unwatch(state: State<'_, AppState>, folder: String, label: String) -> bool {
     state.network.unwatch(&permission::rules::folder_key(std::path::Path::new(&folder)), &label)
@@ -1618,6 +1624,7 @@ pub fn run() {
             network_state,
             network_response,
             network_unwatch,
+            network_rewatch,
             orchestra_decline_merge,
             orchestra_discard,
             run_shell,

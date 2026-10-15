@@ -17,6 +17,12 @@ const CATALOGUE = [
   { id: "relocate-folder", title: "Bring old sessions here…", group: "File", key: "r", shift: true },
   // Only while there is an orchestra: switches between its canvas and the chat view.
   { id: "toggle-canvas", title: "Switch Canvas and Chat View", group: "View", key: "c", shift: true },
+  // Only while the canvas has focus (see Canvas.tsx).
+  { id: "canvas-zoom-in", title: "Zoom In on the Canvas", group: "View", key: "=" },
+  { id: "canvas-zoom-out", title: "Zoom Out on the Canvas", group: "View", key: "-" },
+  { id: "canvas-fit", title: "Fit the Canvas to Everyone", group: "View", key: "0" },
+  { id: "canvas-next-agent", title: "Next Agent on the Canvas", group: "View", key: "]" },
+  { id: "canvas-previous-agent", title: "Previous Agent on the Canvas", group: "View", key: "[" },
   { id: "session-history", title: "Session History", group: "View", key: "k", menu: true, skipInEditor: true },
   { id: "find-file", title: "Find File…", group: "Search", key: "p", menu: true, native: true },
   { id: "search-files", title: "Search in Files…", group: "Search", key: "f", shift: true, menu: true, native: true },

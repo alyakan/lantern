@@ -231,8 +231,8 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
         <div className="toolbar-group">
           {orchestra?.exists && (
             <button
-              className={`icon${orchestra.view === "canvas" ? " pressed" : ""}`}
-              aria-label={orchestra.view === "canvas" ? "Show the chat" : "Show the canvas"}
+              className={`icon canvas-toggle${orchestra.view === "canvas" ? " pressed" : ""}`}
+              aria-label={orchestra.attention > 0 ? `Canvas, ${orchestra.attention === 1 ? "1 agent needs" : `${orchestra.attention} agents need`} you` : "Canvas"}
               aria-pressed={orchestra.view === "canvas"}
               title={orchestra.view === "canvas" ? "Back to the chat (⇧⌘C)" : "Show the canvas (⇧⌘C)"}
               onClick={() => orchestra.onView(orchestra.view === "canvas" ? "chat" : "canvas")}

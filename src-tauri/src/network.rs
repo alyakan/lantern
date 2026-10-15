@@ -526,6 +526,12 @@ impl Monitor {
         }
     }
 
+    /// Saves a watch for the folder (replacing one with the same label) and has the follower read what it matches.
+    pub fn watch(&self, folder: &str, watch: Watch) {
+        self.store.watch(folder, watch);
+        self.rescan();
+    }
+
     pub fn unwatch(&self, folder: &str, label: &str) -> bool {
         let found = self.store.unwatch(folder, label);
         if found {

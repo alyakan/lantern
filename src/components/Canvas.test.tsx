@@ -88,7 +88,7 @@ describe("the canvas", () => {
   it("shows every agent with its name, role and what it is doing, and the worker's branch", () => {
     setup(team(2));
     const agents = screen.getAllByRole("region");
-    expect(agents.map((a) => a.getAttribute("aria-label"))).toEqual(["Main agent Main agent, Idle", "Worker Worker 1, Working", "Worker Worker 2, Working"]);
+    expect(agents.map((a) => a.getAttribute("aria-label"))).toEqual(["Main agent Main agent, Ready", "Worker Worker 1, Working", "Worker Worker 2, Working"]);
     const w1 = screen.getByLabelText(/Worker Worker 1/);
     expect(within(w1).getByText("w1 · Auto")).toBeTruthy(); // its branch (lantern/w1 without the prefix) and its mode
     expect(within(screen.getByLabelText(/Main agent Main agent/)).getByText("Runs the team · Auto")).toBeTruthy();
@@ -577,7 +577,7 @@ describe("the menu of an agent's card", () => {
 describe("agents taken off the canvas", () => {
   it("are not drawn or tethered, keep their place, and are counted in a Hidden control", () => {
     const { layout } = setup(hidden(team(2), "w1"));
-    expect(screen.getAllByRole("region").map((a) => a.getAttribute("aria-label"))).toEqual(["Main agent Main agent, Idle", "Worker Worker 2, Working"]);
+    expect(screen.getAllByRole("region").map((a) => a.getAttribute("aria-label"))).toEqual(["Main agent Main agent, Ready", "Worker Worker 2, Working"]);
     expect(document.querySelectorAll("path.tether")).toHaveLength(1);
     expect(layout.boxes.w1).toBeTruthy();
     expect(screen.getByRole("button", { name: "Hidden (1)" })).toBeTruthy();
@@ -734,5 +734,158 @@ describe("starting an agent from the canvas", () => {
     setup(chats);
     expect(screen.getAllByRole("region")).toHaveLength(1); // an orphaned worker
     expect(screen.queryByRole("button", { name: "+ Agent" })).toBeNull();
+  });
+});
+
+describe("scrolling inside the canvas", () => {
+  it("leaves the wheel alone over the merge cards, the composer and the lists that float over it, and pans over the rest", () => {
+    const { layout } = setup(team(1));
+    const canvas = screen.getByTestId("canvas");
+    act(() => void fireEvent.wheel(canvas, { ctrlKey: true, deltaY: 0 })); // frames the view, so there is one to compare
+    const before = { ...layout.view! };
+    const over = (el: Element) => act(() => void fireEvent.wheel(el, { deltaX: 0, deltaY: 60 }));
+    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    over(w1.querySelector(".node-composer")!);
+    for (const cls of ["node-merges", "canvas-team-list", "canvas-overlay"]) {
+      const el = document.createElement("div");
+      el.className = cls;
+      canvas.append(el);
+      over(el);
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Team" }));
+    over(screen.getByRole("dialog", { name: "Team" }));
+    expect(layout.view).toEqual(before);
+    over(w1.querySelector(".node-head")!);
+    expect(layout.view!.y).toBeCloseTo(before.y - 60);
+  });
+});
+
+describe("a folded card zoomed out into a card", () => {
+  const zoomOut = () => act(() => void fireEvent.wheel(screen.getByTestId("canvas"), { ctrlKey: true, deltaY: 600 }));
+
+  it("is as tall as its title bar is drawn, and its tether follows that as the zoom changes", () => {
+    const { layout } = setup(team(1));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Worker 1" }));
+    const tetherEnd = () => Number(document.querySelector("path.tether")!.getAttribute("d")!.trim().split(" ").pop());
+    const full = tetherEnd();
+    zoomOut();
+    expect(layout.view!.zoom).toBeLessThan(SUMMARY_ZOOM);
+    const w1 = screen.getByLabelText(/Worker Worker 1/);
+    expect(w1.getAttribute("style")).toContain("calc(40px / var(--zoom))");
+    // The tether meets the card's edge at 40px of screen height: more canvas units than the 52 it was folded to.
+    const box = layout.boxes.w1;
+    expect(tetherEnd()).toBeGreaterThanOrEqual(box.y);
+    expect(tetherEnd()).toBeLessThanOrEqual(box.y + 40 / layout.view!.zoom);
+    expect(tetherEnd()).not.toBe(full);
+  });
+});
+
+describe("the agents' title bars", () => {
+  it("has a more button on a worker's card (not the lead's) that opens the same menu, and puts focus back when it closes", () => {
+    setup(team(1));
+    expect(screen.queryByRole("button", { name: "More for Main agent" })).toBeNull();
+    const more = screen.getByRole("button", { name: "More for Worker 1" });
+    expect(more.getAttribute("aria-haspopup")).toBe("menu");
+    more.focus();
+    fireEvent.click(more);
+    const menu = screen.getByRole("menu", { name: "Worker 1 actions" });
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual([expect.stringContaining("Hide"), expect.stringContaining("Clean up and close")]);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(document.activeElement).toBe(more);
+  });
+
+  it("can be focused, and Enter on one opens that agent full size", () => {
+    const { onOpen } = setup(team(1));
+    const head = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-head") as HTMLElement;
+    expect(head.tabIndex).toBe(0);
+    fireEvent.keyDown(screen.getByRole("button", { name: "Open Worker 1 full size" }), { key: "Enter" });
+    expect(onOpen).not.toHaveBeenCalled();
+    fireEvent.keyDown(head, { key: "Enter" });
+    expect(onOpen).toHaveBeenCalledWith("w1");
+  });
+});
+
+describe("the Team and Hidden lists", () => {
+  it("come after their button, take focus into the list, and give it back to the button on Escape", () => {
+    setup(team(1));
+    const button = screen.getByRole("button", { name: "Team" });
+    expect(button.getAttribute("aria-haspopup")).toBe("dialog");
+    fireEvent.click(button);
+    const list = screen.getByRole("dialog", { name: "Team" });
+    expect(button.getAttribute("aria-controls")).toBe(list.id);
+    expect(button.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(list.contains(document.activeElement) && document.activeElement?.tagName === "BUTTON").toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Team" })).toBeNull();
+    expect(document.activeElement).toBe(button);
+  });
+
+  it("do the same for the hidden agents", () => {
+    const chats = team(1);
+    chats.agents.w1 = { ...chats.agents.w1, hidden: true };
+    setup(chats);
+    const button = screen.getByRole("button", { name: /Hidden \(1\)/ });
+    fireEvent.click(button);
+    const list = screen.getByRole("dialog", { name: "Hidden agents" });
+    expect(button.getAttribute("aria-controls")).toBe(list.id);
+    expect(list.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(document.activeElement).toBe(button);
+  });
+});
+
+describe("keys on the canvas", () => {
+  const cmd = (key: string) => ({ key, metaKey: true });
+
+  it("zoom and fit with ⌘= ⌘− ⌘0 while the canvas has focus, and not otherwise", () => {
+    const { layout } = setup(team(1));
+    const head = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-head") as HTMLElement;
+    act(() => void fireEvent.wheel(screen.getByTestId("canvas"), { ctrlKey: true, deltaY: 0 }));
+    const zoom0 = layout.view!.zoom;
+    fireEvent.keyDown(window, cmd("="));
+    expect(layout.view!.zoom).toBe(zoom0);
+    act(() => head.focus());
+    fireEvent.keyDown(window, cmd("="));
+    const zoomed = layout.view!.zoom;
+    expect(zoomed).toBeGreaterThan(zoom0);
+    fireEvent.keyDown(window, cmd("-"));
+    expect(layout.view!.zoom).toBeLessThan(zoomed);
+    layout.touched = true;
+    fireEvent.keyDown(window, cmd("0"));
+    expect(layout.touched).toBe(false);
+  });
+
+  it("go to the next and the previous agent with ⌘] and ⌘[", () => {
+    const { onFocus } = setup(team(2));
+    const head = screen.getByLabelText(/Worker Worker 1/).querySelector(".node-head") as HTMLElement;
+    act(() => head.focus());
+    fireEvent.keyDown(window, cmd("]"));
+    expect(onFocus).toHaveBeenLastCalledWith("w1");
+    fireEvent.keyDown(window, cmd("["));
+    expect(onFocus).toHaveBeenLastCalledWith("w2");
+  });
+});
+
+describe("what the canvas says aloud", () => {
+  it("announces an agent that starts needing you, and a merge that arrives, but not what was already waiting", () => {
+    const chats = team(2);
+    const { store } = setup(chats);
+    const said = () => document.querySelector('.canvas > [role="status"].sr-only')!.textContent;
+    expect(said()).toBe("");
+    const asking = { ...chats.slots.w1, status: "running" as const, items: [{ type: "permission" as const, id: "p", toolName: "Bash", input: {}, decision: null }] };
+    act(() => store.set({ ...chats.slots, w1: asking }));
+    expect(said()).toBe("Worker 1 needs you.");
+    const proposal = { worker: "w2", name: "Worker 2", branch: "lantern/w2", into: "main", summary: "", commits: 1, files: [], uncommitted: 0, loose: [], status: "open" as const, problem: null, attempts: 0 };
+    act(() => store.set({ ...chats.slots, w1: asking, s1: { ...chats.slots.s1, proposals: [proposal] } }));
+    expect(said()).toBe("A merge of Worker 2 is ready for you.");
+  });
+
+  it("shows a lead whose updates are held as needing you, with its own label", () => {
+    const chats = team(1);
+    chats.slots.s1 = { ...chats.slots.s1, wakes: ["note"], autoStreak: WAKE_LIMIT };
+    setup(chats);
+    expect(screen.getByLabelText(/^Main agent Main agent/).getAttribute("aria-label")).toBe("Main agent Main agent, Needs you · updates held");
+    expect(document.querySelector('[data-node="s1"]')!.className).toContain("held");
   });
 });

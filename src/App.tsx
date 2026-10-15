@@ -1565,6 +1565,7 @@ export default function App() {
                 folder={state.folder}
                 ready={state.status !== "starting"}
                 files={shownFiles}
+                chatBusy={state.status === "running"}
                 changesKey={peek?.key}
                 scope={scope}
                 onScope={setChangeScope}
