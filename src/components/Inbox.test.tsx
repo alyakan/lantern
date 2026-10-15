@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { InboxItem } from "../lib/inbox";
 import { resetActionsForTest, runAction } from "../lib/actions";
@@ -15,6 +15,13 @@ function setup(items: InboxItem[]) {
 }
 
 describe("Inbox", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("is a button with the count of what waits on you", () => {
     const { toggle } = setup([item({ slot: "s1" }), item({ slot: "s2" }), item({ slot: "s3", kind: "unread", needsYou: false, requestId: null })]);
     expect(toggle()).toHaveAccessibleName("What needs you, 2 waiting");
@@ -53,10 +60,34 @@ describe("Inbox", () => {
     const { toggle, onDecide } = setup([plain, plan]);
     fireEvent.click(toggle());
     expect(screen.getAllByRole("button", { name: /^Allow / })).toHaveLength(1);
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
     fireEvent.click(screen.getByRole("button", { name: "Allow Chat s1" }));
     fireEvent.click(screen.getByRole("button", { name: "Deny Chat s1" }));
     expect(onDecide.mock.calls).toEqual([[plain, true], [plain, false]]);
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("keeps a new row's Allow dead for a moment, so a click aimed at the row before can't land on it", () => {
+    resetActionsForTest();
+    const onDecide = vi.fn();
+    const first = item({ slot: "s1", requestId: "r1", detail: "npm test" });
+    const { rerender } = render(<Inbox items={[first]} onGo={vi.fn()} onDecide={onDecide} />);
+    fireEvent.click(screen.getByRole("button", { name: /What needs you/ }));
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(screen.getByRole("button", { name: "Allow Chat s1" })).toBeEnabled();
+    rerender(<Inbox items={[{ ...first, requestId: "r2", detail: "rm -rf build" }]} onGo={vi.fn()} onDecide={onDecide} />);
+    const next = screen.getByRole("button", { name: "Allow Chat s1" });
+    expect(next).toBeDisabled();
+    fireEvent.click(next);
+    expect(onDecide).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(next).toBeEnabled();
   });
 
   it("shows the whole command where Allow is offered, and leaves Deny and Go where it isn't", () => {

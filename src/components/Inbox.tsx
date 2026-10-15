@@ -16,7 +16,24 @@ export interface InboxProps {
 /** How often the times in the list are redrawn while it is open. */
 const TICK_MS = 15_000;
 
+/** How long a row's Allow stays dead after the row appears: a click aimed at the row that was there can't land on this one. */
+const ARM_MS = 400;
+
 const label = (n: number) => (n > 0 ? `What needs you, ${n} waiting` : "What needs you");
+
+/** Rows are keyed by their request, so a new request is a new button, and it can't be pressed until it has been on screen a moment. */
+function AllowButton({ title, onAllow }: { title: string; onAllow: () => void }) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setArmed(true), ARM_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <button className="primary" aria-label={`Allow ${title}`} disabled={!armed} onClick={onAllow}>
+      Allow
+    </button>
+  );
+}
 
 /**
  * The title bar's inbox: everything waiting on you across every project and team, each with its project, what it needs
@@ -105,11 +122,7 @@ export function Inbox({ items, onGo, onDecide }: InboxProps) {
                     {it.detail !== null && <span className="inbox-full">{it.detail}</span>}
                   </span>
                   <span className="inbox-actions">
-                    {it.requestId && it.canAllow && (
-                      <button className="primary" aria-label={`Allow ${it.title}`} onClick={() => onDecide(it, true)}>
-                        Allow
-                      </button>
-                    )}
+                    {it.requestId && it.canAllow && <AllowButton title={it.title} onAllow={() => onDecide(it, true)} />}
                     {it.requestId && (
                       <button aria-label={`Deny ${it.title}`} onClick={() => onDecide(it, false)}>
                         Deny
