@@ -193,12 +193,13 @@ The sidebar has three states: **Full** (above), **Compact** and **Hidden**.
 
 **Compact** is the button at the top-right of the sidebar (View ▸ Compact sidebar, or Compact sidebar in the command palette). It becomes a slim column with a small square for each open chat and team, not for each project:
 
-- A square carries the initials of its chat's title (a new chat is N) and a mark: a spinning ring while it works, an amber dot when it needs you, a blue dot when it finished while you were away. The chat on screen is outlined. A team is one square (its Lead, with a small diamond) that shows the team's combined state, and an agent has no square of its own.
+- A square carries the initials of its chat's title (a new chat is N) and a mark on its corner: a spinning ring while it works, an amber dot when it needs you, a blue dot when it finished while you were away. A team is one square (its Lead, with a small diamond badge) that shows the team's combined state, and an agent has no square of its own.
+- Each project has a colour of its own, kept across restarts (and when its folder moves): its squares are tinted with it, and the chat on screen is filled with it, with a bar beside it. Projects open together get different colours.
 - Hover a square for its title, project and status. Click it to switch to that chat, or to open a team's canvas.
-- Each project's squares sit under a thin line labelled with the project's initials (hover it for the full name), and **+** at the top starts a chat. When there are more squares than fit, the column scrolls.
+- Each project's squares sit under the project's initials, in its colour (hover them for the full name), and **+** at the top starts a chat. When there are more squares than fit, the column scrolls.
 - The button at the top of the column (the same one) brings back the full sidebar.
 
-![The compact sidebar: a chat that works, two that need you (one a team), one finished unread, and a second project below its own label](images/sidebar-compact.png)
+![The compact sidebar: four chats that need you (one a team) in one project's colour, and the chat on screen in a second project's](images/sidebar-compact.png)
 
 Rest the pointer on the compact column for a moment and the full sidebar opens over the chat. Click a chat in it to go there, and it closes again, as it does when the pointer leaves it or you press Esc. To keep it open, use its top-right button.
 

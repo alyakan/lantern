@@ -1,5 +1,6 @@
-import { Fragment, useEffect, useMemo, useState, type FocusEvent, type MouseEvent, type PointerEventHandler } from "react";
+import { Fragment, useEffect, useMemo, useState, type CSSProperties, type FocusEvent, type MouseEvent, type PointerEventHandler } from "react";
 import type { RecentFolder } from "../types";
+import { PROJECT_COLORS, assignColors } from "../lib/projectColors";
 import { compactGroups, markOf, type CompactChip, type CompactGroup, type ProjectOpen } from "../lib/sidebar";
 import { PlusIcon, SidebarIcon, TeamIcon } from "./icons";
 
@@ -14,6 +15,10 @@ interface Props {
   /** A chat's square, and a team's (its canvas). */
   onChat: (slot: string) => void;
   onTeam: (slot: string) => void;
+  /** Each project's colour, an index into PROJECT_COLORS by folder (saved by the app, see assignColors). */
+  colors: Record<string, number>;
+  /** The colours with a project new to them given one, to save. */
+  onColors: (colors: Record<string, number>) => void;
   /** Its button at the top: back to the full sidebar. */
   onToggle: () => void;
   /** The pointer resting on the column opens the full sidebar over the chat (see usePeek). */
@@ -57,10 +62,12 @@ function Chip({ chip, group, onClick, onTip }: { chip: CompactChip; group: Compa
 /**
  * The compact sidebar: a slim column with a square for each open chat and team (not for projects), the chat's initials
  * on it and a mark for how it is: a ring while it works, an amber dot when it needs you, a blue dot when it finished
- * unread. The one on screen is lit; each project's squares sit under a line labelled with its initials (its name is the tooltip); + starts a chat. A team is one square, for its Lead,
- * with the team's combined state. The column scrolls when there are more squares than fit.
+ * unread. Each project has a colour of its own, kept across restarts: its squares are tinted with it, and the one on screen
+ * is filled with it and has a bar beside it. Each project's squares sit under its initials (its name is the tooltip);
+ * + starts a chat. A team is one square, for its Lead, with the team's combined state. The column scrolls when there are
+ * more squares than fit.
  */
-export function SidebarCompact({ open, loadRecent, canNew, onNewChat, onChat, onTeam, onToggle, onPointerEnter, onPointerLeave }: Props) {
+export function SidebarCompact({ open, loadRecent, canNew, onNewChat, onChat, onTeam, colors: savedColors, onColors, onToggle, onPointerEnter, onPointerLeave }: Props) {
   const [recent, setRecent] = useState<RecentFolder[]>([]);
   const [tip, setTip] = useState<Tip | null>(null);
   const openKey = Object.keys(open).sort().join("\n");
@@ -68,6 +75,10 @@ export function SidebarCompact({ open, loadRecent, canNew, onNewChat, onChat, on
     loadRecent().then(setRecent, () => setRecent([]));
   }, [openKey]);
   const groups = useMemo(() => compactGroups(open, recent), [open, recent]);
+  const colors = assignColors(groups.map((g) => g.folder), savedColors);
+  useEffect(() => {
+    if (colors !== savedColors) onColors(colors);
+  }, [colors, savedColors]);
 
   const showTip = (next: Tip | null, target?: HTMLElement) => {
     if (!next || !target) return setTip(null);
@@ -88,10 +99,10 @@ export function SidebarCompact({ open, loadRecent, canNew, onNewChat, onChat, on
       <nav className="cp-list" aria-label="Open chats" onScroll={() => setTip(null)}>
         {groups.map((group) => (
           <Fragment key={group.folder}>
-            <div className="cp-project" title={group.label} aria-hidden>
+            <div className="cp-project" title={group.label} aria-hidden style={{ "--pc": PROJECT_COLORS[colors[group.folder]] } as CSSProperties}>
               <span>{group.initials}</span>
             </div>
-            <ul className="cp-group" aria-label={group.label}>
+            <ul className="cp-group" aria-label={group.label} style={{ "--pc": PROJECT_COLORS[colors[group.folder]] } as CSSProperties}>
               {group.chips.map((chip) => (
                 <Chip key={chip.slot} chip={chip} group={group} onClick={() => (chip.team ? onTeam(chip.slot) : onChat(chip.slot))} onTip={showTip} />
               ))}
