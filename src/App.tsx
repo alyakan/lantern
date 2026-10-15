@@ -1504,6 +1504,8 @@ export default function App() {
     if (collapsed) setCollapsedBy(collapsed);
     const pinned = take<Record<string, string[]>>("settings.pinnedSessions");
     if (pinned) setPinnedBy(pinned);
+    const colors = take<Record<string, number>>("sidebar.projectColors");
+    if (colors) setProjectColors(colors);
     const last = take<string>(LAST_FOLDER);
     if (last) setLastFolder(last);
     if (changed[OPEN_CHATS]) setOffer((chats) => chats.map((c) => (c.folder === old ? { ...c, folder: next } : c)));
@@ -1547,6 +1549,7 @@ export default function App() {
   // is its width. The first key is the one that once said "minimized to the rail": that is hidden now.
   const [sidebarHidden, setSidebarHidden] = usePersistentState("sidebar.collapsed", false);
   const [sidebarCompact, setSidebarCompact] = usePersistentState("sidebar.compact", false);
+  const [projectColors, setProjectColors] = usePersistentState<Record<string, number>>("sidebar.projectColors", {});
   const [sidebarWidth, setSidebarWidth] = usePersistentState("sidebar.width", SIDEBAR_DEFAULT);
   // Projects removed from the recents here (Claude Code keeps their chats; one with a chat open is listed regardless).
   const [hiddenFolders, setHiddenFolders] = usePersistentState<string[]>("sidebar.hidden", []);
@@ -1733,6 +1736,8 @@ export default function App() {
                 onNewChat={sidebarHandlers.onNewChat}
                 onChat={sidebarHandlers.onChat}
                 onTeam={sidebarHandlers.onTeam}
+                colors={projectColors}
+                onColors={setProjectColors}
                 onToggle={() => setSidebarCompact(false)}
                 onPointerEnter={(e) => !e.buttons && sidebarPeek.hover()}
                 onPointerLeave={sidebarPeek.unhover}

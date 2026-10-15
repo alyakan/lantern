@@ -10,6 +10,8 @@ export const FOLDER_RECORDS = [
   "settings.harnessByFolder",
   "review.collapsedByFolder",
   "settings.pinnedSessions",
+  // The project's colour in the compact sidebar.
+  "sidebar.projectColors",
 ] as const;
 
 /** The folder that was open last, reopened at launch. */
