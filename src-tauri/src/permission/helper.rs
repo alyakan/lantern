@@ -311,8 +311,10 @@ fn run_helper_with(mut input: impl BufRead + Send, output: impl Write, socket: O
                 let heard = match rx.recv_timeout(progress_every) {
                     Ok(heard) => Ok(heard),
                     Err(mpsc::RecvTimeoutError::Timeout) => {
+                        // Only a card is kept alive: the rest the app answers at once, and one it doesn't answer should
+                        // time out as Claude Code would have it, not be held open for ever.
                         let token = token.borrow().clone();
-                        if !token.is_null() {
+                        if card && !token.is_null() {
                             told += 1;
                             let _ = send(&json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": {"progressToken": token, "progress": told, "message": "Waiting for the user"}}));
                         }
@@ -785,6 +787,27 @@ mod tests {
         app.done.join().unwrap();
         drop(client);
         assert_eq!(ids(&helper.join().unwrap()), vec![json!(2)]);
+    }
+
+    #[test]
+    fn only_a_card_is_kept_alive_with_progress() {
+        let app = fake_app("noncard", Some(BridgeResponse { allow: true, message: Some("2 requests".into()), updated_input: None, failed: false }));
+        let (mut client, input) = UnixStream::pair().unwrap();
+        let socket = app.socket.clone();
+        let helper = std::thread::spawn(move || {
+            let mut out = Vec::new();
+            run_helper_with(BufReader::new(input), &mut out, Some(&socket), Offer::default(), Duration::from_millis(20)).unwrap();
+            String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).collect::<Vec<_>>()
+        });
+        // A network tool: the app answers it, slowly here; it isn't a card, so it gets no keep-alive.
+        let msg = json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "network_requests", "arguments": {}, "_meta": {"progressToken": 9}}});
+        writeln!(client, "{msg}").unwrap();
+        app.got.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(120));
+        app.release.send(()).unwrap();
+        app.done.join().unwrap();
+        drop(client);
+        assert_eq!(ids(&helper.join().unwrap()), vec![json!(4)]);
     }
 
     #[test]
