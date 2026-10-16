@@ -187,6 +187,27 @@ pub struct Worktree {
     pub base: Option<String>,
 }
 
+impl Worktree {
+    /// It has no branch of its own (see `add_detached_worktree`): there is nothing to merge, and nothing to delete with it.
+    pub fn detached(&self) -> bool {
+        self.branch.is_empty()
+    }
+}
+
+/// Where a worktree for `name` goes under `parent`: grouped by repository, and never onto a directory a worktree from an
+/// earlier run left behind. The directory's parent is created.
+fn new_root(repo: &Path, parent: &Path, slug: &str, id: &str) -> Result<PathBuf, String> {
+    let parent = parent.join(self::slug(&repo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
+    let mut root = parent.join(format!("{slug}-{id}"));
+    let mut n = 1;
+    while root.exists() {
+        n += 1;
+        root = parent.join(format!("{slug}-{id}-{n}"));
+    }
+    std::fs::create_dir_all(&parent).map_err(|e| format!("Could not create {}: {e}", parent.display()))?;
+    Ok(root)
+}
+
 /// Creates a worktree for `name` under `parent` on a new branch `lantern/<name>` (numbered if that exists), starting
 /// from the commit the main checkout is on. Work not committed yet is not in it.
 pub fn add_worktree(folder: &Path, parent: &Path, name: &str, id: &str, path_env: Option<&str>) -> Result<Worktree, String> {
@@ -199,20 +220,29 @@ pub fn add_worktree(folder: &Path, parent: &Path, name: &str, id: &str, path_env
         n += 1;
         branch = format!("lantern/{slug}-{n}");
     }
-    // Grouped by repository, and never onto a directory a worktree from an earlier run left behind.
-    let parent = parent.join(self::slug(&repo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()));
-    let mut root = parent.join(format!("{slug}-{id}"));
-    let mut n = 1;
-    while root.exists() {
-        n += 1;
-        root = parent.join(format!("{slug}-{id}-{n}"));
-    }
-    std::fs::create_dir_all(&parent).map_err(|e| format!("Could not create {}: {e}", parent.display()))?;
+    let root = new_root(&repo, parent, &slug, id)?;
     let root_arg = root.to_string_lossy().to_string();
     run(&repo, &["worktree", "add", "-b", &branch, &root_arg, "HEAD"], path_env)?;
     let prefix = prefix_in_repo(folder, path_env);
     let inside = if prefix.is_empty() { root.clone() } else { root.join(prefix.trim_end_matches('/')) };
     Ok(Worktree { folder: inside, root, branch, base })
+}
+
+/// A worktree with no branch, checked out at exactly `commit` (a full commit id, as `tip_of` gives): what a reviewer or a
+/// tester is given of a builder's work. It holds that commit's files and nothing else (not what the builder has loose in
+/// its own worktree, which is left alone), and nothing is committed to a branch from it, so removing it leaves no trace.
+/// Its `branch` is empty (see `Worktree::detached`).
+pub fn add_detached_worktree(folder: &Path, parent: &Path, name: &str, id: &str, commit: &str, path_env: Option<&str>) -> Result<Worktree, String> {
+    let repo = repo_root(folder, path_env).ok_or("This folder isn't in a git repository, so an agent can't get a worktree of its own.")?;
+    if commit.len() != 40 || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("That isn't a commit.".into());
+    }
+    let root = new_root(&repo, parent, &self::slug(name), id)?;
+    let root_arg = root.to_string_lossy().to_string();
+    run(&repo, &["worktree", "add", "--detach", &root_arg, commit], path_env)?;
+    let prefix = prefix_in_repo(folder, path_env);
+    let inside = if prefix.is_empty() { root.clone() } else { root.join(prefix.trim_end_matches('/')) };
+    Ok(Worktree { folder: inside, root, branch: String::new(), base: None })
 }
 
 /// The files `dir` has changed but not committed, as `git status --porcelain` lists them.
@@ -317,7 +347,7 @@ pub struct Snapshot {
 }
 
 /// The commit `branch` is at, from the main repository.
-fn tip_of(repo: &Path, branch: &str, path_env: Option<&str>) -> Result<String, String> {
+pub fn tip_of(repo: &Path, branch: &str, path_env: Option<&str>) -> Result<String, String> {
     run(repo, &["rev-parse", "--verify", "-q", &format!("refs/heads/{branch}^{{commit}}")], path_env).map_err(|_| format!("The branch {branch} is gone."))
 }
 
@@ -976,5 +1006,65 @@ mod tests {
         assert!(!is_workers_branch("lantern/") && !is_workers_branch("main") && is_workers_branch("lantern/w-2"));
         assert!(remove_worktree(main.path(), &wt.root, "lantern/w", true, true, None).is_ok());
         assert!(branch_exists(main.path(), "users-own", None) && !branch_exists(main.path(), "lantern/w", None));
+    }
+
+    #[test]
+    fn a_detached_worktree_holds_exactly_the_commit_and_leaves_the_builders_own_worktree_alone() {
+        let main = repo();
+        let builder = add_worktree(main.path(), &worktrees(), "Builder", "w1", None).unwrap();
+        std::fs::write(builder.folder.join("built.txt"), "built\n").unwrap();
+        let checked = verify_worktree(main.path(), &builder.root, None).unwrap();
+        assert!(commit_all(At::Worktree(&checked), "build it", None).unwrap());
+        let tip = tip_of(main.path(), &builder.branch, None).unwrap();
+        // Work the builder has not committed is not part of what is checked.
+        std::fs::write(builder.folder.join("loose.txt"), "loose\n").unwrap();
+
+        let check = add_detached_worktree(main.path(), &worktrees(), "Reviewer: Builder", "w2", &tip, None).unwrap();
+        assert!(check.detached() && check.base.is_none());
+        assert_eq!(std::fs::read_to_string(check.folder.join("built.txt")).unwrap(), "built\n");
+        assert!(!check.folder.join("loose.txt").exists());
+        // No branch: HEAD is the commit itself.
+        assert_eq!(branch_of(&check.folder, None), None);
+        assert_eq!(run(&check.folder, &["rev-parse", "HEAD"], None).unwrap(), tip);
+        assert!(branch_exists(main.path(), &builder.branch, None));
+        let branches = run(main.path(), &["branch", "--format=%(refname:short)"], None).unwrap();
+        assert_eq!(branches.lines().count(), 2, "{branches}");
+        // The builder's worktree is as it was, loose file included.
+        assert!(builder.folder.join("loose.txt").is_file());
+        assert!(verify_worktree(main.path(), &check.root, None).is_ok());
+        assert_ne!(check.root, builder.root);
+    }
+
+    #[test]
+    fn removing_a_detached_worktree_takes_everything_in_it_and_no_branch_with_it() {
+        let main = repo();
+        let tip = tip_of(main.path(), "main", None).unwrap();
+        let check = add_detached_worktree(main.path(), &worktrees(), "Reviewer", "w2", &tip, None).unwrap();
+        // A tester's scratch work, committed or not, is not kept.
+        std::fs::write(check.folder.join("scratch.txt"), "x\n").unwrap();
+        let checked = verify_worktree(main.path(), &check.root, None).unwrap();
+        commit_all(At::Worktree(&checked), "scratch", None).unwrap();
+        std::fs::write(check.folder.join("loose.txt"), "y\n").unwrap();
+        remove_worktree(main.path(), &check.root, &check.branch, false, true, None).unwrap();
+        assert!(!check.root.exists());
+        assert_eq!(run(main.path(), &["worktree", "list", "--porcelain"], None).unwrap().matches("worktree ").count(), 1);
+        assert_eq!(run(main.path(), &["branch", "--format=%(refname:short)"], None).unwrap(), "main");
+    }
+
+    #[test]
+    fn a_detached_worktree_needs_a_real_commit_id_and_a_repository() {
+        let main = repo();
+        let parent = worktrees();
+        for bad in ["main", "--help", "abc", &"g".repeat(40)] {
+            assert_eq!(add_detached_worktree(main.path(), &parent, "x", "w1", bad, None).unwrap_err(), "That isn't a commit.");
+        }
+        assert!(add_detached_worktree(main.path(), &parent, "x", "w1", &"0".repeat(40), None).is_err());
+        let plain = tempfile::tempdir().unwrap();
+        assert!(add_detached_worktree(plain.path(), &parent, "x", "w1", &"0".repeat(40), None).unwrap_err().contains("isn't in a git repository"));
+        // Two checks of the same work get two folders.
+        let tip = tip_of(main.path(), "main", None).unwrap();
+        let a = add_detached_worktree(main.path(), &parent, "x", "w1", &tip, None).unwrap();
+        let b = add_detached_worktree(main.path(), &parent, "x", "w1", &tip, None).unwrap();
+        assert_ne!(a.root, b.root);
     }
 }
