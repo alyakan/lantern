@@ -14,7 +14,7 @@ A Mac app for the `claude` CLI you already have: see what Claude is doing as car
 | --- | --- |
 | **A chat you can read** | Every tool call is a card, edits and new files are diffs, and Allow / Deny prompts show up in the conversation instead of scrolling past. |
 | **Step by step** | Claude works one page at a time and stops after each. Build, review a pull request file by file, debug from evidence, or review a design as a map. You approve a page, ask about it, or change it. |
-| **Teams on a canvas** | A Lead splits the work between agents, each in its own git worktree and branch. They float on a canvas you can pan and zoom, and you decide which branches merge. |
+| **Teams on a canvas** | A Lead splits the work between agents, each in its own git worktree and branch. They float on a canvas you can pan and zoom, and you decide which branches merge. Start agents in roles (a builder, a read-only reviewer, a tester…) or a whole team from a template. |
 | **A side panel for the rest** | Changes, Files, Plan, Activity, Tests and Network sit beside the chat: every diff, an editor, the plan or map, what each agent did, test results, and API traffic from [Network Monitor](https://github.com/alyakan/network-monitor). |
 | **Yours to set up** | **Ask** or **Auto** permissions, a **Models** preset per chat (who does the work), a sidebar of every project, History for past chats, and a command palette for all of it. |
 

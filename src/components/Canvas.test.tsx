@@ -874,6 +874,29 @@ describe("cleaning up and closing an agent", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
+  it("shows an agent's role on its card, and a Read only badge for a read-only role and for the shared folder", () => {
+    let chats = initialChats(main);
+    const spawn = (worker: string, name: string, over: object) => {
+      chats = chatsReducer(chats, { type: "in", slot: "s1", action: { type: "ui_event", event: { kind: "agent_spawned", worker, name, brief: "x", folder: `/wt/${worker}`, branch: `lantern/${worker}`, base: "main", isolation: "worktree", mode: "auto", ...over } as never } });
+    };
+    spawn("w1", "Reviewer: login", { isolation: "worktree", role: { id: "reviewer", label: "Reviewer", read_only: true } });
+    spawn("w2", "Builder: signup", { role: { id: "builder", label: "Builder", read_only: false } });
+    spawn("w3", "Reader", { folder: "/p", branch: null, base: null, isolation: "shared" });
+    spawn("w4", "Plain", {});
+    setup(chats);
+    const card = (name: string) => within(screen.getByLabelText(new RegExp(`^Agent ${name},`)));
+    expect(card("Reviewer: login").getByText("Reviewer")).toHaveClass("role-chip");
+    expect(card("Reviewer: login").getByText("Read only")).toBeInTheDocument();
+    expect(card("Builder: signup").getByText("Builder")).toBeInTheDocument();
+    expect(card("Builder: signup").queryByText("Read only")).toBeNull();
+    // No role, but a shared folder has its editing tools off too.
+    expect(card("Reader").getByText("Read only")).toBeInTheDocument();
+    expect(card("Reader").queryByText("Builder")).toBeNull();
+    expect(card("Plain").queryByText("Read only")).toBeNull();
+    // The Lead is never read only.
+    expect(within(screen.getByLabelText(/^Lead,/)).queryByText("Read only")).toBeNull();
+  });
+
   it("tells a worker in the shared folder that nothing is removed from it", () => {
     let chats = initialChats(main);
     chats = chatsReducer(chats, { type: "in", slot: "s1", action: { type: "ui_event", event: { kind: "agent_spawned", worker: "w1", name: "Reader", brief: "Read", folder: "/p", branch: null, base: null, isolation: "shared", mode: "auto" } } });

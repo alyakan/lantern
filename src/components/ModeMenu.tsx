@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Flavour } from "../lib/flavour";
 import { useModeGuide } from "../lib/modeGuide";
+import { TemplateTeamContext } from "../lib/roleStore";
 import { useMenuInside } from "../lib/useMenuInside";
 import { PERMISSIONS_LABEL, type Permissions, type Workflow, WORKFLOW_LABEL } from "../lib/workflow";
 import { BoltIcon, InfoIcon, OrchestraIcon, ShieldIcon, SparkIcon, StepsIcon } from "./icons";
@@ -40,10 +41,12 @@ interface MenuProps<T extends string> {
   compact?: boolean;
   /** The "How the modes work…" page this menu's row opens on. */
   guideKey: GuideKey;
+  /** A row of its own under the choices that does something instead of choosing ("Team from a template…"). */
+  extra?: { label: string; hint: string; icon: ReactNode; run: () => void };
 }
 
 // A chip with a menu: under the chat box it opens upwards like the model chip, on a canvas title bar downwards.
-function SettingMenu<T extends string>({ name, value, text, rows, onChange, disabled, compact, guideKey }: MenuProps<T>) {
+function SettingMenu<T extends string>({ name, value, text, rows, onChange, disabled, compact, guideKey, extra }: MenuProps<T>) {
   const [open, setOpen] = useState(false);
   const guide = useModeGuide();
   const root = useRef<HTMLDivElement>(null);
@@ -101,6 +104,25 @@ function SettingMenu<T extends string>({ name, value, text, rows, onChange, disa
               </span>
             </button>
           ))}
+          {extra && (
+            <>
+              <div className="menu-sep" role="separator" />
+              <button
+                role="menuitem"
+                className="menu-row"
+                onClick={() => {
+                  setOpen(false);
+                  extra.run();
+                }}
+              >
+                <span className="mode-icon">{extra.icon}</span>
+                <span className="mode-text">
+                  <span className="menu-row-title">{extra.label}</span>
+                  <span className="mode-hint">{extra.hint}</span>
+                </span>
+              </button>
+            </>
+          )}
           {guide && (
             <>
               <div className="menu-sep" role="separator" />
@@ -155,5 +177,8 @@ interface WorkflowProps {
 export function WorkflowMenu({ workflow, flavour = null, onChange, disabled, compact, agent, holdsAgents }: WorkflowProps) {
   const held = holdsAgents ? "This team still has agents. Close them first." : undefined;
   const rows: Row<Workflow>[] = WORKFLOW_ROWS.filter((r) => !(agent && r.value === "team")).map((r) => ({ ...r, label: WORKFLOW_LABEL[r.value], off: r.value !== "team" ? held : undefined }));
-  return <SettingMenu name="Workflow" value={workflow} text={workflowName(workflow, flavour)} rows={rows} onChange={onChange} disabled={disabled} compact={compact} guideKey={workflow === "steps" && flavour ? flavour : workflow} />;
+  // A new team from a template is offered where a team could be started: not on an agent, a title bar, or a team that has agents.
+  const startTemplate = useContext(TemplateTeamContext);
+  const extra = startTemplate && !agent && !compact && !holdsAgents ? { label: "Team from a template…", hint: "Start a team with its agents already chosen: a builder and a reviewer, say", icon: <OrchestraIcon />, run: startTemplate } : undefined;
+  return <SettingMenu name="Workflow" value={workflow} text={workflowName(workflow, flavour)} rows={rows} onChange={onChange} disabled={disabled} compact={compact} guideKey={workflow === "steps" && flavour ? flavour : workflow} extra={extra} />;
 }

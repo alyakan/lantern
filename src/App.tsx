@@ -89,6 +89,9 @@ import { windowOf } from "./lib/contextShare";
 import { needingYou, orchestraNodes, teamActivity, teamMain, teamNodes } from "./lib/orchestraView";
 import "./styles.css";
 import { AGENT_MODEL } from "./lib/models";
+import { templateMessage, type AgentRole, type TeamTemplate } from "./lib/roles";
+import { RoleStoreProvider, TemplateTeamContext, useRoleStoreState } from "./lib/roleStore";
+import { TeamTemplateDialog } from "./components/TeamTemplateDialog";
 
 /** How many `name` steps have finished, subagents' included. */
 /** Commands the user ran from the chat box that have ended. */
@@ -118,7 +121,7 @@ function mergeOwner(chats: { slots: Record<string, { proposals: { worker: string
  */
 type TeamRole =
   | { role: "main" }
-  | { role: "worker"; parent: string; name: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; hidden?: boolean; model?: string; parentReady?: Promise<boolean> };
+  | { role: "worker"; parent: string; name: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; agentRole?: AgentRole; hidden?: boolean; model?: string; parentReady?: Promise<boolean> };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -416,12 +419,12 @@ export default function App() {
   };
 
   // `quiet`: reopening the remembered project at launch; if that fails (e.g. the folder is gone), just forget it.
-  const startFresh = (folder: string, quiet = false, team = false) => {
-    if (state.claudePath) startIn(takeSlot(), folder, quiet, team);
+  const startFresh = (folder: string, quiet = false, team = false, first?: string) => {
+    if (state.claudePath) startIn(takeSlot(), folder, quiet, team, first);
   };
 
   /** `team`: the chat is the Lead of a team, which can start agents, on the project's last Permissions (the agents never exceed them). */
-  const startIn = (slot: string, folder: string, quiet = false, team = false) => {
+  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string) => {
     const { claudePath } = state;
     if (!claudePath) return;
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
@@ -435,15 +438,20 @@ export default function App() {
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode, autoApprove });
     to(slot)({ type: "orchestrator_set", on: orchestrator });
-    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team);
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first);
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
     api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}) }).then(
       () => {
         if (startGen.current[slot] !== gen) return;
         delete relaunch.current[slot];
-        if (orchestrator) startSubagents(slot, folder);
+        if (orchestrator) {
+          startSubagents(slot, folder);
+          startRoles(slot, folder);
+        }
         setLastFolder(folder);
         to(slot)({ type: "session_ready" });
+        // A team from a template: the Lead's first instruction names its members and their roles.
+        if (first) doingRef.current.send(slot, first);
       },
       (e) => {
         if (startGen.current[slot] !== gen) return;
@@ -539,7 +547,7 @@ export default function App() {
     to(slot)({ type: "mode_changed", mode, autoApprove, flavourStart, explainStart });
     to(slot)({ type: "orchestrator_set", on: team?.role === "main" });
     // A worker is part of its team from the start, not only once it has opened: until then it would be an ordinary chat in the sidebar.
-    if (team?.role === "worker") dispatchChats({ type: "adopt", slot, meta: { parent: team.parent, name: team.name, brief: "", folder, branch: team.branch, base: team.base, isolation: team.isolation, ...(team.hidden ? { hidden: true } : {}) } });
+    if (team?.role === "worker") dispatchChats({ type: "adopt", slot, meta: { parent: team.parent, name: team.name, brief: "", folder, branch: team.branch, base: team.base, isolation: team.isolation, ...(team.agentRole ? { role: team.agentRole } : {}), ...(team.hidden ? { hidden: true } : {}) } });
     // Trying again later doesn't wait on a main agent that has long since opened (or not).
     const again: TeamRole | undefined = team?.role === "worker" ? { ...team, parentReady: undefined } : team;
     relaunch.current[slot] = () => void resumeIn(slot, folder, sessionId, reuse, again);
@@ -550,7 +558,7 @@ export default function App() {
         claudePath,
         folder,
         // An agent comes back on the model it had (or Sonnet, the agents' default), not on its project's own model.
-        { mode, ...settingsFor(slot, h), ...(as?.role === "worker" ? { model: as.model ?? AGENT_MODEL } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared" } } : {}) },
+        { mode, ...settingsFor(slot, h), ...(as?.role === "worker" ? { model: as.model ?? AGENT_MODEL } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared", read_only: !!as.agentRole?.read_only } } : {}) },
         sessionId,
       );
     // A worker waits for its main agent: if that one didn't open, this one stays closed too, under it, where Retry can try again.
@@ -566,7 +574,10 @@ export default function App() {
           return false;
         }
         delete relaunch.current[slot];
-        if (as?.role === "main") startSubagents(slot, folder);
+        if (as?.role === "main") {
+          startSubagents(slot, folder);
+          startRoles(slot, folder);
+        }
         to(slot)({ type: "history_loaded", sessionId, events: opened.events, movedFrom: opened.moved_from });
         to(slot)({ type: "session_ready" });
         return true;
@@ -625,7 +636,7 @@ export default function App() {
       const parent = opened[o.parentSession] ?? openMainOf(o.parentSession);
       // An agent only comes back inside its team: without its main agent it stays closed, never an ordinary chat.
       if (!parent) return Promise.resolve(false);
-      team = { role: "worker", parent: parent.slot, name: o.name, branch: o.branch, base: o.base, isolation: o.isolation, hidden: o.hidden, model: o.model, parentReady: parent.ready };
+      team = { role: "worker", parent: parent.slot, name: o.name, branch: o.branch, base: o.base, isolation: o.isolation, agentRole: o.agentRole, hidden: o.hidden, model: o.model, parentReady: parent.ready };
     }
     if (c.sessionId) return resumeIn(slot, c.folder, c.sessionId, false, team);
     // Typed in the box but never sent: a new chat in its folder, as a main agent again if it was one.
@@ -868,6 +879,26 @@ export default function App() {
     to(slot)({ type: "subagents_set", subagents });
     api.setSubagents(slot, subagents).catch(() => {});
   };
+  // The project's own roles and team templates. A Lead is told its project's roles so it can ask for one by id: when its team
+  // starts or comes back, and again whenever they change.
+  const roleStore = useRoleStoreState();
+  const startRoles = (slot: string, folder: string) => {
+    api.setRoles(slot, roleStore.roles(folder)).catch(() => {});
+  };
+  useEffect(() => {
+    for (const [slot, s] of Object.entries(chats.slots)) if (s.orchestrator && s.folder) startRoles(slot, s.folder);
+  }, [roleStore]);
+  const [templateDialog, setTemplateDialog] = useState(false);
+  const startFromTemplate = (template: TeamTemplate, task: string) => {
+    const folder = state.folder;
+    if (!folder) return;
+    setTemplateDialog(false);
+    const message = templateMessage(template, roleStore.roles(folder), task);
+    askTeam(null, () => {
+      startFresh(folder, false, true, message);
+      setView("canvas");
+    });
+  };
   /** The team's Subagents setting: where its Lead's built-in helpers run. Remembered for the project's next team. */
   const changeSubagents = (slot: string, subagents: Subagents) => {
     const s = chats.slots[slot];
@@ -912,6 +943,7 @@ export default function App() {
         // Becoming a Lead: its agents will appear on the canvas, so that is where it goes.
         if (team && !s.orchestrator) {
           startSubagents(slot, s.folder ?? "");
+          startRoles(slot, s.folder ?? "");
           focusAgent(slot);
           setView("canvas");
         }
@@ -1586,6 +1618,7 @@ export default function App() {
     if (collapsed) setCollapsedBy(collapsed);
     const pinned = take<Record<string, string[]>>("settings.pinnedSessions");
     if (pinned) setPinnedBy(pinned);
+    roleStore.carry(changed);
     const colors = take<Record<string, number>>("sidebar.projectColors");
     if (colors) setProjectColors(colors);
     const order = take<string[]>("sidebar.projectOrder");
@@ -1694,6 +1727,7 @@ export default function App() {
     onOpenFolder: openFolder,
     onNewChat: () => state.folder && startFresh(state.folder),
     onNewTeam: () => newOrchestra(),
+    onNewTeamTemplate: () => state.folder && setTemplateDialog(true),
     onReviewPr: () => setPrPicker(true),
   };
   // The inbox's Allow and Deny answer the request the row named, and only while it is still waiting (one answered in the
@@ -1721,6 +1755,7 @@ export default function App() {
     onOpenFolder: then(sidebarHandlers.onOpenFolder),
     onNewChat: then(sidebarHandlers.onNewChat),
     onNewTeam: then(sidebarHandlers.onNewTeam),
+    onNewTeamTemplate: then(sidebarHandlers.onNewTeamTemplate),
     onReviewPr: then(sidebarHandlers.onReviewPr),
   };
   const sidebarProps = {
@@ -1808,7 +1843,7 @@ export default function App() {
   if (state.status === "setup") return <SetupScreen error={state.setupError} onCheck={locate} />;
 
   return (
-    <SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}><KnownWindowsContext.Provider value={windows}>
+    <SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}><KnownWindowsContext.Provider value={windows}><RoleStoreProvider store={roleStore}><TemplateTeamContext.Provider value={state.folder ? () => setTemplateDialog(true) : null}>
       <div className="app">
         <TopBar
           folder={titleFolder}
@@ -2011,6 +2046,7 @@ export default function App() {
           />
         )}
         {prPicker && state.folder && <ReviewPrDialog folder={state.folder} onPick={startReviewOf} onClose={() => setPrPicker(false)} />}
+        {templateDialog && state.folder && <TeamTemplateDialog folder={state.folder} onStart={startFromTemplate} onClose={() => setTemplateDialog(false)} />}
         {teamAsk && (
           <TeamWarning
             teams={teamAsk.teams}
@@ -2041,6 +2077,6 @@ export default function App() {
           onClose={() => setGuideAt(null)}
         />
       </div>
-    </KnownWindowsContext.Provider></SessionActionsContext.Provider></ModeGuideContext.Provider></SlotContext.Provider>
+    </TemplateTeamContext.Provider></RoleStoreProvider></KnownWindowsContext.Provider></SessionActionsContext.Provider></ModeGuideContext.Provider></SlotContext.Provider>
   );
 }

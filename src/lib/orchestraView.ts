@@ -2,6 +2,7 @@ import { wakesPaused, type Chats } from "../sessions";
 import type { ChatItem, State } from "../store";
 import type { ActivityStatus } from "./status";
 import type { CloseCheck } from "../types";
+import type { AgentRole } from "./roles";
 
 /** What an agent on the canvas is doing, in the words a product owner would use. */
 export type NodeStatus = "starting" | "working" | "waiting" | "held" | "idle" | "ended" | "failed";
@@ -45,6 +46,8 @@ export interface OrchestraNode {
   /** The worker's own branch, when it has a worktree. */
   branch: string | null;
   isolation: "worktree" | "shared" | null;
+  /** The role it was started in (a Reviewer, a Builder…), when it has one. */
+  agentRole?: AgentRole;
   /** The user took it off the canvas (it is still on the team). Absent: shown. */
   hidden?: boolean;
 }
@@ -56,7 +59,7 @@ export interface OrchestraNode {
 export function orchestraNodes(chats: Chats, mainName: (slot: string, s: State) => string): OrchestraNode[] {
   const mains = Object.entries(chats.slots).filter(([, s]) => s.orchestrator).map(([slot]) => slot);
   const nodes: OrchestraNode[] = [];
-  const worker = ([slot, meta]: [string, Chats["agents"][string]], parent: string | null): OrchestraNode => ({ slot, role: "worker", parent, name: meta.name, branch: meta.branch, isolation: meta.isolation, ...(meta.hidden ? { hidden: true } : {}) });
+  const worker = ([slot, meta]: [string, Chats["agents"][string]], parent: string | null): OrchestraNode => ({ slot, role: "worker", parent, name: meta.name, branch: meta.branch, isolation: meta.isolation, ...(meta.role ? { agentRole: meta.role } : {}), ...(meta.hidden ? { hidden: true } : {}) });
   for (const main of mains) {
     nodes.push({ slot: main, role: "main", parent: null, name: mainName(main, chats.slots[main]), branch: null, isolation: null });
     for (const entry of Object.entries(chats.agents)) if (entry[1].parent === main && chats.slots[entry[0]]) nodes.push(worker(entry, main));

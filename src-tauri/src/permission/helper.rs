@@ -575,6 +575,23 @@ mod tests {
     }
 
     #[test]
+    fn spawn_agent_takes_an_optional_role_and_lists_the_built_in_ones() {
+        let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+        let tools = handle_message_as(&list, &allow_all, LEAD).unwrap();
+        let spawn = tools["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "spawn_agent").unwrap().clone();
+        assert_eq!(spawn["inputSchema"]["required"], json!(["name", "brief"]));
+        let role = &spawn["inputSchema"]["properties"]["role"];
+        assert_eq!(role["type"], "string");
+        // Which roles exist is up to the app (the project's own are added to it), which answers an unknown one with the list.
+        assert!(role.get("enum").is_none());
+        let text = role["description"].as_str().unwrap();
+        for r in crate::roles::builtin() {
+            assert!(text.contains(&r.id), "{}", r.id);
+        }
+        assert!(text.contains("read only") && text.contains("can edit"));
+    }
+
+    #[test]
     fn an_orchestra_call_goes_to_the_app_flagged_and_its_result_comes_back_as_the_tool_result() {
         let seen = std::cell::RefCell::new(None);
         let msg = json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "spawn_agent", "arguments": {"name": "login", "brief": "Build it"}}});

@@ -1,4 +1,5 @@
 import { initialState, reducer, type Action, type State, type Status } from "./store";
+import type { AgentRole } from "./lib/roles";
 import type { UiEvent } from "./types";
 
 /** A worker agent: whose it is and where it works (told by the main agent's `agent_spawned`). */
@@ -12,6 +13,8 @@ export interface AgentMeta {
   branch: string | null;
   base: string | null;
   isolation: "worktree" | "shared";
+  /** The role it was started in (a Reviewer, a Builder…), when it has one. */
+  role?: AgentRole;
   /** Taken off the canvas by the user: it keeps working, and comes back by itself when it needs them. Absent: on the canvas. */
   hidden?: boolean;
 }
@@ -69,7 +72,7 @@ function spawnWorker(chats: Chats, main: string, ev: Extract<UiEvent, { kind: "a
     seq: 1,
     items: [{ type: "user", id: "u1", text: ev.brief, at: Date.now(), from: "main agent" }],
   };
-  const meta: AgentMeta = { parent: main, name: ev.name, brief: ev.brief, folder: ev.folder, branch: ev.branch, base: ev.base, isolation: ev.isolation };
+  const meta: AgentMeta = { parent: main, name: ev.name, brief: ev.brief, folder: ev.folder, branch: ev.branch, base: ev.base, isolation: ev.isolation, ...(ev.role ? { role: ev.role } : {}) };
   return { ...chats, slots: { ...chats.slots, [ev.worker]: worker }, agents: { ...chats.agents, [ev.worker]: meta } };
 }
 

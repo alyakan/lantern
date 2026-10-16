@@ -26,6 +26,7 @@ import { totalCost, totalTokens, type State } from "../store";
 import { isBusy } from "../sessions";
 import { permissionsOf, workflowOf } from "../lib/workflow";
 import type { CloseAgreed, CloseCheck } from "../types";
+import type { AgentRole } from "../lib/roles";
 import { AgentMenu, type AgentMenuItem } from "./AgentMenu";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { HiddenAgents } from "./HiddenAgents";
@@ -102,6 +103,9 @@ interface FrameProps {
   role: "main" | "worker";
   name: string;
   branch: string | null;
+  /** The role it was started in, and whether it can only read (its role says so, or it works in your own folder). */
+  agentRole?: AgentRole;
+  readOnly: boolean;
   box: Box;
   z: number;
   focused: boolean;
@@ -137,7 +141,7 @@ function SummaryBody({ slot }: { slot: string }) {
   );
 }
 
-const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, focused, summary, collapsed, fresh, holdsAgents, onGrab, onDrag, onRelease, onToggle, onOpen, onPress, onMenu, onMore }: FrameProps) {
+const Frame = memo(function Frame({ slot, parent, role, name, branch, agentRole, readOnly, box, z, focused, summary, collapsed, fresh, holdsAgents, onGrab, onDrag, onRelease, onToggle, onOpen, onPress, onMenu, onMore }: FrameProps) {
   const state = useChatState(slot);
   const owner = useChatState(parent ?? slot);
   const status: NodeStatus = state ? nodeStatus(state) : "ended";
@@ -208,6 +212,16 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
           <OpenOutIcon />
         </button>
       </header>
+      {!folded && (agentRole || readOnly) && (
+        <div className="node-role-bar">
+          {agentRole && <span className="role-chip">{agentRole.label}</span>}
+          {readOnly && (
+            <span className="role-chip read-only" title="Its editing tools are switched off: it can read and report, not change files">
+              Read only
+            </span>
+          )}
+        </div>
+      )}
       {!folded && (
         <div key={summary ? "card" : "chat"} className="node-body" title={summary ? "Click to zoom in on this agent" : undefined}>
           {summary ? <SummaryBody slot={slot} /> : <NodeBody slot={slot} parent={parent} />}
@@ -806,6 +820,8 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
             role={n.role}
             name={n.name}
             branch={n.branch}
+            agentRole={n.agentRole}
+            readOnly={n.role === "worker" && (!!n.agentRole?.read_only || n.isolation === "shared")}
             box={layout.boxes[n.slot]}
             z={layout.order.indexOf(n.slot) + 1}
             focused={n.slot === activeSlot}

@@ -84,7 +84,7 @@ describe("Permissions and Workflow, under the box", () => {
 
   it("make this chat the Lead of a team when Team is chosen, and show the canvas with its Subagents setting", async () => {
     const calls = await launch();
-    await choose(/Workflow: Chat/, /^Team/);
+    await choose(/Workflow: Chat/, /^Team(?! from)/);
     await waitFor(() => expect(last(calls, "restart_session")).toMatchObject({ mode: "ask", team: true }));
     // The team's Lead is told where its subagents go, on the canvas by default, and the setting is in the canvas controls.
     await waitFor(() => expect(last(calls, "set_subagents")).toEqual({ slot: expect.any(String), subagents: "canvas" }));
@@ -99,7 +99,7 @@ describe("Permissions and Workflow, under the box", () => {
 
   it("change a team's Permissions from the Lead's title bar on the canvas, where both settings are", async () => {
     const calls = await launch();
-    await choose(/Workflow: Chat/, /^Team/);
+    await choose(/Workflow: Chat/, /^Team(?! from)/);
     const lead = await screen.findByLabelText(/^Lead,/);
     expect(within(lead).getByRole("button", { name: "Workflow: Team" })).toBeInTheDocument();
     fireEvent.click(within(lead).getByRole("button", { name: "Permissions: Ask" }));
@@ -114,7 +114,7 @@ describe("a new team", () => {
     localStorage.setItem("settings.permissionsByFolder", JSON.stringify({ [FOLDER]: "auto" }));
     const calls = await launch();
     fireEvent.click(await screen.findByRole("button", { name: "New" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Team/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Team(?! from)/ }));
     await waitFor(() => expect(calls.filter(([c]) => c === "start_session").length).toBeGreaterThan(1));
     const started = calls.filter(([c]) => c === "start_session").pop()![1] as { settings: Record<string, unknown> };
     expect(started.settings).toMatchObject({ mode: "auto", orchestrator: true });
@@ -154,7 +154,7 @@ describe("a second team while another is working", () => {
   /** A team whose Lead is working on a message, so the next team start has something to ask about. */
   async function busyTeam() {
     const calls = await launch();
-    await pick(/Workflow: Chat/, /^Team/);
+    await pick(/Workflow: Chat/, /^Team(?! from)/);
     const box = within(await screen.findByLabelText(/^Lead,/, undefined, { timeout: LOAD })).getByLabelText("Message this agent");
     fireEvent.change(box, { target: { value: "Build the login form (team)" } });
     fireEvent.keyDown(box, { key: "Enter" });
@@ -163,7 +163,7 @@ describe("a second team while another is working", () => {
   }
   const newTeam = async () => {
     fireEvent.click(await screen.findByRole("button", { name: "New" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Team/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Team(?! from)/ }));
   };
   const starts = (calls: Call[]) => calls.filter(([c]) => c === "start_session").length;
 
@@ -204,7 +204,47 @@ describe("a second team while another is working", () => {
     // A plain chat next to the team.
     fireEvent.click(await screen.findByRole("button", { name: "New" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /^Chat/ }));
-    await pick(/Workflow: Chat/, /^Team/);
+    await pick(/Workflow: Chat/, /^Team(?! from)/);
     expect(await screen.findByText(/Start anyway\?/, undefined, { timeout: LOAD })).toBeInTheDocument();
   });
+});
+
+describe("a team from a template", () => {
+  const startOne = async (calls: Call[], template: RegExp, task: string) => {
+    fireEvent.click(await screen.findByRole("button", { name: "New" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Team from a template/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Team from a template" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: template }));
+    fireEvent.change(within(dialog).getByLabelText("What the team should do"), { target: { value: task } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Start team" }));
+    await waitFor(() => expect(calls.filter(([c]) => c === "send_message").length).toBe(1));
+  };
+
+  it("starts nothing when the dialog is cancelled", async () => {
+    const calls = await launch();
+    fireEvent.click(await screen.findByRole("button", { name: "New" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Team from a template/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Team from a template" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Team from a template" })).toBeNull());
+    expect(calls.filter(([c]) => c === "start_session")).toHaveLength(1);
+    expect(calls.some(([c]) => c === "send_message")).toBe(false);
+  });
+
+  it("makes the chat a Lead, tells it its project's roles, and sends it a first instruction naming each member and its role", async () => {
+    localStorage.setItem("settings.rolesByFolder", JSON.stringify({ [FOLDER]: [{ id: "api-reviewer", label: "API reviewer", description: "Checks the API.", brief: "Check the API: {task}", model: "haiku", isolation: "shared", readOnly: true }] }));
+    const calls = await launch();
+    await startOne(calls, /Build, review and test/, "add a dark mode toggle");
+    const started = calls.filter(([c]) => c === "start_session").pop()![1] as { slot: string; settings: Record<string, unknown> };
+    expect(started.settings).toMatchObject({ orchestrator: true });
+    // The Lead is told the project's own roles so it can ask for one by id, before its first instruction.
+    await waitFor(() => expect(last(calls, "orchestra_set_roles")).toMatchObject({ main: started.slot, roles: [expect.objectContaining({ id: "api-reviewer", readOnly: true })] }));
+    const sent = last(calls, "send_message") as { slot: string; text: string };
+    expect(sent.slot).toBe(started.slot);
+    expect(sent.text).toContain("Start a team for this job: add a dark mode toggle");
+    for (const part of ['- Builder (role "builder", can edit)', '- Reviewer (role "reviewer", read only)', '- QA / tester (role "qa", can edit)', "spawn_agent"]) expect(sent.text).toContain(part);
+    expect(calls.findIndex(([c]) => c === "orchestra_set_roles")).toBeLessThan(calls.findIndex(([c]) => c === "send_message"));
+    expect(await screen.findByRole("button", { name: "Subagents: On the canvas" })).toBeInTheDocument();
+  });
+
 });

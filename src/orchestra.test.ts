@@ -27,6 +27,13 @@ describe("a worker the main agent starts", () => {
     expect(c.active).toBe("s1");
   });
 
+  it("keeps the role it was started in, and has none when it was started without one", () => {
+    const role = { id: "reviewer", label: "Reviewer", read_only: true };
+    const c = chatsReducer(initialChats(main), on("s1", { ...spawned, role }));
+    expect(c.agents.w1.role).toEqual(role);
+    expect("role" in withWorker().agents.w1).toBe(false);
+  });
+
   it("starts in the mode the backend gave it, never assumed", () => {
     const c = chatsReducer(initialChats(main), on("s1", { ...spawned, mode: "ask" }));
     expect(c.slots.w1.mode).toBe("ask");

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { TemplateTeamContext } from "../lib/roleStore";
 import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
 import { PermissionCard } from "./PermissionCard";
 
@@ -130,5 +131,28 @@ describe("reproduce card", () => {
     render(<PermissionCard item={item("allowed", "token=null")} onDecide={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "You reproduced it" }));
     expect(screen.getByText("token=null")).toBeInTheDocument();
+  });
+});
+
+describe("WorkflowMenu: Team from a template", () => {
+  const open = (ui: React.ReactElement, run: (() => void) | null) => {
+    render(<TemplateTeamContext.Provider value={run}>{ui}</TemplateTeamContext.Provider>);
+    fireEvent.click(screen.getByRole("button", { name: /^Workflow/ }));
+  };
+
+  it("is a row under the workflows that starts a team from a template, and closes the menu", () => {
+    const run = vi.fn();
+    open(<WorkflowMenu workflow="chat" onChange={() => {}} />, run);
+    fireEvent.click(screen.getByRole("menuitem", { name: /Team from a template…/ }));
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("isn't offered without somewhere to start one, on an agent, on a title bar, or on a team that has agents", () => {
+    for (const ui of [<WorkflowMenu workflow="chat" onChange={() => {}} />, <WorkflowMenu workflow="chat" agent onChange={() => {}} />, <WorkflowMenu workflow="chat" compact onChange={() => {}} />, <WorkflowMenu workflow="team" holdsAgents onChange={() => {}} />]) {
+      cleanup();
+      open(ui, ui.props.agent || ui.props.compact || ui.props.holdsAgents ? vi.fn() : null);
+      expect(screen.queryByRole("menuitem", { name: /Team from a template/ })).toBeNull();
+    }
   });
 });
