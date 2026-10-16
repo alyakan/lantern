@@ -154,6 +154,9 @@ pub enum UiEvent {
         mode: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         provider: Option<crate::provider::ProviderInfo>,
+        /// The role it was started in (a Reviewer, a Builder…): shown on its card, and kept when it is restored.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        role: Option<crate::roles::RoleTag>,
     },
     /// On the main agent's slot: a note from Lantern for it (a worker finished, crashed or waits on the user), to be sent
     /// as a message when the main agent is idle. Several are joined into one.
@@ -187,7 +190,7 @@ mod tests {
 
     #[test]
     fn a_spawned_worker_carries_its_provider_when_it_is_known_and_the_field_is_absent_otherwise() {
-        let ev = |provider| UiEvent::AgentSpawned { worker: "w1".into(), name: "n".into(), brief: "b".into(), folder: "/f".into(), branch: None, base: None, isolation: "shared".into(), mode: "ask".into(), provider };
+        let ev = |provider| UiEvent::AgentSpawned { worker: "w1".into(), name: "n".into(), brief: "b".into(), folder: "/f".into(), branch: None, base: None, isolation: "shared".into(), mode: "ask".into(), provider, role: None };
         let with = serde_json::to_value(ev(Some(crate::provider::ProviderId::Claude.info()))).unwrap();
         assert_eq!(with["provider"]["id"], "claude");
         assert_eq!(with["provider"]["capabilities"]["supports_auto_mode"], true);

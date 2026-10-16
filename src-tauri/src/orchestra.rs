@@ -9,6 +9,7 @@ use crate::git;
 use crate::permission::bridge::OrchestraHandler;
 use crate::permission::protocol::BridgeResponse;
 use crate::provider::ProviderId;
+use crate::roles::{RoleDef, RoleTag};
 use crate::ui_event::UiEvent;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -63,8 +64,10 @@ pub struct SpawnRequest {
     pub model: Option<String>,
     /// The mode it starts in (see args::worker_mode): never more autonomous than the main agent.
     pub mode: crate::args::Mode,
-    /// It works in the main agent's folder, so it may read but not edit.
+    /// It may read but not edit: it works in the main agent's folder, or its role is a read-only one.
     pub read_only: bool,
+    /// The role it was started in, if any (see roles.rs).
+    pub role: Option<RoleTag>,
 }
 
 /// What the user agreed to lose when they confirmed closing a worker (see `Orchestra::close_worker`).
@@ -206,6 +209,8 @@ struct Inner {
     next: u64,
     /// The plan's five-hour window as a chat last reported it: how much is used (0 to 1), and when it resets.
     plan: Option<(f64, Option<u64>)>,
+    /// Each main agent's project's own roles, as the window last told us (the built-in ones need no telling).
+    custom_roles: HashMap<String, Vec<RoleDef>>,
 }
 
 pub struct Orchestra {
@@ -431,7 +436,7 @@ impl Orchestra {
             return Err("This chat is not a Team's lead.".into());
         }
         match tool {
-            "spawn_agent" => self.spawn(main, args).await,
+            "spawn_agent" => self.spawn(main, args, None).await,
             "list_agents" => Ok(self.list(main)),
             "read_agent" => self.read(main, args).await,
             "message_agent" => self.message(main, args).await,
@@ -472,13 +477,45 @@ impl Orchestra {
         }
     }
 
-    async fn spawn(self: &Arc<Self>, main: &str, args: &Value) -> Result<String, String> {
+    /// The role `asked` names: a built-in one, or one of the project's own that the window told us of. None when no role was asked for.
+    fn role_for(&self, main: &str, asked: &Value) -> Result<Option<RoleDef>, String> {
+        let id = match asked {
+            Value::Null => return Ok(None),
+            Value::String(s) if s.trim().is_empty() => return Ok(None),
+            Value::String(s) => s.trim().to_lowercase(),
+            _ => return Err("`role` is a role's id.".into()),
+        };
+        let custom = self.inner.lock().unwrap().custom_roles.get(main).cloned().unwrap_or_default();
+        let all: Vec<RoleDef> = crate::roles::builtin().into_iter().chain(custom).collect();
+        match all.iter().find(|r| r.id == id) {
+            Some(r) => Ok(Some(r.clone())),
+            None => Err(format!("{id:?} is not a role. Roles: {}.", all.iter().map(|r| r.id.as_str()).collect::<Vec<_>>().join(", "))),
+        }
+    }
+
+    /// Tells the orchestra the project's own roles, so a Lead may ask for one by id. Replaces the earlier list.
+    pub fn set_roles(&self, main: &str, roles: Vec<RoleDef>) -> Result<(), String> {
+        let roles = crate::roles::checked_custom(roles)?;
+        let mut inner = self.inner.lock().unwrap();
+        if !inner.mains.contains_key(main) {
+            return Err("This chat is not a Team's lead.".into());
+        }
+        inner.custom_roles.insert(main.to_string(), roles);
+        Ok(())
+    }
+
+    /// `user_role`: set when the user started the agent from the form, whose brief is already written out with their role's
+    /// template (so the role is only noted on the agent, not applied again). Otherwise a `role` in `args` is the Lead's ask.
+    async fn spawn(self: &Arc<Self>, main: &str, args: &Value, user_role: Option<RoleTag>) -> Result<String, String> {
         let name = untrusted(Self::text_arg(args, "name")?, 60);
         let brief = Self::text_arg(args, "brief")?.to_string();
         if brief.len() > 50_000 {
             return Err("The brief is too long: put the detail in a file in the repository and point the agent at it.".into());
         }
-        let isolation = args["isolation"].as_str().unwrap_or("worktree");
+        let asked = if user_role.is_some() { None } else { self.role_for(main, &args["role"])? };
+        let brief = asked.as_ref().map_or(brief.clone(), |r| r.brief_for(&brief));
+        let role = user_role.or_else(|| asked.as_ref().map(RoleDef::tag));
+        let isolation = args["isolation"].as_str().or(asked.as_ref().map(|r| r.isolation.as_str())).unwrap_or("worktree");
         if !["worktree", "shared"].contains(&isolation) {
             return Err("`isolation` is \"worktree\" or \"shared\".".into());
         }
@@ -488,7 +525,8 @@ impl Orchestra {
             None => None,
         };
         let provider = self.worker_provider(main, &args["provider"]).await?;
-        let model = model.or_else(|| (provider == ProviderId::Claude).then(|| WORKER_MODEL.to_string()));
+        // A role's model is a Claude alias: another provider's agent runs on that provider's own default.
+        let model = model.or_else(|| (provider == ProviderId::Claude).then(|| asked.as_ref().map_or(WORKER_MODEL, |r| r.model.as_str()).to_string()));
         let folder = self.host.main_folder(main)?;
         let limit = self.host.agent_limit();
         // The place is taken under the same lock that counts the others, so two calls can't both find room for the last one.
@@ -580,9 +618,11 @@ impl Orchestra {
                 isolation: isolation.to_string(),
                 mode: if mode == crate::args::Mode::Auto { "auto".into() } else { "ask".into() },
                 provider: Some(provider.info()),
+                role: role.clone(),
             },
         );
-        let req = SpawnRequest { parent: main.to_string(), slot: id.clone(), name: name.clone(), brief, folder: run_folder.clone(), provider, model, mode, read_only: worktree.is_none() };
+        let read_only = worktree.is_none() || role.as_ref().is_some_and(|r| r.read_only);
+        let req = SpawnRequest { parent: main.to_string(), slot: id.clone(), name: name.clone(), brief, folder: run_folder.clone(), provider, model, mode, read_only, role };
         if let Err(e) = self.host.spawn_worker(req).await {
             release(self, &id);
             self.host.emit(&id, UiEvent::AgentStopped { reason: Some(format!("It didn't start: {e}")) });
@@ -984,7 +1024,7 @@ impl Orchestra {
 
     /// The user started a worker from the canvas: started exactly as the main agent's `spawn_agent` would (the limit, the
     /// worktree, the checks), and the main agent is told it was the user's doing. Returns the worker's id.
-    pub async fn spawn_for_user(self: &Arc<Self>, main: &str, task: &str, name: Option<&str>, isolation: &str, model: Option<&str>) -> Result<String, String> {
+    pub async fn spawn_for_user(self: &Arc<Self>, main: &str, task: &str, name: Option<&str>, isolation: &str, model: Option<&str>, role: Option<RoleTag>) -> Result<String, String> {
         if !self.is_main(main) {
             return Err("This chat is not a Team's lead.".into());
         }
@@ -993,9 +1033,10 @@ impl Orchestra {
             return Err("Say what the agent should do.".into());
         }
         let name = name.map(str::trim).filter(|n| !n.is_empty()).map_or_else(|| clip(&task.split_whitespace().take(5).collect::<Vec<_>>().join(" "), 40), String::from);
+        let role = role.map(|r| r.checked()).transpose()?;
         let args = serde_json::json!({ "name": name, "brief": task, "isolation": isolation, "model": model });
         // The limit's message tells the main agent what to do about it; the user closes a worker instead.
-        let reply = self.spawn(main, &args).await.map_err(|e| e.replace("or stop_agent one.", "or close one."))?;
+        let reply = self.spawn(main, &args, role).await.map_err(|e| e.replace("or stop_agent one.", "or close one."))?;
         let id = reply.strip_prefix("Started agent ").and_then(|r| r.split_whitespace().next()).ok_or("The agent started, but its id couldn't be read.")?.to_string();
         let (name, place) = {
             let inner = self.inner.lock().unwrap();
@@ -2207,7 +2248,7 @@ mod tests {
     #[tokio::test]
     async fn a_worker_the_user_starts_is_started_like_any_other_and_the_main_agent_is_told_it_was_theirs() {
         let (host, o, _r, _w) = setup();
-        let id = o.spawn_for_user("s1", "  Add dark mode to the settings page, please\nwith a toggle ", None, "worktree", Some("opus")).await.unwrap();
+        let id = o.spawn_for_user("s1", "  Add dark mode to the settings page, please\nwith a toggle ", None, "worktree", Some("opus"), None).await.unwrap();
         assert_eq!(id, "w1");
         let events = host.events_for("s1");
         let UiEvent::AgentSpawned { worker, name, brief, branch, isolation, .. } = &events[0] else { panic!("{events:?}") };
@@ -2227,7 +2268,7 @@ mod tests {
     async fn a_worker_the_user_starts_runs_on_the_main_agents_own_provider_and_mode_cap() {
         let (host, o, _r, _w) = setup();
         *host.main_provider.lock().unwrap() = ProviderId::Fake;
-        o.spawn_for_user("s1", "Read the code", None, "shared", None).await.unwrap();
+        o.spawn_for_user("s1", "Read the code", None, "shared", None, None).await.unwrap();
         let spawned = host.spawned.lock().unwrap().clone();
         // The fake provider has no Auto mode, so as for spawn_agent the worker starts on Ask.
         assert_eq!((spawned[0].provider, spawned[0].mode), (ProviderId::Fake, crate::args::Mode::Ask));
@@ -2236,7 +2277,7 @@ mod tests {
     #[tokio::test]
     async fn a_name_given_by_the_user_is_used_and_a_shared_worker_says_so() {
         let (host, o, repo, _w) = setup();
-        o.spawn_for_user("s1", "Read the code", Some(" Research "), "shared", None).await.unwrap();
+        o.spawn_for_user("s1", "Read the code", Some(" Research "), "shared", None, None).await.unwrap();
         assert_eq!(host.spawned.lock().unwrap()[0].folder, repo.path());
         assert_eq!(host.spawned.lock().unwrap()[0].model.as_deref(), Some(WORKER_MODEL));
         assert_eq!(host.wakes(), vec!["[Lantern: the user started agent \"Research\" (w1) themselves, in your folder; you didn't start it. Its task, in the user's words (quoted): \"Read the code\"]"]);
@@ -2245,22 +2286,22 @@ mod tests {
     #[tokio::test]
     async fn a_worker_the_user_starts_meets_the_same_limits_and_checks_and_says_what_to_do_about_them() {
         let (host, o, _r, _w) = setup();
-        assert!(o.spawn_for_user("s1", "   ", None, "worktree", None).await.unwrap_err().contains("what the agent should do"));
-        assert!(o.spawn_for_user("s1", "x", None, "moon", None).await.unwrap_err().contains("isolation"));
-        assert!(o.spawn_for_user("s1", "x", None, "worktree", Some("--bare")).await.unwrap_err().contains("not a model name"));
-        assert!(o.spawn_for_user("s9", "x", None, "worktree", None).await.unwrap_err().contains("not a Team's lead"));
+        assert!(o.spawn_for_user("s1", "   ", None, "worktree", None, None).await.unwrap_err().contains("what the agent should do"));
+        assert!(o.spawn_for_user("s1", "x", None, "moon", None, None).await.unwrap_err().contains("isolation"));
+        assert!(o.spawn_for_user("s1", "x", None, "worktree", Some("--bare"), None).await.unwrap_err().contains("not a model name"));
+        assert!(o.spawn_for_user("s9", "x", None, "worktree", None, None).await.unwrap_err().contains("not a Team's lead"));
         for i in 0..MAX_WORKERS {
             spawn(&o, &format!("w{i}")).await;
         }
         let wakes = host.wakes().len();
-        let err = o.spawn_for_user("s1", "one too many", None, "worktree", None).await.unwrap_err();
+        let err = o.spawn_for_user("s1", "one too many", None, "worktree", None, None).await.unwrap_err();
         assert!(err.contains("the most is 6") && err.contains("or close one") && !err.contains("stop_agent"), "{err}");
         assert_eq!(host.wakes().len(), wakes, "the main agent was told of a worker that never started");
         // Where a worktree can't be made, the user is told so, as the main agent is.
         o.close_worker("w1", None).await.unwrap();
         let plain = tempfile::tempdir().unwrap();
         *host.folder.lock().unwrap() = plain.path().to_path_buf();
-        assert!(o.spawn_for_user("s1", "y", None, "worktree", None).await.unwrap_err().contains("isolation \"shared\""));
+        assert!(o.spawn_for_user("s1", "y", None, "worktree", None, None).await.unwrap_err().contains("isolation \"shared\""));
     }
 
     fn proposals(host: &FakeHost) -> Vec<(u32, Vec<String>)> {
@@ -2382,7 +2423,7 @@ mod tests {
         o.observe("w1", &done("Done."));
         assert!(call(&o, "spawn_agent", json!({"name": "c", "brief": "y"})).await.is_ok());
         // The user starting one is told to close one instead.
-        let err = o.spawn_for_user("s1", "x", None, "shared", None).await.unwrap_err();
+        let err = o.spawn_for_user("s1", "x", None, "shared", None, None).await.unwrap_err();
         assert!(err.contains("your limit in Settings") && err.contains("or close one"), "{err}");
     }
 
@@ -2398,5 +2439,91 @@ mod tests {
         assert_eq!(err, "The plan's five-hour usage is at 96% (it resets in 30 min). Don't start more agents now: wait for it to reset, or ask the user.");
         o.observe("s7", &UiEvent::PlanUsage { used: 0.1, resets_at: None, status: "allowed".into() });
         assert!(call(&o, "spawn_agent", json!({"name": "after", "brief": "y"})).await.is_ok());
+    }
+
+    fn spawned_role(host: &FakeHost, i: usize) -> Option<RoleTag> {
+        host.spawned.lock().unwrap()[i].role.clone()
+    }
+
+    #[tokio::test]
+    async fn a_role_gives_the_agent_its_brief_model_place_and_access() {
+        let (host, o, _r, _w) = setup();
+        let reply = call(&o, "spawn_agent", json!({"name": "Check login", "brief": "branch lantern/login", "role": "Reviewer"})).await.unwrap();
+        assert!(!reply.contains("worktree"), "a reviewer reads the folder as it is: {reply}");
+        call(&o, "spawn_agent", json!({"name": "Build login", "brief": "the login form", "role": "builder"})).await.unwrap();
+        let spawned = host.spawned.lock().unwrap().clone();
+        assert!(spawned[0].brief.starts_with("You are a Reviewer. Review this: branch lantern/login\n") && spawned[0].brief.contains("Severity:"), "{}", spawned[0].brief);
+        assert_eq!((spawned[0].read_only, spawned[0].model.as_deref()), (true, Some("sonnet")));
+        assert!(spawned[1].brief.starts_with("You are a Builder. Build this: the login form"));
+        assert!(!spawned[1].read_only);
+        assert_eq!(spawned_role(&host, 0).map(|r| (r.id, r.label, r.read_only)), Some(("reviewer".into(), "Reviewer".into(), true)));
+        assert_eq!(spawned_role(&host, 1).map(|r| r.read_only), Some(false));
+        // The card is told which role it is.
+        let tags: Vec<_> = host.events_for("s1").into_iter().filter_map(|e| if let UiEvent::AgentSpawned { role, isolation, .. } = e { Some((role.map(|r| r.id), isolation)) } else { None }).collect();
+        assert_eq!(tags, [(Some("reviewer".to_string()), "shared".to_string()), (Some("builder".to_string()), "worktree".to_string())]);
+    }
+
+    #[tokio::test]
+    async fn a_read_only_role_cannot_be_given_edit_tools_by_asking_for_a_worktree_or_a_model() {
+        let (host, o, _r, _w) = setup();
+        call(&o, "spawn_agent", json!({"name": "Audit", "brief": "the auth code", "role": "security", "isolation": "worktree", "model": "opus"})).await.unwrap();
+        let req = host.spawned.lock().unwrap()[0].clone();
+        assert!(req.read_only, "a security auditor stays read-only in a worktree of its own");
+        assert_eq!(req.model.as_deref(), Some("opus"));
+        assert!(host.events_for("s1").into_iter().any(|e| matches!(e, UiEvent::AgentSpawned { isolation, .. } if isolation == "worktree")));
+    }
+
+    #[tokio::test]
+    async fn an_unknown_role_is_refused_and_the_roles_there_are_listed() {
+        let (host, o, _r, _w) = setup();
+        let err = call(&o, "spawn_agent", json!({"name": "x", "brief": "y", "role": "wizard"})).await.unwrap_err();
+        assert_eq!(err, "\"wizard\" is not a role. Roles: builder, reviewer, qa, docs, security.");
+        assert!(call(&o, "spawn_agent", json!({"name": "x", "brief": "y", "role": 7})).await.unwrap_err().contains("`role`"));
+        // An empty one is no role at all.
+        assert!(call(&o, "spawn_agent", json!({"name": "x", "brief": "y", "role": " "})).await.is_ok());
+        assert_eq!(host.spawned.lock().unwrap().len(), 1);
+        assert_eq!(spawned_role(&host, 0), None);
+    }
+
+    fn api_reviewer() -> RoleDef {
+        RoleDef { id: "api-reviewer".into(), label: "API reviewer".into(), description: String::new(), brief: "Check the API: {task}".into(), model: "haiku".into(), isolation: "shared".into(), read_only: true }
+    }
+
+    #[tokio::test]
+    async fn the_projects_own_roles_can_be_asked_for_once_the_team_has_been_told_of_them() {
+        let (host, o, _r, _w) = setup();
+        let ask = json!({"name": "x", "brief": "the routes", "role": "api-reviewer"});
+        assert!(call(&o, "spawn_agent", ask.clone()).await.unwrap_err().contains("is not a role"));
+        o.set_roles("s1", vec![api_reviewer()]).unwrap();
+        call(&o, "spawn_agent", ask.clone()).await.unwrap();
+        let req = host.spawned.lock().unwrap()[0].clone();
+        assert_eq!((req.brief.as_str(), req.model.as_deref(), req.read_only), ("Check the API: the routes", Some("haiku"), true));
+        // Another team doesn't have them; telling a team again replaces its list.
+        o.register_main("s2");
+        assert!(o.call("s2", "spawn_agent", &ask).await.unwrap_err().contains("is not a role"));
+        o.set_roles("s1", vec![]).unwrap();
+        assert!(call(&o, "spawn_agent", ask).await.unwrap_err().contains("is not a role"));
+    }
+
+    #[tokio::test]
+    async fn roles_are_checked_before_a_team_keeps_them() {
+        let (_h, o, _r, _w) = setup();
+        assert!(o.set_roles("s1", vec![RoleDef { id: "reviewer".into(), ..api_reviewer() }]).is_err(), "a built-in id is taken");
+        assert!(o.set_roles("s1", vec![RoleDef { model: "--bare".into(), ..api_reviewer() }]).is_err());
+        assert!(o.set_roles("s9", vec![api_reviewer()]).unwrap_err().contains("not a Team's lead"));
+    }
+
+    #[tokio::test]
+    async fn an_agent_the_user_starts_with_a_role_keeps_the_role_and_its_access_and_its_brief_as_written() {
+        let (host, o, _r, _w) = setup();
+        let tag = RoleTag { id: "reviewer".into(), label: " Reviewer ".into(), read_only: true };
+        o.spawn_for_user("s1", "You are a Reviewer. Review this: the login form", Some("Reviewer: login form"), "worktree", Some("opus"), Some(tag)).await.unwrap();
+        let req = host.spawned.lock().unwrap()[0].clone();
+        assert_eq!(req.brief, "You are a Reviewer. Review this: the login form", "the form wrote the brief: it isn't wrapped in the role again");
+        assert_eq!((req.name.as_str(), req.read_only, req.model.as_deref()), ("Reviewer: login form", true, Some("opus")));
+        assert_eq!(spawned_role(&host, 0).map(|r| r.label), Some("Reviewer".into()));
+        let bad = RoleTag { id: "Not Valid".into(), label: "x".into(), read_only: false };
+        assert!(o.spawn_for_user("s1", "y", None, "worktree", None, Some(bad)).await.unwrap_err().contains("isn't usable"));
+        assert_eq!(host.spawned.lock().unwrap().len(), 1);
     }
 }

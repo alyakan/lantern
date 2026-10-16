@@ -22,6 +22,7 @@ pub mod slots;
 pub mod offstream;
 pub mod outside;
 pub mod relocate;
+pub mod roles;
 pub mod stream_parser;
 pub mod test_runs;
 pub mod titles;
@@ -470,6 +471,9 @@ struct WorkerSettings {
     /// It works in its main agent's folder, so it reads and doesn't edit (see Role::Worker).
     #[serde(default)]
     shared: bool,
+    /// Its role is a read-only one (see roles.rs): the same as `shared` for what it may do, but it has a folder of its own.
+    #[serde(default)]
+    read_only: bool,
 }
 
 fn checked_effort(effort: Option<String>) -> Result<Option<String>, String> {
@@ -501,7 +505,7 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
             slot,
             match (settings.orchestrator, settings.worker) {
                 (true, _) => Role::Main,
-                (false, Some(w)) => Role::Worker { name: w.name, read_only: w.shared },
+                (false, Some(w)) => Role::Worker { name: w.name, read_only: w.shared || w.read_only },
                 (false, None) => Role::Normal,
             },
         )?,
@@ -746,8 +750,14 @@ async fn orchestra_close_worker(state: State<'_, AppState>, worker: String, agre
 
 /// Starts a worker the user asked for from the canvas (the main agent `main` is told). Returns the worker's id.
 #[tauri::command]
-async fn orchestra_spawn(state: State<'_, AppState>, main: String, task: String, name: Option<String>, isolation: String, model: Option<String>) -> Result<String, String> {
-    state.orchestra.spawn_for_user(&main, &task, name.as_deref(), &isolation, model.as_deref()).await
+async fn orchestra_spawn(state: State<'_, AppState>, main: String, task: String, name: Option<String>, isolation: String, model: Option<String>, role: Option<roles::RoleTag>) -> Result<String, String> {
+    state.orchestra.spawn_for_user(&main, &task, name.as_deref(), &isolation, model.as_deref(), role).await
+}
+
+/// Tells a Lead's team the project's own roles (the built-in ones need no telling), so the Lead may ask for one by id.
+#[tauri::command]
+fn orchestra_set_roles(state: State<'_, AppState>, main: String, roles: Vec<roles::RoleDef>) -> Result<(), String> {
+    state.orchestra.set_roles(&main, roles)
 }
 
 /// The control requests Settings may send to a chat's claude: MCP servers' status and actions, and reloading plugins
@@ -1766,6 +1776,7 @@ pub fn run() {
             orchestra_close_check,
             orchestra_close_worker,
             orchestra_spawn,
+            orchestra_set_roles,
             set_agent_limit
         ])
         .build(tauri::generate_context!())
