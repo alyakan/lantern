@@ -77,6 +77,7 @@ import { usePeek } from "./lib/peek";
 import { MessageInput } from "./components/MessageInput";
 import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
+import type { DiffComment } from "./lib/diffComments";
 import { SetupScreen } from "./components/SetupScreen";
 import { Welcome } from "./components/Welcome";
 import { RestoreCard } from "./components/RestoreCard";
@@ -218,6 +219,8 @@ export default function App() {
   // The agent whose branch a merge card asked to see in Changes, and the base to compare it with (null: Lantern finds it);
   // `key` brings the Changes tab up each time.
   const [branchPeek, setBranchPeek] = useState<{ slot: string; base: string | null; key: number } | null>(null);
+  // Review comments on diff lines, kept for each chat while the app runs (a worker's branch review is its own chat's).
+  const [diffComments, setDiffComments] = useState<Record<string, DiffComment[]>>({});
   // Step-by-step mode shows the conversation as pages; the page on screen picks the turn whose changes the Changes pane
   // shows.
   const [pageRange, setPageRange] = useState<{ from: number; to: number } | null>(null);
@@ -1930,6 +1933,21 @@ export default function App() {
                 onSummarizeRequest={
                   state.status === "idle" || state.status === "running"
                     ? (item) => (state.status === "running" ? dispatch({ type: "queue_set", items: [...state.queued, summarizeRequest(item)] }) : sendIn(active, summarizeRequest(item)))
+                    : undefined
+                }
+                comments={
+                  state.folder
+                    ? {
+                        items: diffComments[active] ?? [],
+                        update: (change) =>
+                          setDiffComments((all) => {
+                            const was = all[active] ?? [];
+                            const now = change(was);
+                            return now === was ? all : { ...all, [active]: now };
+                          }),
+                        // One message for all of them: sent now when Claude is free, queued behind the turn when it's working.
+                        send: state.status === "idle" || state.status === "running" ? (text) => (state.status === "running" ? dispatch({ type: "queue_set", items: [...state.queued, text] }) : sendIn(active, text)) : undefined,
+                      }
                     : undefined
                 }
                 revert={{
