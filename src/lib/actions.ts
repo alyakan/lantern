@@ -47,6 +47,8 @@ const CATALOGUE = [
   { id: "report-bug", title: "Report a Bug…", group: "Help", menu: true },
   { id: "focus-input", title: "Focus the Message Box", group: "Chat", key: "l" },
   { id: "stop", title: "Stop Claude", group: "Chat", key: "." },
+  // In the palette (and the Done page and the Changes tab's Ship it…): no shortcut and no native menu item.
+  { id: "ship-it", title: "Ship It…", group: "Chat" },
 ] as const satisfies readonly ActionDef[];
 
 /** The catalogue, typed as plain entries (the ids are checked against the literal list above). */

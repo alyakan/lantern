@@ -17,6 +17,8 @@ export const FOLDER_RECORDS = [
   // The project's own agent roles and team templates.
   "settings.rolesByFolder",
   "settings.teamTemplatesByFolder",
+  // Which of Ship it's steps (commit, push, pull request) were ticked last.
+  "ship.ticksByFolder",
 ] as const;
 
 /** Lantern's lists of folders that name the folder itself: the moved folder takes the old one's place in them. */

@@ -60,7 +60,7 @@ describe("StepsView", () => {
 
   it("ends a Build on the hand-off, and only the Done page has it", () => {
     const done: ChatItem[] = [...items, { type: "user", id: "u3", text: "Next", turn: 2 }, { type: "assistant", id: "a3", text: "# Done — Added slugify\n\nIt is in." }, { type: "turn", id: "t3", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 }];
-    const handoff = { slot: "s", summary: null, changed: [], doc: { pages: [], title: "t", folder: "/p" }, running: false, onReviewChanges: vi.fn(), onStartNew: vi.fn() };
+    const handoff = { slot: "s", summary: null, changed: [], doc: { pages: [], title: "t", folder: "/p" }, running: false, onReviewChanges: vi.fn(), onStartNew: vi.fn(), onShip: vi.fn() };
     render(<StepsView state={state({ items: done })} {...handlers()} handoff={handoff} />);
     expect(screen.getByRole("region", { name: "What next" })).toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: "Progress" }).querySelector('[aria-current="step"]')).toHaveTextContent("Done");

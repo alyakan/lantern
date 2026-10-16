@@ -17,6 +17,22 @@ const base = { folder: "/p", ready: false, files, refreshKey: 0, onSelect: () =>
 // these tests only look at what the panel offers.
 const controls = (over: Partial<RevertControls> = {}): RevertControls => ({ slot: "s1", blocked: null, latestTurn: null, undo: null, onUndo: vi.fn(), onReverted: vi.fn(), ...over });
 
+describe("ReviewPanel's Ship it", () => {
+  it("is in the Changes header when there are changes and a chat to ask, and opens Ship it", () => {
+    const onShip = vi.fn();
+    render(<ReviewPanel {...base} selected={null} follow onShip={onShip} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ship it…" }));
+    expect(onShip).toHaveBeenCalledTimes(1);
+  });
+
+  it("is absent without a chat to ask, and without changes", () => {
+    const { rerender } = render(<ReviewPanel {...base} selected={null} follow />);
+    expect(screen.queryByRole("button", { name: "Ship it…" })).toBeNull();
+    rerender(<ReviewPanel {...base} selected={null} follow files={[]} onShip={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Ship it…" })).toBeNull();
+  });
+});
+
 describe("ReviewPanel reverts", () => {
   it("a file's Revert opens a dialog for that file", () => {
     render(<ReviewPanel {...base} scope="session" selected="/p/src/a.ts" follow revert={controls()} />);
