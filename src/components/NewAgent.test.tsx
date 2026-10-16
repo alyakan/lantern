@@ -174,7 +174,7 @@ describe("a role in the form to start an agent", () => {
     expect((within(form()).getByLabelText("Shared folder") as HTMLInputElement).checked).toBe(true);
     expect((within(form()).getByLabelText("Model") as HTMLSelectElement).value).toBe("sonnet");
     expect((within(form()).getByLabelText("Read only") as HTMLInputElement).checked).toBe(true);
-    expect(form().textContent).toContain("Reads a branch or diff and reports findings");
+    expect(form().textContent).toContain("Reads files and a diff you give it and reports findings");
     expect(brief().value).toContain("You are a Reviewer. Review this: (your task)");
     type(task(), "the login form");
     expect(brief().value).toContain("You are a Reviewer. Review this: the login form");
