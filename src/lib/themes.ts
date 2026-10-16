@@ -47,7 +47,7 @@ export const THEMES: ThemeInfo[] = [
   { id: "light", label: "Light", scheme: "light", picks: LIGHT_PICKS },
   { id: "dark", label: "Dark", scheme: "dark", picks: DARK_PICKS },
   { id: "terminal", label: "Terminal", scheme: "dark", picks: pick("#0d1117", "#141a22", "#d3d8e0", "#a9b1bb", "#58a6ff", "#21262d") },
-  { id: "fallout", label: "Fallout", scheme: "dark", picks: pick("#020a04", "#051009", "#2adb5f", "#229e4e", "#c4ffd8", "#11401f") },
+  { id: "fallout", label: "Fallout", scheme: "dark", picks: pick("#020a04", "#09180e", "#2adb5f", "#24a54f", "#c4ffd8", "#11401f") },
   { id: "solarized", label: "Solarized Dark", scheme: "dark", picks: pick("#002b36", "#073642", "#a2b1b1", "#93a1a1", "#2aa198", "#0f3f4c") },
   { id: "nord", label: "Nord", scheme: "dark", picks: pick("#2e3440", "#3b4252", "#eceff4", "#d8dee9", "#88c0d0", "#3f4759") },
   { id: "paper", label: "Paper", scheme: "light", picks: pick("#fbf6ec", "#f3ecdc", "#2b2620", "#52483d", "#6b3f1d", "#e4dac6") },
