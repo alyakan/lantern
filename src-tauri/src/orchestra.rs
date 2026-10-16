@@ -9,6 +9,7 @@ use crate::git;
 use crate::permission::bridge::OrchestraHandler;
 use crate::permission::protocol::BridgeResponse;
 use crate::provider::ProviderId;
+use crate::setup;
 use crate::ui_event::UiEvent;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -106,6 +107,14 @@ pub trait Host: Send + Sync + 'static {
     fn main_folder(&self, main: &str) -> Result<PathBuf, String>;
     /// The provider the main agent's own chat runs on.
     fn main_provider(&self, main: &str) -> ProviderId;
+    /// The setup the user saved for the project in `folder` (see setup.rs): what is run in each new worktree before its agent starts.
+    fn project_setup(&self, _folder: &Path) -> setup::ProjectSetup {
+        setup::ProjectSetup::default()
+    }
+    /// How long one setup command may run.
+    fn setup_limit(&self) -> Duration {
+        setup::COMMAND_LIMIT
+    }
     /// The providers a worker of this main agent may run on: the main agent's own, and every other whose CLI is installed.
     fn available_providers(&self, main: &str) -> Fut<'_, Vec<ProviderId>>;
     /// The mode workers of this main agent start in when they run on `provider`.
@@ -187,6 +196,22 @@ struct Worker {
     merge: Merge,
     /// The merge as it was last proposed: approving merges that and nothing else.
     proposed: Option<Proposed>,
+    /// Its worktree is being set up, or setup failed and the user hasn't said what next: its claude hasn't started.
+    pending: Option<Pending>,
+}
+
+/// A worker that hasn't started because the project's setup comes first (see setup.rs).
+struct Pending {
+    req: SpawnRequest,
+    worktree: git::Worktree,
+    /// The main agent's folder: the checkout the worktree was made from.
+    repo: PathBuf,
+    commands: Vec<String>,
+    /// A command is running now (a stopped setup is finished once this is false).
+    running: bool,
+    /// Setup stopped at a command, and the user decides: start it anyway, run setup again, or close it.
+    failed: bool,
+    cancel: tokio::sync::watch::Sender<bool>,
 }
 
 /// A merge as the user was shown it: the branch it goes into, and the commit and loose files it takes.
@@ -376,6 +401,7 @@ impl Orchestra {
                 wait_seq: 0,
                 merge: Merge::None,
                 proposed: None,
+                pending: None,
             },
         );
         Ok(())
@@ -406,6 +432,12 @@ impl Orchestra {
     pub fn forget(&self, slot: &str) {
         let mut inner = self.inner.lock().unwrap();
         inner.mains.remove(slot);
+        // A setup still running in a worktree nobody will start in stops.
+        for (id, w) in &inner.workers {
+            if let (true, Some(p)) = (id == slot || w.parent == slot, &w.pending) {
+                p.cancel.send_replace(true);
+            }
+        }
         inner.workers.retain(|id, w| id != slot && w.parent != slot);
         let live: std::collections::HashSet<String> = inner.workers.keys().cloned().collect();
         inner.order.retain(|s| live.contains(s));
@@ -527,6 +559,7 @@ impl Orchestra {
                     wait_seq: 0,
                     merge: Merge::None,
                     proposed: None,
+                    pending: None,
                 },
             );
             id
@@ -583,15 +616,17 @@ impl Orchestra {
             },
         );
         let req = SpawnRequest { parent: main.to_string(), slot: id.clone(), name: name.clone(), brief, folder: run_folder.clone(), provider, model, mode, read_only: worktree.is_none() };
-        if let Err(e) = self.host.spawn_worker(req).await {
-            release(self, &id);
-            self.host.emit(&id, UiEvent::AgentStopped { reason: Some(format!("It didn't start: {e}")) });
-            if let Some(wt) = worktree {
-                let (repo, env) = (folder, path_env);
-                let _ = tokio::task::spawn_blocking(move || git::remove_worktree(&repo, &wt.root, &wt.branch, true, true, env.as_deref())).await;
-            }
-            return Err(format!("The agent didn't start: {e}"));
+        // The user's setup for the project runs in a new worktree first (npm ci…), which can take minutes: it goes on by itself,
+        // the agent starts when it is done, and the main agent is told if it fails.
+        let setup = worktree.as_ref().map(|_| self.host.project_setup(&folder).commands).unwrap_or_default();
+        if let (Some(wt), false) = (&worktree, setup.is_empty()) {
+            self.begin_setup(&id, req, wt.clone(), folder, setup, path_env);
+            return Ok(format!(
+                "Started agent {id} (\"{name}\") on branch {} in its own worktree. The project's setup commands are running in it first, and it starts on its brief when they are done: you'll get a note if one fails.{note}",
+                wt.branch
+            ));
         }
+        self.start_worker(&id, req, worktree.clone(), folder, path_env).await?;
         if provider != self.host.main_provider(main) {
             note.push_str(&format!(" It runs on {}.", provider.name()));
         }
@@ -599,6 +634,157 @@ impl Orchestra {
             Some(wt) => format!("Started agent {id} (\"{name}\") on branch {} in its own worktree. It runs on its own; you'll get a note when it finishes a turn.{note}", wt.branch),
             None => format!("Started agent {id} (\"{name}\"). It runs on its own; you'll get a note when it finishes a turn.{note}"),
         })
+    }
+
+    /// Starts the worker's claude and sends it its brief. When that fails the worker is forgotten, its worktree removed, and
+    /// the error says so.
+    async fn start_worker(self: &Arc<Self>, id: &str, req: SpawnRequest, worktree: Option<git::Worktree>, repo: PathBuf, path_env: Option<String>) -> Result<(), String> {
+        if let Err(e) = self.host.spawn_worker(req).await {
+            {
+                let mut inner = self.inner.lock().unwrap();
+                inner.workers.remove(id);
+                inner.order.retain(|s| s != id);
+            }
+            self.host.emit(id, UiEvent::AgentStopped { reason: Some(format!("It didn't start: {e}")) });
+            if let Some(wt) = worktree {
+                let _ = tokio::task::spawn_blocking(move || git::remove_worktree(&repo, &wt.root, &wt.branch, true, true, path_env.as_deref())).await;
+            }
+            return Err(format!("The agent didn't start: {e}"));
+        }
+        Ok(())
+    }
+
+    /// The worker waits for the project's setup (`commands`, the user's own lines) to run in its new worktree, which it does now,
+    /// on its own: see `run_setup`.
+    fn begin_setup(self: &Arc<Self>, id: &str, req: SpawnRequest, worktree: git::Worktree, repo: PathBuf, commands: Vec<String>, path_env: Option<String>) {
+        let (cancel, _) = tokio::sync::watch::channel(false);
+        {
+            let mut inner = self.inner.lock().unwrap();
+            let Some(w) = inner.workers.get_mut(id) else { return };
+            w.pending = Some(Pending { req, worktree, repo, commands, running: true, failed: false, cancel });
+        }
+        let (this, id) = (self.clone(), id.to_string());
+        tokio::spawn(async move { this.run_setup(&id, path_env).await });
+    }
+
+    /// Runs the pending worker's setup, telling its card how it goes, then starts it. If a command fails the worker stays
+    /// as it is (nothing started) and the card asks the user what next; the main agent is told it is waiting.
+    async fn run_setup(self: &Arc<Self>, id: &str, path_env: Option<String>) {
+        let (commands, repo, folder, mut cancel, name, main) = {
+            let mut inner = self.inner.lock().unwrap();
+            let Some(w) = inner.workers.get_mut(id) else { return };
+            let (name, main) = (w.name.clone(), w.parent.clone());
+            let Some(p) = w.pending.as_mut() else { return };
+            (p.commands.clone(), p.repo.clone(), p.worktree.folder.clone(), p.cancel.subscribe(), name, main)
+        };
+        let total = commands.len();
+        let host = self.host.clone();
+        let slot = id.to_string();
+        let report = move |p: setup::Progress| {
+            let (index, command, line) = match p {
+                setup::Progress::Started { index, command, .. } => (index, command, String::new()),
+                setup::Progress::Line { index, line } => (index, String::new(), line),
+            };
+            host.emit(&slot, UiEvent::AgentSetup { phase: "running".into(), index, total, command, line, reason: String::new(), tail: String::new() });
+        };
+        let env = setup::Env { folder: &folder, project: &repo, path_env: path_env.as_deref(), limit: self.host.setup_limit() };
+        let result = setup::run_all(&commands, &env, &mut cancel, &report).await;
+        match result {
+            Ok(()) => {
+                let Some(pending) = self.take_pending(id) else { return };
+                self.host.emit(id, UiEvent::AgentSetup { phase: "done".into(), index: total, total, command: String::new(), line: String::new(), reason: String::new(), tail: String::new() });
+                if let Err(e) = self.start_worker(id, pending.req, Some(pending.worktree), pending.repo, path_env).await {
+                    self.wake(&main, format!("[Lantern: agent \"{name}\" ({id}) didn't start after its setup: {}. It is gone.]", untrusted(&e, 200)));
+                }
+            }
+            Err(f) => {
+                {
+                    let mut inner = self.inner.lock().unwrap();
+                    let Some(w) = inner.workers.get_mut(id) else { return };
+                    let Some(p) = w.pending.as_mut() else { return };
+                    p.running = false;
+                    p.failed = true;
+                    // Waiting on the user, who answers from its card.
+                    w.status = Status::Waiting;
+                }
+                self.host.emit(id, UiEvent::AgentSetup { phase: "failed".into(), index: f.index, total, command: f.command.clone(), line: String::new(), reason: f.reason.clone(), tail: f.tail.clone() });
+                // The command is the user's own line; what it printed is not repeated, since a tool can print anything.
+                let what = if f.cancelled { "was stopped".to_string() } else { format!("failed at \"{}\" ({})", untrusted(&f.command, 120), untrusted(&f.reason, 80)) };
+                self.wake(&main, format!("[Lantern: setup for agent \"{name}\" ({id}) {what}, so it hasn't started. The user decides whether to start it anyway, run setup again or close it.]"));
+            }
+        }
+    }
+
+    /// Takes the pending worker's start data when it still can start (it is still part of the team, and its setup wasn't stopped).
+    fn take_pending(&self, id: &str) -> Option<Pending> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.workers.get_mut(id)?.pending.take()
+    }
+
+    /// The user's answer on a card whose setup failed: "start" it without the rest of the setup, or "again" run the setup from
+    /// the first line; or "stop" a setup that is running.
+    pub async fn setup_answer(self: &Arc<Self>, worker: &str, answer: &str) -> Result<(), String> {
+        let path_env = self.host.path_env().await;
+        match answer {
+            "start" => {
+                let (main, pending) = {
+                    let mut inner = self.inner.lock().unwrap();
+                    let w = inner.workers.get_mut(worker).ok_or(GONE)?;
+                    if !w.pending.as_ref().is_some_and(|p| p.failed) {
+                        return Err("That agent isn't waiting for an answer about its setup.".into());
+                    }
+                    w.status = Status::Working;
+                    (w.parent.clone(), w.pending.take().expect("checked above"))
+                };
+                self.host.emit(worker, UiEvent::AgentSetup { phase: "done".into(), index: 0, total: 0, command: String::new(), line: String::new(), reason: String::new(), tail: String::new() });
+                let name = self.inner.lock().unwrap().workers.get(worker).map(|w| w.name.clone()).unwrap_or_default();
+                self.start_worker(worker, pending.req, Some(pending.worktree), pending.repo, path_env).await?;
+                self.wake(&main, format!("[Lantern: the user started agent \"{name}\" ({worker}) without finishing its setup.]"));
+                Ok(())
+            }
+            "again" => {
+                {
+                    let mut inner = self.inner.lock().unwrap();
+                    let w = inner.workers.get_mut(worker).ok_or(GONE)?;
+                    let Some(p) = w.pending.as_mut().filter(|p| p.failed) else {
+                        return Err("That agent isn't waiting for an answer about its setup.".into());
+                    };
+                    // A fresh switch for this run: the earlier stop mustn't stop it.
+                    p.cancel = tokio::sync::watch::channel(false).0;
+                    p.running = true;
+                    p.failed = false;
+                    w.status = Status::Working;
+                }
+                let (this, id) = (self.clone(), worker.to_string());
+                tokio::spawn(async move { this.run_setup(&id, path_env).await });
+                Ok(())
+            }
+            // The card's Stop while it runs: the setup ends, and the card then asks the same three questions.
+            "stop" => {
+                self.end_setup(worker).await;
+                Ok(())
+            }
+            _ => Err("The answer is \"start\", \"again\" or \"stop\".".into()),
+        }
+    }
+
+    /// Stops a setup that is running and waits for its commands to end (a worktree must not be removed under them).
+    async fn end_setup(&self, worker: &str) {
+        let running = {
+            let inner = self.inner.lock().unwrap();
+            let Some(p) = inner.workers.get(worker).and_then(|w| w.pending.as_ref()) else { return };
+            p.cancel.send_replace(true);
+            p.running
+        };
+        if !running {
+            return;
+        }
+        for _ in 0..200 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            if !self.inner.lock().unwrap().workers.get(worker).and_then(|w| w.pending.as_ref()).is_some_and(|p| p.running) {
+                return;
+            }
+        }
     }
 
     fn list(&self, main: &str) -> String {
@@ -609,6 +795,11 @@ impl Orchestra {
             let mut line = format!("{id} \"{}\" — {}", w.name, w.status.label());
             if let (Status::Waiting, Some(on), Some(since)) = (w.status, &w.waiting_on, w.waiting_since) {
                 line.push_str(&format!(" for {}s to allow {on}", since.elapsed().as_secs()));
+            }
+            match w.pending.as_ref() {
+                Some(p) if p.failed => line.push_str(" · setup failed, so it hasn't started (the user decides what next)"),
+                Some(_) => line.push_str(" · setting up its worktree, not started yet"),
+                None => {}
             }
             if let Some(wt) = &w.worktree {
                 line.push_str(&format!(" · branch {}", wt.branch));
@@ -681,6 +872,9 @@ impl Orchestra {
             let w = inner.workers.get(&id).ok_or(GONE)?;
             (w.name.clone(), w.status)
         };
+        if self.inner.lock().unwrap().workers.get(&id).is_some_and(|w| w.pending.is_some()) {
+            return Err(format!("Agent {id} (\"{name}\") hasn't started: the project's setup runs in its worktree first (or failed, and the user decides what next). Try again later."));
+        }
         if !status.live() {
             return Err(format!("Agent {id} (\"{name}\") has {}, so it can't take messages.{}", status.label(), if status.live() { "" } else { " Only the user can restart it; or spawn_agent a new agent with the remaining task." }));
         }
@@ -699,6 +893,12 @@ impl Orchestra {
 
     async fn stop(self: &Arc<Self>, main: &str, args: &Value) -> Result<String, String> {
         let id = self.owned(main, args)?;
+        let setting_up = self.inner.lock().unwrap().workers.get(&id).is_some_and(|w| w.pending.is_some());
+        if setting_up {
+            // Not started yet: only its setup can be stopped, and the user says what happens to it then.
+            self.end_setup(&id).await;
+            return Ok(format!("Stopped the setup of {id}; it hasn't started. The user decides whether to start it anyway, run setup again or close it."));
+        }
         self.host.stop(&id).await;
         let worktree = {
             let mut inner = self.inner.lock().unwrap();
@@ -879,6 +1079,7 @@ impl Orchestra {
                 return Err(format!("Its worktree has {} uncommitted change{}, which removing it would throw away.", loose.len(), if loose.len() == 1 { "" } else { "s" }));
             }
         }
+        self.end_setup(worker).await;
         self.host.stop(worker).await;
         // A branch Lantern didn't make (an older save names what the worktree had checked out) stays, whatever happens.
         let (branch, e) = (wt.branch.clone(), env);
@@ -890,6 +1091,8 @@ impl Orchestra {
             if let Some(w) = inner.workers.get_mut(worker) {
                 w.status = Status::Stopped;
                 w.worktree = None;
+                // It can't start in a worktree that is gone.
+                w.pending = None;
                 w.wait_seq += 1;
             }
         }
@@ -1159,9 +1362,18 @@ mod tests {
         installed: Mutex<Vec<ProviderId>>,
         /// The user's limit on agents running at once across Lantern (None: as many as a team may have).
         limit: Mutex<Option<usize>>,
+        /// The project's setup lines, and how long one may run.
+        setup_lines: Mutex<Vec<String>>,
+        setup_limit: Mutex<Option<Duration>>,
     }
 
     impl Host for FakeHost {
+        fn project_setup(&self, _: &Path) -> setup::ProjectSetup {
+            setup::ProjectSetup { commands: self.setup_lines.lock().unwrap().clone(), run: None }
+        }
+        fn setup_limit(&self) -> Duration {
+            self.setup_limit.lock().unwrap().unwrap_or(setup::COMMAND_LIMIT)
+        }
         fn emit(&self, slot: &str, event: UiEvent) {
             self.events.lock().unwrap().push((slot.to_string(), event));
         }
@@ -2398,5 +2610,147 @@ mod tests {
         assert_eq!(err, "The plan's five-hour usage is at 96% (it resets in 30 min). Don't start more agents now: wait for it to reset, or ask the user.");
         o.observe("s7", &UiEvent::PlanUsage { used: 0.1, resets_at: None, status: "allowed".into() });
         assert!(call(&o, "spawn_agent", json!({"name": "after", "brief": "y"})).await.is_ok());
+    }
+
+    /// Waits (up to ten seconds) until `cond` holds.
+    async fn until(what: &str, cond: impl Fn() -> bool) {
+        for _ in 0..200 {
+            if cond() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("timed out waiting for {what}");
+    }
+
+    fn setup_phases(host: &FakeHost, slot: &str) -> Vec<String> {
+        host.events_for(slot).into_iter().filter_map(|e| if let UiEvent::AgentSetup { phase, .. } = e { Some(phase) } else { None }).collect()
+    }
+
+    fn worktree_folder(host: &FakeHost) -> PathBuf {
+        let events = host.events_for("s1");
+        let Some(UiEvent::AgentSpawned { folder, .. }) = events.into_iter().find(|e| matches!(e, UiEvent::AgentSpawned { .. })) else { panic!("no worker was announced") };
+        PathBuf::from(folder)
+    }
+
+    #[tokio::test]
+    async fn a_new_worktree_is_set_up_in_order_before_its_agent_starts() {
+        let (host, o, repo, _wt) = setup();
+        *host.setup_lines.lock().unwrap() = vec!["pwd > where.txt".into(), "echo two >> order.txt".into(), "cp \"$LANTERN_PROJECT_DIR/a.txt\" copied.txt".into()];
+        let reply = spawn(&o, "Login form").await;
+        // The main agent isn't kept waiting for it.
+        assert!(reply.contains("setup commands are running") && reply.contains("lantern/login-form"), "{reply}");
+        assert!(host.spawned.lock().unwrap().is_empty(), "it started before its setup ran");
+        until("the agent to start", || !host.spawned.lock().unwrap().is_empty()).await;
+        let folder = worktree_folder(&host);
+        assert_eq!(std::fs::read_to_string(folder.join("where.txt")).unwrap().trim(), folder.canonicalize().unwrap().display().to_string());
+        assert_eq!(std::fs::read_to_string(folder.join("copied.txt")).unwrap(), "one\n");
+        assert!(!repo.path().join("where.txt").exists(), "setup ran in the user's own checkout");
+        let phases = setup_phases(&host, "w1");
+        assert_eq!((phases.first().map(String::as_str), phases.last().map(String::as_str)), (Some("running"), Some("done")));
+        assert_eq!(host.spawned.lock().unwrap()[0].folder, folder);
+        assert!(o.inner.lock().unwrap().workers["w1"].pending.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_worker_without_setup_or_in_the_shared_folder_starts_at_once() {
+        let (host, o, _repo, _wt) = setup();
+        spawn(&o, "plain").await;
+        assert_eq!(host.spawned.lock().unwrap().len(), 1);
+        *host.setup_lines.lock().unwrap() = vec!["touch ran.txt".into()];
+        let reply = call(&o, "spawn_agent", json!({"name": "reader", "brief": "look", "isolation": "shared"})).await.unwrap();
+        assert!(!reply.contains("setup"), "{reply}");
+        assert_eq!(host.spawned.lock().unwrap().len(), 2);
+        assert!(setup_phases(&host, "w2").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failed_setup_keeps_the_agent_from_starting_and_tells_the_card_and_the_main_agent() {
+        let (host, o, _repo, _wt) = setup();
+        *host.setup_lines.lock().unwrap() = vec!["echo first > first.txt".into(), "printf 'cannot find %s' lockfile >&2 && exit 2".into(), "echo never > never.txt".into()];
+        spawn(&o, "Login form").await;
+        until("setup to fail", || setup_phases(&host, "w1").contains(&"failed".to_string())).await;
+        let failed = host.events_for("w1").into_iter().find_map(|e| if let UiEvent::AgentSetup { phase, index, total, command, reason, tail, .. } = e { (phase == "failed").then_some((index, total, command, reason, tail)) } else { None }).unwrap();
+        assert_eq!(failed, (1, 3, "printf 'cannot find %s' lockfile >&2 && exit 2".to_string(), "it exited with code 2".to_string(), "cannot find lockfile".to_string()));
+        assert!(host.spawned.lock().unwrap().is_empty());
+        assert!(!worktree_folder(&host).join("never.txt").exists());
+        let wakes = host.wakes();
+        assert_eq!(wakes.len(), 1);
+        assert!(wakes[0].contains("setup for agent") && wakes[0].contains("failed at") && !wakes[0].contains("cannot find lockfile"), "{}", wakes[0]);
+        // The main agent can't message, or read, an agent that hasn't started.
+        let err = call(&o, "message_agent", json!({"id": "w1", "text": "hi"})).await.unwrap_err();
+        assert!(err.contains("hasn't started"), "{err}");
+        assert!(call(&o, "list_agents", json!({})).await.unwrap().contains("setup failed"));
+    }
+
+    #[tokio::test]
+    async fn start_anyway_starts_the_agent_and_run_again_runs_the_setup_from_the_top() {
+        let (host, o, _repo, _wt) = setup();
+        *host.setup_lines.lock().unwrap() = vec!["echo run >> runs.txt".into(), "test -f ready.txt".into()];
+        spawn(&o, "Login form").await;
+        until("setup to fail", || setup_phases(&host, "w1").contains(&"failed".to_string())).await;
+        let folder = worktree_folder(&host);
+        // Answers only mean something while it waits for one.
+        assert!(o.setup_answer("w1", "dance").await.is_err());
+        assert!(o.setup_answer("w9", "start").await.is_err());
+        std::fs::write(folder.join("ready.txt"), "").unwrap();
+        o.setup_answer("w1", "again").await.unwrap();
+        until("the agent to start", || !host.spawned.lock().unwrap().is_empty()).await;
+        assert_eq!(std::fs::read_to_string(folder.join("runs.txt")).unwrap(), "run\nrun\n", "the first line ran again");
+        assert!(o.setup_answer("w1", "start").await.is_err(), "it has started already");
+
+        // Another one fails, and is started without the rest.
+        *host.setup_lines.lock().unwrap() = vec!["exit 1".into()];
+        spawn(&o, "Second").await;
+        until("setup to fail", || setup_phases(&host, "w2").contains(&"failed".to_string())).await;
+        assert_eq!(host.spawned.lock().unwrap().len(), 1);
+        o.setup_answer("w2", "start").await.unwrap();
+        assert_eq!(host.spawned.lock().unwrap().len(), 2);
+        assert_eq!(host.spawned.lock().unwrap()[1].slot, "w2");
+        assert_eq!(setup_phases(&host, "w2").last().map(String::as_str), Some("done"));
+        assert!(host.wakes().iter().any(|w| w.contains("without finishing its setup")));
+    }
+
+    #[tokio::test]
+    async fn a_command_over_the_time_limit_fails_the_setup() {
+        let (host, o, _repo, _wt) = setup();
+        *host.setup_lines.lock().unwrap() = vec!["sleep 30".into()];
+        *host.setup_limit.lock().unwrap() = Some(Duration::from_millis(400));
+        spawn(&o, "Slow").await;
+        until("setup to fail", || setup_phases(&host, "w1").contains(&"failed".to_string())).await;
+        let reason = host.events_for("w1").into_iter().find_map(|e| if let UiEvent::AgentSetup { phase, reason, .. } = e { (phase == "failed").then_some(reason) } else { None }).unwrap();
+        assert!(reason.starts_with("it took longer than"), "{reason}");
+        assert!(host.spawned.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn closing_an_agent_while_it_sets_up_stops_the_setup_and_removes_the_worktree() {
+        let (host, o, _repo, _wt) = setup();
+        *host.setup_lines.lock().unwrap() = vec!["touch begun.txt && sleep 30".into(), "touch after.txt".into()];
+        spawn(&o, "Login form").await;
+        let folder = worktree_folder(&host);
+        until("setup to begin", || folder.join("begun.txt").exists()).await;
+        // What setup wrote is loose in the worktree, so the user is asked, as for any other loose file.
+        o.close_worker("w1", Some(Agreed { uncommitted: 1, unmerged_commits: 0 })).await.unwrap();
+        assert!(!folder.exists(), "its worktree is still there");
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(host.spawned.lock().unwrap().is_empty(), "it started after it was closed");
+        assert!(!o.is_worker("w1"));
+    }
+
+    #[tokio::test]
+    async fn the_main_agent_stopping_an_agent_in_setup_stops_the_setup_only() {
+        let (host, o, _repo, _wt) = setup();
+        *host.setup_lines.lock().unwrap() = vec!["touch begun.txt && sleep 30".into()];
+        spawn(&o, "Login form").await;
+        let folder = worktree_folder(&host);
+        until("setup to begin", || folder.join("begun.txt").exists()).await;
+        let reply = call(&o, "stop_agent", json!({"id": "w1"})).await.unwrap();
+        assert!(reply.contains("hasn't started"), "{reply}");
+        until("the card to hear it stopped", || setup_phases(&host, "w1").contains(&"failed".to_string())).await;
+        assert!(host.spawned.lock().unwrap().is_empty());
+        assert!(folder.exists(), "stopping kept the worktree");
+        o.setup_answer("w1", "start").await.unwrap();
+        assert_eq!(host.spawned.lock().unwrap().len(), 1);
     }
 }

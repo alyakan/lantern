@@ -16,6 +16,7 @@ pub mod pr;
 pub mod process;
 pub mod provider;
 pub mod session;
+pub mod setup;
 pub mod shell;
 pub mod skills;
 pub mod slots;
@@ -57,6 +58,8 @@ pub struct AppState {
     network: Arc<network::Monitor>,
     /// How many workers may run at once across all of Lantern (Settings → General; the window sends it).
     agent_limit: std::sync::atomic::AtomicUsize,
+    /// What the user saved for each project: the setup run in a new worktree, and the Run command (the window sends it).
+    setups: setup::SetupStore,
 }
 
 /// Where a test makes folders that must not be in the system temp dir (which recent folders leave out): the target dir
@@ -90,6 +93,19 @@ fn set_agent_limit(state: State<'_, AppState>, limit: usize) -> Result<(), Strin
     }
     state.agent_limit.store(limit, std::sync::atomic::Ordering::SeqCst);
     Ok(())
+}
+
+/// The window sends what the user saved for a project (or the window started and says what it was): the lines run in each new
+/// worktree, and the command its Run button starts. Lantern's own setting is the only place these come from.
+#[tauri::command]
+fn set_project_setup(state: State<'_, AppState>, folder: String, commands: Vec<String>, run: Option<String>) -> Result<(), String> {
+    state.setups.set(std::path::Path::new(&folder), setup::ProjectSetup { commands, run })
+}
+
+/// What the project's files suggest for its setup and Run command: only offered, the user saves them.
+#[tauri::command]
+async fn suggest_setup(folder: String) -> Result<setup::Suggestion, String> {
+    tauri::async_runtime::spawn_blocking(move || setup::detect(std::path::Path::new(&folder))).await.map_err(|e| e.to_string())
 }
 
 /// How long a looked-up PR is used before it's fetched again (it may have new commits).
@@ -236,6 +252,10 @@ impl orchestra::Host for AppHost {
 
     fn agent_limit(&self) -> usize {
         self.app.state::<AppState>().agent_limit.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn project_setup(&self, folder: &std::path::Path) -> setup::ProjectSetup {
+        self.app.state::<AppState>().setups.get(folder)
     }
 
     fn worktree_root(&self) -> std::path::PathBuf {
@@ -744,6 +764,12 @@ async fn orchestra_close_worker(state: State<'_, AppState>, worker: String, agre
     state.orchestra.close_worker(&worker, agreed).await
 }
 
+/// The user's answer on a worker whose setup failed: "start" it anyway, or run setup "again".
+#[tauri::command]
+async fn orchestra_setup_answer(state: State<'_, AppState>, worker: String, answer: String) -> Result<(), String> {
+    state.orchestra.setup_answer(&worker, &answer).await
+}
+
 /// Starts a worker the user asked for from the canvas (the main agent `main` is told). Returns the worker's id.
 #[tauri::command]
 async fn orchestra_spawn(state: State<'_, AppState>, main: String, task: String, name: Option<String>, isolation: String, model: Option<String>) -> Result<String, String> {
@@ -1039,6 +1065,25 @@ async fn run_shell(app: AppHandle, state: State<'_, AppState>, slot: String, id:
 async fn shell_input(state: State<'_, AppState>, slot: String, id: String, text: String) -> Result<(), String> {
     let shells = state.slots.get(&slot)?.shells.clone();
     tauri::async_runtime::spawn_blocking(move || shells.input(&id, &text)).await.map_err(|e| e.to_string())?
+}
+
+/// Starts the project's Run command (from its saved setting, never from the window's say-so) in the chat's folder, as a
+/// command like any other of the chat's (see shell.rs): stopped with `stop_shell`, and when the chat closes. `id` is "run-…".
+#[tauri::command]
+async fn run_project(app: AppHandle, state: State<'_, AppState>, slot: String, id: String) -> Result<(), String> {
+    if !id.starts_with("run-") {
+        return Err(format!("{id:?} is not a run id."));
+    }
+    let s = state.slots.get(&slot)?;
+    let folder = s.folder()?;
+    // An agent in a worktree runs what its project's Run command says: the project is its main agent's folder.
+    let project = match state.orchestra.parent_of(&slot) {
+        Some(main) => state.slots.get(&main)?.folder()?,
+        None => folder.clone(),
+    };
+    let command = state.setups.get(&project).run.ok_or("This project has no Run command: set one in its Project setup.")?;
+    let path_env = login_path(&state).await;
+    s.shells.run(&id, &command, &folder, path_env.as_deref(), slots::tagged(&slot, emitter(&app)))
 }
 
 #[tauri::command]
@@ -1654,7 +1699,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, agent_limit: DEFAULT_AGENT_LIMIT.into() });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, agent_limit: DEFAULT_AGENT_LIMIT.into(), setups: Default::default() });
             app.manage(updates::Updates::default());
             app.manage(awake::Awake::default());
             if updates::checks_enabled() {
@@ -1766,7 +1811,11 @@ pub fn run() {
             orchestra_close_check,
             orchestra_close_worker,
             orchestra_spawn,
-            set_agent_limit
+            set_agent_limit,
+            set_project_setup,
+            suggest_setup,
+            orchestra_setup_answer,
+            run_project
         ])
         .build(tauri::generate_context!())
         .expect("error while building Lantern")
@@ -1776,6 +1825,8 @@ pub fn run() {
                 if let Some(awake) = app.try_state::<awake::Awake>() {
                     awake.stop();
                 }
+                // A setup still running in a worktree ends with Lantern.
+                setup::stop_all();
                 if let Some(state) = app.try_state::<AppState>() {
                     tauri::async_runtime::block_on(slots::shut_down_all(state.slots.drain()));
                 }

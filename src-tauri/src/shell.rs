@@ -201,7 +201,8 @@ impl Shells {
     }
 }
 
-fn kill_group(pgid: i32) {
+/// Ends a process group: SIGTERM now, SIGKILL if anything is left two seconds later.
+pub(crate) fn kill_group(pgid: i32) {
     unsafe { libc::kill(-pgid, libc::SIGTERM) };
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(2));
@@ -337,6 +338,35 @@ mod tests {
         let (_, code, stopped) = finish(&mut rx).await;
         assert!(stopped);
         assert_eq!(code, None, "ended by a signal");
+    }
+
+    /// True while a process with this pid exists (a zombie it left unreaped doesn't count: it can't run).
+    fn alive(pid: i32) -> bool {
+        let out = std::process::Command::new("ps").args(["-o", "stat=", "-p", &pid.to_string()]).output().unwrap();
+        let stat = String::from_utf8_lossy(&out.stdout);
+        !stat.trim().is_empty() && !stat.trim().starts_with('Z')
+    }
+
+    #[tokio::test]
+    async fn stopping_a_background_command_ends_the_whole_process_group_not_just_the_shell() {
+        let dir = tempfile::tempdir().unwrap();
+        let shells = Arc::new(Shells::default());
+        let (sink, mut rx) = collect();
+        // A dev server's shape: the shell starts a child (which starts its own), and waits.
+        shells.run("run-1", "sh -c 'sleep 60 & echo child $! && wait' & wait", dir.path(), None, sink).unwrap();
+        let text = until_output(&mut rx, "child ").await;
+        let pid: i32 = text.split("child ").nth(1).unwrap().split_whitespace().next().unwrap().parse().unwrap();
+        assert!(alive(pid));
+        shells.stop("run-1");
+        let (_, _, stopped) = finish(&mut rx).await;
+        assert!(stopped);
+        for _ in 0..60 {
+            if !alive(pid) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("the command's child is still running after Stop");
     }
 
     #[tokio::test]
