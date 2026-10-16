@@ -1813,12 +1813,28 @@ label.mcp-scope-option { flex-direction: row; align-items: flex-start; gap: 8px;
 .harness-menu .menu-row-title { flex: none; }
 .harness-menu .harness-edit { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 7px; border-radius: 0 0 var(--radius-chip) var(--radius-chip); }
 .harness-folder { display: flex; align-items: center; gap: 8px; font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); }
-.harness-folder select, .harness-editor select, .harness-editor input { height: 28px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: calc(12.5px * var(--font-scale)) var(--ui); }
+.harness-folder select, .harness-editor select, .harness-editor input, .routine-editor textarea { height: 28px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: calc(12.5px * var(--font-scale)) var(--ui); }
 .harness-row .settings-row-main:disabled { opacity: 1; }
-.harness-editor { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; padding: 4px 12px 12px; }
-.harness-editor label { display: flex; flex-direction: column; gap: 4px; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
-.harness-editor .wide { grid-column: 1 / -1; }
-.harness-editor p { margin: 0; }
+.harness-editor, .routine-editor { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; padding: 4px 12px 12px; }
+.harness-editor label, .routine-editor label { display: flex; flex-direction: column; gap: 4px; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
+.harness-editor .wide, .routine-editor .wide { grid-column: 1 / -1; }
+.harness-editor p, .routine-editor p { margin: 0; }
+.routine-editor textarea { height: auto; padding: 6px 8px; resize: vertical; line-height: 1.4; }
+.routine-editor { margin: 4px 0 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg); }
+.routine-row .routine-editor { margin: 0; border: none; padding: 4px 12px 12px; }
+.routine-head { display: flex; align-items: center; gap: 8px; padding-right: 10px; }
+.routine-head .settings-row-main { flex: 1; min-width: 0; }
+.routine-run { flex: none; }
+.routine-switch { flex: none; display: inline-flex; align-items: center; gap: 6px; min-width: 48px; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
+.routine-said { padding: 0 12px 8px; }
+.routine-details { display: flex; flex-direction: column; gap: 8px; padding: 2px 12px 12px; }
+.routine-prompt { margin: 0; padding: 7px 9px; border-radius: var(--radius-inner); background: var(--field); font-size: calc(12.5px * var(--font-scale)); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 140px; overflow-y: auto; }
+.routine-details .general-title { margin: 6px 0 0; }
+.routine-runs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.routine-run-row { display: flex; align-items: center; gap: 10px; min-height: 26px; font-size: calc(12px * var(--font-scale)); }
+.routine-run-time { flex: none; min-width: 110px; color: var(--muted-text); }
+.routine-run-row .ghost { margin-left: auto; }
+.routine-status { overflow: hidden; text-overflow: ellipsis; }
 button.harness-restore { align-self: flex-start; border: none; background: none; padding: 0; font-size: calc(12px * var(--font-scale)); color: var(--muted); text-decoration: underline; }
 
 /* Agents tab: which agent and model does what in the latest turn. Each model family has its own accent. */

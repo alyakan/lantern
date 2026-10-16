@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FOLDER_LISTS, FOLDER_RECORDS, LAST_FOLDER, NOT_FOLDER_KEYED, OPEN_CHATS, migrateFolderState, movedNote, splitPath, withMovedNote, type KeyValueStore } from "./relocate";
+import { FOLDER_ITEMS, FOLDER_LISTS, FOLDER_RECORDS, LAST_FOLDER, NOT_FOLDER_KEYED, OPEN_CHATS, migrateFolderState, movedNote, splitPath, withMovedNote, type KeyValueStore } from "./relocate";
 import { initialState, reducer } from "../store";
 
 /** An in-memory localStorage: the keys and values as they'd be saved. */
@@ -51,6 +51,19 @@ describe("migrateFolderState", () => {
     expect(read(store, "sidebar.projectOrder")).toEqual(["/a", NEXT, "/b"]);
     const both = memoryStore({ "sidebar.projectOrder": [NEXT, OLD] });
     expect(migrateFolderState(both, OLD, NEXT)).toEqual({});
+  });
+
+  it("moves a routine to the new folder, and leaves the others alone", () => {
+    const routines = [
+      { id: "a", name: "Morning", folder: OLD, runs: [] },
+      { id: "b", name: "Other", folder: "/other", runs: [] },
+    ];
+    const store = memoryStore({ "settings.routines": routines });
+    const changed = migrateFolderState(store, OLD, NEXT);
+    expect(FOLDER_ITEMS).toContain("settings.routines");
+    expect(changed["settings.routines"]).toEqual([{ ...routines[0], folder: NEXT }, routines[1]]);
+    expect(read(store, "settings.routines")).toEqual([{ ...routines[0], folder: NEXT }, routines[1]]);
+    expect(migrateFolderState(memoryStore({ "settings.routines": [routines[1]] }), OLD, NEXT)).toEqual({});
   });
 
   it("keeps an entry the new folder already has", () => {

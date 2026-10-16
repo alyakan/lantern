@@ -14,9 +14,10 @@ import { NewSkillForm } from "./SkillForm";
 import { HarnessSettings, type HarnessSettingsProps } from "./HarnessSettings";
 import { UpdatesPage, type UpdatesPageProps } from "./UpdatesPage";
 import { PermissionRules } from "./PermissionRules";
+import { RoutinesSettings, type RoutinesSettingsProps } from "./RoutinesSettings";
 
-export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions";
-export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules" };
+export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines";
+export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines" };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -42,10 +43,12 @@ interface Props {
   updates?: UpdatesPageProps;
   /** Notifications, appearance and text size, for the General page (App keeps them saved). */
   general?: GeneralSettingsProps;
+  /** The routines and what to do with them, for the Routines page. */
+  routines?: RoutinesSettingsProps;
 }
 
 /** Settings: General (notifications, sound, look), MCP servers (status, log in, add, remove) and skills. */
-export function SettingsView({ open, onClose, harness, updates, general, ...page }: Props) {
+export function SettingsView({ open, onClose, harness, updates, general, routines, ...page }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<SettingsTab>(open ?? "general");
   useEffect(() => {
@@ -70,8 +73,8 @@ export function SettingsView({ open, onClose, harness, updates, general, ...page
           <nav className="mode-guide-nav" aria-label="Settings">
             <div className="mode-guide-group">
               <div className="mode-guide-group-title">Settings</div>
-              {(["general", "harness", "mcp", "skills", "permissions", "updates"] as const)
-                .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "updates" || updates))
+              {(["general", "harness", "routines", "mcp", "skills", "permissions", "updates"] as const)
+                .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "updates" || updates) && (t !== "routines" || routines))
                 .map((t) => (
                   <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} onClick={() => setTab(t)}>
                     {TAB_LABEL[t]}
@@ -84,6 +87,8 @@ export function SettingsView({ open, onClose, harness, updates, general, ...page
               <GeneralPage {...general} />
             ) : tab === "harness" && harness ? (
               <HarnessSettings {...harness} />
+            ) : tab === "routines" && routines ? (
+              <RoutinesSettings {...routines} />
             ) : tab === "updates" && updates ? (
               <UpdatesPage {...updates} />
             ) : tab === "skills" ? (
