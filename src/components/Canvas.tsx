@@ -231,7 +231,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, agentRole,
         <div className="node-role-bar">
           {agentRole && <span className="role-chip">{agentRole.label}</span>}
           {readOnly && (
-            <span className="role-chip read-only" title="Its editing tools are switched off: it can read and report, not change files">
+            <span className="role-chip read-only" title="It can only read files, search and list them: it cannot change files or run commands">
               Read only
             </span>
           )}

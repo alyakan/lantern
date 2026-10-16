@@ -203,12 +203,12 @@ A **role** is a ready-made way to start an agent: what it is told, the model it 
 | Role | What it does | Works in | May edit |
 |---|---|---|---|
 | Builder | Builds a change and reports what it did | its own worktree | yes |
-| Reviewer | Reads a branch or diff and reports findings | your folder | no, read only |
+| Reviewer | Reads files, and a diff you put in the task, and reports findings | your folder | no, read only |
 | QA / tester | Runs the project's tests and tries to break the change; may write tests | its own worktree | yes |
 | Docs | Writes and updates documentation | its own worktree | yes |
-| Security auditor | Looks for security problems | your folder | no, read only |
+| Security auditor | Reads the code for security problems | your folder | no, read only |
 
-Each role's brief asks for a report in a fixed, plain format (what it found, how serious, what to do). **Read only** is enforced, not just asked: the agent's editing tools are switched off, whatever its brief says, and its card says **Read only** in an amber badge under the title bar. (It can still run commands to read, such as git and the tests, and is told not to use them to change anything.) The role's name shows on the card, and in the sidebar's list of agents ("Reviewer · Working"). Docs is asked to touch documentation only; that part is a request, not a switch.
+Each role's brief asks for a report in a fixed, plain format (what it found, how serious, what to do). **Read only** is enforced, not just asked: the agent is started with only three tools, which read, search and list files, whatever its brief says and whatever you have set to Auto or allowed with **Always allow…**. It has no shell, so it cannot run commands (not even git), write, delete or commit by any route, and no web tools; it only reads the files and the diff its task gives it. Its card says **Read only** in an amber badge under the title bar. The role's name shows on the card, and in the sidebar's list of agents ("Reviewer · Working"). Docs is asked to touch documentation only; that part is a request, not a switch.
 
 **Save as a role…** at the bottom of the form keeps what you filled in as a role of your own for the project. Choose it later from "Your roles", save again under the same name to change it, or **Delete this role**. Roles and templates belong to a project and move with it if the folder moves.
 
