@@ -187,6 +187,22 @@ describe("the canvas", () => {
     expect(onFocus).toHaveBeenLastCalledWith("w1");
   });
 
+  it("keeps the agents-need-you pill in the toolbar, not over the cards, and shortens it with the canvas's width", () => {
+    setup(team(2), { attention: ["w1", "w2"] });
+    const pill = screen.getByRole("button", { name: "2 agents need you" });
+    expect(pill.closest(".canvas-controls")).toBeTruthy();
+    expect([...pill.querySelectorAll("span:not(.node-dot)")].map((s) => s.textContent)).toEqual(["2 agents need you", "2 need you", "2"]);
+  });
+
+  it("keeps a card's model chip whole and gives its second line a tooltip with all of it", () => {
+    setup(team(1));
+    const card = screen.getByLabelText(/Agent Worker 1/);
+    const text = card.querySelector(".node-meta-text") as HTMLElement;
+    expect(text.parentElement?.className).toBe("node-meta");
+    expect(text.title).not.toBe("");
+    expect(text.textContent!.length).toBeGreaterThan(0);
+  });
+
   it("frames the agent that needs you at 100%, however far out the view was", () => {
     const { layout } = setup(team(2), { attention: ["w1"] });
     const canvas = screen.getByTestId("canvas");

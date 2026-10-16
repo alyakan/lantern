@@ -1778,6 +1778,17 @@ button.danger { color: var(--del); }
 .rule-scope { flex: none; }
 .rule-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11.5px * var(--font-scale)); color: var(--muted); }
 .rule-pattern { margin-left: 8px; font-family: var(--mono); color: var(--text-2); }
+.rule-add { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg); }
+.rule-add .general-title { margin: 0; }
+.rule-add-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; }
+.rule-add-fields label { display: flex; flex-direction: column; gap: 3px; min-width: 0; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
+.rule-add-fields .rule-add-pattern { flex: 1 1 220px; }
+.rule-add-fields input { min-width: 0; font-family: var(--mono); }
+.rule-add-meaning { margin: 0; font-size: calc(12.5px * var(--font-scale)); color: var(--text); overflow-wrap: anywhere; }
+.rule-add-problem { margin: 0; font-size: calc(12px * var(--font-scale)); color: var(--muted); overflow-wrap: anywhere; }
+.rule-add-broad { margin: 0; padding: 7px 10px; border: 1px solid var(--warn); border-radius: var(--radius-inner); font-size: calc(12.5px * var(--font-scale)); color: var(--warn); overflow-wrap: anywhere; }
+.rule-add-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.rule-add-done { overflow-wrap: anywhere; }
 .settings-row-name { font-size: calc(13px * var(--font-scale)); font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .settings-row-sub { font-size: calc(11.5px * var(--font-scale)); color: var(--muted); }
 .mcp-icon { flex: none; width: 22px; height: 22px; border-radius: calc(var(--radius-inner) + 1px); object-fit: contain; }
@@ -2196,7 +2207,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .canvas-node.waiting::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 26px color-mix(in srgb, var(--attn) 55%, transparent); opacity: 0; animation: node-glow 1.8s ease-in-out 3; }
 .canvas-node.held { box-shadow: 0 0 0 2px var(--attn), var(--shadow); }
 @keyframes node-glow { 50% { opacity: 1; } }
-.node-head { display: flex; align-items: center; gap: 9px; height: 52px; flex: none; padding: 0 8px 0 14px; border-bottom: 1px solid var(--line); cursor: grab; user-select: none; -webkit-user-select: none; }
+.node-head { container: node-head / inline-size; display: flex; align-items: center; gap: 9px; height: 52px; flex: none; padding: 0 8px 0 14px; border-bottom: 1px solid var(--line); cursor: grab; user-select: none; -webkit-user-select: none; }
 .canvas-node.folded .node-head { border-bottom: none; }
 .node-head:active { cursor: grabbing; }
 .node-head:focus-visible { outline: 2px solid var(--text-2); outline-offset: -2px; }
@@ -2209,8 +2220,12 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .node-dot.failed { background: var(--del); }
 .node-titles { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .node-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 calc(13.5px * var(--font-scale)) var(--ui); }
-.node-meta { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11px * var(--font-scale)); color: var(--muted-text); }
+.node-meta { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; white-space: nowrap; font-size: calc(11px * var(--font-scale)); color: var(--muted-text); }
 .node-meta svg { flex: none; }
+/* The text after the model chip is what gives way in a narrow card: it ends in an ellipsis, the chip and the branch icon never shrink. */
+.node-meta-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A title bar's buttons and status keep their size; the title is what truncates. In a narrow card the least needed things step aside so the title keeps room to read. */
+.node-head > :not(.node-titles) { flex: none; }
 .node-head .icon { font-size: calc(16px * var(--font-scale)); line-height: 1; }
 .node-status { flex: none; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); white-space: nowrap; }
 .node-quiet { color: var(--muted-text); font-variant-numeric: tabular-nums; }
@@ -2279,6 +2294,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .canvas-context { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .canvas-context-who { display: inline-block; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 .canvas-ctl-wide { display: flex; align-items: center; gap: 2px; }
+.canvas-attention .canvas-attn-mid, .canvas-attention .canvas-attn-short { display: none; }
 .canvas-controls .canvas-ctl-more, .canvas-ctl-short { display: none; }
 /* An agent's context share on its title bar, with the menu that opens from it (Compact, Clear). */
 .node-context-anchor { position: relative; flex: none; display: inline-flex; }
@@ -2320,13 +2336,20 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .canvas-more-list { width: 300px; }
 /* The toolbar never wraps or gets cut off: as the canvas narrows (the side panel is open) the least used controls fold into "⋯", then the Context chip and Team shorten. */
 @container canvas (max-width: 859px) {
+  .canvas-attention .canvas-attn-long { display: none; }
+  .canvas-attention .canvas-attn-mid { display: inline; }
   .canvas-ctl-wide { display: none; }
   .canvas-controls .canvas-ctl-more { display: inline-flex; }
 }
 @container canvas (max-width: 599px) {
+  .canvas-attention .canvas-attn-mid { display: none; }
+  .canvas-attention .canvas-attn-short { display: inline; }
   .canvas-ctl-long { display: none; }
   .canvas-ctl-short { display: inline; }
 }
+/* In a narrow card the share of context and then the Ask and Chat menus step aside, so the title and the model's line keep room to read. */
+@container node-head (max-width: 420px) { .node-context-anchor { display: none; } }
+@container node-head (max-width: 340px) { .node-settings { display: none; } }
 /* A list that opens from the toolbar fits in a narrow canvas. */
 .canvas-team-list, .new-agent { max-width: calc(100cqw - 24px); white-space: normal; }
 .canvas-context.warn { color: var(--warn); }
@@ -2371,10 +2394,9 @@ button.plan-meter:hover { background: var(--bg-hover); }
 .team-name .model-chip { margin-left: 4px; vertical-align: 1px; }
 .team-warning-text { margin: 0; line-height: 1.5; color: var(--text-2); }
 .team-warning-ask { display: flex; align-items: center; gap: 8px; color: var(--text-2); }
-.canvas-attention { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 8px; height: var(--pill-m); padding: 0 14px; border: 1px solid var(--attn); border-radius: var(--radius-pill); background: var(--field); color: var(--text); font: 600 calc(12.5px * var(--font-scale)) var(--ui); box-shadow: var(--shadow); cursor: pointer; animation: pill-in 200ms ease-out backwards; }
+.canvas-attention { position: relative; flex: none; display: inline-flex; align-items: center; gap: 7px; height: var(--pill-s); margin-right: 3px; padding: 0 12px 0 10px; border: 1px solid var(--attn); border-radius: var(--radius-pill); background: var(--field); color: var(--text); font: 600 calc(12px * var(--font-scale)) var(--ui); cursor: pointer; animation: pill-in 200ms ease-out backwards; }
 .canvas-attention:hover { background: var(--bg-hover); }
-/* The pill's own transform centres it, so it fades down with the separate `translate`. */
-@keyframes pill-in { from { opacity: 0; translate: 0 -8px; } }
+@keyframes pill-in { from { opacity: 0; translate: -8px 0; } }
 .canvas-attention-ring { position: absolute; inset: -1px; border-radius: inherit; pointer-events: none; animation: flavour-in 600ms ease-out; }
 @media (prefers-reduced-motion: reduce) { .canvas-world.animating { transition: none; } .tether.working, .tether.waiting, .canvas-node.waiting, .node-dot.working, .node-dot.waiting { animation: none; } }
 

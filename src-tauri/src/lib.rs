@@ -72,10 +72,19 @@ pub struct AppState {
 }
 
 /// Where a test makes folders that must not be in the system temp dir (which recent folders leave out): the target dir
-/// cargo builds into, wherever that is (a worktree may build into another checkout's).
+/// cargo builds into, wherever that is (a worktree may build into another checkout's). Not an agent's folder either
+/// (Lantern's own workers' worktrees, which recent folders leave out too, see history::is_agent_folder): a checkout
+/// there builds into its own target dir, so the tests use a cache folder in the home folder instead.
 #[cfg(test)]
 pub(crate) fn scratch_dir() -> std::path::PathBuf {
-    std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/target")), std::path::PathBuf::from)
+    let target = std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/target")), std::path::PathBuf::from);
+    if !history::is_agent_folder(&target.to_string_lossy()) {
+        return target;
+    }
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).expect("HOME is set");
+    let cache = home.join(".cache").join("lantern-tests");
+    std::fs::create_dir_all(&cache).unwrap();
+    cache
 }
 
 /// The user's limit on agents running at once until the window says otherwise, and the range it may be set in.
