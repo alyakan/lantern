@@ -582,8 +582,7 @@ export default function App() {
         claudePath,
         folder,
         // An agent comes back on the model it had (or Sonnet, the agents' default), not on its project's own model.
-        { mode, ...settingsFor(slot, h), ...(as?.role === "worker" ? { model: as.model ?? AGENT_MODEL } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared", read_only: !!as.agentRole?.read_only } } : {}) },
-        { mode, ...settingsFor(slot, h), ...(as?.role === "worker" ? { model: as.model ?? AGENT_MODEL } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(notes ? { project_notes: notes } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared" } } : {}) },
+        { mode, ...settingsFor(slot, h), ...(as?.role === "worker" ? { model: as.model ?? AGENT_MODEL } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(notes ? { project_notes: notes } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared", read_only: !!as.agentRole?.read_only } } : {}) },
         sessionId,
       );
     // A worker waits for its main agent: if that one didn't open, this one stays closed too, under it, where Retry can try again.
