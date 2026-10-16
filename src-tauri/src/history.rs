@@ -921,6 +921,27 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_with_a_space_a_dot_or_an_accent_is_found_under_its_encoded_name() {
+        // Claude Code writes every character that isn't a letter or digit as "-", so these all land in one directory name.
+        assert_eq!(encode_folder(Path::new("/Users/me/My Projects/app v1.2")), "-Users-me-My-Projects-app-v1-2");
+        assert_eq!(encode_folder(Path::new("/Users/me/Café")), "-Users-me-Caf-");
+        let root = tempfile::tempdir().unwrap();
+        let work = tempfile::tempdir_in(crate::scratch_dir()).unwrap();
+        let folder = work.path().join("My Projects").join("café v1.2");
+        std::fs::create_dir_all(&folder).unwrap();
+        let folder_s = folder.to_string_lossy().into_owned();
+        let dir = root.path().join(encode_folder(&folder));
+        write_transcript(&dir, "s1", &folder_s, Some("hello"));
+        // Found by its encoded name, not by scanning every project for its cwd.
+        assert_eq!(project_dir(root.path(), &folder), Some(dir.clone()));
+        let listed = list_sessions(root.path(), &folder, &HashMap::new(), &HashMap::new());
+        assert_eq!(listed.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), vec!["s1"]);
+        let known: Vec<(String, bool)> = session_folders(root.path()).into_iter().map(|f| (f.path, f.exists)).collect();
+        assert_eq!(known, vec![(folder_s.clone(), true)]);
+        assert_eq!(recent_folders(root.path(), 10).iter().map(|r| r.path.as_str()).collect::<Vec<_>>(), vec![folder_s.as_str()]);
+    }
+
+    #[test]
     fn a_folder_is_known_whether_or_not_it_still_exists() {
         let root = tempfile::tempdir().unwrap();
         let work = tempfile::tempdir_in(crate::scratch_dir()).unwrap();
