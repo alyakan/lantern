@@ -2,7 +2,7 @@ import { setPlanUsage } from "./lib/planUsage";
 import { pushAgentLimit } from "./lib/agentLimit";
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { api, type BranchReview, type ChangeScope, type RevertOutcome } from "./api";
+import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome } from "./api";
 import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
@@ -1400,6 +1400,19 @@ export default function App() {
   // Edit, Retry and Regenerate: only in a chat that's idle (not mid-turn, not ended) and not Step by step, whose pages
   // have their own flow.
   const resendHandlers = state.status === "idle" && !stepsMode ? { onEdit: editInBox, onResend: (p: { text: string; draft?: string }) => sendIn(active, p.text, p.draft) } : undefined;
+  // "Restore files to here" on a sent message: what it did is said in the chat and told to Claude with the next message.
+  const restoreEvents = state.folder && !stepsMode
+    ? {
+        onRestored: (since: string, result: RestoreResult, summary: string, files: { path: string; trashed: boolean }[]) => {
+          to(active)({ type: "restore_done", id: result.id, since, summary, files });
+          syncChanges(active);
+        },
+        onUndone: (id: number, text: string) => {
+          to(active)({ type: "restore_undone", id, text });
+          syncChanges(active);
+        },
+      }
+    : undefined;
   const hero = state.items.length === 0 && !state.thinking;
   // At launch the last project is on its way back: say so, rather than flashing the screen for having none.
   const openingLast = !state.folder && lastFolder !== null && !reopened.current;
@@ -1889,7 +1902,7 @@ export default function App() {
                       {stepsView ? (
                         <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} explain={explain} onPickFlavour={pickFlavour} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} />
                       ) : (
-                        <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} />
+                        <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} restore={restoreEvents} />
                       )}
                     </FileLinksProvider>
                     </ArchitecturePane.Provider>

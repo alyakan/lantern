@@ -697,6 +697,7 @@ button.code-block-copy:hover:not(:disabled) { background: var(--bg-hover); color
 .msg:hover + .msg-actions, .msg-actions:hover, .msg-actions:focus-within { opacity: 1; }
 button.msg-action { height: 20px; padding: 0 8px; border: none; border-radius: var(--radius-chip); background: none; color: var(--muted-text); font-size: calc(11px * var(--font-scale)); }
 button.msg-action:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+button.msg-action:disabled { opacity: 0.5; cursor: default; }
 .msg.assistant .code-block pre { margin: 0; border-radius: 0; background: none; }
 .code-block-colored code { font-family: var(--mono); font-size: calc(12px * var(--font-scale)); line-height: 1.55; white-space: pre; }
 .code-block-colored code br:last-child { display: none; }
@@ -2044,6 +2045,10 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 /* The scope chip keeps its count and drops its word when there's no room for it. */
 @container (max-width: 460px) { .pane-tabs .scope-label { display: none; } .pane-tabs { gap: 6px; } .pane-tabs .pane-tabs-track button { padding: 0 5px; } .pane-tabs .revert-all { margin-left: 0; } }
 .summary-revert { margin-left: 4px; }
+/* The bar after "Restore files to here": in the chat's column, so it wraps (the text, then the note under it). */
+.restore-undo { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 8px 14px; border-bottom: 1px solid var(--line); font-size: calc(12px * var(--font-scale)); line-height: 1.4; }
+.restore-undo .revert-undo-text { flex: 1 1 220px; }
+.restore-undo .revert-undo-note { flex-basis: 100%; order: 3; }
 
 /* The orchestra's canvas: agents as floating chats on a pannable, zoomable surface, tethered to the main agent. */
 .canvas { container: canvas / inline-size; position: relative; flex: 1; min-height: 0; margin: 0 var(--edge) var(--edge); overflow: hidden; overflow: clip; border-radius: var(--radius-float); box-shadow: var(--card-shadow); cursor: grab; touch-action: none; overscroll-behavior: none;

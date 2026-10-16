@@ -125,3 +125,8 @@ export function withRevertNote(text: string, notes: RevertNote[]): string {
   const note = text.startsWith("/") ? null : revertNote(notes);
   return note ? `${note}\n\n${text}` : text;
 }
+
+/** The number a "Restore files to here" files its notes under (see `RevertNote.revert`): below zero, clear of the reverts'. */
+export function restoreNoteId(undoId: number): number {
+  return -(undoId + 1);
+}

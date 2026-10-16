@@ -3,7 +3,7 @@ import type { Hunk, ModelCost, ModelOption, Mode, Rule, RuleScope, SlashCommand,
 import { countChanges } from "./lib/diff";
 import { readFlavourNote, type Flavour } from "./lib/flavour";
 import { readPageNote } from "./lib/pageNote";
-import { revertSummary, undoOf, undoSummary, type RevertNote, type RevertUndo } from "./lib/revert";
+import { restoreNoteId, revertSummary, undoOf, undoSummary, type RevertNote, type RevertUndo } from "./lib/revert";
 import { KEEP_CHARS, readShellContext, takesShellContext } from "./lib/shell";
 import { readSkillNote } from "./lib/skillNote";
 import type { Subagents } from "./lib/workflow";
@@ -216,6 +216,8 @@ export interface State {
   backgroundRuns: Record<string, BackgroundRun>;
   /** The last revert, which Undo can take back until the next message or quit. */
   revertUndo: RevertUndo | null;
+  /** The last "Restore files to here", which Undo can take back until the next message or quit. */
+  restoreUndo: { id: number; summary: string } | null;
   /** Files reverted since the last message, which Claude is told about with the next one. */
   revertNotes: RevertNote[];
   revertSeq: number;
@@ -294,6 +296,7 @@ export const initialState: State = {
   lastEndedTask: null,
   backgroundRuns: {},
   revertUndo: null,
+  restoreUndo: null,
   revertNotes: [],
   revertSeq: 0,
   movedFrom: null,
@@ -330,6 +333,9 @@ export type Action =
   | { type: "turn_numbered"; turn: number }
   | { type: "revert_done"; since: string; outcomes: RevertOutcome[] }
   | { type: "revert_undone"; id: number; outcomes: RevertOutcome[] }
+  /** The folder was put back to before a message: `id` is what Undo is asked with (null: it can't be undone). */
+  | { type: "restore_done"; id: number | null; since: string; summary: string; files: { path: string; trashed: boolean }[] }
+  | { type: "restore_undone"; id: number; text: string }
   | { type: "notice"; text: string }
   /** The changed files as they stand on disk (from the backend): true counts, and files back to their original gone. */
   | { type: "changes_synced"; files: ChangedFile[] };
@@ -399,7 +405,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -670,7 +676,7 @@ export function reducer(state: State, action: Action): State {
       const movedFrom = takesShellContext(action.text) ? null : state.movedFrom;
       // Anything the user sends ends a run of automatic turns; the guard counts only the unattended ones.
       const autoStreak = action.auto ? state.autoStreak + 1 : 0;
-      return { ...state, status: "running", thinking: true, stopRequested: false, seq, autoStreak, flavourPick: action.switchedTo ? null : state.flavourPick, explainPick: action.switchedTo ? false : state.explainPick, items: [...sent, item], revertUndo: null, revertNotes: noted, movedFrom };
+      return { ...state, status: "running", thinking: true, stopRequested: false, seq, autoStreak, flavourPick: action.switchedTo ? null : state.flavourPick, explainPick: action.switchedTo ? false : state.explainPick, items: [...sent, item], revertUndo: null, restoreUndo: null, revertNotes: noted, movedFrom };
     }
     case "wakes_taken":
       return { ...state, wakes: [] };
@@ -753,6 +759,14 @@ export function reducer(state: State, action: Action): State {
         revertNotes: state.revertNotes.filter((n) => n.revert !== action.id),
         banner: { kind: "info", text: undoSummary(action.outcomes), action: null },
       };
+    case "restore_done": {
+      // A restore's notes are filed under its undo's number, below the reverts' (which count up from 1); 0 if it can't be undone.
+      const revert = action.id === null ? 0 : restoreNoteId(action.id);
+      const notes = action.files.map((f): RevertNote => ({ path: f.path, trashed: f.trashed, since: action.since, revert }));
+      return { ...state, restoreUndo: action.id === null ? null : { id: action.id, summary: action.summary }, revertNotes: [...state.revertNotes, ...notes], banner: action.id === null ? { kind: "info", text: action.summary, action: null } : state.banner };
+    }
+    case "restore_undone":
+      return { ...state, restoreUndo: state.restoreUndo?.id === action.id ? null : state.restoreUndo, revertNotes: state.revertNotes.filter((n) => n.revert !== restoreNoteId(action.id)), banner: { kind: "info", text: action.text, action: null } };
     case "notice":
       return { ...state, banner: { kind: "info", text: action.text, action: null } };
     case "changes_synced": {

@@ -1521,6 +1521,21 @@ export function installMockBackend() {
             else mockFiles[f.path] = f.target;
             return { path: f.path, status: "reverted", before: null, after: f.target, reason: null };
           });
+        // &restore: every message has a restore point, and a restore puts a few made-up files back (for the dialog and Undo).
+        case "restore_points":
+          if (!new URLSearchParams(location.search).has("restore")) return Promise.reject("This folder isn't in a git repository, so it has no restore points.");
+          return Array.from({ length: (turnCount[String(a.slot)] ?? -1) + 1 }, (_, i) => i);
+        case "restore_preview":
+          return {
+            put_back: [`${FOLDER}/src/server.ts`, `${FOLDER}/src/routes/users.ts`, `${FOLDER}/package.json`],
+            removed: [`${FOLDER}/src/routes/orders.ts`],
+            skipped: new URLSearchParams(location.search).get("restore") === "links" ? [{ path: `${FOLDER}/docs`, reason: "A link is in the way, so it isn't restored from here." }] : [],
+            lines: 47,
+          };
+        case "restore_files":
+          return { id: 7, put_back: [`${FOLDER}/src/server.ts`, `${FOLDER}/src/routes/users.ts`, `${FOLDER}/package.json`], removed: [`${FOLDER}/src/routes/orders.ts`], skipped: [], kept: [] };
+        case "undo_restore":
+          return { id: null, put_back: [`${FOLDER}/src/server.ts`], removed: [], skipped: [], kept: [] };
         // &update: a newer Lantern is downloaded and waiting.
         case "update_status":
           return new URLSearchParams(location.search).has("update") ? { version: NEXT_VERSION } : null;

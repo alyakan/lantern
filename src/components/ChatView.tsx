@@ -6,12 +6,36 @@ import { anchorOf, scrollToAnchor, type ChatAnchor } from "../lib/scrollAnchor";
 import type { State } from "../store";
 import { workingVerb } from "../lib/verbs";
 import { ChatStream, type ResendHandlers, type StreamHandlers } from "./ChatStream";
+import { RestoreDialog } from "./RestoreDialog";
+import { api, type RestoreResult } from "../api";
+import { restoredFiles, restoreSummary, undoRestoreSummary, useRestorePoints } from "../lib/restorePoint";
+import { sinceLabel } from "../lib/revert";
 
-export function ChatView({ state, resend, ...handlers }: { state: State; resend?: ResendHandlers } & StreamHandlers) {
+/** What "Restore files to here" tells the app: a restore was done or undone, so it can show it and say it to Claude. */
+export interface RestoreEvents {
+  onRestored: (since: string, result: RestoreResult, summary: string, files: { path: string; trashed: boolean }[]) => void;
+  onUndone: (id: number, text: string) => void;
+}
+
+export function ChatView({ state, resend, restore, ...handlers }: { state: State; resend?: ResendHandlers; restore?: RestoreEvents } & StreamHandlers) {
   const scroller = useRef<HTMLDivElement>(null);
   // Back in this chat: where you left it; at the end if you were there (or it's new). Kept as a place in the chat, not
   // pixels, since the same chat shows at other widths (its card on the canvas, the chat itself, a resized pane).
   const slot = useSlot();
+  // "Restore files to here": the messages it is offered on, the one whose dialog is open, and what Undo failed with.
+  const points = useRestorePoints(slot, !!restore && !!state.folder, state.items, state.status);
+  const [confirming, setConfirming] = useState<number | null>(null);
+  const [undoFailed, setUndoFailed] = useState<string | null>(null);
+  const blocked = state.status === "running" ? "Wait for Claude to finish before restoring files." : state.status === "starting" ? "Claude isn't ready yet." : null;
+  const undoRestore = () => {
+    const undo = state.restoreUndo;
+    if (!undo || !restore) return;
+    setUndoFailed(null);
+    api.undoRestore(slot, undo.id).then(
+      (result) => restore.onUndone(undo.id, undoRestoreSummary(result)),
+      (e) => setUndoFailed(String(e)),
+    );
+  };
   const left = recallScroll<ChatAnchor | -1>(`${slot}:chat`);
   const nearBottom = useRef(left === undefined || left === -1);
   const anchor = useRef<ChatAnchor | null>(left === undefined || left === -1 ? null : left);
@@ -80,9 +104,18 @@ export function ChatView({ state, resend, ...handlers }: { state: State; resend?
   };
   return (
     <div className="chat-wrap">
+      {state.restoreUndo && (
+        <div className="restore-undo" role="status">
+          <span className="revert-undo-text">{undoFailed ?? state.restoreUndo.summary}</span>
+          <span className="revert-undo-note">Undo lasts until your next message or until you quit Lantern.</span>
+          <button className="ghost" onClick={undoRestore} disabled={!!blocked}>
+            Undo restore
+          </button>
+        </div>
+      )}
       <div className="chat" ref={scroller} onScroll={onScroll} onWheel={byHand} onPointerDown={byHand} onKeyDown={byHand}>
         {state.items.length === 0 && !state.thinking && <div className="empty">What should Claude work on?</div>}
-        <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} resend={resend} {...handlers} />
+        <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} resend={resend} restore={restore ? { points, blocked, onRestore: setConfirming } : undefined} {...handlers} />
         {thinkingLine && (
           <div className="activity live thinking-line" role="status" aria-label="Claude is thinking">
             <span className="activity-line">
@@ -93,6 +126,22 @@ export function ChatView({ state, resend, ...handlers }: { state: State; resend?
         )}
       </div>
       <JumpToLatest show={away} onJump={jump} />
+      {confirming !== null && restore && (
+        <RestoreDialog
+          slot={slot}
+          folder={state.folder}
+          turn={confirming}
+          since={sinceLabel(state.items, "turn", confirming)}
+          blocked={blocked}
+          onCancel={() => setConfirming(null)}
+          onDone={(result) => {
+            const since = sinceLabel(state.items, "turn", confirming);
+            setConfirming(null);
+            setUndoFailed(null);
+            restore.onRestored(since, result, restoreSummary(result, since), restoredFiles(result));
+          }}
+        />
+      )}
     </div>
   );
 }
