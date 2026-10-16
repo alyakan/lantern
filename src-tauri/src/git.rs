@@ -53,7 +53,7 @@ const REDIRECTS: [&str; 6] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT
 
 /// Where a git command runs.
 #[derive(Clone, Copy)]
-enum At<'a> {
+pub(crate) enum At<'a> {
     /// A folder of the user's own checkout: git finds the repository from there.
     Dir(&'a Path),
     /// A worker's worktree, checked (see `verify_worktree`): git is told where its repository is, so the `.git` file in it,
@@ -82,6 +82,12 @@ fn run_raw(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, 
 }
 
 fn run_raw_within(at: At, args: &[&str], path_env: Option<&str>, limit: Duration) -> Result<String, String> {
+    run_with(at, args, path_env, limit, &[])
+}
+
+/// `run_raw_within` with variables of its own set after the redirects are removed: a private index for a checkpoint
+/// (`GIT_INDEX_FILE`), the name a commit is made under. Only the checkpoints use it, and with values Lantern chose.
+pub(crate) fn run_with(at: At, args: &[&str], path_env: Option<&str>, limit: Duration, env: &[(&str, &std::ffi::OsStr)]) -> Result<String, String> {
     let mut cmd = Command::new("git");
     cmd.args(HARDENED);
     match at {
@@ -101,6 +107,9 @@ fn run_raw_within(at: At, args: &[&str], path_env: Option<&str>, limit: Duration
         cmd.env_remove(var);
     }
     cmd.args(args).env("GIT_TERMINAL_PROMPT", "0").env("GIT_EDITOR", "true").env("GIT_CONFIG_NOSYSTEM", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    for (name, value) in env {
+        cmd.env(name, value);
+    }
     if let Some(p) = path_env {
         cmd.env("PATH", p);
     }
@@ -245,6 +254,18 @@ pub struct Checked {
     /// The worktree's directory in the repository's git directory (`.git/worktrees/<name>`).
     admin: PathBuf,
     root: PathBuf,
+}
+
+impl Checked {
+    /// The worktree's own directory in the repository's git directory: where its index lives.
+    pub(crate) fn admin(&self) -> &Path {
+        &self.admin
+    }
+
+    /// The worktree's top.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
 }
 
 /// Checks that `root` is a linked worktree of the repository `repo` is in, before Lantern runs git there. A worktree's

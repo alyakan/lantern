@@ -35,6 +35,8 @@ pub struct Slot {
     pub shells: Arc<crate::shell::Shells>,
     /// The process id of this chat's claude (0 before it has started): who the main agent's helper must descend from.
     pub claude_pid: Arc<std::sync::atomic::AtomicU32>,
+    /// The folder's state before each of the chat's messages, which "Restore files to here" puts back.
+    pub checkpoints: crate::checkpoint::Checkpoints,
 }
 
 /// Slot ids come from the UI and end up in a socket path (macOS allows ~104 bytes), so they're short and plain.
@@ -69,7 +71,7 @@ impl Slots {
         let socket = socket_dir.join(format!("lantern-{}-{id}.sock", std::process::id()));
         let claude_pid: Arc<std::sync::atomic::AtomicU32> = Arc::default();
         let bridge = PermissionBridge::start(socket, tagged(id, emit), folder_rules, auth(claude_pid.clone())).map_err(|e| e.to_string())?;
-        let slot = Arc::new(Slot { session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid });
+        let slot = Arc::new(Slot { session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid, checkpoints: Default::default() });
         slots.insert(id.to_string(), slot.clone());
         Ok(slot)
     }

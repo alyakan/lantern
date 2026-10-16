@@ -27,6 +27,7 @@ pub mod test_runs;
 pub mod titles;
 pub mod trash;
 pub mod revert;
+pub mod checkpoint;
 pub mod ui_event;
 pub mod updates;
 
@@ -127,6 +128,12 @@ fn emitter(app: &AppHandle) -> impl Fn(SlotEvent) + Send + Sync + Clone + 'stati
             if matches!(ev.event, ui_event::UiEvent::SessionEnded { .. }) {
                 if let Ok(slot) = state.slots.get(&ev.slot) {
                     slot.claude_pid.store(0, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            // The turn is over (or its claude is gone): files stop changing, so they can be restored.
+            if matches!(ev.event, ui_event::UiEvent::TurnDone { .. } | ui_event::UiEvent::SessionEnded { .. }) {
+                if let Ok(slot) = state.slots.get(&ev.slot) {
+                    slot.checkpoints.turn_ended();
                 }
             }
             state.orchestra.observe(&ev.slot, &ev.event);
@@ -280,14 +287,14 @@ impl orchestra::Host for AppHost {
             // The main agent's mode may have been lowered while this one started (the mode it was given was read before):
             // checked again now that it runs, so a restart that missed it can't leave it freer than its main agent.
             lower_worker(&self.app, &state, &req.slot, main_ceiling(&state, &parent_slot)).await;
-            send_text(&self.app, &s, &req.brief).await.map(|_| ())
+            send_text(&self.app, &req.slot, &s, &req.brief).await.map(|_| ())
         })
     }
 
     fn send_to<'a>(&'a self, slot: &'a str, text: String) -> orchestra::Fut<'a, Result<(), String>> {
         Box::pin(async move {
             let s = self.app.state::<AppState>().slots.get(slot)?;
-            send_text(&self.app, &s, &text).await.map(|_| ())
+            send_text(&self.app, slot, &s, &text).await.map(|_| ())
         })
     }
 
@@ -421,7 +428,9 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, 
         let mut changes = slot.changes.lock().unwrap();
         changes.clear();
         changes.watch(baseline);
+        slot.checkpoints.forget();
     }
+    slot.checkpoints.turn_ended();
     let changes = slot.changes.clone();
     let on_edit: EditHook = Arc::new(move |path: &str, original: Option<String>| changes.lock().unwrap().record(path, original));
     let mut started = Session::spawn(&cfg, slots::tagged(id, emitter(app)), on_edit)?;
@@ -687,20 +696,54 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
 async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
     let s = state.slots.get(&slot)?;
-    let turn = send_text(&app, &s, &text).await?;
+    let turn = send_text(&app, &slot, &s, &text).await?;
     // Said to a worker by the user themselves: its main agent hears of it with its next wake-up.
     state.orchestra.note_user_message(&slot, &text);
     Ok(turn)
 }
 
+/// Runs `f` (blocking) with the chat's restore points and the git checkout of its folder: an error says why there is none
+/// (the folder isn't in a repository). A worker's worktree is checked against its Lead's repository first.
+async fn at_checkpoints<T, F>(app: &AppHandle, id: &str, s: &Arc<Slot>, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&Slot, &checkpoint::Place, Option<&str>) -> Result<T, String> + Send + 'static,
+{
+    let (folder, path_env) = {
+        let cfg = s.config.lock().unwrap();
+        let cfg = cfg.as_ref().ok_or("No folder is open")?;
+        (cfg.folder.clone(), cfg.path_env.clone())
+    };
+    let state = app.state::<AppState>();
+    let main = state.orchestra.parent_of(id).and_then(|p| state.slots.get(&p).ok()).and_then(|p| p.folder().ok());
+    let s = s.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let place = checkpoint::Place::find(&folder, main.as_deref(), path_env.as_deref()).ok_or("This folder isn't in a git repository, so it has no restore points.")?;
+        f(&s, &place, path_env.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Sends `text` into the chat's claude as a new message and returns the turn's number.
-async fn send_text(app: &AppHandle, s: &Slot, text: &str) -> Result<usize, String> {
+async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str) -> Result<usize, String> {
     let mut session = s.session.lock().await;
     let claude = session.as_mut().ok_or("No Claude session is running")?;
     // What "Last turn" in the Changes pane compares against. It's taken before the send, so Claude's edits come after it.
     let changes = s.changes.clone();
     let turn = tauri::async_runtime::spawn_blocking(move || changes.lock().unwrap().start_turn()).await.map_err(|e| e.to_string())?;
+    // How the folder stands before the message, which "Restore files to here" puts back. Before the send, so Claude's edits
+    // come after it; a folder that isn't a repository, or git failing, only means there is no restore point for it. It is
+    // given a few seconds at most, and a late one is never kept (it would hold edits of the turn).
+    let (late, slot_id) = (Arc::new(std::sync::atomic::AtomicBool::new(false)), id.to_string());
+    let given_up = late.clone();
+    let taken = at_checkpoints(app, id, s, move |s, place, path_env| s.checkpoints.take_unless(place, &slot_id, turn, path_env, &given_up));
+    if tokio::time::timeout(std::time::Duration::from_secs(8), taken).await.is_err() {
+        late.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    s.checkpoints.turn_started();
     if let Err(e) = claude.send(text).await {
+        s.checkpoints.turn_ended();
         s.changes.lock().unwrap().cancel_turn(turn);
         return Err(e);
     }
@@ -1314,6 +1357,37 @@ async fn undo_revert(state: State<'_, AppState>, slot: String, files: Vec<revert
     tauri::async_runtime::spawn_blocking(move || revert::undo(&root, &files, &trash::move_to_trash)).await.map_err(|e| e.to_string())
 }
 
+/// The messages of the chat that have a restore point: a folder that isn't a repository has none.
+#[tauri::command]
+async fn restore_points(state: State<'_, AppState>, slot: String) -> Result<Vec<usize>, String> {
+    let s = state.slots.get(&slot)?;
+    tauri::async_runtime::spawn_blocking(move || s.checkpoints.turns()).await.map_err(|e| e.to_string())
+}
+
+/// What putting the chat's folder back to before message `turn` would change: for the dialog that asks first.
+#[tauri::command]
+async fn restore_preview(app: AppHandle, state: State<'_, AppState>, slot: String, turn: usize) -> Result<checkpoint::Plan, String> {
+    let s = state.slots.get(&slot)?;
+    let id = slot.clone();
+    at_checkpoints(&app, &slot, &s, move |s, place, path_env| s.checkpoints.plan(place, &id, turn, path_env)).await
+}
+
+/// Puts the chat's folder back to before message `turn` (see checkpoint.rs). Refused while a turn runs.
+#[tauri::command]
+async fn restore_files(app: AppHandle, state: State<'_, AppState>, slot: String, turn: usize) -> Result<checkpoint::Restored, String> {
+    let s = state.slots.get(&slot)?;
+    let id = slot.clone();
+    at_checkpoints(&app, &slot, &s, move |s, place, path_env| s.checkpoints.restore(place, &id, turn, &trash::move_to_trash, path_env)).await
+}
+
+/// Takes the last restore back (`id` is what it returned). Files edited since are left as they are.
+#[tauri::command]
+async fn undo_restore(app: AppHandle, state: State<'_, AppState>, slot: String, id: u64) -> Result<checkpoint::Restored, String> {
+    let s = state.slots.get(&slot)?;
+    let chat = slot.clone();
+    at_checkpoints(&app, &slot, &s, move |s, place, path_env| s.checkpoints.undo(place, &chat, id, &trash::move_to_trash, path_env)).await
+}
+
 /// Saves an exported document (a plan as markdown). The save dialog is opened here rather than by the webview, and only
 /// the path it returns is written, so a file can't be written anywhere the user didn't pick. None: the dialog was cancelled.
 #[tauri::command]
@@ -1490,6 +1564,8 @@ async fn open_session(
             }
             menu::refresh_recent(&app).await;
             s.changes.lock().unwrap().restore(replayed.edits, replayed.edits_before_last_turn);
+            // Its messages are numbered afresh from here, so an earlier numbering's restore points can't be asked for.
+            s.checkpoints.forget();
             Ok(OpenedSession { events: replayed.events, moved_from, read_only: None, provider })
         }
     }
@@ -1740,6 +1816,10 @@ pub fn run() {
             read_file,
             write_file,
             revert_files,
+            restore_points,
+            restore_preview,
+            restore_files,
+            undo_restore,
             undo_revert,
             export_text,
             find_files,
