@@ -454,13 +454,12 @@ export default function App() {
     if (state.claudePath) startIn(takeSlot(), folder, quiet, team, first);
   };
 
-  /** `team`: the chat is the Lead of a team, which can start agents, on the project's last Permissions (the agents never exceed them). */
-  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string) => {
   /**
    * `team`: the chat is the Lead of a team, which can start agents, on the project's last Permissions (the agents never exceed them).
+   * `first`: a team from a template: the Lead's first instruction, which names its members and their roles.
    * `routine`: a routine's chat, on the routine's own Permissions (never the project's) and the standard preset; it doesn't become the project to reopen.
    */
-  const startIn = (slot: string, folder: string, quiet = false, team = false, routine?: Routine) => {
+  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine) => {
     const { claudePath } = state;
     if (!claudePath) return;
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
@@ -474,12 +473,10 @@ export default function App() {
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode, autoApprove });
     to(slot)({ type: "orchestrator_set", on: orchestrator });
-    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first);
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first, routine);
     // The notes the chat starts with: what is saved now, which a later change doesn't reach.
     const notes = notesOf(notesBy, folder);
     to(slot)({ type: "notes_applied", text: notes || null });
-    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team);
-    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, routine);
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
     api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}), ...(notes ? { project_notes: notes } : {}) }).then(
       () => {
@@ -489,8 +486,6 @@ export default function App() {
           startSubagents(slot, folder);
           startRoles(slot, folder);
         }
-        setLastFolder(folder);
-        if (orchestrator) startSubagents(slot, folder);
         if (!routine) setLastFolder(folder);
         to(slot)({ type: "session_ready" });
         // A team from a template: the Lead's first instruction names its members and their roles.
@@ -902,7 +897,7 @@ export default function App() {
       const slot = `s${++slotSeq.current}`;
       dispatchChats({ type: "add", slot });
       routineSlots.current[slot] = { name: r.name, model: r.model };
-      startIn(slot, folder, false, false, r);
+      startIn(slot, folder, false, false, undefined, r);
       return slot;
     },
   });
@@ -1667,8 +1662,7 @@ export default function App() {
     // History with its search box ready: what was said in any past chat.
     const searchChats: PaletteEntry = { id: "search-chats", title: "Search all chats…", group: "View", shortcut: null, run: () => void openHistory() };
     const project = state.folder ? [{ id: "project-notes", title: "Project notes…", group: "Project", shortcut: null, run: () => setEditingNotes(state.folder) } satisfies PaletteEntry] : [];
-    return [...availableActions(), searchChats, ...project, ...permissions, ...workflows, ...harnesses, ...themes, ...tabs];
-    return [...availableActions(), ...permissions, ...workflows, ...harnesses, routinesEntry, ...themes, ...tabs];
+    return [...availableActions(), searchChats, ...project, ...permissions, ...workflows, ...harnesses, routinesEntry, ...themes, ...tabs];
   };
   // The Work menu: Build, Debug and Design are Step by step in that flavour; Review a PR lists the open pull requests and
   // starts a review on the one chosen; Start a team makes an empty chat a team's Lead, and otherwise starts a new one.
