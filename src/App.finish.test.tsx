@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { clearMocks } from "@tauri-apps/api/mocks";
 
 // These render the whole app against the mock backend, which a loaded CI runner can take longer than
 // vitest's default 5 s to do.
 vi.setConfig({ testTimeout: 60_000 });
+// Their finds and waits take as long on such a runner: the default 1 s is for a component, not the whole app.
+configure({ asyncUtilTimeout: 20_000 });
 
 // The editor isn't needed here, and doesn't load in jsdom.
 vi.mock("./monaco", () => ({ LIGHT_THEME: "lantern-light", DARK_THEME: "lantern-dark" }));
@@ -32,7 +34,7 @@ async function launch(ready: RegExp | string): Promise<Call[]> {
 }
 
 const last = (calls: Call[], cmd: string) => [...calls].reverse().find(([c]) => c === cmd)?.[1];
-const settle = () => waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull(), { timeout: 15000 });
+const settle = () => waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull(), { timeout: 40_000 });
 
 beforeEach(() => {
   vi.resetModules();
