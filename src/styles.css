@@ -2818,6 +2818,10 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-list { flex: 1; min-height: 0; width: 100%; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; overflow-x: hidden; padding: 6px 8px 6px 0; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .sb-list::-webkit-scrollbar { width: 4px; }
 .sb-list::-webkit-scrollbar-thumb { border-radius: 2px; background: var(--line-strong); }
+/* The collapsed bar is a column of squares with no room for a track (with a mouse, or scroll bars set to always show, it is
+   13px of its 48 and clips the marks on the squares' corners): it scrolls with no bar there, and has one once it opens. */
+.sb-panel:not(.expanded) .sb-list { scrollbar-width: none; }
+.sb-panel:not(.expanded) .sb-list::-webkit-scrollbar { display: none; }
 .sb-group { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 /* Each project's colour (--pc, set per project) tints its label and squares; the one on screen is filled with it. */
 .sb-project { flex: none; display: flex; align-items: center; gap: 10px; margin-top: 6px; padding-left: 6px; color: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-ink), var(--text)); font-size: calc(9.5px * var(--font-scale)); font-weight: 600; letter-spacing: 0.06em; line-height: 1; white-space: nowrap; }
