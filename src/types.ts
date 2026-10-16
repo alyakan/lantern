@@ -472,6 +472,8 @@ export interface MergeTestsInfo {
   detected: { command: string[]; source: string } | null;
   running: { command: string[]; elapsed_ms: number; last_line: string } | null;
   last: MergeTestsReport | null;
+}
+
 /** What Ship it learns about the folder's repository, read-only: where a push would go and whether a pull request can be opened. */
 export interface ShipInfo {
   /** The checked-out branch (null: not a repository, or a detached HEAD). */
