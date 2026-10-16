@@ -60,6 +60,12 @@ pub fn valid_id(id: &str) -> bool {
     (1..=32).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
+/// The shape of a Claude Code session id: a UUID (8-4-4-4-12 hex digits). It goes after `--resume`, so nothing else is passed.
+pub fn valid_session_id(id: &str) -> bool {
+    let parts: Vec<&str> = id.split('-').collect();
+    parts.len() == 5 && parts.iter().zip([8, 4, 4, 4, 12]).all(|(p, n)| p.len() == n && p.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
 /// Claude's command line for a side chat. `resume` is the chat's session id, forked so the chat's own session is not
 /// changed; each value is its own argument, and nothing here goes through a shell.
 pub fn args(resume: Option<&str>, model: Option<&str>) -> Vec<String> {
@@ -155,6 +161,9 @@ impl Asides {
     pub async fn ask(&self, id: &str, slot: &str, launch: &Launch, text: &str, emit: Emit) -> Result<bool, String> {
         if !valid_id(id) {
             return Err(format!("{id:?} is not a side chat id."));
+        }
+        if launch.resume.as_deref().is_some_and(|r| !valid_session_id(r)) {
+            return Err("This chat's conversation id is not one a side chat can continue from.".into());
         }
         let text = text.trim();
         if text.is_empty() {
@@ -288,7 +297,7 @@ fn start(aside: &Arc<Aside>, id: &str, launch: &Launch, emit: Emit) -> Result<Cl
 /// Where Claude Code keeps the chat's conversation, when it has one: a side chat of a chat that hasn't said anything yet
 /// starts blank, since there is nothing to fork. Returns the id to fork from.
 pub fn forkable(projects: &Path, folder: &Path, aliases: &[std::path::PathBuf], session_id: Option<&str>) -> Option<String> {
-    let id = session_id.filter(|id| crate::history::valid_id(id))?;
+    let id = session_id.filter(|id| valid_session_id(id))?;
     crate::history::transcript_path_with_aliases(projects, folder, aliases, id).ok()?;
     Some(id.to_string())
 }
@@ -380,6 +389,28 @@ mod tests {
     #[test]
     fn ids_are_short_and_plain() {
         assert!(valid_id("a1-b2") && !valid_id("") && !valid_id("a/b") && !valid_id("a b") && !valid_id(&"x".repeat(33)));
+    }
+
+    #[test]
+    fn a_session_id_is_a_uuid_and_nothing_else() {
+        assert!(valid_session_id("2e1f7a52-aaaa-4bbb-8ccc-0123456789ab") && valid_session_id("2E1F7A52-AAAA-4BBB-8CCC-0123456789AB"));
+        for bad in ["", "abc", "--dangerously-skip-permissions", "-a-b-c-d", "2e1f7a52-aaaa-4bbb-8ccc-0123456789a", "2e1f7a52-aaaa-4bbb-8ccc-0123456789abc", "2e1f7a52-aaaa-4bbb-8ccc-0123456789ag", "../2e1f7a52-aaaa-4bbb-8ccc-012345", "2e1f7a52aaaa4bbb8ccc0123456789ab", "2e1f7a52-aaaa-4bbb-8ccc-0123456789ab\n"] {
+            assert!(!valid_session_id(bad), "{bad:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_session_id_that_is_not_a_uuid_is_refused_before_anything_starts() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = script(dir.path(), "touch started.txt");
+        let (emit, _rx) = channel();
+        let asides = Asides::default();
+        let mut l = launch(fake, dir.path());
+        l.resume = Some("--dangerously-skip-permissions".into());
+        let err = asides.ask("a1", "s1", &l, "what?", emit).await.unwrap_err();
+        assert!(err.contains("conversation id"), "{err}");
+        assert!(!dir.path().join("started.txt").exists());
+        assert!(asides.open.lock().unwrap().is_empty());
     }
 
     #[test]
