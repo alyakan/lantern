@@ -38,6 +38,10 @@ export async function fetchJson(url: string, attempts = 3) {
 }
 `;
 
+// &diffshift: once the page sets `window.diffShifted`, the file has one more line on top and no `if (res.ok)` line, for
+// seeing review comments follow their lines and a comment whose line is gone go outdated.
+const SHIFTED = `// Retries transient failures.\n${CURRENT.replace("    if (res.ok) return res.json();\n", "")}`;
+
 // A small fake project for the Files tab: directory path → entries (a trailing "/" marks a folder).
 const TREE: Record<string, string[]> = {
   [FOLDER]: ["src/", "test/", ".gitignore", "package.json", "README.md", "tsconfig.json"],
@@ -1511,7 +1515,7 @@ export function installMockBackend() {
           return [{ path: FILE, created: false, deleted: false, added: 9, removed: 4 }, ...(MORE ? [{ path: TEST_FILE, created: true, deleted: false, added: 6, removed: 0 }] : [])];
         case "get_file_diff":
           if (a.path === TEST_FILE) return { path: a.path, original: "", current: TEST_SOURCE, created: true, deleted: false };
-          return { path: a.path, original: ORIGINAL, current: CURRENT, created: false, deleted: false };
+          return { path: a.path, original: ORIGINAL, current: new URLSearchParams(location.search).has("diffshift") && (window as { diffShifted?: boolean }).diffShifted ? SHIFTED : CURRENT, created: false, deleted: false };
         case "list_dir":
           return listDir(String(a.path));
         case "search_text": {

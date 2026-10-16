@@ -282,6 +282,12 @@ The side panel (⌘\ shows or hides it) always has six tabs, in this order. A ta
 
 **Changes.** Every file Claude touched, as a diff. Pick a file to see it in a full diff beside the chat, step through the files (or press `j` and `k`), switch between unified and split, edit the file, or **Revert** it (or **Revert all**). The button at the top right chooses what it compares: this chat's edits, or a whole branch. The first screenshot under [A chat](#a-chat) shows it.
 
+**Comments on lines.** Like a code review: point at any line in a diff, an added one, a removed one or one that didn't change, and a small **+** shows in the gutter. Click it (or put the cursor on the line and press `c`) and a box opens under the line: **Enter** adds the comment, **Shift+Enter** starts a new line, **Esc** cancels. Each comment then sits under its line with **Edit** and **Delete**. It works in unified and split views, for every file in Changes, and in a worker's branch review. In the split view the keyboard can reach removed lines too (the old side); in the unified view point at them.
+
+Once there is a comment, a bar over the diff says how many there are, with **Send to Claude** and **Discard** (which asks first). Send puts every comment, from every file, into one message to the chat whose changes you are looking at (a worker's chat when you are reviewing its branch), in a fixed format: the file, the line, whether it was added, removed or unchanged with the line's text quoted, and your comment. A removed line is numbered as it was before and says so. If Claude is in the middle of a turn, the message waits for it to finish; once it is sent, the comments are cleared.
+
+Comments stay while Lantern runs, for each chat, and survive switching tabs or chats. When Claude changes a file, each comment follows its line to where it is now. If the line is gone, the comment is marked **Outdated** and moves into a list above that file's diff; it stays (and is sent with the rest, saying the line has since changed) until you delete it.
+
 **Files.** The project's files, with search by name (⌘P) and by text (⌘⇧F). A file opens in an editor with completion, hover docs and syntax errors for TypeScript, JavaScript, JSON, CSS and HTML: change it and press ⌘S. The change shows in Changes like Claude's, and if Claude (or git) changes the file while you have unsaved edits, you choose between your version and the one on disk before anything is overwritten. A markdown file opens as a styled document; **Edit** switches to the editor.
 
 ![The Files tab with a file open in the editor](images/panel-files.png)
@@ -366,5 +372,6 @@ The code editor and diffs, diagrams and shell output follow the theme, and a cho
 | ⌘= ⌘- ⌘0 | Zoom the canvas in, out, and fit everyone |
 | ⌘] ⌘[ | Next and previous agent on the canvas |
 | `j` `k` | Next and previous changed file (outside the message box) |
+| `c` | Comment on the line the cursor is on (in a diff) |
 | ⌘, | Settings |
 | ⌘/ | Keyboard shortcuts |

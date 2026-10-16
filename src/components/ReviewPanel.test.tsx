@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { ReviewPanel } from "./ReviewPanel";
 import { NetworkEmpty } from "./NetworkTab";
 import type { RevertControls } from "../lib/revert";
+import type { CommentControls, DiffComment } from "../lib/diffComments";
 
 vi.mock("./FullDiff", () => ({ default: ({ path }: { path: string }) => <div>diff of {path}</div> }));
 
@@ -256,6 +257,58 @@ describe("ReviewPanel's fixed tabs", () => {
     render(<ReviewPanel {...base} selected={null} follow />);
     expect(JSON.parse(localStorage.getItem("review.tab")!)).toBe("activity");
     localStorage.clear();
+  });
+});
+
+describe("ReviewPanel review comments", () => {
+  const note = (over: Partial<DiffComment> = {}): DiffComment => ({ id: "c1", path: "/p/src/a.ts", side: "new", line: 4, lineText: "const a = 1;", kind: "added", text: "Why 1?", ...over });
+  const withComments = (items: DiffComment[], over: Partial<CommentControls> = {}): CommentControls => ({ items, update: vi.fn(), send: vi.fn(), ...over });
+
+  it("shows no bar until there is a comment", () => {
+    render(<ReviewPanel {...base} selected="/p/src/a.ts" follow comments={withComments([])} />);
+    expect(screen.queryByRole("group", { name: "Review comments" })).toBeNull();
+  });
+
+  it("counts every comment, and Send to Claude sends them as one message and clears them", () => {
+    const comments = withComments([note(), note({ id: "c2", path: "/p/src/b.ts", line: 9, lineText: "x", kind: "context", text: "Fine." })]);
+    render(<ReviewPanel {...base} selected="/p/src/a.ts" follow comments={comments} />);
+    expect(screen.getByRole("status")).toHaveTextContent("2 comments");
+    fireEvent.click(screen.getByRole("button", { name: "Send to Claude" }));
+    expect(comments.send).toHaveBeenCalledTimes(1);
+    expect(comments.send).toHaveBeenCalledWith("Please address these review comments:\n\n1. src/a.ts line 4 (added line: `const a = 1;`): Why 1?\n2. src/b.ts line 9 (unchanged line: `x`): Fine.");
+    const change = vi.mocked(comments.update).mock.calls[0][0];
+    expect(change(comments.items)).toEqual([]);
+  });
+
+  it("Discard asks first, and Keep leaves the comments alone", () => {
+    const comments = withComments([note()]);
+    render(<ReviewPanel {...base} selected="/p/src/a.ts" follow comments={comments} />);
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.getByText("Discard this comment?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+    expect(comments.update).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(vi.mocked(comments.update).mock.calls[0][0](comments.items)).toEqual([]);
+    expect(comments.send).not.toHaveBeenCalled();
+  });
+
+  it("is off, with the reason, when the chat can't take a message", () => {
+    render(<ReviewPanel {...base} selected="/p/src/a.ts" follow comments={withComments([note()], { send: undefined })} />);
+    const send = screen.getByRole("button", { name: "Send to Claude" });
+    expect(send).toBeDisabled();
+    expect(send).toHaveAttribute("title", "Claude can't take a message right now.");
+  });
+
+  it("says Claude will get them after its turn when it is working", () => {
+    render(<ReviewPanel {...base} selected="/p/src/a.ts" follow chatBusy comments={withComments([note()])} />);
+    expect(screen.getByRole("button", { name: "Send to Claude" })).toHaveAttribute("title", "Claude is working: this goes in as soon as it's done");
+  });
+
+  it("stays in view when the file shown has no changes (comments on other files, another filter)", () => {
+    render(<ReviewPanel {...base} files={[]} selected={null} follow comments={withComments([note()])} />);
+    expect(screen.getByRole("status")).toHaveTextContent("1 comment");
+    expect(screen.getByText("No changes yet")).toBeInTheDocument();
   });
 });
 
