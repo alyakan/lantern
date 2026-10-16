@@ -29,6 +29,28 @@ export interface RevertOutcome {
   reason: string | null;
 }
 
+/** What putting the folder back to before one of the user's messages would do (paths are whole). */
+export interface RestorePlan {
+  /** Files that go back to how they were: changed since, or deleted since. */
+  put_back: string[];
+  /** Files made since, which go to the Trash. */
+  removed: string[];
+  /** Files left alone, with why (links, a folder in the way). */
+  skipped: { path: string; reason: string }[];
+  /** Lines changed since, which are lost. */
+  lines: number;
+}
+
+/** What a restore (or its undo) did. `id` is what Undo is asked with (null: it can't be undone). */
+export interface RestoreResult {
+  id: number | null;
+  put_back: string[];
+  removed: string[];
+  skipped: { path: string; reason: string }[];
+  /** After an undo: files edited since the restore, which were left as they are. */
+  kept: string[];
+}
+
 /** Whether claude is logged in, and as whom. */
 export interface ClaudeLogin {
   logged_in: boolean;
@@ -174,6 +196,14 @@ export const api = {
     invoke<RevertOutcome[]>("revert_files", { slot, scope, turn, toTurn, files }),
   /** Undoes a revert: each file goes back to `target` (null: absent), if it still holds `expected` (what the revert left). */
   undoRevert: (slot: string, files: { path: string; target: string | null; expected: string | null }[]) => invoke<RevertOutcome[]>("undo_revert", { slot, files }),
+  /** The messages (by turn number) the chat has a restore point for: none when its folder isn't a git repository. */
+  restorePoints: (slot: string) => invoke<number[]>("restore_points", { slot }),
+  /** What putting the folder back to before message `turn` would change. Nothing is written. */
+  restorePreview: (slot: string, turn: number) => invoke<RestorePlan>("restore_preview", { slot, turn }),
+  /** Puts the folder back to before message `turn`, after keeping how it stands now. Rejects while Claude is working. */
+  restoreFiles: (slot: string, turn: number) => invoke<RestoreResult>("restore_files", { slot, turn }),
+  /** Takes the last restore back (`id` is what it returned). Files edited since stay as they are. */
+  undoRestore: (slot: string, id: number) => invoke<RestoreResult>("undo_restore", { slot, id }),
   /** Saves an exported document at a path from the save dialog (a markdown file, anywhere). */
   /** Opens the save dialog and writes the document where the user picks; the path picked, or null if they cancel. */
   exportText: (fileName: string, text: string) => invoke<string | null>("export_text", { fileName, text }),
