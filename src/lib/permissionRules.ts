@@ -217,7 +217,7 @@ export function handRule(form: HandForm): HandRule {
       if (!isPlainCommand(pattern)) return { error: "Rules only match plain commands: no ; & | < > $ ` \\ * ? ( ) [ ] { } and no line breaks." };
       const first = programName(pattern.split(" ")[0]);
       const risky = WRAPPERS.includes(first) || DENIED_FIRST.includes(first);
-      return { rule: { tool, kind: "exact", text: pattern }, meaning: `Always allow the Bash command ${pattern}`, broad: risky ? `This lets Claude run \`${pattern}\` without asking. It can run other programs or change or delete files.` : null };
+      return { rule: { tool, kind: "exact", text: pattern }, meaning: `Always allow the Bash command ${pattern}`, broad: risky ? `This lets Claude run ${pattern} without asking. It can run other programs or change or delete files.` : null };
     }
     const text = pattern.split(/ +/).join(" ");
     if (!isPrefix(text)) return { error: "A command's start can only be a read-only, build or test command, like git status, npm test, cargo build or ls. For anything else, choose This exact command." };
