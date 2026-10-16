@@ -1,6 +1,14 @@
 // Small line icons in one stroke style (1.3px, currentColor) so the chrome reads as one set.
 const base = { fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
 
+// A speech bubble with a small one beside it: a question on the side.
+export const SideChatIcon = () => (
+  <svg width="14" height="13" viewBox="0 0 15 14" {...base}>
+    <path d="M1 2.4c0-.77.63-1.4 1.4-1.4h6.2c.77 0 1.4.63 1.4 1.4v3.7c0 .77-.63 1.4-1.4 1.4H5.2L2.8 9.4V7.5h-.4C1.63 7.5 1 6.87 1 6.1z" />
+    <path d="M12 5.2h.6c.77 0 1.4.63 1.4 1.4v3.2c0 .77-.63 1.4-1.4 1.4h-.2v1.6l-2-1.6H7.4c-.43 0-.82-.2-1.07-.5" />
+  </svg>
+);
+
 export const FolderIcon = () => (
   <svg width="14" height="12" viewBox="0 0 15 12" {...base}>
     <path d="M1 2.2c0-.66.54-1.2 1.2-1.2h3.3l1.4 1.6h5.9c.66 0 1.2.54 1.2 1.2v6.5c0 .66-.54 1.2-1.2 1.2H2.2c-.66 0-1.2-.54-1.2-1.2z" />
@@ -266,5 +274,18 @@ export const TeamIcon = () => (
 export const PinIcon = () => (
   <svg width="10" height="11" viewBox="0 0 10 11" {...base}>
     <path d="M3.2 1h3.6l-.5 3 1.7 1.7H2L3.7 4zM5 5.7V10" />
+  </svg>
+);
+
+// A note with a few lines on it: the project has notes every new chat starts with.
+export const NoteIcon = () => (
+  <svg width="10" height="11" viewBox="0 0 10 11" {...base}>
+    <path d="M1.6 1h6.8c.33 0 .6.27.6.6v8.8c0 .33-.27.6-.6.6H1.6a.6.6 0 0 1-.6-.6V1.6c0-.33.27-.6.6-.6zM3 3.7h4M3 5.6h4M3 7.5h2.4" />
+  </svg>
+);
+
+export const PlayIcon = () => (
+  <svg width="10" height="11" viewBox="0 0 10 11" {...base}>
+    <path d="M2 1.2v8.6L8.6 5.5z" />
   </svg>
 );

@@ -25,6 +25,8 @@ import type { DiffLayout, Reveal } from "./FullDiff";
 import { RevertDialog } from "./RevertDialog";
 import { revertFor, type RevertControls, type RevertRequest } from "../lib/revert";
 import { useMenuInside } from "../lib/useMenuInside";
+import { commentsMessage, type CommentControls } from "../lib/diffComments";
+import { CommentBar } from "./DiffComments";
 
 const FullDiff = lazy(() => import("./FullDiff"));
 
@@ -71,8 +73,12 @@ interface Props {
   onSummarizeRequest?: (item: NetworkItem) => void;
   /** Claude is in the middle of a turn in this chat. */
   chatBusy?: boolean;
+  /** Opens Ship it (commit, push, pull request) from the Changes tab's header (absent: no chat to ask). */
+  onShip?: () => void;
   /** Reverting Claude's edits: offered on the Changes views and the Summary's steps; the undo of the last one. */
   revert?: RevertControls;
+  /** Review comments on diff lines: this chat's, how to change them and how to send them to the chat (absent: no comments). */
+  comments?: CommentControls;
   selected: string | null;
   follow: boolean;
   refreshKey: number;
@@ -195,6 +201,11 @@ export function ReviewPanel(props: Props) {
           ))}
         </div>
         {tab === "changes" && props.onScope && <ScopeMenu {...props} onScope={props.onScope} />}
+        {tab === "changes" && props.onShip && count > 0 && (
+          <button className="ghost ship-it" onClick={props.onShip} title="Commit, push and open a pull request: you check each step first">
+            Ship it…
+          </button>
+        )}
         {tab === "changes" && allRevert && rv && count > 0 && (
           <button
             className="ghost revert-all"
@@ -323,11 +334,26 @@ function PlanTab({ summary, architecture, view, onView, revert }: Props & { view
   );
 }
 
-function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr, branch, selected, follow, refreshKey, onSelect, onFollow, onEdit, diffLine, fileRevert }: Props & { diffLine: { path: string; line: number; key: number } | null; onEdit: (path: string) => void; fileRevert?: { off: string | null; onFile: (file: ChangedFile) => void } }) {
+function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr, branch, selected, follow, refreshKey, onSelect, onFollow, onEdit, diffLine, fileRevert, comments, chatBusy }: Props & { diffLine: { path: string; line: number; key: number } | null; onEdit: (path: string) => void; fileRevert?: { off: string | null; onFile: (file: ChangedFile) => void } }) {
   const [layout, setLayout] = usePersistentState<DiffLayout>("review.diffLayout", "inline");
   const found = files.findIndex((f) => f.path === selected);
   const index = found === -1 ? files.length - 1 : found;
   const current = files[index] ?? null;
+
+  // Every comment the chat has, whichever file it is on: sent as one message, or discarded.
+  const sendComments = comments?.send;
+  const bar = comments && comments.items.length > 0 && (
+    <CommentBar
+      count={comments.items.length}
+      busy={chatBusy}
+      sendOff={sendComments ? null : "Claude can't take a message right now."}
+      onSend={() => {
+        sendComments?.(commentsMessage(comments.items, folder));
+        comments.update(() => []);
+      }}
+      onDiscard={() => comments.update(() => [])}
+    />
+  );
 
   if (!current) {
     const empty =
@@ -335,7 +361,12 @@ function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr,
       scope === "pr" ? (gitError ?? `Fetching pull request #${pr}…`) :
       scope === "branch" ? (gitError ?? "Reading the branch…") :
       scope !== "turn" ? "No changes yet" : stepRange === null ? "This step's changes aren't known: the chat was reopened after it" : stepRange !== undefined ? "No changes in this step" : "No changes in the last turn";
-    return <div className="empty">{empty}</div>;
+    return (
+      <>
+        {bar}
+        <div className="empty">{empty}</div>
+      </>
+    );
   }
 
   return (
@@ -373,8 +404,9 @@ function ChangesTab({ folder, files, scope = "session", stepRange, gitError, pr,
           {LAYOUT_LABEL[layout]}
         </button>
       </div>
+      {bar}
       <Suspense fallback={<div className="empty">Loading diff…</div>}>
-        <FullDiff path={current.path} refreshKey={refreshKey} layout={layout} scope={scope} turn={scope === "turn" ? (stepRange?.from ?? null) : null} toTurn={scope === "turn" ? (stepRange?.to ?? null) : null} pr={scope === "pr" ? (pr ?? null) : null} base={scope === "branch" ? (branch?.base ?? null) : null} reveal={diffLine?.path === current.path ? ({ line: diffLine.line, key: diffLine.key } satisfies Reveal) : null} />
+        <FullDiff path={current.path} refreshKey={refreshKey} layout={layout} scope={scope} turn={scope === "turn" ? (stepRange?.from ?? null) : null} toTurn={scope === "turn" ? (stepRange?.to ?? null) : null} pr={scope === "pr" ? (pr ?? null) : null} base={scope === "branch" ? (branch?.base ?? null) : null} comments={comments} reveal={diffLine?.path === current.path ? ({ line: diffLine.line, key: diffLine.key } satisfies Reveal) : null} />
       </Suspense>
     </>
   );

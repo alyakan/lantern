@@ -49,11 +49,11 @@ const HARDENED: [&str; 24] = [
 ];
 
 /// Variables that would point git at another repository, index or config than the one it is run in.
-const REDIRECTS: [&str; 6] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
+pub(crate) const REDIRECTS: [&str; 6] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
 
 /// Where a git command runs.
 #[derive(Clone, Copy)]
-enum At<'a> {
+pub(crate) enum At<'a> {
     /// A folder of the user's own checkout: git finds the repository from there.
     Dir(&'a Path),
     /// A worker's worktree, checked (see `verify_worktree`): git is told where its repository is, so the `.git` file in it,
@@ -82,6 +82,12 @@ fn run_raw(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, 
 }
 
 fn run_raw_within(at: At, args: &[&str], path_env: Option<&str>, limit: Duration) -> Result<String, String> {
+    run_with(at, args, path_env, limit, &[])
+}
+
+/// `run_raw_within` with variables of its own set after the redirects are removed: a private index for a checkpoint
+/// (`GIT_INDEX_FILE`), the name a commit is made under. Only the checkpoints use it, and with values Lantern chose.
+pub(crate) fn run_with(at: At, args: &[&str], path_env: Option<&str>, limit: Duration, env: &[(&str, &std::ffi::OsStr)]) -> Result<String, String> {
     let mut cmd = Command::new("git");
     cmd.args(HARDENED);
     match at {
@@ -101,6 +107,9 @@ fn run_raw_within(at: At, args: &[&str], path_env: Option<&str>, limit: Duration
         cmd.env_remove(var);
     }
     cmd.args(args).env("GIT_TERMINAL_PROMPT", "0").env("GIT_EDITOR", "true").env("GIT_CONFIG_NOSYSTEM", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    for (name, value) in env {
+        cmd.env(name, value);
+    }
     if let Some(p) = path_env {
         cmd.env("PATH", p);
     }
@@ -149,6 +158,73 @@ pub fn branch_of(folder: &Path, path_env: Option<&str>) -> Option<String> {
 /// The top of the repository `folder` is in, or None when it isn't in one.
 pub fn repo_root(folder: &Path, path_env: Option<&str>) -> Option<PathBuf> {
     run(folder, &["rev-parse", "--show-toplevel"], path_env).ok().filter(|p| !p.is_empty()).map(PathBuf::from)
+}
+
+/// What the Ship it dialog needs to know about a folder's repository, all read-only.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+pub struct ShipInfo {
+    /// The checked-out branch (None: not a git repository, or a detached HEAD).
+    pub branch: Option<String>,
+    /// The remote a push goes to: `origin`, else the first remote there is.
+    pub remote: Option<String>,
+    /// That remote's address, without any password or token in it.
+    pub remote_url: Option<String>,
+    /// The remote is on github.com.
+    pub github: bool,
+    /// The GitHub CLI (`gh`) can be run.
+    pub gh: bool,
+    /// The branch a pull request would go into: the remote's default, else main or master.
+    pub base: Option<String>,
+}
+
+/// A remote's address as it can be shown and sent to Claude: a password or token written before the `@` of an
+/// `https://user:token@host/…` address is dropped (`git@github.com:o/r.git` has none to drop).
+pub fn redact_url(url: &str) -> String {
+    let url = url.trim();
+    let Some((scheme, rest)) = url.split_once("://") else { return url.to_string() };
+    let (authority, path) = rest.split_once('/').map_or((rest, None), |(a, p)| (a, Some(p)));
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    match path {
+        Some(path) => format!("{scheme}://{host}/{path}"),
+        None => format!("{scheme}://{host}"),
+    }
+}
+
+/// Whether `gh` starts (`gh --version`): it is what opens the pull request.
+fn gh_installed(path_env: Option<&str>) -> bool {
+    let mut cmd = Command::new("gh");
+    cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    if let Some(path) = path_env {
+        cmd.env("PATH", path);
+    }
+    cmd.status().is_ok_and(|s| s.success())
+}
+
+/// The branch pull requests go into: the remote's own default (`refs/remotes/<remote>/HEAD`), else main or master.
+fn default_branch(folder: &Path, remote: Option<&str>, path_env: Option<&str>) -> Option<String> {
+    if let Some(remote) = remote {
+        let head = format!("refs/remotes/{remote}/HEAD");
+        if let Ok(r) = run(folder, &["symbolic-ref", "--quiet", "--short", &head], path_env) {
+            if let Some(name) = r.strip_prefix(&format!("{remote}/")).filter(|n| !n.is_empty()) {
+                return Some(name.to_string());
+            }
+        }
+    }
+    let exists = |full: String| run(folder, &["rev-parse", "--verify", "--quiet", &full], path_env).is_ok();
+    ["main", "master"].into_iter().find(|name| exists(format!("refs/heads/{name}")) || remote.is_some_and(|r| exists(format!("refs/remotes/{r}/{name}")))).map(String::from)
+}
+
+/// Looks at the folder's repository for the Ship it dialog: its branch, where a push would go, and whether a pull request
+/// can be opened. Only reads: `rev-parse`, `remote`, `remote get-url`, `symbolic-ref`, and `gh --version`.
+pub fn ship_info(folder: &Path, path_env: Option<&str>) -> ShipInfo {
+    let branch = run(folder, &["rev-parse", "--abbrev-ref", "HEAD"], path_env).ok().filter(|b| !b.is_empty() && b != "HEAD");
+    let remotes = run(folder, &["remote"], path_env).unwrap_or_default();
+    let names = || remotes.lines().map(str::trim).filter(|r| !r.is_empty());
+    let remote = names().find(|r| *r == "origin").or_else(|| names().next()).map(String::from);
+    let remote_url = remote.as_deref().and_then(|r| run(folder, &["remote", "get-url", r], path_env).ok()).filter(|u| !u.is_empty()).map(|u| redact_url(&u));
+    let github = remote_url.as_deref().is_some_and(|u| u.contains("github.com"));
+    let base = default_branch(folder, remote.as_deref(), path_env);
+    ShipInfo { branch, remote, remote_url, github, gh: gh_installed(path_env), base }
 }
 
 /// Where `folder` is inside its repository's top ("" at the top, "packages/app/" below it).
@@ -277,6 +353,18 @@ pub struct Checked {
     root: PathBuf,
 }
 
+impl Checked {
+    /// The worktree's own directory in the repository's git directory: where its index lives.
+    pub(crate) fn admin(&self) -> &Path {
+        &self.admin
+    }
+
+    /// The worktree's top.
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+}
+
 /// Checks that `root` is a linked worktree of the repository `repo` is in, before Lantern runs git there. A worktree's
 /// `.git` is a plain file in the worker's own folder, saying where its git directory is: rewritten to point at one the
 /// worker made, the config there would have git run the worker's commands for Lantern (a filesystem monitor, a hook).
@@ -359,6 +447,19 @@ pub fn snapshot(repo: &Path, wt: &Checked, branch: &str, path_env: Option<&str>)
         return Err(format!("Its worktree isn't on {branch} now, so there is no telling what a merge would take."));
     }
     Ok(Snapshot { tip: tip_of(repo, branch, path_env)?, loose: loose_files(wt, path_env)? })
+}
+
+/// What the worker's branch is at and what is loose in its worktree, down to each loose file's size and time: it changes
+/// when the branch moves or any of its loose work does. A test run compares it to say whether it still describes the branch.
+pub fn fingerprint(repo: &Path, wt: &Checked, branch: &str, path_env: Option<&str>) -> Result<(Snapshot, String), String> {
+    let seen = snapshot(repo, wt, branch, path_env)?;
+    let mut text = format!("{}\n", seen.tip);
+    for name in &seen.loose {
+        // A link is the link itself, never what it points at.
+        let stat = std::fs::symlink_metadata(wt.root.join(name)).ok().map(|m| (m.len(), m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos())));
+        text.push_str(&format!("{name}\0{stat:?}\n"));
+    }
+    Ok((seen, text))
 }
 
 /// What `commit_snapshot` found.
@@ -637,6 +738,41 @@ mod tests {
         g(&["add", "-A"]);
         g(&["commit", "-q", "-m", "first"]);
         dir
+    }
+
+    #[test]
+    fn a_remote_address_loses_the_password_or_token_in_it() {
+        assert_eq!(redact_url("https://ada:ghp_secret@github.com/o/r.git"), "https://github.com/o/r.git");
+        assert_eq!(redact_url("https://token@github.com/o/r"), "https://github.com/o/r");
+        assert_eq!(redact_url("https://github.com/o/r.git\n"), "https://github.com/o/r.git");
+        assert_eq!(redact_url("git@github.com:o/r.git"), "git@github.com:o/r.git");
+        assert_eq!(redact_url("ssh://git@github.com/o/r.git"), "ssh://github.com/o/r.git");
+        assert_eq!(redact_url("https://u:p@host"), "https://host");
+    }
+
+    #[test]
+    fn ship_info_reads_the_branch_the_remote_and_the_default_branch() {
+        let dir = repo();
+        let none = ship_info(dir.path(), None);
+        assert_eq!((none.branch.as_deref(), none.remote.as_deref(), none.remote_url.as_deref(), none.github, none.base.as_deref()), (Some("main"), None, None, false, Some("main")));
+        let g = |args: &[&str]| run(dir.path(), args, None).unwrap();
+        g(&["remote", "add", "upstream", "git@example.com:o/r.git"]);
+        g(&["remote", "add", "origin", "https://ada:secret@github.com/o/r.git"]);
+        g(&["checkout", "-q", "-b", "feat/x"]);
+        let info = ship_info(dir.path(), None);
+        assert_eq!((info.branch.as_deref(), info.remote.as_deref(), info.remote_url.as_deref(), info.github), (Some("feat/x"), Some("origin"), Some("https://github.com/o/r.git"), true));
+        assert_eq!(info.base.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn ship_info_has_no_branch_on_a_detached_head_or_outside_a_repository() {
+        let dir = repo();
+        let sha = run(dir.path(), &["rev-parse", "HEAD"], None).unwrap();
+        run(dir.path(), &["checkout", "-q", "--detach", &sha], None).unwrap();
+        assert_eq!(ship_info(dir.path(), None).branch, None);
+        let empty = tempfile::tempdir().unwrap();
+        let outside = ship_info(empty.path(), None);
+        assert_eq!((outside.branch, outside.remote, outside.base), (None, None, None));
     }
 
     /// A directory for worktrees that outlives the statement it's made in (the OS clears /tmp).

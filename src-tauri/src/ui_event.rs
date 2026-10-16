@@ -186,6 +186,10 @@ pub enum UiEvent {
     /// On the main agent's slot: where the review and test of a builder's latest work stands (see orchestra/review.rs).
     /// `done`: every check has finished, so the Lead has its one message.
     ReviewUpdate { builder: String, name: String, commit: String, checks: Vec<ReviewCheck>, done: bool },
+    /// On a worker's slot: its worktree is being set up before it starts (see setup.rs). `phase`: "running" (command number
+    /// `index` of `total` is running; `line` is what it printed last), "failed" (it stopped at `command`, for `reason`, with the
+    /// end of what it printed in `tail`) or "done" (the worker starts now, or was told to start without the rest).
+    AgentSetup { phase: String, index: usize, total: usize, command: String, line: String, reason: String, tail: String },
     /// On a worker's slot: it now runs on this mode ("ask"), because its main agent's mode was lowered.
     AgentMode { mode: String },
     /// On the main agent's slot: it asks the user to merge a worker's branch into `into`. `loose`: the names of the files

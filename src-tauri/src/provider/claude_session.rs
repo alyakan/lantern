@@ -68,7 +68,12 @@ fn command(cfg: &SessionConfig) -> Command {
 
 impl ClaudeSession {
     pub fn spawn(cfg: &SessionConfig, sink: Sink, on_edit: EditHook) -> Result<ClaudeSession, String> {
-        let mut cmd = command(cfg);
+        Self::start(command(cfg), &cfg.binary, &cfg.folder, cfg.resume.clone(), sink, on_edit)
+    }
+
+    /// Runs `cmd` (a claude command line, already built) as a session: `folder` is where it works and `resume` the session
+    /// id it starts from. A chat is started through `spawn`; the side chat (aside.rs) brings its own command line.
+    pub fn start(mut cmd: Command, binary: &std::path::Path, folder: &std::path::Path, resume: Option<String>, sink: Sink, on_edit: EditHook) -> Result<ClaudeSession, String> {
         // Its own session, so its own group (the pid is the group id): stopping claude signals the group, and the
         // background tasks it started go with it. A session rather than just a group, so no terminal Lantern was started
         // from is shared: a child that touches it from a background group is stopped there, where here it just fails.
@@ -84,13 +89,13 @@ impl ClaudeSession {
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
-            .map_err(|e| format!("Failed to start {}: {e}", cfg.binary.display()))?;
+            .map_err(|e| format!("Failed to start {}: {e}", binary.display()))?;
         let pid = child.id().ok_or("claude exited before it started")?;
         let stdin = Arc::new(AsyncMutex::new(child.stdin.take()));
         let stdout = child.stdout.take().ok_or("claude has no stdout pipe")?;
         let stderr = child.stderr.take().ok_or("claude has no stderr pipe")?;
 
-        let session_id = Arc::new(Mutex::new(cfg.resume.clone()));
+        let session_id = Arc::new(Mutex::new(resume));
         let replies: Replies = Arc::default();
         let stopping = Arc::new(AtomicBool::new(false));
         let tail = Arc::new(Mutex::new(String::new()));
@@ -109,7 +114,7 @@ impl ClaudeSession {
 
         {
             let (sid, stopping, tail, replies, stdin) = (session_id.clone(), stopping.clone(), tail.clone(), replies.clone(), stdin.clone());
-            let folder = cfg.folder.clone();
+            let folder = folder.to_path_buf();
             tokio::spawn(async move {
                 let mut parser = StreamParser::default();
                 let mut reader = BufReader::new(stdout);
@@ -361,7 +366,7 @@ mod tests {
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![] },
+            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None },
             path_env: None,
         }
     }

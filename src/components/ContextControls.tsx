@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
-import { COMPACT_ALL_AT, contextShare, shortTokens, tidyBlock } from "../lib/contextShare";
+import { useChatState, useChatStates, useNodeActions, useKnownWindows } from "../lib/canvasContext";
+import { COMPACT_ALL_AT, contextShare, shortTokens, tidyBlock, type ContextShare } from "../lib/contextShare";
 import type { OrchestraNode } from "../lib/orchestraView";
 import { usePopover } from "../lib/usePopover";
 import type { State } from "../store";
@@ -30,7 +30,8 @@ export function NodeContext({ slot, name }: { slot: string; name: string }) {
   useEffect(() => {
     if (confirming) keep.current?.focus();
   }, [confirming]);
-  const share = contextShare(state);
+  const known = useKnownWindows();
+  const share = contextShare(state, known);
   if (!state || !share) return null;
   const blocked = tidyBlock(state);
   const note = share.level === "full" ? ", nearly full" : share.level === "warn" ? ", getting full" : "";
@@ -50,11 +51,11 @@ export function NodeContext({ slot, name }: { slot: string; name: string }) {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? id : undefined}
-        aria-label={`${name} context, ${share.percent}% used${note}`}
-        title={`${share.percent}% of ${name}'s context window is in use. Click to Compact or Clear it.`}
+        aria-label={share.percent !== null ? `${name} context, ${share.percent}% used${note}` : `${name} context, ${share.used.toLocaleString()} tokens used, window not known yet`}
+        title={share.percent !== null ? `${share.percent}% of ${name}'s context window is in use. Click to Compact or Clear it.` : `${share.used.toLocaleString()} tokens are in ${name}'s context. Its window isn't known until it finishes a turn. Click to Compact or Clear it.`}
         onClick={() => (open ? close() : setOpen(true))}
       >
-        {share.percent}%
+        {share.percent !== null ? `${share.percent}%` : shortTokens(share.used)}
       </button>
       {open && (
         <div id={id} className="canvas-menu canvas-overlay node-context-menu" role="menu" aria-label={`${name} context`} onKeyDown={keys.onKeyDown} onPointerDown={(e) => e.stopPropagation()}>
@@ -92,13 +93,9 @@ export function NodeContext({ slot, name }: { slot: string; name: string }) {
   );
 }
 
-interface Row {
+interface Row extends ContextShare {
   node: OrchestraNode;
   state: State;
-  used: number;
-  window: number;
-  percent: number;
-  level: "warn" | "full" | null;
 }
 
 /**
@@ -110,6 +107,7 @@ interface Row {
  */
 export function TeamContext({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string) => void }) {
   const states = useChatStates(nodes.map((n) => n.slot));
+  const known = useKnownWindows();
   const actions = useNodeActions();
   const [open, setOpen] = useState(false);
   // The row asking whether to Clear, and what the last "Compact all" did.
@@ -122,16 +120,21 @@ export function TeamContext({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo:
   };
   const { box, button, list, id } = usePopover(open, close);
   const rows: Row[] = nodes.flatMap((n, i) => {
-    const share = contextShare(states[i]);
+    const share = contextShare(states[i], known);
     return share ? [{ node: n, state: states[i]!, ...share }] : [];
   });
   if (rows.length === 0) return null;
-  // The first of equals: the Lead comes first.
-  const fullest = rows.reduce((a, b) => (b.percent > a.percent ? b : a));
+  // The fullest of those whose window is known (the first of equals: the Lead comes first); when none is known, the one holding the most tokens, said in tokens.
+  const measured = rows.filter((r) => r.percent !== null);
+  const fullest = measured.length > 0 ? measured.reduce((a, b) => ((b.percent ?? 0) > (a.percent ?? 0) ? b : a)) : rows.reduce((a, b) => (b.used > a.used ? b : a));
   const note = fullest.level === "full" ? "nearly full" : fullest.level === "warn" ? "getting full" : null;
   const whose = fullest.node.role === "main" ? "" : fullest.node.name;
   const advice = `At ${WARN_AT}% or more, open that agent and use Compact.`;
-  const over = rows.filter((r) => r.percent > COMPACT_ALL_AT);
+  const over = rows.filter((r) => r.percent !== null && r.percent > COMPACT_ALL_AT);
+  const unknown = rows.length - measured.length;
+  // What the chip says: the percent, or (window not known) the tokens.
+  const shownFull = fullest.percent !== null ? `${fullest.percent}%` : shortTokens(fullest.used);
+  const unknownNote = unknown > 0 && measured.length > 0 ? ` ${unknown === 1 ? "One agent's window isn't" : `${unknown} agents' windows aren't`} known yet, so it isn't counted.` : "";
 
   const compactAll = () => {
     const free = over.filter((r) => !tidyBlock(r.state));
@@ -150,15 +153,15 @@ export function TeamContext({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo:
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? id : undefined}
-        aria-label={`Context: ${fullest.node.name} ${fullest.percent}% used${note ? `, ${note}` : ""}`}
-        title={`The share of ${fullest.node.name}'s context window in use now: the fullest agent's on the team. ${advice} Click for every agent's.`}
+        aria-label={fullest.percent !== null ? `Context: ${fullest.node.name} ${fullest.percent}% used${note ? `, ${note}` : ""}` : `Context: ${fullest.node.name} ${fullest.used.toLocaleString()} tokens used, window not known yet`}
+        title={fullest.percent !== null ? `The share of ${fullest.node.name}'s context window in use now: the fullest agent's on the team. ${advice}${unknownNote} Click for every agent's.` : `${fullest.node.name}'s context holds ${fullest.used.toLocaleString()} tokens. A window isn't known until an agent finishes a turn, so there is no percent yet. Click for every agent's.`}
         onClick={() => (open ? close() : setOpen(true))}
       >
         <span className="canvas-ctl-long">
-          Context {fullest.percent}%{whose && " · "}
+          Context {shownFull}{whose && " · "}
           <span className="canvas-context-who">{whose}</span>
         </span>
-        <span className="canvas-ctl-short">{fullest.percent}%</span>
+        <span className="canvas-ctl-short">{shownFull}</span>
       </button>
       {open && (
         <div id={id} ref={list} className="canvas-team-list context-list" role="dialog" aria-label="Context by agent">
@@ -184,13 +187,17 @@ export function TeamContext({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo:
                   <button className="ctx-name" title={`Go to ${r.node.name}`} onClick={() => { close(); onGoTo(r.node.slot); }}>
                     {r.node.name}
                   </button>
-                  <span className="ctx-percent">{r.percent}%{r.level === "full" ? " · nearly full" : r.level === "warn" ? " · getting full" : ""}</span>
+                  <span className="ctx-percent">{r.percent !== null ? `${r.percent}%` : "window not known"}{r.level === "full" ? " · nearly full" : r.level === "warn" ? " · getting full" : ""}</span>
                   <div className="ctx-line">
-                    <span className="ctx-bar" role="meter" aria-label={`${r.node.name} context used`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={r.percent}>
-                      <span style={{ width: `${r.percent}%` }} />
-                    </span>
-                    <span className="ctx-tokens" title={`${r.used.toLocaleString()} of ${r.window.toLocaleString()} tokens`}>
-                      {shortTokens(r.used)} of {shortTokens(r.window)}
+                    {r.percent !== null ? (
+                      <span className="ctx-bar" role="meter" aria-label={`${r.node.name} context used`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={r.percent}>
+                        <span style={{ width: `${r.percent}%` }} />
+                      </span>
+                    ) : (
+                      <span className="ctx-bar unknown" aria-hidden />
+                    )}
+                    <span className="ctx-tokens" title={r.window !== null ? `${r.used.toLocaleString()} of ${r.window.toLocaleString()} tokens` : `${r.used.toLocaleString()} tokens, window not known until a turn ends`}>
+                      {r.window !== null ? `${shortTokens(r.used)} of ${shortTokens(r.window)}` : `${shortTokens(r.used)} used`}
                     </span>
                     {asking ? (
                       <span className="ctx-confirm">

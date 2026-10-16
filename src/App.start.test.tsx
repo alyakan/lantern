@@ -130,6 +130,20 @@ describe("the Work menu in the command palette", () => {
     expect(await screen.findByRole("button", { name: "Workflow: Step by step · Design" })).toBeInTheDocument();
   });
 
+  it("Search all chats… opens History on its search box, which looks for text in every chat", async () => {
+    const calls = await launch();
+    const palette = await openPalette();
+    fireEvent.click(within(palette).getAllByRole("option").find((o) => o.textContent?.startsWith("Search all chats…"))!);
+    const history = await screen.findByRole("dialog", { name: "Chat history" });
+    const box = within(history).getByRole("textbox", { name: "Search chats" });
+    await waitFor(() => expect(document.activeElement).toBe(box));
+    fireEvent.change(box, { target: { value: "REDIRECT" } });
+    const list = await within(history).findByRole("list", { name: "Chats that mention that" }, { timeout: 5000 });
+    expect(last(calls, "search_history")).toEqual({ query: "REDIRECT" });
+    expect(within(list).getByTitle("Fix the login redirect after OAuth callback")).toBeInTheDocument();
+    expect(within(list).getByText(/web-dashboard · /)).toBeInTheDocument();
+  });
+
   it("⇧⌘N starts a team in an empty chat", async () => {
     const calls = await launch();
     await screen.findByRole("region", { name: "Start" });

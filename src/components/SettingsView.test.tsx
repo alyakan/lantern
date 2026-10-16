@@ -50,6 +50,16 @@ describe("SettingsView", () => {
     readSkill.mockResolvedValue("---\nname: grill-me\n---\n# Grill me\n\nAsk one question at a time.");
   });
 
+  it("has a Routines page when the app gives it routines, and none when it doesn't", async () => {
+    const routines = { routines: [], add: () => null, edit: () => null, remove: () => {}, enable: () => {}, pause: () => {}, runNow: () => null, loadProjects: () => Promise.resolve([]), keepAwake: true, onKeepAwake: () => {}, onOpenChat: () => {} };
+    const { unmount } = render(<SettingsView open="routines" {...props} routines={routines} />);
+    expect(await screen.findByRole("heading", { name: "Routines" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Routines" })).toHaveAttribute("aria-current", "page");
+    unmount();
+    render(<SettingsView open="general" {...props} />);
+    expect(screen.queryByRole("button", { name: "Routines" })).toBeNull();
+  });
+
   it("lists MCP servers with their status and source", async () => {
     render(<SettingsView open="mcp" {...props} />);
     const list = await screen.findByRole("list", { name: "MCP servers" });

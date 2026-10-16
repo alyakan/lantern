@@ -12,6 +12,12 @@ export type Mode = "ask" | "auto" | "steps";
 export type RuleScope = "chat" | "folder";
 
 /** What a rule matches within its tool's input (src-tauri/src/permission/rules.rs). */
+/** What a project's files suggest for its setup lines and its Run command (see ProjectSetupDialog). */
+export interface SetupSuggestion {
+  commands: string[];
+  run: string | null;
+}
+
 export type RuleMatcher = { kind: "any" } | { kind: "exact"; text: string } | { kind: "prefix"; text: string } | { kind: "dir"; path: string };
 
 /** An "Always allow" rule: a tool and what of its calls it covers. */
@@ -92,6 +98,8 @@ export type UiEvent =
   /** On a worker's chat: its claude was stopped on purpose, or never started (`reason`). */
   | { kind: "agent_stopped"; reason: string | null }
   /** On a worker's chat: it now runs on this mode, because its main agent's was lowered. */
+  /** On a worker's slot: its worktree is being set up before it starts. "done": it starts now; "failed": it stopped at `command`. */
+  | { kind: "agent_setup"; phase: "running" | "failed" | "done"; index: number; total: number; command: string; line: string; reason: string; tail: string }
   | { kind: "agent_mode"; mode: Mode }
   /** On the main agent's chat: it asks the user to merge a worker's branch. */
   | { kind: "merge_proposed"; worker: string; name: string; branch: string; into: string; summary: string; commits: number; files: { path: string; added: number; removed: number }[]; uncommitted: number; loose: string[] }
@@ -104,6 +112,13 @@ export type UiEvent =
   | { kind: "merge_resolved"; worker: string; outcome: "merged" | "conflicts" | "declined" | "failed" | "changed"; detail: string }
   | { kind: "unknown"; raw: unknown }
   | { kind: "parse_error"; line: string };
+
+/** What a side chat's claude says (src-tauri/src/aside.rs): one of the events of an answer, or a note from Lantern (why an answer was stopped). Never a chat's own event. */
+export interface AsideEvent {
+  aside: string;
+  event?: UiEvent;
+  note?: string;
+}
 
 export interface DirEntry {
   name: string;
@@ -301,6 +316,8 @@ export interface Settings {
   /** Reopen the chat as a worker of an open main agent (a team restored after Lantern was closed). */
   /** `branch`: the one Lantern made for it (null when it shares the folder); its worktree's HEAD is the worker's to switch. */
   worker?: { name: string; parent: string; branch: string | null; shared: boolean; read_only: boolean; role?: AgentRole };
+  /** The user's notes for the project (the app cuts them to its limit): every new chat starts knowing them. A worker gets its Lead's. */
+  project_notes?: string;
 }
 
 /** A file search result (see files::find): the file, and which characters of `rel` matched. */
@@ -316,6 +333,31 @@ export interface TextQuery {
   case_sensitive: boolean;
   whole_word: boolean;
   regex: boolean;
+}
+
+/** A run of a search result's text; `hit` marks what matched (see history_search.rs). */
+export interface ChatPiece {
+  text: string;
+  hit: boolean;
+}
+
+/** A past chat whose text has what was searched for: its title, where it opens, and up to two lines around the match. */
+export interface ChatHit {
+  id: string;
+  title: ChatPiece[];
+  folder: string;
+  project: string;
+  updated_ms: number;
+  snippets: { role: "user" | "assistant"; pieces: ChatPiece[] }[];
+}
+
+export interface ChatSearchResults {
+  /** Newest first. */
+  chats: ChatHit[];
+  /** It stopped (its limit, or its time) before it had read every chat. */
+  partial: boolean;
+  /** A newer search replaced it: the answer is of no use. */
+  cancelled: boolean;
 }
 
 export interface TextResults {
@@ -448,3 +490,75 @@ export interface OpenPr {
   branch: string;
   draft: boolean;
 }
+
+/** How a worker's tests went when the user ran them from its merge card. */
+export interface MergeTestsReport {
+  command: string[];
+  result: "passed" | "failed" | "timed_out";
+  passed: number | null;
+  failed: number | null;
+  skipped: number | null;
+  exit_code: number | null;
+  took_ms: number;
+  /** The last lines of the output. */
+  tail: string;
+  /** What the numbers don't say (no packages installed, stopped for time). */
+  note: string | null;
+  /** Files the run left in the worktree that weren't there before. */
+  new_files: string[];
+  /** When it ended (unix milliseconds). */
+  at: number;
+  /** The branch (or its loose work) isn't what it was when the tests ran. */
+  stale: boolean;
+}
+
+/** What a merge card knows about its tests: how they would run, the run going now, and the last result. */
+export interface MergeTestsInfo {
+  /** The project's folder: the command a user types is remembered for it. */
+  project: string;
+  detected: { command: string[]; source: string } | null;
+  running: { command: string[]; elapsed_ms: number; last_line: string } | null;
+  last: MergeTestsReport | null;
+}
+
+/** What Ship it learns about the folder's repository, read-only: where a push would go and whether a pull request can be opened. */
+export interface ShipInfo {
+  /** The checked-out branch (null: not a repository, or a detached HEAD). */
+  branch: string | null;
+  remote: string | null;
+  /** The remote's address, without any password or token in it. */
+  remote_url: string | null;
+  github: boolean;
+  /** The GitHub CLI can be run. */
+  gh: boolean;
+  /** The branch a pull request would go into. */
+  base: string | null;
+}
+
+/** One check of a pull request, as gh lists it (read-only). */
+export interface PrCheck {
+  name: string;
+  state: string;
+  /** gh's grouping: pass, fail, pending, skipping or cancel. */
+  bucket: "pass" | "fail" | "pending" | "skipping" | "cancel";
+  link: string | null;
+  workflow: string | null;
+  /** The GitHub Actions run the link points at, when it is one: its log can be read. */
+  run_id: string | null;
+}
+
+/** The pull request of a folder's branch. */
+export interface PullRequest {
+  number: number;
+  url: string;
+  state: "OPEN" | "MERGED" | "CLOSED";
+  branch: string;
+  base: string;
+  /** The commit the branch is at on GitHub: a new one means a push happened. */
+  head_sha: string | null;
+}
+
+/** What looking at a folder's pull request found. */
+export type PrWatch = { kind: "no_gh" } | { kind: "logged_out" } | { kind: "no_pr" } | { kind: "found"; pr: PullRequest; checks: PrCheck[] };
+
+export type GhAccess = "ready" | "missing" | "logged_out";

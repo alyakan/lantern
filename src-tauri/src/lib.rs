@@ -1,13 +1,17 @@
 pub mod args;
+pub mod aside;
 pub mod awake;
 pub mod changes;
+pub mod checks;
 pub mod cli_locator;
 pub mod diagnostics;
 pub mod files;
 pub mod git;
 pub mod history;
+pub mod history_search;
 pub mod mcp_config;
 pub mod menu;
+pub mod merge_tests;
 pub mod navigation;
 pub mod network;
 pub mod orchestra;
@@ -16,6 +20,7 @@ pub mod pr;
 pub mod process;
 pub mod provider;
 pub mod session;
+pub mod setup;
 pub mod shell;
 pub mod skills;
 pub mod slots;
@@ -28,6 +33,7 @@ pub mod test_runs;
 pub mod titles;
 pub mod trash;
 pub mod revert;
+pub mod checkpoint;
 pub mod ui_event;
 pub mod updates;
 
@@ -58,13 +64,28 @@ pub struct AppState {
     network: Arc<network::Monitor>,
     /// How many workers may run at once across all of Lantern (Settings → General; the window sends it).
     agent_limit: std::sync::atomic::AtomicUsize,
+    /// What History's full-text search has read of past chats, and the number of its newest search (see history_search.rs).
+    chat_search: Arc<history_search::ChatSearch>,
+    /// The side chats that are open: quick questions about a chat, in their own read-only claude (see aside.rs).
+    asides: aside::Asides,
+    /// What the user saved for each project: the setup run in a new worktree, and the Run command (the window sends it).
+    setups: setup::SetupStore,
 }
 
 /// Where a test makes folders that must not be in the system temp dir (which recent folders leave out): the target dir
-/// cargo builds into, wherever that is (a worktree may build into another checkout's).
+/// cargo builds into, wherever that is (a worktree may build into another checkout's). Not an agent's folder either
+/// (Lantern's own workers' worktrees, which recent folders leave out too, see history::is_agent_folder): a checkout
+/// there builds into its own target dir, so the tests use a cache folder in the home folder instead.
 #[cfg(test)]
 pub(crate) fn scratch_dir() -> std::path::PathBuf {
-    std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/target")), std::path::PathBuf::from)
+    let target = std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/target")), std::path::PathBuf::from);
+    if !history::is_agent_folder(&target.to_string_lossy()) {
+        return target;
+    }
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from).expect("HOME is set");
+    let cache = home.join(".cache").join("lantern-tests");
+    std::fs::create_dir_all(&cache).unwrap();
+    cache
 }
 
 /// The user's limit on agents running at once until the window says otherwise, and the range it may be set in.
@@ -91,6 +112,19 @@ fn set_agent_limit(state: State<'_, AppState>, limit: usize) -> Result<(), Strin
     }
     state.agent_limit.store(limit, std::sync::atomic::Ordering::SeqCst);
     Ok(())
+}
+
+/// The window sends what the user saved for a project (or the window started and says what it was): the lines run in each new
+/// worktree, and the command its Run button starts. Lantern's own setting is the only place these come from.
+#[tauri::command]
+fn set_project_setup(state: State<'_, AppState>, folder: String, commands: Vec<String>, run: Option<String>) -> Result<(), String> {
+    state.setups.set(std::path::Path::new(&folder), setup::ProjectSetup { commands, run })
+}
+
+/// What the project's files suggest for its setup and Run command: only offered, the user saves them.
+#[tauri::command]
+async fn suggest_setup(folder: String) -> Result<setup::Suggestion, String> {
+    tauri::async_runtime::spawn_blocking(move || setup::detect(std::path::Path::new(&folder))).await.map_err(|e| e.to_string())
 }
 
 /// How long a looked-up PR is used before it's fetched again (it may have new commits).
@@ -128,6 +162,12 @@ fn emitter(app: &AppHandle) -> impl Fn(SlotEvent) + Send + Sync + Clone + 'stati
             if matches!(ev.event, ui_event::UiEvent::SessionEnded { .. }) {
                 if let Ok(slot) = state.slots.get(&ev.slot) {
                     slot.claude_pid.store(0, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            // The turn is over (or its claude is gone): files stop changing, so they can be restored.
+            if matches!(ev.event, ui_event::UiEvent::TurnDone { .. } | ui_event::UiEvent::SessionEnded { .. }) {
+                if let Ok(slot) = state.slots.get(&ev.slot) {
+                    slot.checkpoints.turn_ended();
                 }
             }
             state.orchestra.observe(&ev.slot, &ev.event);
@@ -197,7 +237,7 @@ async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: 
     cfg.auto_approve = auto;
     cfg.resume = running.or(cfg.resume);
     cfg.path_env = login_path(state).await;
-    if let Ok(helper) = helper_config(&s, cfg.helper.role.clone()) {
+    if let Ok(helper) = helper_config(&s, cfg.helper.role.clone(), cfg.helper.project_notes.clone()) {
         cfg.helper = helper;
     }
     if launch(app, worker, &s, cfg, false).await.is_ok() {
@@ -239,6 +279,10 @@ impl orchestra::Host for AppHost {
         self.app.state::<AppState>().agent_limit.load(std::sync::atomic::Ordering::SeqCst)
     }
 
+    fn project_setup(&self, folder: &std::path::Path) -> setup::ProjectSetup {
+        self.app.state::<AppState>().setups.get(folder)
+    }
+
     fn worktree_root(&self) -> std::path::PathBuf {
         self.app.path().app_local_data_dir().unwrap_or_else(|_| std::env::temp_dir()).join("worktrees")
     }
@@ -275,20 +319,22 @@ impl orchestra::Host for AppHost {
             if req.model.is_some() {
                 cfg.model = req.model;
             }
-            cfg.helper = helper_config(&s, Role::Worker { name: req.name, read_only: req.read_only })?;
+            // The worker's folder is a worktree, but it belongs to its Lead's project: it gets the notes the Lead started with.
+            let notes = cfg.helper.project_notes.clone();
+            cfg.helper = helper_config(&s, Role::Worker { name: req.name, read_only: req.read_only }, notes)?;
             cfg.path_env = login_path(&state).await;
             launch(&self.app, &req.slot, &s, cfg, true).await?;
             // The main agent's mode may have been lowered while this one started (the mode it was given was read before):
             // checked again now that it runs, so a restart that missed it can't leave it freer than its main agent.
             lower_worker(&self.app, &state, &req.slot, main_ceiling(&state, &parent_slot)).await;
-            send_text(&self.app, &s, &req.brief).await.map(|_| ())
+            send_text(&self.app, &req.slot, &s, &req.brief).await.map(|_| ())
         })
     }
 
     fn send_to<'a>(&'a self, slot: &'a str, text: String) -> orchestra::Fut<'a, Result<(), String>> {
         Box::pin(async move {
             let s = self.app.state::<AppState>().slots.get(slot)?;
-            send_text(&self.app, &s, &text).await.map(|_| ())
+            send_text(&self.app, slot, &s, &text).await.map(|_| ())
         })
     }
 
@@ -396,9 +442,10 @@ fn network_unwatch(state: State<'_, AppState>, folder: String, label: String) ->
     state.network.unwatch(&permission::rules::folder_key(std::path::Path::new(&folder)), &label)
 }
 
-fn helper_config(slot: &Slot, role: Role) -> Result<HelperConfig, String> {
+/// `project_notes`: what the chat was started with (a restart passes its own on, a new chat the user's notes as they are now).
+fn helper_config(slot: &Slot, role: Role, project_notes: Option<String>) -> Result<HelperConfig, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role, providers: vec![] })
+    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role, providers: vec![], project_notes })
 }
 
 /// Stops the slot's running session (denying its pending prompts) and starts `cfg` in it.
@@ -422,7 +469,9 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, 
         let mut changes = slot.changes.lock().unwrap();
         changes.clear();
         changes.watch(baseline);
+        slot.checkpoints.forget();
     }
+    slot.checkpoints.turn_ended();
     let changes = slot.changes.clone();
     let on_edit: EditHook = Arc::new(move |path: &str, original: Option<String>| changes.lock().unwrap().record(path, original));
     let mut started = Session::spawn(&cfg, slots::tagged(id, emitter(app)), on_edit)?;
@@ -456,6 +505,9 @@ struct Settings {
     /// Reopen the chat as a worker of an open main agent (a team restored after Lantern was closed).
     #[serde(default)]
     worker: Option<WorkerSettings>,
+    /// The user's notes for the project (see args::clean_project_notes). A worker's are its Lead's, whatever it sends.
+    #[serde(default)]
+    project_notes: Option<String>,
 }
 
 /// Whose worker a restored chat is.
@@ -493,6 +545,11 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
         return Err(format!("{folder} no longer exists."));
     }
     let ceiling = settings.worker.as_ref().map(|w| main_ceiling(state, &w.parent));
+    // A worker's folder is a worktree of its Lead's project, so it gets the notes its Lead started with.
+    let notes = match &settings.worker {
+        Some(w) => state.slots.get(&w.parent).ok().and_then(|s| s.config.lock().unwrap().as_ref().and_then(|c| c.helper.project_notes.clone())),
+        None => settings.project_notes.as_deref().and_then(args::clean_project_notes),
+    };
     let mut cfg = SessionConfig {
         provider: settings.provider,
         binary: claude_path.into(),
@@ -511,6 +568,7 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
                 (false, Some(w)) => Role::Worker { name: w.name, read_only: w.shared || w.read_only },
                 (false, None) => Role::Normal,
             },
+            notes,
         )?,
         path_env: login_path(state).await,
     };
@@ -611,7 +669,7 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
         cfg.auto_approve = auto;
     }
     cfg.resume = running_id.or(cfg.resume);
-    cfg.helper = helper_config(&s, role.clone())?;
+    cfg.helper = helper_config(&s, role.clone(), cfg.helper.project_notes.clone())?;
     cfg.path_env = login_path(&state).await;
     // A worker asked for more freedom than its main agent allows gets what it allows (the window is told).
     let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
@@ -645,7 +703,7 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
     cfg.advisor = checked_model(advisor)?;
     cfg.subagent_model = checked_model(subagent_model)?;
     cfg.resume = running_id.or(cfg.resume);
-    cfg.helper = helper_config(&s, cfg.helper.role.clone())?;
+    cfg.helper = helper_config(&s, cfg.helper.role.clone(), cfg.helper.project_notes.clone())?;
     cfg.path_env = login_path(&state).await;
     let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
     launch(&app, &slot, &s, cfg, false).await?;
@@ -659,9 +717,51 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
 #[tauri::command]
 async fn close_session(state: State<'_, AppState>, slot: String) -> Result<(), String> {
     state.orchestra.forget(&slot);
+    state.asides.stop_slot(&slot).await;
     if let Some(s) = state.slots.remove(&slot) {
         s.shut_down().await;
     }
+    Ok(())
+}
+
+/// Asks a side question about a chat (see aside.rs): the first question of side chat `aside` starts a read-only copy of the
+/// chat's conversation, the rest follow up in it. The answer comes as `aside-event`s, never as the chat's own events.
+/// `model`: what the side chat runs on; None is the chat's. Resolves to whether it has the chat's conversation to start from.
+#[tauri::command]
+async fn aside_ask(app: AppHandle, state: State<'_, AppState>, slot: String, aside: String, text: String, model: Option<String>) -> Result<bool, String> {
+    let model = checked_model(model)?;
+    let s = state.slots.get(&slot)?;
+    let (provider, binary, folder, path_env, chat_model) = {
+        let cfg = s.config.lock().unwrap();
+        let cfg = cfg.as_ref().ok_or("No folder is open")?;
+        (cfg.provider, cfg.binary.clone(), cfg.folder.clone(), cfg.path_env.clone(), cfg.model.clone())
+    };
+    if provider != ProviderId::Claude {
+        return Err("Side chats need Claude Code.".into());
+    }
+    let session_id = s.session.lock().await.as_ref().and_then(|x| x.session_id());
+    // From the folder's own transcripts only: that is where the claude it starts looks.
+    let resume = aside::forkable(&projects_root()?, &folder, &[], session_id.as_deref());
+    let launch = aside::Launch { binary, folder, path_env, resume, model: model.or(chat_model) };
+    let emit: Arc<dyn Fn(aside::AsideEvent) + Send + Sync> = Arc::new(move |ev| {
+        let _ = app.emit("aside-event", &ev);
+    });
+    state.asides.ask(&aside, &slot, &launch, &text, emit).await
+}
+
+/// The side chat's popover closed: its claude is stopped and nothing of it is kept.
+#[tauri::command]
+async fn aside_stop(state: State<'_, AppState>, aside: String) -> Result<(), String> {
+    state.asides.stop(&aside).await;
+    Ok(())
+}
+
+/// Stops the answer being written, keeping the side chat for another question.
+#[tauri::command]
+async fn aside_stop_answering(app: AppHandle, state: State<'_, AppState>, aside: String) -> Result<(), String> {
+    state.asides.stop_answering(&aside, Arc::new(move |ev| {
+        let _ = app.emit("aside-event", &ev);
+    })).await;
     Ok(())
 }
 
@@ -694,20 +794,54 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
 async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
     let s = state.slots.get(&slot)?;
-    let turn = send_text(&app, &s, &text).await?;
+    let turn = send_text(&app, &slot, &s, &text).await?;
     // Said to a worker by the user themselves: its main agent hears of it with its next wake-up.
     state.orchestra.note_user_message(&slot, &text);
     Ok(turn)
 }
 
+/// Runs `f` (blocking) with the chat's restore points and the git checkout of its folder: an error says why there is none
+/// (the folder isn't in a repository). A worker's worktree is checked against its Lead's repository first.
+async fn at_checkpoints<T, F>(app: &AppHandle, id: &str, s: &Arc<Slot>, f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&Slot, &checkpoint::Place, Option<&str>) -> Result<T, String> + Send + 'static,
+{
+    let (folder, path_env) = {
+        let cfg = s.config.lock().unwrap();
+        let cfg = cfg.as_ref().ok_or("No folder is open")?;
+        (cfg.folder.clone(), cfg.path_env.clone())
+    };
+    let state = app.state::<AppState>();
+    let main = state.orchestra.parent_of(id).and_then(|p| state.slots.get(&p).ok()).and_then(|p| p.folder().ok());
+    let s = s.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let place = checkpoint::Place::find(&folder, main.as_deref(), path_env.as_deref()).ok_or("This folder isn't in a git repository, so it has no restore points.")?;
+        f(&s, &place, path_env.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Sends `text` into the chat's claude as a new message and returns the turn's number.
-async fn send_text(app: &AppHandle, s: &Slot, text: &str) -> Result<usize, String> {
+async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str) -> Result<usize, String> {
     let mut session = s.session.lock().await;
     let claude = session.as_mut().ok_or("No Claude session is running")?;
     // What "Last turn" in the Changes pane compares against. It's taken before the send, so Claude's edits come after it.
     let changes = s.changes.clone();
     let turn = tauri::async_runtime::spawn_blocking(move || changes.lock().unwrap().start_turn()).await.map_err(|e| e.to_string())?;
+    // How the folder stands before the message, which "Restore files to here" puts back. Before the send, so Claude's edits
+    // come after it; a folder that isn't a repository, or git failing, only means there is no restore point for it. It is
+    // given a few seconds at most, and a late one is never kept (it would hold edits of the turn).
+    let (late, slot_id) = (Arc::new(std::sync::atomic::AtomicBool::new(false)), id.to_string());
+    let given_up = late.clone();
+    let taken = at_checkpoints(app, id, s, move |s, place, path_env| s.checkpoints.take_unless(place, &slot_id, turn, path_env, &given_up));
+    if tokio::time::timeout(std::time::Duration::from_secs(8), taken).await.is_err() {
+        late.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+    s.checkpoints.turn_started();
     if let Err(e) = claude.send(text).await {
+        s.checkpoints.turn_ended();
         s.changes.lock().unwrap().cancel_turn(turn);
         return Err(e);
     }
@@ -731,6 +865,36 @@ fn orchestra_decline_merge(state: State<'_, AppState>, worker: String) -> Result
     state.orchestra.decline_merge(&worker)
 }
 
+/// The merge card's test run for a worker: how it can be run, what is going, and the last result.
+#[tauri::command]
+async fn orchestra_merge_tests_info(state: State<'_, AppState>, worker: String) -> Result<orchestra::TestsInfo, String> {
+    state.orchestra.merge_tests_info(&worker).await
+}
+
+/// Runs the tests in a worker's worktree, when the user asks: `command` is the words of what they typed (null: what the
+/// worktree says). Resolves when they end; null when the user cancelled them.
+#[tauri::command]
+async fn orchestra_run_merge_tests(state: State<'_, AppState>, worker: String, command: Option<Vec<String>>) -> Result<Option<orchestra::LastInfo>, String> {
+    state.orchestra.run_merge_tests(&worker, command).await
+}
+
+#[tauri::command]
+fn orchestra_cancel_merge_tests(state: State<'_, AppState>, worker: String) {
+    state.orchestra.cancel_merge_tests(&worker)
+}
+
+/// What a command the user typed would run as: its words, or why it can't be run. Nothing is run.
+#[tauri::command]
+fn merge_tests_split_command(text: String) -> Result<Vec<String>, String> {
+    merge_tests::split_command(&text)
+}
+
+/// "Run tests when a merge is proposed" (Settings → General).
+#[tauri::command]
+fn set_auto_merge_tests(state: State<'_, AppState>, on: bool) {
+    state.orchestra.set_auto_tests(on)
+}
+
 /// Removes a worker's worktree. Without `force`, a worktree with loose work is kept (an error says so) and a branch
 /// that isn't merged is kept either way.
 #[tauri::command]
@@ -749,6 +913,12 @@ async fn orchestra_close_check(state: State<'_, AppState>, worker: String) -> Re
 #[tauri::command]
 async fn orchestra_close_worker(state: State<'_, AppState>, worker: String, agreed: Option<orchestra::Agreed>) -> Result<(), String> {
     state.orchestra.close_worker(&worker, agreed).await
+}
+
+/// The user's answer on a worker whose setup failed: "start" it anyway, or run setup "again".
+#[tauri::command]
+async fn orchestra_setup_answer(state: State<'_, AppState>, worker: String, answer: String) -> Result<(), String> {
+    state.orchestra.setup_answer(&worker, &answer).await
 }
 
 /// Starts a worker the user asked for from the canvas (the main agent `main` is told). Returns the worker's id.
@@ -1060,6 +1230,25 @@ async fn shell_input(state: State<'_, AppState>, slot: String, id: String, text:
     tauri::async_runtime::spawn_blocking(move || shells.input(&id, &text)).await.map_err(|e| e.to_string())?
 }
 
+/// Starts the project's Run command (from its saved setting, never from the window's say-so) in the chat's folder, as a
+/// command like any other of the chat's (see shell.rs): stopped with `stop_shell`, and when the chat closes. `id` is "run-…".
+#[tauri::command]
+async fn run_project(app: AppHandle, state: State<'_, AppState>, slot: String, id: String) -> Result<(), String> {
+    if !id.starts_with("run-") {
+        return Err(format!("{id:?} is not a run id."));
+    }
+    let s = state.slots.get(&slot)?;
+    let folder = s.folder()?;
+    // An agent in a worktree runs what its project's Run command says: the project is its main agent's folder.
+    let project = match state.orchestra.parent_of(&slot) {
+        Some(main) => state.slots.get(&main)?.folder()?,
+        None => folder.clone(),
+    };
+    let command = state.setups.get(&project).run.ok_or("This project has no Run command: set one in its Project setup.")?;
+    let path_env = login_path(&state).await;
+    s.shells.run(&id, &command, &folder, path_env.as_deref(), slots::tagged(&slot, emitter(&app)))
+}
+
 #[tauri::command]
 fn stop_shell(state: State<'_, AppState>, slot: String, id: String) -> Result<(), String> {
     state.slots.get(&slot)?.shells.stop(&id);
@@ -1205,6 +1394,30 @@ async fn list_open_prs(state: State<'_, AppState>, folder: String) -> Result<Vec
     tauri::async_runtime::spawn_blocking(move || pr::open_prs(&folder, path_env.as_deref())).await.map_err(|e| e.to_string())?
 }
 
+/// The pull request on the folder's branch and how its checks stand (read-only: see `checks::watch`). An error is a call
+/// that failed for a reason that may pass; the window keeps what it knew.
+#[tauri::command]
+async fn pr_watch(state: State<'_, AppState>, folder: String) -> Result<checks::PrWatch, String> {
+    let path_env = login_path(&state).await;
+    let folder = std::path::PathBuf::from(folder);
+    tauri::async_runtime::spawn_blocking(move || checks::watch(&folder, path_env.as_deref())).await.map_err(|e| e.to_string())?
+}
+
+/// The end of the log of a failed check's run (read-only). `run_id` must be digits.
+#[tauri::command]
+async fn pr_failure_log(state: State<'_, AppState>, folder: String, run_id: String) -> Result<String, String> {
+    let path_env = login_path(&state).await;
+    let folder = std::path::PathBuf::from(folder);
+    tauri::async_runtime::spawn_blocking(move || checks::failure_log(&folder, &run_id, path_env.as_deref())).await.map_err(|e| e.to_string())?
+}
+
+/// Whether the GitHub CLI is installed and logged in, for the "Pull request checks" dialog.
+#[tauri::command]
+async fn gh_access(state: State<'_, AppState>) -> Result<checks::GhAccess, String> {
+    let path_env = login_path(&state).await;
+    tauri::async_runtime::spawn_blocking(move || checks::gh_access(path_env.as_deref())).await.map_err(|e| e.to_string())
+}
+
 /// Step by step's flavours as the prompt Claude runs with has them: each one's section and its headings. The window
 /// repeats them in its notes (switching flavour, a page it couldn't read), so they're never a copy that has drifted.
 #[tauri::command]
@@ -1227,6 +1440,14 @@ fn remove_permission_rule(state: State<'_, AppState>, slot: Option<String>, entr
         Scope::Folder => state.folder_rules.remove(&entry.folder.ok_or("A folder rule needs its folder.")?, &entry.rule),
     }
     Ok(())
+}
+
+/// What the Ship it dialog shows about the folder's repository (read-only: see `git::ship_info`).
+#[tauri::command]
+async fn ship_info(state: State<'_, AppState>, folder: String) -> Result<git::ShipInfo, String> {
+    let path_env = login_path(&state).await;
+    let folder = std::path::PathBuf::from(folder);
+    tauri::async_runtime::spawn_blocking(move || git::ship_info(&folder, path_env.as_deref())).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1333,6 +1554,37 @@ async fn undo_revert(state: State<'_, AppState>, slot: String, files: Vec<revert
     tauri::async_runtime::spawn_blocking(move || revert::undo(&root, &files, &trash::move_to_trash)).await.map_err(|e| e.to_string())
 }
 
+/// The messages of the chat that have a restore point: a folder that isn't a repository has none.
+#[tauri::command]
+async fn restore_points(state: State<'_, AppState>, slot: String) -> Result<Vec<usize>, String> {
+    let s = state.slots.get(&slot)?;
+    tauri::async_runtime::spawn_blocking(move || s.checkpoints.turns()).await.map_err(|e| e.to_string())
+}
+
+/// What putting the chat's folder back to before message `turn` would change: for the dialog that asks first.
+#[tauri::command]
+async fn restore_preview(app: AppHandle, state: State<'_, AppState>, slot: String, turn: usize) -> Result<checkpoint::Plan, String> {
+    let s = state.slots.get(&slot)?;
+    let id = slot.clone();
+    at_checkpoints(&app, &slot, &s, move |s, place, path_env| s.checkpoints.plan(place, &id, turn, path_env)).await
+}
+
+/// Puts the chat's folder back to before message `turn` (see checkpoint.rs). Refused while a turn runs.
+#[tauri::command]
+async fn restore_files(app: AppHandle, state: State<'_, AppState>, slot: String, turn: usize) -> Result<checkpoint::Restored, String> {
+    let s = state.slots.get(&slot)?;
+    let id = slot.clone();
+    at_checkpoints(&app, &slot, &s, move |s, place, path_env| s.checkpoints.restore(place, &id, turn, &trash::move_to_trash, path_env)).await
+}
+
+/// Takes the last restore back (`id` is what it returned). Files edited since are left as they are.
+#[tauri::command]
+async fn undo_restore(app: AppHandle, state: State<'_, AppState>, slot: String, id: u64) -> Result<checkpoint::Restored, String> {
+    let s = state.slots.get(&slot)?;
+    let chat = slot.clone();
+    at_checkpoints(&app, &slot, &s, move |s, place, path_env| s.checkpoints.undo(place, &chat, id, &trash::move_to_trash, path_env)).await
+}
+
 /// Saves an exported document (a plan as markdown). The save dialog is opened here rather than by the webview, and only
 /// the path it returns is written, so a file can't be written anywhere the user didn't pick. None: the dialog was cancelled.
 #[tauri::command]
@@ -1370,6 +1622,25 @@ async fn list_sessions(state: State<'_, AppState>, folder: String) -> Result<Vec
     let renamed = state.renames.all();
     let aliases = aliases_for(&state, &folder);
     tauri::async_runtime::spawn_blocking(move || history::list_sessions_with_aliases(&root, std::path::Path::new(&folder), &aliases, &titles, &renamed)).await.map_err(|e| e.to_string())
+}
+
+/// Past chats of every project whose text has `query` (what was said, not tool output), newest first. A newer search cancels
+/// this one. The query is plain text: it is compared, never run or used as a path.
+#[tauri::command]
+async fn search_history(state: State<'_, AppState>, query: String) -> Result<history_search::Results, String> {
+    use std::sync::atomic::Ordering;
+    let root = projects_root()?;
+    let titles = state.titles.all();
+    let renamed = state.renames.all();
+    let moved: std::collections::HashMap<String, String> = state.relocations.list().into_iter().flat_map(|e| e.aliases.into_iter().map(move |old| (old, e.folder.clone()))).collect();
+    let search = state.chat_search.clone();
+    let this = search.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    tauri::async_runtime::spawn_blocking(move || {
+        let scope = history_search::Scope { titles: &titles, renamed: &renamed, moved: &moved };
+        history_search::search(&root, &query, &scope, &history_search::Options::default(), &search.index, &|| search.generation.load(Ordering::Relaxed) != this)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Names a past session in Lantern (the History menu's Rename). The name is kept apart from Claude Code's transcripts,
@@ -1509,6 +1780,8 @@ async fn open_session(
             }
             menu::refresh_recent(&app).await;
             s.changes.lock().unwrap().restore(replayed.edits, replayed.edits_before_last_turn);
+            // Its messages are numbered afresh from here, so an earlier numbering's restore points can't be asked for.
+            s.checkpoints.forget();
             Ok(OpenedSession { events: replayed.events, moved_from, read_only: None, provider })
         }
     }
@@ -1673,7 +1946,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, agent_limit: DEFAULT_AGENT_LIMIT.into() });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default() });
             app.manage(updates::Updates::default());
             app.manage(awake::Awake::default());
             if updates::checks_enabled() {
@@ -1720,12 +1993,20 @@ pub fn run() {
             apply_harness,
             close_session,
             send_message,
+            aside_ask,
+            aside_stop,
+            aside_stop_answering,
             orchestra_approve_merge,
             network_state,
             network_response,
             network_unwatch,
             network_rewatch,
             orchestra_decline_merge,
+            orchestra_merge_tests_info,
+            orchestra_run_merge_tests,
+            orchestra_cancel_merge_tests,
+            merge_tests_split_command,
+            set_auto_merge_tests,
             orchestra_discard,
             run_shell,
             claude_request,
@@ -1750,21 +2031,30 @@ pub fn run() {
             respond_permission,
             steps_guide,
             list_open_prs,
+            pr_watch,
+            pr_failure_log,
+            gh_access,
             set_subagents,
             list_permission_rules,
             add_permission_rule,
             remove_permission_rule,
             git_branch,
+            ship_info,
             list_dir,
             read_file,
             write_file,
             revert_files,
+            restore_points,
+            restore_preview,
+            restore_files,
+            undo_restore,
             undo_revert,
             export_text,
             find_files,
             resolve_files,
             search_text,
             list_sessions,
+            search_history,
             rename_session,
             session_events,
             title_session,
@@ -1787,7 +2077,11 @@ pub fn run() {
             orchestra_spawn,
             orchestra_set_roles,
             orchestra_set_review,
-            set_agent_limit
+            set_agent_limit,
+            set_project_setup,
+            suggest_setup,
+            orchestra_setup_answer,
+            run_project
         ])
         .build(tauri::generate_context!())
         .expect("error while building Lantern")
@@ -1797,7 +2091,10 @@ pub fn run() {
                 if let Some(awake) = app.try_state::<awake::Awake>() {
                     awake.stop();
                 }
+                // A setup still running in a worktree ends with Lantern.
+                setup::stop_all();
                 if let Some(state) = app.try_state::<AppState>() {
+                    tauri::async_runtime::block_on(state.asides.stop_all());
                     tauri::async_runtime::block_on(slots::shut_down_all(state.slots.drain()));
                 }
                 // An update the user didn't restart for goes in now, for the next launch.
@@ -1858,7 +2155,7 @@ mod tests {
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![] },
+            helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![], project_notes: None },
             path_env: None,
         }
     }

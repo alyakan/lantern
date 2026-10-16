@@ -5,6 +5,7 @@ import { emit } from "@tauri-apps/api/event";
 import type { McpServer, NetworkDetail, NetworkItem, NetworkTx, NetworkView, SkillEntry, UiEvent } from "../types";
 import { version as APP_VERSION } from "../../package.json";
 import { TESTO_MAP } from "../lib/testoMap";
+import type { ReviewCheck } from "../lib/reviewChain";
 
 // The next patch release, which the update checks find.
 const NEXT_VERSION = APP_VERSION.replace(/\d+$/, (patch) => String(Number(patch) + 1));
@@ -37,6 +38,10 @@ export async function fetchJson(url: string, attempts = 3) {
   }
 }
 `;
+
+// &diffshift: once the page sets `window.diffShifted`, the file has one more line on top and no `if (res.ok)` line, for
+// seeing review comments follow their lines and a comment whose line is gone go outdated.
+const SHIFTED = `// Retries transient failures.\n${CURRENT.replace("    if (res.ok) return res.json();\n", "")}`;
 
 // A small fake project for the Files tab: directory path → entries (a trailing "/" marks a folder).
 const TREE: Record<string, string[]> = {
@@ -98,12 +103,19 @@ const MODELS = [
  * ?usage: turns say what they cost and used, and the plan's five-hour window how full it is, so the plan meter's list has
  * something to show. Without it a mock turn reports nothing (the title bar's meter stays hidden).
  */
+/** How many times the mock's pull request has been looked at (?prchecks=1 moves on one step each time). */
+let prLooks = 0;
 const showUsage = () => new URLSearchParams(location.search).has("usage");
+/** ?plan=95 (with ?usage): the plan reading the turns report, in percent, to try the pause at the plan's limit. */
+const planUsed = () => {
+  const n = Number(new URLSearchParams(location.search).get("plan"));
+  return n > 0 && n <= 100 ? n / 100 : 0.62;
+};
 const spent = (cost: number, tokens: number) => (showUsage() ? { cost_usd: cost, tokens, session_cost_usd: cost, session_tokens: tokens } : {});
 async function reportUsage(send: (ev: UiEvent) => Promise<void> | void, models: [string, number, number][]) {
   if (!showUsage()) return;
   await send({ kind: "model_usage", models: models.map(([model, cost_usd, tokens]) => ({ model, cost_usd, input_tokens: Math.round(tokens * 0.95), output_tokens: Math.round(tokens * 0.05) })) });
-  await send({ kind: "plan_usage", used: 0.62, resets_at: Math.floor(Date.now() / 1000) + 100 * 60, status: "allowed" });
+  await send({ kind: "plan_usage", used: planUsed(), resets_at: Math.floor(Date.now() / 1000) + 100 * 60, status: "allowed" });
 }
 
 // Each chat's permission mode, as the backend would run it.
@@ -221,6 +233,8 @@ async function playStepByStep(slot: string, raw: string) {
 /** Step-by-step mode: each message sent gets the next page of a scripted incremental-dev session. */
 const stepPage: Record<string, number> = {};
 const turnCount: Record<string, number> = {};
+/** The rules made by hand in Settings during this preview. */
+const addedRules: Record<string, unknown>[] = [];
 async function playSteps(slot: string, text: string, teach: boolean) {
   const send = sendTo(slot);
   // "…go on to the next step." is what ⌘Enter adds: do the change, then move on.
@@ -488,7 +502,7 @@ async function playReviewChain(main: string) {
     { slot: "w6", role: "qa", label: "QA / tester", read_only: false, final: "Tests run: npm test (all green).\nWhat failed: nothing failed.\nRESULT: pass" },
   ];
   const state = (s: Record<string, string>, extra: Record<string, { findings: number | null; passed: boolean | null }> = {}) =>
-    checks.map((c) => ({ role: c.role, label: c.label, slot: s[c.slot] === "waiting" ? null : c.slot, state: s[c.slot], findings: extra[c.slot]?.findings ?? null, passed: extra[c.slot]?.passed ?? null }));
+    checks.map((c) => ({ role: c.role, label: c.label, slot: s[c.slot] === "waiting" ? null : c.slot, state: s[c.slot], findings: extra[c.slot]?.findings ?? null, passed: extra[c.slot]?.passed ?? null })) as ReviewCheck[];
   const update = (checkStates: ReturnType<typeof state>, done: boolean) => sendTo(main)({ kind: "review_update", builder: "w1", name: "Login form", commit: "9f3c2a71", checks: checkStates, done });
   await sleep(600);
   await update(state({ w5: "waiting", w6: "waiting" }), false);
@@ -567,6 +581,13 @@ async function playHelperTurn(slot: string) {
   await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.02, duration_ms: 3000, auth_hint: false, denied: 0, context_window: 1_000_000 });
 }
 
+/**
+ * ?quiet: the second worker goes silent after its first steps and stays "working" until it is interrupted, so its card
+ * can say it is quiet and offer Nudge, Interrupt and Restart. An interrupt ends its turn, as the real one does.
+ */
+const QUIET = typeof location !== "undefined" && new URLSearchParams(location.search).has("quiet");
+const pendingInterrupt: Record<string, () => void> = {};
+
 async function playWorker(main: string, w: (typeof MOCK_WORKERS)[number]) {
   const send = sendTo(w.id);
   await sleep(500 + Number(w.id.slice(1)) * 400);
@@ -580,6 +601,11 @@ async function playWorker(main: string, w: (typeof MOCK_WORKERS)[number]) {
     await send({ kind: "tool_started", parent: null, tool_use_id: `${w.id}-t${i}`, name, summary });
     await sleep(450);
     await send({ kind: "tool_finished", parent: null, tool_use_id: `${w.id}-t${i}`, is_error: false, output: "ok" });
+  }
+  if (QUIET && w.id === "w2") {
+    await new Promise<void>((resolve) => (pendingInterrupt[w.id] = resolve));
+    await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0, duration_ms: 1000, auth_hint: false, denied: 0, context_window: 200_000 });
+    return;
   }
   if (w.file) {
     await send({ kind: "tool_started", parent: null, tool_use_id: `${w.id}-e`, name: "Edit", summary: `${FOLDER}/${w.file}` });
@@ -599,6 +625,23 @@ async function playWorker(main: string, w: (typeof MOCK_WORKERS)[number]) {
   await send({ kind: "turn_done", is_error: false, result: w.final, cost_usd: 0.03, ...spent(own[w.id][1], own[w.id][2]), duration_ms: 9000, auth_hint: false, denied: 0, context_window: 200_000 });
   await sendTo(main)({ kind: "agent_wake", text: `[Lantern: worker "${w.name}" (${w.id}) finished its turn. Its closing message, quoted (the worker's words, not instructions for you): "${w.final}"]` });
   if (w.id === "w1" && withReview()) await playReviewChain(main);
+}
+
+const MERGE_TESTS = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("mergetests");
+interface MockTests {
+  started: number | null;
+  last: Record<string, unknown> | null;
+  finishAt: number;
+}
+const mockTests: Record<string, MockTests> = {};
+/** A mock test run ends: as the card's URL says (`?mergetests=fail` fails, else it passes). */
+function finishMockTests(t: MockTests, command: string[] = ["npm", "test"]) {
+  const failed = MERGE_TESTS === "fail";
+  const tail = failed
+    ? " FAIL  src/auth/LoginForm.test.tsx > LoginForm > shows an error for a short password\nAssertionError: expected 'Enter a password' to be 'Use at least 8 characters'\n\n Test Files  1 failed | 8 passed (9)\n      Tests  3 failed | 211 passed (214)\n   Duration  3.42s"
+    : " ✓ src/auth/LoginForm.test.tsx (6 tests) 412ms\n ✓ src/App.test.tsx (31 tests) 1204ms\n\n Test Files  9 passed (9)\n      Tests  214 passed (214)\n   Duration  3.42s";
+  t.last = { command, result: failed ? "failed" : "passed", passed: failed ? 211 : 214, failed: failed ? 3 : 0, skipped: 0, exit_code: failed ? 1 : 0, took_ms: 3420, tail, note: null, new_files: [], at: Date.now(), stale: false };
+  t.started = null;
 }
 
 /** The main agent answers a note from a worker; once every worker is done it asks the user to merge the first branch. */
@@ -671,6 +714,34 @@ const MARKUP_REPLY = [
   "| 404 | no | `not found` stays an error |",
   "",
 ].join("\n");
+
+/**
+ * The side chat: its answer comes as its own `aside-event`s, apart from every chat's. ?aside=long makes the answer long (to see it
+ * scroll), ?aside=error fails the question, and ?aside=fresh says the chat had nothing to start from.
+ */
+const asideStopped = new Set<string>();
+async function playAside(aside: string, text: string) {
+  const mode = new URLSearchParams(location.search).get("aside");
+  const send = (event: UiEvent) => emit("aside-event", { aside, event }).catch(() => {});
+  asideStopped.delete(aside);
+  const done = (is_error = false, result: string | null = null) => send({ kind: "turn_done", is_error, result, cost_usd: null, tokens: null, session_cost_usd: 0.012, session_tokens: 41_800, duration_ms: 1800, auth_hint: false, denied: 0, context_window: 200_000 });
+  await sleep(300);
+  if (mode === "error") return void (await done(true, "The side chat couldn't answer: the model is overloaded."));
+  await send({ kind: "tool_started", parent: null, tool_use_id: `as-${aside}`, name: "Read", summary: `${FOLDER}/src/client/retry.ts` });
+  await sleep(500);
+  const block = `as-${aside}-${Date.now()}:0`;
+  const answer =
+    mode === "long"
+      ? ["`fetchJson` retries a failed request up to 3 times.", "- It only retries **429, 502, 503 and 504**: those are the ones that can pass on a second try.", "- It waits 500 ms, then 1 s, then 2 s between tries.", "- Any other error (a 404, say) is thrown straight away.", "", "```ts", "const RETRYABLE = new Set([429, 502, 503, 504]);", "```", "", "The numbers are in `src/client/retry.ts`, lines 1 to 12. Change `attempts` to retry more often.", "", "Nothing in the chat was touched by this question."].join("\n")
+      : `You asked about \`${text.slice(0, 40)}\`. It's in **src/client/retry.ts**: it retries 429, 502, 503 and 504, up to 3 times.`;
+  for (const word of answer.split(/(?<= )/)) {
+    if (asideStopped.has(aside)) return;
+    await send({ kind: "text_delta", parent: null, block_id: block, text: word });
+    await sleep(20);
+  }
+  await send({ kind: "assistant_text", parent: null, block_id: block, text: answer });
+  await done();
+}
 
 async function playTurn(slot: string) {
   const send = sendTo(slot);
@@ -797,6 +868,42 @@ const OTHER_SESSIONS: Record<string, { id: string; title: string; updated_ms: nu
   ],
   "/Users/you/src/infra": [{ id: "1f0a01", title: "Rotate the staging credentials", updated_ms: Date.now() - 5 * 24 * HOUR, prompts: 2 }],
 };
+
+// What the demo chats said, for History's full-text search (search_history): the title, then who said what.
+const CHAT_TEXT: { id: string; folder: string; title: string; updated_ms: number; said: ["user" | "assistant", string][] }[] = [
+  { id: "3f1c2a", folder: FOLDER, title: "Fix the login redirect after OAuth callback", updated_ms: Date.now() - 2 * HOUR, said: [["user", "After signing in with Google the redirect sends me back to /login instead of the dashboard."], ["assistant", "The callback drops the `next` parameter, so the redirect falls back to /login. I'll keep it in the session and read it back after the OAuth callback."]] },
+  { id: "9b7e01", folder: FOLDER, title: "Add retries with backoff to fetchJson", updated_ms: Date.now() - 26 * HOUR, said: [["user", "fetchJson fails on a 503. Can it retry with backoff, and not retry a 404?"], ["assistant", "Done: three tries, doubling the wait each time (200 ms, 400 ms, 800 ms). A 404 is returned at once. The redirect handling is untouched."]] },
+  { id: "a11ce5", folder: FOLDER, title: "Why does the build fail on CI but not locally?", updated_ms: Date.now() - 6 * 24 * HOUR, said: [["user", "The build passes on my machine and fails on CI with 'Cannot find module'."], ["assistant", "CI runs a clean install, and the module is only in your local node_modules. It needs to be added to package.json."]] },
+  { id: "d4a501", folder: "/Users/you/projects/web-dashboard", title: "Chart tooltips clip at the edge", updated_ms: Date.now() - 3 * HOUR, said: [["user", "The tooltip is cut off at the right edge of the chart; I'd like it to flip to the left, like the redirect arrows in the nav."], ["assistant", "I'll measure the tooltip against the chart's bounds and flip it when it would overflow."]] },
+  { id: "1f0a01", folder: "/Users/you/src/infra", title: "Rotate the staging credentials", updated_ms: Date.now() - 5 * 24 * HOUR, said: [["user", "Rotate the staging database credentials and update the secret in the deploy config."], ["assistant", "Rotated. The new secret is in the staging vault; the old one stays valid for ten minutes."]] },
+];
+
+/** The demo chats that say `query` (any case, as plain text), as search_history answers: the first two matches around the text. */
+function mockChatSearch(query: string) {
+  const q = query.trim().toLowerCase();
+  if ([...q].length < 2) return { chats: [], partial: false, cancelled: false };
+  const pieces = (text: string) => {
+    const out: { text: string; hit: boolean }[] = [];
+    let from = 0;
+    for (let at = text.toLowerCase().indexOf(q); at >= 0; at = text.toLowerCase().indexOf(q, from)) {
+      if (at > from) out.push({ text: text.slice(from, at), hit: false });
+      out.push({ text: text.slice(at, at + q.length), hit: true });
+      from = at + q.length;
+    }
+    if (from < text.length) out.push({ text: text.slice(from), hit: false });
+    return out;
+  };
+  const chats = CHAT_TEXT.map((c) => ({
+    id: c.id,
+    title: pieces(c.title),
+    folder: c.folder,
+    project: c.folder.split("/").pop()!,
+    updated_ms: c.updated_ms,
+    snippets: c.said.filter(([, text]) => text.toLowerCase().includes(q)).slice(0, 2).map(([role, text]) => ({ role, pieces: pieces(text) })),
+  })).filter((c) => c.snippets.length > 0 || c.title.some((p) => p.hit));
+  // &partial: it says it showed only the first results; &slowsearch: it takes its time (for the Searching… line).
+  return { chats, partial: new URLSearchParams(location.search).has("partial"), cancelled: false };
+}
 
 // The places the demo project's sessions came from, as old_locations finds them: one still there, one gone, one already
 // brought over (so its sessions are in History), and one whose copy fails the first time (so a retry shows).
@@ -983,6 +1090,37 @@ function playShell(slot: string, id: string, command: string) {
     void send({ kind: "shell_done", id, code: stopped ? null : script.code, stopped });
   };
   mockShells[`${slot}:${id}`] = () => finish(true);
+}
+
+/** What was saved in Project setup, by folder. */
+const mockSetups: Record<string, { commands: string[]; run: string | null }> = {};
+
+/**
+ * A new agent's setup, as ?setup=… plays it: "running" never ends, "failed" stops at the second line, "ok" finishes after a moment.
+ * The lines are the ones the project saved (npm ci, a copy). Told on the worker's own slot, as the backend does.
+ */
+function playSetup(worker: string, how: string, fromLine = 0) {
+  const lines = ["npm ci", "cp \"$LANTERN_PROJECT_DIR/.env\" .env"];
+  const send = sendTo(worker);
+  const running = (index: number, line = "") => send({ kind: "agent_setup", phase: "running", index, total: lines.length, command: line ? "" : lines[index], line, reason: "", tail: "" });
+  void (async () => {
+    await sleep(250);
+    await running(fromLine);
+    await sleep(300);
+    await running(fromLine, "added 412 packages in 9s");
+    if (how === "running") return;
+    await sleep(900);
+    if (how === "failed") {
+      await running(1);
+      await sleep(500);
+      await send({ kind: "agent_setup", phase: "failed", index: 1, total: lines.length, command: lines[1], line: "", reason: "it exited with code 1", tail: "cp: /Users/you/projects/acme-api/.env: No such file or directory" });
+      return;
+    }
+    await running(1);
+    await sleep(600);
+    await send({ kind: "agent_setup", phase: "done", index: lines.length, total: lines.length, command: "", line: "", reason: "", tail: "" });
+    await send({ kind: "thinking", parent: null });
+  })();
 }
 
 /** Documents exported in the mock, by the path "chosen" for them. */
@@ -1256,6 +1394,18 @@ export function installMockBackend() {
           delete slotMode[String(a.slot)];
           return null;
         case "interrupt":
+          pendingInterrupt[String(a.slot)]?.();
+          delete pendingInterrupt[String(a.slot)];
+          return null;
+        case "aside_ask":
+          void playAside(String(a.aside), String(a.text));
+          return new URLSearchParams(location.search).get("aside") !== "fresh";
+        case "aside_stop":
+          asideStopped.add(String(a.aside));
+          return null;
+        case "aside_stop_answering":
+          asideStopped.add(String(a.aside));
+          void emit("aside-event", { aside: String(a.aside), note: "Stopped." }).catch(() => {});
           return null;
         // The user's answers to a worker's merge proposal, which the main agent's chat hears of.
         case "orchestra_approve_merge":
@@ -1265,6 +1415,36 @@ export function installMockBackend() {
           if (mockMain) void sendTo(mockMain)({ kind: "merge_resolved", worker: String(a.worker), outcome: "declined", detail: "" });
           return null;
         case "orchestra_discard":
+          return null;
+        // The merge card's tests (`?mergetests=pass|fail|none|auto`: how a run ends, a project with no test command, or a run that starts by itself).
+        case "orchestra_merge_tests_info": {
+          const t = (mockTests[String(a.worker)] ??= { started: MERGE_TESTS === "auto" ? Date.now() : null, last: null, finishAt: MERGE_TESTS === "auto" ? Date.now() + 6000 : 0 });
+          if (t.started !== null && Date.now() >= t.finishAt) finishMockTests(t);
+          return {
+            project: FOLDER,
+            detected: MERGE_TESTS === "none" ? null : { command: ["npm", "test"], source: "package.json" },
+            running: t.started === null ? null : { command: ["npm", "test"], elapsed_ms: Date.now() - t.started, last_line: " ✓ src/auth/LoginForm.test.tsx (6 tests) 412ms" },
+            last: t.last,
+          };
+        }
+        case "orchestra_run_merge_tests": {
+          const t = (mockTests[String(a.worker)] ??= { started: null, last: null, finishAt: 0 });
+          t.started = Date.now();
+          t.finishAt = Date.now() + 3500;
+          return new Promise((r) => setTimeout(() => (t.started !== null ? (finishMockTests(t, (a.command as string[] | null) ?? ["npm", "test"]), r(t.last)) : r(null)), 3500));
+        }
+        case "orchestra_cancel_merge_tests": {
+          const t = mockTests[String(a.worker)];
+          if (t) t.started = null;
+          return null;
+        }
+        case "merge_tests_split_command": {
+          const text = String(a.text);
+          if (!text.trim()) return Promise.reject("Type a command to run.");
+          if (/[|&;<>`]/.test(text)) return Promise.reject("“&” is a shell symbol, and nothing here goes through a shell. Type one command with its arguments.");
+          return text.trim().split(/\s+/);
+        }
+        case "set_auto_merge_tests":
           return null;
         // Closing and starting workers from the canvas. Nothing is on disk in the mock: it says there is a little loose work to
         // show the question, except for the one worker that shares the folder.
@@ -1282,11 +1462,34 @@ export function installMockBackend() {
           const name = String(a.name ?? "").trim() || String(a.task).split(/\s+/).slice(0, 5).join(" ");
           void sendTo(String(a.main))({ kind: "agent_spawned", worker: id, name, brief: String(a.task), folder: worktree ? `/Users/you/Library/Application Support/lantern/worktrees/web-app/${id}` : FOLDER, branch: worktree ? `lantern/${id}` : null, base: worktree ? "main" : null, isolation: worktree ? "worktree" : "shared", mode: slotMode[String(a.main)] === "auto" ? "auto" : "ask", ...(a.role ? { role: a.role as { id: string; label: string; read_only: boolean } } : {}) });
           // It starts thinking, which is also its first word: a card that then says nothing for minutes shows as quiet.
+          const setupHow = new URLSearchParams(location.search).get("setup");
+          if (worktree && setupHow) {
+            playSetup(id, setupHow);
+            return id;
+          }
           void sleep(150).then(async () => {
             await sendTo(id)({ kind: "thinking", parent: null });
             if (HOT) await sendTo(id)({ kind: "context_used", tokens: 150_000 });
           });
           return id;
+        }
+        // Project setup: saved as typed, and the files suggest the usual (?suggest=none finds nothing).
+        case "set_project_setup":
+          mockSetups[String(a.folder)] = { commands: a.commands as string[], run: (a.run as string | null) ?? null };
+          return null;
+        case "suggest_setup":
+          return new URLSearchParams(location.search).get("suggest") === "none" ? { commands: [], run: null } : { commands: ["npm ci"], run: "npm run dev" };
+        // The answers on a card whose setup stopped.
+        case "orchestra_setup_answer":
+          if (a.answer === "start") void sendTo(String(a.worker))({ kind: "agent_setup", phase: "done", index: 0, total: 0, command: "", line: "", reason: "", tail: "" }).then(() => sendTo(String(a.worker))({ kind: "thinking", parent: null }));
+          else if (a.answer === "again") playSetup(String(a.worker), new URLSearchParams(location.search).get("again") ?? "ok");
+          else void sendTo(String(a.worker))({ kind: "agent_setup", phase: "failed", index: 0, total: 2, command: "npm ci", line: "", reason: "setup was stopped", tail: "" });
+          return null;
+        case "run_project": {
+          const run = Object.values(mockSetups).find((s) => s.run)?.run;
+          if (!run) return Promise.reject("This project has no Run command: set one in its Project setup.");
+          playShell(String(a.slot), String(a.id), run);
+          return null;
         }
         case "run_shell":
           playShell(String(a.slot), String(a.id), String(a.command));
@@ -1376,8 +1579,13 @@ export function installMockBackend() {
           pendingPermission[String(a.slot)]?.(Boolean(a.allow));
           delete pendingPermission[String(a.slot)];
           return null;
-        case "add_permission_rule":
+        case "add_permission_rule": {
+          const { scope, ...rule } = a.rule as { scope: string };
+          addedRules.push({ scope, folder: scope === "folder" ? FOLDER : null, ...rule });
+          return null;
+        }
         case "remove_permission_rule":
+          return null;
         case "steps_guide":
           // A short stand-in for the backend's own (args::flavour_guide): enough for the notes to show their headings.
           return [
@@ -1395,7 +1603,42 @@ export function installMockBackend() {
           return [
             { scope: "folder", folder: FOLDER, tool: "Bash", kind: "prefix", text: "npm test" },
             { scope: "chat", folder: null, tool: "Edit", kind: "dir", path: `${FOLDER}/src` },
+            ...addedRules,
           ];
+        case "ship_info": {
+          // ?ship=main (on main), nogh (gh missing), nogithub (a remote that isn't GitHub) or none (no remote) show each state of Ship it.
+          const ship = new URLSearchParams(location.search).get("ship");
+          const base = { branch: "feat/slugify", remote: "origin", remote_url: "https://github.com/acme/web-dashboard.git", github: true, gh: true, base: "main" };
+          const found = ship === "main" ? { ...base, branch: "main" } : ship === "nogh" ? { ...base, gh: false } : ship === "nogithub" ? { ...base, github: false, remote_url: "git@gitlab.com:acme/web-dashboard.git" } : ship === "none" ? { ...base, remote: null, remote_url: null, github: false } : base;
+          return new Promise((r) => setTimeout(() => r(found), 120));
+        }
+        case "pr_watch": {
+          // ?prchecks=1 walks a pull request's checks through running, failed and passed, one step each look; =fail, =pass, =run and =merged stay at one state; =nopr, =nogh and =loggedout show what a project without one shows.
+          const want = new URLSearchParams(location.search).get("prchecks");
+          if (!want) return { kind: "no_pr" };
+          if (want === "nopr") return { kind: "no_pr" };
+          if (want === "nogh") return { kind: "no_gh" };
+          if (want === "loggedout") return { kind: "logged_out" };
+          const run = (n: string, bucket: string, id = "9001") => ({ name: n, state: bucket.toUpperCase(), bucket, link: `https://github.com/acme/web-dashboard/actions/runs/${id}/job/${n.length}`, workflow: "CI", run_id: id });
+          const steps: Record<string, unknown[][]> = {
+            "1": [[run("build", "pass"), run("lint", "pass"), run("test (unit)", "pending"), run("test (e2e)", "pending")], [run("build", "pass"), run("lint", "pass"), run("test (unit)", "fail"), run("test (e2e)", "pass")], [run("build", "pass", "9002"), run("lint", "pass", "9002"), run("test (unit)", "pass", "9002"), run("test (e2e)", "pass", "9002")]],
+            fail: [[run("build", "pass"), run("lint", "pass"), run("test (unit)", "fail"), run("test (e2e)", "pass")]],
+            pass: [[run("build", "pass"), run("lint", "pass"), run("test (unit)", "pass"), run("test (e2e)", "skipping")]],
+            run: [[run("build", "pass"), run("lint", "pass"), run("test (unit)", "pending"), run("test (e2e)", "pending")]],
+            merged: [[]],
+          };
+          const list = steps[want] ?? steps.fail;
+          prLooks += 1;
+          const checks = list[Math.min(prLooks - 1, list.length - 1)];
+          const pr = { number: 57, url: "https://github.com/acme/web-dashboard/pull/57", state: want === "merged" ? "MERGED" : "OPEN", branch: "feat/slugify", base: "main", head_sha: want === "1" && prLooks > 2 ? "bbb222" : "aaa111" };
+          return new Promise((r) => setTimeout(() => r({ kind: "found", pr, checks }), 150));
+        }
+        case "pr_failure_log":
+          return new Promise((r) => setTimeout(() => r("test (unit)\tRun tests\t2026-10-16T09:12:01Z FAIL src/slugify.test.ts\ntest (unit)\tRun tests\t2026-10-16T09:12:01Z   expected 'hello-world' but got 'hello--world'\ntest (unit)\tRun tests\t2026-10-16T09:12:02Z Error: Process completed with exit code 1."), 150));
+        case "gh_access": {
+          const gh = new URLSearchParams(location.search).get("ghaccess");
+          return gh === "missing" ? "missing" : gh === "out" ? "logged_out" : "ready";
+        }
         case "git_branch":
           return "main";
         case "set_model":
@@ -1404,6 +1647,8 @@ export function installMockBackend() {
           return new Promise((r) => setTimeout(() => r([FOLDER, "/Users/you/projects/web-dashboard", "/Users/you/src/infra", "/Users/you/notes", "/Users/you/Documents/Github/web-dashboard"].map((path, i) => ({ path, updated_ms: Date.now() - i * 3_600_000 }))), 100));
         case "list_sessions":
           return new Promise((r) => setTimeout(() => r(a.folder === FOLDER ? SESSIONS : (OTHER_SESSIONS[String(a.folder)] ?? [])), 150));
+        case "search_history":
+          return new Promise((r) => setTimeout(() => r(mockChatSearch(String(a.query))), new URLSearchParams(location.search).has("slowsearch") ? 1500 : 300));
         case "rename_session": {
           const session = SESSIONS.find((s) => s.id === a.sessionId);
           if (session) session.title = String(a.title);
@@ -1479,7 +1724,7 @@ export function installMockBackend() {
           return [{ path: FILE, created: false, deleted: false, added: 9, removed: 4 }, ...(MORE ? [{ path: TEST_FILE, created: true, deleted: false, added: 6, removed: 0 }] : [])];
         case "get_file_diff":
           if (a.path === TEST_FILE) return { path: a.path, original: "", current: TEST_SOURCE, created: true, deleted: false };
-          return { path: a.path, original: ORIGINAL, current: CURRENT, created: false, deleted: false };
+          return { path: a.path, original: ORIGINAL, current: new URLSearchParams(location.search).has("diffshift") && (window as { diffShifted?: boolean }).diffShifted ? SHIFTED : CURRENT, created: false, deleted: false };
         case "list_dir":
           return listDir(String(a.path));
         case "search_text": {
@@ -1566,6 +1811,21 @@ export function installMockBackend() {
             else mockFiles[f.path] = f.target;
             return { path: f.path, status: "reverted", before: null, after: f.target, reason: null };
           });
+        // &restore: every message has a restore point, and a restore puts a few made-up files back (for the dialog and Undo).
+        case "restore_points":
+          if (!new URLSearchParams(location.search).has("restore")) return Promise.reject("This folder isn't in a git repository, so it has no restore points.");
+          return Array.from({ length: (turnCount[String(a.slot)] ?? -1) + 1 }, (_, i) => i);
+        case "restore_preview":
+          return {
+            put_back: [`${FOLDER}/src/server.ts`, `${FOLDER}/src/routes/users.ts`, `${FOLDER}/package.json`],
+            removed: [`${FOLDER}/src/routes/orders.ts`],
+            skipped: new URLSearchParams(location.search).get("restore") === "links" ? [{ path: `${FOLDER}/docs`, reason: "A link is in the way, so it isn't restored from here." }] : [],
+            lines: 47,
+          };
+        case "restore_files":
+          return { id: 7, put_back: [`${FOLDER}/src/server.ts`, `${FOLDER}/src/routes/users.ts`, `${FOLDER}/package.json`], removed: [`${FOLDER}/src/routes/orders.ts`], skipped: [], kept: [] };
+        case "undo_restore":
+          return { id: null, put_back: [`${FOLDER}/src/server.ts`], removed: [], skipped: [], kept: [] };
         // &update: a newer Lantern is downloaded and waiting.
         case "update_status":
           return new URLSearchParams(location.search).has("update") ? { version: NEXT_VERSION } : null;

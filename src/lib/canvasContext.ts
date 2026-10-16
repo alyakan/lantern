@@ -93,6 +93,12 @@ export interface NodeActions {
   removeWorktree(worker: string): Promise<void>;
   /** What closing a worker would throw away; rejects with why it can't be closed (its branch is being merged, say). */
   closeCheck(worker: string): Promise<CloseCheck>;
+  /** The user's answer on an agent whose setup stopped ("start" it anyway, run the setup "again"), or "stop" a setup that is running. */
+  answerSetup(worker: string, answer: "start" | "again" | "stop"): Promise<void>;
+  /** The project's Run command, started in the agent's folder (a run that is going is replaced); stopped; and its panel closed (which stops it). */
+  run(slot: string): void;
+  stopRun(slot: string): void;
+  closeRun(slot: string): void;
   /** Stops a worker, removes its worktree and branch, and takes it off the canvas. Work that would be thrown away needs `agreed`, what the user confirmed. */
   closeWorker(worker: string, agreed?: CloseAgreed): Promise<void>;
   /** Starts a worker for the main agent `main` at the user's own request; rejects with why it didn't start (the limit, no git). */
@@ -111,6 +117,16 @@ export interface NodeActions {
 }
 
 export const NodeActionsContext = createContext<NodeActions | null>(null);
+
+/** The context windows seen so far, by model (saved by the app): what an agent that hasn't finished a turn yet can use. */
+export const KnownWindowsContext = createContext<Record<string, number>>({});
+
+export function useKnownWindows(): Record<string, number> {
+  return useContext(KnownWindowsContext);
+}
+
+/** Asks to close an agent (the canvas asks what would be lost first), for a card that offers it. */
+export const CloseAgentContext = createContext<(slot: string) => void>(() => {});
 
 export function useNodeActions(): NodeActions {
   const actions = useContext(NodeActionsContext);

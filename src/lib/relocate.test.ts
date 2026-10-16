@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FOLDER_LISTS, FOLDER_RECORDS, LAST_FOLDER, NOT_FOLDER_KEYED, OPEN_CHATS, migrateFolderState, movedNote, splitPath, withMovedNote, type KeyValueStore } from "./relocate";
+import { FOLDER_ITEMS, FOLDER_LISTS, FOLDER_RECORDS, LAST_FOLDER, NOT_FOLDER_KEYED, OPEN_CHATS, migrateFolderState, movedNote, splitPath, withMovedNote, type KeyValueStore } from "./relocate";
 import { initialState, reducer } from "../store";
 
 /** An in-memory localStorage: the keys and values as they'd be saved. */
@@ -32,6 +32,12 @@ describe("migrateFolderState", () => {
       "sidebar.projectColors": { [OLD]: 3 },
       "settings.rolesByFolder": { [OLD]: [{ id: "api-reviewer" }] },
       "settings.teamTemplatesByFolder": { [OLD]: [{ id: "build-audit" }] },
+      "merge.testCommandByFolder": { [OLD]: "npm run test:unit" },
+      "ship.ticksByFolder": { [OLD]: { commit: true, push: false } },
+      "settings.projectNotes": { [OLD]: "always use pnpm" },
+      "settings.projectSetupByFolder": { [OLD]: { commands: ["npm ci"], run: "npm run dev" } },
+      "prChecks.byFolder": { [OLD]: { mode: "fix", tries: 4 } },
+      "prChecks.loopByFolder": { [OLD]: { "57": { tries: 2, status: "waiting" } } },
     });
     const changed = migrateFolderState(store, OLD, NEXT);
     expect(Object.keys(changed).sort()).toEqual([...FOLDER_RECORDS].sort());
@@ -46,6 +52,12 @@ describe("migrateFolderState", () => {
     // The project's own agent roles and team templates go with it.
     expect(read(store, "settings.rolesByFolder")).toEqual({ [OLD]: [{ id: "api-reviewer" }], [NEXT]: [{ id: "api-reviewer" }] });
     expect(read(store, "settings.teamTemplatesByFolder")).toEqual({ [OLD]: [{ id: "build-audit" }], [NEXT]: [{ id: "build-audit" }] });
+    expect(read(store, "merge.testCommandByFolder")).toEqual({ [OLD]: "npm run test:unit", [NEXT]: "npm run test:unit" });
+    expect(read(store, "ship.ticksByFolder")).toEqual({ [OLD]: { commit: true, push: false }, [NEXT]: { commit: true, push: false } });
+    expect(read(store, "settings.projectNotes")).toEqual({ [OLD]: "always use pnpm", [NEXT]: "always use pnpm" });
+    expect(read(store, "settings.projectSetupByFolder")[NEXT]).toEqual({ commands: ["npm ci"], run: "npm run dev" });
+    expect(read(store, "prChecks.byFolder")).toEqual({ [OLD]: { mode: "fix", tries: 4 }, [NEXT]: { mode: "fix", tries: 4 } });
+    expect(read(store, "prChecks.loopByFolder")).toEqual({ [OLD]: { "57": { tries: 2, status: "waiting" } }, [NEXT]: { "57": { tries: 2, status: "waiting" } } });
     // What was returned is what was written.
     expect(changed["settings.permissionsByFolder"]).toEqual(read(store, "settings.permissionsByFolder"));
   });
@@ -56,6 +68,19 @@ describe("migrateFolderState", () => {
     expect(read(store, "sidebar.projectOrder")).toEqual(["/a", NEXT, "/b"]);
     const both = memoryStore({ "sidebar.projectOrder": [NEXT, OLD] });
     expect(migrateFolderState(both, OLD, NEXT)).toEqual({});
+  });
+
+  it("moves a routine to the new folder, and leaves the others alone", () => {
+    const routines = [
+      { id: "a", name: "Morning", folder: OLD, runs: [] },
+      { id: "b", name: "Other", folder: "/other", runs: [] },
+    ];
+    const store = memoryStore({ "settings.routines": routines });
+    const changed = migrateFolderState(store, OLD, NEXT);
+    expect(FOLDER_ITEMS).toContain("settings.routines");
+    expect(changed["settings.routines"]).toEqual([{ ...routines[0], folder: NEXT }, routines[1]]);
+    expect(read(store, "settings.routines")).toEqual([{ ...routines[0], folder: NEXT }, routines[1]]);
+    expect(migrateFolderState(memoryStore({ "settings.routines": [routines[1]] }), OLD, NEXT)).toEqual({});
   });
 
   it("keeps an entry the new folder already has", () => {

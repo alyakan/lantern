@@ -6,7 +6,7 @@ const exportText = vi.fn((_name: string, _text: string) => Promise.resolve<strin
 vi.mock("../api", () => ({ api: { changeSummary: () => Promise.resolve([]), exportText: (name: string, text: string) => exportText(name, text) } }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ revealItemInDir: () => Promise.resolve() }));
 
-import { COMMIT_PROMPT, DoneHandoff, PR_PROMPT, type Handoff } from "./DoneHandoff";
+import { DoneHandoff, type Handoff } from "./DoneHandoff";
 
 const summary: StepsSummary = { headline: "1 of 1 steps built", rows: [] } as unknown as StepsSummary;
 const handoff = (extra: Partial<Handoff> = {}): Handoff => ({
@@ -17,13 +17,14 @@ const handoff = (extra: Partial<Handoff> = {}): Handoff => ({
   running: false,
   onReviewChanges: vi.fn(),
   onStartNew: vi.fn(),
+  onShip: vi.fn(),
   ...extra,
 });
 
 describe("the Done page's hand-off", () => {
   it("shows the next actions as buttons", () => {
     render(<DoneHandoff handoff={handoff()} onSend={() => {}} />);
-    expect(screen.getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Review the changes (2)", "Commit…", "Open a pull request…", "Export the plan", "Start something new"]);
+    expect(screen.getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Review the changes (2)", "Ship it…", "Export the plan", "Start something new"]);
   });
 
   it("opens the side panel on the changes with Review the changes, and starts a new chat with Start something new", () => {
@@ -35,33 +36,18 @@ describe("the Done page's hand-off", () => {
     expect(h.onStartNew).toHaveBeenCalledTimes(1);
   });
 
-  it("asks Claude to commit only after a confirming click, showing what it will send", () => {
+  it("opens Ship it with Ship it…, and sends nothing itself", () => {
     const onSend = vi.fn();
-    render(<DoneHandoff handoff={handoff()} onSend={onSend} />);
-    fireEvent.click(screen.getByRole("button", { name: "Commit…" }));
+    const h = handoff();
+    render(<DoneHandoff handoff={h} onSend={onSend} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ship it…" }));
+    expect(h.onShip).toHaveBeenCalledTimes(1);
     expect(onSend).not.toHaveBeenCalled();
-    expect(screen.getByRole("group", { name: "Confirm: Commit…" })).toHaveTextContent(COMMIT_PROMPT);
-    fireEvent.click(screen.getByRole("button", { name: "Ask Claude to commit" }));
-    expect(onSend).toHaveBeenCalledExactlyOnceWith(COMMIT_PROMPT);
-    expect(screen.queryByRole("group", { name: /Confirm/ })).toBeNull();
   });
 
-  it("asks Claude to open a pull request the same way, and Cancel sends nothing", () => {
-    const onSend = vi.fn();
-    render(<DoneHandoff handoff={handoff()} onSend={onSend} />);
-    fireEvent.click(screen.getByRole("button", { name: "Open a pull request…" }));
-    expect(screen.getByRole("group", { name: "Confirm: Open a pull request…" })).toHaveTextContent(PR_PROMPT);
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(onSend).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Open a pull request…" }));
-    fireEvent.click(screen.getByRole("button", { name: "Ask Claude to open it" }));
-    expect(onSend).toHaveBeenCalledExactlyOnceWith(PR_PROMPT);
-  });
-
-  it("leaves Commit and Open a pull request off while Claude is busy, but not the rest", () => {
+  it("leaves Ship it off while Claude is busy, but not the rest", () => {
     render(<DoneHandoff handoff={handoff()} />);
-    expect(screen.getByRole("button", { name: "Commit…" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Open a pull request…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Ship it…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: /^Review the changes/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Start something new" })).toBeEnabled();
   });

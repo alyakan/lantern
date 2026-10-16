@@ -172,3 +172,65 @@ export const RULE_SCOPES: [RuleScope, string][] = [
 export function newRule(scope: RuleScope, rule: Rule): NewRule {
   return { scope, ...rule };
 }
+
+/** The tools Settings offers a hand-made rule for; "other" is a tool typed by name (an MCP tool, say). */
+export const HAND_TOOLS = ["Bash", "Read", "Edit", "Write", "WebFetch", "WebSearch", "other"] as const;
+export type HandTool = (typeof HAND_TOOLS)[number];
+
+/** What a hand-made rule covers: a Bash command's start or the exact command, a folder's files, or every call. */
+export type HandMatch = "prefix" | "exact" | "dir" | "any";
+
+/** What the Add a rule form holds. */
+export type HandForm = { tool: HandTool; otherName: string; match: HandMatch; pattern: string; scope: RuleScope };
+
+/** The ways a tool's rule can cover calls, first one the default. */
+export function handMatches(tool: HandTool): HandMatch[] {
+  if (tool === "Bash") return ["prefix", "exact"];
+  if (tool === "Read" || tool === "Edit" || tool === "Write") return ["dir", "any"];
+  return ["any"];
+}
+
+/** The rule a form makes, in the shape the cards make (see ruleChoices), with what it means in words, or why it can't be made.
+ *  `broad` is a rule that lets Claude do a lot without asking, which Settings makes the user confirm. */
+export type HandRule = { error: string } | { rule: Rule; meaning: string; broad: string | null };
+
+const trim = (path: string) => (path.length > 1 ? path.replace(/\/+$/, "") : path);
+
+/** Checks a form against what the backend accepts (validate in rules.rs) so a rule is refused here in plain words, not by an error. */
+export function handRule(form: HandForm): HandRule {
+  const tool = form.tool === "other" ? form.otherName.trim() : form.tool;
+  if (!tool) return { error: "Type the tool's name, like mcp__linear__save_issue." };
+  if (/\s/.test(tool) || tool.length > 100 || /[\u0000-\u001f\u007f-\u009f]/.test(tool)) return { error: "A tool's name has no spaces in it, like mcp__linear__save_issue." };
+  if (NEVER_AUTO_TOOLS.includes(tool) || tool.startsWith("mcp__lantern__")) return { error: `${tool} always asks, because its card has something for you to read or answer.` };
+  if (form.tool === "other" && (tool === "Bash" || FILE_TOOLS[tool])) return { error: `Pick ${tool} from the list: it needs a command or a folder.` };
+  const match = handMatches(form.tool).includes(form.match) ? form.match : handMatches(form.tool)[0];
+  const pattern = form.pattern.trim();
+  if (match === "any") {
+    const everything = FILE_TOOLS[tool] ? `any file ${tool === "Read" ? "it reads" : tool === "Edit" ? "it edits" : "it writes"}` : `every ${tool} call`;
+    return { rule: { tool, kind: "any" }, meaning: `Always allow ${tool} for ${FILE_TOOLS[tool] ? "any file" : "every call"}`, broad: `This lets Claude use ${tool} on ${everything} without asking${FILE_TOOLS[tool] ? " (git, editor and config files still ask)" : ""}.` };
+  }
+  if (!pattern) return { error: match === "dir" ? "Type the folder the rule covers." : "Type the command." };
+  if (tool === "Bash") {
+    if (pattern === "*" || pattern === "Bash") return { error: "A rule can't cover every command. Type a command's start, like npm test, or one exact command." };
+    if (match === "exact") {
+      if (pattern.length < 2) return { error: "That command is too short to make a rule for." };
+      if (!isPlainCommand(pattern)) return { error: "Rules only match plain commands: no ; & | < > $ ` \\ * ? ( ) [ ] { } and no line breaks." };
+      const first = programName(pattern.split(" ")[0]);
+      const risky = WRAPPERS.includes(first) || DENIED_FIRST.includes(first);
+      return { rule: { tool, kind: "exact", text: pattern }, meaning: `Always allow the Bash command ${pattern}`, broad: risky ? `This lets Claude run ${pattern} without asking. It can run other programs or change or delete files.` : null };
+    }
+    const text = pattern.split(/ +/).join(" ");
+    if (!isPrefix(text)) return { error: "A command's start can only be a read-only, build or test command, like git status, npm test, cargo build or ls. For anything else, choose This exact command." };
+    return { rule: { tool, kind: "prefix", text }, meaning: `Always allow Bash commands starting with ${text}`, broad: null };
+  }
+  if (FILE_TOOLS[tool]) {
+    const path = trim(pattern);
+    if (!path.startsWith("/")) return { error: "Type the folder's full path, starting with /." };
+    if (!isPlainPath(path)) return { error: "A folder path can't have .. in it." };
+    if (path === "/") return { error: "A rule can't cover the whole disk. Pick a folder." };
+    if (isProtectedPath(path)) return { error: "Rules don't cover git, editor, Claude or build config folders (.git, .claude, .vscode, package.json…)." };
+    const shallow = path.split("/").filter(Boolean).length <= 2;
+    return { rule: { tool, kind: "dir", path }, meaning: `Always allow ${tool} for files in ${path}`, broad: shallow ? `This lets Claude ${tool === "Read" ? "read" : tool === "Edit" ? "edit" : "write"} every file in ${path}, a very large folder, without asking.` : null };
+  }
+  return { error: "That tool's rule covers every call." };
+}

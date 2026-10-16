@@ -46,6 +46,15 @@ export interface ResendHandlers {
   onResend: (prompt: { text: string; draft?: string }) => void;
 }
 
+/** "Restore files to here" on a sent message: the project's files go back to how they were before it. */
+export interface RestoreHandlers {
+  /** The messages (by turn number) the chat has a restore point for. */
+  points: ReadonlySet<number>;
+  /** Why it can't be done now (Claude is working), or null. */
+  blocked: string | null;
+  onRestore: (turn: number) => void;
+}
+
 export interface StreamHandlers {
   /** `note`: what the user typed on a reproduce card, passed back to Claude; `answered`: AskUserQuestion's input with the answers; `remember`: an "Always allow…" rule to save. */
   onDecide: (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => void;
@@ -68,12 +77,14 @@ interface Props extends StreamHandlers {
   live?: boolean;
   /** Edit, Retry and Regenerate, where the chat can send again (not while a turn runs, not in Step by step). */
   resend?: ResendHandlers;
+  restore?: RestoreHandlers;
 }
 
 // Resending runs the work again, so the tooltip says so.
+const RESTORE_TITLE = "Put the project's files back to how they were just before this message";
 const REGENERATE_TITLE = "Sends the last prompt again. Files it changes and commands it runs happen again.";
 
-export function ChatStream({ items, folder, sections, live = false, resend, ...handlers }: Props) {
+export function ChatStream({ items, folder, sections, live = false, resend, restore, ...handlers }: Props) {
   const rows = groupItems(items, live);
   // Each turn's word ("Pondering…") comes from its prompt, so the live line and the thinking line agree.
   const verbFor = new Map<string, string>();
@@ -93,6 +104,14 @@ export function ChatStream({ items, folder, sections, live = false, resend, ...h
     if (row.type === "assistant" || row.type === "turn") answering.set(row.id, current);
   }
   const resendOf = (p: UserRow | null | undefined) => (resend && p ? () => resend.onResend({ text: p.text, draft: p.draft }) : undefined);
+  const userActions = (row: UserRow): MessageAction[] => {
+    const actions: MessageAction[] = resend ? [{ label: "Edit", title: "Edit and send as a new message", onClick: () => resend.onEdit(row.draft ?? draftOf(row.text)) }] : [];
+    const turn = row.turn;
+    if (restore && turn !== undefined && restore.points.has(turn)) {
+      actions.push({ label: "Restore files to here", title: restore.blocked ?? RESTORE_TITLE, disabled: !!restore.blocked, onClick: () => restore.onRestore(turn) });
+    }
+    return actions;
+  };
   const render = (row: Row): ReactNode => {
     switch (row.type) {
       case "user":
@@ -109,7 +128,7 @@ export function ChatStream({ items, folder, sections, live = false, resend, ...h
             <div className="msg user">
               <CollapsibleText>{row.text}</CollapsibleText>
             </div>
-            <MessageActions text={row.text} align="end" actions={resend ? [{ label: "Edit", title: "Edit and send as a new message", onClick: () => resend.onEdit(row.draft ?? draftOf(row.text)) }] : []} />
+            <MessageActions text={row.text} align="end" actions={userActions(row)} />
           </Fragment>
         );
       case "assistant": {

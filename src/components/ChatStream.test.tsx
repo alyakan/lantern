@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ChatItem } from "../store";
 import { ChatStream } from "./ChatStream";
 
@@ -150,5 +150,43 @@ describe("a turn's usage", () => {
   it("says nothing when neither is known", () => {
     const { container } = render(<ChatStream items={turn(null, null)} folder={null} {...handlers} />);
     expect(container.querySelector(".turn-note")).toBeNull();
+  });
+});
+
+describe("Restore files to here", () => {
+  const turns: ChatItem[] = [
+    { type: "user", id: "u1", text: "First", turn: 0 },
+    { type: "assistant", id: "a1", text: "One." },
+    { type: "user", id: "u2", text: "Second", turn: 1 },
+    { type: "assistant", id: "a2", text: "Two." },
+    { type: "user", id: "u3", text: "Third" },
+    { type: "user", id: "u4", text: "[Lantern: agent finished]", auto: true, turn: 2 },
+  ];
+
+  it("is on the user's messages that have a restore point, after Copy and Edit", () => {
+    const onRestore = vi.fn();
+    render(<ChatStream items={turns} folder={null} {...handlers} resend={{ onEdit: vi.fn(), onResend: vi.fn() }} restore={{ points: new Set([1, 2]), blocked: null, onRestore }} />);
+    const buttons = screen.getAllByRole("button", { name: "Restore files to here" });
+    // Not on the message with no restore point, not on a note from the agents.
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].getAttribute("title")).toBe("Put the project's files back to how they were just before this message");
+    expect(within(buttons[0].parentElement as HTMLElement).getAllByRole("button").map((b) => b.textContent)).toEqual(["Copy", "Edit", "Restore files to here"]);
+    fireEvent.click(buttons[0]);
+    expect(onRestore).toHaveBeenCalledWith(1);
+  });
+
+  it("is disabled with the reason while a turn runs", () => {
+    const onRestore = vi.fn();
+    render(<ChatStream items={turns} folder={null} {...handlers} restore={{ points: new Set([0]), blocked: "Wait for Claude to finish before restoring files.", onRestore }} />);
+    const button = screen.getByRole("button", { name: "Restore files to here" });
+    expect(button).toBeDisabled();
+    expect(button.getAttribute("title")).toBe("Wait for Claude to finish before restoring files.");
+    fireEvent.click(button);
+    expect(onRestore).not.toHaveBeenCalled();
+  });
+
+  it("isn't offered without the feature", () => {
+    render(<ChatStream items={turns} folder={null} {...handlers} />);
+    expect(screen.queryByRole("button", { name: "Restore files to here" })).toBeNull();
   });
 });

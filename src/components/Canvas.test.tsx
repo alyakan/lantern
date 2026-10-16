@@ -6,6 +6,7 @@ import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions
 import { needingYou, orchestraNodes } from "../lib/orchestraView";
 import { GAP, MAIN_SIZE, overlaps, SUMMARY_ZOOM, WORKER_SIZE } from "../lib/canvas";
 import { Canvas, newLayout, placeNodes, UPDATE_REQUEST } from "./Canvas";
+import { NUDGE_MESSAGE } from "./NodeBody";
 
 // jsdom has no PointerEvent, so its clientX, button and pointerId would never reach a handler.
 if (typeof window.PointerEvent === "undefined") {
@@ -29,7 +30,7 @@ function team(workers = 2): Chats {
   return c;
 }
 
-const actions = (over: Partial<NodeActions> = {}): NodeActions => ({ send: vi.fn(), clear: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(() => Promise.resolve()), reviewMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), spawn: vi.fn(() => Promise.resolve()), closeCheck: vi.fn(() => Promise.resolve({ worktree: true, branch: null, uncommitted: 0, unmerged_commits: 0 })), closeWorker: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), setPermissions: vi.fn(), setWorkflow: vi.fn(), setSubagents: vi.fn(), setReview: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(), ...over });
+const actions = (over: Partial<NodeActions> = {}): NodeActions => ({ send: vi.fn(), clear: vi.fn(), stop: vi.fn(), queue: vi.fn(), decide: vi.fn(), openFile: vi.fn(), openTestRun: vi.fn(), stopShell: vi.fn(), answerSetup: vi.fn(() => Promise.resolve()), run: vi.fn(), stopRun: vi.fn(), closeRun: vi.fn(), shellInput: vi.fn(), restart: vi.fn(), approveMerge: vi.fn(), declineMerge: vi.fn(() => Promise.resolve()), reviewMerge: vi.fn(), removeWorktree: vi.fn(() => Promise.resolve()), spawn: vi.fn(() => Promise.resolve()), closeCheck: vi.fn(() => Promise.resolve({ worktree: true, branch: null, uncommitted: 0, unmerged_commits: 0 })), closeWorker: vi.fn(() => Promise.resolve()), hide: vi.fn(), show: vi.fn(), setPermissions: vi.fn(), setWorkflow: vi.fn(), setSubagents: vi.fn(), setReview: vi.fn(), draft: vi.fn(() => ""), setDraft: vi.fn(), ...over });
 
 function setup(chats: Chats, extra: { attention?: string[]; layout?: ReturnType<typeof newLayout>; actions?: Partial<NodeActions> } = {}) {
   const store = createChatStore();
@@ -184,6 +185,22 @@ describe("the canvas", () => {
     expect(onFocus).toHaveBeenLastCalledWith("w2");
     fireEvent.click(pill);
     expect(onFocus).toHaveBeenLastCalledWith("w1");
+  });
+
+  it("keeps the agents-need-you pill in the toolbar, not over the cards, and shortens it with the canvas's width", () => {
+    setup(team(2), { attention: ["w1", "w2"] });
+    const pill = screen.getByRole("button", { name: "2 agents need you" });
+    expect(pill.closest(".canvas-controls")).toBeTruthy();
+    expect([...pill.querySelectorAll("span:not(.node-dot)")].map((s) => s.textContent)).toEqual(["2 agents need you", "2 need you", "2"]);
+  });
+
+  it("keeps a card's model chip whole and gives its second line a tooltip with all of it", () => {
+    setup(team(1));
+    const card = screen.getByLabelText(/Agent Worker 1/);
+    const text = card.querySelector(".node-meta-text") as HTMLElement;
+    expect(text.parentElement?.className).toBe("node-meta");
+    expect(text.title).not.toBe("");
+    expect(text.textContent!.length).toBeGreaterThan(0);
   });
 
   it("frames the agent that needs you at 100%, however far out the view was", () => {
@@ -518,6 +535,36 @@ describe("oversight", () => {
     expect(chip.querySelector(".canvas-ctl-long")?.textContent).toBe("Context 78%");
     expect(chip).toHaveClass("warn");
     expect(chip).toHaveAccessibleName("Context: Lead 78% used, getting full");
+  });
+
+  it("says tokens, not a percent, while no agent's window is known, and never calls it full", () => {
+    const chats = team(1);
+    // 312k used by a Lead whose window nothing has said (its first turn hasn't ended): not "312k of 200k".
+    chats.slots.s1 = { ...chats.slots.s1, contextUsed: 312_000, contextWindow: null };
+    setup(chats);
+    const chip = screen.getByRole("button", { name: /^Context:/ });
+    expect(chip.querySelector(".canvas-ctl-long")?.textContent).toBe("Context 312k");
+    expect(chip.querySelector(".canvas-ctl-short")?.textContent).toBe("312k");
+    expect(chip).toHaveAccessibleName("Context: Lead 312,000 tokens used, window not known yet");
+    expect(chip).not.toHaveClass("full");
+    expect(chip).not.toHaveClass("warn");
+    fireEvent.click(chip);
+    const list = screen.getByRole("dialog", { name: "Context by agent" });
+    expect(within(list).queryAllByRole("meter")).toHaveLength(0);
+    expect(within(list).getByText("window not known")).toBeTruthy();
+    expect(within(list).getByTitle("312,000 tokens, window not known until a turn ends")).toHaveTextContent("312k used");
+    // Nobody has a percent, so nobody is over the line "Compact all" uses.
+    expect(screen.getByRole("button", { name: /Compact all above 60%/ })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("counts only the agents whose window is known toward the chip, and says how many aren't", () => {
+    const chats = team(1);
+    chats.slots.s1 = { ...chats.slots.s1, contextUsed: 312_000, contextWindow: null };
+    chats.slots.w1 = { ...chats.slots.w1, contextUsed: 100_000, contextWindow: 200_000 };
+    setup(chats);
+    const chip = screen.getByRole("button", { name: /^Context:/ });
+    expect(chip).toHaveAccessibleName("Context: Worker 1 50% used");
+    expect(chip.getAttribute("title")).toContain("One agent's window isn't known yet, so it isn't counted.");
   });
 
   it("shows no cost until something has cost anything", () => {
@@ -1064,7 +1111,67 @@ describe("an agent at work that has gone quiet", () => {
     const stuck = screen.getByLabelText(/Agent Worker 1, Quiet 3m/);
     expect(stuck).toHaveClass("stuck");
     expect(stuck.querySelector(".node-status")).toHaveTextContent("Quiet 3m");
-    expect(stuck.querySelector(".node-status")?.getAttribute("title")).toMatch(/send it a message, or stop it/);
+    expect(stuck.querySelector(".node-status")?.getAttribute("title")).toMatch(/nudge it, interrupt it or restart it/);
+  });
+
+  it("says so in its card, with Nudge, Interrupt and Restart, only once it is quiet", () => {
+    setup(working(45_000));
+    expect(screen.queryByRole("button", { name: "Nudge" })).toBeNull();
+    cleanup();
+    setup(working(200_000));
+    const line = screen.getByText(/Quiet for 3 min\. It may be stuck\./);
+    expect(line).toBeInTheDocument();
+    expect(within(line.parentElement!).getAllByRole("button").map((b) => b.textContent)).toEqual(["Nudge", "Interrupt", "Restart"]);
+  });
+
+  it("Nudge asks for a one-line status once for each stretch of quiet", () => {
+    const { acts } = setup(working(200_000));
+    fireEvent.click(screen.getByRole("button", { name: "Nudge" }));
+    expect(acts.send).toHaveBeenCalledTimes(1);
+    expect(acts.send).toHaveBeenCalledWith("w1", NUDGE_MESSAGE);
+    expect(screen.getByRole("button", { name: "Nudged" })).toBeDisabled();
+    expect(acts.stop).not.toHaveBeenCalled();
+    expect(acts.restart).not.toHaveBeenCalled();
+  });
+
+  it("Interrupt stops its turn and nothing else: it isn't restarted or closed", () => {
+    const { acts } = setup(working(200_000));
+    fireEvent.click(screen.getByRole("button", { name: "Interrupt" }));
+    expect(acts.stop).toHaveBeenCalledWith("w1");
+    expect(acts.restart).not.toHaveBeenCalled();
+    expect(acts.closeWorker).not.toHaveBeenCalled();
+  });
+
+  it("Restart says what it loses first, and does nothing until it is confirmed", () => {
+    const { acts } = setup(working(200_000));
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    expect(screen.getByRole("alertdialog", { name: "Restart this agent?" })).toHaveTextContent(/step it is in the middle of is lost/);
+    expect(acts.restart).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(acts.restart).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Nudge" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restart anyway" }));
+    expect(acts.restart).toHaveBeenCalledWith("w1");
+  });
+
+  it("follows the quiet time in Settings", () => {
+    localStorage.setItem("lantern.quietMinutes", "5");
+    try {
+      setup(working(200_000));
+      expect(screen.queryByRole("button", { name: "Nudge" })).toBeNull();
+      expect(screen.getByLabelText(/Agent Worker 1/)).not.toHaveClass("stuck");
+    } finally {
+      localStorage.removeItem("lantern.quietMinutes");
+    }
+  });
+
+  it("is counted in the Team list, which names who", () => {
+    setup(working(200_000));
+    const button = screen.getByRole("button", { name: "Team" });
+    expect(button).toHaveTextContent("1 quiet");
+    fireEvent.click(button);
+    expect(within(screen.getByRole("dialog", { name: "Team" })).getByText("Quiet 3m")).toBeInTheDocument();
   });
 });
 

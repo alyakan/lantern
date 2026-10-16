@@ -4,6 +4,8 @@ export interface MessageAction {
   label: string;
   title: string;
   onClick: () => void;
+  /** Shown but not usable now: the title says why. */
+  disabled?: boolean;
 }
 
 /**
@@ -29,7 +31,7 @@ export function MessageActions({ text, align, actions = [] }: { text: string; al
         {copied ? "Copied" : "Copy"}
       </button>
       {actions.map((a) => (
-        <button key={a.label} className="msg-action" title={a.title} onClick={a.onClick}>
+        <button key={a.label} className="msg-action" title={a.title} onClick={a.onClick} disabled={a.disabled}>
           {a.label}
         </button>
       ))}

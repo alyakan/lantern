@@ -5,6 +5,9 @@ import type { McpServer, McpServerSpec, SkillEntry, SlashCommand } from "../type
 import { describeConfig, displayName, groupSkills, iconOf, removable, sourceOf, statusOf, toolsOf, withoutFrontmatter } from "../lib/mcp";
 import { setChime, useChimeOn } from "../lib/chime";
 import { AGENT_LIMIT_MAX, AGENT_LIMIT_MIN, setAgentLimit, useAgentLimit } from "../lib/agentLimit";
+import { PAUSE_OPTIONS, setPauseAtPercent, usePauseAtPercent } from "../lib/planPause";
+import { QUIET_MINUTES, setQuietMinutes, useQuietMinutes } from "../lib/quietSetting";
+import { setAutoMergeTests, useAutoMergeTests } from "../lib/mergeTests";
 import { PAUSE_MS, type NotifyPrefs } from "../lib/notifyPrefs";
 import type { TextSize } from "../lib/theme";
 import type { CustomTheme, ThemeId } from "../lib/themes";
@@ -14,9 +17,12 @@ import { NewSkillForm } from "./SkillForm";
 import { HarnessSettings, type HarnessSettingsProps } from "./HarnessSettings";
 import { UpdatesPage, type UpdatesPageProps } from "./UpdatesPage";
 import { PermissionRules } from "./PermissionRules";
+import { RoutinesSettings, type RoutinesSettingsProps } from "./RoutinesSettings";
 
-export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions";
-export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules" };
+import { PrChecksSettings, type PrChecksSettingsProps } from "./PrChecksSettings";
+
+export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs";
+export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests" };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -42,10 +48,14 @@ interface Props {
   updates?: UpdatesPageProps;
   /** Notifications, appearance and text size, for the General page (App keeps them saved). */
   general?: GeneralSettingsProps;
+  /** The routines and what to do with them, for the Routines page. */
+  routines?: RoutinesSettingsProps;
+  /** What happens after a pull request's checks run, per project, for the Pull requests page. */
+  prChecks?: PrChecksSettingsProps;
 }
 
 /** Settings: General (notifications, sound, look), MCP servers (status, log in, add, remove) and skills. */
-export function SettingsView({ open, onClose, harness, updates, general, ...page }: Props) {
+export function SettingsView({ open, onClose, harness, updates, general, routines, prChecks, ...page }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<SettingsTab>(open ?? "general");
   useEffect(() => {
@@ -70,8 +80,8 @@ export function SettingsView({ open, onClose, harness, updates, general, ...page
           <nav className="mode-guide-nav" aria-label="Settings">
             <div className="mode-guide-group">
               <div className="mode-guide-group-title">Settings</div>
-              {(["general", "harness", "mcp", "skills", "permissions", "updates"] as const)
-                .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "updates" || updates))
+              {(["general", "harness", "routines", "mcp", "skills", "permissions", "prs", "updates"] as const)
+                .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "prs" || prChecks))
                 .map((t) => (
                   <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} onClick={() => setTab(t)}>
                     {TAB_LABEL[t]}
@@ -84,12 +94,16 @@ export function SettingsView({ open, onClose, harness, updates, general, ...page
               <GeneralPage {...general} />
             ) : tab === "harness" && harness ? (
               <HarnessSettings {...harness} />
+            ) : tab === "routines" && routines ? (
+              <RoutinesSettings {...routines} />
             ) : tab === "updates" && updates ? (
               <UpdatesPage {...updates} />
             ) : tab === "skills" ? (
               <SkillsPage {...page} />
             ) : tab === "permissions" ? (
               <PermissionRules slot={page.slot} />
+            ) : tab === "prs" && prChecks ? (
+              <PrChecksSettings {...prChecks} />
             ) : (
               <McpPage {...page} />
             )}
@@ -132,6 +146,9 @@ const NOTIFY_EVENTS: { key: "finished" | "waiting" | "failed"; label: string }[]
 function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme, customTheme, onCustomTheme, textSize, onTextSize, warnTeams, onWarnTeams }: GeneralSettingsProps) {
   const sound = useChimeOn();
   const agentLimit = useAgentLimit();
+  const quiet = useQuietMinutes();
+  const pauseAt = usePauseAtPercent();
+  const autoTests = useAutoMergeTests();
   const paused = notify.pausedUntil > Date.now();
   const set = (patch: Partial<NotifyPrefs>) => onNotify({ ...notify, ...patch });
   return (
@@ -223,6 +240,33 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
           </select>
         </label>
         <span className="settings-muted">Every agent spends the same plan. A Lead asking for one more is told to wait for one to finish.</span>
+        <label className="general-option">
+          <span>Say an agent is quiet after</span>
+          <select aria-label="Say an agent is quiet after" value={quiet} onChange={(e) => setQuietMinutes(Number(e.target.value))}>
+            {QUIET_MINUTES.map((n) => (
+              <option key={n} value={n}>
+                {n === 1 ? "1 minute" : `${n} minutes`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="settings-muted">An agent at work that says nothing for this long shows "Quiet" on its card and in the inbox, with Nudge, Interrupt and Restart.</span>
+        <label className="general-option">
+          <span>Pause a team's work when my plan reaches</span>
+          <select aria-label="Pause a team's work when my plan reaches" value={pauseAt} onChange={(e) => setPauseAtPercent(Number(e.target.value))}>
+            {PAUSE_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n === 0 ? "Off" : `${n}%`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="settings-muted">Stops what every working agent of every team is doing (they stay on their teams) and tells you when the plan resets. Nothing starts again until you press Resume. You get a heads-up 5 points before, and it pauses once for each five-hour window.</span>
+        <label className="general-option">
+          <input type="checkbox" checked={autoTests} onChange={(e) => setAutoMergeTests(e.target.checked)} />
+          <span>Run tests when a merge is proposed</span>
+        </label>
+        <span className="settings-muted">Runs the project's tests in the agent's worktree as its merge card appears, so the result is waiting for you. Off, nothing runs until you press Run tests.</span>
         {onWarnTeams && (
           <label className="general-option">
             <input type="checkbox" checked={warnTeams ?? true} onChange={(e) => onWarnTeams(e.target.checked)} />

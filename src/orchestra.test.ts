@@ -18,7 +18,8 @@ describe("a worker the main agent starts", () => {
   it("opens as a chat of its own, already working on its brief, before any of its own events", () => {
     const c = withWorker();
     expect(Object.keys(c.slots)).toEqual(["s1", "w1"]);
-    expect(c.slots.w1).toMatchObject({ folder: "/wt/login-form", mode: "auto", status: "running", thinking: true, claudePath: "/bin/claude", contextWindow: 200_000 });
+    expect(c.slots.w1).toMatchObject({ folder: "/wt/login-form", mode: "auto", status: "running", thinking: true, claudePath: "/bin/claude", contextWindow: null });
+    // Its window isn't its Lead's: it may run on another model, and says its own when its first turn ends.
     expect(c.slots.w1.items).toEqual([expect.objectContaining({ type: "user", text: "Build the login form", from: "main agent" })]);
     expect(c.agents.w1).toEqual({ parent: "s1", name: "Login form", brief: "Build the login form", folder: "/wt/login-form", branch: "lantern/login-form", base: "main", isolation: "worktree" });
     // The main agent's own chat gets no item for it.

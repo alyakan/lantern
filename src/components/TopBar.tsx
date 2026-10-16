@@ -9,7 +9,7 @@ import { FolderMenu } from "./FolderPill";
 import { Inbox, type InboxProps } from "./Inbox";
 import { useMenuKeys } from "./useMenuKeys";
 import type { ActivityStatus } from "../lib/status";
-import { BranchIcon, CanvasIcon, FailIcon, FolderIcon, GearIcon, PaneIcon, SidebarIcon } from "./icons";
+import { BranchIcon, CanvasIcon, FailIcon, FolderIcon, GearIcon, PaneIcon, PlayIcon, SidebarIcon } from "./icons";
 
 interface Props {
   folder: string | null;
@@ -45,6 +45,8 @@ interface Props {
   sidebar?: { needs: number; onShow: () => void };
   /** What waits on you in every project and team (see Inbox): a button at the right with a popover. */
   inbox?: InboxProps;
+  /** The project's Run command (saved in its setup): a Run button beside the folder. Disabled while a run goes. */
+  run?: { command: string; running: boolean; onRun: () => void };
 }
 
 const showSidebarLabel = (needs: number) => (needs > 0 ? `Show sidebar, ${needs} ${needs === 1 ? "chat needs" : "chats need"} you` : "Show sidebar");
@@ -69,7 +71,7 @@ function taskKind(type: string): string {
 // Xcode's activity viewer: the folder and branch on the left (it opens the folder menu, like Xcode's scheme), what
 // Claude is doing on the right, and a progress bar along its bottom edge while it works. The projects, new chats and
 // teams, and past chats are in the sidebar.
-export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, mcpIssues = [], branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, onBringOld, orchestra, usage, sidebar, inbox }: Props) {
+export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, mcpIssues = [], branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, onBringOld, orchestra, usage, sidebar, inbox, run }: Props) {
   // A working chat keeps running in the background when you switch away, so only a starting one blocks switching.
   const busy = status === "starting";
   const toggleLabel = reviewCollapsed ? "Show side panel" : "Hide side panel";
@@ -215,6 +217,14 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
           )}
           {activity?.working && <span className="viewer-progress" aria-hidden />}
         </div>
+        {run && (
+          <div className="toolbar-group">
+            <button className="topbar-run" aria-label="Run" title={run.running ? "It is running: see the panel below" : `Run: ${run.command}`} disabled={run.running || busy} onClick={run.onRun}>
+              <PlayIcon />
+              Run
+            </button>
+          </div>
+        )}
         {orchestra?.exists && (
           <div className="toolbar-group">
             <button

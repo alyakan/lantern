@@ -1,8 +1,9 @@
 import { setPlanUsage } from "./lib/planUsage";
 import { pushAgentLimit } from "./lib/agentLimit";
+import { pushAutoMergeTests } from "./lib/mergeTests";
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { api, type BranchReview, type ChangeScope, type RevertOutcome } from "./api";
+import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome } from "./api";
 import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
@@ -12,7 +13,7 @@ import { ReviewPrDialog } from "./components/ReviewPrDialog";
 import { TeamWarning } from "./components/TeamWarning";
 import { usageRows, workingTeams, type WorkingTeam } from "./lib/usage";
 import { windowFocused } from "./lib/windowFocus";
-import { initialState, reducer, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
+import { initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend } from "./sessions";
 import type { Mode, UiEvent } from "./types";
@@ -30,9 +31,12 @@ import { agentGraph } from "./lib/agentGraph";
 import { BUILT_IN, CUSTOM_HARNESS, customOf, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
-import type { CloseAgreed, McpServer, MovedFolder, NewRule, NewWorker, OpenPr, RelocationEntry, SkillEntry, UpdateInfo } from "./types";
+import type { CloseAgreed, CloseCheck, McpServer, MovedFolder, NewRule, NewWorker, OpenPr, RecentFolder, RelocationEntry, SkillEntry, UpdateInfo } from "./types";
 import { LAST_FOLDER, OPEN_CHATS, migrateFolderState, withMovedNote, type Migrated } from "./lib/relocate";
 import { BringOldSessionsDialog } from "./components/BringOldSessionsDialog";
+import { ProjectNotesDialog } from "./components/ProjectNotesDialog";
+import { NotesApplied } from "./components/NotesApplied";
+import { notedFolders, notesOf, withNotes } from "./lib/projectNotes";
 import { stepFile, usePersistentState } from "./lib/layout";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyTheme, readCustomTheme, readTheme, type TextSize } from "./lib/theme";
@@ -73,11 +77,21 @@ import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover
 import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects, sidebarProjects } from "./lib/sidebar";
 import { anythingWorking } from "./lib/awake";
-import { inboxItems, type InboxItem } from "./lib/inbox";
+import { useRoutines } from "./lib/useRoutines";
+import { type Routine, routineTitle } from "./lib/routines";
+import { checkItems, type InboxItem, inboxItems } from "./lib/inbox";
+import { useTeamGuards } from "./lib/teamGuards";
+import { PlanPaused } from "./components/PlanPaused";
 import { usePeek } from "./lib/peek";
 import { MessageInput } from "./components/MessageInput";
 import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
+import type { DiffComment } from "./lib/diffComments";
+import { ShipDialog } from "./components/ShipDialog";
+import { PrChecksCard } from "./components/PrChecksCard";
+import { PrChecksDialog } from "./components/PrChecksDialog";
+import { settingFor as prSettingFor, type PrSetting } from "./lib/prChecks";
+import { usePrChecks } from "./lib/usePrChecks";
 import { SetupScreen } from "./components/SetupScreen";
 import { Welcome } from "./components/Welcome";
 import { RestoreCard } from "./components/RestoreCard";
@@ -85,8 +99,14 @@ import { agentSessionsOf, chatsToSave, currentFolder, loadSaved, restorable, sav
 import { SplitPane } from "./components/SplitPane";
 import { TopBar } from "./components/TopBar";
 import { Canvas, newLayout } from "./components/Canvas";
-import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions } from "./lib/canvasContext";
-import { needingYou, orchestraNodes, teamActivity, teamMain, teamNodes } from "./lib/orchestraView";
+import { ChatStoreContext, createChatStore, KnownWindowsContext, NodeActionsContext, type NodeActions } from "./lib/canvasContext";
+import { windowOf } from "./lib/contextShare";
+import { lostText, needingYou, orchestraNodes, teamActivity, teamMain, teamNodes } from "./lib/orchestraView";
+import { ProjectSetupContext, pushProjectSetups, runCommandOf, type ProjectSetup, type SetupByFolder } from "./lib/projectSetup";
+import { ConfirmDialog } from "./components/ConfirmDialog";
+import { ProjectSetupDialog } from "./components/ProjectSetupDialog";
+import { RunPanel } from "./components/RunPanel";
+import { SetupNotice } from "./components/SetupNotice";
 import "./styles.css";
 import { AGENT_MODEL } from "./lib/models";
 import { templateMessage, type AgentRole, type TeamTemplate } from "./lib/roles";
@@ -139,6 +159,11 @@ export default function App() {
   const [workflowBy, setWorkflowBy] = usePersistentState<Record<string, Workflow>>("settings.workflowByFolder", {});
   // A team's Subagents setting, per project too: the next team in it starts with the last choice.
   const [subagentsBy, setSubagentsBy] = usePersistentState<Record<string, Subagents>>("settings.subagentsByFolder", {});
+  // The text the user keeps for each project (Project notes): every chat started in it afterwards is told it. It is Lantern's
+  // own, never written into the project's files.
+  const [notesBy, setNotesBy] = usePersistentState<Record<string, string>>("settings.projectNotes", {});
+  // The project whose notes are being edited.
+  const [editingNotes, setEditingNotes] = useState<string | null>(null);
   const permissionsFor = (folder: string): Permissions => (permissionsBy[folder] === "auto" ? "auto" : "ask");
   const launchFor = (folder: string, team = false) => launchOf(permissionsFor(folder), team ? "team" : workflowBy[folder] === "steps" ? "steps" : "chat");
   // Each session's own mode, so reopening one from History brings back the mode it was in, not the folder's latest.
@@ -167,6 +192,8 @@ export default function App() {
   const [savedPresets, setSavedPresets] = usePersistentState<Harness[]>("settings.harnessPresets", BUILT_IN.slice(1));
   const presets = presetsOf(savedPresets);
   const [harnessByFolder, setHarnessByFolder] = usePersistentState<Record<string, string>>("settings.harnessByFolder", {});
+  // What each project runs in a new agent's worktree before it starts, and its Run command (see lib/projectSetup.ts).
+  const [setupBy, setSetupBy] = usePersistentState<SetupByFolder>("settings.projectSetupByFolder", {});
   const [harnessBySession, setHarnessBySession] = usePersistentState<Record<string, string>>("settings.harnessBySession", {});
   // General: which events are told about (and paused), the theme and the text size.
   const [notifyPrefs, setNotifyPrefs] = usePersistentState<NotifyPrefs>(NOTIFY_KEY, NOTIFY_DEFAULTS);
@@ -222,6 +249,8 @@ export default function App() {
   // The agent whose branch a merge card asked to see in Changes, and the base to compare it with (null: Lantern finds it);
   // `key` brings the Changes tab up each time.
   const [branchPeek, setBranchPeek] = useState<{ slot: string; base: string | null; key: number } | null>(null);
+  // Review comments on diff lines, kept for each chat while the app runs (a worker's branch review is its own chat's).
+  const [diffComments, setDiffComments] = useState<Record<string, DiffComment[]>>({});
   // Step-by-step mode shows the conversation as pages; the page on screen picks the turn whose changes the Changes pane
   // shows.
   const [pageRange, setPageRange] = useState<{ from: number; to: number } | null>(null);
@@ -250,7 +279,12 @@ export default function App() {
   // The backend checks the user's limit on agents running at once: it learns it from here.
   useEffect(() => {
     void pushAgentLimit();
+    void pushAutoMergeTests();
   }, []);
+  // The backend runs a project's setup in a new worktree, and its Run command: it learns both from here, at launch and on every save.
+  useEffect(() => {
+    void pushProjectSetups(setupBy);
+  }, [setupBy]);
   // When each chat's last turn ended, for the title bar's "Done | Today at 19:22".
   const [finishedAt, setFinishedAt] = useState<Record<string, Date>>({});
   // The pop-up shown when the chat on screen finishes a turn.
@@ -344,7 +378,9 @@ export default function App() {
 
   const harnessOf = (slot: string) => findHarness(presets, harnessBySlot[slot]);
   /** What a chat runs with: its preset's models, or (Default) the app's model and effort. */
-  const settingsFor = (slot: string, h: Harness = harnessOf(slot)) => settingsOf(h, { model, effort });
+  // The chats routines started, by slot: each runs on the model its routine names (while it is on the standard preset), and is called "Routine: name".
+  const routineSlots = useRef<Record<string, { name: string; model: string | null }>>({});
+  const settingsFor = (slot: string, h: Harness = harnessOf(slot)) => settingsOf(h, { model: h.id === DEFAULT_HARNESS && slot in routineSlots.current ? routineSlots.current[slot].model : model, effort });
 
   /** `change`: Step by step's Permissions and Workflow Team, when this restart is what sets them (see `launchOf`); else the chat keeps its own. */
   const restart = (slot: string, mode: Mode, withEffort: string | null = settingsFor(slot).effort, change: { autoApprove?: boolean; team?: boolean } = {}) => {
@@ -420,27 +456,34 @@ export default function App() {
 
   // `quiet`: reopening the remembered project at launch; if that fails (e.g. the folder is gone), just forget it.
   const startFresh = (folder: string, quiet = false, team = false, first?: string, review?: ReviewSetting) => {
-    if (state.claudePath) startIn(takeSlot(), folder, quiet, team, first, review);
+    if (state.claudePath) startIn(takeSlot(), folder, quiet, team, first, undefined, review);
   };
 
-  /** `team`: the chat is the Lead of a team, which can start agents, on the project's last Permissions (the agents never exceed them). */
-  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, review?: ReviewSetting) => {
+  /**
+   * `team`: the chat is the Lead of a team, which can start agents, on the project's last Permissions (the agents never exceed them).
+   * `first`: a team from a template: the Lead's first instruction, which names its members and their roles.
+   * `routine`: a routine's chat, on the routine's own Permissions (never the project's) and the standard preset; it doesn't become the project to reopen.
+   */
+  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting) => {
     const { claudePath } = state;
     if (!claudePath) return;
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
     reopened.current = true;
     // A team's Lead runs on the project's last Permissions, which its agents never exceed; Team is not remembered as the
     // project's Workflow (see the effect below).
-    const { mode, autoApprove } = launchFor(folder, team);
+    const { mode, autoApprove } = routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team);
     const orchestrator = team;
-    const h = findHarness(presets, harnessByFolder[folder]);
+    const h = routine ? BUILT_IN[0] : findHarness(presets, harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode, autoApprove });
     to(slot)({ type: "orchestrator_set", on: orchestrator });
-    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first, review);
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first, routine, review);
+    // The notes the chat starts with: what is saved now, which a later change doesn't reach.
+    const notes = notesOf(notesBy, folder);
+    to(slot)({ type: "notes_applied", text: notes || null });
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
-    api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}) }).then(
+    api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}), ...(notes ? { project_notes: notes } : {}) }).then(
       () => {
         if (startGen.current[slot] !== gen) return;
         delete relaunch.current[slot];
@@ -449,7 +492,7 @@ export default function App() {
           startRoles(slot, folder);
           startReview(slot, review);
         }
-        setLastFolder(folder);
+        if (!routine) setLastFolder(folder);
         to(slot)({ type: "session_ready" });
         // A team from a template: the Lead's first instruction names its members and their roles.
         if (first) doingRef.current.send(slot, first);
@@ -464,8 +507,9 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Not a worker's: its folder is a worktree that's gone with it, and its Permissions are capped by its Lead.
-    if (!state.folder || chats.agents[active]) return;
+    // Not a worker's: its folder is a worktree that's gone with it, and its Permissions are capped by its Lead. Nor a routine's:
+    // looking at one must not make the project's next chat start on its Permissions.
+    if (!state.folder || chats.agents[active] || routineSlots.current[active]) return;
     const permissions = permissionsOf(state);
     if (permissionsBy[state.folder] !== permissions) setPermissionsBy({ ...permissionsBy, [state.folder]: permissions });
     // A Team is the chat's own: the project's next chat starts as a chat (or in Step by step, if that is where it was).
@@ -507,6 +551,8 @@ export default function App() {
 
   // The past chats of a project: the user's own. An agent's conversation (a shared one is in the project's folder too) stays with its team.
   const listPast = (folder: string) => api.listSessions(folder).then((all) => all.filter((x) => !agentSessions.includes(x.id)));
+  // The chats whose text has the query, without the ones agents ran (as listPast does).
+  const searchPast = (query: string) => api.searchHistory(query).then((r) => ({ ...r, chats: r.chats.filter((c) => !agentSessions.includes(c.id)) }));
   const loadSessions = () => (state.folder ? listPast(state.folder) : Promise.resolve([]));
 
   // Replays a past session into a chat, then continues it with `claude --resume`. A session that's already open
@@ -553,13 +599,15 @@ export default function App() {
     const again: TeamRole | undefined = team?.role === "worker" ? { ...team, parentReady: undefined } : team;
     relaunch.current[slot] = () => void resumeIn(slot, folder, sessionId, reuse, again);
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
+    // An agent is told its Lead's notes (the app looks them up), not the notes of its worktree's folder.
+    const notes = team?.role === "worker" ? "" : notesOf(notesBy, folder);
     const open = (as: TeamRole | undefined) =>
       api.openSession(
         slot,
         claudePath,
         folder,
         // An agent comes back on the model it had (or Sonnet, the agents' default), not on its project's own model.
-        { mode, ...settingsFor(slot, h), ...(as?.role === "worker" ? { model: as.model ?? AGENT_MODEL } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared", read_only: !!as.agentRole?.read_only, ...(as.agentRole ? { role: as.agentRole } : {}) } } : {}) },
+        { mode, ...settingsFor(slot, h), ...(as?.role === "worker" ? { model: as.model ?? AGENT_MODEL } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(notes ? { project_notes: notes } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared", read_only: !!as.agentRole?.read_only, ...(as.agentRole ? { role: as.agentRole } : {}) } } : {}) },
         sessionId,
       );
     // A worker waits for its main agent: if that one didn't open, this one stays closed too, under it, where Retry can try again.
@@ -581,6 +629,7 @@ export default function App() {
           startReview(slot, as.review);
         }
         to(slot)({ type: "history_loaded", sessionId, events: opened.events, movedFrom: opened.moved_from });
+        if (notes) to(slot)({ type: "notes_applied", text: notes });
         to(slot)({ type: "session_ready" });
         return true;
       })
@@ -642,7 +691,7 @@ export default function App() {
     }
     if (c.sessionId) return resumeIn(slot, c.folder, c.sessionId, false, team);
     // Typed in the box but never sent: a new chat in its folder, as a main agent again if it was one.
-    startIn(slot, c.folder, false, team?.role === "main", undefined, team?.role === "main" ? team.review : undefined);
+    startIn(slot, c.folder, false, team?.role === "main", undefined, undefined, team?.role === "main" ? team.review : undefined);
     return Promise.resolve(true);
   };
   // What the restore card lists: agents aren't, they come back with their team.
@@ -813,6 +862,12 @@ export default function App() {
 
   // "!command" in the chat box: run in the chat's folder, its output streaming into the conversation.
   const shellSeq = useRef(0);
+  const runSeq = useRef(0);
+  // The project a chat belongs to: its Lead's folder for an agent (its own folder is a worktree), else its own.
+  const projectFolderOf = (slot: string) => {
+    const parent = chats.agents[slot]?.parent;
+    return (parent && chats.slots[parent]?.folder) || chats.slots[slot]?.folder || null;
+  };
   const runShell = (slot: string, command: string) => {
     const id = `sh-${Date.now().toString(36)}-${++shellSeq.current}`;
     to(slot)({ type: "shell_started", id, command });
@@ -822,10 +877,42 @@ export default function App() {
     });
   };
 
+  // What keeps a team from running unwatched: the pause when the plan reaches the user's limit (while it lasts, nothing
+  // below starts a turn by itself), and the clock the inbox lists quiet agents by.
+  const guards = useTeamGuards(chats, {
+    stop: (slot) => stopIn(slot),
+    send: (slot, text) => sendIn(slot, text),
+    queue: (slot, items) => to(slot)({ type: "queue_set", items }),
+    warn: (text) => setHud({ key: Date.now(), kind: "warning", body: text }),
+    paused: (text) => {
+      setHud({ key: Date.now(), kind: "warning", detail: "Paused", body: text });
+      if (!windowFocused()) void notify("Lantern", text, "waiting");
+    },
+  });
+  const paused = guards.pause !== null;
+  // Routines: prompts that go out by themselves while Lantern is open. Each run is a new chat in the project, opened behind the
+  // one on screen on the routine's own Permissions and model, and sent the prompt once it is ready.
+  const routines = useRoutines({
+    ready: !!state.claudePath,
+    chats: chats.slots,
+    send: sendIn,
+    open: async (r) => {
+      const folder = here(r.folder);
+      const gone = await api.foldersGone([folder]).catch(() => [] as string[]);
+      if (gone.length > 0) throw new Error("its project folder isn't there any more");
+      if (!state.claudePath) throw new Error("Claude isn't ready");
+      const slot = `s${++slotSeq.current}`;
+      dispatchChats({ type: "add", slot });
+      routineSlots.current[slot] = { name: r.name, model: r.model };
+      startIn(slot, folder, false, false, undefined, r);
+      return slot;
+    },
+  });
+
   // A chat's queued messages go out when its turn ends normally, whether or not it's on screen.
   const prevStatus = useRef<Record<string, Status>>({});
   useEffect(() => {
-    const due = queuesToSend(prevStatus.current, chats.slots);
+    const due = paused ? [] : queuesToSend(prevStatus.current, chats.slots);
     // A turn that just ended may have changed files outside Claude's edits (a shell rm, git checkout): re-check them.
     const ended = Object.entries(chats.slots).filter(([slot, s]) => prevStatus.current[slot] === "running" && s.status === "idle");
     for (const [slot] of ended) syncChanges(slot);
@@ -839,11 +926,11 @@ export default function App() {
     // Notes from an orchestra's workers go to the main agent as soon as it is idle (not only when a turn ends: it is
     // usually idle when a worker finishes), joined into one message. Not to a chat that was just sent its queue above: this
     // render still has it idle, and a second message would start a second turn on top of that one.
-    for (const { slot, text } of wakesToSend(chats.slots, new Set(due.map((d) => d.slot)))) {
+    for (const { slot, text } of paused ? [] : wakesToSend(chats.slots, new Set(due.map((d) => d.slot)))) {
       to(slot)({ type: "wakes_taken" });
       sendIn(slot, text, undefined, true);
     }
-  }, [chats.slots]);
+  }, [chats.slots, paused]);
 
   /**
    * Restarting a chat's claude (a new mode, effort or preset) stops what it runs in the background: workflows,
@@ -1220,6 +1307,29 @@ export default function App() {
       if (chats.slots[slot]?.folder) setCollapsedBy({ ...collapsedBy, [chats.slots[slot].folder!]: false });
     },
     stopShell: (slot: string, id: string) => api.stopShell(slot, id).catch(() => {}),
+    answerSetup: (slot: string, answer: "start" | "again" | "stop") => api.answerSetup(slot, answer).catch((e) => Promise.reject(errText(e))),
+    // The project's Run command in the chat's folder. One that is going is stopped first; its own id keeps its ending from touching the new run.
+    run: (slot: string) => {
+      const s = chats.slots[slot];
+      const command = runCommandOf(setupBy, projectFolderOf(slot));
+      if (!s?.folder || !command) return;
+      if (s.run?.status === "running") api.stopShell(slot, s.run.id).catch(() => {});
+      const id = `${RUN_PREFIX}${Date.now().toString(36)}-${++runSeq.current}`;
+      to(slot)({ type: "run_started", id, command });
+      api.runProject(slot, id).catch((e) => {
+        to(slot)({ type: "ui_event", event: { kind: "shell_output", id, text: errText(e) } });
+        to(slot)({ type: "ui_event", event: { kind: "shell_done", id, code: null, stopped: false } });
+      });
+    },
+    stopRun: (slot: string) => {
+      const run = chats.slots[slot]?.run;
+      if (run?.status === "running") api.stopShell(slot, run.id).catch(() => {});
+    },
+    closeRun: (slot: string) => {
+      const run = chats.slots[slot]?.run;
+      if (run?.status === "running") api.stopShell(slot, run.id).catch(() => {});
+      to(slot)({ type: "run_closed" });
+    },
     shellInput: (slot: string, id: string, text: string) =>
       api.shellInput(slot, id, text).catch((e) => to(slot)({ type: "ui_event", event: { kind: "shell_output", id, text: `\n${errText(e)}\n` } })),
     restart: (slot: string) => {
@@ -1300,6 +1410,10 @@ export default function App() {
       openFile: (slot, path) => doingRef.current.openFile(slot, path),
       openTestRun: (slot, id) => doingRef.current.openTestRun(slot, id),
       stopShell: (slot, id) => doingRef.current.stopShell(slot, id),
+      answerSetup: (slot, answer) => doingRef.current.answerSetup(slot, answer),
+      run: (slot) => doingRef.current.run(slot),
+      stopRun: (slot) => doingRef.current.stopRun(slot),
+      closeRun: (slot) => doingRef.current.closeRun(slot),
       shellInput: (slot, id, text) => doingRef.current.shellInput(slot, id, text),
       restart: (slot) => doingRef.current.restart(slot),
       approveMerge: (worker) => doingRef.current.approveMerge(worker),
@@ -1351,11 +1465,18 @@ export default function App() {
   const [titles, setTitles] = useState<Record<string, string>>({});
   const titling = useRef(new Set<string>());
   useEffect(() => {
-    for (const s of Object.values(chats.slots)) {
+    for (const [slot, s] of Object.entries(chats.slots)) {
       const prompt = firstPrompt(s);
       const id = s.sessionId;
       if (!id || !prompt || !s.folder || !s.claudePath || titles[id] || titling.current.has(id)) continue;
       titling.current.add(id);
+      // A routine's chat is called after the routine, not after what its prompt says (also when it is reopened later).
+      const own = routineSlots.current[slot];
+      const routine = own ? routineTitle(own.name) : routines.titles[id];
+      if (routine) {
+        setTitles((all) => ({ ...all, [id]: routine }));
+        continue;
+      }
       api.titleSession(s.claudePath, s.folder, id, prompt).then(
         (t) => t && setTitles((all) => ({ ...all, [id]: t })),
         () => {},
@@ -1446,7 +1567,8 @@ export default function App() {
   useEffect(() => {
     if (state.model && state.contextWindow && windows[state.model] !== state.contextWindow) setWindows({ ...windows, [state.model]: state.contextWindow });
   }, [lastTurn?.id]);
-  const contextWindow = (state.model && windows[state.model]) || state.contextWindow || 200_000;
+  // What the window is, or null when nothing says: the meter then shows the tokens, not a percent against a guess.
+  const contextWindow = windowOf(state, windows);
   // What the chat (and Step-by-step pages) can do: answer prompts, open files, show test runs.
   const streamHandlers = {
     onDecide: decide,
@@ -1463,6 +1585,19 @@ export default function App() {
   // Edit, Retry and Regenerate: only in a chat that's idle (not mid-turn, not ended) and not Step by step, whose pages
   // have their own flow.
   const resendHandlers = state.status === "idle" && !stepsMode ? { onEdit: editInBox, onResend: (p: { text: string; draft?: string }) => sendIn(active, p.text, p.draft) } : undefined;
+  // "Restore files to here" on a sent message: what it did is said in the chat and told to Claude with the next message.
+  const restoreEvents = state.folder && !stepsMode
+    ? {
+        onRestored: (since: string, result: RestoreResult, summary: string, files: { path: string; trashed: boolean }[]) => {
+          to(active)({ type: "restore_done", id: result.id, since, summary, files });
+          syncChanges(active);
+        },
+        onUndone: (id: number, text: string) => {
+          to(active)({ type: "restore_undone", id, text });
+          syncChanges(active);
+        },
+      }
+    : undefined;
   const hero = state.items.length === 0 && !state.thinking;
   // At launch the last project is on its way back: say so, rather than flashing the screen for having none.
   const openingLast = !state.folder && lastFolder !== null && !reopened.current;
@@ -1486,6 +1621,8 @@ export default function App() {
   const archMap = useMemo(() => (stepPages ? architectureMap(stepPages) : null), [stepPages]);
   // The Done page's "Review the changes": the side panel on Changes, showing everything this chat changed.
   const [changesAsked, setChangesAsked] = useState(0);
+  // Ship it: the dialog that sends Claude one message to commit, push and open a pull request.
+  const [shipping, setShipping] = useState(false);
   const handoff = stepsView && state.folder
     ? {
         slot: active,
@@ -1499,6 +1636,7 @@ export default function App() {
           setChangesAsked((n) => n + 1);
         },
         onStartNew: () => startFresh(state.folder!),
+        onShip: () => setShipping(true),
       }
     : undefined;
   const [shownPage, setShownPage] = useState<{ slot: string; page: string } | null>(null);
@@ -1551,11 +1689,15 @@ export default function App() {
     const harnesses = presets
       .filter((h) => ready && h.id !== harnessOf(active).id)
       .map((h): PaletteEntry => ({ id: `harness:${h.id}`, title: `Models: ${h.name}`, group: "Models", shortcut: null, run: () => switchHarness(h) }));
-    const tabs = (["general", "harness", "mcp", "skills", "permissions", "updates"] as SettingsTab[])
+    const tabs = (["general", "harness", "mcp", "skills", "permissions", "prs", "updates"] as SettingsTab[])
       .filter((t) => t !== "harness" || !!state.folder)
       .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
+    const routinesEntry: PaletteEntry = { id: "routines", title: "Routines…", group: "Routines", shortcut: null, run: () => setSettingsAt("routines") };
     const themes = THEMES.filter((t) => t.id !== theme && t.id !== "custom").map((t): PaletteEntry => ({ id: `theme:${t.id}`, title: `Theme: ${t.label}`, group: "Theme", shortcut: null, run: () => setTheme(t.id) }));
-    return [...availableActions(), ...permissions, ...workflows, ...harnesses, ...themes, ...tabs];
+    // History with its search box ready: what was said in any past chat.
+    const searchChats: PaletteEntry = { id: "search-chats", title: "Search all chats…", group: "View", shortcut: null, run: () => void openHistory() };
+    const project = state.folder ? [{ id: "project-notes", title: "Project notes…", group: "Project", shortcut: null, run: () => setEditingNotes(state.folder) } satisfies PaletteEntry] : [];
+    return [...availableActions(), searchChats, ...project, ...permissions, ...workflows, ...harnesses, routinesEntry, ...themes, ...tabs];
   };
   // The Work menu: Build, Debug and Design are Step by step in that flavour; Review a PR lists the open pull requests and
   // starts a review on the one chosen; Start a team makes an empty chat a team's Lead, and otherwise starts a new one.
@@ -1612,6 +1754,11 @@ export default function App() {
   const [moved, setMoved] = useState<MovedFolder[]>([]);
   const [dismissedMoves, setDismissedMoves] = usePersistentState<string[]>("relocate.dismissed", []);
   // The project the old sessions go to (null: not chosen yet), and the place a "moved?" notice was for, if any.
+  // The project whose setup dialog is open.
+  const [settingUp, setSettingUp] = useState<string | null>(null);
+  // Closing an agent from the full-size chat's setup card: asked what would be lost first, as the canvas does.
+  const [closingFull, setClosingFull] = useState<{ slot: string; check: CloseCheck } | null>(null);
+  const [closingBusy, setClosingBusy] = useState(false);
   const [bringing, setBringing] = useState<{ destination: string | null; from: string | null } | null>(null);
   const refreshMoved = () => api.movedFolderCandidates().then(setMoved, () => setMoved([]));
   useEffect(() => {
@@ -1619,6 +1766,7 @@ export default function App() {
   }, []);
   const bringHere = () => setBringing({ destination: state.folder, from: null });
   useAction("relocate-folder", bringHere, true);
+  useAction("ship-it", () => setShipping(true), !!state.folder && (state.status === "idle" || state.status === "running"));
   const relocateMenu = {
     moved: moved.filter((m) => !dismissedMoves.includes(m.old)),
     onRelocate: (from: MovedFolder | null) => (from ? setBringing({ destination: from.suggested, from: from.old }) : bringHere()),
@@ -1648,12 +1796,20 @@ export default function App() {
     const pinned = take<Record<string, string[]>>("settings.pinnedSessions");
     if (pinned) setPinnedBy(pinned);
     roleStore.carry(changed);
+    const notes = take<Record<string, string>>("settings.projectNotes");
+    if (notes) setNotesBy(notes);
     const colors = take<Record<string, number>>("sidebar.projectColors");
     if (colors) setProjectColors(colors);
+    const setups = take<SetupByFolder>("settings.projectSetupByFolder");
+    if (setups) setSetupBy(setups);
     const order = take<string[]>("sidebar.projectOrder");
     if (order) setProjectOrder(order);
+    const prs = take<Record<string, Partial<PrSetting>>>("prChecks.byFolder");
+    if (prs) setPrSettings(prs);
+    if (changed["prChecks.loopByFolder"]) prChecks.reloadLoops();
     const last = take<string>(LAST_FOLDER);
     if (last) setLastFolder(last);
+    if (changed["settings.routines"]) routines.replace(changed["settings.routines"]);
     if (changed[OPEN_CHATS]) setOffer((chats) => chats.map((c) => (c.folder === old ? { ...c, folder: next } : c)));
   };
   // One place's sessions came over. The dialog stays open for the others, so only the saved state moves here.
@@ -1705,7 +1861,37 @@ export default function App() {
   // Projects removed from the recents here (Claude Code keeps their chats; one with a chat open is listed regardless).
   const [hiddenFolders, setHiddenFolders] = usePersistentState<string[]>("sidebar.hidden", []);
   const openByProject = openProjects(chats, { titles, drafts: drafts.current, unread, pinned: pinnedBy });
-  const inbox = inboxItems(chats, openByProject, { unread, describe: describeInput });
+  // Pull request checks: each project's choice (Off, Tell me, Fix it myself), and the loop that watches the pull request.
+  const [prSettings, setPrSettings] = usePersistentState<Record<string, Partial<PrSetting>>>("prChecks.byFolder", {});
+  const [prDialog, setPrDialog] = useState<string | null>(null);
+  const prChecks = usePrChecks({
+    chats: Object.entries(chats.slots).flatMap(([slot, s]) => (s.folder ? [{ slot, folder: s.folder, live: s.status === "idle" || s.status === "running", busy: isBusy(s) }] : [])),
+    active,
+    settings: prSettings,
+    send: (slot, text) => sendIn(slot, text),
+    onFailed: (folder, slot, snap) => {
+      const body = `${basename(folder)}: pull request #${snap.pr.number}`;
+      const wanted = shouldNotify(notifyPrefs, "failed");
+      if (wanted && (!windowFocused() || slot !== chats.active)) notify(`Checks failed on ${snap.pr.branch}`, body, "failed");
+      const s = chats.slots[slot];
+      if (wanted && s && slot !== chats.active) setHud({ key: Date.now(), kind: "failed", body: `Checks failed on ${snap.pr.branch}`, chat: { slot, title: chats.agents[slot]?.name ?? chatTitle(s, titles), project: basename(folder) } });
+    },
+  });
+  // Settings → Pull requests lists every project: the open ones and the recents (read when Settings opens).
+  const [prFolders, setPrFolders] = useState<string[]>([]);
+  useEffect(() => {
+    if (settingsAt === null) return;
+    const list = (recent: RecentFolder[]) => sidebarProjects({ recent, hidden: hiddenFolders, open: openByProject, order: projectOrder }).map((p) => p.folder);
+    loadRecentFolders().then((recent) => setPrFolders(list(recent)), () => setPrFolders(list([])));
+  }, [settingsAt]);
+  const prRows = checkItems(
+    Object.values(prChecks.views).flatMap((v) => {
+      const slot = Object.entries(chats.slots).filter(([, s]) => s.folder === v.folder && (s.status === "idle" || s.status === "running")).map(([id]) => id);
+      const target = slot.includes(active) ? active : slot[slot.length - 1];
+      return v.needsYou && v.snap && target ? [{ folder: v.folder, slot: target, where: basename(v.folder), branch: v.snap.pr.branch, number: v.snap.pr.number, failed: v.snap.checks.filter((c) => c.bucket === "fail").length }] : [];
+    }),
+  );
+  const inbox = [...inboxItems(chats, openByProject, { unread, describe: describeInput, quiet: guards.quiet }), ...prRows];
   useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden), true, sidebarHidden ? "Show Sidebar" : "Hide Sidebar");
   useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Expand Sidebar" : "Collapse Sidebar");
   useEffect(() => {
@@ -1751,8 +1937,11 @@ export default function App() {
     onNewChatIn: (folder: string) => startFresh(folder),
     onNewTeamIn: (folder: string) => newOrchestra(folder),
     onBringOld: (folder: string) => setBringing({ destination: folder, from: null }),
+    onProjectNotes: (folder: string) => setEditingNotes(folder),
+    onSetup: (folder: string) => setSettingUp(folder),
     onReveal: (folder: string) => void revealItemInDir(folder).catch(() => {}),
     onRemove: (folder: string) => setHiddenFolders([...hiddenFolders.filter((f) => f !== folder), folder]),
+    onPrChecks: (folder: string) => setPrDialog(folder),
     onOpenFolder: openFolder,
     onNewChat: () => state.folder && startFresh(state.folder),
     onNewTeam: () => newOrchestra(),
@@ -1781,6 +1970,8 @@ export default function App() {
     onNewChatIn: then(sidebarHandlers.onNewChatIn),
     onNewTeamIn: then(sidebarHandlers.onNewTeamIn),
     onBringOld: then(sidebarHandlers.onBringOld),
+    onProjectNotes: then(sidebarHandlers.onProjectNotes),
+    onSetup: then(sidebarHandlers.onSetup),
     onOpenFolder: then(sidebarHandlers.onOpenFolder),
     onNewChat: then(sidebarHandlers.onNewChat),
     onNewTeam: then(sidebarHandlers.onNewTeam),
@@ -1804,6 +1995,7 @@ export default function App() {
     onDismissMoved: relocateMenu.onDismiss,
     colors: projectColors,
     onColors: setProjectColors,
+    noted: notedFolders(notesBy),
   };
 
   const restartToUpdate = () => {
@@ -1868,11 +2060,37 @@ export default function App() {
     />
   );
 
+  // The project's Run command in the title bar, for a chat that isn't on the canvas (the canvas cards have their own).
+  const topRun = !showCanvas && state.folder && !state.setup && state.status !== "starting" ? runCommandOf(setupBy, projectFolderOf(active)) : null;
+  // A worker's setup, and the project's Run command, above the chat box.
+  const chatExtras = (state.setup || state.run) && (
+    <div className="chat-extras">
+      {state.setup && <SetupNotice key={active} card={state.setup} onAnswer={(answer) => doing.answerSetup(active, answer)} onClose={() => void closeFull(active)} />}
+      {state.run && <RunPanel key={state.run.id} run={state.run} onStop={() => doing.stopRun(active)} onRestart={() => doing.run(active)} onClose={() => doing.closeRun(active)} />}
+    </div>
+  );
+  // "Close agent" on a full-size card whose setup failed: nothing to lose closes at once, else the user is asked.
+  const closeFull = (slot: string) =>
+    doing.closeCheck(slot).then(
+      (check) => (lostText(check) ? setClosingFull({ slot, check }) : doing.closeWorker(slot)),
+      (e) => dispatch({ type: "failed", text: errText(e) }),
+    );
+  const closeFullAgent = (slot: string, agreed?: CloseAgreed) => {
+    setClosingBusy(true);
+    doing.closeWorker(slot, agreed).then(
+      () => setClosingFull(null),
+      (e) => {
+        setClosingFull(null);
+        dispatch({ type: "failed", text: errText(e) });
+      },
+    ).finally(() => setClosingBusy(false));
+  };
+
   if (state.status === "locating") return <div className="center muted">Looking for the claude CLI…</div>;
   if (state.status === "setup") return <SetupScreen error={state.setupError} onCheck={locate} />;
 
   return (
-    <SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}><RoleStoreProvider store={roleStore}><TemplateTeamContext.Provider value={state.folder ? () => setTemplateDialog(true) : null}>
+    <ProjectSetupContext.Provider value={setupBy}><SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}><KnownWindowsContext.Provider value={windows}><RoleStoreProvider store={roleStore}><TemplateTeamContext.Provider value={state.folder ? () => setTemplateDialog(true) : null}>
       <div className="app">
         <TopBar
           folder={titleFolder}
@@ -1894,7 +2112,8 @@ export default function App() {
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
           usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo }}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
-          inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox }}
+          inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox, paused: guards.pause, onResume: guards.resume }}
+          run={topRun ? { command: topRun, running: state.run?.status === "running", onRun: () => doing.run(active) } : undefined}
         />
         <Hud event={hud} onOpenChat={switchTo} />
         <div className="app-body">
@@ -1911,6 +2130,7 @@ export default function App() {
           <Sidebar {...sidebarHandlers} {...sidebarProps} mode={sidebarCompact ? "collapsed" : "pinned"} onToggle={() => setSidebarCompact(!sidebarCompact)} />
         )}
         <div className="app-main">
+        {guards.pause && <PlanPaused pause={guards.pause} onResume={guards.resume} />}
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
         <SplitPane
           ratio={splitRatio}
@@ -1927,6 +2147,7 @@ export default function App() {
               </ChatStoreContext.Provider>
             ) : (
             <section className="chat-pane">
+              {state.folder && state.notesApplied && <NotesApplied text={state.notesApplied} />}
               {!state.folder ? (
                 // Until a folder is open: open one, or pick a recent project. No box, no side panel.
                 openingLast ? (
@@ -1942,6 +2163,7 @@ export default function App() {
                     {offeredTop.length > 0 && state.claudePath && (
                       <RestoreCard chats={offeredTop} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />
                     )}
+                    {chatExtras}
                     {state.folder && <StartScreen picked={stepsMode ? state.flavourPick : null} explain={explain} onExplain={(on) => state.flavourPick && pickFlavour(state.flavourPick, on)} team={workflowOf(state) === "team"} onFlavour={pickFlavour} onReview={() => setPrPicker(true)} onTeam={() => changeWorkflow(workflowOf(state) === "team" ? "chat" : "team")} />}
                     {composer}
                   </div>
@@ -1955,11 +2177,13 @@ export default function App() {
                       {stepsView ? (
                         <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} explain={explain} onPickFlavour={pickFlavour} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} />
                       ) : (
-                        <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} />
+                        <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} restore={restoreEvents} />
                       )}
                     </FileLinksProvider>
                     </ArchitecturePane.Provider>
                   </ErrorBoundary>
+                  {chatExtras}
+                  {state.folder && prChecks.views[state.folder] && <PrChecksCard view={prChecks.views[state.folder]} busy={isBusy(state)} onSend={() => prChecks.sendFailure(state.folder!, active)} onStop={() => prChecks.stop(state.folder!)} />}
                   {composer}
                 </>
               )}
@@ -1976,6 +2200,7 @@ export default function App() {
                 ready={state.status !== "starting"}
                 files={shownFiles}
                 chatBusy={state.status === "running"}
+                onShip={state.folder ? () => setShipping(true) : undefined}
                 changesKey={peek?.key ?? (changesAsked || undefined)}
                 scope={scope}
                 onScope={setChangeScope}
@@ -1996,6 +2221,21 @@ export default function App() {
                 onSummarizeRequest={
                   state.status === "idle" || state.status === "running"
                     ? (item) => (state.status === "running" ? dispatch({ type: "queue_set", items: [...state.queued, summarizeRequest(item)] }) : sendIn(active, summarizeRequest(item)))
+                    : undefined
+                }
+                comments={
+                  state.folder
+                    ? {
+                        items: diffComments[active] ?? [],
+                        update: (change) =>
+                          setDiffComments((all) => {
+                            const was = all[active] ?? [];
+                            const now = change(was);
+                            return now === was ? all : { ...all, [active]: now };
+                          }),
+                        // One message for all of them: sent now when Claude is free, queued behind the turn when it's working.
+                        send: state.status === "idle" || state.status === "running" ? (text) => (state.status === "running" ? dispatch({ type: "queue_set", items: [...state.queued, text] }) : sendIn(active, text)) : undefined,
+                      }
                     : undefined
                 }
                 revert={{
@@ -2023,7 +2263,18 @@ export default function App() {
           commands={state.commands}
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
+          prChecks={{ folders: prFolders, saved: prSettings, onChange: (folder, setting) => setPrSettings({ ...prSettings, [folder]: setting }) }}
           general={{ keepAwake, onKeepAwake: setKeepAwake, notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize, warnTeams, onWarnTeams: setWarnTeams }}
+          routines={{
+            ...routines,
+            loadProjects: () => api.recentFolders().then((recent) => sidebarProjects({ recent, hidden: hiddenFolders, open: openByProject, order: projectOrder }).map((p) => ({ folder: p.folder, label: p.label }))),
+            keepAwake,
+            onKeepAwake: setKeepAwake,
+            onOpenChat: (sessionId, folder) => {
+              setSettingsAt(null);
+              openSession(sessionId, folder);
+            },
+          }}
           updates={{
             version: updates.version,
             state: updates.state,
@@ -2048,8 +2299,38 @@ export default function App() {
         />
         {installing && <UpdatingOverlay state={updates.state} version={update?.version ?? null} />}
         {palette && <CommandPalette entries={palette} onClose={() => setPalette(null)} />}
+        {prDialog && (
+          <PrChecksDialog
+            key={prDialog}
+            label={basename(prDialog)}
+            setting={prSettingFor(prSettings, prDialog)}
+            onSave={(setting) => setPrSettings({ ...prSettings, [prDialog]: setting })}
+            onClose={() => setPrDialog(null)}
+          />
+        )}
+        {shipping && state.folder && (
+          <ShipDialog folder={state.folder} title={chatTitle(state, titles)} files={state.changedFiles} running={state.status === "running"} onSend={(text) => sendIn(active, text)} onClose={() => setShipping(false)} />
+        )}
         {shortcutsOpen && <ShortcutSheet available={availableActions().map((a) => a.id)} onClose={() => setShortcutsOpen(false)} />}
         {whatsNew && <WhatsNew version={whatsNew.version} notes={whatsNew.notes} onClose={() => setWhatsNew(null)} />}
+        {editingNotes && (
+          <ProjectNotesDialog
+            project={basename(editingNotes)}
+            notes={notesOf(notesBy, editingNotes)}
+            onSave={(text) => setNotesBy(withNotes(notesBy, editingNotes, text))}
+            onClose={() => setEditingNotes(null)}
+          />
+        )}
+        {settingUp && <ProjectSetupDialog folder={settingUp} saved={setupBy[settingUp]} onSave={(setup: ProjectSetup) => setSetupBy({ ...setupBy, [settingUp]: setup })} onClose={() => setSettingUp(null)} />}
+        {closingFull && (
+          <div className="app-modal">
+            <ConfirmDialog title="Close this agent?" confirmLabel="Discard work and close" busyLabel="Closing…" busy={closingBusy} onConfirm={() => closeFullAgent(closingFull.slot, { uncommitted: closingFull.check.uncommitted, unmerged_commits: closingFull.check.unmerged_commits })} onCancel={() => setClosingFull(null)}>
+              <p>
+                It has <strong>{lostText(closingFull.check)}</strong>. Closing it stops it and deletes its worktree{closingFull.check.branch ? <> and branch <code>{closingFull.check.branch}</code></> : null}, so that work is gone for good.
+              </p>
+            </ConfirmDialog>
+          </div>
+        )}
         {bringing && (
           <BringOldSessionsDialog
             destination={bringing.destination}
@@ -2066,6 +2347,7 @@ export default function App() {
             initial={history.folder}
             exclude={openChatIds}
             load={listPast}
+            search={searchPast}
             loadOld={(folder) => api.oldLocations(folder)}
             actionsFor={actionsFor}
             onBring={(folder) => { setHistory(null); setBringing({ destination: folder, from: null }); }}
@@ -2106,6 +2388,6 @@ export default function App() {
           onClose={() => setGuideAt(null)}
         />
       </div>
-    </TemplateTeamContext.Provider></RoleStoreProvider></SessionActionsContext.Provider></ModeGuideContext.Provider></SlotContext.Provider>
+    </TemplateTeamContext.Provider></RoleStoreProvider></KnownWindowsContext.Provider></SessionActionsContext.Provider></ModeGuideContext.Provider></SlotContext.Provider></ProjectSetupContext.Provider>
   );
 }

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
   bounds,
   centerOn,
@@ -18,7 +18,8 @@ import {
   type Size,
   type View,
 } from "../lib/canvas";
-import { useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
+import { CloseAgentContext, useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
+import { ProjectSetupContext, runCommandOf } from "../lib/projectSetup";
 import { useAction } from "../lib/actions";
 import { lostText, nodeStatus, readyToMerge, statusLabel, summaryLine, usage, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
 import { usePopover } from "../lib/usePopover";
@@ -33,13 +34,14 @@ import { HiddenAgents } from "./HiddenAgents";
 import { NewAgent } from "./NewAgent";
 import { ModelChip } from "./ModelChip";
 import { NodeBody } from "./NodeBody";
-import { BranchIcon, ChevronIcon, OpenOutIcon } from "./icons";
+import { BranchIcon, ChevronIcon, OpenOutIcon, PlayIcon } from "./icons";
 import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
 import { SubagentsMenu } from "./SubagentsMenu";
 import { ReviewMenu } from "./ReviewMenu";
 import { reviewBusy, reviewStrip } from "../lib/reviewChain";
 import { CanvasOverflow } from "./CanvasOverflow";
-import { useQuiet } from "../lib/quiet";
+import { longSpan, quietFor, shortSpan, useQuiet } from "../lib/quiet";
+import { useQuietAfter } from "../lib/quietSetting";
 import { NodeContext, TeamContext } from "./ContextControls";
 
 /** Where agents sit and how the canvas is framed. The app keeps it, so leaving the canvas and coming back finds it as it was. */
@@ -135,12 +137,14 @@ interface FrameProps {
 /** The agent's latest words and state, for the card that stands in for its chat when zoomed out or folded. */
 function SummaryBody({ slot, strip }: { slot: string; strip: string | null }) {
   const state = useChatState(slot);
+  const quiet = useQuiet(state?.activityAt ?? null, !!state && nodeStatus(state) === "working", useQuietAfter());
   if (!state) return null;
   const open = state.proposals.filter((p) => p.status === "open").length;
   return (
     <div className="node-summary">
       <p className="node-summary-line">{summaryLine(state, 220)}</p>
       {strip && <p className="node-summary-note">{strip}</p>}
+      {quiet?.stuck && <p className="node-summary-note node-summary-quiet">Quiet for {longSpan(quiet.ms)}. It may be stuck.</p>}
       {open > 0 && <p className="node-summary-note">{open === 1 ? "A merge is waiting for you" : `${open} merges are waiting for you`}</p>}
     </div>
   );
@@ -158,9 +162,12 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, agentRole,
   const strip = reviewStrip(review);
   // A card at work that's been quiet a while says how long, so a long think can be told from a stuck one; from three minutes
   // on it turns amber and says what to do, since the agent may be stuck.
-  const quiet = useQuiet(state?.activityAt ?? null, status === "working");
+  const quiet = useQuiet(state?.activityAt ?? null, status === "working", useQuietAfter());
   const stuck = !!quiet?.stuck;
-  const label = stuck ? `Quiet ${quiet.span}` : statusLabel(status, role, ready);
+  const label = stuck ? `Quiet ${quiet.span}` : state?.setup ? (state.setup.status === "failed" ? "Setup stopped" : "Setting up") : statusLabel(status, role, ready);
+  // The project's Run command (saved in its setup), for a card whose agent has started.
+  const setups = useContext(ProjectSetupContext);
+  const runCommand = runCommandOf(setups, role === "main" ? state?.folder : owner?.folder);
   const spent = state ? usage(totalCost(state), totalTokens(state)) : "";
   const actions = useNodeActions();
   return (
@@ -190,10 +197,13 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, agentRole,
           <span className="node-name" title={name}>
             {name}
           </span>
-          <span className="node-meta" title={branch ?? undefined}>
+          <span className="node-meta">
             <ModelChip model={state?.model ?? null} />
             {branch && <BranchIcon />}
-            {[role === "main" ? "Runs the team" : branch ? branch.replace(/^lantern\//, "") : "Shared folder", spent || null].filter(Boolean).join(" · ")}
+            {/* The model chip stays whole; this is what gives way when the card is narrow, and the tooltip has all of it. */}
+            <span className="node-meta-text" title={[role === "main" ? "Runs the team" : (branch ?? "Shared folder"), spent || null].filter(Boolean).join(" · ")}>
+              {[role === "main" ? "Runs the team" : branch ? branch.replace(/^lantern\//, "") : "Shared folder", spent || null].filter(Boolean).join(" · ")}
+            </span>
           </span>
         </span>
         {state && !folded && <NodeContext slot={slot} name={name} />}
@@ -204,10 +214,15 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, agentRole,
             <WorkflowMenu compact workflow={workflowOf(state)} agent={role === "worker"} holdsAgents={holdsAgents} onChange={(w) => actions.setWorkflow(slot, w)} disabled={isBusy(state)} />
           </span>
         )}
-        <span className="node-status" title={stuck ? `No word from it for ${quiet.span}. It may be stuck: send it a message, or stop it.` : quiet ? `Its last step was ${quiet.span} ago` : undefined}>
+        <span className="node-status" title={stuck ? `No word from it for ${longSpan(quiet.ms)}. It may be stuck: nudge it, interrupt it or restart it.` : quiet ? `Its last step was ${quiet.span} ago` : undefined}>
           {label}
           {quiet && !stuck && <span className="node-quiet"> · {quiet.span} ago</span>}
         </span>
+        {runCommand && state?.folder && !state.setup && !folded && (
+          <button className="icon node-run" aria-label={`Run ${name}`} title={state.run?.status === "running" ? "It is running: see below" : `Run: ${runCommand}`} disabled={state.run?.status === "running"} onClick={() => actions.run(slot)}>
+            <PlayIcon />
+          </button>
+        )}
         {role === "worker" && (
           <button className="icon" aria-label={`More for ${name}`} aria-haspopup="menu" title="More: hide, or clean up and close" onClick={(e) => onMore(e, slot)}>
             ⋯
@@ -275,6 +290,19 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
     if (states[i]) bySlot[n.slot] = states[i]!;
   });
   const ready = readyToMerge(nodes, bySlot);
+  // Who has gone quiet, which no stream event says: the list looks again every few seconds.
+  const quietAfter = useQuietAfter();
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 10_000);
+    return () => clearInterval(timer);
+  }, []);
+  const quietMs: Record<string, number> = {};
+  for (const n of nodes) {
+    const ms = bySlot[n.slot] ? quietFor(bySlot[n.slot], now, quietAfter) : null;
+    if (ms !== null) quietMs[n.slot] = ms;
+  }
+  const quietCount = Object.keys(quietMs).length;
   const all = Object.values(bySlot);
   const total = usage(
     all.reduce((sum, s) => sum + totalCost(s), 0),
@@ -299,6 +327,7 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
     <div className="canvas-team" ref={box}>
       <button ref={button} className="canvas-fit" aria-expanded={open} aria-haspopup="dialog" aria-controls={open ? id : undefined} aria-label="Team" title="Everyone on the team, and what it has cost" onClick={() => setOpen(!open)}>
         Team{total && <span className="canvas-ctl-long"> · {total}</span>}
+        {quietCount > 0 && <span className="team-quiet"> · {quietCount} quiet</span>}
       </button>
       {open && (
         <div id={id} ref={list} className="canvas-team-list" role="dialog" aria-label="Team">
@@ -307,7 +336,8 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
               const s = bySlot[n.slot];
               if (!s) return null;
               const status = nodeStatus(s);
-              const label = statusLabel(status, n.role, ready.has(n.slot));
+              const quiet = n.slot in quietMs;
+              const label = quiet ? `Quiet ${shortSpan(quietMs[n.slot])}` : statusLabel(status, n.role, ready.has(n.slot));
               const spent = usage(totalCost(s), totalTokens(s));
               return (
                 <li key={n.slot}>
@@ -317,14 +347,14 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
                       onGoTo(n.slot);
                     }}
                   >
-                    <span className={`node-dot ${status}`} aria-hidden />
+                    <span className={`node-dot ${status}${quiet ? " stuck" : ""}`} aria-hidden />
                     <span className="team-text">
                       <span className="team-name">
                         {n.name} <ModelChip model={s.model} />
                       </span>
                       <span className="team-line">{summaryLine(s, 90)}</span>
                     </span>
-                    <span className="team-state">
+                    <span className={`team-state${quiet ? " quiet" : ""}`}>
                       {label}
                       {spent && <span className="team-cost">{spent}</span>}
                     </span>
@@ -352,40 +382,42 @@ function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onSho
     if (attention > before.current) setRung((n) => n + 1);
     before.current = attention;
   }, [attention]);
+  const full = attention === 1 ? "1 agent needs you" : `${attention} agents need you`;
   return (
-    <>
+    <div className="canvas-controls" role="group" aria-label="Canvas view">
+      {/* Part of the toolbar, so it never sits on an agent's title bar. The wording shortens with the canvas's width, like the toolbar's other chips. */}
       {attention > 0 && (
-        <button className="canvas-attention" onClick={onNext} title="Go to the next agent waiting for you">
+        <button className="canvas-attention" onClick={onNext} aria-label={full} title="Go to the next agent waiting for you">
           {rung > 0 && <span key={rung} className="canvas-attention-ring" aria-hidden />}
           <span className="node-dot waiting" aria-hidden />
-          {attention === 1 ? "1 agent needs you" : `${attention} agents need you`}
+          <span className="canvas-attn-long" aria-hidden>{full}</span>
+          <span className="canvas-attn-mid" aria-hidden>{attention === 1 ? "1 needs you" : `${attention} need you`}</span>
+          <span className="canvas-attn-short" aria-hidden>{attention}</span>
         </button>
       )}
-      <div className="canvas-controls" role="group" aria-label="Canvas view">
-        <button className="icon" aria-label="Zoom out" title="Zoom out" onClick={() => onZoom(1 / 1.25)}>
-          −
-        </button>
-        <span className="canvas-zoom" aria-live="off">
-          {Math.round(zoom * 100)}%
-        </span>
-        <button className="icon" aria-label="Zoom in" title="Zoom in" onClick={() => onZoom(1.25)}>
-          +
-        </button>
-        <button className="canvas-fit" aria-label="Fit everything" title="Fit everything in view" onClick={onFit}>
-          Fit
-        </button>
-        <TeamContext nodes={nodes} onGoTo={onGoTo} />
-        <Team nodes={nodes} onGoTo={onGoTo} />
-        {/* Below a width the rest fold into "⋯" (the canvas's container query decides which shows). */}
-        <div className="canvas-ctl-wide">
-          <HiddenAgents nodes={nodes.filter((n) => n.hidden)} onShow={onShow} />
-          {main && <SubagentsMenu main={main} />}
-          {main && <ReviewMenu main={main} />}
-          {main && <NewAgent main={main} />}
-        </div>
-        {main && <CanvasOverflow main={main} hidden={nodes.filter((n) => n.hidden)} onShow={onShow} />}
+      <button className="icon" aria-label="Zoom out" title="Zoom out" onClick={() => onZoom(1 / 1.25)}>
+        −
+      </button>
+      <span className="canvas-zoom" aria-live="off">
+        {Math.round(zoom * 100)}%
+      </span>
+      <button className="icon" aria-label="Zoom in" title="Zoom in" onClick={() => onZoom(1.25)}>
+        +
+      </button>
+      <button className="canvas-fit" aria-label="Fit everything" title="Fit everything in view" onClick={onFit}>
+        Fit
+      </button>
+      <TeamContext nodes={nodes} onGoTo={onGoTo} />
+      <Team nodes={nodes} onGoTo={onGoTo} />
+      {/* Below a width the rest fold into "⋯" (the canvas's container query decides which shows). */}
+      <div className="canvas-ctl-wide">
+        <HiddenAgents nodes={nodes.filter((n) => n.hidden)} onShow={onShow} />
+        {main && <SubagentsMenu main={main} />}
+        {main && <ReviewMenu main={main} />}
+        {main && <NewAgent main={main} />}
       </div>
-    </>
+      {main && <CanvasOverflow main={main} hidden={nodes.filter((n) => n.hidden)} onShow={onShow} />}
+    </div>
   );
 }
 
@@ -736,6 +768,10 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       (e) => setProblem(errText(e)),
     );
   };
+  // A card that offers "Close agent" (a setup that failed) asks the same way the menu does: through one function that never changes.
+  const askRef = useRef(askToClose);
+  askRef.current = askToClose;
+  const closeAsk = useCallback((slot: string) => askRef.current(slot), []);
   const menuNode = menu ? nodes.find((n) => n.slot === menu.slot) : undefined;
   const menuItems = (n: OrchestraNode): AgentMenuItem[] => {
     const needsYou = attention.includes(n.slot);
@@ -819,6 +855,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       onPointerUp={onBackgroundUp}
       onPointerCancel={onBackgroundUp}
     >
+      <CloseAgentContext.Provider value={closeAsk}>
       <div className="canvas-world" ref={world} style={{ transform: `translate(${initial.x}px, ${initial.y}px) scale(${initial.zoom})` }}>
         <svg className="canvas-tethers" aria-hidden>
           {visible.map((n) => {
@@ -855,6 +892,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
           />
         ))}
       </div>
+      </CloseAgentContext.Provider>
       <Announcer nodes={nodes} />
       <Controls zoom={zoomPct} attention={attention.length} nodes={nodes} onZoom={zoomBy} onFit={() => { layout.touched = false; fit(true); }} onNext={next} onGoTo={goTo} onShow={actions.show} main={nodes.find((n) => n.role === "main")?.slot} />
       {problem && (

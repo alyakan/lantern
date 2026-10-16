@@ -67,7 +67,6 @@ function spawnWorker(chats: Chats, main: string, ev: Extract<UiEvent, { kind: "a
   const worker: State = {
     ...initialState,
     claudePath: parent.claudePath,
-    contextWindow: parent.contextWindow,
     mode: ev.mode,
     folder: ev.folder,
     status: "running",
@@ -90,7 +89,7 @@ export function chatsReducer(chats: Chats, action: ChatsAction): Chats {
     }
     case "add": {
       const from = chats.slots[chats.active] ?? initialState;
-      const fresh: State = { ...initialState, claudePath: from.claudePath, mode: from.mode, contextWindow: from.contextWindow, status: "no_folder" };
+      const fresh: State = { ...initialState, claudePath: from.claudePath, mode: from.mode, status: "no_folder" };
       return { ...chats, slots: { ...chats.slots, [action.slot]: fresh } };
     }
     case "activate":
