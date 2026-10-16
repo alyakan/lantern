@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
+import { createContext, memo, useContext, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { markdownComponents, pathBreaks, splitMention, useFileLinks } from "../lib/fileLinks";
@@ -232,7 +232,7 @@ const ImagesAllowed = createContext(false);
  * Claude's markdown: GFM, file links, code block headers, plan step cards and callouts. Pictures aren't loaded unless
  * `images` is set, so a picture shows as its description, whatever text it's in.
  */
-export function Md({ children, inline = false, images }: { children: string; inline?: boolean; images?: boolean }) {
+export const Md = memo(function Md({ children, inline = false, images }: { children: string; inline?: boolean; images?: boolean }) {
   const hint = useMemo(() => languageHint(children), [children]);
   const inherited = useContext(ImagesAllowed);
   const loadImages = images ?? inherited;
@@ -245,4 +245,4 @@ export function Md({ children, inline = false, images }: { children: string; inl
       </LanguageHint.Provider>
     </ImagesAllowed.Provider>
   );
-}
+});

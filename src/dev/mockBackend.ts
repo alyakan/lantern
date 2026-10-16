@@ -1016,6 +1016,120 @@ const mockResponse = (id: string): NetworkDetail => {
   };
 };
 
+/**
+ * `&stress` (with `?mock=ready`): as busy as a real day's work, for measuring the sidebar and the canvas. About 20 open chats
+ * in 4 projects (3 of them a team's Lead with 6 agents), transcripts of hundreds of messages, and the agents streaming
+ * events all the time. `&stress=N` streams N events a second (default 25; 0 sets it up and leaves it still).
+ * `window.__stress` says when it is set up. Every other scene is untouched.
+ */
+const STRESS_PARAM = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("stress");
+const STRESS = STRESS_PARAM !== null;
+const STRESS_FOLDERS = [FOLDER, "/Users/you/projects/web-dashboard", "/Users/you/projects/infra", "/Users/you/projects/notes"];
+let stressOpened = 0;
+const stressStarted: { slot: string; folder: string; team: boolean }[] = [];
+
+const STRESS_TEXT = [
+  "Retrying only idempotent requests keeps side effects safe; the delay doubles each attempt and is capped so a slow upstream can't stall the UI.",
+  "I read the callers first: three pass a second argument, so the new optional parameter has to stay last and default to the old behaviour.",
+  "The failing case is the fake clock: the backoff timer never fires under `vi.useFakeTimers()` until the test advances it by the full delay.",
+  "```ts\nexport async function fetchJson(url: string, attempts = 3) {\n  for (let i = 1; ; i++) {\n    const res = await fetch(url);\n    if (res.ok) return res.json();\n  }\n}\n```",
+  "- Added the retry loop\n- Capped the delay at 4s\n- Covered 429, 502, 503 and 504 in the tests\n- 4xx errors other than 429 fail at once",
+];
+
+/** `count` events of a chat's history: what was asked, what it said and the tools it used, in a few hundred messages. */
+async function stressHistory(slot: string, count: number) {
+  const send = sendTo(slot);
+  await send({ kind: "session_started", session_id: `mock-${slot}`, model: "claude-sonnet-5-5", cwd: FOLDER, permission_mode: "default", claude_version: "2.1.284" });
+  for (let i = 0; i < count; i++) {
+    const id = `${slot}:h${i}`;
+    if (i % 12 === 0) await send({ kind: "user_text", text: `Step ${i / 12 + 1}: keep going, and tell me what you changed.` });
+    else if (i % 4 === 1) await send({ kind: "assistant_text", parent: null, block_id: id, text: STRESS_TEXT[i % STRESS_TEXT.length] });
+    else {
+      await send({ kind: "tool_started", parent: null, tool_use_id: id, name: i % 3 ? "Read" : "Grep", summary: `${FOLDER}/src/client/file${i}.ts` });
+      await send({ kind: "tool_finished", parent: null, tool_use_id: id, is_error: false, output: "ok" });
+    }
+    if (i % 40 === 39) await sleep(0);
+  }
+  await send({ kind: "context_used", tokens: 40_000 + (count % 7) * 9_000 });
+}
+
+async function stressDrive() {
+  const until = async <T,>(find: () => T | null | undefined): Promise<T> => {
+    for (;;) {
+      const found = find();
+      if (found) return found;
+      await sleep(30);
+    }
+  };
+  const click = (el: Element) => (el as HTMLElement).click();
+  // A chat that is still empty is reused (or forgotten) when the next one starts, so each says something once it is up.
+  const started = async (n: number) => {
+    await until(() => stressStarted.length >= n || null);
+    await sendTo(stressStarted[n - 1].slot)({ kind: "user_text", text: "Where were we?" });
+    await sleep(120);
+  };
+  const label = (folder: string) => folder.split("/").pop() ?? folder;
+  // Four projects, from the Open folder button (the dialog hands them out in turn), then chats in each, then a team in three.
+  click(await until(() => document.querySelector(".welcome-open")));
+  await started(1);
+  for (let p = 1; p < STRESS_FOLDERS.length; p++) {
+    click(await until(() => document.querySelector(".sb-foot")));
+    await started(p + 1);
+  }
+  const chatsIn = [4, 3, 3, 3];
+  for (const [p, extra] of chatsIn.entries()) {
+    for (let k = 0; k < extra; k++) {
+      const had = stressStarted.length;
+      click(await until(() => document.querySelector(`button[aria-label="New chat in ${label(STRESS_FOLDERS[p])}"]`)));
+      await started(had + 1);
+    }
+  }
+  for (let p = 0; p < 3; p++) {
+    const had = stressStarted.length;
+    click(await until(() => document.querySelector(`button[aria-label="More for ${label(STRESS_FOLDERS[p])}"]`)));
+    click(await until(() => [...document.querySelectorAll('[role="menuitem"]')].find((e) => e.textContent?.trim() === "New team")));
+    await started(had + 1);
+  }
+  await sleep(300);
+  const leads = stressStarted.filter((s) => s.team);
+  const agents: string[] = [];
+  for (const lead of leads) {
+    const send = sendTo(lead.slot);
+    for (let k = 1; k <= 6; k++) {
+      const worker = `${lead.slot}-a${k}`;
+      agents.push(worker);
+      await send({ kind: "agent_spawned", worker, name: `Agent ${k} of ${label(lead.folder)}`, brief: "Work through your part of the task and report back.", folder: lead.folder, branch: null, base: null, isolation: "shared", mode: "ask" });
+    }
+  }
+  await sleep(300);
+  for (const s of stressStarted) await stressHistory(s.slot, s.team ? 300 : 60);
+  for (const worker of agents) await stressHistory(worker, 120);
+  // A few chats working, a few waiting, the rest done: the Leads and agents work all the time.
+  const plain = stressStarted.filter((s) => !s.team);
+  for (const s of plain.slice(0, 3)) await sendTo(s.slot)({ kind: "thinking", parent: null });
+  for (const s of plain.slice(3, 5)) await sendTo(s.slot)({ kind: "permission_requested", request_id: `stress-${s.slot}`, tool_name: "Bash", input: { command: "npm test" } });
+  for (const s of plain.slice(5)) await sendTo(s.slot)({ kind: "turn_done", is_error: false, result: "ok", cost_usd: 0.1, duration_ms: 4000, auth_hint: false, denied: 0, context_window: 200_000 });
+  const working = [...leads.map((l) => l.slot), ...agents];
+  for (const slot of working) await sendTo(slot)({ kind: "thinking", parent: null });
+  const rate = STRESS_PARAM === "" ? 25 : Number(STRESS_PARAM);
+  let n = 0;
+  if (rate > 0) {
+    // Events in small bursts every 40ms: text a word at a time, and a tool now and then, as agents do.
+    setInterval(() => {
+      for (let e = 0; e < Math.max(1, Math.round(rate / 25)); e++) {
+        const slot = working[Math.floor(Math.random() * working.length)];
+        const send = sendTo(slot);
+        const i = ++n;
+        if (i % 7 === 0) {
+          void send({ kind: "tool_started", parent: null, tool_use_id: `live${i}`, name: "Read", summary: `${FOLDER}/src/live${i}.ts` });
+          void send({ kind: "tool_finished", parent: null, tool_use_id: `live${i}`, is_error: false, output: "ok" });
+        } else void send({ kind: "text_delta", parent: null, block_id: `live-${slot}-${Math.floor(i / 40)}`, text: "word " });
+      }
+    }, 40);
+  }
+  (window as unknown as { __stress: unknown }).__stress = { chats: stressStarted.length, agents: agents.length };
+}
+
 export function installMockBackend() {
   // In the browser console: `mockEmit("check-for-updates")` fires a backend event, as the app menu's item does.
   (globalThis as unknown as { mockEmit: (event: string, payload?: unknown) => Promise<void> }).mockEmit = (event, payload) => emit(event, payload);
@@ -1025,7 +1139,8 @@ export function installMockBackend() {
   };
   const mode = new URLSearchParams(location.search).get("mock");
   // ?mock = UI with no folder; ?mock=ready = folder open, empty chat; ?mock=demo = a scripted turn.
-  if (mode === "demo" || mode === "ready" || mode === "history") autoplay(new URLSearchParams(location.search).has("allow"), mode === "ready", mode === "history");
+  if (STRESS) void stressDrive();
+  else if (mode === "demo" || mode === "ready" || mode === "history") autoplay(new URLSearchParams(location.search).has("allow"), mode === "ready", mode === "history");
   mockWindows("main");
   mockIPC(
     (cmd, args) => {
@@ -1056,7 +1171,7 @@ export function installMockBackend() {
           return null;
         }
         case "plugin:dialog|open":
-          return FOLDER;
+          return STRESS ? STRESS_FOLDERS[Math.min(stressOpened, STRESS_FOLDERS.length - 1)] : FOLDER;
         // The save dialog "picks" the Desktop; what was exported is in `claudeExports()` in the browser console.
         case "export_text": {
           const path = `/Users/you/Desktop/${String(a.fileName).split("/").pop()}`;
@@ -1067,7 +1182,12 @@ export function installMockBackend() {
           return null;
         case "start_session":
           // A second project opens too, for switching between projects; the rest are gone.
-          if (a.folder !== FOLDER && a.folder !== "/Users/you/projects/web-dashboard") return Promise.reject(`${String(a.folder)} no longer exists.`);
+          if (STRESS) {
+            const team = Boolean((a.settings as { orchestrator?: boolean } | undefined)?.orchestrator);
+            // Only the Open folder button moves on to the next project: the others stay in the one they are in.
+            stressOpened = Math.max(stressOpened, STRESS_FOLDERS.indexOf(String(a.folder)) + 1);
+            stressStarted.push({ slot: String(a.slot), folder: String(a.folder), team });
+          } else if (a.folder !== FOLDER && a.folder !== "/Users/you/projects/web-dashboard") return Promise.reject(`${String(a.folder)} no longer exists.`);
           slotMode[String(a.slot)] = String((a.settings as { mode?: string } | undefined)?.mode ?? "ask");
           if ((a.settings as { orchestrator?: boolean } | undefined)?.orchestrator) mockMain = String(a.slot);
           setTimeout(() => {
