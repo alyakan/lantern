@@ -703,6 +703,13 @@ mod tests {
         FakeApp { socket: path.to_string_lossy().into_owned(), got, release, done }
     }
 
+    /// Ends the client's line. A card the helper is still waiting on is called off when the line closes, so the test first
+    /// gives the helper time to take the app's answer and write it, even on a slow CI runner.
+    fn hang_up(client: UnixStream) {
+        std::thread::sleep(Duration::from_millis(300));
+        drop(client);
+    }
+
     /// The helper on a thread, reading what the test writes (its client stays there until the writer is dropped).
     fn helper_on(socket: String) -> (UnixStream, std::thread::JoinHandle<Vec<Value>>) {
         let (client, input) = UnixStream::pair().unwrap();
@@ -731,7 +738,7 @@ mod tests {
         assert!(hung_up);
         // It goes on answering; the called-off request gets nothing.
         writeln!(client, r#"{{"jsonrpc":"2.0","id":3,"method":"tools/list"}}"#).unwrap();
-        drop(client);
+        hang_up(client);
         assert_eq!(ids(&helper.join().unwrap()), vec![json!(3)]);
     }
 
@@ -747,7 +754,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(50));
         app.release.send(()).unwrap();
         app.done.join().unwrap();
-        drop(client);
+        hang_up(client);
         let replies = helper.join().unwrap();
         assert_eq!(ids(&replies), vec![json!(2), json!(3)]);
         assert_eq!(decision(&replies[0])["behavior"], "allow");
@@ -778,7 +785,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(500));
         app.release.send(()).unwrap();
         app.done.join().unwrap();
-        drop(client);
+        hang_up(client);
         let out = helper.join().unwrap();
         let (progress, rest): (Vec<_>, Vec<_>) = out.into_iter().partition(|m| m["method"] == "notifications/progress");
         assert!(progress.len() >= 2, "{progress:?}");
@@ -803,7 +810,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(80));
         app.release.send(()).unwrap();
         app.done.join().unwrap();
-        drop(client);
+        hang_up(client);
         assert_eq!(ids(&helper.join().unwrap()), vec![json!(2)]);
     }
 
@@ -825,7 +832,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(500));
         app.release.send(()).unwrap();
         app.done.join().unwrap();
-        drop(client);
+        hang_up(client);
         assert_eq!(ids(&helper.join().unwrap()), vec![json!(4)]);
     }
 
@@ -839,7 +846,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(50));
         app.release.send(()).unwrap();
         app.done.join().unwrap();
-        drop(client);
+        hang_up(client);
         // The ping's answer comes before the card's.
         assert_eq!(ids(&helper.join().unwrap()), vec![json!(5), json!(2)]);
     }
@@ -857,7 +864,7 @@ mod tests {
         app.release.send(()).unwrap();
         // The app was asked once: the called-off one never reached it (it takes one request, then is gone).
         assert_eq!(app.done.join().unwrap().0.tool_name, "Bash");
-        drop(client);
+        hang_up(client);
         assert_eq!(ids(&helper.join().unwrap()), vec![json!(2)]);
     }
 
@@ -869,7 +876,7 @@ mod tests {
         app.got.recv().unwrap();
         writeln!(client, "{}", call_as(4, "Write")).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(50));
-        drop(client);
+        hang_up(client);
         assert!(app.done.join().unwrap().1);
         // Neither prompt is answered, and the queued one isn't shown to anyone.
         assert!(helper.join().unwrap().is_empty());
