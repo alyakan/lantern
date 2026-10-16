@@ -195,12 +195,12 @@ const tabs = () => screen.getAllByRole("tab").map((t) => t.textContent);
 const selected = () => screen.getAllByRole("tab").find((t) => t.getAttribute("aria-selected") === "true")?.textContent;
 
 describe("ReviewPanel's fixed tabs", () => {
-  it("always has Changes, Files, Plan, Activity, Tests, Checks and Network, in that order", () => {
+  it("always has Changes, Files, Plan, Activity, Tests, Checks, Network and Storage, in that order", () => {
     localStorage.clear();
     const { rerender } = render(<ReviewPanel {...base} selected={null} follow />);
-    expect(tabs()).toEqual(["Changes2", "Files", "Plan", "Activity", "Tests", "Checks", "Network"]);
+    expect(tabs()).toEqual(["Changes2", "Files", "Plan", "Activity", "Tests", "Checks", "Network", "Storage"]);
     rerender(<ReviewPanel {...base} selected={null} follow summary={summary()} architecture={architecture()} />);
-    expect(tabs()).toEqual(["Changes2", "Files", "Plan", "Activity", "Tests", "Checks", "Network"]);
+    expect(tabs()).toEqual(["Changes2", "Files", "Plan", "Activity", "Tests", "Checks", "Network", "Storage"]);
   });
 
   it("Plan shows the plan and opens a row's page; it takes a click, so it doesn't take the pane over", () => {
@@ -263,7 +263,7 @@ describe("ReviewPanel's fixed tabs", () => {
   it("moves between the tabs with the arrow keys, and each tab's panel is labelled by it", () => {
     localStorage.clear();
     render(<ReviewPanel {...base} selected={null} follow summary={summary()} />);
-    const [changes, files, , , , , network] = screen.getAllByRole("tab");
+    const [changes, files, , , , , , storage] = screen.getAllByRole("tab");
     expect(changes).toHaveAttribute("tabindex", "0");
     expect(files).toHaveAttribute("tabindex", "-1");
     changes.focus();
@@ -272,8 +272,8 @@ describe("ReviewPanel's fixed tabs", () => {
     expect(files).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel", { name: "Files" })).toBeInTheDocument();
     fireEvent.keyDown(files, { key: "End" });
-    expect(network).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tabpanel", { name: "Network" })).toBeInTheDocument();
+    expect(storage).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Storage" })).toBeInTheDocument();
     localStorage.clear();
   });
 

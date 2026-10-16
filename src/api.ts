@@ -4,7 +4,7 @@ import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { Role } from "./lib/roles";
 import type { ReviewSetting } from "./lib/reviewChain";
-import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, GhAccess, McpServerSpec, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, GhAccess, McpServerSpec, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -280,6 +280,15 @@ export const api = {
   networkRewatch: (folder: string, label: string, method: string | null, url: string) => invoke<void>("network_rewatch", { folder, label, method, url }),
   /** A folder's Network tab has something new: a match, a summary, a watch, or Network Monitor going up or down. */
   onNetworkChanged: (cb: () => void): Promise<UnlistenFn> => listen("network-changed", () => cb()),
+  /** The Storage tab: the last scan, Claude's suggestions on it, free space. */
+  storageState: () => invoke<StorageView>("storage_state"),
+  /** Starts a scan in the background; false when one is already running. */
+  storageScan: () => invoke<boolean>("storage_scan"),
+  storageCancel: () => invoke<void>("storage_cancel"),
+  /** Deletes the items with these ids (from the last scan), each checked again first; the outcome says what each came to. */
+  storageDelete: (ids: string[]) => invoke<StorageOutcome[]>("storage_delete", { ids }),
+  /** The scan moved on, finished, or Claude marked suggestions. */
+  onStorageChanged: (cb: () => void): Promise<UnlistenFn> => listen("storage-changed", () => cb()),
   onUiEvent: (cb: (slot: string, event: UiEvent) => void): Promise<UnlistenFn> =>
     listen<{ slot: string; event: UiEvent }>("ui-event", (e) => cb(e.payload.slot, e.payload.event)),
 };

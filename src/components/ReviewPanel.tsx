@@ -8,6 +8,7 @@ import { NetworkEmpty, NetworkTab, useNetworkView } from "./NetworkTab";
 import { ChecksTab, hasChecks } from "./ChecksTab";
 import { totals } from "../lib/prChecks";
 import type { PrView } from "../lib/usePrChecks";
+import { StorageTab, suggestedCount, useStorageView } from "./StorageTab";
 import type { NetworkItem } from "../types";
 import { basename, dirOf, relativeTo } from "../lib/diff";
 import { usePersistentState } from "../lib/layout";
@@ -74,6 +75,8 @@ interface Props {
   architecture?: { map: ArchitectureMap; current: string[]; pageNames: Record<string, string>; onOpenPage: (page: string) => void; openKey: number; box?: { id: string; key: number } | null };
   /** The Network tab's Summarize: asks Claude in this chat about one request (absent: no chat to ask). */
   onSummarizeRequest?: (item: NetworkItem) => void;
+  /** The Storage tab's Ask Claude: asks Claude in this chat to scan and suggest what to delete (absent: no chat to ask). */
+  onAskStorage?: () => void;
   /** Claude is in the middle of a turn in this chat. */
   chatBusy?: boolean;
   /** The Checks tab: what the checks loop knows about this folder's pull request, whether Claude is too busy to be sent the failure, and what the buttons do (absent: no chat to ask). */
@@ -95,7 +98,7 @@ const LAYOUT_LABEL: Record<DiffLayout, string> = { inline: "Unified", split: "Sp
 const NEXT_LAYOUT: Record<DiffLayout, DiffLayout> = { inline: "split", split: "inline" };
 
 /** The side panel's tabs, always these and always in this order; one with nothing to show says so. */
-export type Tab = "changes" | "files" | "plan" | "activity" | "tests" | "checks" | "network";
+export type Tab = "changes" | "files" | "plan" | "activity" | "tests" | "checks" | "network" | "storage";
 const TABS: { id: Tab; label: string }[] = [
   { id: "changes", label: "Changes" },
   { id: "files", label: "Files" },
@@ -104,6 +107,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "tests", label: "Tests" },
   { id: "checks", label: "Checks" },
   { id: "network", label: "Network" },
+  { id: "storage", label: "Storage" },
 ];
 /** Each tab's button, which its panel is labelled by. */
 const tabId = (t: Tab) => `review-${t}-tab`;
@@ -125,6 +129,8 @@ export function ReviewPanel(props: Props) {
   const checksView = props.prChecks?.view;
   const checkTotals = hasChecks(checksView) && checksView.snap.pr.state === "OPEN" ? totals(checksView.snap.checks) : null;
   const hasNetwork = !!network && (network.watches.length > 0 || network.items.length > 0);
+  // The disk scan is the Mac's, not the folder's: one for every chat. Its tab shows how many deletions Claude suggested.
+  const storage = useStorageView();
   // Every tab is always there, so the saved tab (shared by every chat) is always valid; one saved under an old name moves to its new one.
   const tab = migrateTab(savedTab);
   useEffect(() => {
@@ -207,6 +213,7 @@ export function ReviewPanel(props: Props) {
               {id === "tests" && latestRun?.outcome === "failed" && <span className="tab-count failed">{latestRun.failed || "!"}</span>}
               {id === "checks" && checkTotals && checkTotals.total > 0 && <span className={`tab-count${checkTotals.failed > 0 ? " failed" : ""}`}>{checkTotals.failed || checkTotals.total}</span>}
               {id === "network" && hasNetwork && network.items.length > 0 && <span className="tab-count">{network.items.length}</span>}
+              {id === "storage" && suggestedCount(storage) > 0 && <span className="tab-count" title="Claude's suggestions">{suggestedCount(storage)}</span>}
             </button>
           ))}
         </div>
@@ -292,6 +299,11 @@ export function ReviewPanel(props: Props) {
           {hasNetwork && props.folder ? <NetworkTab folder={props.folder} view={network} onSummarize={props.onSummarizeRequest ?? null} busy={props.chatBusy} /> : <NetworkEmpty link={network?.link ?? null} />}
         </div>
       )}
+      {tab === "storage" && (
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("storage")}>
+          <StorageTab view={storage} onAsk={props.onAskStorage ?? null} busy={props.chatBusy} />
+        </div>
+      )}
       {/* Kept mounted while hidden so the tree keeps its expanded folders across tab switches. */}
       <div className="tab-body" role="tabpanel" aria-labelledby={tabId("files")} hidden={tab !== "files"}>
         <FilesTab
@@ -320,6 +332,7 @@ const TAB_TITLE: Record<Tab, string | undefined> = {
   tests: undefined,
   checks: "How the checks of this branch's pull request stand",
   network: "Requests matching this folder's watches, from Network Monitor",
+  storage: "Scan this Mac for what can be cleared to get disk space back",
 };
 
 /**

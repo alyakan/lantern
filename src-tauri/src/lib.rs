@@ -28,6 +28,7 @@ pub mod offstream;
 pub mod outside;
 pub mod relocate;
 pub mod roles;
+pub mod storage;
 pub mod stream_parser;
 pub mod test_runs;
 pub mod titles;
@@ -62,6 +63,8 @@ pub struct AppState {
     prs: std::sync::Mutex<std::collections::HashMap<(std::path::PathBuf, u32), (std::time::Instant, pr::PrRange)>>,
     /// Network Monitor's captured traffic, as the network_* tools and the Network tab read it (see network.rs).
     network: Arc<network::Monitor>,
+    /// The Storage tab's scan, and what Claude's storage_* tools read and mark (see storage/mod.rs).
+    storage: Arc<storage::Storage>,
     /// How many workers may run at once across all of Lantern (Settings → General; the window sends it).
     agent_limit: std::sync::atomic::AtomicUsize,
     /// What History's full-text search has read of past chats, and the number of its newest search (see history_search.rs).
@@ -400,10 +403,23 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
     let slot = state.slots.get_or_create(slot, &std::env::temp_dir(), emitter(app), state.folder_rules.clone(), move |claude| permission::bridge::helper_of(claude, exe))?;
     // Every chat's helper offers the network_* tools; they're answered here, for the chat's folder.
     let monitor = state.network.clone();
+    // So are the storage_* tools (see storage/mod.rs): they share the bridge call, and are told apart by name.
+    let storage = state.storage.clone();
+    let login = state.login_path.clone();
     slot.bridge.set_network(Arc::new(move |folder, tool, input| {
         let monitor = monitor.clone();
+        let storage = storage.clone();
+        let login = login.clone();
         Box::pin(async move {
-            let result = tauri::async_runtime::spawn_blocking(move || monitor.call(folder.as_deref(), &tool, &input)).await.unwrap_or_else(|e| Err(e.to_string()));
+            let result = tauri::async_runtime::spawn_blocking(move || {
+                if storage::TOOLS.contains(&tool.as_str()) {
+                    storage.call(&tool, &input, login.get_or_init(cli_locator::login_shell_path).clone())
+                } else {
+                    monitor.call(folder.as_deref(), &tool, &input)
+                }
+            })
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()));
             let (allow, text) = match result {
                 Ok(text) => (true, text),
                 Err(text) => (false, text),
@@ -442,6 +458,33 @@ fn network_rewatch(state: State<'_, AppState>, folder: String, label: String, me
 #[tauri::command]
 fn network_unwatch(state: State<'_, AppState>, folder: String, label: String) -> bool {
     state.network.unwatch(&permission::rules::folder_key(std::path::Path::new(&folder)), &label)
+}
+
+/// The Storage tab's data: the last scan, Claude's suggestions on it, and the disk's free space.
+#[tauri::command]
+fn storage_state(state: State<'_, AppState>) -> storage::View {
+    state.storage.view()
+}
+
+/// Starts a scan in the background (the tab hears of progress and the result through `storage-changed`).
+#[tauri::command]
+async fn storage_scan(state: State<'_, AppState>) -> Result<bool, String> {
+    let path_env = login_path(&state).await;
+    Ok(state.storage.start_scan(path_env))
+}
+
+#[tauri::command]
+fn storage_cancel(state: State<'_, AppState>) {
+    state.storage.cancel_scan();
+}
+
+/// Deletes the checked items, by the ids of the last scan. Each is checked again first, and the ones git or the file
+/// system say have changed are refused with a reason.
+#[tauri::command]
+async fn storage_delete(state: State<'_, AppState>, ids: Vec<String>) -> Result<Vec<storage::Outcome>, String> {
+    let path_env = login_path(&state).await;
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || storage.delete(&ids, path_env.as_deref())).await.map_err(|e| e.to_string())?
 }
 
 /// `project_notes`: what the chat was started with (a restart passes its own on, a new chat the user's notes as they are now).
@@ -1952,13 +1995,23 @@ pub fn run() {
             network.set_on_change(move || {
                 let _ = handle.emit("network-changed", ());
             });
+            let handle = app.handle().clone();
+            let for_in_use = app.handle().clone();
+            let storage = Arc::new(storage::Storage::new(
+                std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default(),
+                move || {
+                    let _ = handle.emit("storage-changed", ());
+                },
+                // Asked at every scan and every delete: the folders chats and agents are running in right now.
+                move || for_in_use.try_state::<AppState>().map(|s| s.slots.running_folders()).unwrap_or_default(),
+            ));
             // Follows Network Monitor while any folder has a watch (a poll with none reads nothing).
             let following = network.clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into() });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into() });
             app.manage(updates::Updates::default());
             app.manage(awake::Awake::default());
             if updates::checks_enabled() {
@@ -2013,6 +2066,10 @@ pub fn run() {
             network_response,
             network_unwatch,
             network_rewatch,
+            storage_state,
+            storage_scan,
+            storage_cancel,
+            storage_delete,
             orchestra_decline_merge,
             orchestra_merge_tests_info,
             orchestra_run_merge_tests,
