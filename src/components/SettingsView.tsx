@@ -5,6 +5,8 @@ import type { McpServer, McpServerSpec, SkillEntry, SlashCommand } from "../type
 import { describeConfig, displayName, groupSkills, iconOf, removable, sourceOf, statusOf, toolsOf, withoutFrontmatter } from "../lib/mcp";
 import { setChime, useChimeOn } from "../lib/chime";
 import { AGENT_LIMIT_MAX, AGENT_LIMIT_MIN, setAgentLimit, useAgentLimit } from "../lib/agentLimit";
+import { PAUSE_OPTIONS, setPauseAtPercent, usePauseAtPercent } from "../lib/planPause";
+import { QUIET_MINUTES, setQuietMinutes, useQuietMinutes } from "../lib/quietSetting";
 import { PAUSE_MS, type NotifyPrefs } from "../lib/notifyPrefs";
 import type { TextSize } from "../lib/theme";
 import type { CustomTheme, ThemeId } from "../lib/themes";
@@ -132,6 +134,8 @@ const NOTIFY_EVENTS: { key: "finished" | "waiting" | "failed"; label: string }[]
 function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme, customTheme, onCustomTheme, textSize, onTextSize, warnTeams, onWarnTeams }: GeneralSettingsProps) {
   const sound = useChimeOn();
   const agentLimit = useAgentLimit();
+  const quiet = useQuietMinutes();
+  const pauseAt = usePauseAtPercent();
   const paused = notify.pausedUntil > Date.now();
   const set = (patch: Partial<NotifyPrefs>) => onNotify({ ...notify, ...patch });
   return (
@@ -223,6 +227,28 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
           </select>
         </label>
         <span className="settings-muted">Every agent spends the same plan. A Lead asking for one more is told to wait for one to finish.</span>
+        <label className="general-option">
+          <span>Say an agent is quiet after</span>
+          <select aria-label="Say an agent is quiet after" value={quiet} onChange={(e) => setQuietMinutes(Number(e.target.value))}>
+            {QUIET_MINUTES.map((n) => (
+              <option key={n} value={n}>
+                {n === 1 ? "1 minute" : `${n} minutes`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="settings-muted">An agent at work that says nothing for this long shows "Quiet" on its card and in the inbox, with Nudge, Interrupt and Restart.</span>
+        <label className="general-option">
+          <span>Pause a team's work when my plan reaches</span>
+          <select aria-label="Pause a team's work when my plan reaches" value={pauseAt} onChange={(e) => setPauseAtPercent(Number(e.target.value))}>
+            {PAUSE_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n === 0 ? "Off" : `${n}%`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="settings-muted">Stops what every working agent of every team is doing (they stay on their teams) and tells you when the plan resets. Nothing starts again until you press Resume. You get a heads-up 5 points before, and it pauses once for each five-hour window.</span>
         {onWarnTeams && (
           <label className="general-option">
             <input type="checkbox" checked={warnTeams ?? true} onChange={(e) => onWarnTeams(e.target.checked)} />

@@ -2,21 +2,59 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import type { InboxItem } from "../lib/inbox";
 import { resetActionsForTest, runAction } from "../lib/actions";
+import type { PlanPause } from "../lib/planPause";
 import { Inbox } from "./Inbox";
 
 const item = (over: Partial<InboxItem> & { slot: string }): InboxItem => ({ key: over.slot, kind: "permission", role: "chat", team: null, title: `Chat ${over.slot}`, where: "lantern", need: "Wants to use Bash: npm test", since: Date.now() - 180_000, requestId: `r-${over.slot}`, canAllow: true, detail: null, needsYou: true, ...over });
 
-function setup(items: InboxItem[]) {
+function setup(items: InboxItem[], paused: PlanPause | null = null) {
   resetActionsForTest();
   const onGo = vi.fn();
   const onDecide = vi.fn();
-  render(<Inbox items={items} onGo={onGo} onDecide={onDecide} />);
-  return { onGo, onDecide, toggle: () => screen.getByRole("button", { name: /What needs you/ }) };
+  const onResume = vi.fn();
+  render(<Inbox items={items} onGo={onGo} onDecide={onDecide} paused={paused} onResume={onResume} />);
+  return { onGo, onDecide, onResume, toggle: () => screen.getByRole("button", { name: /What needs you/ }) };
 }
 
 describe("Inbox", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+  });
+
+  it("lists a quiet agent like anything else that waits, with Go", () => {
+    const row = item({ slot: "a1", kind: "quiet", role: "agent", team: "lead", title: "security pass", need: "Quiet while working. It may be stuck", requestId: null, canAllow: false, since: Date.now() - 4 * 60_000 });
+    const { toggle, onGo } = setup([row]);
+    expect(toggle()).toHaveAccessibleName("What needs you, 1 waiting");
+    fireEvent.click(toggle());
+    expect(screen.getByText("Quiet while working. It may be stuck")).toBeInTheDocument();
+    expect(screen.getByText("4m")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Go to security pass" }));
+    expect(onGo).toHaveBeenCalledWith(row);
+  });
+
+  describe("when the teams' work was paused", () => {
+    const pause = (): PlanPause => ({ percent: 95, resetsAt: Math.floor(Date.now() / 1000) + 72 * 60 + 30, since: Date.now() - 60_000, slots: ["s1", "w1"] });
+
+    it("has a row of its own at the top, counted, with when the plan resets and Resume", () => {
+      const { toggle, onResume } = setup([item({ slot: "s2" })], pause());
+      expect(toggle()).toHaveAccessibleName("What needs you, 2 waiting");
+      fireEvent.click(toggle());
+      const [first] = screen.getAllByRole("listitem");
+      expect(within(first).getByText("Paused: your plan is 95% used, it resets in 1h 12m")).toBeInTheDocument();
+      expect(within(first).getByText(/2 agents stopped, none ended/)).toBeInTheDocument();
+      expect(within(first).getByText(/Continue where you stopped\./)).toBeInTheDocument();
+      // It opens on Resume, which is the row's Go.
+      expect(within(first).getByRole("button", { name: "Resume the paused agents" })).toHaveFocus();
+      fireEvent.click(within(first).getByRole("button", { name: "Resume the paused agents" }));
+      expect(onResume).toHaveBeenCalledTimes(1);
+    });
+
+    it("is there even when nothing else waits", () => {
+      const { toggle } = setup([], pause());
+      fireEvent.click(toggle());
+      expect(screen.queryByText("Nothing is waiting for you.")).toBeNull();
+      expect(screen.getByRole("button", { name: "Resume the paused agents" })).toBeInTheDocument();
+    });
   });
   afterEach(() => {
     vi.useRealTimers();

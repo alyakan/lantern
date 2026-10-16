@@ -3,10 +3,11 @@ import type { ChatItem } from "../store";
 import { attentionFor } from "./attention";
 import { QUESTION_TOOL } from "./questions";
 import { nodeStatus } from "./orchestraView";
+import { quietFor } from "./quiet";
 import { projectLabels, type ProjectOpen } from "./sidebar";
 
 /** What a row is waiting for. `permission` is a plain request Allow and Deny answer; the others are answered where they are. */
-export type InboxKind = "permission" | "question" | "plan" | "reproduce" | "merge" | "held" | "unread";
+export type InboxKind = "permission" | "question" | "plan" | "reproduce" | "merge" | "held" | "quiet" | "unread";
 
 /** One thing waiting on the user: a chat or an agent, in some project, with what it needs. */
 export interface InboxItem {
@@ -22,7 +23,7 @@ export interface InboxItem {
   where: string;
   /** In plain words. */
   need: string;
-  /** Since when (ms); null when Lantern doesn't know (a team held back by its loop guard, say). */
+  /** Since when (ms): how long it has waited, or for a quiet agent since its last word; null when Lantern doesn't know (a team held back by its loop guard, say). */
   since: number | null;
   /** The pending request, for a plain permission: what Allow and Deny answer. */
   requestId: string | null;
@@ -97,11 +98,12 @@ export function wholeRequest(toolName: string, input: unknown): string | null {
 
 /**
  * Everything waiting on the user across every open project and team: permission requests and questions, plans and
- * reproductions to answer, merges to approve, teams held back until the user says go on, and chats that finished while
- * the user was elsewhere (`unread`, by slot, since when). The ones that need an answer come first, the longest waiting
+ * reproductions to answer, merges to approve, teams held back until the user says go on, agents of a team that have
+ * gone quiet while working (`quiet`: the time now and how long counts as quiet), and chats that finished while the user
+ * was elsewhere (`unread`, by slot, since when). The ones that need an answer come first, the longest waiting
  * first, then the unread ones the same way. The sidebar's `needs` counts the first group.
  */
-export function inboxItems(chats: Chats, open: Record<string, ProjectOpen>, opts: { titles?: Record<string, string>; unread: Record<string, number>; describe: (input: unknown) => string }): InboxItem[] {
+export function inboxItems(chats: Chats, open: Record<string, ProjectOpen>, opts: { titles?: Record<string, string>; unread: Record<string, number>; describe: (input: unknown) => string; quiet?: { now: number; after: number } }): InboxItem[] {
   const folders = Object.keys(open);
   const labels = projectLabels(folders);
   const out: InboxItem[] = [];
@@ -131,6 +133,11 @@ export function inboxItems(chats: Chats, open: Record<string, ProjectOpen>, opts
         }
         if (nodeStatus(s) === "held") {
           out.push({ ...base, kind: "held", need: "Its agents' updates are held until you say go on", needsYou: true });
+          continue;
+        }
+        // Only a team's own agents: a plain chat may sit on one long command as long as it likes.
+        if (opts.quiet && m.role !== "chat" && quietFor(s, opts.quiet.now, opts.quiet.after) !== null) {
+          out.push({ ...base, kind: "quiet", need: "Quiet while working. It may be stuck: nudge it, interrupt it or restart it", since: s.activityAt, needsYou: true });
           continue;
         }
         const finished = opts.unread[m.slot];

@@ -99,11 +99,16 @@ const MODELS = [
  * something to show. Without it a mock turn reports nothing (the title bar's meter stays hidden).
  */
 const showUsage = () => new URLSearchParams(location.search).has("usage");
+/** ?plan=95 (with ?usage): the plan reading the turns report, in percent, to try the pause at the plan's limit. */
+const planUsed = () => {
+  const n = Number(new URLSearchParams(location.search).get("plan"));
+  return n > 0 && n <= 100 ? n / 100 : 0.62;
+};
 const spent = (cost: number, tokens: number) => (showUsage() ? { cost_usd: cost, tokens, session_cost_usd: cost, session_tokens: tokens } : {});
 async function reportUsage(send: (ev: UiEvent) => Promise<void> | void, models: [string, number, number][]) {
   if (!showUsage()) return;
   await send({ kind: "model_usage", models: models.map(([model, cost_usd, tokens]) => ({ model, cost_usd, input_tokens: Math.round(tokens * 0.95), output_tokens: Math.round(tokens * 0.05) })) });
-  await send({ kind: "plan_usage", used: 0.62, resets_at: Math.floor(Date.now() / 1000) + 100 * 60, status: "allowed" });
+  await send({ kind: "plan_usage", used: planUsed(), resets_at: Math.floor(Date.now() / 1000) + 100 * 60, status: "allowed" });
 }
 
 // Each chat's permission mode, as the backend would run it.
@@ -536,6 +541,13 @@ async function playHelperTurn(slot: string) {
   await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.02, duration_ms: 3000, auth_hint: false, denied: 0, context_window: 1_000_000 });
 }
 
+/**
+ * ?quiet: the second worker goes silent after its first steps and stays "working" until it is interrupted, so its card
+ * can say it is quiet and offer Nudge, Interrupt and Restart. An interrupt ends its turn, as the real one does.
+ */
+const QUIET = typeof location !== "undefined" && new URLSearchParams(location.search).has("quiet");
+const pendingInterrupt: Record<string, () => void> = {};
+
 async function playWorker(main: string, w: (typeof MOCK_WORKERS)[number]) {
   const send = sendTo(w.id);
   await sleep(500 + Number(w.id.slice(1)) * 400);
@@ -549,6 +561,11 @@ async function playWorker(main: string, w: (typeof MOCK_WORKERS)[number]) {
     await send({ kind: "tool_started", parent: null, tool_use_id: `${w.id}-t${i}`, name, summary });
     await sleep(450);
     await send({ kind: "tool_finished", parent: null, tool_use_id: `${w.id}-t${i}`, is_error: false, output: "ok" });
+  }
+  if (QUIET && w.id === "w2") {
+    await new Promise<void>((resolve) => (pendingInterrupt[w.id] = resolve));
+    await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0, duration_ms: 1000, auth_hint: false, denied: 0, context_window: 200_000 });
+    return;
   }
   if (w.file) {
     await send({ kind: "tool_started", parent: null, tool_use_id: `${w.id}-e`, name: "Edit", summary: `${FOLDER}/${w.file}` });
@@ -1224,6 +1241,8 @@ export function installMockBackend() {
           delete slotMode[String(a.slot)];
           return null;
         case "interrupt":
+          pendingInterrupt[String(a.slot)]?.();
+          delete pendingInterrupt[String(a.slot)];
           return null;
         // The user's answers to a worker's merge proposal, which the main agent's chat hears of.
         case "orchestra_approve_merge":

@@ -164,6 +164,31 @@ describe("Settings' General page", () => {
   });
 });
 
+describe("Settings' Teams section: quiet agents and the plan's limit", () => {
+  const props = (): GeneralSettingsProps => ({ keepAwake: true, onKeepAwake: vi.fn(), notify: { ...NOTIFY_DEFAULTS }, onNotify: vi.fn(), theme: "system", customTheme: CUSTOM_DEFAULT, onTheme: vi.fn(), onCustomTheme: vi.fn(), textSize: "default", onTextSize: vi.fn() });
+  const view = () => render(<SettingsView open="general" onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={props()} />);
+  beforeEach(() => localStorage.clear());
+
+  it("sets how long an agent may be quiet, 3 minutes until chosen", () => {
+    view();
+    const select = screen.getByRole("combobox", { name: "Say an agent is quiet after" });
+    expect(select).toHaveValue("3");
+    fireEvent.change(select, { target: { value: "10" } });
+    expect(localStorage.getItem("lantern.quietMinutes")).toBe("10");
+    expect(select).toHaveValue("10");
+  });
+
+  it("sets when a team's work is paused, Off until chosen", () => {
+    view();
+    const select = screen.getByRole("combobox", { name: "Pause a team's work when my plan reaches" });
+    expect(select).toHaveValue("0");
+    expect([...select.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Off", "90%", "95%"]);
+    fireEvent.change(select, { target: { value: "95" } });
+    expect(localStorage.getItem("lantern.pauseAtPercent")).toBe("95");
+    expect(select).toHaveValue("95");
+  });
+});
+
 describe("useChimeOn", () => {
   beforeEach(() => {
     localStorage.clear();
