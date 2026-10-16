@@ -221,6 +221,8 @@ async function playStepByStep(slot: string, raw: string) {
 /** Step-by-step mode: each message sent gets the next page of a scripted incremental-dev session. */
 const stepPage: Record<string, number> = {};
 const turnCount: Record<string, number> = {};
+/** The rules made by hand in Settings during this preview. */
+const addedRules: Record<string, unknown>[] = [];
 async function playSteps(slot: string, text: string, teach: boolean) {
   const send = sendTo(slot);
   // "…go on to the next step." is what ⌘Enter adds: do the change, then move on.
@@ -1331,8 +1333,13 @@ export function installMockBackend() {
           pendingPermission[String(a.slot)]?.(Boolean(a.allow));
           delete pendingPermission[String(a.slot)];
           return null;
-        case "add_permission_rule":
+        case "add_permission_rule": {
+          const { scope, ...rule } = a.rule as { scope: string };
+          addedRules.push({ scope, folder: scope === "folder" ? FOLDER : null, ...rule });
+          return null;
+        }
         case "remove_permission_rule":
+          return null;
         case "steps_guide":
           // A short stand-in for the backend's own (args::flavour_guide): enough for the notes to show their headings.
           return [
@@ -1350,6 +1357,7 @@ export function installMockBackend() {
           return [
             { scope: "folder", folder: FOLDER, tool: "Bash", kind: "prefix", text: "npm test" },
             { scope: "chat", folder: null, tool: "Edit", kind: "dir", path: `${FOLDER}/src` },
+            ...addedRules,
           ];
         case "git_branch":
           return "main";

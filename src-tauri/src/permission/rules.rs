@@ -960,6 +960,46 @@ mod tests {
     }
 
     #[test]
+    fn a_rule_made_by_hand_in_settings_behaves_like_one_made_on_a_card() {
+        // The shapes Settings' Add a rule form posts: the same ones a card posts.
+        let hand: Vec<NewRule> = serde_json::from_value(json!([
+            {"scope": "folder", "tool": "Bash", "kind": "prefix", "text": "npm test"},
+            {"scope": "chat", "tool": "Bash", "kind": "exact", "text": "npm run build"},
+            {"scope": "chat", "tool": "WebFetch", "kind": "any"},
+            {"scope": "folder", "tool": "mcp__linear__save_issue", "kind": "any"}
+        ]))
+        .unwrap();
+        for new in &hand {
+            assert_eq!(validate(&new.rule).unwrap(), new.rule, "{:?}", new.rule);
+        }
+        assert!(matches(&hand[0].rule, "Bash", &cmd("npm test --")) == matches(&prefix("npm test"), "Bash", &cmd("npm test --")));
+        assert!(matches(&hand[0].rule, "Bash", &cmd("npm test")));
+        assert!(!matches(&hand[0].rule, "Bash", &cmd("npm test; rm x")));
+        assert!(matches(&hand[1].rule, "Bash", &cmd("npm run build")));
+        assert!(!matches(&hand[1].rule, "Bash", &cmd("npm run build x")));
+        assert!(matches(&hand[2].rule, "WebFetch", &json!({"url": "https://example.com", "prompt": "x"})));
+        assert!(!matches(&hand[2].rule, "WebSearch", &json!({"query": "x"})));
+        assert!(matches(&hand[3].rule, "mcp__linear__save_issue", &json!({"title": "x"})));
+        // What Settings' form refuses, the backend refuses too: a rule for every Bash command, an interpreter's start, a wrapper.
+        for text in ["*", "rm", "sh", "python3", "npm install"] {
+            assert!(validate(&prefix(text)).is_err(), "{text}");
+        }
+        assert!(validate(&bash(Matcher::Any)).is_err());
+    }
+
+    #[test]
+    fn a_folder_rule_covers_a_folder_whose_path_has_a_space() {
+        let tmp = tempfile::tempdir().unwrap();
+        let folder = std::fs::canonicalize(tmp.path()).unwrap().join("my project").join("src");
+        std::fs::create_dir_all(&folder).unwrap();
+        let rule = validate(&Rule { tool: "Edit".into(), matcher: Matcher::Dir { path: folder.display().to_string() } }).unwrap();
+        let inside = json!({"file_path": folder.join("a b.ts").display().to_string()});
+        assert!(matches(&rule, "Edit", &for_matching("Edit", &inside)));
+        let outside = json!({"file_path": folder.parent().unwrap().join("other.ts").display().to_string()});
+        assert!(!matches(&rule, "Edit", &for_matching("Edit", &outside)));
+    }
+
+    #[test]
     fn a_saved_folder_rule_comes_back_and_leaves_no_temp_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sub/permission_rules.json");
