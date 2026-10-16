@@ -43,6 +43,8 @@ const CATALOGUE = [
   { id: "work-debug", title: "Debug", group: "Work", menu: true },
   { id: "work-design", title: "Design", group: "Work", menu: true },
   { id: "work-team", title: "Start a Team", group: "Work", key: "n", shift: true, menu: true, native: true },
+  // Only while a team's canvas is open (see Canvas.tsx): closes the team's stopped agents, asking about any with work that isn't merged.
+  { id: "close-stopped-agents", title: "Close Stopped Agents", group: "View" },
   { id: "keyboard-shortcuts", title: "Keyboard Shortcuts", group: "Help", key: "/", menu: true, skipInEditor: true },
   { id: "report-bug", title: "Report a Bug…", group: "Help", menu: true },
   { id: "focus-input", title: "Focus the Message Box", group: "Chat", key: "l" },
