@@ -608,7 +608,7 @@ pub fn scan(env: &Env, cancel: &AtomicBool, progress: &(dyn Fn(String) + Sync)) 
                 let out = job(env, cancel);
                 results.lock().unwrap_or_else(|e| e.into_inner()).push(out);
                 let n = done.fetch_add(1, Ordering::SeqCst) + 1;
-                if n % 10 == 0 || n == total {
+                if n.is_multiple_of(10) || n == total {
                     progress(format!("Measured {n} of {total} places"));
                 }
             });
@@ -627,7 +627,7 @@ pub fn scan(env: &Env, cancel: &AtomicBool, progress: &(dyn Fn(String) + Sync)) 
     let mut seen = HashSet::new();
     all.items.retain(|i| seen.insert(i.id.clone()));
     link_within(&mut all.items);
-    all.items.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    all.items.sort_by_key(|i| std::cmp::Reverse(i.bytes));
     all
 }
 

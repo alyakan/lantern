@@ -303,7 +303,7 @@ impl Storage {
             let mut inner = self.lock();
             inner.items.retain(|i| i.kind != Kind::Trash);
             inner.items.extend(trash);
-            inner.items.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+            inner.items.sort_by_key(|i| std::cmp::Reverse(i.bytes));
         }
         Ok(outcomes)
     }
@@ -431,7 +431,7 @@ fn results(view: &View, input: &Value) -> String {
     let min = input["min_mb"].as_u64().unwrap_or(0) * 1_000_000;
     let kind = input["kind"].as_str();
     let mut rows: Vec<&Item> = view.items.iter().filter(|i| i.bytes >= min && kind.is_none_or(|k| serde_json::to_value(i.kind).ok().and_then(|v| v.as_str().map(|s| s == k)).unwrap_or(false))).collect();
-    rows.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+    rows.sort_by_key(|i| std::cmp::Reverse(i.bytes));
     let total = rows.len();
     let mut lines = vec!["id | kind | size | risk | idle days | name | how it comes back / why it isn't safe".to_string()];
     for i in rows.iter().take(limit) {
