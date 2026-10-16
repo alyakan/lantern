@@ -168,10 +168,13 @@ An agent works on its own branch, and only you can approve merging it. When the 
 
 ![A merge card on the Lead and on the Login form agent: Review diff, Approve merge, Not yet](images/team-merge.png)
 
-- **Show files** lists the files with their line counts.
+- **Show files** lists the files with their line counts. The arrow before a file opens its changes right on the card; its name opens it in the side panel.
+- **Run tests** runs the project's tests in that agent's worktree, only when you press it. Lantern finds the command itself (a `test` script in package.json, Cargo.toml, pytest settings or a Makefile `test` target) and shows it next to the button; **Change** lets you type another, and it is remembered for the project. If Lantern can't tell, it says so and asks you to type one. What you type is shown back as the words it will run, and nothing goes through a shell (so `&&` and pipes are refused with a reason). While it runs you see the clock and the line it is on, with **Cancel**; a run stops by itself after 10 minutes. Afterwards the card says it plainly ("Tests passed: 214", "3 tests failed"), how long it took, and the end of the output on request. The result stays on the card, and says **Out of date** once the branch or its loose work has changed since. A run that leaves new files in the worktree says so, because they would no longer match what was proposed.
+- **Approve merge** merges the branch into your folder. If the tests failed on this very branch, or are still running, the card asks once more (**Tests failed: merge anyway?**); with passing tests, no tests, or an out-of-date result it merges as before. If your folder has uncommitted changes, it says so and offers to try again.
 - **Review diff** opens the side panel (which stays beside the canvas and remembers whether it was open) on that branch against its base, and each file listed opens its diff.
-- **Approve merge** merges the branch into your folder. If your folder has uncommitted changes, it says so and offers to try again.
 - **Not yet** leaves a quiet line that the Lead was told.
+
+Settings → General has **Run tests when a merge is proposed** (off by default): with it on, the tests start by themselves as the card appears, when Lantern knows the project's test command.
 
 ### Usage
 
