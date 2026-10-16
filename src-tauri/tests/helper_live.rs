@@ -51,7 +51,7 @@ async fn a_real_claudes_helper_gets_through_and_nothing_else_does() {
         effort: None,
         advisor: None,
         subagent_model: None,
-        helper: HelperConfig { exe: exe.display().to_string(), socket: bridge.socket_path.display().to_string(), role: Role::Normal, providers: vec![] },
+        helper: HelperConfig { exe: exe.display().to_string(), socket: bridge.socket_path.display().to_string(), role: Role::Normal, providers: vec![], project_notes: None },
         path_env: std::env::var("PATH").ok(),
     };
     let mut session = Session::spawn(&cfg, Arc::new(move |ev| { let _ = tx.send(ev); }), Arc::new(|_: &str, _: Option<String>| {})).unwrap();
@@ -132,7 +132,7 @@ async fn a_real_claude_takes_the_servers_instructions_and_calls_a_tool() {
         effort: None,
         advisor: None,
         subagent_model: None,
-        helper: HelperConfig { exe: exe.display().to_string(), socket: bridge.socket_path.display().to_string(), role: Role::Normal, providers: vec![] },
+        helper: HelperConfig { exe: exe.display().to_string(), socket: bridge.socket_path.display().to_string(), role: Role::Normal, providers: vec![], project_notes: None },
         path_env: std::env::var("PATH").ok(),
     };
     let mut session = Session::spawn(&cfg, Arc::new(move |ev| { let _ = tx.send(ev); }), Arc::new(|_: &str, _: Option<String>| {})).unwrap();

@@ -2115,6 +2115,18 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .ship-prompt { max-height: 220px; margin: 6px 0 0; padding: 8px 10px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-subtle); color: var(--text-2); font-family: var(--mono, ui-monospace, monospace); font-size: calc(11.5px * var(--font-scale)); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ship-problem { font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
 .pane-tabs .ship-it { flex: none; margin-left: 4px; white-space: nowrap; }
+/* A project's notes: the revert dialog's frame around a text box, its limit counter and Clear at the far left. */
+.notes-field { width: 100%; min-height: 140px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: calc(13px * var(--font-scale))/1.5 var(--ui); resize: vertical; outline: none; box-sizing: border-box; }
+.notes-field:focus { border-color: var(--faint); }
+.notes-field::placeholder { color: var(--muted-text); }
+.notes-foot { display: flex; justify-content: space-between; gap: 12px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.notes-count { flex: none; font-variant-numeric: tabular-nums; }
+.notes-count.near { color: var(--attn-text); }
+.notes-clear { margin-right: auto; }
+/* At the top of a chat that started with its project's notes: one quiet line, the notes themselves when opened. */
+.notes-applied { flex: none; padding: 8px 20px 0; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
+.notes-applied summary { cursor: pointer; width: fit-content; }
+.notes-applied-text { margin: 6px 0 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-inner); background: var(--bg-subtle); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .revert-undo { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: calc(12px * var(--font-scale)); }
 .revert-undo-text { min-width: 0; }
 .revert-undo-note { flex: 1; color: var(--muted); font-size: calc(11.5px * var(--font-scale)); }
@@ -2719,6 +2731,8 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-badge { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 5px; padding-left: 8px; font-size: calc(11.5px * var(--font-scale)); font-weight: 600; color: var(--attn-text); }
 .sb-branch + .sb-badge { margin-left: 0; }
 .sb-badge-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--attn); }
+/* The note mark beside a project's name: it has notes every new chat starts with. */
+.sb-notes { flex: none; display: inline-flex; align-items: center; color: var(--muted-text); }
 /* + and ⋯ show over the branch or badge while the pointer (or focus) is on the project. */
 .sb-actions { position: absolute; right: 2px; top: -3px; bottom: -3px; display: none; align-items: center; gap: 1px; padding-left: 14px; background: linear-gradient(90deg, transparent, var(--bg) 14px); }
 .sb-header:hover .sb-actions, .sb-header:focus-within .sb-actions { display: flex; }

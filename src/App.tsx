@@ -34,6 +34,9 @@ import type { McpIssue } from "./components/CompletionMenu";
 import type { CloseAgreed, McpServer, MovedFolder, NewRule, NewWorker, OpenPr, RelocationEntry, SkillEntry, UpdateInfo } from "./types";
 import { LAST_FOLDER, OPEN_CHATS, migrateFolderState, withMovedNote, type Migrated } from "./lib/relocate";
 import { BringOldSessionsDialog } from "./components/BringOldSessionsDialog";
+import { ProjectNotesDialog } from "./components/ProjectNotesDialog";
+import { NotesApplied } from "./components/NotesApplied";
+import { notedFolders, notesOf, withNotes } from "./lib/projectNotes";
 import { stepFile, usePersistentState } from "./lib/layout";
 import { NOTIFY_DEFAULTS, NOTIFY_KEY, shouldNotify, type NotifyPrefs } from "./lib/notifyPrefs";
 import { applyTheme, readCustomTheme, readTheme, type TextSize } from "./lib/theme";
@@ -144,6 +147,11 @@ export default function App() {
   const [workflowBy, setWorkflowBy] = usePersistentState<Record<string, Workflow>>("settings.workflowByFolder", {});
   // A team's Subagents setting, per project too: the next team in it starts with the last choice.
   const [subagentsBy, setSubagentsBy] = usePersistentState<Record<string, Subagents>>("settings.subagentsByFolder", {});
+  // The text the user keeps for each project (Project notes): every chat started in it afterwards is told it. It is Lantern's
+  // own, never written into the project's files.
+  const [notesBy, setNotesBy] = usePersistentState<Record<string, string>>("settings.projectNotes", {});
+  // The project whose notes are being edited.
+  const [editingNotes, setEditingNotes] = useState<string | null>(null);
   const permissionsFor = (folder: string): Permissions => (permissionsBy[folder] === "auto" ? "auto" : "ask");
   const launchFor = (folder: string, team = false) => launchOf(permissionsFor(folder), team ? "team" : workflowBy[folder] === "steps" ? "steps" : "chat");
   // Each session's own mode, so reopening one from History brings back the mode it was in, not the folder's latest.
@@ -447,8 +455,12 @@ export default function App() {
     to(slot)({ type: "mode_changed", mode, autoApprove });
     to(slot)({ type: "orchestrator_set", on: orchestrator });
     if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first);
+    // The notes the chat starts with: what is saved now, which a later change doesn't reach.
+    const notes = notesOf(notesBy, folder);
+    to(slot)({ type: "notes_applied", text: notes || null });
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team);
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
-    api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}) }).then(
+    api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}), ...(notes ? { project_notes: notes } : {}) }).then(
       () => {
         if (startGen.current[slot] !== gen) return;
         delete relaunch.current[slot];
@@ -562,6 +574,8 @@ export default function App() {
     const again: TeamRole | undefined = team?.role === "worker" ? { ...team, parentReady: undefined } : team;
     relaunch.current[slot] = () => void resumeIn(slot, folder, sessionId, reuse, again);
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
+    // An agent is told its Lead's notes (the app looks them up), not the notes of its worktree's folder.
+    const notes = team?.role === "worker" ? "" : notesOf(notesBy, folder);
     const open = (as: TeamRole | undefined) =>
       api.openSession(
         slot,
@@ -569,6 +583,7 @@ export default function App() {
         folder,
         // An agent comes back on the model it had (or Sonnet, the agents' default), not on its project's own model.
         { mode, ...settingsFor(slot, h), ...(as?.role === "worker" ? { model: as.model ?? AGENT_MODEL } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared", read_only: !!as.agentRole?.read_only } } : {}) },
+        { mode, ...settingsFor(slot, h), ...(as?.role === "worker" ? { model: as.model ?? AGENT_MODEL } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(notes ? { project_notes: notes } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared" } } : {}) },
         sessionId,
       );
     // A worker waits for its main agent: if that one didn't open, this one stays closed too, under it, where Retry can try again.
@@ -589,6 +604,7 @@ export default function App() {
           startRoles(slot, folder);
         }
         to(slot)({ type: "history_loaded", sessionId, events: opened.events, movedFrom: opened.moved_from });
+        if (notes) to(slot)({ type: "notes_applied", text: notes });
         to(slot)({ type: "session_ready" });
         return true;
       })
@@ -1569,6 +1585,8 @@ export default function App() {
     // History with its search box ready: what was said in any past chat.
     const searchChats: PaletteEntry = { id: "search-chats", title: "Search all chats…", group: "View", shortcut: null, run: () => void openHistory() };
     return [...availableActions(), searchChats, ...permissions, ...workflows, ...harnesses, ...themes, ...tabs];
+    const project = state.folder ? [{ id: "project-notes", title: "Project notes…", group: "Project", shortcut: null, run: () => setEditingNotes(state.folder) } satisfies PaletteEntry] : [];
+    return [...availableActions(), ...project, ...permissions, ...workflows, ...harnesses, ...themes, ...tabs];
   };
   // The Work menu: Build, Debug and Design are Step by step in that flavour; Review a PR lists the open pull requests and
   // starts a review on the one chosen; Start a team makes an empty chat a team's Lead, and otherwise starts a new one.
@@ -1662,6 +1680,8 @@ export default function App() {
     const pinned = take<Record<string, string[]>>("settings.pinnedSessions");
     if (pinned) setPinnedBy(pinned);
     roleStore.carry(changed);
+    const notes = take<Record<string, string>>("settings.projectNotes");
+    if (notes) setNotesBy(notes);
     const colors = take<Record<string, number>>("sidebar.projectColors");
     if (colors) setProjectColors(colors);
     const order = take<string[]>("sidebar.projectOrder");
@@ -1765,6 +1785,7 @@ export default function App() {
     onNewChatIn: (folder: string) => startFresh(folder),
     onNewTeamIn: (folder: string) => newOrchestra(folder),
     onBringOld: (folder: string) => setBringing({ destination: folder, from: null }),
+    onProjectNotes: (folder: string) => setEditingNotes(folder),
     onReveal: (folder: string) => void revealItemInDir(folder).catch(() => {}),
     onRemove: (folder: string) => setHiddenFolders([...hiddenFolders.filter((f) => f !== folder), folder]),
     onOpenFolder: openFolder,
@@ -1795,6 +1816,7 @@ export default function App() {
     onNewChatIn: then(sidebarHandlers.onNewChatIn),
     onNewTeamIn: then(sidebarHandlers.onNewTeamIn),
     onBringOld: then(sidebarHandlers.onBringOld),
+    onProjectNotes: then(sidebarHandlers.onProjectNotes),
     onOpenFolder: then(sidebarHandlers.onOpenFolder),
     onNewChat: then(sidebarHandlers.onNewChat),
     onNewTeam: then(sidebarHandlers.onNewTeam),
@@ -1818,6 +1840,7 @@ export default function App() {
     onDismissMoved: relocateMenu.onDismiss,
     colors: projectColors,
     onColors: setProjectColors,
+    noted: notedFolders(notesBy),
   };
 
   const restartToUpdate = () => {
@@ -1942,6 +1965,7 @@ export default function App() {
               </ChatStoreContext.Provider>
             ) : (
             <section className="chat-pane">
+              {state.folder && state.notesApplied && <NotesApplied text={state.notesApplied} />}
               {!state.folder ? (
                 // Until a folder is open: open one, or pick a recent project. No box, no side panel.
                 openingLast ? (
@@ -2084,6 +2108,14 @@ export default function App() {
         )}
         {shortcutsOpen && <ShortcutSheet available={availableActions().map((a) => a.id)} onClose={() => setShortcutsOpen(false)} />}
         {whatsNew && <WhatsNew version={whatsNew.version} notes={whatsNew.notes} onClose={() => setWhatsNew(null)} />}
+        {editingNotes && (
+          <ProjectNotesDialog
+            project={basename(editingNotes)}
+            notes={notesOf(notesBy, editingNotes)}
+            onSave={(text) => setNotesBy(withNotes(notesBy, editingNotes, text))}
+            onClose={() => setEditingNotes(null)}
+          />
+        )}
         {bringing && (
           <BringOldSessionsDialog
             destination={bringing.destination}

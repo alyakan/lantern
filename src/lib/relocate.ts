@@ -19,6 +19,8 @@ export const FOLDER_RECORDS = [
   "settings.teamTemplatesByFolder",
   // Which of Ship it's steps (commit, push, pull request) were ticked last.
   "ship.ticksByFolder",
+  // The text every new chat in the project starts with (Project notes in the project's ⋯ menu).
+  "settings.projectNotes",
 ] as const;
 
 /** Lantern's lists of folders that name the folder itself: the moved folder takes the old one's place in them. */

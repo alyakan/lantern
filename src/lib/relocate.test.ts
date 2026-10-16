@@ -34,6 +34,7 @@ describe("migrateFolderState", () => {
       "settings.teamTemplatesByFolder": { [OLD]: [{ id: "build-audit" }] },
       "merge.testCommandByFolder": { [OLD]: "npm run test:unit" },
       "ship.ticksByFolder": { [OLD]: { commit: true, push: false } },
+      "settings.projectNotes": { [OLD]: "always use pnpm" },
     });
     const changed = migrateFolderState(store, OLD, NEXT);
     expect(Object.keys(changed).sort()).toEqual([...FOLDER_RECORDS].sort());
@@ -50,6 +51,7 @@ describe("migrateFolderState", () => {
     expect(read(store, "settings.teamTemplatesByFolder")).toEqual({ [OLD]: [{ id: "build-audit" }], [NEXT]: [{ id: "build-audit" }] });
     expect(read(store, "merge.testCommandByFolder")).toEqual({ [OLD]: "npm run test:unit", [NEXT]: "npm run test:unit" });
     expect(read(store, "ship.ticksByFolder")).toEqual({ [OLD]: { commit: true, push: false }, [NEXT]: { commit: true, push: false } });
+    expect(read(store, "settings.projectNotes")).toEqual({ [OLD]: "always use pnpm", [NEXT]: "always use pnpm" });
     // What was returned is what was written.
     expect(changed["settings.permissionsByFolder"]).toEqual(read(store, "settings.permissionsByFolder"));
   });
