@@ -92,22 +92,56 @@ export function overlaps(a: Box, b: Box, gap = 0): boolean {
 /** Where the first agent goes. */
 export const firstBox = (): Box => ({ x: 0, y: 0, ...MAIN_SIZE });
 
+/** How many cards sit side by side below the Lead before the next row starts: wide enough to fill a window, never far off to the right. */
+export const PLACE_COLUMNS = 3;
+
+const free = (box: Box, existing: Box[]) => !existing.some((e) => overlaps(box, e, GAP / 2));
+
 /**
- * Where a new worker goes: in columns to the right of `parent`, two to a column (level with it, then below), at the
- * first spot that doesn't sit on another agent. Two rows keep the whole orchestra wider than tall, which is the shape of
- * the window, so it fits at a size where chats can still be read. Moved agents are respected: it only looks for free space.
+ * Where a new worker goes: in the free space below `lead`, filling a row of PLACE_COLUMNS from the left, then wrapping to the next
+ * row down. The first card is right under the Lead; a spot another card sits on (one the user moved there) is skipped, so a card never
+ * overlaps another and nothing that is already placed moves. Only called for a card that has no place yet.
  */
-export function placeWorker(existing: Box[], parent: Box, size: Size = WORKER_SIZE): Box {
-  const rows = [0, 1];
-  for (let col = 0; col < 50; col++) {
-    for (const row of rows) {
-      const box: Box = { x: parent.x + parent.w + GAP + col * (size.w + GAP), y: parent.y + row * (size.h + GAP), ...size };
-      if (!existing.some((e) => overlaps(box, e, GAP / 2))) return box;
+export function placeWorker(existing: Box[], lead: Box, size: Size = WORKER_SIZE): Box {
+  const top = lead.y + lead.h + GAP;
+  for (let row = 0; row < 60; row++) {
+    for (let col = 0; col < PLACE_COLUMNS; col++) {
+      const box: Box = { x: lead.x + col * (size.w + GAP), y: top + row * (size.h + GAP), ...size };
+      if (free(box, existing)) return box;
     }
   }
   // Somewhere absurdly crowded: stack below everything.
-  const b = bounds(existing) ?? parent;
-  return { x: parent.x + parent.w + GAP, y: b.y + b.h + GAP, ...size };
+  const b = bounds(existing) ?? lead;
+  return { x: lead.x, y: b.y + b.h + GAP, ...size };
+}
+
+/**
+ * Where a card that checks a builder's work goes: beside it (to its right), else right below it, else the nearest free spot around it
+ * (a step left, diagonally, two steps off). With no room around the builder it is placed like any worker, below the Lead.
+ */
+export function placeCheck(existing: Box[], builder: Box, lead: Box | undefined, size: Size = WORKER_SIZE): Box {
+  const stepX = size.w + GAP;
+  const stepY = size.h + GAP;
+  // The first step off the builder clears its own edge; the rest are whole cards. Listed in the order they are tried.
+  const at = (dx: number, dy: number): Box => ({
+    x: dx === 0 ? builder.x : dx > 0 ? builder.x + builder.w + GAP + (dx - 1) * stepX : builder.x - GAP - size.w + (dx + 1) * stepX,
+    y: dy === 0 ? builder.y : dy > 0 ? builder.y + builder.h + GAP + (dy - 1) * stepY : builder.y - GAP - size.h + (dy + 1) * stepY,
+    ...size,
+  });
+  const around: [number, number][] = [[1, 0], [0, 1], [1, 1], [-1, 0], [-1, 1], [0, -1], [1, -1], [2, 0], [-1, -1], [2, 1], [0, 2], [1, 2]];
+  for (const [dx, dy] of around) {
+    const box = at(dx, dy);
+    if (free(box, existing)) return box;
+  }
+  return placeWorker(existing, lead ?? builder, size);
+}
+
+/** Whether at least `min` pixels of `box` (in each direction) are on screen in `viewport` through `view`: a card the user can see and grab. */
+export function inView(view: View, viewport: Size, box: Box, min = 80): boolean {
+  const a = toScreen(view, box);
+  const w = Math.min(a.x + box.w * view.zoom, viewport.w) - Math.max(a.x, 0);
+  const h = Math.min(a.y + box.h * view.zoom, viewport.h) - Math.max(a.y, 0);
+  return w >= min && h >= min;
 }
 
 export interface Tether {
