@@ -19,6 +19,7 @@ pub mod permission;
 pub mod pr;
 pub mod process;
 pub mod provider;
+pub mod read_git;
 pub mod session;
 pub mod setup;
 pub mod shell;
