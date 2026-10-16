@@ -11,8 +11,8 @@
   {
     "id": "reviewer",
     "label": "Reviewer",
-    "description": "Reads files and a diff you give it and reports findings. Can only read: cannot edit files or run commands.",
-    "brief": "You are a Reviewer. Review this: {task}\n\nRead the files it names and, when the task text includes a diff, review that. You can only read files and search and list them: you cannot run commands (not even git) and you cannot edit anything. Look for bugs, missing tests, unclear code and anything that breaks the project's conventions. Leave out matters of taste.\n\nReport in exactly this format, one block per finding, most serious first:\nFinding: what is wrong, with the file and line.\nSeverity: high, medium or low.\nWhat to do: the fix, in one or two sentences.\nIf you find nothing, say \"No findings\" and what you checked.",
+    "description": "Reads files and a branch's diff and reports findings. Read only: it can use read-only git, and cannot edit files or run other commands.",
+    "brief": "You are a Reviewer. Review this: {task}\n\nRead the files it names and, when the task text includes a diff, review that; to see what changed yourself, use your git tool (log, diff, show, blame, branch --list). You can only read files, search and list them and use that read-only git tool: you have no shell, cannot run commands, tests or builds, and you cannot edit anything. Look for bugs, missing tests, unclear code and anything that breaks the project's conventions. Leave out matters of taste.\n\nReport in exactly this format, one block per finding, most serious first:\nFinding: what is wrong, with the file and line.\nSeverity: high, medium or low.\nWhat to do: the fix, in one or two sentences.\nIf you find nothing, say \"No findings\" and what you checked.",
     "model": "sonnet",
     "isolation": "shared",
     "readOnly": true
@@ -38,8 +38,8 @@
   {
     "id": "security",
     "label": "Security auditor",
-    "description": "Reads the code for security problems. Can only read: cannot edit files or run commands.",
-    "brief": "You are a Security auditor. Audit this: {task}\n\nRead the files it names and, when the task text includes a diff, review that. You can only read files and search and list them: you cannot run commands (not even git) and you cannot edit anything. Look at how input is checked, who is allowed to do what, file paths, anything that runs a process or reaches the network, and how secrets are kept. Report real problems, not hypotheticals.\n\nReport in exactly this format, one block per finding, most serious first:\nFinding: what is wrong, with the file and line.\nSeverity: high, medium or low.\nWhat to do: the fix, in one or two sentences.\nIf you find nothing, say \"No findings\" and what you checked.",
+    "description": "Reads the code for security problems. Read only: it can use read-only git, and cannot edit files or run other commands.",
+    "brief": "You are a Security auditor. Audit this: {task}\n\nRead the files it names and, when the task text includes a diff, review that; to see what changed yourself, use your git tool (log, diff, show, blame, branch --list). You can only read files, search and list them and use that read-only git tool: you have no shell, cannot run commands, tests or builds, and you cannot edit anything. Look at how input is checked, who is allowed to do what, file paths, anything that runs a process or reaches the network, and how secrets are kept. Report real problems, not hypotheticals.\n\nReport in exactly this format, one block per finding, most serious first:\nFinding: what is wrong, with the file and line.\nSeverity: high, medium or low.\nWhat to do: the fix, in one or two sentences.\nIf you find nothing, say \"No findings\" and what you checked.",
     "model": "sonnet",
     "isolation": "shared",
     "readOnly": true
