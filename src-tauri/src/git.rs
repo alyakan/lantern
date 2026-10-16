@@ -49,7 +49,7 @@ const HARDENED: [&str; 24] = [
 ];
 
 /// Variables that would point git at another repository, index or config than the one it is run in.
-const REDIRECTS: [&str; 6] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
+pub(crate) const REDIRECTS: [&str; 6] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT"];
 
 /// Where a git command runs.
 #[derive(Clone, Copy)]
@@ -329,6 +329,19 @@ pub fn snapshot(repo: &Path, wt: &Checked, branch: &str, path_env: Option<&str>)
         return Err(format!("Its worktree isn't on {branch} now, so there is no telling what a merge would take."));
     }
     Ok(Snapshot { tip: tip_of(repo, branch, path_env)?, loose: loose_files(wt, path_env)? })
+}
+
+/// What the worker's branch is at and what is loose in its worktree, down to each loose file's size and time: it changes
+/// when the branch moves or any of its loose work does. A test run compares it to say whether it still describes the branch.
+pub fn fingerprint(repo: &Path, wt: &Checked, branch: &str, path_env: Option<&str>) -> Result<(Snapshot, String), String> {
+    let seen = snapshot(repo, wt, branch, path_env)?;
+    let mut text = format!("{}\n", seen.tip);
+    for name in &seen.loose {
+        // A link is the link itself, never what it points at.
+        let stat = std::fs::symlink_metadata(wt.root.join(name)).ok().map(|m| (m.len(), m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos())));
+        text.push_str(&format!("{name}\0{stat:?}\n"));
+    }
+    Ok((seen, text))
 }
 
 /// What `commit_snapshot` found.

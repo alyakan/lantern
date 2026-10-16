@@ -6,6 +6,7 @@
 //! Everything here is written against `Host`, which is the app (slots, sessions, events); tests use a fake one.
 
 use crate::git;
+use crate::merge_tests::{self, Capped, Detected, Report};
 use crate::permission::bridge::OrchestraHandler;
 use crate::permission::protocol::BridgeResponse;
 use crate::provider::ProviderId;
@@ -15,6 +16,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -187,6 +189,64 @@ struct Worker {
     merge: Merge,
     /// The merge as it was last proposed: approving merges that and nothing else.
     proposed: Option<Proposed>,
+    /// The merge card's test run (see `run_merge_tests`).
+    tests: TestsState,
+}
+
+/// A worker's test run for its merge card: the one going now, and the last that finished.
+#[derive(Default)]
+struct TestsState {
+    running: Option<RunningTests>,
+    last: Option<LastTests>,
+}
+
+struct RunningTests {
+    started: Instant,
+    command: Vec<String>,
+    cancel: Arc<tokio::sync::Notify>,
+    live: Arc<Mutex<Capped>>,
+}
+
+/// Tests marked as going, with what running them needs.
+struct BegunTests {
+    main: String,
+    wt: git::Worktree,
+    command: Vec<String>,
+    cancel: Arc<tokio::sync::Notify>,
+    live: Arc<Mutex<Capped>>,
+}
+
+struct LastTests {
+    report: Report,
+    /// What the branch and its loose work were when the run ended (see `git::fingerprint`).
+    fingerprint: String,
+    /// The branch moved while the tests ran, so they ran on something that isn't what it is now.
+    moved: bool,
+}
+
+/// What the merge card is told about its tests: whether and how to run them, the run going now, and the last one.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TestsInfo {
+    /// The project's folder, which the typed command is remembered for.
+    pub project: String,
+    pub detected: Option<Detected>,
+    pub running: Option<RunningInfo>,
+    pub last: Option<LastInfo>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RunningInfo {
+    pub command: Vec<String>,
+    pub elapsed_ms: u64,
+    pub last_line: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LastInfo {
+    #[serde(flatten)]
+    pub report: Report,
+    /// The branch (or its loose work) isn't what it was when the tests ran.
+    pub stale: bool,
 }
 
 /// A merge as the user was shown it: the branch it goes into, and the commit and loose files it takes.
@@ -212,6 +272,8 @@ pub struct Orchestra {
     host: Arc<dyn Host>,
     inner: Mutex<Inner>,
     wait_notice: Duration,
+    /// The user's setting: a proposed merge's tests run by themselves.
+    auto_tests: AtomicBool,
 }
 
 fn clip(s: &str, max: usize) -> String {
@@ -316,12 +378,12 @@ pub fn condense(events: &[UiEvent]) -> Vec<String> {
 
 impl Orchestra {
     pub fn new(host: Arc<dyn Host>) -> Arc<Self> {
-        Arc::new(Self { host, inner: Mutex::default(), wait_notice: WAIT_NOTICE })
+        Arc::new(Self { host, inner: Mutex::default(), wait_notice: WAIT_NOTICE, auto_tests: AtomicBool::new(false) })
     }
 
     #[cfg(test)]
     fn with_wait_notice(host: Arc<dyn Host>, wait_notice: Duration) -> Arc<Self> {
-        Arc::new(Self { host, inner: Mutex::default(), wait_notice })
+        Arc::new(Self { host, inner: Mutex::default(), wait_notice, auto_tests: AtomicBool::new(false) })
     }
 
     /// `slot` is a main agent: its workers report to it.
@@ -375,6 +437,7 @@ impl Orchestra {
                 waiting_since: None,
                 wait_seq: 0,
                 merge: Merge::None,
+                tests: TestsState::default(),
                 proposed: None,
             },
         );
@@ -405,6 +468,12 @@ impl Orchestra {
     /// there is nobody to message, stop or merge them, and nobody to tell what they do.
     pub fn forget(&self, slot: &str) {
         let mut inner = self.inner.lock().unwrap();
+        // Tests going for it, or for its workers, have no card left to report to.
+        for (_, w) in inner.workers.iter().filter(|(id, w)| *id == slot || w.parent == slot) {
+            if let Some(r) = &w.tests.running {
+                r.cancel.notify_one();
+            }
+        }
         inner.mains.remove(slot);
         inner.workers.retain(|id, w| id != slot && w.parent != slot);
         let live: std::collections::HashSet<String> = inner.workers.keys().cloned().collect();
@@ -526,6 +595,7 @@ impl Orchestra {
                     waiting_since: None,
                     wait_seq: 0,
                     merge: Merge::None,
+                    tests: TestsState::default(),
                     proposed: None,
                 },
             );
@@ -760,10 +830,19 @@ impl Orchestra {
             w.proposed = Some(proposal.clone());
         }
         let loose = proposal.seen.loose;
+        // With "Run tests when a merge is proposed" on, they are going before the card is drawn. A project whose tests
+        // Lantern can't tell, or tests already going, just leave the card to the user.
+        let auto = if self.auto_tests.load(Ordering::SeqCst) { self.begin_tests(&id, None).ok() } else { None };
         self.host.emit(
             main,
             UiEvent::MergeProposed { worker: id.clone(), name, branch: wt.branch.clone(), into: into.clone(), summary, commits: stats.commits, files: stats.files, uncommitted: loose.len(), loose },
         );
+        if let Some(begun) = auto {
+            let (this, id) = (self.clone(), id.clone());
+            tokio::spawn(async move {
+                let _ = this.finish_tests(&id, begun).await;
+            });
+        }
         Ok(format!("Asked the user to merge {} into {into}. Only they can approve it; you'll get a note with their answer.", untrusted(&wt.branch, 120)))
     }
 
@@ -773,6 +852,8 @@ impl Orchestra {
     pub async fn approve_merge(self: &Arc<Self>, worker: &str) -> Result<(), String> {
         // Only a merge the main agent proposed can be approved, and only once at a time.
         let (main, name, wt, proposed) = self.begin_merge(worker)?;
+        // Tests still going would be writing into the worktree being merged.
+        self.cancel_merge_tests(worker);
         let repo = match self.host.main_folder(&main) {
             Ok(r) => r,
             Err(e) => {
@@ -879,6 +960,7 @@ impl Orchestra {
                 return Err(format!("Its worktree has {} uncommitted change{}, which removing it would throw away.", loose.len(), if loose.len() == 1 { "" } else { "s" }));
             }
         }
+        self.cancel_merge_tests(worker);
         self.host.stop(worker).await;
         // A branch Lantern didn't make (an older save names what the worktree had checked out) stays, whatever happens.
         let (branch, e) = (wt.branch.clone(), env);
@@ -1116,6 +1198,114 @@ impl Orchestra {
         };
         self.wake(&main, text);
     }
+}
+
+/// The merge card's tests: run in the worker's worktree when the user asks (or the setting asks for them as a merge is
+/// proposed), cancellable, and remembered with what the branch was when they ran.
+impl Orchestra {
+    /// "Run tests when a merge is proposed" (the user's setting).
+    pub fn set_auto_tests(&self, on: bool) {
+        self.auto_tests.store(on, Ordering::SeqCst);
+    }
+
+    /// Whether a worker's tests are going, what runs them, and the last result with whether it still describes the branch.
+    pub async fn merge_tests_info(self: &Arc<Self>, worker: &str) -> Result<TestsInfo, String> {
+        let (main, wt, running, last) = {
+            let inner = self.inner.lock().unwrap();
+            let w = inner.workers.get(worker).ok_or(GONE)?;
+            let running = w.tests.running.as_ref().map(|r| (r.command.clone(), r.started.elapsed(), r.live.clone()));
+            let last = w.tests.last.as_ref().map(|l| (l.report.clone(), l.fingerprint.clone(), l.moved));
+            (w.parent.clone(), w.worktree.clone().ok_or("That agent shares your folder, so there is no branch to test.")?, running, last)
+        };
+        let repo = self.host.main_folder(&main)?;
+        let env = self.host.path_env().await;
+        let (r, root, branch) = (repo.clone(), wt.root.clone(), wt.branch.clone());
+        let (detected, last) = tokio::task::spawn_blocking(move || {
+            let detected = merge_tests::detect(&root);
+            let last = last.map(|(report, fingerprint, moved)| {
+                // Not the same branch and loose work as when the tests ran: what they said may not be true of it now.
+                let stale = moved || git::verify_worktree(&r, &root, env.as_deref()).and_then(|c| git::fingerprint(&r, &c, &branch, env.as_deref())).map_or(true, |(_, now)| now != fingerprint);
+                LastInfo { report, stale }
+            });
+            (detected, last)
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+        let running = running.map(|(command, elapsed, live)| RunningInfo { command, elapsed_ms: elapsed.as_millis() as u64, last_line: live.lock().unwrap().last_line() });
+        Ok(TestsInfo { project: repo.display().to_string(), detected, running, last })
+    }
+
+    /// Marks the worker's tests as going, before anything runs: a second ask finds them going, and a card that appears
+    /// right after sees them. `command`: what the user typed (already split), else what the worktree says to run.
+    fn begin_tests(&self, worker: &str, command: Option<Vec<String>>) -> Result<BegunTests, String> {
+        let mut inner = self.inner.lock().unwrap();
+        let w = inner.workers.get_mut(worker).ok_or(GONE)?;
+        let wt = w.worktree.clone().ok_or("That agent shares your folder, so there is no branch to test.")?;
+        if w.merge != Merge::Proposed {
+            return Err("There is no merge waiting for that agent, so there is nothing to test.".into());
+        }
+        if w.tests.running.is_some() {
+            return Err("The tests are already running.".into());
+        }
+        let command = match command {
+            Some(c) => {
+                merge_tests::check_words(&c)?;
+                c
+            }
+            None => merge_tests::detect(&wt.root).ok_or("Lantern can't tell how this project is tested. Type the command to run.")?.command,
+        };
+        let (cancel, live) = (Arc::new(tokio::sync::Notify::new()), Arc::new(Mutex::new(Capped::default())));
+        w.tests.running = Some(RunningTests { started: Instant::now(), command: command.clone(), cancel: cancel.clone(), live: live.clone() });
+        Ok(BegunTests { main: w.parent.clone(), wt, command, cancel, live })
+    }
+
+    /// Runs the project's tests in the worker's worktree, for its merge card, and returns how they went (None: the user
+    /// cancelled). The command is the user's, as words (see `merge_tests::split_command`), or what the worktree says.
+    pub async fn run_merge_tests(self: &Arc<Self>, worker: &str, command: Option<Vec<String>>) -> Result<Option<LastInfo>, String> {
+        let begun = self.begin_tests(worker, command)?;
+        self.finish_tests(worker, begun).await
+    }
+
+    async fn finish_tests(self: &Arc<Self>, worker: &str, begun: BegunTests) -> Result<Option<LastInfo>, String> {
+        let outcome = self.run_tests_in(&begun.main, &begun.wt, &begun.command, begun.cancel, begun.live).await;
+        // Whatever came of it, they are not going any more.
+        if let Some(w) = self.inner.lock().unwrap().workers.get_mut(worker) {
+            w.tests.running = None;
+            if let Ok(Some((report, fingerprint, moved))) = &outcome {
+                w.tests.last = Some(LastTests { report: report.clone(), fingerprint: fingerprint.clone(), moved: *moved });
+            }
+        }
+        // Looked at again from here so the card gets the same answer as any other asking would.
+        outcome.map(|done| done.map(|(report, _, moved)| LastInfo { report, stale: moved }))
+    }
+
+    /// The run itself: the worktree is checked to be Lantern's own first, and what the branch was before and after is
+    /// kept, so a result can later say whether it still holds. A cancelled run leaves nothing.
+    async fn run_tests_in(self: &Arc<Self>, main: &str, wt: &git::Worktree, command: &[String], cancel: Arc<tokio::sync::Notify>, live: Arc<Mutex<Capped>>) -> Result<Option<(Report, String, bool)>, String> {
+        let repo = self.host.main_folder(main)?;
+        let env = self.host.path_env().await;
+        let (before, _) = look(repo.clone(), wt.root.clone(), wt.branch.clone(), env.clone()).await?;
+        let finished = merge_tests::run(&wt.root, command, env.as_deref(), merge_tests::DEFAULT_LIMIT, cancel, live).await?;
+        let missing_packages = command.first().is_some_and(|c| c == "npm") && wt.root.join("package.json").exists() && !wt.root.join("node_modules").exists();
+        let Some(mut report) = merge_tests::report(command, &finished, merge_tests::DEFAULT_LIMIT, missing_packages) else { return Ok(None) };
+        // The run may have written files of its own (coverage, build output): they are said, and not counted as the branch changing.
+        let (after, fingerprint) = look(repo, wt.root.clone(), wt.branch.clone(), env).await?;
+        report.new_files = after.loose.iter().filter(|f| !before.loose.contains(f)).take(20).cloned().collect();
+        Ok(Some((report, fingerprint, before.tip != after.tip)))
+    }
+
+    /// The user cancels the tests going for this worker; they stop with everything they started.
+    pub fn cancel_merge_tests(&self, worker: &str) {
+        if let Some(r) = self.inner.lock().unwrap().workers.get(worker).and_then(|w| w.tests.running.as_ref()) {
+            r.cancel.notify_one();
+        }
+    }
+}
+
+/// A worker's branch and loose work as git sees them now (the worktree is checked to be Lantern's own first): what a test
+/// run is compared with.
+async fn look(repo: PathBuf, root: PathBuf, branch: String, env: Option<String>) -> Result<(git::Snapshot, String), String> {
+    tokio::task::spawn_blocking(move || git::verify_worktree(&repo, &root, env.as_deref()).and_then(|c| git::fingerprint(&repo, &c, &branch, env.as_deref()))).await.map_err(|e| e.to_string())?
 }
 
 /// What approving a merge came to.
@@ -1594,6 +1784,140 @@ mod tests {
         assert!(repo.path().join("b.txt").is_file());
         assert!(host.events_for("s1").iter().any(|e| matches!(e, UiEvent::MergeResolved { outcome, detail, .. } if outcome == "merged" && detail == "main")));
         assert_eq!(host.wakes().last().unwrap(), "[Lantern: the user approved the merge: lantern/login is now merged into main.]");
+    }
+
+    fn sh(script: &str) -> Option<Vec<String>> {
+        Some(vec!["sh".to_string(), "-c".to_string(), script.to_string()])
+    }
+
+    async fn proposed_worker(o: &Arc<Orchestra>) {
+        spawn_idle(o, "login").await;
+        commit_in_worktree(o, "w1", "b.txt", "b\n");
+        call(o, "propose_merge", json!({"id": "w1", "summary": "x"})).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_merge_cards_tests_run_in_the_worktree_and_go_stale_when_the_branch_moves() {
+        let (_h, o, repo, _w) = setup();
+        spawn_idle(&o, "login").await;
+        commit_in_worktree(&o, "w1", "b.txt", "b\n");
+        // Only a merge that is waiting on the user has tests to run.
+        assert!(o.run_merge_tests("w1", sh("exit 0")).await.unwrap_err().contains("no merge waiting"));
+        call(&o, "propose_merge", json!({"id": "w1", "summary": "x"})).await.unwrap();
+        assert!(o.run_merge_tests("w1", None).await.unwrap_err().contains("can't tell how this project is tested"));
+        assert!(o.run_merge_tests("w1", Some(vec![])).await.is_err());
+        assert!(o.run_merge_tests("w9", None).await.unwrap_err().contains("no longer part"));
+        let info = o.merge_tests_info("w1").await.unwrap();
+        assert!(info.detected.is_none() && info.running.is_none() && info.last.is_none());
+        assert_eq!(info.project, repo.path().display().to_string());
+
+        let (_, _, wt) = o.worktree_of("w1").unwrap();
+        let ran = o.run_merge_tests("w1", sh("pwd; echo 'test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s'")).await.unwrap().unwrap();
+        assert_eq!((ran.report.result.as_str(), ran.stale), ("passed", false));
+        assert!(ran.report.tail.lines().any(|l| std::fs::canonicalize(l).is_ok_and(|p| p == std::fs::canonicalize(&wt.root).unwrap())), "not run in the worktree: {}", ran.report.tail);
+        // It is the user's own checkout that stays untouched.
+        assert!(!repo.path().join("b.txt").exists());
+        let info = o.merge_tests_info("w1").await.unwrap();
+        assert!(info.running.is_none());
+        assert_eq!(info.last.as_ref().map(|l| (l.report.result.as_str(), l.stale)), Some(("passed", false)));
+
+        // The branch moves: what the tests said no longer describes it.
+        commit_in_worktree(&o, "w1", "c.txt", "c\n");
+        assert!(o.merge_tests_info("w1").await.unwrap().last.unwrap().stale);
+        // A run again says so afresh; one that fails is a result too.
+        let failed = o.run_merge_tests("w1", sh("echo broke; exit 2")).await.unwrap().unwrap();
+        assert_eq!((failed.report.result.as_str(), failed.report.exit_code, failed.stale), ("failed", Some(2), false));
+        // Loose work changing after the run makes it stale as well, even under the same name.
+        std::fs::write(wt.folder.join("loose.txt"), "one\n").unwrap();
+        let again = o.run_merge_tests("w1", sh("exit 0")).await.unwrap().unwrap();
+        assert!(!o.merge_tests_info("w1").await.unwrap().last.unwrap().stale && again.report.new_files.is_empty());
+        std::fs::write(wt.folder.join("loose.txt"), "two, longer\n").unwrap();
+        assert!(o.merge_tests_info("w1").await.unwrap().last.unwrap().stale);
+    }
+
+    #[tokio::test]
+    async fn files_a_test_run_leaves_behind_are_named_and_do_not_make_it_stale() {
+        let (_h, o, _r, _w) = setup();
+        proposed_worker(&o).await;
+        let ran = o.run_merge_tests("w1", sh("touch made.txt")).await.unwrap().unwrap();
+        assert_eq!(ran.report.new_files, vec!["made.txt".to_string()]);
+        assert!(!o.merge_tests_info("w1").await.unwrap().last.unwrap().stale);
+    }
+
+    #[tokio::test]
+    async fn tests_going_are_seen_cancelled_and_leave_the_last_result_alone() {
+        let (_h, o, _r, _w) = setup();
+        proposed_worker(&o).await;
+        o.run_merge_tests("w1", sh("exit 0")).await.unwrap();
+        let (o2, slow) = (o.clone(), tokio::spawn({
+            let o = o.clone();
+            async move { o.run_merge_tests("w1", sh("echo working; sleep 30")).await }
+        }));
+        let mut seen = None;
+        for _ in 0..200 {
+            seen = o2.merge_tests_info("w1").await.unwrap().running;
+            if seen.as_ref().is_some_and(|r| r.last_line == "working") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(seen.unwrap().last_line, "working");
+        // A second run meanwhile is refused, and cancelling stops the first.
+        assert!(o2.run_merge_tests("w1", sh("exit 0")).await.unwrap_err().contains("already running"));
+        o2.cancel_merge_tests("w1");
+        assert!(slow.await.unwrap().unwrap().is_none());
+        let info = o2.merge_tests_info("w1").await.unwrap();
+        assert!(info.running.is_none());
+        assert_eq!(info.last.map(|l| l.report.result), Some("passed".to_string()));
+    }
+
+    #[tokio::test]
+    async fn tests_start_by_themselves_with_the_setting_and_only_where_the_project_says_how() {
+        let (_h, o, _r, _w) = setup();
+        o.set_auto_tests(true);
+        spawn_idle(&o, "login").await;
+        commit_in_worktree(&o, "w1", "b.txt", "b\n");
+        // Nothing says how to test it: the card is the user's to answer.
+        call(&o, "propose_merge", json!({"id": "w1", "summary": "x"})).await.unwrap();
+        assert!(o.merge_tests_info("w1").await.unwrap().running.is_none());
+
+        commit_in_worktree(&o, "w1", "Makefile", "test:\n\t@sleep 1\n\t@echo made\n");
+        call(&o, "propose_merge", json!({"id": "w1", "summary": "x"})).await.unwrap();
+        // Going before the card could be asked about it.
+        let info = o.merge_tests_info("w1").await.unwrap();
+        assert_eq!(info.running.map(|r| r.command), Some(vec!["make".to_string(), "test".to_string()]));
+        let mut last = None;
+        for _ in 0..200 {
+            last = o.merge_tests_info("w1").await.unwrap().last;
+            if last.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert_eq!(last.map(|l| l.report.result), Some("passed".to_string()));
+        // Off again: a new proposal leaves them alone.
+        o.set_auto_tests(false);
+        commit_in_worktree(&o, "w1", "d.txt", "d\n");
+        call(&o, "propose_merge", json!({"id": "w1", "summary": "x"})).await.unwrap();
+        assert!(o.merge_tests_info("w1").await.unwrap().running.is_none());
+    }
+
+    #[tokio::test]
+    async fn approving_a_merge_stops_tests_still_going() {
+        let (_h, o, _r, _w) = setup();
+        proposed_worker(&o).await;
+        let slow = tokio::spawn({
+            let o = o.clone();
+            async move { o.run_merge_tests("w1", sh("sleep 30")).await }
+        });
+        for _ in 0..200 {
+            if o.merge_tests_info("w1").await.unwrap().running.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        o.approve_merge("w1").await.unwrap();
+        assert!(slow.await.unwrap().unwrap().is_none());
     }
 
     #[tokio::test]
