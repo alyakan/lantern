@@ -6,6 +6,7 @@ import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions
 import { needingYou, orchestraNodes } from "../lib/orchestraView";
 import { GAP, MAIN_SIZE, overlaps, SUMMARY_ZOOM, WORKER_SIZE } from "../lib/canvas";
 import { Canvas, newLayout, placeNodes, UPDATE_REQUEST } from "./Canvas";
+import { NUDGE_MESSAGE } from "./NodeBody";
 
 // jsdom has no PointerEvent, so its clientX, button and pointerId would never reach a handler.
 if (typeof window.PointerEvent === "undefined") {
@@ -1041,7 +1042,67 @@ describe("an agent at work that has gone quiet", () => {
     const stuck = screen.getByLabelText(/Agent Worker 1, Quiet 3m/);
     expect(stuck).toHaveClass("stuck");
     expect(stuck.querySelector(".node-status")).toHaveTextContent("Quiet 3m");
-    expect(stuck.querySelector(".node-status")?.getAttribute("title")).toMatch(/send it a message, or stop it/);
+    expect(stuck.querySelector(".node-status")?.getAttribute("title")).toMatch(/nudge it, interrupt it or restart it/);
+  });
+
+  it("says so in its card, with Nudge, Interrupt and Restart, only once it is quiet", () => {
+    setup(working(45_000));
+    expect(screen.queryByRole("button", { name: "Nudge" })).toBeNull();
+    cleanup();
+    setup(working(200_000));
+    const line = screen.getByText(/Quiet for 3 min\. It may be stuck\./);
+    expect(line).toBeInTheDocument();
+    expect(within(line.parentElement!).getAllByRole("button").map((b) => b.textContent)).toEqual(["Nudge", "Interrupt", "Restart"]);
+  });
+
+  it("Nudge asks for a one-line status once for each stretch of quiet", () => {
+    const { acts } = setup(working(200_000));
+    fireEvent.click(screen.getByRole("button", { name: "Nudge" }));
+    expect(acts.send).toHaveBeenCalledTimes(1);
+    expect(acts.send).toHaveBeenCalledWith("w1", NUDGE_MESSAGE);
+    expect(screen.getByRole("button", { name: "Nudged" })).toBeDisabled();
+    expect(acts.stop).not.toHaveBeenCalled();
+    expect(acts.restart).not.toHaveBeenCalled();
+  });
+
+  it("Interrupt stops its turn and nothing else: it isn't restarted or closed", () => {
+    const { acts } = setup(working(200_000));
+    fireEvent.click(screen.getByRole("button", { name: "Interrupt" }));
+    expect(acts.stop).toHaveBeenCalledWith("w1");
+    expect(acts.restart).not.toHaveBeenCalled();
+    expect(acts.closeWorker).not.toHaveBeenCalled();
+  });
+
+  it("Restart says what it loses first, and does nothing until it is confirmed", () => {
+    const { acts } = setup(working(200_000));
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    expect(screen.getByRole("alertdialog", { name: "Restart this agent?" })).toHaveTextContent(/step it is in the middle of is lost/);
+    expect(acts.restart).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(acts.restart).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Nudge" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    fireEvent.click(screen.getByRole("button", { name: "Restart anyway" }));
+    expect(acts.restart).toHaveBeenCalledWith("w1");
+  });
+
+  it("follows the quiet time in Settings", () => {
+    localStorage.setItem("lantern.quietMinutes", "5");
+    try {
+      setup(working(200_000));
+      expect(screen.queryByRole("button", { name: "Nudge" })).toBeNull();
+      expect(screen.getByLabelText(/Agent Worker 1/)).not.toHaveClass("stuck");
+    } finally {
+      localStorage.removeItem("lantern.quietMinutes");
+    }
+  });
+
+  it("is counted in the Team list, which names who", () => {
+    setup(working(200_000));
+    const button = screen.getByRole("button", { name: "Team" });
+    expect(button).toHaveTextContent("1 quiet");
+    fireEvent.click(button);
+    expect(within(screen.getByRole("dialog", { name: "Team" })).getByText("Quiet 3m")).toBeInTheDocument();
   });
 });
 
