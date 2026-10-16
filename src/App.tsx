@@ -1830,7 +1830,6 @@ export default function App() {
   // Projects removed from the recents here (Claude Code keeps their chats; one with a chat open is listed regardless).
   const [hiddenFolders, setHiddenFolders] = usePersistentState<string[]>("sidebar.hidden", []);
   const openByProject = openProjects(chats, { titles, drafts: drafts.current, unread, pinned: pinnedBy });
-  const inbox = inboxItems(chats, openByProject, { unread, describe: describeInput, quiet: guards.quiet });
   // Pull request checks: each project's choice (Off, Tell me, Fix it myself), and the loop that watches the pull request.
   const [prSettings, setPrSettings] = usePersistentState<Record<string, Partial<PrSetting>>>("prChecks.byFolder", {});
   const [prDialog, setPrDialog] = useState<string | null>(null);
@@ -1861,7 +1860,7 @@ export default function App() {
       return v.needsYou && v.snap && target ? [{ folder: v.folder, slot: target, where: basename(v.folder), branch: v.snap.pr.branch, number: v.snap.pr.number, failed: v.snap.checks.filter((c) => c.bucket === "fail").length }] : [];
     }),
   );
-  const inbox = [...inboxItems(chats, openByProject, { unread, describe: describeInput }), ...prRows];
+  const inbox = [...inboxItems(chats, openByProject, { unread, describe: describeInput, quiet: guards.quiet }), ...prRows];
   useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden), true, sidebarHidden ? "Show Sidebar" : "Hide Sidebar");
   useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Expand Sidebar" : "Collapse Sidebar");
   useEffect(() => {

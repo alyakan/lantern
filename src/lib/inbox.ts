@@ -7,8 +7,7 @@ import { quietFor } from "./quiet";
 import { projectLabels, type ProjectOpen } from "./sidebar";
 
 /** What a row is waiting for. `permission` is a plain request Allow and Deny answer; the others are answered where they are. */
-export type InboxKind = "permission" | "question" | "plan" | "reproduce" | "merge" | "held" | "quiet" | "unread";
-export type InboxKind = "permission" | "question" | "plan" | "reproduce" | "merge" | "held" | "unread" | "checks";
+export type InboxKind = "permission" | "question" | "plan" | "reproduce" | "merge" | "held" | "quiet" | "unread" | "checks";
 
 /** One thing waiting on the user: a chat or an agent, in some project, with what it needs. */
 export interface InboxItem {
