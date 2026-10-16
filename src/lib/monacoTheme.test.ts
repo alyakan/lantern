@@ -36,7 +36,7 @@ describe("monacoTheme", () => {
   });
 
   it("keeps every source colour readable on the editor's background, whatever the theme's palette", () => {
-    for (const [name, tokens, isDark] of [["light", light, false], ["dark", dark, true], ["terminal", { ...dark, pane: "#0d1117", text: "#d3d8e0" }, true], ["fallout", { ...dark, pane: "#020a04", text: "#2adb5f" }, true], ["solarized", { ...dark, pane: "#002b36", text: "#a2b1b1" }, true], ["nord", { ...dark, pane: "#2e3440", text: "#eceff4" }, true], ["paper", { ...light, pane: "#fffdf8", text: "#2b2620" }, false]] as const) {
+    for (const [name, tokens, isDark] of [["light", light, false], ["dark", dark, true], ["terminal", { ...dark, pane: "#0d1117", text: "#d3d8e0" }, true], ["fallout", { ...dark, pane: "#020a04", text: "#2adb5f" }, true], ["solarized", { ...dark, pane: "#002b36", text: "#a2b1b1" }, true], ["nord", { ...dark, pane: "#2e3440", text: "#eceff4" }, true], ["paper", { ...light, pane: "#fffdf8", text: "#2b2620" }, false], ["posthog", { ...light, pane: "#eeefe9", text: "#151515" }, false]] as const) {
       const t = monacoTheme(tokens, isDark, syntaxFor(name, isDark));
       for (const rule of t.rules) expect(contrast(`#${rule.foreground}`, tokens.pane), `${name}: ${rule.token || "plain"}`).toBeGreaterThanOrEqual(4.5);
     }

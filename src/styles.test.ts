@@ -134,7 +134,7 @@ describe("themes", () => {
   const names = (b: string) => [...b.matchAll(/--([\w-]+):/g)].map((m) => m[1]);
   // Dark's tokens are the full list of colours a theme has to give; Light's block is `:root`, with the shared ones too.
   const colourTokens = names(block("dark")).filter((n) => !/^(shadow|card-shadow)$/.test(n));
-  const own = THEMES.filter((t) => ["terminal", "fallout", "solarized", "nord", "paper"].includes(t.id));
+  const own = THEMES.filter((t) => ["terminal", "fallout", "solarized", "nord", "paper", "posthog"].includes(t.id));
 
   it("has a block for each preset, with every colour token Dark has", () => {
     for (const { id } of own) {
@@ -365,6 +365,32 @@ describe("themes", () => {
       for (const radius of names(block("fallout")).filter((n) => n.startsWith("radius"))) expect(parseFloat(rs(radius)), radius).toBe(0);
       expect(rs("shadow")).toMatch(/^0 0 0 1px var\(--[\w-]+\)$/);
       expect(rs("pane-edge")).toMatch(/^inset 0 0 0 1px/);
+    });
+  });
+
+  describe("PostHog", () => {
+    const px = (name: string) => parseFloat(token(block("posthog"), name));
+
+    it("has tighter corners than the default, with pills still round", () => {
+      const root = css.match(/:root \{([^}]*)\}/)![1];
+      for (const name of ["radius", "radius-inner", "radius-chip", "radius-float", "radius-md", "radius-card", "radius-hud"]) {
+        expect(px(name), name).toBeLessThan(parseFloat(token(root, name)));
+      }
+      expect(names(block("posthog"))).not.toContain("radius-pill");
+    });
+
+    it("reads blue links and a visible focus ring on the cream and the white", () => {
+      const b = block("posthog");
+      for (const surface of ["bg", "sidebar"]) {
+        expect(contrast(token(b, "md-link"), token(b, surface)), surface).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(token(b, "unread"), token(b, surface)), surface).toBeGreaterThanOrEqual(3);
+      }
+      expect(css).toMatch(/:root\[data-theme="posthog"\] button:focus-visible[^{]*\{ outline: 2px solid var\(--unread\)/);
+    });
+
+    it("turns the orange primary button yellow under the pointer, text still readable", () => {
+      expect(css).toMatch(/:root\[data-theme="posthog"\] button\.primary:hover:not\(:disabled\) \{ background: var\(--accent-hover\);/);
+      expect(contrast(token(block("posthog"), "accent-text"), token(block("posthog"), "accent-hover"))).toBeGreaterThanOrEqual(4.5);
     });
   });
 
