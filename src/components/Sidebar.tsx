@@ -5,7 +5,7 @@ import { ACTIONS, shortcutLabel } from "../lib/actions";
 import { PROJECT_COLORS, assignColors } from "../lib/projectColors";
 import { chipOf, compactGroups, markOf, projectFolders, type ChatDot, type CompactChip, type CompactGroup, type ProjectOpen, type SidebarChat, type SidebarItem } from "../lib/sidebar";
 import { lostText } from "../lib/orchestraView";
-import { ChevronIcon, ClockIcon, FolderOpenIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
+import { ChevronIcon, ClockIcon, FolderOpenIcon, NoteIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
 import { MovedNotice } from "./MovedFolders";
 import { moveFocus } from "./useMenuKeys";
 import { moveProject, orderProjects } from "../lib/projectOrder";
@@ -47,6 +47,8 @@ export interface SidebarHandlers {
   onNewChatIn: (folder: string) => void;
   onNewTeamIn: (folder: string) => void;
   onBringOld: (folder: string) => void;
+  /** Opens the project's notes: the text every new chat in it starts with. */
+  onProjectNotes: (folder: string) => void;
   onReveal: (folder: string) => void;
   onRemove: (folder: string) => void;
   onOpenFolder: () => void;
@@ -101,6 +103,8 @@ interface Props extends SidebarHandlers {
   colors: Record<string, number>;
   /** The colours with a project new to them given one, to save. */
   onColors: (colors: Record<string, number>) => void;
+  /** The projects that have notes: each is marked on its header. */
+  noted?: string[];
 }
 
 /** Focus that came from the keyboard (a click focuses a button too, and that shouldn't open the column). */
@@ -394,6 +398,9 @@ function ProjectMenu({ group, h, moves, finished, onClose, onClosed }: { group: 
       >
         <span className="menu-row-title">Close finished chats</span>
       </button>
+      <button role="menuitem" className="menu-row" title="Text every new chat in this project starts knowing" onClick={pick(() => h.onProjectNotes(group.folder))}>
+        <span className="menu-row-title">Project notes…</span>
+      </button>
       <button role="menuitem" className="menu-row" onClick={pick(() => h.onBringOld(group.folder))}>
         <span className="menu-row-title">Bring old chats here…</span>
       </button>
@@ -436,7 +443,7 @@ interface Reorder {
  * One project of the open pane: its header (the project's coloured initials, its name, the branch when it is the one on
  * screen, what needs you when it is folded, and + and ⋯ while the pointer is on it), then its open chats and teams.
  */
-function Project({ group, color, expanded, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents }: { group: CompactGroup; color: string; expanded: boolean; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
+function Project({ group, color, noted, expanded, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents }: { group: CompactGroup; color: string; noted: boolean; expanded: boolean; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
   const [menu, setMenu] = useState(false);
   // The chats that are done: not a working one, a draft, or a team.
   const finished = group.items.flatMap((item) => (item.kind === "chat" && item.state === "done" ? [item.slot] : []));
@@ -448,6 +455,11 @@ function Project({ group, color, expanded, onToggle, current, branch, moved, onR
             {group.initials}
           </span>
           <span className="sb-name">{group.label}</span>
+          {noted && (
+            <span className="sb-notes" role="img" aria-label="Has project notes" title="This project has notes every new chat starts with">
+              <NoteIcon />
+            </span>
+          )}
           <span className={`sb-fold${expanded ? " open" : ""}`} aria-hidden>
             <ChevronIcon />
           </span>
@@ -508,7 +520,7 @@ const lostIn = (checks: CloseCheck[]) => lostText({ worktree: true, branch: null
  * goes, Escape is pressed, or something is picked.
  */
 export function Sidebar(props: Props) {
-  const { mode, onToggle, width, onWidth, open, currentFolder, branch, canNew, loadRecent, hidden, moved, onRelocate, onDismissMoved, memory, order = [], onOrder, colors: savedColors, onColors, ...handlers } = props;
+  const { mode, onToggle, width, onWidth, open, currentFolder, branch, canNew, loadRecent, hidden, moved, onRelocate, onDismissMoved, memory, order = [], onOrder, colors: savedColors, onColors, noted = [], ...handlers } = props;
   const [recent, setRecent] = useState<RecentFolder[]>(() => memory?.recent ?? []);
   if (memory) memory.recent = recent;
   // A project the user folded by hand: the others show their chats.
@@ -714,6 +726,7 @@ export function Sidebar(props: Props) {
           onNewChatIn: then(handlers.onNewChatIn),
           onNewTeamIn: then(handlers.onNewTeamIn),
           onBringOld: then(handlers.onBringOld),
+          onProjectNotes: then(handlers.onProjectNotes),
           onOpenFolder: then(handlers.onOpenFolder),
           onNewChat: then(handlers.onNewChat),
           onNewTeam: then(handlers.onNewTeam),
@@ -797,6 +810,7 @@ export function Sidebar(props: Props) {
                   key={g.folder}
                   group={g}
                   color={PROJECT_COLORS[colors[g.folder]]}
+                  noted={noted.includes(g.folder)}
                   expanded={isExpanded(g)}
                   onToggle={() => toggle(g)}
                   current={g.folder === currentFolder}

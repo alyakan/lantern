@@ -292,6 +292,8 @@ export interface Settings {
   /** Reopen the chat as a worker of an open main agent (a team restored after Lantern was closed). */
   /** `branch`: the one Lantern made for it (null when it shares the folder); its worktree's HEAD is the worker's to switch. */
   worker?: { name: string; parent: string; branch: string | null; shared: boolean };
+  /** The user's notes for the project (the app cuts them to its limit): every new chat starts knowing them. A worker gets its Lead's. */
+  project_notes?: string;
 }
 
 /** A file search result (see files::find): the file, and which characters of `rel` matched. */

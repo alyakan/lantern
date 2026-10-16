@@ -12,6 +12,8 @@ export const FOLDER_RECORDS = [
   "settings.pinnedSessions",
   // The project's colour in the sidebar.
   "sidebar.projectColors",
+  // The text every new chat in the project starts with (Project notes in the project's ⋯ menu).
+  "settings.projectNotes",
 ] as const;
 
 /** Lantern's lists of folders that name the folder itself: the moved folder takes the old one's place in them. */

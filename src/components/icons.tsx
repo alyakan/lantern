@@ -268,3 +268,10 @@ export const PinIcon = () => (
     <path d="M3.2 1h3.6l-.5 3 1.7 1.7H2L3.7 4zM5 5.7V10" />
   </svg>
 );
+
+// A note with a few lines on it: the project has notes every new chat starts with.
+export const NoteIcon = () => (
+  <svg width="10" height="11" viewBox="0 0 10 11" {...base}>
+    <path d="M1.6 1h6.8c.33 0 .6.27.6.6v8.8c0 .33-.27.6-.6.6H1.6a.6.6 0 0 1-.6-.6V1.6c0-.33.27-.6.6-.6zM3 3.7h4M3 5.6h4M3 7.5h2.4" />
+  </svg>
+);

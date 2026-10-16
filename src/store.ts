@@ -221,6 +221,8 @@ export interface State {
   revertSeq: number;
   /** The folder this session was started in, when that was a place the folder moved from: Claude is told once. */
   movedFrom: string | null;
+  /** The project's notes this chat was started with (null: none), shown at the top as "Project notes applied". */
+  notesApplied: string | null;
 }
 
 export interface BackgroundRun {
@@ -297,6 +299,7 @@ export const initialState: State = {
   revertNotes: [],
   revertSeq: 0,
   movedFrom: null,
+  notesApplied: null,
 };
 
 export type Action =
@@ -307,6 +310,8 @@ export type Action =
   | { type: "folder_cleared" }
   | { type: "history_loaded"; sessionId: string; events: UiEvent[]; movedFrom?: string | null }
   | { type: "session_ready" }
+  /** The chat started with the project's notes: what it was told (after the chat opened, so the open doesn't clear it). */
+  | { type: "notes_applied"; text: string | null }
   /** `auto`: sent by Lantern from agents' notes, not typed by the user. */
   | { type: "user_sent"; text: string; switchedTo?: Flavour; explained?: boolean; draft?: string; auto?: boolean }
   | { type: "wakes_taken" }
@@ -399,7 +404,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, wakes: [], autoStreak: 0, proposals: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -656,6 +661,8 @@ export function reducer(state: State, action: Action): State {
       if (at < 0) return state;
       return { ...state, items: state.items.map((it, i): ChatItem => (i === at && it.type === "user" ? { ...it, turn: action.turn } : it)) };
     }
+    case "notes_applied":
+      return state.notesApplied === action.text ? state : { ...state, notesApplied: action.text };
     case "session_ready":
       return state.status === "starting" ? { ...state, status: "idle" } : state;
     case "user_sent": {
