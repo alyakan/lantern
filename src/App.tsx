@@ -84,7 +84,8 @@ import { agentSessionsOf, chatsToSave, currentFolder, loadSaved, restorable, sav
 import { SplitPane } from "./components/SplitPane";
 import { TopBar } from "./components/TopBar";
 import { Canvas, newLayout } from "./components/Canvas";
-import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions } from "./lib/canvasContext";
+import { ChatStoreContext, createChatStore, KnownWindowsContext, NodeActionsContext, type NodeActions } from "./lib/canvasContext";
+import { windowOf } from "./lib/contextShare";
 import { needingYou, orchestraNodes, teamActivity, teamMain, teamNodes } from "./lib/orchestraView";
 import "./styles.css";
 import { AGENT_MODEL } from "./lib/models";
@@ -1383,7 +1384,8 @@ export default function App() {
   useEffect(() => {
     if (state.model && state.contextWindow && windows[state.model] !== state.contextWindow) setWindows({ ...windows, [state.model]: state.contextWindow });
   }, [lastTurn?.id]);
-  const contextWindow = (state.model && windows[state.model]) || state.contextWindow || 200_000;
+  // What the window is, or null when nothing says: the meter then shows the tokens, not a percent against a guess.
+  const contextWindow = windowOf(state, windows);
   // What the chat (and Step-by-step pages) can do: answer prompts, open files, show test runs.
   const streamHandlers = {
     onDecide: decide,
@@ -1806,7 +1808,7 @@ export default function App() {
   if (state.status === "setup") return <SetupScreen error={state.setupError} onCheck={locate} />;
 
   return (
-    <SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}>
+    <SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}><KnownWindowsContext.Provider value={windows}>
       <div className="app">
         <TopBar
           folder={titleFolder}
@@ -2039,6 +2041,6 @@ export default function App() {
           onClose={() => setGuideAt(null)}
         />
       </div>
-    </SessionActionsContext.Provider></ModeGuideContext.Provider></SlotContext.Provider>
+    </KnownWindowsContext.Provider></SessionActionsContext.Provider></ModeGuideContext.Provider></SlotContext.Provider>
   );
 }

@@ -332,7 +332,7 @@ impl StreamParser {
         let now = Totals::of(v);
         let turn = self.totals.as_ref().and_then(|before| now.turn_since(before));
         let models = turn.as_ref().map(|t| t.models.clone()).unwrap_or_default();
-        let done = result_event(v, turn.as_ref(), &now);
+        let done = result_event(v, turn.as_ref(), &now, self.models.get("").map(String::as_str));
         self.totals = Some(now);
         vec![UiEvent::ModelUsage { models }, done]
     }
@@ -379,7 +379,26 @@ fn edit_applied(r: &Value, parent: Option<String>, id: &str) -> Option<UiEvent> 
     Some(UiEvent::EditApplied { parent, tool_use_id: id.to_string(), path, created, hunks, original })
 }
 
-fn result_event(v: &Value, turn: Option<&Turn>, session: &Totals) -> UiEvent {
+/// The main conversation's context window, from a result's `modelUsage`: the one of the model the main thread runs on
+/// (its name may carry a suffix such as `[1m]` in one place and not the other), or, when that isn't known, the only model
+/// the turn used. None when it can't tell: a subagent on a bigger model must not stand in for it.
+fn main_window(usage: &Value, main_model: Option<&str>) -> Option<u64> {
+    let map = usage.as_object()?;
+    let window = |u: &Value| u["contextWindow"].as_u64();
+    let base = |m: &str| m.split('[').next().unwrap_or(m).to_string();
+    if let Some(main) = main_model {
+        let wanted = base(main);
+        if let Some(found) = map.iter().filter(|(k, _)| base(k) == wanted).filter_map(|(_, u)| window(u)).max() {
+            return Some(found);
+        }
+    }
+    if map.len() == 1 {
+        return map.values().next().and_then(window);
+    }
+    None
+}
+
+fn result_event(v: &Value, turn: Option<&Turn>, session: &Totals, main_model: Option<&str>) -> UiEvent {
     let is_error = v["is_error"].as_bool().unwrap_or(false);
     let result = v["result"].as_str().map(String::from);
     let lower = result.as_deref().unwrap_or("").to_lowercase();
@@ -394,8 +413,8 @@ fn result_event(v: &Value, turn: Option<&Turn>, session: &Totals) -> UiEvent {
         session_tokens: Totals::tokens(&session.models),
         duration_ms: v["duration_ms"].as_u64(),
         denied: v["permission_denials"].as_array().map(|a| a.len()).unwrap_or(0),
-        // Subagents may run on other models; the largest window is the main conversation's.
-        context_window: v["modelUsage"].as_object().and_then(|m| m.values().filter_map(|u| u["contextWindow"].as_u64()).max()),
+        // Subagents may run on other models: only the main thread's own model says what its window is.
+        context_window: main_window(&v["modelUsage"], main_model),
     }
 }
 
@@ -817,12 +836,32 @@ mod tests {
     fn reports_context_use_from_main_thread_messages_and_the_window_from_the_result() {
         let usage = r#"{"input_tokens":10,"cache_creation_input_tokens":23120,"cache_read_input_tokens":14053,"output_tokens":4}"#;
         let mut p = StreamParser::default();
-        let main = p.parse_line(&format!(r#"{{"type":"assistant","parent_tool_use_id":null,"message":{{"id":"m1","content":[{{"type":"text","text":"ok"}}],"usage":{usage}}}}}"#));
-        assert_eq!(main[0], UiEvent::ContextUsed { tokens: 37_187 });
+        let main = p.parse_line(&format!(r#"{{"type":"assistant","parent_tool_use_id":null,"message":{{"id":"m1","model":"claude-opus-5-5","content":[{{"type":"text","text":"ok"}}],"usage":{usage}}}}}"#));
+        assert!(main.contains(&UiEvent::ContextUsed { tokens: 37_187 }));
         let sub = p.parse_line(&format!(r#"{{"type":"assistant","parent_tool_use_id":"task1","message":{{"id":"m2","content":[],"usage":{usage}}}}}"#));
         assert!(sub.is_empty(), "a subagent's usage is its own context");
         let done = p.parse_line(r#"{"type":"result","is_error":false,"duration_ms":2000,"modelUsage":{"claude-opus-5-5[1m]":{"contextWindow":1000000},"claude-haiku-4-5-20251001":{"contextWindow":200000}}}"#);
         assert!(matches!(done.last().unwrap(), UiEvent::TurnDone { context_window: Some(1_000_000), .. }));
+    }
+
+    #[test]
+    fn the_window_is_the_main_models_and_never_a_guess() {
+        let usage = serde_json::json!({ "claude-sonnet-5-5": { "contextWindow": 200000 }, "claude-opus-5-5[1m]": { "contextWindow": 1000000 } });
+        // The main thread runs on Sonnet: a subagent on a bigger window doesn't stand in for it.
+        assert_eq!(main_window(&usage, Some("claude-sonnet-5-5")), Some(200_000));
+        // Its name may carry a suffix in one place and not the other.
+        assert_eq!(main_window(&usage, Some("claude-opus-5-5")), Some(1_000_000));
+        assert_eq!(main_window(&usage, Some("claude-opus-5-5[1m]")), Some(1_000_000));
+        // Not known, with several models: it doesn't say.
+        assert_eq!(main_window(&usage, None), None);
+        assert_eq!(main_window(&usage, Some("claude-haiku-5-5")), None);
+        // One model: that one's.
+        let one = serde_json::json!({ "claude-opus-5-5[1m]": { "contextWindow": 1000000 } });
+        assert_eq!(main_window(&one, None), Some(1_000_000));
+        assert_eq!(main_window(&one, Some("something-else")), Some(1_000_000));
+        // No window in it, or no usage at all.
+        assert_eq!(main_window(&serde_json::json!({ "m": {} }), Some("m")), None);
+        assert_eq!(main_window(&serde_json::Value::Null, Some("m")), None);
     }
 
     #[test]
