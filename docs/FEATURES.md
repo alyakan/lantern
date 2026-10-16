@@ -415,6 +415,10 @@ The code editor and diffs, diagrams and shell output follow the theme, and a cho
 
 ![Terminal: a chat with every kind of markdown, and its diff](images/theme-terminal.png)
 
+![PostHog: a chat with a permission card, and a diff](images/theme-posthog.png)
+
+![PostHog chosen in Settings' theme picker](images/theme-posthog-picker.png)
+
 ![Fallout: the same chat in phosphor green](images/theme-fallout.png)
 
 ## Keyboard shortcuts and the command palette
