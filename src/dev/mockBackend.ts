@@ -1614,7 +1614,7 @@ export function installMockBackend() {
           return new Promise((r) => setTimeout(() => r(found), 120));
         }
         case "pr_watch": {
-          // ?prchecks=1 walks a pull request's checks through running, failed and passed, one step each look; =fail, =pass, =run and =merged stay at one state; =nopr, =nogh and =loggedout show what a project without one shows.
+          // ?prchecks=1 walks a pull request's checks through running, failed and passed, one step each look; =fail, =pass, =run, =many (36 checks) and =merged stay at one state; =nopr, =nogh and =loggedout show what a project without one shows.
           const want = new URLSearchParams(location.search).get("prchecks");
           if (!want) return { kind: "no_pr" };
           if (want === "nopr") return { kind: "no_pr" };
@@ -1627,6 +1627,8 @@ export function installMockBackend() {
             pass: [[run("build", "pass"), run("lint", "pass"), run("test (unit)", "pass"), run("test (e2e)", "skipping")]],
             run: [[run("build", "pass"), run("lint", "pass"), run("test (unit)", "pending"), run("test (e2e)", "pending")]],
             merged: [[]],
+            // A long list, to see the Checks tab scroll.
+            many: [Array.from({ length: 36 }, (_, i) => run(`${i % 2 ? "test" : "build"} (shard ${i + 1})`, i === 13 ? "fail" : i > 30 ? "pending" : "pass"))],
           };
           const list = steps[want] ?? steps.fail;
           prLooks += 1;

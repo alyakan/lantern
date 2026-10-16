@@ -1,9 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { ReviewPanel } from "./ReviewPanel";
 import { NetworkEmpty } from "./NetworkTab";
 import type { RevertControls } from "../lib/revert";
 import type { CommentControls, DiffComment } from "../lib/diffComments";
+import { freshLoop, type LoopState } from "../lib/prChecks";
+import type { PrView } from "../lib/usePrChecks";
+import type { PrCheck } from "../types";
+
+vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(() => Promise.resolve()) }));
 
 vi.mock("./FullDiff", () => ({ default: ({ path }: { path: string }) => <div>diff of {path}</div> }));
 
@@ -175,16 +180,27 @@ vi.mock("./ArchitectureTab", () => ({ ArchitectureTab: () => <div>the map</div> 
 
 const summary = (onOpenPage = vi.fn()) => ({ slot: "s1", data: { headline: "Plan: 2 steps · 1 built", rows: [{ page: "p1" }] } as never, changed: [], running: false, onOpenPage });
 const architecture = (openKey = 0) => ({ map: {} as never, current: [], pageNames: {}, onOpenPage: vi.fn(), openKey });
+const check = (name: string, bucket: PrCheck["bucket"]): PrCheck => ({ name, state: bucket.toUpperCase(), bucket, link: `https://github.com/o/r/actions/runs/1/job/${name}`, workflow: "CI", run_id: "1" });
+const MIXED = [check("build", "pass"), check("lint", "pass"), check("test", "fail"), check("e2e", "pending")];
+const prView = (checks: PrCheck[], over: { setting?: PrView["setting"]; state?: "OPEN" | "MERGED"; loop?: Partial<LoopState> } = {}): PrView => ({
+  folder: "/p",
+  setting: over.setting ?? { mode: "tell", tries: 3 },
+  snap: { pr: { number: 57, url: "https://github.com/o/r/pull/57", state: over.state ?? "OPEN", branch: "feat/x", base: "main", head_sha: "aaa" }, checks },
+  access: "ok",
+  loop: { ...freshLoop(), ...over.loop },
+  needsYou: false,
+});
+const checksProps = (view: PrView) => ({ view, busy: false, onSend: vi.fn(() => Promise.resolve()), onStop: vi.fn() });
 const tabs = () => screen.getAllByRole("tab").map((t) => t.textContent);
 const selected = () => screen.getAllByRole("tab").find((t) => t.getAttribute("aria-selected") === "true")?.textContent;
 
 describe("ReviewPanel's fixed tabs", () => {
-  it("always has Changes, Files, Plan, Activity, Tests and Network, in that order", () => {
+  it("always has Changes, Files, Plan, Activity, Tests, Checks and Network, in that order", () => {
     localStorage.clear();
     const { rerender } = render(<ReviewPanel {...base} selected={null} follow />);
-    expect(tabs()).toEqual(["Changes2", "Files", "Plan", "Activity", "Tests", "Network"]);
+    expect(tabs()).toEqual(["Changes2", "Files", "Plan", "Activity", "Tests", "Checks", "Network"]);
     rerender(<ReviewPanel {...base} selected={null} follow summary={summary()} architecture={architecture()} />);
-    expect(tabs()).toEqual(["Changes2", "Files", "Plan", "Activity", "Tests", "Network"]);
+    expect(tabs()).toEqual(["Changes2", "Files", "Plan", "Activity", "Tests", "Checks", "Network"]);
   });
 
   it("Plan shows the plan and opens a row's page; it takes a click, so it doesn't take the pane over", () => {
@@ -247,7 +263,7 @@ describe("ReviewPanel's fixed tabs", () => {
   it("moves between the tabs with the arrow keys, and each tab's panel is labelled by it", () => {
     localStorage.clear();
     render(<ReviewPanel {...base} selected={null} follow summary={summary()} />);
-    const [changes, files, , , , network] = screen.getAllByRole("tab");
+    const [changes, files, , , , , network] = screen.getAllByRole("tab");
     expect(changes).toHaveAttribute("tabindex", "0");
     expect(files).toHaveAttribute("tabindex", "-1");
     changes.focus();
@@ -258,6 +274,51 @@ describe("ReviewPanel's fixed tabs", () => {
     fireEvent.keyDown(files, { key: "End" });
     expect(network).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel", { name: "Network" })).toBeInTheDocument();
+    localStorage.clear();
+  });
+
+  it("Checks says what will show there until a pull request has checks, and why not when it is off", () => {
+    localStorage.clear();
+    const { rerender } = render(<ReviewPanel {...base} selected={null} follow />);
+    fireEvent.click(screen.getByRole("tab", { name: "Checks" }));
+    expect(screen.getByText(/show here, once it has one/)).toBeInTheDocument();
+    rerender(<ReviewPanel {...base} selected={null} follow prChecks={checksProps(prView(MIXED, { setting: { mode: "off", tries: 3 } }))} />);
+    expect(screen.getByText(/Checks are off for this project/)).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Checks" })).toHaveTextContent(/^Checks$/);
+    localStorage.clear();
+  });
+
+  it("Checks lists the checks and sends the failure to Claude from its button", () => {
+    localStorage.clear();
+    const props = checksProps(prView(MIXED));
+    render(<ReviewPanel {...base} selected={null} follow prChecks={props} />);
+    fireEvent.click(screen.getByRole("tab", { name: /^Checks/ }));
+    const panel = screen.getByRole("tabpanel", { name: /^Checks/ });
+    expect(within(panel).getAllByRole("listitem")).toHaveLength(4);
+    expect(within(panel).getByRole("link", { name: "Pull request #57" })).toBeInTheDocument();
+    fireEvent.click(within(panel).getByRole("button", { name: "Send the failure to Claude" }));
+    expect(props.onSend).toHaveBeenCalledTimes(1);
+    localStorage.clear();
+  });
+
+  it("Checks shows how many failed on its tab, a plain count when none did, and nothing when the pull request is closed", () => {
+    localStorage.clear();
+    const { rerender } = render(<ReviewPanel {...base} selected={null} follow prChecks={checksProps(prView(MIXED))} />);
+    expect(screen.getByRole("tab", { name: /Checks/ })).toHaveTextContent("Checks1");
+    expect(screen.getByRole("tab", { name: /Checks/ }).querySelector(".tab-count")).toHaveClass("failed");
+    rerender(<ReviewPanel {...base} selected={null} follow prChecks={checksProps(prView([check("build", "pass"), check("lint", "pass")]))} />);
+    expect(screen.getByRole("tab", { name: /Checks/ })).toHaveTextContent("Checks2");
+    expect(screen.getByRole("tab", { name: /Checks/ }).querySelector(".tab-count")).not.toHaveClass("failed");
+    rerender(<ReviewPanel {...base} selected={null} follow prChecks={checksProps(prView(MIXED, { state: "MERGED" }))} />);
+    expect(screen.getByRole("tab", { name: /Checks/ })).toHaveTextContent(/^Checks$/);
+    localStorage.clear();
+  });
+
+  it("a failed check doesn't bring the Checks tab up on its own", () => {
+    localStorage.clear();
+    const { rerender } = render(<ReviewPanel {...base} selected={null} follow prChecks={checksProps(prView([check("build", "pass")]))} />);
+    rerender(<ReviewPanel {...base} selected={null} follow prChecks={checksProps(prView(MIXED))} />);
+    expect(selected()).toBe("Changes2");
     localStorage.clear();
   });
 

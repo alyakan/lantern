@@ -90,7 +90,6 @@ import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
 import type { DiffComment } from "./lib/diffComments";
 import { ShipDialog } from "./components/ShipDialog";
-import { PrChecksCard } from "./components/PrChecksCard";
 import { PrChecksDialog } from "./components/PrChecksDialog";
 import { settingFor as prSettingFor, type PrSetting } from "./lib/prChecks";
 import { usePrChecks } from "./lib/usePrChecks";
@@ -2188,7 +2187,6 @@ export default function App() {
                     </ArchitecturePane.Provider>
                   </ErrorBoundary>
                   {chatExtras}
-                  {state.folder && prChecks.views[state.folder] && <PrChecksCard view={prChecks.views[state.folder]} busy={isBusy(state)} onSend={() => prChecks.sendFailure(state.folder!, active)} onStop={() => prChecks.stop(state.folder!)} />}
                   {composer}
                 </>
               )}
@@ -2205,6 +2203,7 @@ export default function App() {
                 ready={state.status !== "starting"}
                 files={shownFiles}
                 chatBusy={state.status === "running"}
+                prChecks={state.folder ? { view: prChecks.views[state.folder], busy: isBusy(state), onSend: () => prChecks.sendFailure(state.folder!, active), onStop: () => prChecks.stop(state.folder!) } : undefined}
                 onShip={state.folder ? () => setShipping(true) : undefined}
                 changesKey={peek?.key ?? (changesAsked || undefined)}
                 scope={scope}

@@ -5,6 +5,9 @@ import type { ChangedFile, TestRunItem } from "../store";
 import { parseLocation } from "../lib/testRuns";
 import { TestsTab } from "./TestsTab";
 import { NetworkEmpty, NetworkTab, useNetworkView } from "./NetworkTab";
+import { ChecksTab, hasChecks } from "./ChecksTab";
+import { totals } from "../lib/prChecks";
+import type { PrView } from "../lib/usePrChecks";
 import type { NetworkItem } from "../types";
 import { basename, dirOf, relativeTo } from "../lib/diff";
 import { usePersistentState } from "../lib/layout";
@@ -73,6 +76,8 @@ interface Props {
   onSummarizeRequest?: (item: NetworkItem) => void;
   /** Claude is in the middle of a turn in this chat. */
   chatBusy?: boolean;
+  /** The Checks tab: what the checks loop knows about this folder's pull request, whether Claude is too busy to be sent the failure, and what the buttons do (absent: no chat to ask). */
+  prChecks?: { view: PrView | undefined; busy: boolean; onSend: () => Promise<void>; onStop: () => void };
   /** Opens Ship it (commit, push, pull request) from the Changes tab's header (absent: no chat to ask). */
   onShip?: () => void;
   /** Reverting Claude's edits: offered on the Changes views and the Summary's steps; the undo of the last one. */
@@ -90,13 +95,14 @@ const LAYOUT_LABEL: Record<DiffLayout, string> = { inline: "Unified", split: "Sp
 const NEXT_LAYOUT: Record<DiffLayout, DiffLayout> = { inline: "split", split: "inline" };
 
 /** The side panel's tabs, always these and always in this order; one with nothing to show says so. */
-export type Tab = "changes" | "files" | "plan" | "activity" | "tests" | "network";
+export type Tab = "changes" | "files" | "plan" | "activity" | "tests" | "checks" | "network";
 const TABS: { id: Tab; label: string }[] = [
   { id: "changes", label: "Changes" },
   { id: "files", label: "Files" },
   { id: "plan", label: "Plan" },
   { id: "activity", label: "Activity" },
   { id: "tests", label: "Tests" },
+  { id: "checks", label: "Checks" },
   { id: "network", label: "Network" },
 ];
 /** Each tab's button, which its panel is labelled by. */
@@ -115,6 +121,9 @@ export function ReviewPanel(props: Props) {
   const runs = props.testRuns ?? [];
   // The folder's watched requests: the Network tab lists them once there's a watch or a summary, and explains itself until then.
   const network = useNetworkView(props.folder);
+  // The pull request's checks: the tab counts them, in red when one failed.
+  const checksView = props.prChecks?.view;
+  const checkTotals = hasChecks(checksView) && checksView.snap.pr.state === "OPEN" ? totals(checksView.snap.checks) : null;
   const hasNetwork = !!network && (network.watches.length > 0 || network.items.length > 0);
   // Every tab is always there, so the saved tab (shared by every chat) is always valid; one saved under an old name moves to its new one.
   const tab = migrateTab(savedTab);
@@ -196,6 +205,7 @@ export function ReviewPanel(props: Props) {
               {id === "changes" && count > 0 && <span className="tab-count">{count}</span>}
               {id === "activity" && props.agents?.tree.live && <span className="tab-live" aria-label="working" />}
               {id === "tests" && latestRun?.outcome === "failed" && <span className="tab-count failed">{latestRun.failed || "!"}</span>}
+              {id === "checks" && checkTotals && checkTotals.total > 0 && <span className={`tab-count${checkTotals.failed > 0 ? " failed" : ""}`}>{checkTotals.failed || checkTotals.total}</span>}
               {id === "network" && hasNetwork && network.items.length > 0 && <span className="tab-count">{network.items.length}</span>}
             </button>
           ))}
@@ -272,6 +282,11 @@ export function ReviewPanel(props: Props) {
           {runs.length > 0 ? <TestsTab runs={runs} selected={shownRun} onSelect={setShownRun} onOpenLocation={openLocation} /> : <TabEmpty title="Tests">Test runs show here when Claude runs your tests.</TabEmpty>}
         </div>
       )}
+      {tab === "checks" && (
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("checks")}>
+          <ChecksTab view={checksView} busy={props.prChecks?.busy ?? false} onSend={props.prChecks?.onSend ?? (() => Promise.resolve())} onStop={props.prChecks?.onStop ?? (() => {})} />
+        </div>
+      )}
       {tab === "network" && (
         <div className="tab-body" role="tabpanel" aria-labelledby={tabId("network")}>
           {hasNetwork && props.folder ? <NetworkTab folder={props.folder} view={network} onSummarize={props.onSummarizeRequest ?? null} busy={props.chatBusy} /> : <NetworkEmpty link={network?.link ?? null} />}
@@ -303,6 +318,7 @@ const TAB_TITLE: Record<Tab, string | undefined> = {
   plan: "The plan so far, and the architecture map in a Design chat",
   activity: "Each turn's agents, models and tools",
   tests: undefined,
+  checks: "How the checks of this branch's pull request stand",
   network: "Requests matching this folder's watches, from Network Monitor",
 };
 

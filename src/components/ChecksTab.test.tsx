@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type { PrCheck, PullRequest } from "../types";
 import { failureSig, freshLoop, type LoopState, type PrSetting } from "../lib/prChecks";
 import type { PrView } from "../lib/usePrChecks";
-import { PrChecksCard } from "./PrChecksCard";
+import { ChecksTab } from "./ChecksTab";
 
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(() => Promise.resolve()) }));
 
@@ -24,11 +24,11 @@ const MIXED = [check("build", "pass"), check("lint", "pass"), check("test", "fai
 function show(v: PrView, busy = false) {
   const onSend = vi.fn(() => Promise.resolve());
   const onStop = vi.fn();
-  render(<PrChecksCard view={v} busy={busy} onSend={onSend} onStop={onStop} />);
+  render(<ChecksTab view={v} busy={busy} onSend={onSend} onStop={onStop} />);
   return { onSend, onStop };
 }
 
-describe("the pull request checks card", () => {
+describe("the Checks tab", () => {
   it("says how the checks stand, with each check and a link to it", () => {
     show(view(MIXED));
     expect(screen.getByRole("status")).toHaveTextContent("Checks: 2 passed, 1 failed, 1 running");
@@ -38,22 +38,38 @@ describe("the pull request checks card", () => {
     expect(screen.getByRole("link", { name: "Open test on GitHub" })).toHaveAttribute("href", "https://github.com/o/r/actions/runs/1/job/test");
   });
 
-  it("shows nothing when it is off or no pull request was found", () => {
-    const { container, unmount } = render(<PrChecksCard view={view(MIXED, { setting: { mode: "off", tries: 3 } })} busy={false} onSend={vi.fn()} onStop={vi.fn()} />);
-    expect(container).toBeEmptyDOMElement();
-    unmount();
-    const none = render(<PrChecksCard view={{ ...view(MIXED), snap: null }} busy={false} onSend={vi.fn()} onStop={vi.fn()} />);
-    expect(none.container).toBeEmptyDOMElement();
+  it("explains itself when it is off, when gh can't be used and when there is no pull request", () => {
+    const { rerender } = render(<ChecksTab view={view(MIXED, { setting: { mode: "off", tries: 3 } })} busy={false} onSend={vi.fn()} onStop={vi.fn()} />);
+    expect(screen.getByText(/Checks are off for this project/)).toBeInTheDocument();
+    expect(screen.queryByRole("list")).toBeNull();
+    rerender(<ChecksTab view={{ ...view(MIXED), snap: null, access: "no_gh" }} busy={false} onSend={vi.fn()} onStop={vi.fn()} />);
+    expect(screen.getByText(/which isn't installed/)).toBeInTheDocument();
+    rerender(<ChecksTab view={{ ...view(MIXED), snap: null, access: "logged_out" }} busy={false} onSend={vi.fn()} onStop={vi.fn()} />);
+    expect(screen.getByText(/gh auth login/)).toBeInTheDocument();
+    rerender(<ChecksTab view={{ ...view(MIXED), snap: null }} busy={false} onSend={vi.fn()} onStop={vi.fn()} />);
+    expect(screen.getByText(/show here, once it has one/)).toBeInTheDocument();
+    rerender(<ChecksTab view={undefined} busy={false} onSend={vi.fn()} onStop={vi.fn()} />);
+    expect(screen.getByText("Checks")).toBeInTheDocument();
   });
 
-  it("starts the list folded when everything passed, and opens it on request", () => {
+  it("lists every check, however many, and keeps the button in view", () => {
+    const many = Array.from({ length: 40 }, (_, i) => check(`job-${i}`, i === 7 ? "fail" : "pass"));
+    show(view(many));
+    expect(within(screen.getByRole("list", { name: "Checks" })).getAllByRole("listitem")).toHaveLength(40);
+    expect(screen.getByRole("status")).toHaveTextContent("Checks: 39 passed, 1 failed");
+    expect(screen.getByRole("button", { name: "Send the failure to Claude" })).toBeInTheDocument();
+  });
+
+  it("lists the checks of a passing pull request without a button", () => {
     show(view([check("build", "pass")]));
-    expect(screen.queryByRole("list", { name: "Checks" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Send the failure to Claude" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Show checks" }));
     expect(screen.getByRole("list", { name: "Checks" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Hide checks" }));
-    expect(screen.queryByRole("list", { name: "Checks" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Send the failure to Claude" })).toBeNull();
+  });
+
+  it("leaves out the link of a check that has none", () => {
+    show(view([{ ...check("legacy", "pass"), link: null }]));
+    expect(screen.queryByRole("link", { name: "Open legacy on GitHub" })).toBeNull();
+    expect(screen.getByText("legacy")).toBeInTheDocument();
   });
 
   it("sends the failure to Claude on the button, once, and says so after", async () => {
@@ -83,7 +99,7 @@ describe("the pull request checks card", () => {
 
   it("shows why a send failed", async () => {
     const onSend = vi.fn(() => Promise.reject(new Error("The chat has closed.")));
-    render(<PrChecksCard view={view(MIXED)} busy={false} onSend={onSend} onStop={vi.fn()} />);
+    render(<ChecksTab view={view(MIXED)} busy={false} onSend={onSend} onStop={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Send the failure to Claude" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The chat has closed.");
   });
