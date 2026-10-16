@@ -497,6 +497,8 @@ export default function App() {
 
   // The past chats of a project: the user's own. An agent's conversation (a shared one is in the project's folder too) stays with its team.
   const listPast = (folder: string) => api.listSessions(folder).then((all) => all.filter((x) => !agentSessions.includes(x.id)));
+  // The chats whose text has the query, without the ones agents ran (as listPast does).
+  const searchPast = (query: string) => api.searchHistory(query).then((r) => ({ ...r, chats: r.chats.filter((c) => !agentSessions.includes(c.id)) }));
   const loadSessions = () => (state.folder ? listPast(state.folder) : Promise.resolve([]));
 
   // Replays a past session into a chat, then continues it with `claude --resume`. A session that's already open
@@ -1492,7 +1494,9 @@ export default function App() {
       .filter((t) => t !== "harness" || !!state.folder)
       .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
     const themes = THEMES.filter((t) => t.id !== theme && t.id !== "custom").map((t): PaletteEntry => ({ id: `theme:${t.id}`, title: `Theme: ${t.label}`, group: "Theme", shortcut: null, run: () => setTheme(t.id) }));
-    return [...availableActions(), ...permissions, ...workflows, ...harnesses, ...themes, ...tabs];
+    // History with its search box ready: what was said in any past chat.
+    const searchChats: PaletteEntry = { id: "search-chats", title: "Search all chats…", group: "View", shortcut: null, run: () => void openHistory() };
+    return [...availableActions(), searchChats, ...permissions, ...workflows, ...harnesses, ...themes, ...tabs];
   };
   // The Work menu: Build, Debug and Design are Step by step in that flavour; Review a PR lists the open pull requests and
   // starts a review on the one chosen; Start a team makes an empty chat a team's Lead, and otherwise starts a new one.
@@ -2000,6 +2004,7 @@ export default function App() {
             initial={history.folder}
             exclude={openChatIds}
             load={listPast}
+            search={searchPast}
             loadOld={(folder) => api.oldLocations(folder)}
             actionsFor={actionsFor}
             onBring={(folder) => { setHistory(null); setBringing({ destination: folder, from: null }); }}
