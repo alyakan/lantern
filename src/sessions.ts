@@ -104,7 +104,11 @@ export function chatsReducer(chats: Chats, action: ChatsAction): Chats {
     }
     case "close_agent": {
       const parent = chats.agents[action.slot]?.parent;
-      const left = chats.active === action.slot && parent && chats.slots[parent] ? { ...chats, active: parent } : chats;
+      const moved = chats.active === action.slot && parent && chats.slots[parent] ? { ...chats, active: parent } : chats;
+      // A merged branch whose agent goes is tidied: its merge card says so instead of offering to.
+      const owner = parent ? moved.slots[parent] : undefined;
+      const merged = (p: { worker: string; status: string }) => p.worker === action.slot && p.status === "merged";
+      const left = parent && owner?.proposals.some(merged) ? { ...moved, slots: { ...moved.slots, [parent]: { ...owner, proposals: owner.proposals.map((p) => (merged(p) ? { ...p, tidied: true } : p)) } } } : moved;
       return chatsReducer(left, { type: "remove", slot: action.slot });
     }
     case "close": {

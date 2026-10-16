@@ -7,6 +7,7 @@ import { setChime, useChimeOn } from "../lib/chime";
 import { AGENT_LIMIT_MAX, AGENT_LIMIT_MIN, setAgentLimit, useAgentLimit } from "../lib/agentLimit";
 import { PAUSE_OPTIONS, setPauseAtPercent, usePauseAtPercent } from "../lib/planPause";
 import { QUIET_MINUTES, setQuietMinutes, useQuietMinutes } from "../lib/quietSetting";
+import { setTidyMode, TIDY_MODES, useTidyMode } from "../lib/tidySetting";
 import { setAutoMergeTests, useAutoMergeTests } from "../lib/mergeTests";
 import { setRestorePoints, useRestorePoints } from "../lib/restorePointsSetting";
 import { PAUSE_MS, type NotifyPrefs } from "../lib/notifyPrefs";
@@ -148,6 +149,7 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
   const sound = useChimeOn();
   const agentLimit = useAgentLimit();
   const quiet = useQuietMinutes();
+  const tidy = useTidyMode();
   const pauseAt = usePauseAtPercent();
   const autoTests = useAutoMergeTests();
   const restorePoints = useRestorePoints();
@@ -253,6 +255,17 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
           </select>
         </label>
         <span className="settings-muted">An agent at work that says nothing for this long shows "Quiet" on its card and in the inbox, with Nudge, Interrupt and Restart.</span>
+        <label className="general-option">
+          <span>Tidy up an agent after its merge</span>
+          <select aria-label="Tidy up an agent after its merge" value={tidy} onChange={(e) => setTidyMode(e.target.value as (typeof TIDY_MODES)[number]["value"])}>
+            {TIDY_MODES.map((m) => (
+              <option key={m.value} value={m.value}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="settings-muted">Once you approve an agent's merge and it goes through, "Tidy up" on its merge card closes the agent and removes its worktree and branch. Ask me puts the question on the card; Automatically does it by itself when the agent has nothing left to lose.</span>
         <label className="general-option">
           <span>Pause a team's work when my plan reaches</span>
           <select aria-label="Pause a team's work when my plan reaches" value={pauseAt} onChange={(e) => setPauseAtPercent(Number(e.target.value))}>

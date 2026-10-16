@@ -304,6 +304,16 @@ describe("closing a worker from its card", () => {
     expect(c.active).toBe("s1");
   });
 
+  it("marks the merged proposal of that worker tidied, and leaves open ones and other workers' alone", () => {
+    const proposal = (worker: string, status: "open" | "merged") => ({ worker, name: worker, branch: `lantern/${worker}`, into: "main", summary: "", commits: 1, files: [], uncommitted: 0, loose: [], status, problem: null, attempts: 0 });
+    let c = withWorkers();
+    c = { ...c, slots: { ...c.slots, s1: { ...c.slots.s1, proposals: [proposal("w1", "merged"), proposal("w2", "open")] } } };
+    const after = chatsReducer(c, { type: "close_agent", slot: "w1" });
+    expect(after.slots.s1.proposals.map((p) => [p.worker, p.tidied])).toEqual([["w1", true], ["w2", undefined]]);
+    const open = chatsReducer(c, { type: "close_agent", slot: "w2" });
+    expect(open.slots.s1.proposals.map((p) => p.tidied)).toEqual([undefined, undefined]);
+  });
+
   it("is a plain removal for a chat that is not a worker", () => {
     const c = chatsReducer(initialChats(main), { type: "add", slot: "s2" });
     expect(chatsReducer(c, { type: "close_agent", slot: "s2" }).slots.s2).toBeUndefined();

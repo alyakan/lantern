@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inSummary, bounds, centerOn, clampZoom, firstBox, fitView, GAP, READABLE_ZOOM, MAIN_SIZE, MAX_ZOOM, MIN_NODE, MIN_ZOOM, moveBox, overlaps, panBy, placeWorker, resizeBox, SUMMARY_ZOOM, tether, toScreen, toWorld, WORKER_SIZE, zoomAt, type Box, type View } from "./canvas";
+import { inSummary, bounds, centerOn, clampZoom, firstBox, fitView, GAP, READABLE_ZOOM, MAIN_SIZE, MAX_ZOOM, MIN_NODE, MIN_ZOOM, moveBox, overlaps, panBy, PLACE_COLUMNS, placeCheck, placeWorker, inView, resizeBox, SUMMARY_ZOOM, tether, toScreen, toWorld, WORKER_SIZE, zoomAt, type Box, type View } from "./canvas";
 
 const view: View = { x: 100, y: 50, zoom: 0.5 };
 
@@ -73,48 +73,156 @@ describe("the view", () => {
 
 describe("placing workers", () => {
   const main = firstBox();
-
-  it("puts the first worker level with its parent, to the right of it", () => {
-    const w = placeWorker([main], main);
-    expect(w).toEqual({ x: MAIN_SIZE.w + GAP, y: 0, ...WORKER_SIZE });
-  });
-
-  it("fills a column of two (level, then below), then starts the next one", () => {
-    const boxes: Box[] = [main];
+  const noOverlap = (boxes: Box[]) => {
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) expect(overlaps(boxes[i], boxes[j]), `${i} and ${j}`).toBe(false);
+  };
+  const fill = (boxes: Box[], n: number) => {
     const placed: Box[] = [];
-    for (let i = 0; i < 6; i++) {
-      const w = placeWorker(boxes, main);
+    for (let i = 0; i < n; i++) {
+      const w = placeWorker(boxes, boxes[0]);
       boxes.push(w);
       placed.push(w);
     }
-    const col0 = MAIN_SIZE.w + GAP;
-    const col1 = col0 + WORKER_SIZE.w + GAP;
-    const col2 = col1 + WORKER_SIZE.w + GAP;
-    expect(placed.map((b) => b.x)).toEqual([col0, col0, col1, col1, col2, col2]);
-    expect(placed.slice(0, 2).map((b) => b.y)).toEqual([0, WORKER_SIZE.h + GAP]);
-    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) expect(overlaps(boxes[i], boxes[j]), `${i} and ${j}`).toBe(false);
+    return placed;
+  };
+
+  it("puts the first worker right below the Lead, aligned with it", () => {
+    expect(placeWorker([main], main)).toEqual({ x: 0, y: MAIN_SIZE.h + GAP, ...WORKER_SIZE });
   });
 
-  it("keeps a full team at a size where a chat can still be read", () => {
+  it("works on an empty canvas around a Lead that is the only card, wherever the Lead is", () => {
+    const lead: Box = { x: -300, y: 900, ...MAIN_SIZE };
+    expect(placeWorker([lead], lead)).toEqual({ x: -300, y: 900 + MAIN_SIZE.h + GAP, ...WORKER_SIZE });
+    expect(placeWorker([], lead)).toEqual({ x: -300, y: 900 + MAIN_SIZE.h + GAP, ...WORKER_SIZE });
+  });
+
+  it("fills a row below the Lead, then wraps to the next row, never going far to the right", () => {
     const boxes: Box[] = [main];
-    for (let i = 0; i < 3; i++) boxes.push(placeWorker(boxes, main));
-    // Three workers (the usual team) in an ordinary window.
-    expect(fitView(boxes, { w: 1426, h: 845 }).zoom).toBeGreaterThanOrEqual(SUMMARY_ZOOM);
-    for (let i = 3; i < 6; i++) boxes.push(placeWorker(boxes, main));
-    expect(fitView(boxes, { w: 1426, h: 845 }).zoom).toBeGreaterThanOrEqual(0.45);
+    const placed = fill(boxes, 7);
+    const col = (i: number) => i * (WORKER_SIZE.w + GAP);
+    const row0 = MAIN_SIZE.h + GAP;
+    const row1 = row0 + WORKER_SIZE.h + GAP;
+    expect(placed.map((b) => [b.x, b.y])).toEqual([
+      [col(0), row0],
+      [col(1), row0],
+      [col(2), row0],
+      [col(0), row1],
+      [col(1), row1],
+      [col(2), row1],
+      [col(0), row1 + WORKER_SIZE.h + GAP],
+    ]);
+    noOverlap(boxes);
+    // However many there are, the team is never wider than three cards.
+    for (const b of placed) expect(b.x + b.w).toBeLessThanOrEqual(PLACE_COLUMNS * (WORKER_SIZE.w + GAP));
   });
 
-  it("goes around an agent the user moved onto a spot", () => {
-    const moved: Box = { x: MAIN_SIZE.w + GAP + 40, y: 30, ...WORKER_SIZE };
+  it("many cards: 30 placed in turn never overlap each other or the Lead", () => {
+    const boxes: Box[] = [main];
+    fill(boxes, 30);
+    noOverlap(boxes);
+    expect(bounds(boxes)!.w).toBeLessThanOrEqual(PLACE_COLUMNS * (WORKER_SIZE.w + GAP));
+  });
+
+  it("keeps the saved positions as they are: placing a new card changes nothing that was placed", () => {
+    const moved: Box = { x: 900, y: 40, ...WORKER_SIZE };
+    const boxes: Box[] = [main, moved];
+    const before = JSON.parse(JSON.stringify(boxes));
+    placeWorker(boxes, main);
+    expect(boxes).toEqual(before);
+  });
+
+  it("goes around a card the user moved onto a spot, and uses the free spot beside it", () => {
+    const first: Box = { x: 0, y: MAIN_SIZE.h + GAP, ...WORKER_SIZE };
+    const moved: Box = { x: first.x + 40, y: first.y + 30, ...WORKER_SIZE };
     const w = placeWorker([main, moved], main);
-    expect(overlaps(w, moved)).toBe(false);
+    expect(overlaps(w, moved, GAP / 2)).toBe(false);
     expect(overlaps(w, main)).toBe(false);
+    // The nearest spot that is free: the next one along the row.
+    expect(w).toEqual({ x: 2 * (WORKER_SIZE.w + GAP), y: first.y, ...WORKER_SIZE });
+  });
+
+  it("uses a gap the user left, nearest the Lead first", () => {
+    const boxes: Box[] = [main, { x: 0, y: MAIN_SIZE.h + GAP, ...WORKER_SIZE }, { x: 2 * (WORKER_SIZE.w + GAP), y: MAIN_SIZE.h + GAP, ...WORKER_SIZE }];
+    expect(placeWorker(boxes, main)).toEqual({ x: WORKER_SIZE.w + GAP, y: MAIN_SIZE.h + GAP, ...WORKER_SIZE });
   });
 
   it("always finds somewhere, even when crowded", () => {
-    const crowd: Box[] = [main, { x: MAIN_SIZE.w, y: -5000, w: 90_000, h: 10_000 }];
+    const crowd: Box[] = [main, { x: -50_000, y: MAIN_SIZE.h, w: 100_000, h: 10_000 }];
     const w = placeWorker(crowd, main);
     expect(overlaps(w, main)).toBe(false);
+    expect(overlaps(w, crowd[1])).toBe(false);
+  });
+
+  it("keeps a team of three at a size where chats can be read", () => {
+    const boxes: Box[] = [main];
+    fill(boxes, 3);
+    expect(fitView(boxes, { w: 1426, h: 845 }).zoom).toBeGreaterThanOrEqual(SUMMARY_ZOOM);
+  });
+});
+
+describe("placing a card that checks a builder's work", () => {
+  const main = firstBox();
+  const lead = main;
+  const builder = placeWorker([main], main);
+
+  it("goes beside the builder, level with it, when that is free", () => {
+    const r = placeCheck([main, builder], builder, lead);
+    expect(r).toEqual({ x: builder.x + builder.w + GAP, y: builder.y, ...WORKER_SIZE });
+  });
+
+  it("goes right below the builder when its side is taken", () => {
+    const side: Box = { x: builder.x + builder.w + GAP, y: builder.y, ...WORKER_SIZE };
+    const r = placeCheck([main, builder, side], builder, lead);
+    expect(r).toEqual({ x: builder.x, y: builder.y + builder.h + GAP, ...WORKER_SIZE });
+  });
+
+  it("stays near the builder, not at the end of the row, even with other agents about", () => {
+    const boxes: Box[] = [main];
+    for (let i = 0; i < 5; i++) boxes.push(placeWorker(boxes, main));
+    const b = boxes[4];
+    const r = placeCheck(boxes, b, lead);
+    boxes.forEach((e) => expect(overlaps(r, e, GAP / 2)).toBe(false));
+    expect(Math.hypot(r.x - b.x, r.y - b.y)).toBeLessThanOrEqual(2.5 * (WORKER_SIZE.w + GAP));
+  });
+
+  it("two cards checking the same builder never overlap", () => {
+    const boxes: Box[] = [main, builder];
+    const a = placeCheck(boxes, builder, lead);
+    boxes.push(a);
+    const q = placeCheck(boxes, builder, lead);
+    expect(overlaps(a, q)).toBe(false);
+    expect(overlaps(q, builder)).toBe(false);
+  });
+
+  it("falls back to the Lead's free space when the builder is boxed in", () => {
+    const ring: Box[] = [];
+    for (let dx = -3; dx <= 3; dx++) for (let dy = -3; dy <= 4; dy++) if (dx !== 0 || dy !== 0) ring.push({ x: builder.x + dx * 500, y: builder.y + dy * 580, w: 480, h: 560 });
+    const r = placeCheck([main, builder, ...ring], builder, lead);
+    expect(overlaps(r, builder)).toBe(false);
+    ring.forEach((e) => expect(overlaps(r, e, GAP / 2)).toBe(false));
+  });
+
+  it("works when the builder's Lead is gone", () => {
+    expect(placeCheck([builder], builder, undefined)).toEqual({ x: builder.x + builder.w + GAP, y: builder.y, ...WORKER_SIZE });
+  });
+});
+
+describe("whether a card is in view", () => {
+  const viewport = { w: 1000, h: 700 };
+  const view: View = { x: 0, y: 0, zoom: 1 };
+
+  it("is true for a card on screen, false for one off an edge, and false for one only peeking in", () => {
+    expect(inView(view, viewport, { x: 100, y: 100, w: 400, h: 500 })).toBe(true);
+    expect(inView(view, viewport, { x: 1200, y: 100, w: 400, h: 500 })).toBe(false);
+    expect(inView(view, viewport, { x: 100, y: 900, w: 400, h: 500 })).toBe(false);
+    expect(inView(view, viewport, { x: 960, y: 100, w: 400, h: 500 })).toBe(false);
+    expect(inView(view, viewport, { x: 900, y: 100, w: 400, h: 500 })).toBe(true);
+  });
+
+  it("follows the pan and the zoom", () => {
+    const box: Box = { x: 1200, y: 100, w: 400, h: 500 };
+    expect(inView({ x: -900, y: 0, zoom: 1 }, viewport, box)).toBe(true);
+    expect(inView({ x: 0, y: 0, zoom: 0.5 }, viewport, box)).toBe(true);
   });
 });
 

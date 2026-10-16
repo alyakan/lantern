@@ -215,6 +215,16 @@ describe("Settings' Teams section: quiet agents and the plan's limit", () => {
     expect(select).toHaveValue("10");
   });
 
+  it("sets whether an agent is tidied up after its merge: Off until chosen, then Ask me or Automatically", () => {
+    view();
+    const select = screen.getByRole("combobox", { name: "Tidy up an agent after its merge" });
+    expect(select).toHaveValue("off");
+    expect([...select.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Off", "Ask me", "Automatically"]);
+    fireEvent.change(select, { target: { value: "auto" } });
+    expect(localStorage.getItem("lantern.tidyAfterMerge")).toBe("auto");
+    expect(select).toHaveValue("auto");
+  });
+
   it("sets when a team's work is paused, Off until chosen", () => {
     view();
     const select = screen.getByRole("combobox", { name: "Pause a team's work when my plan reaches" });

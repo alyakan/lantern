@@ -8,6 +8,8 @@ import {
   GAP,
   moveBox,
   panBy,
+  inView,
+  placeCheck,
   placeWorker,
   resizeBox,
   inSummary,
@@ -18,7 +20,8 @@ import {
   type Size,
   type View,
 } from "../lib/canvas";
-import { CloseAgentContext, useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
+import { ChatStoreContext, CloseAgentContext, useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
+import { agreedOf, closeAll, closedLine, planClosing, riskyQuestion, stoppedAgents, isStopped, type ClosePlan } from "../lib/closeStopped";
 import { ProjectSetupContext, runCommandOf } from "../lib/projectSetup";
 import { useAction } from "../lib/actions";
 import { lostText, nodeStatus, readyToMerge, statusLabel, summaryLine, usage, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
@@ -60,18 +63,18 @@ export interface CanvasLayout {
 
 export const newLayout = (): CanvasLayout => ({ boxes: {}, view: null, touched: false, collapsed: {}, order: [], seen: new Set() });
 
-/** Gives every agent a place (new ones go beside their main agent, in free space) and forgets agents that are gone. */
+/** Gives every agent a place (new ones go below their main agent, in free space) and forgets agents that are gone. */
 export function placeNodes(layout: CanvasLayout, nodes: { slot: string; role: "main" | "worker"; parent: string | null; reviewOf?: string }[]): void {
   const live = new Set(nodes.map((n) => n.slot));
   for (const slot of Object.keys(layout.boxes)) if (!live.has(slot)) delete layout.boxes[slot];
   for (const n of nodes) {
     if (layout.boxes[n.slot]) continue;
     const all = Object.values(layout.boxes);
-    // An agent that checks a builder's work goes beside that builder; any other beside its main agent.
-    const beside = n.reviewOf ? layout.boxes[n.reviewOf] : undefined;
+    // An agent that checks a builder's work goes beside that builder; any other below its main agent, in the nearest free spot.
+    const builder = n.reviewOf ? layout.boxes[n.reviewOf] : undefined;
     const parent = n.parent ? layout.boxes[n.parent] : undefined;
-    if (n.role === "worker" && (beside ?? parent)) {
-      layout.boxes[n.slot] = placeWorker(all, (beside ?? parent)!);
+    if (n.role === "worker" && (builder || parent)) {
+      layout.boxes[n.slot] = builder ? placeCheck(all, builder, parent) : placeWorker(all, parent!);
     } else {
       // A main agent (or a worker whose main agent is gone) goes below whatever is already there.
       const b = bounds(all);
@@ -281,7 +284,7 @@ const TetherLine = memo(function TetherLine({ slot, d, fresh }: { slot: string; 
 export const UPDATE_REQUEST =
   "Give me a short status report in plain language: for each agent, what it has done, what it is doing now, and anything blocked or waiting for my decision. Look at each agent's latest work first if you need to. No code unless I ask.";
 
-function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string) => void }) {
+function Team({ nodes, onGoTo, onCloseStopped }: { nodes: OrchestraNode[]; onGoTo: (slot: string) => void; onCloseStopped: () => void }) {
   const [open, setOpen] = useState(false);
   const actions = useNodeActions();
   const states = useChatStates(nodes.map((n) => n.slot));
@@ -310,6 +313,7 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
   );
   const main = nodes.find((n) => n.role === "main");
   const mainState = main ? bySlot[main.slot] : undefined;
+  const stopped = stoppedAgents(nodes, (slot) => bySlot[slot]).length;
   const canAsk = !!main && !!mainState && (mainState.status === "idle" || mainState.status === "running") && nodes.some((n) => n.role === "worker");
   // Sent now when the main agent is free, and queued behind what it is doing when it isn't (like anything typed to it).
   const askForUpdate = () => {
@@ -363,6 +367,18 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
               );
             })}
           </ul>
+          {stopped > 0 && (
+            <button
+              className="team-ask"
+              onClick={() => {
+                setOpen(false);
+                onCloseStopped();
+              }}
+              title="Closes the agents that have stopped, and removes their worktrees and branches. You are asked about any with work that isn't merged."
+            >
+              Close stopped agents ({stopped})
+            </button>
+          )}
           {canAsk && (
             <button className="team-ask" onClick={askForUpdate} title="The Lead writes up where everything stands, in plain language">
               Ask the Lead for an update
@@ -374,7 +390,7 @@ function Team({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo: (slot: string
   );
 }
 
-function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onShow, main }: { zoom: number; attention: number; nodes: OrchestraNode[]; onZoom: (factor: number) => void; onFit: () => void; onNext: () => void; onGoTo: (slot: string) => void; onShow: (slot: string) => void; main: string | undefined }) {
+function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onShow, onCloseStopped, main }: { zoom: number; attention: number; nodes: OrchestraNode[]; onZoom: (factor: number) => void; onFit: () => void; onNext: () => void; onGoTo: (slot: string) => void; onShow: (slot: string) => void; onCloseStopped: () => void; main: string | undefined }) {
   // One ring each time the count goes up (not when the canvas opens with some waiting already).
   const before = useRef(attention);
   const [rung, setRung] = useState(0);
@@ -408,7 +424,7 @@ function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onSho
         Fit
       </button>
       <TeamContext nodes={nodes} onGoTo={onGoTo} />
-      <Team nodes={nodes} onGoTo={onGoTo} />
+      <Team nodes={nodes} onGoTo={onGoTo} onCloseStopped={onCloseStopped} />
       {/* Below a width the rest fold into "⋯" (the canvas's container query decides which shows). */}
       <div className="canvas-ctl-wide">
         <HiddenAgents nodes={nodes.filter((n) => n.hidden)} onShow={onShow} />
@@ -476,6 +492,17 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   const summaryRef = useRef(summary);
   const nextAttention = useRef(0);
   const actions = useNodeActions();
+  const store = useContext(ChatStoreContext);
+  // Cards that arrived off screen on a canvas the user has framed themselves: it doesn't re-frame, so the corner says they are there.
+  const [unseen, setUnseen] = useState<string[]>([]);
+  const unseenRef = useRef<string[]>([]);
+  const refreshUnseen = useCallback(() => {
+    if (unseenRef.current.length === 0) return;
+    const next = unseenRef.current.filter((slot) => layout.boxes[slot] && !inView(view.current, size.current, layout.boxes[slot]));
+    if (next.length === unseenRef.current.length) return;
+    unseenRef.current = next;
+    setUnseen(next);
+  }, [layout]);
 
   // Hidden agents keep their place (so one comes back where it was) but are not drawn, tethered or framed.
   placeNodes(layout, nodes);
@@ -515,12 +542,13 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     }
     // Cards below SUMMARY_ENTER, chats again above SUMMARY_EXIT; in between, whichever it was.
     summaryRef.current = inSummary(summaryRef.current, v.zoom);
+    refreshUnseen();
     // A folded card's height depends on the zoom once it is a card, and its tether meets it.
     if (Object.values(layout.collapsed).some(Boolean)) paintTethersRef.current();
     // Only these two things in React depend on the zoom: the label, and whether agents are cards. Both are cheap.
     setSummary(summaryRef.current);
     setZoomPct((prev) => (Math.round(prev * 100) === Math.round(v.zoom * 100) ? prev : v.zoom));
-  }, [layout]);
+  }, [layout, refreshUnseen]);
 
   const fit = useCallback((animate: boolean) => {
     const boxes = shownSlots.current.map((s) => layout.boxes[s]).filter(Boolean);
@@ -553,6 +581,18 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   useEffect(() => {
     if (!layout.touched) fit(true);
   }, [slotKey, fit, layout]);
+
+  // A new card on a canvas the user has framed: not re-framed, but a card that is off screen is pointed out.
+  useEffect(() => {
+    const slots = new Set(shownSlots.current);
+    const fresh = [...arriving].filter((slot) => slots.has(slot) && layout.boxes[slot]);
+    const kept = unseenRef.current.filter((slot) => slots.has(slot));
+    const off = layout.touched && size.current.w > 0 ? fresh.filter((slot) => !inView(view.current, size.current, layout.boxes[slot])) : [];
+    const next = [...new Set([...kept, ...off])];
+    if (next.length === unseenRef.current.length && next.every((s, i) => s === unseenRef.current[i])) return;
+    unseenRef.current = next;
+    setUnseen(next);
+  }, [slotKey]);
 
   const touch = () => {
     layout.touched = true;
@@ -772,6 +812,38 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   const askRef = useRef(askToClose);
   askRef.current = askToClose;
   const closeAsk = useCallback((slot: string) => askRef.current(slot), []);
+  // "Close stopped agents": every stopped agent of the team, checked first. When none has work to lose they are closed at once; when some
+  // do, one question names them and what each would lose, and nothing is closed until it is answered (Close all, Keep those, Cancel).
+  const [bulk, setBulk] = useState<ClosePlan | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const noteTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(noteTimer.current), []);
+  const say = (text: string) => {
+    window.clearTimeout(noteTimer.current);
+    setNote(text);
+    noteTimer.current = window.setTimeout(() => setNote(null), 9000);
+  };
+  const stillStopped = (slot: string) => isStopped(store.get(slot));
+  const finishClosing = (agents: Parameters<typeof closeAll>[0], refused: ClosePlan["refused"], skipped: number) => {
+    setCloseBusy(true);
+    closeAll(agents, { closeWorker: actions.closeWorker, stillStopped }).then((out) => {
+      setBulk(null);
+      setCloseBusy(false);
+      say(closedLine(out.closed, out.kept + refused.length + skipped, [...out.problems, ...refused.map((r) => `${r.name}: ${r.reason}`)]));
+    });
+  };
+  const closeStopped = () => {
+    setProblem(null);
+    setNote(null);
+    const agents = stoppedAgents(nodesNow.current, store.get);
+    if (agents.length === 0) return say("No agents have stopped.");
+    planClosing(agents, actions.closeCheck).then((plan) => {
+      if (plan.risky.length > 0) setBulk(plan);
+      else if (plan.free.length > 0) finishClosing(plan.free, plan.refused, 0);
+      else say(closedLine(0, plan.refused.length, plan.refused.map((r) => `${r.name}: ${r.reason}`)));
+    });
+  };
+  useAction("close-stopped-agents", closeStopped);
   const menuNode = menu ? nodes.find((n) => n.slot === menu.slot) : undefined;
   const menuItems = (n: OrchestraNode): AgentMenuItem[] => {
     const needsYou = attention.includes(n.slot);
@@ -894,12 +966,37 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       </div>
       </CloseAgentContext.Provider>
       <Announcer nodes={nodes} />
-      <Controls zoom={zoomPct} attention={attention.length} nodes={nodes} onZoom={zoomBy} onFit={() => { layout.touched = false; fit(true); }} onNext={next} onGoTo={goTo} onShow={actions.show} main={nodes.find((n) => n.role === "main")?.slot} />
+      <Controls zoom={zoomPct} attention={attention.length} nodes={nodes} onZoom={zoomBy} onFit={() => { layout.touched = false; fit(true); }} onNext={next} onGoTo={goTo} onShow={actions.show} onCloseStopped={closeStopped} main={nodes.find((n) => n.role === "main")?.slot} />
       {problem && (
         <div className="canvas-problem canvas-overlay" role="alert">
           <span>{problem}</span>
           <button onClick={() => setProblem(null)}>Dismiss</button>
         </div>
+      )}
+      {note && (
+        <div className="canvas-note canvas-overlay" role="status">
+          <span>{note}</span>
+          <button onClick={() => setNote(null)}>Dismiss</button>
+        </div>
+      )}
+      {unseen.length > 0 && (
+        <button className="canvas-new canvas-overlay" onClick={() => goTo(unseen[0])} title="Go to the agent that was just added, off the edge of what you are looking at">
+          {unseen.length === 1 ? "1 new agent" : `${unseen.length} new agents`}
+        </button>
+      )}
+      {bulk && (
+        <ConfirmDialog
+          title="Close stopped agents?"
+          confirmLabel="Close all"
+          busyLabel="Closing…"
+          busy={closeBusy}
+          onConfirm={() => finishClosing([...bulk.free, ...bulk.risky.map((a) => ({ ...a, agreed: agreedOf(a.check) }))], bulk.refused, 0)}
+          alternative={{ label: "Keep those", onClick: () => (bulk.free.length > 0 ? finishClosing(bulk.free, bulk.refused, bulk.risky.length) : (setBulk(null), say(closedLine(0, bulk.risky.length + bulk.refused.length)))) }}
+          onCancel={() => setBulk(null)}
+        >
+          <p>{riskyQuestion(bulk.risky)}</p>
+          <p>Closing stops them and deletes their worktrees and branches, so that work is gone for good.{bulk.free.length > 0 ? ` ${bulk.free.length === 1 ? "1 other stopped agent has" : `${bulk.free.length} other stopped agents have`} nothing to lose and will be closed either way.` : ""}</p>
+        </ConfirmDialog>
       )}
       {closing && (
         <ConfirmDialog title={`Close ${nodes.find((n) => n.slot === closing.slot)?.name ?? "this agent"}?`} confirmLabel="Discard work and close" busyLabel="Closing…" busy={closeBusy} onConfirm={() => closeAgent(closing.slot, { uncommitted: closing.check.uncommitted, unmerged_commits: closing.check.unmerged_commits })} onCancel={() => setClosing(null)}>

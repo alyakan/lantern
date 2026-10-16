@@ -1,10 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { availableActions, runAction } from "../lib/actions";
 import { chatsReducer, initialChats, WAKE_LIMIT, type Chats } from "../sessions";
 import { initialState, type State } from "../store";
 import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions } from "../lib/canvasContext";
 import { needingYou, orchestraNodes } from "../lib/orchestraView";
-import { GAP, MAIN_SIZE, overlaps, SUMMARY_ZOOM, WORKER_SIZE } from "../lib/canvas";
+import { firstBox, GAP, MAIN_SIZE, overlaps, SUMMARY_ZOOM, WORKER_SIZE } from "../lib/canvas";
 import { Canvas, newLayout, placeNodes, UPDATE_REQUEST } from "./Canvas";
 import { NUDGE_MESSAGE } from "./NodeBody";
 
@@ -49,12 +50,22 @@ function setup(chats: Chats, extra: { attention?: string[]; layout?: ReturnType<
   return { ...render(ui), layout, store, ...handlers, nodes, acts };
 }
 
+/** A layout with the first worker level with the Lead, to its right: a tether that leaves the Lead's side and meets the worker's left edge, so a folded card's height shows in it. */
+function besideLead() {
+  const layout = newLayout();
+  layout.boxes.s1 = firstBox();
+  layout.boxes.w1 = { x: MAIN_SIZE.w + GAP, y: 100, ...WORKER_SIZE };
+  return layout;
+}
+
 describe("placeNodes", () => {
-  it("puts the main agent first and workers beside it without overlap, and gives every agent a front-to-back place", () => {
+  it("puts the main agent first and workers below it without overlap, and gives every agent a front-to-back place", () => {
     const layout = newLayout();
     placeNodes(layout, orchestraNodes(team(3), () => "Lead"));
     expect(layout.boxes.s1).toEqual({ x: 0, y: 0, ...MAIN_SIZE });
-    expect(layout.boxes.w1.x).toBe(MAIN_SIZE.w + GAP);
+    expect(layout.boxes.w1).toEqual({ x: 0, y: MAIN_SIZE.h + GAP, ...WORKER_SIZE });
+    expect(layout.boxes.w2.y).toBe(layout.boxes.w1.y);
+    expect(layout.boxes.w2.x).toBeGreaterThan(layout.boxes.w1.x);
     const boxes = Object.values(layout.boxes);
     for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) expect(overlaps(boxes[i], boxes[j])).toBe(false);
     expect(layout.order).toEqual(["s1", "w1", "w2", "w3"]);
@@ -360,7 +371,7 @@ describe("the canvas", () => {
   });
 
   it("meets a folded agent's tether at its title bar, not at the space its full height would have taken", () => {
-    const { layout } = setup(team(1));
+    const { layout } = setup(team(1), { layout: besideLead() });
     const full = document.querySelector("path.tether")!.getAttribute("d")!;
     fireEvent.click(screen.getByRole("button", { name: "Collapse Worker 1" }));
     const folded = document.querySelector("path.tether")!.getAttribute("d")!;
@@ -1247,7 +1258,7 @@ describe("a folded card zoomed out into a card", () => {
   const zoomOut = () => act(() => void fireEvent.wheel(screen.getByTestId("canvas"), { ctrlKey: true, deltaY: 600 }));
 
   it("is as tall as its title bar is drawn, and its tether follows that as the zoom changes", () => {
-    const { layout } = setup(team(1));
+    const { layout } = setup(team(1), { layout: besideLead() });
     fireEvent.click(screen.getByRole("button", { name: "Collapse Worker 1" }));
     const tetherEnd = () => Number(document.querySelector("path.tether")!.getAttribute("d")!.trim().split(" ").pop());
     const full = tetherEnd();
@@ -1512,23 +1523,194 @@ describe("Lantern's review and test of a builder's work", () => {
     expect(acts.setReview).toHaveBeenCalledWith("s1", { on: false, tidy: true, checks: ["reviewer", "qa"] });
   });
 
-  it("places an agent that checks a builder's work beside that builder, not beside the Lead", () => {
+  it("places an agent that checks a builder's work beside that builder, not with the Lead's other agents", () => {
     let chats = team(2);
     chats = ui(chats, { kind: "agent_spawned", worker: "w3", name: "Reviewer: Worker 1", brief: "x", folder: "/wt/w3", branch: null, base: null, isolation: "worktree", mode: "auto", role: { id: "reviewer", label: "Reviewer", read_only: true }, review_of: "w2" });
     const layout = newLayout();
     placeNodes(layout, orchestraNodes(chats, () => "Lead"));
     const w2 = layout.boxes.w2;
     const w3 = layout.boxes.w3;
-    // To the right of its builder, level with it or just below, and clear of every other card.
-    expect(w3.x).toBeGreaterThanOrEqual(w2.x + w2.w + GAP);
-    expect(w3.x).toBeGreaterThan(layout.boxes.w1.x);
+    // To the right of its builder, level with it, and clear of every other card.
+    expect(w3.x).toBe(w2.x + w2.w + GAP);
     expect(w3.y).toBe(w2.y);
     const boxes = Object.values(layout.boxes);
     for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) expect(overlaps(boxes[i], boxes[j])).toBe(false);
-    // Without it, the same agent goes beside the Lead like any other.
+    // Without it, the same agent takes the next free spot below the Lead like any other.
     const plain = ui(team(2), { kind: "agent_spawned", worker: "w3", name: "Reviewer", brief: "x", folder: "/wt/w3", branch: null, base: null, isolation: "worktree", mode: "auto" });
     const l2 = newLayout();
     placeNodes(l2, orchestraNodes(plain, () => "Lead"));
-    expect(l2.boxes.w3.y).toBe(l2.boxes.s1.y);
+    expect(l2.boxes.w3.y).toBe(l2.boxes.w1.y);
+    expect(l2.boxes.w3.x).toBe(2 * (WORKER_SIZE.w + GAP));
+  });
+});
+
+/** A team whose workers `stopped` have stopped (their chats ended), the rest idle. */
+function withStopped(chats: Chats, ...stopped: string[]): Chats {
+  const slots = { ...chats.slots };
+  for (const slot of stopped) slots[slot] = { ...slots[slot], status: "ended" };
+  return { ...chats, slots };
+}
+
+const check = (uncommitted: number, unmerged_commits: number) => ({ worktree: true, branch: "lantern/x", uncommitted, unmerged_commits });
+
+describe("Close stopped agents", () => {
+  const openTeam = () => fireEvent.click(screen.getByRole("button", { name: "Team" }));
+
+  it("is offered in the Team list only while an agent has stopped, with how many", () => {
+    setup(team(2));
+    openTeam();
+    expect(screen.queryByRole("button", { name: /Close stopped agents/ })).toBeNull();
+    cleanup();
+    setup(withStopped(team(3), "w1", "w3"));
+    openTeam();
+    expect(screen.getByRole("button", { name: "Close stopped agents (2)" })).toBeInTheDocument();
+  });
+
+  it("closes the stopped agents that have nothing to lose straight away, and says so: never the Lead, never one at work", async () => {
+    let chats = withStopped(team(3), "w1", "w2");
+    chats.slots.w3 = { ...chats.slots.w3, status: "running" };
+    const { acts } = setup(chats);
+    openTeam();
+    fireEvent.click(screen.getByRole("button", { name: "Close stopped agents (2)" }));
+    expect(await screen.findByText("Closed 2 agents.")).toBeInTheDocument();
+    expect((acts.closeCheck as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]).sort()).toEqual(["w1", "w2"]);
+    expect((acts.closeWorker as ReturnType<typeof vi.fn>).mock.calls).toEqual([["w1", undefined], ["w2", undefined]]);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("asks once about the ones with work that isn't merged, naming what each would lose, and closes nothing until answered", async () => {
+    const closeCheck = vi.fn((slot: string) => Promise.resolve(slot === "w1" ? check(0, 3) : slot === "w2" ? check(1, 0) : check(0, 0)));
+    const { acts } = setup(withStopped(team(3), "w1", "w2", "w3"), { actions: { closeCheck } });
+    openTeam();
+    fireEvent.click(screen.getByRole("button", { name: "Close stopped agents (3)" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Close stopped agents?" });
+    expect(within(dialog).getByText("2 agents have work that isn't merged: Worker 1 (3 commits), Worker 2 (1 uncommitted file). Close them anyway?")).toBeInTheDocument();
+    expect(within(dialog).getByText(/1 other stopped agent has nothing to lose/)).toBeInTheDocument();
+    expect(acts.closeWorker).not.toHaveBeenCalled();
+    expect(within(dialog).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cancel", "Keep those", "Close all"]);
+  });
+
+  it("Close all closes every one, each risky one with exactly what it was told it would lose", async () => {
+    const closeCheck = vi.fn((slot: string) => Promise.resolve(slot === "w1" ? check(2, 3) : check(0, 0)));
+    const { acts } = setup(withStopped(team(2), "w1", "w2"), { actions: { closeCheck } });
+    openTeam();
+    fireEvent.click(screen.getByRole("button", { name: "Close stopped agents (2)" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Close all" }));
+    expect(await screen.findByText("Closed 2 agents.")).toBeInTheDocument();
+    expect((acts.closeWorker as ReturnType<typeof vi.fn>).mock.calls).toEqual([["w2", undefined], ["w1", { uncommitted: 2, unmerged_commits: 3 }]]);
+  });
+
+  it("Keep those closes only the ones with nothing to lose: 'Closed 1 agent. Kept 1.'", async () => {
+    const closeCheck = vi.fn((slot: string) => Promise.resolve(slot === "w1" ? check(0, 1) : check(0, 0)));
+    const { acts } = setup(withStopped(team(2), "w1", "w2"), { actions: { closeCheck } });
+    openTeam();
+    fireEvent.click(screen.getByRole("button", { name: "Close stopped agents (2)" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Keep those" }));
+    expect(await screen.findByText("Closed 1 agent. Kept 1.")).toBeInTheDocument();
+    expect((acts.closeWorker as ReturnType<typeof vi.fn>).mock.calls).toEqual([["w2", undefined]]);
+  });
+
+  it("Cancel closes nothing at all", async () => {
+    const closeCheck = vi.fn((slot: string) => Promise.resolve(slot === "w1" ? check(0, 1) : check(0, 0)));
+    const { acts } = setup(withStopped(team(2), "w1", "w2"), { actions: { closeCheck } });
+    openTeam();
+    fireEvent.click(screen.getByRole("button", { name: "Close stopped agents (2)" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(acts.closeWorker).not.toHaveBeenCalled();
+  });
+
+  it("keeps an agent whose close is refused, and says why", async () => {
+    const closeWorker = vi.fn((slot: string) => (slot === "w1" ? Promise.reject("Its branch is being merged.") : Promise.resolve()));
+    setup(withStopped(team(2), "w1", "w2"), { actions: { closeWorker } });
+    openTeam();
+    fireEvent.click(screen.getByRole("button", { name: "Close stopped agents (2)" }));
+    expect(await screen.findByText("Closed 1 agent. Kept 1. Worker 1: Its branch is being merged.")).toBeInTheDocument();
+  });
+
+  it("an agent that started working again while the question was open is left alone", async () => {
+    const closeCheck = vi.fn((slot: string) => Promise.resolve(slot === "w1" ? check(0, 1) : check(0, 0)));
+    const { acts, store, nodes } = setup(withStopped(team(2), "w1", "w2"), { actions: { closeCheck } });
+    openTeam();
+    fireEvent.click(screen.getByRole("button", { name: "Close stopped agents (2)" }));
+    const dialog = await screen.findByRole("alertdialog");
+    // w2 restarts before the answer.
+    const slots = { ...store.get("w2") && { w1: store.get("w1")!, w2: { ...store.get("w2")!, status: "running" as const }, s1: store.get("s1")! } };
+    act(() => store.set(slots));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close all" }));
+    expect(await screen.findByText("Closed 1 agent. Kept 1.")).toBeInTheDocument();
+    expect((acts.closeWorker as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0])).toEqual(["w1"]);
+    expect(nodes.length).toBe(3);
+  });
+
+  it("is in the command palette while the canvas is open", async () => {
+    const { acts } = setup(withStopped(team(2), "w2"));
+    expect(availableActions().map((a) => a.title)).toContain("Close stopped agents");
+    act(() => void runAction("close-stopped-agents"));
+    expect(await screen.findByText("Closed 1 agent.")).toBeInTheDocument();
+    expect((acts.closeWorker as ReturnType<typeof vi.fn>).mock.calls).toEqual([["w2", undefined]]);
+  });
+
+  it("says when no agent has stopped", async () => {
+    setup(team(2));
+    // The same action twice within a moment is one keystroke arriving twice (see runAction), so let the last test's pass.
+    await new Promise((r) => setTimeout(r, 170));
+    act(() => void runAction("close-stopped-agents"));
+    expect(await screen.findByText("No agents have stopped.")).toBeInTheDocument();
+  });
+});
+
+describe("a new card the user can't see", () => {
+  const size = (w: number, h: number) => {
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => w });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => h });
+  };
+  afterEach(() => {
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientWidth;
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientHeight;
+  });
+
+  const rerenderWith = (view: ReturnType<typeof setup>, chats: Chats, layout: ReturnType<typeof newLayout>) => {
+    view.store.set(chats.slots);
+    view.rerender(
+      <ChatStoreContext.Provider value={view.store}>
+        <NodeActionsContext.Provider value={view.acts}>
+          <Canvas nodes={orchestraNodes(chats, () => "Lead")} layout={layout} activeSlot="s1" attention={[]} onFocus={vi.fn()} onOpen={vi.fn()} />
+        </NodeActionsContext.Provider>
+      </ChatStoreContext.Provider>,
+    );
+  };
+
+  it("says '1 new agent' when the user has framed the canvas and the new card is off screen, and goes to it", () => {
+    size(800, 600);
+    const layout = newLayout();
+    const view = setup(team(1), { layout });
+    act(() => void fireEvent.wheel(screen.getByTestId("canvas"), { ctrlKey: true, deltaY: 0 })); // the user frames it
+    layout.touched = true;
+    layout.view = { x: 0, y: 0, zoom: 1 };
+    const before = { ...layout.view };
+    act(() => rerenderWith(view, team(2), layout));
+    // Placed in the free space below the Lead, which is off the 600px-tall view; the view itself was left as the user had it.
+    expect(layout.view).toEqual(before);
+    const nudge = screen.getByRole("button", { name: "1 new agent" });
+    fireEvent.click(nudge);
+    expect(layout.view!.y).toBeLessThan(0);
+    expect(screen.queryByRole("button", { name: /new agent/ })).toBeNull();
+  });
+
+  it("says nothing when the new card is on screen, and nothing when the canvas isn't framed by the user (it re-frames itself)", () => {
+    size(1600, 1400);
+    const layout = newLayout();
+    const view = setup(team(1), { layout });
+    layout.touched = true;
+    layout.view = { x: 0, y: 0, zoom: 0.6 };
+    act(() => rerenderWith(view, team(2), layout));
+    expect(screen.queryByRole("button", { name: /new agent/ })).toBeNull();
+    cleanup();
+    size(800, 600);
+    const l2 = newLayout();
+    const v2 = setup(team(1), { layout: l2 });
+    act(() => rerenderWith(v2, team(2), l2));
+    expect(screen.queryByRole("button", { name: /new agent/ })).toBeNull();
   });
 });
