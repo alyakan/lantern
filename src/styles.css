@@ -2034,6 +2034,22 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .revert-file-error { flex-basis: 100%; font-size: calc(11.5px * var(--font-scale)); color: var(--muted); }
 .revert-error { color: var(--del); }
 .revert-actions { display: flex; justify-content: flex-end; gap: 8px; }
+/* "Team from a template": the templates as a list to choose from, the task, and making one of your own. */
+.template-list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; border: none; }
+.template-row { display: flex; align-items: center; gap: 4px; border-radius: var(--radius-chip); }
+.template-row:has(input:checked) { background: var(--bg-active); }
+.template-row:hover { background: var(--bg-hover); }
+.template-choice { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; padding: 7px 8px; cursor: pointer; }
+.template-choice input { margin-top: 3px; }
+.template-task { display: flex; flex-direction: column; gap: 4px; }
+.template-task textarea, .template-make input[type="text"], .template-make input:not([type]) { width: 100%; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg); color: var(--text); font: 400 calc(13px * var(--font-scale)) var(--ui); }
+.template-task textarea { resize: vertical; }
+.template-task textarea[aria-invalid="true"] { border-color: var(--del); }
+.template-make { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 10px; border: 1px solid var(--line-strong); border-radius: var(--radius); }
+.template-roles { display: flex; flex-direction: column; gap: 4px; }
+.template-role { display: flex; align-items: center; gap: 8px; }
+.template-make-actions { display: flex; gap: 8px; }
+.template-new { align-self: flex-start; }
 .revert-undo { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: calc(12px * var(--font-scale)); }
 .revert-undo-text { min-width: 0; }
 .revert-undo-note { flex: 1; color: var(--muted); font-size: calc(11.5px * var(--font-scale)); }
@@ -2244,6 +2260,11 @@ button.plan-meter:hover { background: var(--bg-hover); }
 .model-chip { flex: none; display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-pill); color: var(--muted-text); font: 500 calc(10.5px * var(--font-scale)) var(--ui); white-space: nowrap; }
 .model-chip.opus { border-color: var(--attn); background: color-mix(in srgb, var(--attn) 14%, transparent); color: var(--attn-text); font-weight: 600; }
 .node-meta .model-chip { height: 15px; padding: 0 5px; font-size: calc(10px * var(--font-scale)); }
+/* An agent's role on its card and in the sidebar's list; a read-only one says so, in the accent colour that says "careful". */
+.node-role-bar { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-bottom: 0.5px solid var(--line-strong); }
+.canvas.summary .node-role-bar { display: none; }
+.role-chip { flex: none; display: inline-flex; align-items: center; height: 15px; padding: 0 5px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-pill); color: var(--text-2); font: 500 calc(10px * var(--font-scale)) var(--ui); white-space: nowrap; }
+.role-chip.read-only { border-color: var(--attn); background: color-mix(in srgb, var(--attn) 14%, transparent); color: var(--attn-text); }
 .team-name .model-chip { margin-left: 4px; vertical-align: 1px; }
 .team-warning-text { margin: 0; line-height: 1.5; color: var(--text-2); }
 .team-warning-ask { display: flex; align-items: center; gap: 8px; color: var(--text-2); }
@@ -2328,6 +2349,13 @@ button.plan-meter:hover { background: var(--bg-hover); }
 .new-agent-optional { font-weight: 400; color: var(--muted-text); }
 .new-agent-hint { margin: 0; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); line-height: 1.4; }
 .new-agent-problem { margin: 0; color: var(--del); line-height: 1.4; }
+.new-agent { max-height: min(80vh, 680px); overflow-y: auto; }
+.new-agent-brief { min-height: 110px; font-size: calc(11.5px * var(--font-scale)) !important; line-height: 1.45; }
+.new-agent-roles { display: flex; gap: 14px; }
+.new-agent-save { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.new-agent-save input { flex: 1 1 100%; }
+.new-agent-save .new-agent-hint { flex: 1 1 100%; }
+.new-agent-save button { height: var(--pill-m); padding: 0 11px; border-radius: var(--radius-pill); font-size: calc(12px * var(--font-scale)); }
 .new-agent-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .new-agent-actions button { height: var(--pill-m); padding: 0 13px; border-radius: var(--radius-pill); font-size: calc(12.5px * var(--font-scale)); }
 

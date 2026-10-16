@@ -1,3 +1,5 @@
+import type { AgentRole } from "./lib/roles";
+
 /**
  * How a chat launches: Permissions Ask, Permissions Auto, or the Step by step workflow (a page per message, in a flavour:
  * see lib/flavour.ts), whose own Permissions are `auto_approve`. A chat's two settings, Permissions and Workflow, are
@@ -77,7 +79,7 @@ export type UiEvent =
   | { kind: "shell_done"; id: string; code: number | null; stopped: boolean }
   | { kind: "shell_secret"; id: string; secret: boolean }
   /** On the main agent's chat: it started a worker, whose chat is the slot `worker` (open before its first event). */
-  | { kind: "agent_spawned"; worker: string; name: string; brief: string; folder: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; mode: Mode; provider?: ProviderInfo }
+  | { kind: "agent_spawned"; worker: string; name: string; brief: string; folder: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; mode: Mode; provider?: ProviderInfo; role?: AgentRole }
   /** On the main agent's chat: a note from Lantern for it (a worker finished, crashed or waits on the user). */
   | { kind: "agent_wake"; text: string }
   /** On a worker's chat: the main agent sent it this. */
@@ -192,6 +194,8 @@ export interface NewWorker {
   isolation: "worktree" | "shared";
   /** Null: Claude Code's default. */
   model: string | null;
+  /** The role it is started in, which is also what is kept of it on its card; absent: none. A read-only one has its editing tools switched off. */
+  role?: AgentRole;
 }
 
 /**
@@ -291,7 +295,7 @@ export interface Settings {
   orchestrator?: boolean;
   /** Reopen the chat as a worker of an open main agent (a team restored after Lantern was closed). */
   /** `branch`: the one Lantern made for it (null when it shares the folder); its worktree's HEAD is the worker's to switch. */
-  worker?: { name: string; parent: string; branch: string | null; shared: boolean };
+  worker?: { name: string; parent: string; branch: string | null; shared: boolean; read_only: boolean };
 }
 
 /** A file search result (see files::find): the file, and which characters of `rel` matched. */

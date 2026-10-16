@@ -36,6 +36,13 @@ describe("chatsToSave, for a team", () => {
     expect(saved.map((c) => [c.sessionId, c.orchestra])).toEqual([["lead", { role: "main" }], ["w1", { role: "worker", name: "Login form", parentSession: "lead", branch: "lantern/login", base: "main", isolation: "worktree" }]]);
   });
 
+  it("saves an agent's role, so it comes back with the access it had", () => {
+    const role = { id: "reviewer", label: "Reviewer", read_only: true };
+    const saved = chatsToSave(team(), "s1", {}, {}, { s2: { ...agent, role } });
+    expect(saved[1].orchestra).toMatchObject({ role: "worker", agentRole: role });
+    expect("agentRole" in (chatsToSave(team(), "s1", {}, {}, { s2: agent })[1].orchestra ?? {})).toBe(false);
+  });
+
   it("saves the model an agent runs on, so it comes back on that and not on the project's own", () => {
     const saved = chatsToSave(team({ model: "claude-sonnet-5-5" }), "s1", {}, {}, { s2: agent });
     expect(saved.find((c) => c.sessionId === "w1")?.orchestra).toMatchObject({ role: "worker", model: "claude-sonnet-5-5" });

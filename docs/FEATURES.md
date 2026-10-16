@@ -162,6 +162,26 @@ The same canvas in the dark theme:
 
 ![The team canvas in the dark theme](images/team-canvas-dark.png)
 
+### Roles and templates
+
+A **role** is a ready-made way to start an agent: what it is told, the model it runs on, where it works and whether it may change files. Pick one in **+ Agent** and the form fills in the rest; you can still change any of it, and the task you type goes into the brief. The agent is named from it ("Reviewer: login form").
+
+| Role | What it does | Works in | May edit |
+|---|---|---|---|
+| Builder | Builds a change and reports what it did | its own worktree | yes |
+| Reviewer | Reads a branch or diff and reports findings | your folder | no, read only |
+| QA / tester | Runs the project's tests and tries to break the change; may write tests | its own worktree | yes |
+| Docs | Writes and updates documentation | its own worktree | yes |
+| Security auditor | Looks for security problems | your folder | no, read only |
+
+Each role's brief asks for a report in a fixed, plain format (what it found, how serious, what to do). **Read only** is enforced, not just asked: the agent's editing tools are switched off, whatever its brief says, and its card says **Read only** in an amber badge under the title bar. (It can still run commands to read, such as git and the tests, and is told not to use them to change anything.) The role's name shows on the card, and in the sidebar's list of agents ("Reviewer · Working"). Docs is asked to touch documentation only; that part is a request, not a switch.
+
+**Save as a role…** at the bottom of the form keeps what you filled in as a role of your own for the project. Choose it later from "Your roles", save again under the same name to change it, or **Delete this role**. Roles and templates belong to a project and move with it if the folder moves.
+
+The Lead can ask for a role by name when it starts an agent, so its brief only says what to work on. An unknown role is refused with the list of roles there are.
+
+**Team from a template** (**New ▾** in the sidebar, or the Workflow menu under the box) starts a team that already has its members chosen: **Build and review** (a Builder and a Reviewer) or **Build, review and test** (adding a QA tester). Say what the team should do, and the Lead is told each member and its role and starts them. **Make a template of your own…** saves a named list of roles (yours included) for the project.
+
 ### Merging
 
 An agent works on its own branch, and only you can approve merging it. When the Lead asks, a merge card appears on its window and the agent's:

@@ -173,6 +173,16 @@ describe("the open sidebar's projects", () => {
     expect(screen.queryByRole("list", { name: "Agents in audit sweep" })).toBeNull();
   });
 
+  it("names an agent's role in its row, and to VoiceOver", () => {
+    const team = { kind: "team" as const, ...chat("lead", "audit sweep", { state: "running" }), agents: [chat("a1", "Reviewer: login form", { state: "running", role: "Reviewer" }), chat("a2", "ui pass")] };
+    setup({ open: { [LANTERN]: { ...lanternOpen, items: [team] } } });
+    showAgents();
+    const row = screen.getByRole("button", { name: "Reviewer: login form, Reviewer, lantern, Working" });
+    expect(row).toHaveTextContent("Reviewer · Working");
+    // An agent with no role reads as before.
+    expect(screen.getByRole("button", { name: "ui pass, lantern, Done" }).querySelector(".sb-status")?.textContent).toBe("Done");
+  });
+
   it("says who needs you on the line that folds a team's agents", () => {
     const team = { kind: "team" as const, ...chat("lead", "audit sweep", { state: "waiting" }), agents: [chat("a1", "security pass", { state: "waiting" }), chat("a2", "ui pass", { state: "waiting" })] };
     setup({ open: { [LANTERN]: { ...lanternOpen, items: [team] } } });

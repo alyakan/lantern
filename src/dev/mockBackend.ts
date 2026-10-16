@@ -469,6 +469,14 @@ const MOCK_WORKERS = [
   { id: "w3", name: "API docs", branch: null, brief: "Read the API routes and list every endpoint that has no documentation. Write nothing.", ask: false, file: "", final: "Four endpoints have no docs: /signup, /login, /sessions and /webhooks. Nothing was changed." },
 ] as const;
 
+/** With ?roles in the address, the mock team's agents are started in roles (a Builder, a QA tester, a read-only Security auditor). */
+const MOCK_ROLES: Record<string, { id: string; label: string; read_only: boolean }> = {
+  w1: { id: "builder", label: "Builder", read_only: false },
+  w2: { id: "qa", label: "QA / tester", read_only: false },
+  w3: { id: "security", label: "Security auditor", read_only: true },
+};
+const withRoles = () => new URLSearchParams(location.search).has("roles");
+
 /** The main agent's first turn in a mock orchestra: it starts the workers, which then run alongside it. */
 async function playOrchestraTurn(slot: string) {
   const send = sendTo(slot);
@@ -491,6 +499,7 @@ async function playOrchestraTurn(slot: string) {
       isolation: w.branch ? "worktree" : "shared",
       // Never more freedom than the main agent (see worker_mode in the backend).
       mode: slotMode[slot] === "auto" ? "auto" : "ask",
+      ...(withRoles() ? { role: MOCK_ROLES[w.id] } : {}),
     });
     await send({ kind: "tool_finished", parent: null, tool_use_id: id, is_error: false, output: `Started worker ${w.id} ("${w.name}").` });
     void playWorker(slot, w);
@@ -1231,11 +1240,13 @@ export function installMockBackend() {
           return a.worker === "w3" ? { worktree: false, branch: null, uncommitted: 0, unmerged_commits: 0 } : { worktree: true, branch: `lantern/${String(a.worker)}`, uncommitted: 2, unmerged_commits: 1 };
         case "orchestra_close_worker":
           return null;
+        case "orchestra_set_roles":
+          return null;
         case "orchestra_spawn": {
           const id = `w${++mockSpawned}`;
           const worktree = a.isolation === "worktree";
           const name = String(a.name ?? "").trim() || String(a.task).split(/\s+/).slice(0, 5).join(" ");
-          void sendTo(String(a.main))({ kind: "agent_spawned", worker: id, name, brief: String(a.task), folder: worktree ? `/Users/you/Library/Application Support/lantern/worktrees/web-app/${id}` : FOLDER, branch: worktree ? `lantern/${id}` : null, base: worktree ? "main" : null, isolation: worktree ? "worktree" : "shared", mode: slotMode[String(a.main)] === "auto" ? "auto" : "ask" });
+          void sendTo(String(a.main))({ kind: "agent_spawned", worker: id, name, brief: String(a.task), folder: worktree ? `/Users/you/Library/Application Support/lantern/worktrees/web-app/${id}` : FOLDER, branch: worktree ? `lantern/${id}` : null, base: worktree ? "main" : null, isolation: worktree ? "worktree" : "shared", mode: slotMode[String(a.main)] === "auto" ? "auto" : "ask", ...(a.role ? { role: a.role as { id: string; label: string; read_only: boolean } } : {}) });
           // It starts thinking, which is also its first word: a card that then says nothing for minutes shows as quiet.
           void sleep(150).then(async () => {
             await sendTo(id)({ kind: "thinking", parent: null });

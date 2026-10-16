@@ -53,6 +53,8 @@ export interface SidebarHandlers {
   /** New ▾, for the project on screen. */
   onNewChat: () => void;
   onNewTeam: () => void;
+  /** "Team from a template…"; absent: the menu has no such row. */
+  onNewTeamTemplate?: () => void;
   onReviewPr: () => void;
 }
 
@@ -135,7 +137,7 @@ function useDismiss(open: boolean, root: RefObject<HTMLElement | null>, close: (
 const menuKeys = (e: ReactKeyboardEvent<HTMLElement>) => void moveFocus(e, [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')]);
 
 /** New ▾: a chat or a team in the project on screen, or a review of one of its pull requests. */
-function NewMenu({ canNew, onNewChat, onNewTeam, onReviewPr }: Pick<Props, "canNew" | "onNewChat" | "onNewTeam" | "onReviewPr">) {
+function NewMenu({ canNew, onNewChat, onNewTeam, onNewTeamTemplate, onReviewPr }: Pick<Props, "canNew" | "onNewChat" | "onNewTeam" | "onNewTeamTemplate" | "onReviewPr">) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   useDismiss(open, root, () => setOpen(false), () => root.current?.querySelector<HTMLElement>("[aria-haspopup]"));
@@ -165,6 +167,7 @@ function NewMenu({ canNew, onNewChat, onNewTeam, onReviewPr }: Pick<Props, "canN
         <div className="menu sb-menu" role="menu" aria-label="New" ref={menuRef} style={menuStyle} onKeyDown={menuKeys}>
           {item("Chat", "new-session", onNewChat)}
           {item("Team", "work-team", onNewTeam)}
+          {onNewTeamTemplate && item("Team from a template…", null, onNewTeamTemplate)}
           {item("Review a PR…", null, onReviewPr)}
         </div>
       )}
@@ -245,7 +248,7 @@ function CloseConfirm({ closing, closer, floating }: { closing: Closing; closer:
 /** What a row says to VoiceOver (and shows, once the pane is open): the title, the project and the status. */
 const describe = (chip: CompactChip, project: string, full: boolean) => {
   const extra = full ? `${chip.pinned ? ", pinned" : ""}${chip.background > 0 ? `, ${chip.background} running in the background` : ""}` : "";
-  return `${chip.team ? "Team: " : ""}${chip.title}, ${project}, ${chip.status}${extra}`;
+  return `${chip.team ? "Team: " : ""}${chip.title}, ${chip.role ? `${chip.role}, ` : ""}${project}, ${chip.status}${extra}`;
 };
 
 /**
@@ -291,7 +294,7 @@ function ChatRow({ chip, project, onClick, target, closer, full }: { chip: Compa
             ) : (
               <span className="sb-title">{title}</span>
             )}
-            <span className={`sb-status ${mark}`}>{chip.status}</span>
+            <span className={`sb-status ${mark}`}>{chip.role ? `${chip.role} · ${chip.status}` : chip.status}</span>
           </span>
         </button>
         {full ? (
@@ -717,6 +720,7 @@ export function Sidebar(props: Props) {
           onOpenFolder: then(handlers.onOpenFolder),
           onNewChat: then(handlers.onNewChat),
           onNewTeam: then(handlers.onNewTeam),
+          ...(handlers.onNewTeamTemplate ? { onNewTeamTemplate: then(handlers.onNewTeamTemplate) } : {}),
           onReviewPr: then(handlers.onReviewPr),
         };
   const toggleBar = () => {
@@ -753,7 +757,7 @@ export function Sidebar(props: Props) {
     e.preventDefault();
   };
 
-  const newMenu = { canNew, onNewChat: h.onNewChat, onNewTeam: h.onNewTeam, onReviewPr: h.onReviewPr };
+  const newMenu = { canNew, onNewChat: h.onNewChat, onNewTeam: h.onNewTeam, onNewTeamTemplate: h.onNewTeamTemplate, onReviewPr: h.onReviewPr };
   const pin = mode === "pinned" ? "Collapse sidebar" : full ? "Keep sidebar open" : "Expand sidebar";
   const label = full ? "Projects" : "Open chats";
   const shownWidth = dragWidth ?? width;

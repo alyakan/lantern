@@ -127,8 +127,8 @@ describe("the sidebar in the app", () => {
     expect(bar).toHaveTextContent("acme-api");
     expect(await within(bar).findByText("main")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "New" }));
-    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Chat⌘N", "Team⇧⌘N", "Review a PR…"]);
-    fireEvent.click(screen.getByRole("menuitem", { name: /^Team/ }));
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Chat⌘N", "Team⇧⌘N", "Team from a template…", "Review a PR…"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Team(?! from)/ }));
     await waitFor(() => expect(calledWith(calls, "start_session").length).toBeGreaterThan(1));
     expect(calledWith(calls, "start_session").pop()).toMatchObject({ settings: { orchestrator: true } });
     expect(await screen.findByRole("button", { name: /Team: New team/ })).toBeInTheDocument();

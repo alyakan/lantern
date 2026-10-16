@@ -30,6 +30,8 @@ describe("migrateFolderState", () => {
       "review.collapsedByFolder": { [OLD]: true },
       "settings.pinnedSessions": { [OLD]: ["s1"] },
       "sidebar.projectColors": { [OLD]: 3 },
+      "settings.rolesByFolder": { [OLD]: [{ id: "api-reviewer" }] },
+      "settings.teamTemplatesByFolder": { [OLD]: [{ id: "build-audit" }] },
     });
     const changed = migrateFolderState(store, OLD, NEXT);
     expect(Object.keys(changed).sort()).toEqual([...FOLDER_RECORDS].sort());
@@ -41,6 +43,9 @@ describe("migrateFolderState", () => {
     expect(read(store, "review.collapsedByFolder")).toEqual({ [OLD]: true, [NEXT]: true });
     expect(read(store, "settings.pinnedSessions")).toEqual({ [OLD]: ["s1"], [NEXT]: ["s1"] });
     expect(read(store, "sidebar.projectColors")).toEqual({ [OLD]: 3, [NEXT]: 3 });
+    // The project's own agent roles and team templates go with it.
+    expect(read(store, "settings.rolesByFolder")).toEqual({ [OLD]: [{ id: "api-reviewer" }], [NEXT]: [{ id: "api-reviewer" }] });
+    expect(read(store, "settings.teamTemplatesByFolder")).toEqual({ [OLD]: [{ id: "build-audit" }], [NEXT]: [{ id: "build-audit" }] });
     // What was returned is what was written.
     expect(changed["settings.permissionsByFolder"]).toEqual(read(store, "settings.permissionsByFolder"));
   });
