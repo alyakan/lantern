@@ -254,7 +254,7 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
             ))}
           </select>
         </label>
-        <span className="settings-muted">An agent at work that says nothing for this long shows "Quiet" on its card and in the inbox, with Nudge, Interrupt and Restart.</span>
+        <span className="settings-muted">An agent at work that says nothing for this long shows "Quiet" on its card.</span>
         <label className="general-option">
           <span>Tidy up an agent after its merge</span>
           <select aria-label="Tidy up an agent after its merge" value={tidy} onChange={(e) => setTidyMode(e.target.value as (typeof TIDY_MODES)[number]["value"])}>

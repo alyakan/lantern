@@ -1,8 +1,5 @@
-import { memo, useContext, useMemo, useRef, useState } from "react";
+import { memo, useContext, useMemo, useRef } from "react";
 import { CloseAgentContext, useChatState, useNodeActions } from "../lib/canvasContext";
-import { nodeStatus } from "../lib/orchestraView";
-import { longSpan, useQuiet } from "../lib/quiet";
-import { useQuietAfter } from "../lib/quietSetting";
 import { SlotContext } from "../lib/slot";
 import { WAKE_LIMIT, wakesPaused } from "../sessions";
 import type { MergeProposal } from "../store";
@@ -31,51 +28,6 @@ export function visibleProposals(all: MergeProposal[], worker: string | null): M
       return !mine.some((q) => q.worker === p.worker && q.status === "open");
     })
     .reverse();
-}
-
-/** What Nudge sends: a short ask a stuck agent can answer in a line. */
-export const NUDGE_MESSAGE = "Quick check: please reply with a one-line status of what you are doing right now.";
-
-/**
- * An agent at work that has said nothing for the user's quiet time (Settings > General): how long, and what to do about it.
- * Nudge asks it for a one-line status, Interrupt stops its current turn (the agent stays, and can be messaged), Restart
- * starts its claude again, which asks first because it loses the step in progress.
- */
-function QuietLine({ slot, activityAt, working, stopping }: { slot: string; activityAt: number | null; working: boolean; stopping: boolean }) {
-  const actions = useNodeActions();
-  const quiet = useQuiet(activityAt, working, useQuietAfter());
-  // One nudge for each stretch of quiet: any word from the agent (a new activityAt) gives it a fresh one.
-  const [nudged, setNudged] = useState<number | null>(null);
-  const [confirming, setConfirming] = useState(false);
-  if (!quiet?.stuck) return null;
-  if (confirming) {
-    return (
-      <div className="node-banner node-quiet-line" role="alertdialog" aria-label="Restart this agent?">
-        <span>Restarting starts it again on the same conversation. The step it is in the middle of is lost and anything it runs in the background stops. Its chat and files stay.</span>
-        <button className="danger" onClick={() => (setConfirming(false), actions.restart(slot))}>
-          Restart anyway
-        </button>
-        <button autoFocus onClick={() => setConfirming(false)}>
-          Cancel
-        </button>
-      </div>
-    );
-  }
-  const sent = nudged !== null && nudged === activityAt;
-  return (
-    <div className="node-banner node-quiet-line" role="status">
-      <span>Quiet for {longSpan(quiet.ms)}. It may be stuck.</span>
-      <button disabled={sent} title="Ask it for a one-line status" onClick={() => (setNudged(activityAt), actions.send(slot, NUDGE_MESSAGE))}>
-        {sent ? "Nudged" : "Nudge"}
-      </button>
-      <button disabled={stopping} title="Stop what it is doing now. It stays on the team and you can message it" onClick={() => actions.stop(slot)}>
-        {stopping ? "Interrupting…" : "Interrupt"}
-      </button>
-      <button title="Start it again, losing the step it is on" onClick={() => setConfirming(true)}>
-        Restart
-      </button>
-    </div>
-  );
 }
 
 /**
@@ -126,7 +78,6 @@ export const NodeBody = memo(function NodeBody({ slot, parent }: { slot: string;
           ))}
         </div>
       )}
-      <QuietLine slot={slot} activityAt={state.activityAt} working={nodeStatus(state) === "working"} stopping={state.stopRequested} />
       {wakesPaused(state) && (
         <div className="node-banner info" role="status">
           <span>
