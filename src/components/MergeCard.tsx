@@ -1,5 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { useNodeActions } from "../lib/canvasContext";
+import { useChatState, useNodeActions } from "../lib/canvasContext";
+import { lostText } from "../lib/orchestraView";
+import { isOccupied, useTidyMode } from "../lib/tidySetting";
+import type { CloseAgreed, CloseCheck } from "../types";
 import { testsHeadline } from "../lib/mergeTests";
 import { SlotContext } from "../lib/slot";
 import { useMergeTests } from "../lib/useMergeTests";
@@ -16,7 +19,7 @@ const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error 
 
 /**
  * A worker's branch the main agent asks the user to merge: what it adds, and the two answers. Only the user can approve
- * it; the main agent can ask. Once merged it offers to clear the worker's worktree away.
+ * it; the main agent can ask. Once merged it offers one "Tidy up": close the agent and remove its worktree and branch.
  */
 export function MergeCard({ proposal }: { proposal: MergeProposal }) {
   const actions = useNodeActions();
@@ -35,7 +38,10 @@ export function MergeCard({ proposal }: { proposal: MergeProposal }) {
   const [confirming, setConfirming] = useState<"failed" | "running" | null>(null);
   const open = proposal.status === "open";
   const tests = useMergeTests(proposal.worker, open, [proposal.commits, proposal.files.length, proposal.uncommitted, proposal.attempts, proposal.problem]);
-  const [removal, setRemoval] = useState<"idle" | "removing" | "done" | string>("idle");
+  // "Tidy up" on a merged branch: closes its agent, worktree and branch. Asked about first only when the check finds something to lose.
+  const tidyMode = useTidyMode();
+  const worker = useChatState(proposal.worker);
+  const [tidy, setTidy] = useState<{ step: "idle" | "checking" | "closing" | "done" } | { step: "asking"; check: CloseCheck; working: boolean } | { step: "failed"; why: string }>({ step: "idle" });
   // Whatever came of an approval (merged, conflicts, a checkout with changes), the buttons come back to answer again.
   useEffect(() => {
     setBusy(false);
@@ -51,6 +57,23 @@ export function MergeCard({ proposal }: { proposal: MergeProposal }) {
     );
   }
   if (proposal.status === "merged") {
+    const close = (agreed?: CloseAgreed) => {
+      setTidy({ step: "closing" });
+      actions.closeWorker(proposal.worker, agreed).then(
+        () => setTidy({ step: "done" }),
+        (e) => setTidy({ step: "failed", why: errText(e) }),
+      );
+    };
+    const tidyUp = () => {
+      setTidy({ step: "checking" });
+      actions.closeCheck(proposal.worker).then(
+        // Nothing to lose closes at once; work that is still there (or an agent still at it) is asked about first.
+        (check) => (lostText(check) || isOccupied(worker) ? setTidy({ step: "asking", check, working: isOccupied(worker) }) : close()),
+        (e) => setTidy({ step: "failed", why: errText(e) }),
+      );
+    };
+    const tidied = proposal.tidied || tidy.step === "done";
+    const busy = tidy.step === "checking" || tidy.step === "closing";
     return (
       <div className="merge-card quiet" role="status">
         <span>
@@ -59,23 +82,30 @@ export function MergeCard({ proposal }: { proposal: MergeProposal }) {
           </span>{" "}
           Merged {proposal.branch} into {proposal.into}.
         </span>
-        {removal === "done" ? (
-          <span>Worktree removed.</span>
+        {tidied ? (
+          <span>Tidied up: {proposal.name} is closed and its worktree and branch are gone.</span>
+        ) : tidy.step === "asking" ? (
+          <span className="merge-confirm" role="alertdialog" aria-label={`Tidy up ${proposal.name}?`}>
+            <span className="merge-problem">
+              {[tidy.working ? `${proposal.name} is still at work.` : null, lostText(tidy.check) ? `It has ${lostText(tidy.check)}.` : null].filter(Boolean).join(" ")} Tidying up stops it and deletes its worktree and branch
+              {lostText(tidy.check) ? ", so that work is gone for good" : ""}.
+            </span>
+            <span className="merge-actions">
+              <button autoFocus onClick={() => setTidy({ step: "idle" })}>
+                Keep it
+              </button>
+              <button onClick={() => close({ uncommitted: tidy.check.uncommitted, unmerged_commits: tidy.check.unmerged_commits })}>Tidy up anyway</button>
+            </span>
+          </span>
         ) : (
-          <button
-            disabled={removal === "removing"}
-            onClick={() => {
-              setRemoval("removing");
-              actions.removeWorktree(proposal.worker).then(
-                () => setRemoval("done"),
-                (e) => setRemoval(errText(e)),
-              );
-            }}
-          >
-            {removal === "removing" ? "Removing…" : "Remove worktree"}
-          </button>
+          <>
+            {tidyMode === "ask" && !busy && <span className="merge-ask">Tidy up {proposal.name}? It closes the agent and removes its worktree and branch.</span>}
+            <button className={tidyMode === "ask" ? "merge-approve" : undefined} disabled={busy} onClick={tidyUp} title="Closes this agent and removes its worktree and branch, now that its work is merged">
+              {busy ? "Tidying up…" : "Tidy up"}
+            </button>
+          </>
         )}
-        {removal !== "idle" && removal !== "removing" && removal !== "done" && <span className="merge-problem">{removal}</span>}
+        {tidy.step === "failed" && <span className="merge-problem">{tidy.why}</span>}
       </div>
     );
   }

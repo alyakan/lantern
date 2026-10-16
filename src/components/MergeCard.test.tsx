@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { NodeActionsContext, type NodeActions } from "../lib/canvasContext";
 import type { MergeProposal } from "../store";
 import { MergeCard } from "./MergeCard";
@@ -140,17 +140,63 @@ describe("the merge card", () => {
     expect(a.reviewMerge).toHaveBeenLastCalledWith("w1", "src/App.tsx");
   });
 
-  it("shows a merged one, with a way to clear the worktree, whose failure is shown", async () => {
-    const removeWorktree = vi.fn().mockRejectedValueOnce("It has uncommitted changes.").mockResolvedValueOnce(undefined);
-    show({ ...proposal, status: "merged" }, actions({ removeWorktree }));
-    expect(screen.getByRole("status").textContent).toContain("Merged lantern/login-form into main.");
-    fireEvent.click(screen.getByRole("button", { name: "Remove worktree" }));
-    await waitFor(() => expect(screen.getByText("It has uncommitted changes.")).toBeTruthy());
-    await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Remove worktree" }));
+  describe("once merged", () => {
+    const merged: MergeProposal = { ...proposal, status: "merged" };
+    const lost = (uncommitted: number, unmerged_commits: number) => ({ worktree: true, branch: "lantern/login-form", uncommitted, unmerged_commits });
+    afterEach(() => localStorage.clear());
+
+    it("shows one button, Tidy up, that closes the agent with nothing asked when nothing is left to lose", async () => {
+      const { a } = show(merged);
+      expect(screen.getByRole("status").textContent).toContain("Merged lantern/login-form into main.");
+      expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Tidy up"]);
+      expect(screen.queryByText(/Tidy up Login form\?/)).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Tidy up" }));
+      await waitFor(() => expect(screen.getByText(/Tidied up: Login form is closed/)).toBeTruthy());
+      expect(a.closeCheck).toHaveBeenCalledWith("w1");
+      expect(a.closeWorker).toHaveBeenCalledWith("w1", undefined);
+      expect(screen.queryByRole("button", { name: "Tidy up" })).toBeNull();
     });
-    await waitFor(() => expect(screen.getByText("Worktree removed.")).toBeTruthy());
-    expect(removeWorktree).toHaveBeenCalledWith("w1");
+
+    it("says it is tidied when the proposal already is (the agent was closed another way)", () => {
+      show({ ...merged, tidied: true });
+      expect(screen.getByText(/Tidied up: Login form is closed/)).toBeTruthy();
+      expect(screen.queryByRole("button")).toBeNull();
+    });
+
+    it("asks first, naming what would be lost, when the check finds something; closing agrees to exactly that", async () => {
+      const { a } = show(merged, actions({ closeCheck: vi.fn(() => Promise.resolve(lost(2, 1))) }));
+      fireEvent.click(screen.getByRole("button", { name: "Tidy up" }));
+      const ask = await screen.findByRole("alertdialog", { name: "Tidy up Login form?" });
+      expect(ask.textContent).toContain("It has 2 uncommitted files and 1 commit that isn't merged.");
+      expect(a.closeWorker).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(a.closeWorker).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Tidy up" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Tidy up anyway" }));
+      await waitFor(() => expect(a.closeWorker).toHaveBeenCalledWith("w1", { uncommitted: 2, unmerged_commits: 1 }));
+    });
+
+    it("shows why it couldn't be tidied, and the button is there to try again", async () => {
+      const closeWorker = vi.fn().mockRejectedValueOnce("Its branch is being merged.").mockResolvedValueOnce(undefined);
+      show(merged, actions({ closeWorker }));
+      fireEvent.click(screen.getByRole("button", { name: "Tidy up" }));
+      await waitFor(() => expect(screen.getByText("Its branch is being merged.")).toBeTruthy());
+      fireEvent.click(screen.getByRole("button", { name: "Tidy up" }));
+      await waitFor(() => expect(screen.getByText(/Tidied up: Login form is closed/)).toBeTruthy());
+    });
+
+    it("with Ask me, puts the question on the card; with Off it stays a quiet button", () => {
+      localStorage.setItem("lantern.tidyAfterMerge", "ask");
+      show(merged);
+      expect(screen.getByText("Tidy up Login form? It closes the agent and removes its worktree and branch.")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Tidy up" }).className).toContain("merge-approve");
+      cleanup();
+      localStorage.setItem("lantern.tidyAfterMerge", "off");
+      show(merged);
+      expect(screen.queryByText(/Tidy up Login form\?/)).toBeNull();
+      expect(screen.getByRole("button", { name: "Tidy up" }).className).not.toContain("merge-approve");
+    });
   });
 });
 

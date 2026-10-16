@@ -161,6 +161,8 @@ export interface MergeProposal {
   attempts: number;
   /** When it arrived (ms): a card drawn soon after is one that just came, and says so. */
   at?: number;
+  /** Merged, and its agent was closed with its worktree and branch ("Tidy up"). */
+  tidied?: boolean;
 }
 
 export interface State {

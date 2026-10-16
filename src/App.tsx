@@ -1,6 +1,7 @@
 import { setPlanUsage } from "./lib/planUsage";
 import { pushAgentLimit } from "./lib/agentLimit";
 import { pushAutoMergeTests } from "./lib/mergeTests";
+import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
@@ -1402,6 +1403,8 @@ export default function App() {
   // Agents are handed one set of actions for good and call through it to whatever this render has, so they never redraw for it.
   const doingRef = useRef(doing);
   doingRef.current = doing;
+  // "Tidy up an agent after its merge: Automatically" closes a merged agent that has nothing left to lose.
+  useAutoTidy(chats.slots, { closeCheck: doing.closeCheck, closeWorker: doing.closeWorker });
   const nodeActions = useMemo<NodeActions>(
     () => ({
       send: (slot, text) => doingRef.current.send(slot, text),
