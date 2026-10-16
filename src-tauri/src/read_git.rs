@@ -137,8 +137,8 @@ fn check_list_form(form: &ListForm, rest: &[String]) -> Result<bool, String> {
                 true
             } else if form.flags.contains(&a.as_str()) || form.prefixed.iter().any(|p| a.starts_with(p)) {
                 true
-            } else if a.len() > 1 && !a.starts_with("--") && a[1..].chars().all(|c| form.cluster.contains(c)) {
-                listing |= a.contains('l');
+            } else if let Some(letters) = a.strip_prefix('-').filter(|l| !l.is_empty() && !l.starts_with('-') && l.chars().all(|c| form.cluster.contains(c))) {
+                listing |= letters.contains('l');
                 true
             } else {
                 form.sub == "tag" && a.strip_prefix("-n").is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))

@@ -464,6 +464,9 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, 
         old.stop().await;
     }
     slot.bridge.set_folder(&cfg.folder);
+    // Only a chat started as a read-only agent has the git tool answered (see PermissionBridge); the helper's word is not taken.
+    let reader = matches!(cfg.helper.role, Role::Worker { read_only: true, .. });
+    slot.bridge.set_read_git(reader.then(|| read_git::Scope { folder: cfg.folder.clone(), path_env: cfg.path_env.clone() }));
     if clear_changes {
         // A new conversation in this chat: the rules it made for its old one go. (A restart keeps them.)
         slot.bridge.clear_chat_rules();
