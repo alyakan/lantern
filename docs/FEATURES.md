@@ -149,7 +149,8 @@ The app becomes a canvas of floating chats tethered to the Lead:
 ![The team canvas: a Lead and three agents, one of which needs permission](images/team-canvas.png)
 
 - Drag a title to move a window and its corner to resize it. Drag the background to pan; pinch or ⌘-scroll to zoom. Zoomed out, agents become cards, and a click zooms in.
-- Every window says what its chat is doing in the same words: **Working**, **Needs you**, **Ready** (a Lead with nothing running), **Done** (an agent that finished its turn) or **Stopped**. The title bar says the same for the chat you're in, and the sidebar's rows say Working, Needs you or Done (Unread for a finish you haven't opened). A working agent that has been silent a while says "Working · 45s ago", and from three minutes on it turns amber and reads **Quiet 3m**; its tooltip says to send it a message, or stop it.
+- Every window says what its chat is doing in the same words: **Working**, **Needs you**, **Ready** (a Lead with nothing running), **Done** (an agent that finished its turn) or **Stopped**. The title bar says the same for the chat you're in, and the sidebar's rows say Working, Needs you or Done (Unread for a finish you haven't opened). A working agent that has been silent a while says "Working · 45s ago", and from three minutes on (you can change that, see below) it turns amber and reads **Quiet 3m**.
+- **A quiet agent**: its window then has a line, "Quiet for 4 min. It may be stuck.", with three buttons. **Nudge** sends it a short message asking for a one-line status (once for each stretch of quiet). **Interrupt** stops what it is doing now; it stays on the team and you can message it. **Restart** starts it again and says first what that loses: the step it is in the middle of and anything running in the background (its chat and files stay). The Team list counts how many are quiet ("Team · 2 quiet") and marks them, and the title bar's inbox lists each one ("Quiet while working", with how long) with **Go**.
 - An agent's permission prompts appear in its own window. The pill at the top ("1 agent needs you") takes you to the next one that does, at 100% so you can read it.
 - Fitting everything (**Fit**, or a new agent arriving) never zooms out past 80% by itself. A team too big for the window is shown from the Lead at 80% and you pan to the rest; zooming out further is yours to do.
 - Each window's title bar shows how full that agent's context is ("42%", amber from 75%, red from 90%). Click it for **Compact** (summarise the conversation to free up context) and **Clear** (a fresh conversation; the files stay, and you are asked first). Both wait until the agent has finished its turn.
@@ -193,6 +194,10 @@ Starting a team (the Workflow menu's Team, New ▸ Team, Start a team, or **+ Ag
 A plain chat always runs its subagents inline.
 
 **Agents running at once** is in Settings → General → Teams: how many agents can work at the same time across all teams. Every agent spends the same plan, and a Lead asking for one more is told to wait for one to finish.
+
+**Say an agent is quiet after** (same place, 3 minutes until you change it) is how long a working agent may say nothing before it counts as quiet.
+
+**Pause a team's work when my plan reaches** (Off until you choose, or 90% or 95%) keeps the teams from using up the plan unwatched. Five points before the limit a toast says so, once. When the plan reaches it while any agent of any team is working, Lantern stops what each of them is doing (they stay on their teams, nothing is closed) and shows a card at the top of the window and a row in the inbox: "Paused: your plan is 95% used, it resets in 1h 12m", with **Resume**. Nothing starts again on its own, not even queued messages or the agents' notes to a Lead; Resume tells each agent that was stopped "Continue where you stopped." A window of the plan is paused once: after you resume, it doesn't pause again until the next window.
 
 The team runs on the Lead's Permissions, and an agent never gets more freedom than its Lead: change them from any window's title bar. A Lead can leave Team once its agents are closed.
 
@@ -285,7 +290,7 @@ A few things to know:
 
 ![Settings, on the General tab](images/settings.png)
 
-- **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, keeping the Mac awake while Claude works, the theme (see below), the text size, and **Agents running at once** for teams.
+- **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, keeping the Mac awake while Claude works, the theme (see below), the text size, and, for teams, **Agents running at once**, **Say an agent is quiet after** and **Pause a team's work when my plan reaches**.
 - **Models**: the model presets (who is the Lead, the advisor and the subagents) that the Models chip offers.
 - **MCP servers**: your servers with their status. Log in, reconnect, turn off, add, edit or remove them (through Claude Code's own settings). When one is down or needs you to log in, a small amber dot sits on the Settings gear in the title bar (hover it to see which), and the `/` menu says so too. A secret never goes into the project's committed `.mcp.json`.
 - **Skills**: the project's and plugins' skills, each with a preview of its file.

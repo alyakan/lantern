@@ -3,7 +3,7 @@ import { HudCheckIcon, HudFailIcon, HudStopIcon, WaitIcon } from "./icons";
 import { whenFocused } from "../lib/windowFocus";
 import { playChime, setChime, useChimeOn } from "../lib/chime";
 
-export type HudKind = "finished" | "stopped" | "failed" | "waiting";
+export type HudKind = "finished" | "stopped" | "failed" | "waiting" | "warning";
 /** `key` changes for every turn that ends, so the same kind twice in a row still shows. */
 export interface HudEvent {
   key: number;
@@ -21,6 +21,7 @@ const LOOK: Record<HudKind, { label: string; icon: ReactElement }> = {
   stopped: { label: "Stopped", icon: <HudStopIcon /> },
   failed: { label: "Failed", icon: <HudFailIcon /> },
   waiting: { label: "Needs you", icon: <WaitIcon /> },
+  warning: { label: "Heads up", icon: <WaitIcon /> },
 };
 
 /**

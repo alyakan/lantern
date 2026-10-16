@@ -73,6 +73,8 @@ import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects, sidebarProjects } from "./lib/sidebar";
 import { anythingWorking } from "./lib/awake";
 import { inboxItems, type InboxItem } from "./lib/inbox";
+import { useTeamGuards } from "./lib/teamGuards";
+import { PlanPaused } from "./components/PlanPaused";
 import { usePeek } from "./lib/peek";
 import { MessageInput } from "./components/MessageInput";
 import { describeInput } from "./components/PermissionCard";
@@ -808,10 +810,24 @@ export default function App() {
     });
   };
 
+  // What keeps a team from running unwatched: the pause when the plan reaches the user's limit (while it lasts, nothing
+  // below starts a turn by itself), and the clock the inbox lists quiet agents by.
+  const guards = useTeamGuards(chats, {
+    stop: (slot) => stopIn(slot),
+    send: (slot, text) => sendIn(slot, text),
+    queue: (slot, items) => to(slot)({ type: "queue_set", items }),
+    warn: (text) => setHud({ key: Date.now(), kind: "warning", body: text }),
+    paused: (text) => {
+      setHud({ key: Date.now(), kind: "warning", detail: "Paused", body: text });
+      if (!windowFocused()) void notify("Lantern", text, "waiting");
+    },
+  });
+  const paused = guards.pause !== null;
+
   // A chat's queued messages go out when its turn ends normally, whether or not it's on screen.
   const prevStatus = useRef<Record<string, Status>>({});
   useEffect(() => {
-    const due = queuesToSend(prevStatus.current, chats.slots);
+    const due = paused ? [] : queuesToSend(prevStatus.current, chats.slots);
     // A turn that just ended may have changed files outside Claude's edits (a shell rm, git checkout): re-check them.
     const ended = Object.entries(chats.slots).filter(([slot, s]) => prevStatus.current[slot] === "running" && s.status === "idle");
     for (const [slot] of ended) syncChanges(slot);
@@ -825,11 +841,11 @@ export default function App() {
     // Notes from an orchestra's workers go to the main agent as soon as it is idle (not only when a turn ends: it is
     // usually idle when a worker finishes), joined into one message. Not to a chat that was just sent its queue above: this
     // render still has it idle, and a second message would start a second turn on top of that one.
-    for (const { slot, text } of wakesToSend(chats.slots, new Set(due.map((d) => d.slot)))) {
+    for (const { slot, text } of paused ? [] : wakesToSend(chats.slots, new Set(due.map((d) => d.slot)))) {
       to(slot)({ type: "wakes_taken" });
       sendIn(slot, text, undefined, true);
     }
-  }, [chats.slots]);
+  }, [chats.slots, paused]);
 
   /**
    * Restarting a chat's claude (a new mode, effort or preset) stops what it runs in the background: workflows,
@@ -1641,7 +1657,7 @@ export default function App() {
   // Projects removed from the recents here (Claude Code keeps their chats; one with a chat open is listed regardless).
   const [hiddenFolders, setHiddenFolders] = usePersistentState<string[]>("sidebar.hidden", []);
   const openByProject = openProjects(chats, { titles, drafts: drafts.current, unread, pinned: pinnedBy });
-  const inbox = inboxItems(chats, openByProject, { unread, describe: describeInput });
+  const inbox = inboxItems(chats, openByProject, { unread, describe: describeInput, quiet: guards.quiet });
   useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden), true, sidebarHidden ? "Show Sidebar" : "Hide Sidebar");
   useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Expand Sidebar" : "Collapse Sidebar");
   useEffect(() => {
@@ -1828,7 +1844,7 @@ export default function App() {
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
           usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo }}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
-          inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox }}
+          inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox, paused: guards.pause, onResume: guards.resume }}
         />
         <Hud event={hud} onOpenChat={switchTo} />
         <div className="app-body">
@@ -1845,6 +1861,7 @@ export default function App() {
           <Sidebar {...sidebarHandlers} {...sidebarProps} mode={sidebarCompact ? "collapsed" : "pinned"} onToggle={() => setSidebarCompact(!sidebarCompact)} />
         )}
         <div className="app-main">
+        {guards.pause && <PlanPaused pause={guards.pause} onResume={guards.resume} />}
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
         <SplitPane
           ratio={splitRatio}
