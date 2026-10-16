@@ -667,6 +667,15 @@ pub fn is_workers_branch(branch: &str) -> bool {
     branch.strip_prefix("lantern/").is_some_and(|rest| !rest.is_empty())
 }
 
+/// Whether the repository has a record of a worktree at `root`. When git can't say it is taken that it does, so an error
+/// that came from something else is never hidden.
+fn is_listed(repo: &Path, root: &Path, path_env: Option<&str>) -> bool {
+    let Ok(list) = run_raw(repo, &["worktree", "list", "--porcelain"], path_env) else { return true };
+    let wanted = root.to_string_lossy();
+    // git writes the real path (/private/var for /var on a Mac).
+    list.lines().filter_map(|l| l.strip_prefix("worktree ")).any(|p| p == wanted || p.strip_prefix("/private").is_some_and(|rest| rest == wanted))
+}
+
 /// Removes a worktree and, when asked, its branch. `force` throws away uncommitted work and an unmerged branch. A branch
 /// that isn't one of Lantern's own (see `is_workers_branch`) is never deleted: asked to, nothing is removed. A worktree whose
 /// folder is already gone (see `worktree_gone`) has nothing to remove: git is told to forget its record instead, and a
@@ -676,17 +685,20 @@ pub fn remove_worktree(repo: &Path, root: &Path, branch: &str, delete_branch: bo
         return Err(format!("{branch} isn't a branch Lantern made for an agent, so Lantern won't delete it."));
     }
     let gone = worktree_gone(root);
-    if gone {
-        // Before the branch goes: git won't delete a branch that a worktree record still has checked out.
-        run(repo, &["worktree", "prune"], path_env)?;
-    } else {
-        let root_arg = root.to_string_lossy().to_string();
-        let mut args = vec!["worktree", "remove"];
-        if force {
-            args.push("--force");
+    let root_arg = root.to_string_lossy().to_string();
+    let mut args = vec!["worktree", "remove"];
+    if force {
+        args.push("--force");
+    }
+    args.push(&root_arg);
+    // Git removes the record of a worktree whose folder is already gone, and only that one (a `worktree prune` would forget
+    // every worktree of the repository whose folder is missing, the user's on an unmounted drive among them). It does so
+    // before the branch goes: git won't delete a branch that a worktree record still has checked out.
+    if let Err(e) = run(repo, &args, path_env) {
+        // A record that is not there any more (forgotten by a prune, say) is already what was asked for.
+        if !(gone && !is_listed(repo, root, path_env)) {
+            return Err(e);
         }
-        args.push(&root_arg);
-        run(repo, &args, path_env)?;
     }
     if delete_branch && !(gone && tip_of(repo, branch, path_env).is_err()) {
         // Unforced, a branch with commits that were never merged is kept (git refuses): the worktree is gone either way.
@@ -1085,6 +1097,8 @@ mod tests {
             wt
         };
         let listed = || run(main.path(), &["worktree", "list", "--porcelain"], None).unwrap();
+        // Another worktree of the repository whose folder is missing too (an unmounted drive, say): none of this touches it.
+        let bystander = make("o", "w0");
         // Not asked to delete the branch: the record goes, the branch stays.
         let kept = make("k", "w1");
         assert!(listed().contains(&kept.branch));
@@ -1099,6 +1113,12 @@ mod tests {
         remove_worktree(main.path(), &forced.root, &forced.branch, true, true, None).unwrap();
         assert!(!branch_exists(main.path(), &forced.branch, None));
         remove_worktree(main.path(), &forced.root, &forced.branch, true, true, None).unwrap();
+        // The bystander's record is still there after all of that: only the one asked for was removed.
+        assert!(listed().contains(&bystander.branch), "{}", listed());
+        // A record that was forgotten already (someone ran `git worktree prune`) is nothing left to remove, not an error.
+        let forgotten = make("g", "w4");
+        run(main.path(), &["worktree", "prune"], None).unwrap();
+        remove_worktree(main.path(), &forgotten.root, &forgotten.branch, false, true, None).unwrap();
         // A branch that isn't Lantern's is still never deleted.
         assert!(remove_worktree(main.path(), &forced.root, "main", true, true, None).is_err());
     }
