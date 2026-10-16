@@ -76,6 +76,8 @@ import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover
 import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects, sidebarProjects } from "./lib/sidebar";
 import { anythingWorking } from "./lib/awake";
+import { useRoutines } from "./lib/useRoutines";
+import { routineTitle, type Routine } from "./lib/routines";
 import { inboxItems, type InboxItem } from "./lib/inbox";
 import { useTeamGuards } from "./lib/teamGuards";
 import { PlanPaused } from "./components/PlanPaused";
@@ -371,7 +373,9 @@ export default function App() {
 
   const harnessOf = (slot: string) => findHarness(presets, harnessBySlot[slot]);
   /** What a chat runs with: its preset's models, or (Default) the app's model and effort. */
-  const settingsFor = (slot: string, h: Harness = harnessOf(slot)) => settingsOf(h, { model, effort });
+  // The chats routines started, by slot: each runs on the model its routine names (while it is on the standard preset), and is called "Routine: name".
+  const routineSlots = useRef<Record<string, { name: string; model: string | null }>>({});
+  const settingsFor = (slot: string, h: Harness = harnessOf(slot)) => settingsOf(h, { model: h.id === DEFAULT_HARNESS && slot in routineSlots.current ? routineSlots.current[slot].model : model, effort });
 
   /** `change`: Step by step's Permissions and Workflow Team, when this restart is what sets them (see `launchOf`); else the chat keeps its own. */
   const restart = (slot: string, mode: Mode, withEffort: string | null = settingsFor(slot).effort, change: { autoApprove?: boolean; team?: boolean } = {}) => {
@@ -452,15 +456,20 @@ export default function App() {
 
   /** `team`: the chat is the Lead of a team, which can start agents, on the project's last Permissions (the agents never exceed them). */
   const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string) => {
+  /**
+   * `team`: the chat is the Lead of a team, which can start agents, on the project's last Permissions (the agents never exceed them).
+   * `routine`: a routine's chat, on the routine's own Permissions (never the project's) and the standard preset; it doesn't become the project to reopen.
+   */
+  const startIn = (slot: string, folder: string, quiet = false, team = false, routine?: Routine) => {
     const { claudePath } = state;
     if (!claudePath) return;
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
     reopened.current = true;
     // A team's Lead runs on the project's last Permissions, which its agents never exceed; Team is not remembered as the
     // project's Workflow (see the effect below).
-    const { mode, autoApprove } = launchFor(folder, team);
+    const { mode, autoApprove } = routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team);
     const orchestrator = team;
-    const h = findHarness(presets, harnessByFolder[folder]);
+    const h = routine ? BUILT_IN[0] : findHarness(presets, harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode, autoApprove });
@@ -470,6 +479,7 @@ export default function App() {
     const notes = notesOf(notesBy, folder);
     to(slot)({ type: "notes_applied", text: notes || null });
     if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team);
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, routine);
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
     api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}), ...(notes ? { project_notes: notes } : {}) }).then(
       () => {
@@ -480,6 +490,8 @@ export default function App() {
           startRoles(slot, folder);
         }
         setLastFolder(folder);
+        if (orchestrator) startSubagents(slot, folder);
+        if (!routine) setLastFolder(folder);
         to(slot)({ type: "session_ready" });
         // A team from a template: the Lead's first instruction names its members and their roles.
         if (first) doingRef.current.send(slot, first);
@@ -494,8 +506,9 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Not a worker's: its folder is a worktree that's gone with it, and its Permissions are capped by its Lead.
-    if (!state.folder || chats.agents[active]) return;
+    // Not a worker's: its folder is a worktree that's gone with it, and its Permissions are capped by its Lead. Nor a routine's:
+    // looking at one must not make the project's next chat start on its Permissions.
+    if (!state.folder || chats.agents[active] || routineSlots.current[active]) return;
     const permissions = permissionsOf(state);
     if (permissionsBy[state.folder] !== permissions) setPermissionsBy({ ...permissionsBy, [state.folder]: permissions });
     // A Team is the chat's own: the project's next chat starts as a chat (or in Step by step, if that is where it was).
@@ -875,6 +888,24 @@ export default function App() {
     },
   });
   const paused = guards.pause !== null;
+  // Routines: prompts that go out by themselves while Lantern is open. Each run is a new chat in the project, opened behind the
+  // one on screen on the routine's own Permissions and model, and sent the prompt once it is ready.
+  const routines = useRoutines({
+    ready: !!state.claudePath,
+    chats: chats.slots,
+    send: sendIn,
+    open: async (r) => {
+      const folder = here(r.folder);
+      const gone = await api.foldersGone([folder]).catch(() => [] as string[]);
+      if (gone.length > 0) throw new Error("its project folder isn't there any more");
+      if (!state.claudePath) throw new Error("Claude isn't ready");
+      const slot = `s${++slotSeq.current}`;
+      dispatchChats({ type: "add", slot });
+      routineSlots.current[slot] = { name: r.name, model: r.model };
+      startIn(slot, folder, false, false, r);
+      return slot;
+    },
+  });
 
   // A chat's queued messages go out when its turn ends normally, whether or not it's on screen.
   const prevStatus = useRef<Record<string, Status>>({});
@@ -1417,11 +1448,18 @@ export default function App() {
   const [titles, setTitles] = useState<Record<string, string>>({});
   const titling = useRef(new Set<string>());
   useEffect(() => {
-    for (const s of Object.values(chats.slots)) {
+    for (const [slot, s] of Object.entries(chats.slots)) {
       const prompt = firstPrompt(s);
       const id = s.sessionId;
       if (!id || !prompt || !s.folder || !s.claudePath || titles[id] || titling.current.has(id)) continue;
       titling.current.add(id);
+      // A routine's chat is called after the routine, not after what its prompt says (also when it is reopened later).
+      const own = routineSlots.current[slot];
+      const routine = own ? routineTitle(own.name) : routines.titles[id];
+      if (routine) {
+        setTitles((all) => ({ ...all, [id]: routine }));
+        continue;
+      }
       api.titleSession(s.claudePath, s.folder, id, prompt).then(
         (t) => t && setTitles((all) => ({ ...all, [id]: t })),
         () => {},
@@ -1624,11 +1662,13 @@ export default function App() {
     const tabs = (["general", "harness", "mcp", "skills", "permissions", "updates"] as SettingsTab[])
       .filter((t) => t !== "harness" || !!state.folder)
       .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
+    const routinesEntry: PaletteEntry = { id: "routines", title: "Routines…", group: "Routines", shortcut: null, run: () => setSettingsAt("routines") };
     const themes = THEMES.filter((t) => t.id !== theme && t.id !== "custom").map((t): PaletteEntry => ({ id: `theme:${t.id}`, title: `Theme: ${t.label}`, group: "Theme", shortcut: null, run: () => setTheme(t.id) }));
     // History with its search box ready: what was said in any past chat.
     const searchChats: PaletteEntry = { id: "search-chats", title: "Search all chats…", group: "View", shortcut: null, run: () => void openHistory() };
     const project = state.folder ? [{ id: "project-notes", title: "Project notes…", group: "Project", shortcut: null, run: () => setEditingNotes(state.folder) } satisfies PaletteEntry] : [];
     return [...availableActions(), searchChats, ...project, ...permissions, ...workflows, ...harnesses, ...themes, ...tabs];
+    return [...availableActions(), ...permissions, ...workflows, ...harnesses, routinesEntry, ...themes, ...tabs];
   };
   // The Work menu: Build, Debug and Design are Step by step in that flavour; Review a PR lists the open pull requests and
   // starts a review on the one chosen; Start a team makes an empty chat a team's Lead, and otherwise starts a new one.
@@ -1737,6 +1777,7 @@ export default function App() {
     if (order) setProjectOrder(order);
     const last = take<string>(LAST_FOLDER);
     if (last) setLastFolder(last);
+    if (changed["settings.routines"]) routines.replace(changed["settings.routines"]);
     if (changed[OPEN_CHATS]) setOffer((chats) => chats.map((c) => (c.folder === old ? { ...c, folder: next } : c)));
   };
   // One place's sessions came over. The dialog stays open for the others, so only the saved state moves here.
@@ -2159,6 +2200,16 @@ export default function App() {
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
           general={{ keepAwake, onKeepAwake: setKeepAwake, notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize, warnTeams, onWarnTeams: setWarnTeams }}
+          routines={{
+            ...routines,
+            loadProjects: () => api.recentFolders().then((recent) => sidebarProjects({ recent, hidden: hiddenFolders, open: openByProject, order: projectOrder }).map((p) => ({ folder: p.folder, label: p.label }))),
+            keepAwake,
+            onKeepAwake: setKeepAwake,
+            onOpenChat: (sessionId, folder) => {
+              setSettingsAt(null);
+              openSession(sessionId, folder);
+            },
+          }}
           updates={{
             version: updates.version,
             state: updates.state,

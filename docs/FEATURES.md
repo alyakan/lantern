@@ -315,6 +315,14 @@ People start work and walk away, so two things help while you are gone.
 
 **Keeping the Mac awake.** While any chat or agent is working, or paused on a question for you, Lantern stops the Mac from going to sleep on its own, so a long turn finishes while you are away (it holds macOS's `caffeinate` for as long as that lasts, and lets go when nothing is working or Lantern quits). Only idle sleep is prevented: the screen may still turn off, and closing the lid still sleeps the Mac. Turn it off in Settings ▸ General ▸ **Keep my Mac awake while Claude works**.
 
+**Routines.** A routine is a prompt Lantern sends by itself, at times you pick, in a project: for example "every weekday at 9, check the open TODOs and tell me what changed since yesterday" or "every hour, run the tests and tell me if anything broke". Set them up in Settings ▸ **Routines** (also **Routines…** in the command palette). Each one has a name, a project, the prompt, a schedule (every few minutes or hours, every day, every weekday, or every week on a day, with a time picker), Permissions, a model (Sonnet unless you choose otherwise), an on/off switch, **Run now**, and **Pause for 1 hour**. You can have up to 20.
+
+- Each run opens a new chat in the project, called "Routine: name". It shows in the sidebar and in your inbox like any chat, and the routine's list keeps its last ten runs (when, how it ended, and **Open chat**).
+- Permissions are **Ask** unless you choose **Auto**. With Ask, Claude's questions and permission requests wait in your inbox until you are back. Auto lets Claude act without asking while you may be away, so the form warns you in plain words. A routine's Permissions never rise above what you set, and looking at its chat never changes the project's own setting.
+- A routine runs only while Lantern is open and the Mac is awake. If a run was due while Lantern was closed or the Mac was asleep, it is **not** made up: the list shows "Missed 9:00" once, and you can **Run now**. Keeping the Mac awake (Settings) only holds while Claude is working, not between runs.
+- A routine runs one chat at a time (a run due while the last is still going is skipped, and the history says so), and at most two routine chats work at once. When your plan is at 95% or more, runs are skipped and the history says so.
+- The prompt is sent to Claude as your text; it is never run as a command. Routines follow a project that you move (see Bring old chats here).
+
 ## The side panel
 
 The side panel (⌘\ shows or hides it) always has six tabs, in this order. A tab with nothing to show yet says what will show there.
@@ -355,12 +363,13 @@ A few things to know:
 
 ## Settings
 
-**⌘,** opens Settings, with six tabs:
+**⌘,** opens Settings, with seven tabs:
 
 ![Settings, on the General tab](images/settings.png)
 
 - **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, keeping the Mac awake while Claude works, the theme (see below), the text size, and, for teams, **Agents running at once**, **Say an agent is quiet after** and **Pause a team's work when my plan reaches**.
 - **Models**: the model presets (who is the Lead, the advisor and the subagents) that the Models chip offers.
+- **Routines**: prompts that Lantern sends by itself at set times (see [Away](#away)).
 - **MCP servers**: your servers with their status. Log in, reconnect, turn off, add, edit or remove them (through Claude Code's own settings). When one is down or needs you to log in, a small amber dot sits on the Settings gear in the title bar (hover it to see which), and the `/` menu says so too. A secret never goes into the project's committed `.mcp.json`.
 - **Skills**: the project's and plugins' skills, each with a preview of its file.
 - **Allow rules**: the rules you saved with **Always allow…**, each on one line with its scope (this chat or this folder), what it covers and a **Remove** button. (The tab isn't called Permissions, so it can't be mistaken for the Permissions chip under the chat box.)
