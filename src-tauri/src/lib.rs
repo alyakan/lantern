@@ -196,7 +196,7 @@ async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: 
     cfg.auto_approve = auto;
     cfg.resume = running.or(cfg.resume);
     cfg.path_env = login_path(state).await;
-    if let Ok(helper) = helper_config(&s, cfg.helper.role.clone()) {
+    if let Ok(helper) = helper_config(&s, cfg.helper.role.clone(), cfg.helper.project_notes.clone()) {
         cfg.helper = helper;
     }
     if launch(app, worker, &s, cfg, false).await.is_ok() {
@@ -274,7 +274,9 @@ impl orchestra::Host for AppHost {
             if req.model.is_some() {
                 cfg.model = req.model;
             }
-            cfg.helper = helper_config(&s, Role::Worker { name: req.name, read_only: req.read_only })?;
+            // The worker's folder is a worktree, but it belongs to its Lead's project: it gets the notes the Lead started with.
+            let notes = cfg.helper.project_notes.clone();
+            cfg.helper = helper_config(&s, Role::Worker { name: req.name, read_only: req.read_only }, notes)?;
             cfg.path_env = login_path(&state).await;
             launch(&self.app, &req.slot, &s, cfg, true).await?;
             // The main agent's mode may have been lowered while this one started (the mode it was given was read before):
@@ -395,9 +397,10 @@ fn network_unwatch(state: State<'_, AppState>, folder: String, label: String) ->
     state.network.unwatch(&permission::rules::folder_key(std::path::Path::new(&folder)), &label)
 }
 
-fn helper_config(slot: &Slot, role: Role) -> Result<HelperConfig, String> {
+/// `project_notes`: what the chat was started with (a restart passes its own on, a new chat the user's notes as they are now).
+fn helper_config(slot: &Slot, role: Role, project_notes: Option<String>) -> Result<HelperConfig, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role, providers: vec![] })
+    Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role, providers: vec![], project_notes })
 }
 
 /// Stops the slot's running session (denying its pending prompts) and starts `cfg` in it.
@@ -455,6 +458,9 @@ struct Settings {
     /// Reopen the chat as a worker of an open main agent (a team restored after Lantern was closed).
     #[serde(default)]
     worker: Option<WorkerSettings>,
+    /// The user's notes for the project (see args::clean_project_notes). A worker's are its Lead's, whatever it sends.
+    #[serde(default)]
+    project_notes: Option<String>,
 }
 
 /// Whose worker a restored chat is.
@@ -486,6 +492,11 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
         return Err(format!("{folder} no longer exists."));
     }
     let ceiling = settings.worker.as_ref().map(|w| main_ceiling(state, &w.parent));
+    // A worker's folder is a worktree of its Lead's project, so it gets the notes its Lead started with.
+    let notes = match &settings.worker {
+        Some(w) => state.slots.get(&w.parent).ok().and_then(|s| s.config.lock().unwrap().as_ref().and_then(|c| c.helper.project_notes.clone())),
+        None => settings.project_notes.as_deref().and_then(args::clean_project_notes),
+    };
     let mut cfg = SessionConfig {
         provider: settings.provider,
         binary: claude_path.into(),
@@ -504,6 +515,7 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
                 (false, Some(w)) => Role::Worker { name: w.name, read_only: w.shared },
                 (false, None) => Role::Normal,
             },
+            notes,
         )?,
         path_env: login_path(state).await,
     };
@@ -604,7 +616,7 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
         cfg.auto_approve = auto;
     }
     cfg.resume = running_id.or(cfg.resume);
-    cfg.helper = helper_config(&s, role.clone())?;
+    cfg.helper = helper_config(&s, role.clone(), cfg.helper.project_notes.clone())?;
     cfg.path_env = login_path(&state).await;
     // A worker asked for more freedom than its main agent allows gets what it allows (the window is told).
     let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
@@ -638,7 +650,7 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
     cfg.advisor = checked_model(advisor)?;
     cfg.subagent_model = checked_model(subagent_model)?;
     cfg.resume = running_id.or(cfg.resume);
-    cfg.helper = helper_config(&s, cfg.helper.role.clone())?;
+    cfg.helper = helper_config(&s, cfg.helper.role.clone(), cfg.helper.project_notes.clone())?;
     cfg.path_env = login_path(&state).await;
     let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
     launch(&app, &slot, &s, cfg, false).await?;
@@ -1837,7 +1849,7 @@ mod tests {
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![] },
+            helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![], project_notes: None },
             path_env: None,
         }
     }

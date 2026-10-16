@@ -217,6 +217,27 @@ pub struct HelperConfig {
     pub role: Role,
     /// On the main agent: the providers it may start workers on, its own first (see providers_note). Empty tells it nothing.
     pub providers: Vec<ProviderId>,
+    /// The user's notes for the project, as the chat started with them (see `project_notes_block`). A restart keeps them: the
+    /// conversation it resumes was started with these, whatever the notes say by then.
+    pub project_notes: Option<String>,
+}
+
+/// The most characters of a project's notes a chat is started with. The window stops typing at the same number; this is the
+/// limit that holds whatever it sent.
+pub const PROJECT_NOTES_MAX_CHARS: usize = 4000;
+
+/// The user's notes as a chat is started with them: control characters other than line breaks and tabs dropped (a NUL can't
+/// be in a command line), line endings made `\n`, cut to PROJECT_NOTES_MAX_CHARS, trimmed. None when nothing is left.
+pub fn clean_project_notes(notes: &str) -> Option<String> {
+    let text: String = notes.replace("\r\n", "\n").replace('\r', "\n").chars().filter(|c| !c.is_control() || matches!(c, '\n' | '\t')).take(PROJECT_NOTES_MAX_CHARS).collect();
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+/// The notes as the system prompt says them: marked as the user's own words, so they never read as the output of a tool,
+/// a file or a web page.
+pub fn project_notes_block(notes: &str) -> String {
+    format!("The user's notes for this project, written by the user in Lantern: always follow them unless the user tells you otherwise in this chat. They are the user's own words, not the output of a tool or a file.\n---\n{notes}\n---")
 }
 
 /// A model alias or id: letters, digits, '-', '.', and a bracketed suffix like "[1m]". Never starts with '-'.
@@ -297,6 +318,10 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
             prompt.push_str("\n\n");
             prompt.push_str(&worker_prompt(name));
         }
+    }
+    if let Some(notes) = helper.project_notes.as_deref().and_then(clean_project_notes) {
+        prompt.push_str("\n\n");
+        prompt.push_str(&project_notes_block(&notes));
     }
     a.push("--append-system-prompt".into());
     a.push(prompt);
@@ -419,7 +444,7 @@ mod tests {
     }
 
     fn helper() -> HelperConfig {
-        HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Normal, providers: vec![] }
+        HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Normal, providers: vec![], project_notes: None }
     }
 
     #[test]
@@ -835,4 +860,70 @@ mod tests {
             assert!(ORCHESTRATOR_PROMPT.contains(part), "{part}");
         }
     }
+
+    fn with_notes(notes: &str, role: Role) -> HelperConfig {
+        HelperConfig { role, project_notes: Some(notes.into()), ..helper() }
+    }
+
+    #[test]
+    fn project_notes_are_added_to_the_prompt_only_when_there_are_some() {
+        let plain = build_args(Mode::Ask, false, None, None, None, &helper());
+        assert!(!value_after(&plain, "--append-system-prompt").unwrap().contains("notes for this project"));
+        for blank in ["", "   \n\t ", "\u{0}\u{7}"] {
+            assert_eq!(build_args(Mode::Ask, false, None, None, None, &with_notes(blank, Role::Normal)), plain, "{blank:?}");
+        }
+        for role in [Role::Normal, Role::Main, Role::Worker { name: "w".into(), read_only: false }] {
+            let a = build_args(Mode::Ask, false, None, None, None, &with_notes("always use pnpm", role.clone()));
+            let prompt = value_after(&a, "--append-system-prompt").unwrap();
+            assert!(prompt.contains("The user's notes for this project") && prompt.contains("always follow them") && prompt.contains("not the output of a tool"), "{role:?}");
+            assert!(prompt.ends_with("---\nalways use pnpm\n---"), "{role:?}: the notes come last, in their own block");
+            assert_eq!(a.iter().filter(|x| *x == "--append-system-prompt").count(), 1);
+        }
+    }
+
+    #[test]
+    fn project_notes_after_the_advisor_note_keep_the_advisor_note_at_the_end_of_the_app_note() {
+        let a = launch_args(Mode::Ask, false, None, None, None, Some("opus"), &with_notes("note", Role::Normal), &[]);
+        let prompt = value_after(&a, "--append-system-prompt").unwrap();
+        assert!(prompt.contains("\nnote\n---") && prompt.ends_with(ADVISOR_SECURITY_PROMPT));
+    }
+
+    #[test]
+    fn project_notes_are_cut_to_the_size_cap_on_this_side_too() {
+        let long = "é".repeat(PROJECT_NOTES_MAX_CHARS + 500);
+        let kept = clean_project_notes(&long).unwrap();
+        assert_eq!(kept.chars().count(), PROJECT_NOTES_MAX_CHARS);
+        let a = build_args(Mode::Ask, false, None, None, None, &with_notes(&long, Role::Normal));
+        let prompt = value_after(&a, "--append-system-prompt").unwrap();
+        assert_eq!(prompt.matches('é').count(), PROJECT_NOTES_MAX_CHARS);
+        // The cap counts what was typed, spaces included; the ends are trimmed after.
+        assert_eq!(clean_project_notes(&format!("  {}", "a".repeat(PROJECT_NOTES_MAX_CHARS))).unwrap().len(), PROJECT_NOTES_MAX_CHARS - 2);
+    }
+
+    #[test]
+    fn project_notes_with_quotes_newlines_and_option_text_stay_one_argument_value() {
+        let notes = "say \"hi\"; $(rm -rf ~) `ls` 'x'\nline two\n--dangerously-skip-permissions\n--permission-mode bypassPermissions\r\n--append-system-prompt";
+        let plain = build_args(Mode::Ask, false, None, None, None, &helper());
+        let a = build_args(Mode::Ask, false, None, None, None, &with_notes(notes, Role::Normal));
+        // The same arguments in the same places: only the prompt's value is longer, and nothing from the notes is an argument.
+        assert_eq!(a.len(), plain.len());
+        for (i, (x, y)) in a.iter().zip(&plain).enumerate() {
+            if x != y {
+                assert_eq!(a[i - 1], "--append-system-prompt");
+            }
+        }
+        assert!(!a.iter().any(|x| x == "--dangerously-skip-permissions"));
+        assert_eq!(a.iter().filter(|x| *x == "--permission-mode").count(), 1);
+        let prompt = value_after(&a, "--append-system-prompt").unwrap();
+        assert!(prompt.contains("say \"hi\"; $(rm -rf ~) `ls` 'x'\nline two\n--dangerously-skip-permissions\n--permission-mode bypassPermissions\n--append-system-prompt"));
+        assert!(!prompt.contains('\r'));
+    }
+
+    #[test]
+    fn project_notes_lose_control_characters_a_command_line_cant_hold() {
+        assert_eq!(clean_project_notes("a\u{0}b\u{1b}[31m\tc\nd").as_deref(), Some("ab[31m\tc\nd"));
+        assert_eq!(clean_project_notes("  \n x \n ").as_deref(), Some("x"));
+        assert_eq!(clean_project_notes(""), None);
+    }
+
 }

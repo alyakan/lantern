@@ -361,7 +361,7 @@ mod tests {
             effort: None,
             advisor: None,
             subagent_model: None,
-            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![] },
+            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None },
             path_env: None,
         }
     }
