@@ -188,7 +188,7 @@ describe("RoutinesSettings", () => {
       const how = screen.getByLabelText("How often");
       const save = () => {
         fireEvent.click(screen.getByRole("button", { name: "Add routine" }));
-        return (props.add as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0].schedule;
+        return (props.add as ReturnType<typeof vi.fn>).mock.lastCall![0].schedule;
       };
       (props.add as ReturnType<typeof vi.fn>).mockReturnValue("stay open");
       fireEvent.change(how, { target: { value: "every" } });

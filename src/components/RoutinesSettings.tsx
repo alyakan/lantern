@@ -283,7 +283,7 @@ function RoutineForm({ initial, projects, onSave, onCancel }: { initial: Routine
     >
       <label className="wide">
         Name
-        <input value={f.name} maxLength={60} placeholder="Morning TODOs" onChange={(e) => set({ name: e.target.value })} />
+        <input value={f.name} maxLength={60} placeholder="For example: Morning TODOs" onChange={(e) => set({ name: e.target.value })} />
       </label>
       <label className="wide">
         Project
@@ -298,7 +298,7 @@ function RoutineForm({ initial, projects, onSave, onCancel }: { initial: Routine
       </label>
       <label className="wide">
         What should Claude do?
-        <textarea value={f.prompt} rows={4} maxLength={MAX_PROMPT} placeholder="Check the open TODOs and summarise what changed since yesterday" onChange={(e) => set({ prompt: e.target.value })} />
+        <textarea value={f.prompt} rows={4} maxLength={MAX_PROMPT} placeholder="For example: Check the open TODOs and summarise what changed since yesterday" onChange={(e) => set({ prompt: e.target.value })} />
       </label>
       <label className="wide">
         How often
