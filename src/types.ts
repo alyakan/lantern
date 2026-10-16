@@ -313,6 +313,31 @@ export interface TextQuery {
   regex: boolean;
 }
 
+/** A run of a search result's text; `hit` marks what matched (see history_search.rs). */
+export interface ChatPiece {
+  text: string;
+  hit: boolean;
+}
+
+/** A past chat whose text has what was searched for: its title, where it opens, and up to two lines around the match. */
+export interface ChatHit {
+  id: string;
+  title: ChatPiece[];
+  folder: string;
+  project: string;
+  updated_ms: number;
+  snippets: { role: "user" | "assistant"; pieces: ChatPiece[] }[];
+}
+
+export interface ChatSearchResults {
+  /** Newest first. */
+  chats: ChatHit[];
+  /** It stopped (its limit, or its time) before it had read every chat. */
+  partial: boolean;
+  /** A newer search replaced it: the answer is of no use. */
+  cancelled: boolean;
+}
+
 export interface TextResults {
   files: { path: string; rel: string; lines: { line: number; pieces: { text: string; hit: boolean }[] }[]; more: number }[];
   /** More matches than listed. */

@@ -804,6 +804,42 @@ const OTHER_SESSIONS: Record<string, { id: string; title: string; updated_ms: nu
   "/Users/you/src/infra": [{ id: "1f0a01", title: "Rotate the staging credentials", updated_ms: Date.now() - 5 * 24 * HOUR, prompts: 2 }],
 };
 
+// What the demo chats said, for History's full-text search (search_history): the title, then who said what.
+const CHAT_TEXT: { id: string; folder: string; title: string; updated_ms: number; said: ["user" | "assistant", string][] }[] = [
+  { id: "3f1c2a", folder: FOLDER, title: "Fix the login redirect after OAuth callback", updated_ms: Date.now() - 2 * HOUR, said: [["user", "After signing in with Google the redirect sends me back to /login instead of the dashboard."], ["assistant", "The callback drops the `next` parameter, so the redirect falls back to /login. I'll keep it in the session and read it back after the OAuth callback."]] },
+  { id: "9b7e01", folder: FOLDER, title: "Add retries with backoff to fetchJson", updated_ms: Date.now() - 26 * HOUR, said: [["user", "fetchJson fails on a 503. Can it retry with backoff, and not retry a 404?"], ["assistant", "Done: three tries, doubling the wait each time (200 ms, 400 ms, 800 ms). A 404 is returned at once. The redirect handling is untouched."]] },
+  { id: "a11ce5", folder: FOLDER, title: "Why does the build fail on CI but not locally?", updated_ms: Date.now() - 6 * 24 * HOUR, said: [["user", "The build passes on my machine and fails on CI with 'Cannot find module'."], ["assistant", "CI runs a clean install, and the module is only in your local node_modules. It needs to be added to package.json."]] },
+  { id: "d4a501", folder: "/Users/you/projects/web-dashboard", title: "Chart tooltips clip at the edge", updated_ms: Date.now() - 3 * HOUR, said: [["user", "The tooltip is cut off at the right edge of the chart; I'd like it to flip to the left, like the redirect arrows in the nav."], ["assistant", "I'll measure the tooltip against the chart's bounds and flip it when it would overflow."]] },
+  { id: "1f0a01", folder: "/Users/you/src/infra", title: "Rotate the staging credentials", updated_ms: Date.now() - 5 * 24 * HOUR, said: [["user", "Rotate the staging database credentials and update the secret in the deploy config."], ["assistant", "Rotated. The new secret is in the staging vault; the old one stays valid for ten minutes."]] },
+];
+
+/** The demo chats that say `query` (any case, as plain text), as search_history answers: the first two matches around the text. */
+function mockChatSearch(query: string) {
+  const q = query.trim().toLowerCase();
+  if ([...q].length < 2) return { chats: [], partial: false, cancelled: false };
+  const pieces = (text: string) => {
+    const out: { text: string; hit: boolean }[] = [];
+    let from = 0;
+    for (let at = text.toLowerCase().indexOf(q); at >= 0; at = text.toLowerCase().indexOf(q, from)) {
+      if (at > from) out.push({ text: text.slice(from, at), hit: false });
+      out.push({ text: text.slice(at, at + q.length), hit: true });
+      from = at + q.length;
+    }
+    if (from < text.length) out.push({ text: text.slice(from), hit: false });
+    return out;
+  };
+  const chats = CHAT_TEXT.map((c) => ({
+    id: c.id,
+    title: pieces(c.title),
+    folder: c.folder,
+    project: c.folder.split("/").pop()!,
+    updated_ms: c.updated_ms,
+    snippets: c.said.filter(([, text]) => text.toLowerCase().includes(q)).slice(0, 2).map(([role, text]) => ({ role, pieces: pieces(text) })),
+  })).filter((c) => c.snippets.length > 0 || c.title.some((p) => p.hit));
+  // &partial: it says it showed only the first results; &slowsearch: it takes its time (for the Searching… line).
+  return { chats, partial: new URLSearchParams(location.search).has("partial"), cancelled: false };
+}
+
 // The places the demo project's sessions came from, as old_locations finds them: one still there, one gone, one already
 // brought over (so its sessions are in History), and one whose copy fails the first time (so a retry shows).
 const DAY = 24 * HOUR;
@@ -1447,6 +1483,8 @@ export function installMockBackend() {
           return new Promise((r) => setTimeout(() => r([FOLDER, "/Users/you/projects/web-dashboard", "/Users/you/src/infra", "/Users/you/notes", "/Users/you/Documents/Github/web-dashboard"].map((path, i) => ({ path, updated_ms: Date.now() - i * 3_600_000 }))), 100));
         case "list_sessions":
           return new Promise((r) => setTimeout(() => r(a.folder === FOLDER ? SESSIONS : (OTHER_SESSIONS[String(a.folder)] ?? [])), 150));
+        case "search_history":
+          return new Promise((r) => setTimeout(() => r(mockChatSearch(String(a.query))), new URLSearchParams(location.search).has("slowsearch") ? 1500 : 300));
         case "rename_session": {
           const session = SESSIONS.find((s) => s.id === a.sessionId);
           if (session) session.title = String(a.title);

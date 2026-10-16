@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { Role } from "./lib/roles";
-import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, ShipInfo, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, ShipInfo, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -156,6 +156,7 @@ export const api = {
   /** Stops one of the chat's background tasks (a run_in_background command, a background agent). */
   stopTask: (slot: string, taskId: string) => invoke<void>("stop_task", { slot, taskId }),
   listSessions: (folder: string) => invoke<SessionSummary[]>("list_sessions", { folder }),
+  searchHistory: (query: string) => invoke<ChatSearchResults>("search_history", { query }),
   /** Names a past session in Lantern (its History menu's Rename). The name beats every other title the session has. */
   renameSession: (sessionId: string, title: string) => invoke<void>("rename_session", { sessionId, title }),
   /** A past session's events, read from its transcript without starting claude (for Export as Markdown). */

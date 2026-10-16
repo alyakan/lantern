@@ -6,6 +6,7 @@ pub mod diagnostics;
 pub mod files;
 pub mod git;
 pub mod history;
+pub mod history_search;
 pub mod mcp_config;
 pub mod menu;
 pub mod merge_tests;
@@ -60,6 +61,8 @@ pub struct AppState {
     network: Arc<network::Monitor>,
     /// How many workers may run at once across all of Lantern (Settings → General; the window sends it).
     agent_limit: std::sync::atomic::AtomicUsize,
+    /// What History's full-text search has read of past chats, and the number of its newest search (see history_search.rs).
+    chat_search: Arc<history_search::ChatSearch>,
 }
 
 /// Where a test makes folders that must not be in the system temp dir (which recent folders leave out): the target dir
@@ -1476,6 +1479,25 @@ async fn list_sessions(state: State<'_, AppState>, folder: String) -> Result<Vec
     tauri::async_runtime::spawn_blocking(move || history::list_sessions_with_aliases(&root, std::path::Path::new(&folder), &aliases, &titles, &renamed)).await.map_err(|e| e.to_string())
 }
 
+/// Past chats of every project whose text has `query` (what was said, not tool output), newest first. A newer search cancels
+/// this one. The query is plain text: it is compared, never run or used as a path.
+#[tauri::command]
+async fn search_history(state: State<'_, AppState>, query: String) -> Result<history_search::Results, String> {
+    use std::sync::atomic::Ordering;
+    let root = projects_root()?;
+    let titles = state.titles.all();
+    let renamed = state.renames.all();
+    let moved: std::collections::HashMap<String, String> = state.relocations.list().into_iter().flat_map(|e| e.aliases.into_iter().map(move |old| (old, e.folder.clone()))).collect();
+    let search = state.chat_search.clone();
+    let this = search.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    tauri::async_runtime::spawn_blocking(move || {
+        let scope = history_search::Scope { titles: &titles, renamed: &renamed, moved: &moved };
+        history_search::search(&root, &query, &scope, &history_search::Options::default(), &search.index, &|| search.generation.load(Ordering::Relaxed) != this)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 /// Names a past session in Lantern (the History menu's Rename). The name is kept apart from Claude Code's transcripts,
 /// and beats every title the session has.
 #[tauri::command]
@@ -1779,7 +1801,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, agent_limit: DEFAULT_AGENT_LIMIT.into() });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default() });
             app.manage(updates::Updates::default());
             app.manage(awake::Awake::default());
             if updates::checks_enabled() {
@@ -1881,6 +1903,7 @@ pub fn run() {
             resolve_files,
             search_text,
             list_sessions,
+            search_history,
             rename_session,
             session_events,
             title_session,

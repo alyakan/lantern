@@ -12,7 +12,7 @@ use std::time::UNIX_EPOCH;
 
 const TITLE_MAX: usize = 80;
 /// Terminal sessions ("cli") and sessions started by Lantern ("sdk-cli"). Other SDK entrypoints are plugin automation.
-const USER_ENTRYPOINTS: &[&str] = &["cli", "sdk-cli"];
+pub(crate) const USER_ENTRYPOINTS: &[&str] = &["cli", "sdk-cli"];
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SessionSummary {
@@ -77,7 +77,7 @@ pub fn is_real_dir(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_dir())
 }
 
-fn jsonl_files(dir: &Path) -> Vec<PathBuf> {
+pub(crate) fn jsonl_files(dir: &Path) -> Vec<PathBuf> {
     std::fs::read_dir(dir)
         .map(|rd| rd.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "jsonl") && is_regular_file(p)).collect())
         .unwrap_or_default()
@@ -106,13 +106,13 @@ fn records(path: &Path) -> impl Iterator<Item = Value> {
 
 /// False for records that aren't part of the visible conversation: injected meta content, subagent turns, and the
 /// summary Claude Code writes when it compacts (the turns it summarizes are still earlier in the same file).
-fn in_conversation(r: &Value) -> bool {
+pub(crate) fn in_conversation(r: &Value) -> bool {
     let flag = |k: &str| r[k].as_bool() == Some(true);
     !(flag("isMeta") || flag("isSidechain") || flag("isCompactSummary") || flag("isVisibleInTranscriptOnly"))
 }
 
 /// The text of a record if it is something the user typed (not injected skill/hook content or a command tag).
-fn prompt_text(r: &Value) -> Option<String> {
+pub(crate) fn prompt_text(r: &Value) -> Option<String> {
     if r["type"] != "user" || !in_conversation(r) {
         return None;
     }
@@ -165,7 +165,7 @@ const INJECTED_TAGS: &[&str] = &[
     "<task-notification>",
 ];
 
-fn title_of(prompt: &str) -> String {
+pub(crate) fn title_of(prompt: &str) -> String {
     let line = prompt.lines().next().unwrap_or("").trim();
     if line.chars().count() <= TITLE_MAX {
         line.to_string()
@@ -175,7 +175,7 @@ fn title_of(prompt: &str) -> String {
 }
 
 /// The title Claude Code gave a record: a /rename (`custom-title`) or its own (`ai-title`).
-fn title_record(r: &Value) -> Option<(bool, &str)> {
+pub(crate) fn title_record(r: &Value) -> Option<(bool, &str)> {
     let t = match r["type"].as_str()? {
         "custom-title" => (true, r["customTitle"].as_str()?),
         "ai-title" => (false, r["aiTitle"].as_str()?),
@@ -268,7 +268,7 @@ pub struct RecentFolder {
     pub updated_ms: u64,
 }
 
-fn modified_ms(path: &Path) -> u64 {
+pub(crate) fn modified_ms(path: &Path) -> u64 {
     std::fs::metadata(path).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as u64)
 }
 
@@ -295,7 +295,7 @@ fn user_session_cwd(path: &Path, dir_name: &str) -> Option<String> {
 }
 
 /// Scratch folders (probes, tools' temp dirs) aren't projects anyone wants to reopen.
-fn is_temp(path: &str) -> bool {
+pub(crate) fn is_temp(path: &str) -> bool {
     ["/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/"].iter().any(|p| path.starts_with(p))
 }
 

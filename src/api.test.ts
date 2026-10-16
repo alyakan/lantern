@@ -97,6 +97,7 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ["userName", () => api.userName(), ["user_name"]],
   ["stopTask", () => api.stopTask("s1", "t1"), ["stop_task", { slot: "s1", taskId: "t1" }]],
   ["listSessions", () => api.listSessions("/repo"), ["list_sessions", { folder: "/repo" }]],
+  ["searchHistory", () => api.searchHistory("retry"), ["search_history", { query: "retry" }]],
   ["renameSession", () => api.renameSession("sid", "Retries"), ["rename_session", { sessionId: "sid", title: "Retries" }]],
   ["sessionEvents", () => api.sessionEvents("/repo", "sid"), ["session_events", { folder: "/repo", sessionId: "sid" }]],
   [

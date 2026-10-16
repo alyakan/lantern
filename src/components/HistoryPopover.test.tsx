@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { HistoryPopover } from "./HistoryPopover";
 import type { SessionActions } from "../lib/sessionActions";
+import type { ChatHit, ChatSearchResults } from "../types";
 
 const ACME = "/work/acme-api";
 const WEB = "/work/web-dashboard";
@@ -166,5 +167,148 @@ describe("History", () => {
     await act(async () => release(sessions[WEB]));
     expect(screen.queryByText("Loading…")).toBeNull();
     expect(screen.getByText("Chart tooltips clip at the edge")).toBeInTheDocument();
+  });
+
+  describe("searching what was said", () => {
+    const hit = (id: string, title: string, over: Partial<ChatHit> = {}): ChatHit => ({
+      id,
+      title: [{ text: title, hit: false }],
+      folder: ACME,
+      project: "acme-api",
+      updated_ms: Date.now() - 3_600_000,
+      snippets: [{ role: "user", pieces: [{ text: "fix the ", hit: false }, { text: "redirect", hit: true }, { text: " after login", hit: false }] }],
+      ...over,
+    });
+    const found = (chats: ChatHit[], partial = false): ChatSearchResults => ({ chats, partial, cancelled: false });
+    const box = () => screen.getByRole("textbox", { name: "Search chats" });
+    const type = (value: string) => fireEvent.change(box(), { target: { value } });
+
+    beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
+    afterEach(() => vi.useRealTimers());
+    const wait = (ms = 250) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
+
+    it("looks for the text after a short pause, from two characters, and lists the chats with the match marked", async () => {
+      const search = vi.fn().mockResolvedValue(found([hit("a", "Fix the login redirect", { title: [{ text: "Fix the login ", hit: false }, { text: "redirect", hit: true }] })]));
+      setup({ search });
+      await screen.findByText("Fix the login redirect", { exact: false });
+      type("r");
+      await wait();
+      expect(search).not.toHaveBeenCalled();
+      type("re");
+      type("redirect");
+      expect(search).not.toHaveBeenCalled();
+      expect(screen.getByText("Searching…")).toBeInTheDocument();
+      await wait();
+      expect(search).toHaveBeenCalledTimes(1);
+      expect(search).toHaveBeenCalledWith("redirect");
+      const list = await screen.findByRole("list", { name: "Chats that mention that" });
+      expect(within(list).getAllByText("redirect").map((m) => m.tagName)).toEqual(["MARK", "MARK"]);
+      expect(within(list).getByText("You")).toBeInTheDocument();
+      expect(within(list).getByText(/acme-api · /)).toBeInTheDocument();
+      // The projects' own lists are replaced while a search is shown.
+      expect(screen.queryByRole("region", { name: "acme-api" })).toBeNull();
+    });
+
+    it("shows what a chat said as text, never as markup", async () => {
+      const search = vi.fn().mockResolvedValue(found([hit("a", "t", { snippets: [{ role: "assistant", pieces: [{ text: "<img src=x onerror=alert(1)> ", hit: false }, { text: "<b>", hit: true }] }] })]));
+      setup({ search });
+      type("<b>");
+      await wait();
+      const list = await screen.findByRole("list", { name: "Chats that mention that" });
+      expect(list.querySelector("img")).toBeNull();
+      expect(list.querySelector("b")).toBeNull();
+      expect(within(list).getByText("<b>").tagName).toBe("MARK");
+      expect(within(list).getByText("Claude")).toBeInTheDocument();
+    });
+
+    it("says so when no chat mentions it, while it searches, and when it failed", async () => {
+      let release: (r: ChatSearchResults) => void = () => {};
+      const search = vi.fn().mockImplementationOnce(() => new Promise((r) => (release = r))).mockRejectedValueOnce("boom");
+      setup({ search });
+      type("nothing here");
+      await wait();
+      expect(screen.getByText("Searching…")).toBeInTheDocument();
+      await act(async () => release(found([])));
+      expect(screen.getByText("No chat mentions that")).toBeInTheDocument();
+      type("something else");
+      await wait();
+      expect(await screen.findByText("The search didn't work. Try again.")).toBeInTheDocument();
+    });
+
+    it("says it shows the first results when the search stopped early", async () => {
+      setup({ search: vi.fn().mockResolvedValue(found([hit("a", "Fix the login redirect")], true)) });
+      type("redirect");
+      await wait();
+      expect(await screen.findByText("Showing the first results")).toBeInTheDocument();
+    });
+
+    it("ignores the answer to an older search", async () => {
+      const answers: ((r: ChatSearchResults) => void)[] = [];
+      const search = vi.fn(() => new Promise<ChatSearchResults>((r) => answers.push(r)));
+      setup({ search });
+      type("first query");
+      await wait();
+      type("second query");
+      await wait();
+      expect(search).toHaveBeenCalledTimes(2);
+      await act(async () => answers[1](found([hit("new", "The new answer")])));
+      await act(async () => answers[0](found([hit("old", "The old answer")])));
+      expect(screen.getByText("The new answer")).toBeInTheDocument();
+      expect(screen.queryByText("The old answer")).toBeNull();
+    });
+
+    it("ignores an answer that says a newer search replaced it", async () => {
+      setup({ search: vi.fn().mockResolvedValue({ chats: [hit("a", "Stale")], partial: false, cancelled: true }) });
+      type("redirect");
+      await wait();
+      expect(screen.getByText("Searching…")).toBeInTheDocument();
+      expect(screen.queryByText("Stale")).toBeNull();
+    });
+
+    it("opens a chat in its own project with a click, with Enter in the box (the first), and with ↓ then Enter on another", async () => {
+      const chats = [hit("a", "First chat"), hit("b", "Second chat", { folder: WEB })];
+      const p = setup({ search: vi.fn().mockResolvedValue(found(chats)) });
+      type("redirect");
+      await wait();
+      await screen.findByText("Second chat");
+      fireEvent.keyDown(box(), { key: "Enter" });
+      expect(p.onOpen).toHaveBeenLastCalledWith("a", ACME);
+      fireEvent.keyDown(box(), { key: "ArrowDown" });
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+      expect(document.activeElement).toBe(screen.getByTitle("Second chat"));
+      fireEvent.click(document.activeElement!);
+      expect(p.onOpen).toHaveBeenLastCalledWith("b", WEB);
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+      expect(document.activeElement).toBe(box());
+    });
+
+    it("keeps to the project chosen with the chip", async () => {
+      setup({ search: vi.fn().mockResolvedValue(found([hit("a", "First chat"), hit("b", "Second chat", { folder: WEB })])), initial: WEB });
+      type("redirect");
+      await wait();
+      expect(await screen.findByText("Second chat")).toBeInTheDocument();
+      expect(screen.queryByText("First chat")).toBeNull();
+    });
+
+    it("clears the search on Escape, and closes on the next one", async () => {
+      const p = setup({ search: vi.fn().mockResolvedValue(found([hit("a", "First chat")])) });
+      type("redirect");
+      await wait();
+      await screen.findByText("First chat");
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(box()).toHaveValue("");
+      expect(p.onClose).not.toHaveBeenCalled();
+      expect(await screen.findByRole("region", { name: "acme-api" })).toBeInTheDocument();
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(p.onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it("only filters titles when it has no search to ask", async () => {
+      setup();
+      type("redirect");
+      await wait();
+      expect(screen.queryByText("Searching…")).toBeNull();
+    });
   });
 });

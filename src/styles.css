@@ -2802,3 +2802,10 @@ nav > .sb-note { padding-left: 14px; }
 .history-group-head .menu-heading { flex: 1; min-width: 0; }
 .history-new { flex: none; width: 22px; height: 22px; display: grid; place-items: center; margin-right: 2px; border-radius: var(--radius-chip); color: var(--muted); }
 .history-new:hover { background: var(--bg-hover); color: var(--text); }
+/* Full-text search in History: a chat that mentions the text, with the lines around the match. */
+.search-results { display: flex; flex-direction: column; min-height: 0; }
+.search-hit { flex-direction: column; align-items: stretch; gap: 3px; }
+.search-hit-head { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.search-snippet { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.search-role { flex: none; width: 44px; color: var(--faint); }
+.search-text { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
