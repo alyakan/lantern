@@ -32,6 +32,16 @@ describe("the Pull request checks dialog", () => {
     expect(dialog).toHaveTextContent("It never merges.");
   });
 
+  it("says under Fix it myself what Auto and Ask mean for the fixes, and only then", () => {
+    const note = "With Auto permissions Claude will push fixes without asking you. With Ask it asks you on each command.";
+    open();
+    expect(screen.queryByText(note)).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: /Fix it myself/ }));
+    expect(screen.getByText(note)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: /Off/ }));
+    expect(screen.queryByText(note)).toBeNull();
+  });
+
   it("has a tries number from 1 to 5 that only Fix it myself uses", () => {
     open();
     const tries = screen.getByRole("combobox", { name: "Tries" }) as HTMLSelectElement;
@@ -95,6 +105,13 @@ describe("Settings → Pull requests", () => {
     expect(onChange).toHaveBeenCalledWith("/dev/lumiform", { mode: "off", tries: 3 });
     fireEvent.change(within(rows[0]).getByRole("combobox", { name: "Tries in lantern" }), { target: { value: "4" } });
     expect(onChange).toHaveBeenCalledWith("/dev/lantern", { mode: "fix", tries: 4 });
+  });
+
+  it("says the same under a project set to Fix it myself, and under no other", () => {
+    render(<PrChecksSettings folders={["/dev/lantern", "/dev/lumiform"]} saved={{ "/dev/lantern": { mode: "fix", tries: 2 } }} onChange={vi.fn()} />);
+    const rows = screen.getAllByRole("listitem");
+    expect(within(rows[0]).getByText(/With Auto permissions Claude will push fixes without asking you\. With Ask it asks you on each command\./)).toBeInTheDocument();
+    expect(within(rows[1]).queryByText(/push fixes without asking you/)).toBeNull();
   });
 
   it("tells projects of the same name apart", () => {

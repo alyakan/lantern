@@ -2177,6 +2177,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .pr-mode-hint { font-size: calc(12px * var(--font-scale)); line-height: 1.4; color: var(--text-2); }
 .pr-tries { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .pr-tries.off { opacity: 0.55; }
+.pr-fix-note { margin: 0; color: var(--muted-text); }
 .pr-tries-hint { flex-basis: 100%; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .pr-setting { display: flex; flex-direction: column; gap: 2px; padding: 9px 10px; }
 .pr-setting-main { display: flex; align-items: center; gap: 10px; min-width: 0; }

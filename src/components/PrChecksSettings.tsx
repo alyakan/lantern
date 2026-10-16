@@ -1,6 +1,6 @@
 import { PR_MODES, settingFor, type PrMode, type PrSetting } from "../lib/prChecks";
 import { projectLabels } from "../lib/sidebar";
-import { GH_NOTE, TRIES_OPTIONS, useGhAccess } from "./PrChecksDialog";
+import { FIX_NOTE, GH_NOTE, TRIES_OPTIONS, useGhAccess } from "./PrChecksDialog";
 
 export interface PrChecksSettingsProps {
   /** Every project Lantern knows (open now or in the recents). */
@@ -61,6 +61,11 @@ export function PrChecksSettings({ folders, saved, onChange }: PrChecksSettingsP
                   )}
                 </div>
                 <span className="settings-row-sub">{hint}</span>
+                {s.mode === "fix" && (
+                  <span className="settings-row-sub pr-fix-note">
+                    {FIX_NOTE}
+                  </span>
+                )}
               </li>
             );
           })}
