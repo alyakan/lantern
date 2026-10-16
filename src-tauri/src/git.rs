@@ -284,10 +284,21 @@ fn new_root(repo: &Path, parent: &Path, slug: &str, id: &str) -> Result<PathBuf,
     Ok(root)
 }
 
+/// Held while a worktree is added or removed, one at a time in the whole app. A team's agents are started at once, and git
+/// doesn't take that: a `worktree add` that reads the repository's worktree records while another is making its own fails
+/// ("failed to read .git/worktrees/…/commondir"), and two that pick the free branch name or folder at the same moment pick
+/// the same one. A lock that a panic left behind is not a reason to refuse every later agent.
+static WORKTREE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn worktree_lock() -> std::sync::MutexGuard<'static, ()> {
+    WORKTREE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Creates a worktree for `name` under `parent` on a new branch `lantern/<name>` (numbered if that exists), starting
 /// from the commit the main checkout is on. Work not committed yet is not in it.
 pub fn add_worktree(folder: &Path, parent: &Path, name: &str, id: &str, path_env: Option<&str>) -> Result<Worktree, String> {
     let repo = repo_root(folder, path_env).ok_or("This folder isn't in a git repository, so an agent can't get a worktree of its own.")?;
+    let _one_at_a_time = worktree_lock();
     let base = current_branch(&repo).filter(|b| branch_exists(&repo, b, path_env));
     let slug = self::slug(name);
     let mut branch = format!("lantern/{slug}");
@@ -313,6 +324,7 @@ pub fn add_detached_worktree(folder: &Path, parent: &Path, name: &str, id: &str,
     if commit.len() != 40 || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err("That isn't a commit.".into());
     }
+    let _one_at_a_time = worktree_lock();
     let root = new_root(&repo, parent, &self::slug(name), id)?;
     let root_arg = root.to_string_lossy().to_string();
     run(&repo, &["worktree", "add", "--detach", &root_arg, commit], path_env)?;
@@ -684,6 +696,7 @@ pub fn remove_worktree(repo: &Path, root: &Path, branch: &str, delete_branch: bo
     if delete_branch && !is_workers_branch(branch) {
         return Err(format!("{branch} isn't a branch Lantern made for an agent, so Lantern won't delete it."));
     }
+    let _one_at_a_time = worktree_lock();
     let gone = worktree_gone(root);
     let root_arg = root.to_string_lossy().to_string();
     let mut args = vec!["worktree", "remove"];
@@ -808,6 +821,28 @@ mod tests {
     /// A directory for worktrees that outlives the statement it's made in (the OS clears /tmp).
     fn worktrees() -> PathBuf {
         tempfile::tempdir().unwrap().keep()
+    }
+
+    #[test]
+    fn agents_started_at_the_same_moment_each_get_a_worktree_of_their_own() {
+        // A team's agents are started at once; git alone fails one of them reading another's half-made worktree record,
+        // and two of the same name would pick the same branch.
+        let main = repo();
+        let parent = worktrees();
+        let (folder, parent_ref) = (main.path(), &parent);
+        let made: Vec<Result<Worktree, String>> = std::thread::scope(|s| {
+            let jobs: Vec<_> = (0..8).map(|i| s.spawn(move || add_worktree(folder, parent_ref, "Same name", &format!("w{i}"), None))).collect();
+            jobs.into_iter().map(|j| j.join().unwrap()).collect()
+        });
+        let all: Vec<&Worktree> = made.iter().map(|r| r.as_ref().unwrap_or_else(|e| panic!("{e}"))).collect();
+        let mut branches: Vec<&str> = all.iter().map(|w| w.branch.as_str()).collect();
+        branches.sort();
+        branches.dedup();
+        assert_eq!(branches.len(), 8, "{branches:?}");
+        let mut roots: Vec<&Path> = all.iter().map(|w| w.root.as_path()).collect();
+        roots.sort();
+        roots.dedup();
+        assert_eq!(roots.len(), 8);
     }
 
     #[test]
