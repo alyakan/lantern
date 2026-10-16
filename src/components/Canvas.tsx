@@ -178,10 +178,13 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
           <span className="node-name" title={name}>
             {name}
           </span>
-          <span className="node-meta" title={branch ?? undefined}>
+          <span className="node-meta">
             <ModelChip model={state?.model ?? null} />
             {branch && <BranchIcon />}
-            {[role === "main" ? "Runs the team" : branch ? branch.replace(/^lantern\//, "") : "Shared folder", spent || null].filter(Boolean).join(" · ")}
+            {/* The model chip stays whole; this is what gives way when the card is narrow, and the tooltip has all of it. */}
+            <span className="node-meta-text" title={[role === "main" ? "Runs the team" : (branch ?? "Shared folder"), spent || null].filter(Boolean).join(" · ")}>
+              {[role === "main" ? "Runs the team" : branch ? branch.replace(/^lantern\//, "") : "Shared folder", spent || null].filter(Boolean).join(" · ")}
+            </span>
           </span>
         </span>
         {state && !folded && <NodeContext slot={slot} name={name} />}
@@ -324,39 +327,41 @@ function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onSho
     if (attention > before.current) setRung((n) => n + 1);
     before.current = attention;
   }, [attention]);
+  const full = attention === 1 ? "1 agent needs you" : `${attention} agents need you`;
   return (
-    <>
+    <div className="canvas-controls" role="group" aria-label="Canvas view">
+      {/* Part of the toolbar, so it never sits on an agent's title bar. The wording shortens with the canvas's width, like the toolbar's other chips. */}
       {attention > 0 && (
-        <button className="canvas-attention" onClick={onNext} title="Go to the next agent waiting for you">
+        <button className="canvas-attention" onClick={onNext} aria-label={full} title="Go to the next agent waiting for you">
           {rung > 0 && <span key={rung} className="canvas-attention-ring" aria-hidden />}
           <span className="node-dot waiting" aria-hidden />
-          {attention === 1 ? "1 agent needs you" : `${attention} agents need you`}
+          <span className="canvas-attn-long" aria-hidden>{full}</span>
+          <span className="canvas-attn-mid" aria-hidden>{attention === 1 ? "1 needs you" : `${attention} need you`}</span>
+          <span className="canvas-attn-short" aria-hidden>{attention}</span>
         </button>
       )}
-      <div className="canvas-controls" role="group" aria-label="Canvas view">
-        <button className="icon" aria-label="Zoom out" title="Zoom out" onClick={() => onZoom(1 / 1.25)}>
-          −
-        </button>
-        <span className="canvas-zoom" aria-live="off">
-          {Math.round(zoom * 100)}%
-        </span>
-        <button className="icon" aria-label="Zoom in" title="Zoom in" onClick={() => onZoom(1.25)}>
-          +
-        </button>
-        <button className="canvas-fit" aria-label="Fit everything" title="Fit everything in view" onClick={onFit}>
-          Fit
-        </button>
-        <TeamContext nodes={nodes} onGoTo={onGoTo} />
-        <Team nodes={nodes} onGoTo={onGoTo} />
-        {/* Below a width the rest fold into "⋯" (the canvas's container query decides which shows). */}
-        <div className="canvas-ctl-wide">
-          <HiddenAgents nodes={nodes.filter((n) => n.hidden)} onShow={onShow} />
-          {main && <SubagentsMenu main={main} />}
-          {main && <NewAgent main={main} />}
-        </div>
-        {main && <CanvasOverflow main={main} hidden={nodes.filter((n) => n.hidden)} onShow={onShow} />}
+      <button className="icon" aria-label="Zoom out" title="Zoom out" onClick={() => onZoom(1 / 1.25)}>
+        −
+      </button>
+      <span className="canvas-zoom" aria-live="off">
+        {Math.round(zoom * 100)}%
+      </span>
+      <button className="icon" aria-label="Zoom in" title="Zoom in" onClick={() => onZoom(1.25)}>
+        +
+      </button>
+      <button className="canvas-fit" aria-label="Fit everything" title="Fit everything in view" onClick={onFit}>
+        Fit
+      </button>
+      <TeamContext nodes={nodes} onGoTo={onGoTo} />
+      <Team nodes={nodes} onGoTo={onGoTo} />
+      {/* Below a width the rest fold into "⋯" (the canvas's container query decides which shows). */}
+      <div className="canvas-ctl-wide">
+        <HiddenAgents nodes={nodes.filter((n) => n.hidden)} onShow={onShow} />
+        {main && <SubagentsMenu main={main} />}
+        {main && <NewAgent main={main} />}
       </div>
-    </>
+      {main && <CanvasOverflow main={main} hidden={nodes.filter((n) => n.hidden)} onShow={onShow} />}
+    </div>
   );
 }
 
