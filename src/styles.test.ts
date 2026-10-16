@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { contrast, luminance, parseHex } from "./lib/color";
-import { THEMES } from "./lib/themes";
+import { contrast, ensureContrast, isDark, luminance, mix, parseHex } from "./lib/color";
+import { syntaxFor } from "./lib/monacoTheme";
+import { PROJECT_COLORS } from "./lib/projectColors";
+import { THEMES, type ThemeId } from "./lib/themes";
 // @ts-expect-error type error without @types/node package
 import { readFileSync } from "node:fs";
 
@@ -200,6 +202,125 @@ describe("themes", () => {
     const h = max === r ? (g - b) / (max - min) : max === g ? 2 + (b - r) / (max - min) : 4 + (r - g) / (max - min);
     return (h * 60 + 360) % 360;
   };
+
+  describe("contrast", () => {
+    // A theme's tokens as hex; a hover or active wash (#rrggbbaa) is laid over the surface it sits on.
+    const hexOf = (id: string, name: string) => resolve(id, name).slice(0, 7);
+    const wash = (id: string, name: string, over: string) => {
+      const raw = resolve(id, name);
+      return mix(resolve(id, over), raw.slice(0, 7), parseInt(raw.slice(7, 9) || "ff", 16) / 255);
+    };
+    const percent = (id: string, name: string) => parseFloat(resolve(id, name)) / 100;
+    const surfaces = ["pane", "sidebar", "bg-subtle", "bg-user", "code-bg", "info-bg", "error-bg", "auth-bg"];
+    const at = (id: string, label: string, fg: string, bg: string, min: number) => expect(contrast(fg, bg), `${id}: ${label}`).toBeGreaterThanOrEqual(min);
+    const each = (fn: (id: string, t: (name: string) => string) => void) => {
+      for (const { id } of own) fn(id, (name) => hexOf(id, name));
+    };
+
+    it("reads the text, secondary text and muted text on every surface and under every hover and selection", () => {
+      each((id, t) => {
+        for (const s of surfaces) {
+          at(id, `text on ${s}`, t("text"), t(s), 4.5);
+          at(id, `text-2 on ${s}`, t("text-2"), t(s), 4.5);
+          at(id, `muted-text on ${s}`, t("muted-text"), t(s), 4.5);
+        }
+        for (const s of ["pane", "sidebar"]) {
+          at(id, `text on ${s}, for body text`, t("text"), t(s), 7);
+          at(id, `text on seg-thumb over ${s}`, t("text"), wash(id, "seg-thumb", s), 4.5);
+          for (const w of ["bg-hover", "bg-active"]) {
+            at(id, `text on ${w} over ${s}`, t("text"), wash(id, w, s), 4.5);
+            at(id, `text-2 on ${w} over ${s}`, t("text-2"), wash(id, w, s), 4.5);
+            at(id, `muted-text on ${w} over ${s}`, t("muted-text"), wash(id, w, s), 4.5);
+          }
+        }
+        // The muted grey (icons, placeholders, the focus ring) is text-grade too; faint is for hints and marks, 3:1.
+        for (const s of ["bg", "pane", "sidebar", "field"]) {
+          at(id, `muted on ${s}`, t("muted"), t(s), 4.5);
+          at(id, `faint on ${s}`, t("faint"), t(s), 3);
+        }
+      });
+    });
+
+    it("keeps the order text, then secondary text, then muted text, on the pane and the chat card", () => {
+      each((id, t) => {
+        for (const s of ["pane", "sidebar"]) {
+          expect(contrast(t("text"), t(s)), `${id}: text vs text-2 on ${s}`).toBeGreaterThan(contrast(t("text-2"), t(s)));
+          expect(contrast(t("text-2"), t(s)), `${id}: text-2 vs muted-text on ${s}`).toBeGreaterThan(contrast(t("muted-text"), t(s)));
+        }
+      });
+    });
+
+    it("reads every status colour as text on the surfaces it sits on, and its dot or ring at 3:1", () => {
+      each((id, t) => {
+        for (const n of ["add", "del", "warn", "attn-text", "sev-should-text"]) {
+          for (const s of ["pane", "sidebar", "bg-subtle", "info-bg", "error-bg", "auth-bg"]) at(id, `${n} on ${s}`, t(n), t(s), 4.5);
+        }
+        for (const n of ["working", "unread", "sev-blocker"]) for (const s of ["pane", "sidebar"]) at(id, `${n} on ${s}`, t(n), t(s), 4.5);
+        for (const n of ["attn", "sev-should", "accent"]) for (const s of ["pane", "sidebar"]) at(id, `${n} on ${s}`, t(n), t(s), 3);
+      });
+    });
+
+    it("reads the text on a primary button, a red confirm button, a check mark, an issue badge and the inbox badge", () => {
+      each((id, t) => {
+        at(id, "accent-text on accent", t("accent-text"), t("accent"), 4.5);
+        for (const n of ["add", "del", "warn"]) at(id, `on-status on ${n}`, t("on-status"), t(n), 4.5);
+        at(id, "on-attn on attn", t("on-attn"), t("attn"), 4.5);
+        // PostHog's accent text is near-black, for its orange; its red button takes the white card's colour.
+        at(id, "red confirm button", id === "posthog" ? t("sidebar") : t("accent-text"), t("del"), 4.5);
+        at(id, "del on field", t("del"), t("field"), 4.5);
+        at(id, "del on bg-subtle (the permission card)", t("del"), t("bg-subtle"), 4.5);
+      });
+    });
+
+    it("draws a card's edge and separates the surfaces and the hover and selection fills from each other", () => {
+      each((id, t) => {
+        for (const s of ["pane", "sidebar"]) {
+          at(id, `line-strong vs ${s}`, t("line-strong"), t(s), 1.5);
+          at(id, `line vs ${s}`, t("line"), t(s), 1.1);
+        }
+        at(id, "sidebar vs pane", t("sidebar"), t("pane"), 1.08);
+        at(id, "sidebar vs bg-subtle", t("sidebar"), t("bg-subtle"), 1.04);
+        at(id, "sidebar vs code-bg", t("sidebar"), t("code-bg"), 1.08);
+        for (const s of ["pane", "sidebar"]) {
+          at(id, `hover vs ${s}`, wash(id, "bg-hover", s), t(s), 1.07);
+          at(id, `active vs ${s}`, wash(id, "bg-active", s), t(s), 1.1);
+          at(id, `active vs hover over ${s}`, wash(id, "bg-active", s), wash(id, "bg-hover", s), 1.03);
+        }
+      });
+    });
+
+    it("tints a project's chip so its letter reads, on the chip and on the card", () => {
+      each((id, t) => {
+        for (const pc of PROJECT_COLORS) {
+          const letter = mix(t("text"), pc, percent(id, "pc-ink"));
+          at(id, `${pc} letter on its chip`, letter, mix(t("bg"), pc, percent(id, "pc-tint")), 4.5);
+          at(id, `${pc} letter on the card`, letter, t("sidebar"), 4.5);
+        }
+      });
+    });
+
+    it("draws code in colours that read on the editor and on a code block (comments 4:1)", () => {
+      each((id, t) => {
+        const syntax = syntaxFor(id as ThemeId, isDark(t("pane")));
+        for (const [role, raw] of Object.entries(syntax)) {
+          const min = role === "comment" ? 4 : 4.5;
+          // Xcode's colours (PostHog's) are moved by the editor until they read; the others' own must read as they are.
+          const drawn = id === "posthog" ? ensureContrast(raw, t("pane"), 4.5) : raw;
+          at(id, `${role} on the editor`, drawn, t("pane"), min);
+          at(id, `${role} on a code block`, drawn, t("md-pre-bg"), min);
+        }
+        at(id, "text on a code block", t("text"), t("md-pre-bg"), 4.5);
+      });
+    });
+
+    it("reads the text on a diagram's node, new, changed and removed", () => {
+      each((id, t) => {
+        for (const [colour, amount] of [["#2ea043", 0.2], ["#d9a300", 0.2], ["#e5484d", 0.133]] as const) {
+          at(id, `text on a ${colour} node`, t("text"), mix(t("sidebar"), colour, amount), 4.5);
+        }
+      });
+    });
+  });
 
   describe("markdown tokens", () => {
     const md = names(rootBlock).filter((n) => n.startsWith("md-"));
