@@ -101,3 +101,22 @@ describe("team templates", () => {
     expect(templateMessage({ id: "t", label: "Solo", description: "", members: ["builder"] }, [], "x")).toContain("and one agent:");
   });
 });
+
+describe("templateMessage with Lantern's own review and test", () => {
+  const template = BUILTIN_TEMPLATES[1];
+
+  it("tells the Lead to start the builders and leave the checks to Lantern, and to wait for the one note", () => {
+    const message = templateMessage(template, [], "Add a login form", true);
+    expect(message).toContain("Lantern starts the members that check the work (review, test) by itself");
+    expect(message).toContain("don't start those yourself");
+    expect(message).toContain("wait for that note before you propose the merge");
+    expect(message).not.toContain("once there is a branch or change for them to look at");
+  });
+
+  it("is the usual message, with the Lead starting every member, when it is off", () => {
+    const message = templateMessage(template, [], "Add a login form");
+    expect(message).toContain("Start each member with spawn_agent");
+    expect(message).toContain("Start the ones that check the work (review, test, audit) once there is a branch");
+    expect(message).not.toContain("by itself");
+  });
+});

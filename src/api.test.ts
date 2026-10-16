@@ -68,6 +68,7 @@ const wrappers: [string, () => unknown, unknown[]][] = [
     ["restart_session", { slot: "s1", mode: "auto", effort: null, autoApprove: false, team: true }],
   ],
   ["setSubagents", () => api.setSubagents("s1", "inline"), ["set_subagents", { slot: "s1", subagents: "inline" }]],
+  ["setReview", () => api.setReview("s1", { on: true, tidy: false, checks: ["reviewer", "qa"] }), ["orchestra_set_review", { main: "s1", setting: { on: true, tidy: false, checks: ["reviewer", "qa"] } }]],
   [
     "getFileDiff",
     () => api.getFileDiff("s1", "a.ts"),

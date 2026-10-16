@@ -13,6 +13,19 @@ pub struct SlashCommand {
     pub argument_hint: String,
 }
 
+/// One check (a Reviewer, a QA tester…) in a `ReviewUpdate`. `state`: "waiting" (for a free slot), "running", "done", "failed"
+/// (it stopped before reporting) or "skipped" (the setting was switched off before it started). `findings` and `passed`
+/// come from the report's last line (`RESULT: pass` or `RESULT: issues 3`), and are None when it has none.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ReviewCheck {
+    pub role: String,
+    pub label: String,
+    pub slot: Option<String>,
+    pub state: String,
+    pub findings: Option<u32>,
+    pub passed: Option<bool>,
+}
+
 /// A model claude offers. `value` is what `--model` takes ("default" means no flag).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ModelOption {
@@ -157,6 +170,9 @@ pub enum UiEvent {
         /// The role it was started in (a Reviewer, a Builder…): shown on its card, and kept when it is restored.
         #[serde(skip_serializing_if = "Option::is_none")]
         role: Option<crate::roles::RoleTag>,
+        /// It was started by Lantern to review or test this builder's work (the builder's slot): it is placed next to it.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        review_of: Option<String>,
     },
     /// On the main agent's slot: a note from Lantern for it (a worker finished, crashed or waits on the user), to be sent
     /// as a message when the main agent is idle. Several are joined into one.
@@ -165,6 +181,11 @@ pub enum UiEvent {
     AgentMessage { from: String, text: String },
     /// On a worker's slot: its claude was stopped on purpose (or never started: `reason` says why).
     AgentStopped { reason: Option<String> },
+    /// On a worker's slot: it reported on a builder's work and Lantern closed it: its checkout is removed, its report stays.
+    AgentTidied,
+    /// On the main agent's slot: where the review and test of a builder's latest work stands (see orchestra/review.rs).
+    /// `done`: every check has finished, so the Lead has its one message.
+    ReviewUpdate { builder: String, name: String, commit: String, checks: Vec<ReviewCheck>, done: bool },
     /// On a worker's slot: its worktree is being set up before it starts (see setup.rs). `phase`: "running" (command number
     /// `index` of `total` is running; `line` is what it printed last), "failed" (it stopped at `command`, for `reason`, with the
     /// end of what it printed in `tail`) or "done" (the worker starts now, or was told to start without the rest).
@@ -194,7 +215,7 @@ mod tests {
 
     #[test]
     fn a_spawned_worker_carries_its_provider_when_it_is_known_and_the_field_is_absent_otherwise() {
-        let ev = |provider| UiEvent::AgentSpawned { worker: "w1".into(), name: "n".into(), brief: "b".into(), folder: "/f".into(), branch: None, base: None, isolation: "shared".into(), mode: "ask".into(), provider, role: None };
+        let ev = |provider| UiEvent::AgentSpawned { worker: "w1".into(), name: "n".into(), brief: "b".into(), folder: "/f".into(), branch: None, base: None, isolation: "shared".into(), mode: "ask".into(), provider, role: None, review_of: None };
         let with = serde_json::to_value(ev(Some(crate::provider::ProviderId::Claude.info()))).unwrap();
         assert_eq!(with["provider"]["id"], "claude");
         assert_eq!(with["provider"]["capabilities"]["supports_auto_mode"], true);

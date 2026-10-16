@@ -15,6 +15,8 @@ export interface AgentMeta {
   isolation: "worktree" | "shared";
   /** The role it was started in (a Reviewer, a Builder…), when it has one. */
   role?: AgentRole;
+  /** Lantern started it to review or test this builder's work (the builder's slot): its card is placed next to that one. */
+  reviewOf?: string;
   /** Taken off the canvas by the user: it keeps working, and comes back by itself when it needs them. Absent: on the canvas. */
   hidden?: boolean;
 }
@@ -72,7 +74,7 @@ function spawnWorker(chats: Chats, main: string, ev: Extract<UiEvent, { kind: "a
     seq: 1,
     items: [{ type: "user", id: "u1", text: ev.brief, at: Date.now(), from: "main agent" }],
   };
-  const meta: AgentMeta = { parent: main, name: ev.name, brief: ev.brief, folder: ev.folder, branch: ev.branch, base: ev.base, isolation: ev.isolation, ...(ev.role ? { role: ev.role } : {}) };
+  const meta: AgentMeta = { parent: main, name: ev.name, brief: ev.brief, folder: ev.folder, branch: ev.branch, base: ev.base, isolation: ev.isolation, ...(ev.role ? { role: ev.role } : {}), ...(ev.review_of ? { reviewOf: ev.review_of } : {}) };
   return { ...chats, slots: { ...chats.slots, [ev.worker]: worker }, agents: { ...chats.agents, [ev.worker]: meta } };
 }
 

@@ -327,3 +327,49 @@ describe("adopting a restored worker", () => {
     expect(chatsReducer(orphan, { type: "adopt", slot: "s2", meta: { ...meta, parent: "nope" } })).toBe(orphan);
   });
 });
+
+describe("the review and test of a builder's work", () => {
+  const update = (over: Partial<Extract<UiEvent, { kind: "review_update" }>> = {}): UiEvent => ({
+    kind: "review_update",
+    builder: "w1",
+    name: "Login form",
+    commit: "abc12345",
+    checks: [{ role: "reviewer", label: "Reviewer", slot: "w2", state: "running", findings: null, passed: null }],
+    done: false,
+    ...over,
+  });
+
+  it("starts off, with reviewers tidied up after they report, until the team is told otherwise", () => {
+    expect(initialState.review).toEqual({ on: false, tidy: true, checks: ["reviewer"] });
+    expect(reducer(initialState, { type: "review_set", review: { on: true, tidy: false, checks: ["reviewer", "qa"] } }).review).toEqual({ on: true, tidy: false, checks: ["reviewer", "qa"] });
+  });
+
+  it("keeps where the review of each builder's latest work stands, one entry per builder", () => {
+    let s = ev(main, update());
+    expect(s.reviews).toEqual([expect.objectContaining({ builder: "w1", name: "Login form", commit: "abc12345", done: false })]);
+    s = ev(s, update({ builder: "w3", name: "Signup" }));
+    s = ev(s, update({ done: true, checks: [{ role: "reviewer", label: "Reviewer", slot: "w2", state: "done", findings: 2, passed: false }] }));
+    expect(s.reviews.map((r) => [r.builder, r.done])).toEqual([["w3", false], ["w1", true]]);
+    expect(s.reviews[1].checks[0]).toMatchObject({ state: "done", findings: 2 });
+  });
+
+  it("forgets the reviews of a conversation that was cleared", () => {
+    const s = ev(main, update());
+    expect(reducer(s, { type: "folder_opened", folder: "/p" }).reviews).toEqual([]);
+  });
+
+  it("places an agent Lantern started to check a builder's work beside that builder, and remembers whose it checks", () => {
+    const role = { id: "reviewer", label: "Reviewer", read_only: true };
+    let c = chatsReducer(initialChats(main), on("s1", spawned));
+    c = chatsReducer(c, on("s1", { ...spawned, worker: "w2", name: "Reviewer: Login form", branch: null, base: null, role, review_of: "w1" }));
+    expect(c.agents.w2.reviewOf).toBe("w1");
+    expect("reviewOf" in c.agents.w1).toBe(false);
+  });
+
+  it("shows an agent Lantern closed after its report as finished, with nothing to restart, and leaves it out of what is saved", () => {
+    const c = chatsReducer(withWorker(), on("w1", { kind: "agent_tidied" }));
+    expect(c.slots.w1).toMatchObject({ status: "ended", thinking: false, leadStopped: true });
+    expect(c.slots.w1.banner).toMatchObject({ kind: "info", action: null });
+    expect(c.slots.w1.banner?.text).toContain("Lantern closed this agent after it reported");
+  });
+});

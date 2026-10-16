@@ -247,4 +247,26 @@ describe("a team from a template", () => {
     expect(await screen.findByRole("button", { name: "Subagents: On the canvas" })).toBeInTheDocument();
   });
 
+  it("turns Review and test on for a team with a Reviewer or QA, tells the Lead's backend before its first instruction, and tells the Lead to leave the checks to Lantern", async () => {
+    const calls = await launch();
+    await startOne(calls, /Build, review and test/, "add a dark mode toggle");
+    const started = calls.filter(([c]) => c === "start_session").pop()![1] as { slot: string };
+    await waitFor(() => expect(last(calls, "orchestra_set_review")).toEqual({ main: started.slot, setting: { on: true, tidy: true, checks: ["reviewer", "qa"] } }));
+    expect(calls.findIndex(([c]) => c === "orchestra_set_review")).toBeLessThan(calls.findIndex(([c]) => c === "send_message"));
+    expect(await screen.findByRole("button", { name: "Review: On" })).toBeInTheDocument();
+    const sent = last(calls, "send_message") as { text: string };
+    expect(sent.text).toContain("Lantern starts the members that check the work (review, test) by itself");
+    expect(sent.text).toContain("don't start those yourself");
+  });
+
+  it("keeps a team that wasn't started from a template off, until the user switches it on", async () => {
+    const calls = await launch();
+    fireEvent.click(await screen.findByRole("button", { name: "New" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Team(?! from)/ }));
+    await waitFor(() => expect(last(calls, "orchestra_set_review")).toMatchObject({ setting: { on: false, tidy: true } }));
+    fireEvent.click(await screen.findByRole("button", { name: "Review: Off" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /Review and test what an agent builds/ }));
+    await waitFor(() => expect(last(calls, "orchestra_set_review")).toMatchObject({ setting: { on: true, tidy: true, checks: ["reviewer"] } }));
+    expect(await screen.findByRole("button", { name: "Review: On" })).toBeInTheDocument();
+  });
 });

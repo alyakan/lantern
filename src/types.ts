@@ -1,4 +1,5 @@
 import type { AgentRole } from "./lib/roles";
+import type { ReviewCheck } from "./lib/reviewChain";
 
 /**
  * How a chat launches: Permissions Ask, Permissions Auto, or the Step by step workflow (a page per message, in a flavour:
@@ -85,9 +86,13 @@ export type UiEvent =
   | { kind: "shell_done"; id: string; code: number | null; stopped: boolean }
   | { kind: "shell_secret"; id: string; secret: boolean }
   /** On the main agent's chat: it started a worker, whose chat is the slot `worker` (open before its first event). */
-  | { kind: "agent_spawned"; worker: string; name: string; brief: string; folder: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; mode: Mode; provider?: ProviderInfo; role?: AgentRole }
+  | { kind: "agent_spawned"; worker: string; name: string; brief: string; folder: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; mode: Mode; provider?: ProviderInfo; role?: AgentRole; review_of?: string }
   /** On the main agent's chat: a note from Lantern for it (a worker finished, crashed or waits on the user). */
   | { kind: "agent_wake"; text: string }
+  /** On a worker: Lantern reviewed or tested a builder's work with it and closed it: its copy of the code is gone, its report stays. */
+  | { kind: "agent_tidied" }
+  /** On the Lead: where the review and test of a builder's latest work stands. */
+  | { kind: "review_update"; builder: string; name: string; commit: string; checks: ReviewCheck[]; done: boolean }
   /** On a worker's chat: the main agent sent it this. */
   | { kind: "agent_message"; from: string; text: string }
   /** On a worker's chat: its claude was stopped on purpose, or never started (`reason`). */
@@ -310,7 +315,7 @@ export interface Settings {
   orchestrator?: boolean;
   /** Reopen the chat as a worker of an open main agent (a team restored after Lantern was closed). */
   /** `branch`: the one Lantern made for it (null when it shares the folder); its worktree's HEAD is the worker's to switch. */
-  worker?: { name: string; parent: string; branch: string | null; shared: boolean; read_only: boolean };
+  worker?: { name: string; parent: string; branch: string | null; shared: boolean; read_only: boolean; role?: AgentRole };
   /** The user's notes for the project (the app cuts them to its limit): every new chat starts knowing them. A worker gets its Lead's. */
   project_notes?: string;
 }

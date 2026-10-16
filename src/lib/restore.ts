@@ -1,5 +1,6 @@
 import { chatTitle, type AgentMeta } from "../sessions";
 import type { AgentRole } from "./roles";
+import type { ReviewSetting } from "./reviewChain";
 import type { State } from "../store";
 import type { RelocationEntry } from "../types";
 import { savedModeOf } from "./workflow";
@@ -9,7 +10,7 @@ import { savedModeOf } from "./workflow";
  * after a restart (slots are not), so the team can be put back together.
  */
 export type SavedTeamRole =
-  | { role: "main" }
+  | { role: "main"; review?: ReviewSetting }
   | { role: "worker"; name: string; parentSession: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; agentRole?: AgentRole; hidden?: boolean; model?: string };
 
 /** An open chat as saved for the next launch: its conversation (if it has one), where, and what was typed in its box. */
@@ -38,7 +39,7 @@ export function chatsToSave(slots: Record<string, State>, active: string, drafts
     // is left out (saved as it was, it would return as an ordinary chat).
     if (meta && (!parentSession || s.leadStopped)) return [];
     const orchestra: SavedTeamRole | undefined = s.orchestrator
-      ? { role: "main" }
+      ? { role: "main", ...(s.review.on ? { review: s.review } : {}) }
       : meta && parentSession
         ? { role: "worker", name: meta.name, parentSession, branch: meta.branch, base: meta.base, isolation: meta.isolation, ...(meta.role ? { agentRole: meta.role } : {}), ...(meta.hidden ? { hidden: true } : {}), ...(s.model ? { model: s.model } : {}) }
         : undefined;

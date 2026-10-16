@@ -37,6 +37,8 @@ import { NodeBody } from "./NodeBody";
 import { BranchIcon, ChevronIcon, OpenOutIcon, PlayIcon } from "./icons";
 import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
 import { SubagentsMenu } from "./SubagentsMenu";
+import { ReviewMenu } from "./ReviewMenu";
+import { reviewBusy, reviewStrip } from "../lib/reviewChain";
 import { CanvasOverflow } from "./CanvasOverflow";
 import { longSpan, quietFor, shortSpan, useQuiet } from "../lib/quiet";
 import { useQuietAfter } from "../lib/quietSetting";
@@ -59,15 +61,17 @@ export interface CanvasLayout {
 export const newLayout = (): CanvasLayout => ({ boxes: {}, view: null, touched: false, collapsed: {}, order: [], seen: new Set() });
 
 /** Gives every agent a place (new ones go beside their main agent, in free space) and forgets agents that are gone. */
-export function placeNodes(layout: CanvasLayout, nodes: { slot: string; role: "main" | "worker"; parent: string | null }[]): void {
+export function placeNodes(layout: CanvasLayout, nodes: { slot: string; role: "main" | "worker"; parent: string | null; reviewOf?: string }[]): void {
   const live = new Set(nodes.map((n) => n.slot));
   for (const slot of Object.keys(layout.boxes)) if (!live.has(slot)) delete layout.boxes[slot];
   for (const n of nodes) {
     if (layout.boxes[n.slot]) continue;
     const all = Object.values(layout.boxes);
+    // An agent that checks a builder's work goes beside that builder; any other beside its main agent.
+    const beside = n.reviewOf ? layout.boxes[n.reviewOf] : undefined;
     const parent = n.parent ? layout.boxes[n.parent] : undefined;
-    if (n.role === "worker" && parent) {
-      layout.boxes[n.slot] = placeWorker(all, parent);
+    if (n.role === "worker" && (beside ?? parent)) {
+      layout.boxes[n.slot] = placeWorker(all, (beside ?? parent)!);
     } else {
       // A main agent (or a worker whose main agent is gone) goes below whatever is already there.
       const b = bounds(all);
@@ -131,7 +135,7 @@ interface FrameProps {
 }
 
 /** The agent's latest words and state, for the card that stands in for its chat when zoomed out or folded. */
-function SummaryBody({ slot }: { slot: string }) {
+function SummaryBody({ slot, strip }: { slot: string; strip: string | null }) {
   const state = useChatState(slot);
   const quiet = useQuiet(state?.activityAt ?? null, !!state && nodeStatus(state) === "working", useQuietAfter());
   if (!state) return null;
@@ -139,6 +143,7 @@ function SummaryBody({ slot }: { slot: string }) {
   return (
     <div className="node-summary">
       <p className="node-summary-line">{summaryLine(state, 220)}</p>
+      {strip && <p className="node-summary-note">{strip}</p>}
       {quiet?.stuck && <p className="node-summary-note node-summary-quiet">Quiet for {longSpan(quiet.ms)}. It may be stuck.</p>}
       {open > 0 && <p className="node-summary-note">{open === 1 ? "A merge is waiting for you" : `${open} merges are waiting for you`}</p>}
     </div>
@@ -152,6 +157,9 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, agentRole,
   const folded = collapsed;
   // A worker whose branch the main agent has asked the user to merge: that is what it is waiting on, and it's theirs to answer.
   const ready = !!parent && !!owner?.proposals.some((p) => p.worker === slot && p.status === "open");
+  // Lantern's review and test of this agent's work, while it runs and after: a small strip under its title.
+  const review = parent ? owner?.reviews.find((r) => r.builder === slot) : undefined;
+  const strip = reviewStrip(review);
   // A card at work that's been quiet a while says how long, so a long think can be told from a stuck one; from three minutes
   // on it turns amber and says what to do, since the agent may be stuck.
   const quiet = useQuiet(state?.activityAt ?? null, status === "working", useQuietAfter());
@@ -237,9 +245,15 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, agentRole,
           )}
         </div>
       )}
+      {!folded && strip && (
+        <div className={`node-review${reviewBusy(review) ? " busy" : ""}`} title="Lantern had this work reviewed and tested by itself. The Lead has the reports; nothing was merged or changed.">
+          <span className="node-review-dot" aria-hidden />
+          {strip}
+        </div>
+      )}
       {!folded && (
         <div key={summary ? "card" : "chat"} className="node-body" title={summary ? "Click to zoom in on this agent" : undefined}>
-          {summary ? <SummaryBody slot={slot} /> : <NodeBody slot={slot} parent={parent} />}
+          {summary ? <SummaryBody slot={slot} strip={strip} /> : <NodeBody slot={slot} parent={parent} />}
         </div>
       )}
       {!folded && <div className="node-resize" aria-hidden onPointerDown={(e) => onGrab(e, slot, "resize")} onPointerMove={onDrag} onPointerUp={onRelease} onPointerCancel={onRelease} />}
@@ -399,6 +413,7 @@ function Controls({ zoom, attention, nodes, onZoom, onFit, onNext, onGoTo, onSho
       <div className="canvas-ctl-wide">
         <HiddenAgents nodes={nodes.filter((n) => n.hidden)} onShow={onShow} />
         {main && <SubagentsMenu main={main} />}
+        {main && <ReviewMenu main={main} />}
         {main && <NewAgent main={main} />}
       </div>
       {main && <CanvasOverflow main={main} hidden={nodes.filter((n) => n.hidden)} onShow={onShow} />}

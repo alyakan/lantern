@@ -526,6 +526,9 @@ struct WorkerSettings {
     /// Its role is a read-only one (see roles.rs): the same as `shared` for what it may do, but it has a folder of its own.
     #[serde(default)]
     read_only: bool,
+    /// The role it was started in, which decides whether a finished turn of its starts a review (see orchestra/review.rs).
+    #[serde(default)]
+    role: Option<roles::RoleTag>,
 }
 
 fn checked_effort(effort: Option<String>) -> Result<Option<String>, String> {
@@ -925,6 +928,12 @@ async fn orchestra_spawn(state: State<'_, AppState>, main: String, task: String,
 }
 
 /// Tells a Lead's team the project's own roles (the built-in ones need no telling), so the Lead may ask for one by id.
+/// A team's "Review and test what an agent builds" setting (see orchestra/review.rs).
+#[tauri::command]
+fn orchestra_set_review(state: State<'_, AppState>, main: String, setting: orchestra::ReviewSetting) -> Result<(), String> {
+    state.orchestra.set_review(&main, setting)
+}
+
 #[tauri::command]
 fn orchestra_set_roles(state: State<'_, AppState>, main: String, roles: Vec<roles::RoleDef>) -> Result<(), String> {
     state.orchestra.set_roles(&main, roles)
@@ -1755,7 +1764,7 @@ async fn open_session(
             let replayed = tauri::async_runtime::spawn_blocking(move || history::replay(&path)).await.map_err(|e| e.to_string())?;
             // Registered before it starts, so its first events are seen, and unregistered if it never does.
             if let Some(w) = worker {
-                state.orchestra.adopt(&slot, &w.parent, &w.name, &cfg.folder, w.branch.as_deref()).await?;
+                state.orchestra.adopt(&slot, &w.parent, &w.name, &cfg.folder, w.branch.as_deref(), w.role.clone()).await?;
             }
             if let Err(e) = launch(&app, &slot, &s, cfg, true).await {
                 state.orchestra.forget(&slot);
@@ -2067,6 +2076,7 @@ pub fn run() {
             orchestra_close_worker,
             orchestra_spawn,
             orchestra_set_roles,
+            orchestra_set_review,
             set_agent_limit,
             set_project_setup,
             suggest_setup,

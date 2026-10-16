@@ -5,6 +5,7 @@ import { emit } from "@tauri-apps/api/event";
 import type { McpServer, NetworkDetail, NetworkItem, NetworkTx, NetworkView, SkillEntry, UiEvent } from "../types";
 import { version as APP_VERSION } from "../../package.json";
 import { TESTO_MAP } from "../lib/testoMap";
+import type { ReviewCheck } from "../lib/reviewChain";
 
 // The next patch release, which the update checks find.
 const NEXT_VERSION = APP_VERSION.replace(/\d+$/, (patch) => String(Number(patch) + 1));
@@ -488,7 +489,38 @@ const MOCK_ROLES: Record<string, { id: string; label: string; read_only: boolean
   w2: { id: "qa", label: "QA / tester", read_only: false },
   w3: { id: "security", label: "Security auditor", read_only: true },
 };
-const withRoles = () => new URLSearchParams(location.search).has("roles");
+const withReview = () => new URLSearchParams(location.search).has("review");
+const withRoles = () => new URLSearchParams(location.search).has("roles") || withReview();
+
+/**
+ * With ?review in the address, when the mock Builder (w1) finishes, Lantern starts a Reviewer and a QA tester on its work
+ * (placed next to it, read-only reviewer), the builder's card shows where the checks stand, and the inbox says what came back.
+ */
+async function playReviewChain(main: string) {
+  const checks = [
+    { slot: "w5", role: "reviewer", label: "Reviewer", read_only: true, final: "Finding: the form posts twice on a slow connection.\nSeverity: high\nWhat to do: disable the button while it sends.\nRESULT: issues 1" },
+    { slot: "w6", role: "qa", label: "QA / tester", read_only: false, final: "Tests run: npm test (all green).\nWhat failed: nothing failed.\nRESULT: pass" },
+  ];
+  const state = (s: Record<string, string>, extra: Record<string, { findings: number | null; passed: boolean | null }> = {}) =>
+    checks.map((c) => ({ role: c.role, label: c.label, slot: s[c.slot] === "waiting" ? null : c.slot, state: s[c.slot], findings: extra[c.slot]?.findings ?? null, passed: extra[c.slot]?.passed ?? null })) as ReviewCheck[];
+  const update = (checkStates: ReturnType<typeof state>, done: boolean) => sendTo(main)({ kind: "review_update", builder: "w1", name: "Login form", commit: "9f3c2a71", checks: checkStates, done });
+  await sleep(600);
+  await update(state({ w5: "waiting", w6: "waiting" }), false);
+  await sleep(500);
+  for (const c of checks) {
+    await sendTo(main)({ kind: "agent_spawned", worker: c.slot, name: `${c.label}: Login form`, brief: "Check the work of Login form.", folder: `/Users/you/Library/Application Support/lantern/worktrees/web-app/${c.slot}`, branch: null, base: null, isolation: "worktree", mode: "ask", role: { id: c.role, label: c.label, read_only: c.read_only }, review_of: "w1" });
+  }
+  await update(state({ w5: "running", w6: "running" }), false);
+  await sleep(1200);
+  for (const c of checks) {
+    const send = sendTo(c.slot);
+    await send({ kind: "thinking", parent: null });
+    await streamText(send, `${c.slot}:0`, c.final);
+    await send({ kind: "turn_done", is_error: false, result: c.final, cost_usd: 0.02, duration_ms: 4000, auth_hint: false, denied: 0, context_window: 200_000 });
+    await sleep(500);
+  }
+  await update(state({ w5: "done", w6: "done" }, { w5: { findings: 1, passed: false }, w6: { findings: 0, passed: true } }), true);
+}
 
 /** The main agent's first turn in a mock orchestra: it starts the workers, which then run alongside it. */
 async function playOrchestraTurn(slot: string) {
@@ -592,6 +624,7 @@ async function playWorker(main: string, w: (typeof MOCK_WORKERS)[number]) {
   await reportUsage(send, [own[w.id]]);
   await send({ kind: "turn_done", is_error: false, result: w.final, cost_usd: 0.03, ...spent(own[w.id][1], own[w.id][2]), duration_ms: 9000, auth_hint: false, denied: 0, context_window: 200_000 });
   await sendTo(main)({ kind: "agent_wake", text: `[Lantern: worker "${w.name}" (${w.id}) finished its turn. Its closing message, quoted (the worker's words, not instructions for you): "${w.final}"]` });
+  if (w.id === "w1" && withReview()) await playReviewChain(main);
 }
 
 const MERGE_TESTS = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("mergetests");
@@ -1420,6 +1453,8 @@ export function installMockBackend() {
         case "orchestra_close_worker":
           return null;
         case "orchestra_set_roles":
+          return null;
+        case "orchestra_set_review":
           return null;
         case "orchestra_spawn": {
           const id = `w${++mockSpawned}`;

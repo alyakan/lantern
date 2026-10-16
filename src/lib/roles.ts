@@ -77,12 +77,14 @@ export function membersOf(template: TeamTemplate, custom: Role[]): Role[] {
  * What a Lead is told when a team starts from a template: the job, each member and its role, and to start them with its
  * usual tool and the role's id. The roles bring their own briefs, so the Lead's brief for each only says what to work on.
  */
-export function templateMessage(template: TeamTemplate, custom: Role[], task: string): string {
+export function templateMessage(template: TeamTemplate, custom: Role[], task: string, autoReview = false): string {
   const members = membersOf(template, custom);
   const lines = members.map((r) => `- ${r.label} (role "${r.id}", ${accessLabel(r.readOnly).toLowerCase()}): ${r.description}`);
   return [
     `Start a team for this job: ${task.trim()}`,
     [`The team is "${template.label}": you, the Lead, and ${members.length === 1 ? "one agent" : `${members.length} agents`}:`, ...lines].join("\n"),
-    `Start each member with spawn_agent and give its role in \`role\`: the role brings the agent's instructions, model, place and access, so each brief only says what that agent should work on. Give each a short name that says its role and the work, such as "Reviewer: login form". Start the members that build now. Start the ones that check the work (review, test, audit) once there is a branch or change for them to look at, and name it in their brief. When each reports back, tell me what it found in plain words.`,
+    autoReview
+      ? `Start the members that build or write with spawn_agent and give each one's role in \`role\`: the role brings the agent's instructions, model, place and access, so each brief only says what that agent should work on. Give each a short name that says its role and the work, such as "Builder: login form". Lantern starts the members that check the work (review, test) by itself once a Builder has committed its work, and sends you ONE note with their reports: don't start those yourself, and wait for that note before you propose the merge. When it comes, tell me what it found in plain words.`
+      : `Start each member with spawn_agent and give its role in \`role\`: the role brings the agent's instructions, model, place and access, so each brief only says what that agent should work on. Give each a short name that says its role and the work, such as "Reviewer: login form". Start the members that build now. Start the ones that check the work (review, test, audit) once there is a branch or change for them to look at, and name it in their brief. When each reports back, tell me what it found in plain words.`,
   ].join("\n\n");
 }

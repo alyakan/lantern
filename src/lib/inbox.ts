@@ -3,11 +3,12 @@ import type { ChatItem } from "../store";
 import { attentionFor } from "./attention";
 import { QUESTION_TOOL } from "./questions";
 import { nodeStatus } from "./orchestraView";
+import { reviewHeadline } from "./reviewChain";
 import { quietFor } from "./quiet";
 import { projectLabels, type ProjectOpen } from "./sidebar";
 
 /** What a row is waiting for. `permission` is a plain request Allow and Deny answer; the others are answered where they are. */
-export type InboxKind = "permission" | "question" | "plan" | "reproduce" | "merge" | "held" | "quiet" | "unread" | "checks";
+export type InboxKind = "permission" | "question" | "plan" | "reproduce" | "merge" | "held" | "quiet" | "unread" | "checks" | "review";
 
 /** One thing waiting on the user: a chat or an agent, in some project, with what it needs. */
 export interface InboxItem {
@@ -141,6 +142,14 @@ export function inboxItems(chats: Chats, open: Record<string, ProjectOpen>, opts
           continue;
         }
         const finished = opts.unread[m.slot];
+        // Lantern had the builder's work reviewed and tested, and the reports are in: said until the user looks. (A later
+        // turn of the builder replaces the time, and the row is its own again.)
+        const review = m.role === "agent" && lead ? chats.slots[lead]?.reviews.find((r) => r.builder === m.slot && r.done) : undefined;
+        const headline = review ? reviewHeadline(review) : null;
+        if (review && headline && finished === review.at) {
+          out.push({ ...base, kind: "review", need: headline, since: review.at, needsYou: false });
+          continue;
+        }
         if (finished && chatState(s) === "done") {
           const said = attentionFor(s.items, s.folder, opts.describe);
           const need = said?.kind === "failed" ? said.body : said?.kind === "finished" && said.body !== "Done" ? `Finished: ${said.body}` : "Finished";

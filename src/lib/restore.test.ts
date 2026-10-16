@@ -227,3 +227,16 @@ describe("sessionModesToSave", () => {
     expect(sessionModesToSave(slots, { "main-1": "auto", "worker-1": "auto" })).toBeNull();
   });
 });
+
+describe("chatsToSave, a team's review setting", () => {
+  const lead = (review: State["review"]) => ({ s1: { ...talked("lead"), orchestrator: true, review } });
+
+  it("is kept with the team when it is on, so the team comes back reviewing", () => {
+    const review = { on: true, tidy: false, checks: ["reviewer", "qa"] };
+    expect(chatsToSave(lead(review), "s1", {}, {})[0].orchestra).toEqual({ role: "main", review });
+  });
+
+  it("is not saved when it is off: an older save and a team that never asked look the same", () => {
+    expect(chatsToSave(lead({ on: false, tidy: true, checks: ["reviewer"] }), "s1", {}, {})[0].orchestra).toEqual({ role: "main" });
+  });
+});

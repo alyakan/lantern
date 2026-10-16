@@ -2917,6 +2917,16 @@ nav > .sb-note { padding-left: 14px; }
 .history-group-head .menu-heading { flex: 1; min-width: 0; }
 .history-new { flex: none; width: 22px; height: 22px; display: grid; place-items: center; margin-right: 2px; border-radius: var(--radius-chip); color: var(--muted); }
 .history-new:hover { background: var(--bg-hover); color: var(--text); }
+
+/* A builder's card: where Lantern's review and test of its work stands. */
+.node-review { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-bottom: 0.5px solid var(--line-strong); color: var(--text-2); font: 500 calc(11px * var(--font-scale)) var(--ui); }
+.canvas.summary .node-review { display: none; }
+.node-review-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--add); }
+.node-review.busy .node-review-dot { background: var(--working); animation: agents-pulse 1.2s ease-in-out infinite; }
+/* The two switches of the team's review setting: On and Off beside each row, the way a menu says what is chosen. */
+.subagents-list button .switch-state { flex: none; align-self: center; margin-left: 10px; padding: 1px 7px; border: 0.5px solid var(--line-strong); border-radius: var(--radius-pill); color: var(--muted-text); font: 600 calc(11px * var(--font-scale)) var(--ui); }
+.subagents-list button.current .switch-state { border-color: transparent; background: var(--accent); color: var(--accent-text); }
+@media (prefers-reduced-motion: reduce) { .node-review.busy .node-review-dot { animation: none; } }
 /* Full-text search in History: a chat that mentions the text, with the lines around the match. */
 .search-results { display: flex; flex-direction: column; min-height: 0; }
 .search-hit { flex-direction: column; align-items: stretch; gap: 3px; }
