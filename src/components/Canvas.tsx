@@ -229,7 +229,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, agentRole,
             <WorkflowMenu compact workflow={workflowOf(state)} agent={role === "worker"} holdsAgents={holdsAgents} onChange={(w) => actions.setWorkflow(slot, w)} disabled={isBusy(state)} />
           </span>
         )}
-        <span className="node-status" title={stuck ? `No word from it for ${longSpan(quiet.ms)}. It may be stuck: nudge it, interrupt it or restart it.` : quiet ? `Its last step was ${quiet.span} ago` : undefined}>
+        <span className="node-status" title={stuck ? `No word from it for ${longSpan(quiet.ms)}. It may be stuck.` : quiet ? `Its last step was ${quiet.span} ago` : undefined}>
           {label}
           {quiet && !stuck && <span className="node-quiet"> · {quiet.span} ago</span>}
         </span>

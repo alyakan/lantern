@@ -583,7 +583,7 @@ async function playHelperTurn(slot: string) {
 
 /**
  * ?quiet: the second worker goes silent after its first steps and stays "working" until it is interrupted, so its card
- * can say it is quiet and offer Nudge, Interrupt and Restart. An interrupt ends its turn, as the real one does.
+ * can say it is quiet. An interrupt ends its turn, as the real one does.
  */
 const QUIET = typeof location !== "undefined" && new URLSearchParams(location.search).has("quiet");
 const pendingInterrupt: Record<string, () => void> = {};
