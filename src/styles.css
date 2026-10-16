@@ -1409,11 +1409,6 @@ button.steps-phase:not(:disabled):hover { color: var(--text); }
 .handoff-export .summary-export-button { border: 1px solid var(--line-strong); background: var(--field); color: var(--text); }
 .handoff-export .summary-export-button:hover, .handoff-export .summary-export-button[aria-expanded="true"] { background: var(--bg-hover); }
 .handoff-export .summary-export-menu { right: auto; left: 0; }
-.handoff-confirm { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
-.handoff-confirm-label { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
-.handoff-prompt { margin: 0; padding: 8px 12px; border-left: 2px solid var(--line-strong); color: var(--text-2); font-size: calc(13px * var(--font-scale)); line-height: 1.45; }
-.handoff-confirm-actions { display: flex; gap: 8px; }
-.handoff-confirm-actions button { height: var(--pill-m); padding: 0 14px; border-radius: var(--radius-pill); font-size: calc(12.5px * var(--font-scale)); }
 .steps-working .activity-line { cursor: default; }
 .steps-working .activity-line:hover { background: none; }
 
@@ -2034,6 +2029,25 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .revert-file-error { flex-basis: 100%; font-size: calc(11.5px * var(--font-scale)); color: var(--muted); }
 .revert-error { color: var(--del); }
 .revert-actions { display: flex; justify-content: flex-end; gap: 8px; }
+/* Ship it: a checklist of steps, each with the text Claude will use. */
+.ship-dialog .revert-body { width: min(560px, calc(100vw - 48px)); max-height: calc(100vh - 80px); }
+.ship-scroll { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; }
+.ship-steps { display: flex; flex-direction: column; gap: 8px; }
+.ship-step { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-subtle); }
+.ship-step-head { display: flex; align-items: center; gap: 8px; }
+.ship-step-name { font-weight: 600; }
+.ship-detail, .ship-why { padding-left: 24px; font-size: calc(12px * var(--font-scale)); line-height: 1.4; color: var(--text-2); }
+.ship-why { color: var(--muted-text); }
+.ship-url { color: var(--muted-text); overflow-wrap: anywhere; }
+.ship-warning { margin-left: 24px; padding: 6px 10px; border: 1px solid var(--warn); border-radius: var(--radius-md); font-size: calc(12px * var(--font-scale)); line-height: 1.4; color: var(--warn); }
+.ship-field { display: flex; flex-direction: column; gap: 3px; padding-left: 24px; }
+.ship-field-label { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.ship-field input, .ship-field textarea { box-sizing: border-box; width: 100%; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: inherit; resize: vertical; }
+.ship-field input:focus-visible, .ship-field textarea:focus-visible { outline: 1.5px solid var(--muted); outline-offset: 1px; }
+.ship-sent summary { cursor: pointer; color: var(--text-2); }
+.ship-prompt { max-height: 220px; margin: 6px 0 0; padding: 8px 10px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-subtle); color: var(--text-2); font-family: var(--mono, ui-monospace, monospace); font-size: calc(11.5px * var(--font-scale)); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ship-problem { font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
+.pane-tabs .ship-it { flex: none; margin-left: 4px; white-space: nowrap; }
 .revert-undo { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: calc(12px * var(--font-scale)); }
 .revert-undo-text { min-width: 0; }
 .revert-undo-note { flex: 1; color: var(--muted); font-size: calc(11.5px * var(--font-scale)); }

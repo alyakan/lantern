@@ -77,6 +77,7 @@ import { usePeek } from "./lib/peek";
 import { MessageInput } from "./components/MessageInput";
 import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
+import { ShipDialog } from "./components/ShipDialog";
 import { SetupScreen } from "./components/SetupScreen";
 import { Welcome } from "./components/Welcome";
 import { RestoreCard } from "./components/RestoreCard";
@@ -1423,6 +1424,8 @@ export default function App() {
   const archMap = useMemo(() => (stepPages ? architectureMap(stepPages) : null), [stepPages]);
   // The Done page's "Review the changes": the side panel on Changes, showing everything this chat changed.
   const [changesAsked, setChangesAsked] = useState(0);
+  // Ship it: the dialog that sends Claude one message to commit, push and open a pull request.
+  const [shipping, setShipping] = useState(false);
   const handoff = stepsView && state.folder
     ? {
         slot: active,
@@ -1436,6 +1439,7 @@ export default function App() {
           setChangesAsked((n) => n + 1);
         },
         onStartNew: () => startFresh(state.folder!),
+        onShip: () => setShipping(true),
       }
     : undefined;
   const [shownPage, setShownPage] = useState<{ slot: string; page: string } | null>(null);
@@ -1556,6 +1560,7 @@ export default function App() {
   }, []);
   const bringHere = () => setBringing({ destination: state.folder, from: null });
   useAction("relocate-folder", bringHere, true);
+  useAction("ship-it", () => setShipping(true), !!state.folder && (state.status === "idle" || state.status === "running"));
   const relocateMenu = {
     moved: moved.filter((m) => !dismissedMoves.includes(m.old)),
     onRelocate: (from: MovedFolder | null) => (from ? setBringing({ destination: from.suggested, from: from.old }) : bringHere()),
@@ -1910,6 +1915,7 @@ export default function App() {
                 ready={state.status !== "starting"}
                 files={shownFiles}
                 chatBusy={state.status === "running"}
+                onShip={state.folder ? () => setShipping(true) : undefined}
                 changesKey={peek?.key ?? (changesAsked || undefined)}
                 scope={scope}
                 onScope={setChangeScope}
@@ -1982,6 +1988,9 @@ export default function App() {
         />
         {installing && <UpdatingOverlay state={updates.state} version={update?.version ?? null} />}
         {palette && <CommandPalette entries={palette} onClose={() => setPalette(null)} />}
+        {shipping && state.folder && (
+          <ShipDialog folder={state.folder} title={chatTitle(state, titles)} files={state.changedFiles} running={state.status === "running"} onSend={(text) => sendIn(active, text)} onClose={() => setShipping(false)} />
+        )}
         {shortcutsOpen && <ShortcutSheet available={availableActions().map((a) => a.id)} onClose={() => setShortcutsOpen(false)} />}
         {whatsNew && <WhatsNew version={whatsNew.version} notes={whatsNew.notes} onClose={() => setWhatsNew(null)} />}
         {bringing && (

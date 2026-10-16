@@ -71,6 +71,8 @@ interface Props {
   onSummarizeRequest?: (item: NetworkItem) => void;
   /** Claude is in the middle of a turn in this chat. */
   chatBusy?: boolean;
+  /** Opens Ship it (commit, push, pull request) from the Changes tab's header (absent: no chat to ask). */
+  onShip?: () => void;
   /** Reverting Claude's edits: offered on the Changes views and the Summary's steps; the undo of the last one. */
   revert?: RevertControls;
   selected: string | null;
@@ -195,6 +197,11 @@ export function ReviewPanel(props: Props) {
           ))}
         </div>
         {tab === "changes" && props.onScope && <ScopeMenu {...props} onScope={props.onScope} />}
+        {tab === "changes" && props.onShip && count > 0 && (
+          <button className="ghost ship-it" onClick={props.onShip} title="Commit, push and open a pull request: you check each step first">
+            Ship it…
+          </button>
+        )}
         {tab === "changes" && allRevert && rv && count > 0 && (
           <button
             className="ghost revert-all"

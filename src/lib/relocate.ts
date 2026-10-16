@@ -12,6 +12,8 @@ export const FOLDER_RECORDS = [
   "settings.pinnedSessions",
   // The project's colour in the sidebar.
   "sidebar.projectColors",
+  // Which of Ship it's steps (commit, push, pull request) were ticked last.
+  "ship.ticksByFolder",
 ] as const;
 
 /** Lantern's lists of folders that name the folder itself: the moved folder takes the old one's place in them. */

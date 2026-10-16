@@ -1351,6 +1351,13 @@ export function installMockBackend() {
             { scope: "folder", folder: FOLDER, tool: "Bash", kind: "prefix", text: "npm test" },
             { scope: "chat", folder: null, tool: "Edit", kind: "dir", path: `${FOLDER}/src` },
           ];
+        case "ship_info": {
+          // ?ship=main (on main), nogh (gh missing), nogithub (a remote that isn't GitHub) or none (no remote) show each state of Ship it.
+          const ship = new URLSearchParams(location.search).get("ship");
+          const base = { branch: "feat/slugify", remote: "origin", remote_url: "https://github.com/acme/web-dashboard.git", github: true, gh: true, base: "main" };
+          const found = ship === "main" ? { ...base, branch: "main" } : ship === "nogh" ? { ...base, gh: false } : ship === "nogithub" ? { ...base, github: false, remote_url: "git@gitlab.com:acme/web-dashboard.git" } : ship === "none" ? { ...base, remote: null, remote_url: null, github: false } : base;
+          return new Promise((r) => setTimeout(() => r(found), 120));
+        }
         case "git_branch":
           return "main";
         case "set_model":

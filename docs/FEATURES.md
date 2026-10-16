@@ -95,7 +95,18 @@ Claude frames the task, plans one step per page (the files, the change, how to c
 
 ![A Build plan page with a "Why this way" section, and the plan in the side panel](images/build-explain.png)
 
-When the last step is built, the **Done** page ends on what to do next, as buttons: **Review the changes** (opens the side panel on Changes with everything the chat changed), **Commit…** and **Open a pull request…** (each shows the message it would send Claude and sends it only after you confirm; Lantern runs no git itself), **Export the plan** (the same export as the Plan tab's) and **Start something new** (a new chat in this project).
+When the last step is built, the **Done** page ends on what to do next, as buttons: **Review the changes** (opens the side panel on Changes with everything the chat changed), **Ship it…** (see below), **Export the plan** (the same export as the Plan tab's) and **Start something new** (a new chat in this project).
+
+### Ship it
+
+**Ship it…** commits, pushes and opens a pull request with one confirmation. It's on the Done page, in the Changes tab's header and in the command palette. A dialog lists the three steps, each with a checkbox and the text Claude will use, which you can edit:
+
+- **Commit the changes**: a commit message drafted from the chat's title (or from the files changed).
+- **Push the branch**: names the branch and the remote it goes to. On `main` or `master` it warns in amber and starts unticked.
+- **Open a pull request**: a title, a description and the branch it goes into. It's switched off, with the reason, when `gh` isn't installed, when the project has no GitHub remote, or when you're on the branch it would go into.
+
+At least Commit or Push must be ticked. **What will be sent** shows the exact message. **Ship** sends it as one message to Claude, which does the ticked steps in order, stops and tells you if one fails, never force-pushes, never commits files that look like secrets (`.env`, keys) and shows the pull request's link at the end. Claude asks you to allow each command as usual. Lantern itself only looks at the repository (the branch, the remote, whether `gh` is there) and never runs git or talks to GitHub. Ship waits while Claude is working, and each project remembers the steps you ticked last.
+
 
 The plan is always in the side panel's **Plan** tab: each step, what was done, the files it changed, and whether it's built. A click opens the step's page, and **Export** copies or saves the plan as markdown.
 
