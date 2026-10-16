@@ -36,6 +36,8 @@ describe("migrateFolderState", () => {
       "ship.ticksByFolder": { [OLD]: { commit: true, push: false } },
       "settings.projectNotes": { [OLD]: "always use pnpm" },
       "settings.projectSetupByFolder": { [OLD]: { commands: ["npm ci"], run: "npm run dev" } },
+      "prChecks.byFolder": { [OLD]: { mode: "fix", tries: 4 } },
+      "prChecks.loopByFolder": { [OLD]: { "57": { tries: 2, status: "waiting" } } },
     });
     const changed = migrateFolderState(store, OLD, NEXT);
     expect(Object.keys(changed).sort()).toEqual([...FOLDER_RECORDS].sort());
@@ -54,6 +56,8 @@ describe("migrateFolderState", () => {
     expect(read(store, "ship.ticksByFolder")).toEqual({ [OLD]: { commit: true, push: false }, [NEXT]: { commit: true, push: false } });
     expect(read(store, "settings.projectNotes")).toEqual({ [OLD]: "always use pnpm", [NEXT]: "always use pnpm" });
     expect(read(store, "settings.projectSetupByFolder")[NEXT]).toEqual({ commands: ["npm ci"], run: "npm run dev" });
+    expect(read(store, "prChecks.byFolder")).toEqual({ [OLD]: { mode: "fix", tries: 4 }, [NEXT]: { mode: "fix", tries: 4 } });
+    expect(read(store, "prChecks.loopByFolder")).toEqual({ [OLD]: { "57": { tries: 2, status: "waiting" } }, [NEXT]: { "57": { tries: 2, status: "waiting" } } });
     // What was returned is what was written.
     expect(changed["settings.permissionsByFolder"]).toEqual(read(store, "settings.permissionsByFolder"));
   });

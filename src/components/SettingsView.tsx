@@ -21,6 +21,10 @@ import { RoutinesSettings, type RoutinesSettingsProps } from "./RoutinesSettings
 
 export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines";
 export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines" };
+import { PrChecksSettings, type PrChecksSettingsProps } from "./PrChecksSettings";
+
+export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "prs";
+export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", prs: "Pull requests" };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -52,6 +56,12 @@ interface Props {
 
 /** Settings: General (notifications, sound, look), MCP servers (status, log in, add, remove) and skills. */
 export function SettingsView({ open, onClose, harness, updates, general, routines, ...page }: Props) {
+  /** What happens after a pull request's checks run, per project, for the Pull requests page. */
+  prChecks?: PrChecksSettingsProps;
+}
+
+/** Settings: General (notifications, sound, look), MCP servers (status, log in, add, remove) and skills. */
+export function SettingsView({ open, onClose, harness, updates, general, prChecks, ...page }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<SettingsTab>(open ?? "general");
   useEffect(() => {
@@ -78,6 +88,8 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
               <div className="mode-guide-group-title">Settings</div>
               {(["general", "harness", "routines", "mcp", "skills", "permissions", "updates"] as const)
                 .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "updates" || updates) && (t !== "routines" || routines))
+              {(["general", "harness", "mcp", "skills", "permissions", "prs", "updates"] as const)
+                .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "updates" || updates) && (t !== "prs" || prChecks))
                 .map((t) => (
                   <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} onClick={() => setTab(t)}>
                     {TAB_LABEL[t]}
@@ -98,6 +110,8 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
               <SkillsPage {...page} />
             ) : tab === "permissions" ? (
               <PermissionRules slot={page.slot} />
+            ) : tab === "prs" && prChecks ? (
+              <PrChecksSettings {...prChecks} />
             ) : (
               <McpPage {...page} />
             )}

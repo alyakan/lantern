@@ -529,3 +529,31 @@ export interface ShipInfo {
   /** The branch a pull request would go into. */
   base: string | null;
 }
+
+/** One check of a pull request, as gh lists it (read-only). */
+export interface PrCheck {
+  name: string;
+  state: string;
+  /** gh's grouping: pass, fail, pending, skipping or cancel. */
+  bucket: "pass" | "fail" | "pending" | "skipping" | "cancel";
+  link: string | null;
+  workflow: string | null;
+  /** The GitHub Actions run the link points at, when it is one: its log can be read. */
+  run_id: string | null;
+}
+
+/** The pull request of a folder's branch. */
+export interface PullRequest {
+  number: number;
+  url: string;
+  state: "OPEN" | "MERGED" | "CLOSED";
+  branch: string;
+  base: string;
+  /** The commit the branch is at on GitHub: a new one means a push happened. */
+  head_sha: string | null;
+}
+
+/** What looking at a folder's pull request found. */
+export type PrWatch = { kind: "no_gh" } | { kind: "logged_out" } | { kind: "no_pr" } | { kind: "found"; pr: PullRequest; checks: PrCheck[] };
+
+export type GhAccess = "ready" | "missing" | "logged_out";

@@ -23,6 +23,9 @@ export const FOLDER_RECORDS = [
   "settings.projectNotes",
   // The project's setup lines for new worktrees, and its Run command.
   "settings.projectSetupByFolder",
+  // What to do once a pull request's checks run (Off, Tell me, Fix it myself), and how far each pull request's fixing has got.
+  "prChecks.byFolder",
+  "prChecks.loopByFolder",
 ] as const;
 
 /** Lantern's lists of folders that name the folder itself: the moved folder takes the old one's place in them. */

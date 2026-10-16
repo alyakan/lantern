@@ -44,6 +44,7 @@ function setup(over: Partial<React.ComponentProps<typeof Sidebar>> = {}) {
     onProjectNotes: vi.fn(),
     onSetup: vi.fn(),
     onReveal: vi.fn(),
+    onPrChecks: vi.fn(),
     onRemove: vi.fn(),
     onOpenFolder: vi.fn(),
     onNewChat: vi.fn(),
@@ -302,6 +303,15 @@ describe("clicking in the open sidebar", () => {
     expect(h.onNewTeamIn).toHaveBeenCalledWith(MONITOR);
     expect(screen.queryByRole("menu", { name: "network-monitor actions" })).toBeNull();
     for (const [label, handler] of [["Project notes…", h.onProjectNotes], ["Project setup…", h.onSetup], ["Bring old chats here…", h.onBringOld], ["Reveal in Finder", h.onReveal], ["Remove from recents", h.onRemove]] as const) {
+  it("has a ⋯ menu per project: New team, Close finished chats, Bring old chats here…, Pull request checks…, Reveal in Finder, Remove from recents", () => {
+    const { h } = setup({ open: { [LANTERN]: lanternOpen, [MONITOR]: monitorOpen } });
+    fireEvent.click(screen.getByRole("button", { name: "More for network-monitor" }));
+    const menu = screen.getByRole("menu", { name: "network-monitor actions" });
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["New team", "Close finished chats", "Bring old chats here…", "Pull request checks…", "Reveal in Finder", "Move up⌥⌘↑", "Move down⌥⌘↓", "Remove from recents"]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "New team" }));
+    expect(h.onNewTeamIn).toHaveBeenCalledWith(MONITOR);
+    expect(screen.queryByRole("menu", { name: "network-monitor actions" })).toBeNull();
+    for (const [label, handler] of [["Bring old chats here…", h.onBringOld], ["Pull request checks…", h.onPrChecks], ["Reveal in Finder", h.onReveal], ["Remove from recents", h.onRemove]] as const) {
       fireEvent.click(screen.getByRole("button", { name: "More for network-monitor" }));
       fireEvent.click(screen.getByRole("menuitem", { name: label }));
       expect(handler).toHaveBeenCalledWith(MONITOR);

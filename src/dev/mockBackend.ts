@@ -102,6 +102,8 @@ const MODELS = [
  * ?usage: turns say what they cost and used, and the plan's five-hour window how full it is, so the plan meter's list has
  * something to show. Without it a mock turn reports nothing (the title bar's meter stays hidden).
  */
+/** How many times the mock's pull request has been looked at (?prchecks=1 moves on one step each time). */
+let prLooks = 0;
 const showUsage = () => new URLSearchParams(location.search).has("usage");
 /** ?plan=95 (with ?usage): the plan reading the turns report, in percent, to try the pause at the plan's limit. */
 const planUsed = () => {
@@ -1574,6 +1576,33 @@ export function installMockBackend() {
           const base = { branch: "feat/slugify", remote: "origin", remote_url: "https://github.com/acme/web-dashboard.git", github: true, gh: true, base: "main" };
           const found = ship === "main" ? { ...base, branch: "main" } : ship === "nogh" ? { ...base, gh: false } : ship === "nogithub" ? { ...base, github: false, remote_url: "git@gitlab.com:acme/web-dashboard.git" } : ship === "none" ? { ...base, remote: null, remote_url: null, github: false } : base;
           return new Promise((r) => setTimeout(() => r(found), 120));
+        }
+        case "pr_watch": {
+          // ?prchecks=1 walks a pull request's checks through running, failed and passed, one step each look; =fail, =pass, =run and =merged stay at one state; =nopr, =nogh and =loggedout show what a project without one shows.
+          const want = new URLSearchParams(location.search).get("prchecks");
+          if (!want) return { kind: "no_pr" };
+          if (want === "nopr") return { kind: "no_pr" };
+          if (want === "nogh") return { kind: "no_gh" };
+          if (want === "loggedout") return { kind: "logged_out" };
+          const run = (n: string, bucket: string, id = "9001") => ({ name: n, state: bucket.toUpperCase(), bucket, link: `https://github.com/acme/web-dashboard/actions/runs/${id}/job/${n.length}`, workflow: "CI", run_id: id });
+          const steps: Record<string, unknown[][]> = {
+            "1": [[run("build", "pass"), run("lint", "pass"), run("test (unit)", "pending"), run("test (e2e)", "pending")], [run("build", "pass"), run("lint", "pass"), run("test (unit)", "fail"), run("test (e2e)", "pass")], [run("build", "pass", "9002"), run("lint", "pass", "9002"), run("test (unit)", "pass", "9002"), run("test (e2e)", "pass", "9002")]],
+            fail: [[run("build", "pass"), run("lint", "pass"), run("test (unit)", "fail"), run("test (e2e)", "pass")]],
+            pass: [[run("build", "pass"), run("lint", "pass"), run("test (unit)", "pass"), run("test (e2e)", "skipping")]],
+            run: [[run("build", "pass"), run("lint", "pass"), run("test (unit)", "pending"), run("test (e2e)", "pending")]],
+            merged: [[]],
+          };
+          const list = steps[want] ?? steps.fail;
+          prLooks += 1;
+          const checks = list[Math.min(prLooks - 1, list.length - 1)];
+          const pr = { number: 57, url: "https://github.com/acme/web-dashboard/pull/57", state: want === "merged" ? "MERGED" : "OPEN", branch: "feat/slugify", base: "main", head_sha: want === "1" && prLooks > 2 ? "bbb222" : "aaa111" };
+          return new Promise((r) => setTimeout(() => r({ kind: "found", pr, checks }), 150));
+        }
+        case "pr_failure_log":
+          return new Promise((r) => setTimeout(() => r("test (unit)\tRun tests\t2026-10-16T09:12:01Z FAIL src/slugify.test.ts\ntest (unit)\tRun tests\t2026-10-16T09:12:01Z   expected 'hello-world' but got 'hello--world'\ntest (unit)\tRun tests\t2026-10-16T09:12:02Z Error: Process completed with exit code 1."), 150));
+        case "gh_access": {
+          const gh = new URLSearchParams(location.search).get("ghaccess");
+          return gh === "missing" ? "missing" : gh === "out" ? "logged_out" : "ready";
         }
         case "git_branch":
           return "main";

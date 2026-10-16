@@ -2141,6 +2141,47 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .ship-sent summary { cursor: pointer; color: var(--text-2); }
 .ship-prompt { max-height: 220px; margin: 6px 0 0; padding: 8px 10px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-subtle); color: var(--text-2); font-family: var(--mono, ui-monospace, monospace); font-size: calc(11.5px * var(--font-scale)); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 .ship-problem { font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
+/* Pull request checks: the card above the message box, and the choice in a project's ⋯ menu and in Settings */
+.pr-card-wrap { width: 100%; max-width: calc(var(--col) + 80px); margin: 0 auto; padding: 4px 20px 0; flex: none; box-sizing: border-box; }
+.pr-card { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--field); font-size: calc(12.5px * var(--font-scale)); color: var(--text); }
+.pr-card.failed { border-color: var(--del); }
+.pr-card.quiet { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 6px; padding: 6px 10px; color: var(--muted-text); font-size: calc(12px * var(--font-scale)); }
+.pr-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pr-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.pr-dot.passed { background: var(--add); }
+.pr-dot.failed { background: var(--del); }
+.pr-dot.running { background: var(--working); }
+.pr-link { color: var(--text); font-weight: 600; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 2px; }
+.pr-link:hover { text-decoration-color: currentColor; }
+.pr-summary { flex: 1; min-width: 0; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-toggle { flex: none; height: var(--pill-s); padding: 0 9px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: none; color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
+.pr-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 140px; overflow-y: auto; }
+.pr-check { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: calc(12px * var(--font-scale)); }
+.pr-check-state { flex: none; width: 66px; color: var(--muted-text); }
+.pr-check.fail .pr-check-state { color: var(--del); font-weight: 600; }
+.pr-check.pass .pr-check-state { color: var(--add); }
+.pr-check.pending .pr-check-state { color: var(--working); }
+.pr-check-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-check .pr-link { flex: none; font-weight: 400; }
+.pr-fix { display: flex; align-items: center; gap: 10px; color: var(--text-2); }
+.pr-actions { display: flex; align-items: center; gap: 10px; }
+.pr-problem { color: var(--del); font-size: calc(12px * var(--font-scale)); }
+.pr-dialog .revert-body { width: min(460px, calc(100vw - 48px)); }
+.pr-dialog .ship-warning, .settings-page .ship-warning { margin-left: 0; }
+.pr-modes { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: none; }
+.pr-mode { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--bg-subtle); cursor: pointer; }
+.pr-mode:has(input:checked) { border-color: var(--line-strong); background: var(--bg-active); }
+.pr-mode input { margin-top: 3px; }
+.pr-mode-text { display: flex; flex-direction: column; gap: 1px; }
+.pr-mode-name { font-weight: 600; }
+.pr-mode-hint { font-size: calc(12px * var(--font-scale)); line-height: 1.4; color: var(--text-2); }
+.pr-tries { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.pr-tries.off { opacity: 0.55; }
+.pr-tries-hint { flex-basis: 100%; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.pr-setting { display: flex; flex-direction: column; gap: 2px; padding: 9px 10px; }
+.pr-setting-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.pr-setting-main .settings-row-name { flex: 1; }
+.pr-setting-tries { display: flex; align-items: center; gap: 6px; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
 .pane-tabs .ship-it { flex: none; margin-left: 4px; white-space: nowrap; }
 /* A project's notes: the revert dialog's frame around a text box, its limit counter and Clear at the far left. */
 .notes-field { width: 100%; min-height: 140px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: calc(13px * var(--font-scale))/1.5 var(--ui); resize: vertical; outline: none; box-sizing: border-box; }

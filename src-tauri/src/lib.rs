@@ -2,6 +2,7 @@ pub mod args;
 pub mod aside;
 pub mod awake;
 pub mod changes;
+pub mod checks;
 pub mod cli_locator;
 pub mod diagnostics;
 pub mod files;
@@ -1384,6 +1385,30 @@ async fn list_open_prs(state: State<'_, AppState>, folder: String) -> Result<Vec
     tauri::async_runtime::spawn_blocking(move || pr::open_prs(&folder, path_env.as_deref())).await.map_err(|e| e.to_string())?
 }
 
+/// The pull request on the folder's branch and how its checks stand (read-only: see `checks::watch`). An error is a call
+/// that failed for a reason that may pass; the window keeps what it knew.
+#[tauri::command]
+async fn pr_watch(state: State<'_, AppState>, folder: String) -> Result<checks::PrWatch, String> {
+    let path_env = login_path(&state).await;
+    let folder = std::path::PathBuf::from(folder);
+    tauri::async_runtime::spawn_blocking(move || checks::watch(&folder, path_env.as_deref())).await.map_err(|e| e.to_string())?
+}
+
+/// The end of the log of a failed check's run (read-only). `run_id` must be digits.
+#[tauri::command]
+async fn pr_failure_log(state: State<'_, AppState>, folder: String, run_id: String) -> Result<String, String> {
+    let path_env = login_path(&state).await;
+    let folder = std::path::PathBuf::from(folder);
+    tauri::async_runtime::spawn_blocking(move || checks::failure_log(&folder, &run_id, path_env.as_deref())).await.map_err(|e| e.to_string())?
+}
+
+/// Whether the GitHub CLI is installed and logged in, for the "Pull request checks" dialog.
+#[tauri::command]
+async fn gh_access(state: State<'_, AppState>) -> Result<checks::GhAccess, String> {
+    let path_env = login_path(&state).await;
+    tauri::async_runtime::spawn_blocking(move || checks::gh_access(path_env.as_deref())).await.map_err(|e| e.to_string())
+}
+
 /// Step by step's flavours as the prompt Claude runs with has them: each one's section and its headings. The window
 /// repeats them in its notes (switching flavour, a page it couldn't read), so they're never a copy that has drifted.
 #[tauri::command]
@@ -1997,6 +2022,9 @@ pub fn run() {
             respond_permission,
             steps_guide,
             list_open_prs,
+            pr_watch,
+            pr_failure_log,
+            gh_access,
             set_subagents,
             list_permission_rules,
             add_permission_rule,
