@@ -10,6 +10,8 @@ export const FOLDER_RECORDS = [
   "settings.harnessByFolder",
   "review.collapsedByFolder",
   "settings.pinnedSessions",
+  // The command typed for a project's tests, when Lantern can't tell how it is tested (the merge card's Run tests).
+  "merge.testCommandByFolder",
   // The project's colour in the sidebar.
   "sidebar.projectColors",
 ] as const;

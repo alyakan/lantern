@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
-import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MergeTestsInfo, MergeTestsReport, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -50,6 +50,15 @@ export const api = {
   /** The user approves a worker's merge: its branch goes into the main checkout (the outcome comes as `merge_resolved`). */
   approveMerge: (worker: string) => invoke<void>("orchestra_approve_merge", { worker }),
   declineMerge: (worker: string) => invoke<void>("orchestra_decline_merge", { worker }),
+  /** What the merge card knows about its worker's tests: how they would run, the run going now, the last result and whether it still holds. */
+  mergeTestsInfo: (worker: string) => invoke<MergeTestsInfo>("orchestra_merge_tests_info", { worker }),
+  /** Runs the tests in the worker's worktree (the user asked): `command` is the words of what they typed, null for what the worktree says. Resolves when they end; null if they were cancelled. */
+  runMergeTests: (worker: string, command: string[] | null) => invoke<MergeTestsReport | null>("orchestra_run_merge_tests", { worker, command }),
+  cancelMergeTests: (worker: string) => invoke<void>("orchestra_cancel_merge_tests", { worker }),
+  /** What a typed test command would run as: its words, or why it can't run. Nothing is run. */
+  splitTestCommand: (text: string) => invoke<string[]>("merge_tests_split_command", { text }),
+  /** "Run tests when a merge is proposed" (Settings). */
+  setAutoMergeTests: (on: boolean) => invoke<void>("set_auto_merge_tests", { on }),
   /** Removes a worker's worktree; loose work needs `force`, and an unmerged branch is kept either way. */
   discardWorktree: (worker: string, force: boolean) => invoke<void>("orchestra_discard", { worker, force }),
   /** What closing a worker would throw away. Nothing is stopped or removed by asking. */

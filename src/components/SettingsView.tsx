@@ -5,6 +5,7 @@ import type { McpServer, McpServerSpec, SkillEntry, SlashCommand } from "../type
 import { describeConfig, displayName, groupSkills, iconOf, removable, sourceOf, statusOf, toolsOf, withoutFrontmatter } from "../lib/mcp";
 import { setChime, useChimeOn } from "../lib/chime";
 import { AGENT_LIMIT_MAX, AGENT_LIMIT_MIN, setAgentLimit, useAgentLimit } from "../lib/agentLimit";
+import { setAutoMergeTests, useAutoMergeTests } from "../lib/mergeTests";
 import { PAUSE_MS, type NotifyPrefs } from "../lib/notifyPrefs";
 import type { TextSize } from "../lib/theme";
 import type { CustomTheme, ThemeId } from "../lib/themes";
@@ -132,6 +133,7 @@ const NOTIFY_EVENTS: { key: "finished" | "waiting" | "failed"; label: string }[]
 function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme, customTheme, onCustomTheme, textSize, onTextSize, warnTeams, onWarnTeams }: GeneralSettingsProps) {
   const sound = useChimeOn();
   const agentLimit = useAgentLimit();
+  const autoTests = useAutoMergeTests();
   const paused = notify.pausedUntil > Date.now();
   const set = (patch: Partial<NotifyPrefs>) => onNotify({ ...notify, ...patch });
   return (
@@ -223,6 +225,11 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
           </select>
         </label>
         <span className="settings-muted">Every agent spends the same plan. A Lead asking for one more is told to wait for one to finish.</span>
+        <label className="general-option">
+          <input type="checkbox" checked={autoTests} onChange={(e) => setAutoMergeTests(e.target.checked)} />
+          <span>Run tests when a merge is proposed</span>
+        </label>
+        <span className="settings-muted">Runs the project's tests in the agent's worktree as its merge card appears, so the result is waiting for you. Off, nothing runs until you press Run tests.</span>
         {onWarnTeams && (
           <label className="general-option">
             <input type="checkbox" checked={warnTeams ?? true} onChange={(e) => onWarnTeams(e.target.checked)} />

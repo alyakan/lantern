@@ -3,6 +3,8 @@ import { fireEvent, render, renderHook, screen, act, within } from "@testing-lib
 import { NOTIFY_DEFAULTS, type NotifyPrefs } from "../lib/notifyPrefs";
 import { chimeOn, setChime, useChimeOn } from "../lib/chime";
 import { CUSTOM_DEFAULT, THEMES } from "../lib/themes";
+import { autoMergeTests } from "../lib/mergeTests";
+import { api } from "../api";
 
 vi.mock("../api", () => ({ api: {} }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(), revealItemInDir: vi.fn() }));
@@ -44,6 +46,20 @@ describe("Settings' General page", () => {
     expect(box).toBeChecked();
     fireEvent.click(box);
     expect(general.onKeepAwake).toHaveBeenCalledWith(false);
+  });
+
+  it("offers running the tests when a merge is proposed, off until chosen, and tells the backend", () => {
+    const set = vi.fn(() => Promise.resolve());
+    (api as unknown as { setAutoMergeTests: typeof set }).setAutoMergeTests = set;
+    view();
+    const box = screen.getByRole("checkbox", { name: "Run tests when a merge is proposed" });
+    expect(box).not.toBeChecked();
+    fireEvent.click(box);
+    expect(box).toBeChecked();
+    expect(autoMergeTests()).toBe(true);
+    expect(set).toHaveBeenLastCalledWith(true);
+    fireEvent.click(box);
+    expect(set).toHaveBeenLastCalledWith(false);
   });
 
   it("turns notifications off as a whole", () => {
