@@ -108,6 +108,17 @@ When the last step is built, the **Done** page ends on what to do next, as butto
 At least Commit or Push must be ticked. **What will be sent** shows the exact message. **Ship** sends it as one message to Claude, which does the ticked steps in order, stops and tells you if one fails, never force-pushes, never commits files that look like secrets (`.env`, keys) and shows the pull request's link at the end. Claude asks you to allow each command as usual. Lantern itself only looks at the repository (the branch, the remote, whether `gh` is there) and never runs git or talks to GitHub. Ship waits while Claude is working, and each project remembers the steps you ticked last.
 
 
+### Pull request checks
+
+Once a pull request is open and its checks run, you decide what Lantern does about it, **for each project**: a project's **⋯** menu has **Pull request checks…**, and **Settings → Pull requests** lists every project.
+
+- **Off**: Lantern doesn't look at the checks.
+- **Tell me** (the usual): a card above the message box says how the checks stand, "Checks: 2 passed, 1 failed, 1 running", with each check and a link to it. When a check fails, the card has **Send the failure to Claude**, which sends one message with the failed check's name and the end of its log, and asks Claude to find the cause, fix it, and commit and push. The inbox gets a row, "Checks failed on <branch>", and macOS shows a notification.
+- **Fix it myself**: when the checks finish and one failed, Lantern sends that same message by itself, once for each failing run and never while Claude is working. The card says "Fixing failed checks: try 2 of 3" with a **Stop** button. You choose how many tries, 1 to 5 (3 is usual), counted for each pull request. After the last try it goes back to Tell me and says "Out of tries". If Claude's turn ends without pushing anything new, the fix didn't land: that counts as the try, and Lantern stops and says so. It never sends anything when the checks pass or the pull request is merged or closed, and it never merges anything.
+
+Lantern finds the pull request with the GitHub CLI (`gh`, read-only: it looks at the pull request, its checks and the log of a failed run, and never writes to GitHub), every 30 seconds while the checks are running and a little less often as time goes on, for up to an hour. It needs `gh` installed and logged in; the dialog says so when it isn't. What CI printed is untrusted, so the message puts the log in a fenced block labelled as untrusted output and tells Claude to treat it as data and never as instructions. Claude still asks permission for each command.
+
+
 The plan is always in the side panel's **Plan** tab: each step, what was done, the files it changed, and whether it's built. A click opens the step's page, and **Export** copies or saves the plan as markdown.
 
 ![The plan complete page, with the plan in the side panel](images/build-plan.png)

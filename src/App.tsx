@@ -30,7 +30,7 @@ import { agentGraph } from "./lib/agentGraph";
 import { BUILT_IN, CUSTOM_HARNESS, customOf, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
-import type { CloseAgreed, McpServer, MovedFolder, NewRule, NewWorker, OpenPr, RelocationEntry, SkillEntry, UpdateInfo } from "./types";
+import type { CloseAgreed, McpServer, MovedFolder, NewRule, NewWorker, OpenPr, RecentFolder, RelocationEntry, SkillEntry, UpdateInfo } from "./types";
 import { LAST_FOLDER, OPEN_CHATS, migrateFolderState, withMovedNote, type Migrated } from "./lib/relocate";
 import { BringOldSessionsDialog } from "./components/BringOldSessionsDialog";
 import { stepFile, usePersistentState } from "./lib/layout";
@@ -72,12 +72,16 @@ import { HistoryPopover, type HistoryProject } from "./components/HistoryPopover
 import { Sidebar, SIDEBAR_DEFAULT, sidebarMemory } from "./components/Sidebar";
 import { needsYou, openProjects, sidebarProjects } from "./lib/sidebar";
 import { anythingWorking } from "./lib/awake";
-import { inboxItems, type InboxItem } from "./lib/inbox";
+import { checkItems, inboxItems, type InboxItem } from "./lib/inbox";
 import { usePeek } from "./lib/peek";
 import { MessageInput } from "./components/MessageInput";
 import { describeInput } from "./components/PermissionCard";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { ShipDialog } from "./components/ShipDialog";
+import { PrChecksCard } from "./components/PrChecksCard";
+import { PrChecksDialog } from "./components/PrChecksDialog";
+import { settingFor as prSettingFor, type PrSetting } from "./lib/prChecks";
+import { usePrChecks } from "./lib/usePrChecks";
 import { SetupScreen } from "./components/SetupScreen";
 import { Welcome } from "./components/Welcome";
 import { RestoreCard } from "./components/RestoreCard";
@@ -1492,7 +1496,7 @@ export default function App() {
     const harnesses = presets
       .filter((h) => ready && h.id !== harnessOf(active).id)
       .map((h): PaletteEntry => ({ id: `harness:${h.id}`, title: `Models: ${h.name}`, group: "Models", shortcut: null, run: () => switchHarness(h) }));
-    const tabs = (["general", "harness", "mcp", "skills", "permissions", "updates"] as SettingsTab[])
+    const tabs = (["general", "harness", "mcp", "skills", "permissions", "prs", "updates"] as SettingsTab[])
       .filter((t) => t !== "harness" || !!state.folder)
       .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
     const themes = THEMES.filter((t) => t.id !== theme && t.id !== "custom").map((t): PaletteEntry => ({ id: `theme:${t.id}`, title: `Theme: ${t.label}`, group: "Theme", shortcut: null, run: () => setTheme(t.id) }));
@@ -1593,6 +1597,9 @@ export default function App() {
     if (colors) setProjectColors(colors);
     const order = take<string[]>("sidebar.projectOrder");
     if (order) setProjectOrder(order);
+    const prs = take<Record<string, Partial<PrSetting>>>("prChecks.byFolder");
+    if (prs) setPrSettings(prs);
+    if (changed["prChecks.loopByFolder"]) prChecks.reloadLoops();
     const last = take<string>(LAST_FOLDER);
     if (last) setLastFolder(last);
     if (changed[OPEN_CHATS]) setOffer((chats) => chats.map((c) => (c.folder === old ? { ...c, folder: next } : c)));
@@ -1646,7 +1653,37 @@ export default function App() {
   // Projects removed from the recents here (Claude Code keeps their chats; one with a chat open is listed regardless).
   const [hiddenFolders, setHiddenFolders] = usePersistentState<string[]>("sidebar.hidden", []);
   const openByProject = openProjects(chats, { titles, drafts: drafts.current, unread, pinned: pinnedBy });
-  const inbox = inboxItems(chats, openByProject, { unread, describe: describeInput });
+  // Pull request checks: each project's choice (Off, Tell me, Fix it myself), and the loop that watches the pull request.
+  const [prSettings, setPrSettings] = usePersistentState<Record<string, Partial<PrSetting>>>("prChecks.byFolder", {});
+  const [prDialog, setPrDialog] = useState<string | null>(null);
+  const prChecks = usePrChecks({
+    chats: Object.entries(chats.slots).flatMap(([slot, s]) => (s.folder ? [{ slot, folder: s.folder, live: s.status === "idle" || s.status === "running", busy: isBusy(s) }] : [])),
+    active,
+    settings: prSettings,
+    send: (slot, text) => sendIn(slot, text),
+    onFailed: (folder, slot, snap) => {
+      const body = `${basename(folder)}: pull request #${snap.pr.number}`;
+      const wanted = shouldNotify(notifyPrefs, "failed");
+      if (wanted && (!windowFocused() || slot !== chats.active)) notify(`Checks failed on ${snap.pr.branch}`, body, "failed");
+      const s = chats.slots[slot];
+      if (wanted && s && slot !== chats.active) setHud({ key: Date.now(), kind: "failed", body: `Checks failed on ${snap.pr.branch}`, chat: { slot, title: chats.agents[slot]?.name ?? chatTitle(s, titles), project: basename(folder) } });
+    },
+  });
+  // Settings → Pull requests lists every project: the open ones and the recents (read when Settings opens).
+  const [prFolders, setPrFolders] = useState<string[]>([]);
+  useEffect(() => {
+    if (settingsAt === null) return;
+    const list = (recent: RecentFolder[]) => sidebarProjects({ recent, hidden: hiddenFolders, open: openByProject, order: projectOrder }).map((p) => p.folder);
+    loadRecentFolders().then((recent) => setPrFolders(list(recent)), () => setPrFolders(list([])));
+  }, [settingsAt]);
+  const prRows = checkItems(
+    Object.values(prChecks.views).flatMap((v) => {
+      const slot = Object.entries(chats.slots).filter(([, s]) => s.folder === v.folder && (s.status === "idle" || s.status === "running")).map(([id]) => id);
+      const target = slot.includes(active) ? active : slot[slot.length - 1];
+      return v.needsYou && v.snap && target ? [{ folder: v.folder, slot: target, where: basename(v.folder), branch: v.snap.pr.branch, number: v.snap.pr.number, failed: v.snap.checks.filter((c) => c.bucket === "fail").length }] : [];
+    }),
+  );
+  const inbox = [...inboxItems(chats, openByProject, { unread, describe: describeInput }), ...prRows];
   useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden), true, sidebarHidden ? "Show Sidebar" : "Hide Sidebar");
   useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Expand Sidebar" : "Collapse Sidebar");
   useEffect(() => {
@@ -1694,6 +1731,7 @@ export default function App() {
     onBringOld: (folder: string) => setBringing({ destination: folder, from: null }),
     onReveal: (folder: string) => void revealItemInDir(folder).catch(() => {}),
     onRemove: (folder: string) => setHiddenFolders([...hiddenFolders.filter((f) => f !== folder), folder]),
+    onPrChecks: (folder: string) => setPrDialog(folder),
     onOpenFolder: openFolder,
     onNewChat: () => state.folder && startFresh(state.folder),
     onNewTeam: () => newOrchestra(),
@@ -1899,6 +1937,7 @@ export default function App() {
                     </FileLinksProvider>
                     </ArchitecturePane.Provider>
                   </ErrorBoundary>
+                  {state.folder && prChecks.views[state.folder] && <PrChecksCard view={prChecks.views[state.folder]} busy={isBusy(state)} onSend={() => prChecks.sendFailure(state.folder!, active)} onStop={() => prChecks.stop(state.folder!)} />}
                   {composer}
                 </>
               )}
@@ -1963,6 +2002,7 @@ export default function App() {
           commands={state.commands}
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
+          prChecks={{ folders: prFolders, saved: prSettings, onChange: (folder, setting) => setPrSettings({ ...prSettings, [folder]: setting }) }}
           general={{ keepAwake, onKeepAwake: setKeepAwake, notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize, warnTeams, onWarnTeams: setWarnTeams }}
           updates={{
             version: updates.version,
@@ -1988,6 +2028,15 @@ export default function App() {
         />
         {installing && <UpdatingOverlay state={updates.state} version={update?.version ?? null} />}
         {palette && <CommandPalette entries={palette} onClose={() => setPalette(null)} />}
+        {prDialog && (
+          <PrChecksDialog
+            key={prDialog}
+            label={basename(prDialog)}
+            setting={prSettingFor(prSettings, prDialog)}
+            onSave={(setting) => setPrSettings({ ...prSettings, [prDialog]: setting })}
+            onClose={() => setPrDialog(null)}
+          />
+        )}
         {shipping && state.folder && (
           <ShipDialog folder={state.folder} title={chatTitle(state, titles)} files={state.changedFiles} running={state.status === "running"} onSend={(text) => sendIn(active, text)} onClose={() => setShipping(false)} />
         )}

@@ -49,6 +49,8 @@ export interface SidebarHandlers {
   onBringOld: (folder: string) => void;
   onReveal: (folder: string) => void;
   onRemove: (folder: string) => void;
+  /** Opens the project's "Pull request checks" choice (Off, Tell me, Fix it myself). */
+  onPrChecks: (folder: string) => void;
   onOpenFolder: () => void;
   /** New ▾, for the project on screen. */
   onNewChat: () => void;
@@ -396,6 +398,9 @@ function ProjectMenu({ group, h, moves, finished, onClose, onClosed }: { group: 
       </button>
       <button role="menuitem" className="menu-row" onClick={pick(() => h.onBringOld(group.folder))}>
         <span className="menu-row-title">Bring old chats here…</span>
+      </button>
+      <button role="menuitem" className="menu-row" title="What happens after a pull request is open and its checks run" onClick={pick(() => h.onPrChecks(group.folder))}>
+        <span className="menu-row-title">Pull request checks…</span>
       </button>
       <button role="menuitem" className="menu-row" onClick={pick(() => h.onReveal(group.folder))}>
         <span className="menu-row-title">Reveal in Finder</span>
