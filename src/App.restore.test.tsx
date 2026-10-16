@@ -226,8 +226,9 @@ describe("restoring a team at launch", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
     await screen.findByRole("button", { name: "Canvas" });
-    // The team's own agent is nested under it in the sidebar: no project of its own, no row among the chats.
+    // The team's own agent is nested under it in the sidebar (folded under "1 agent" until opened): no project of its own, no row among the chats.
     const acme = await screen.findByRole("region", { name: "acme-api" });
+    fireEvent.click(await within(acme).findByRole("button", { name: /^1 agent in / }));
     expect(within(acme).getByTitle(/Login form/)).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: /login-form|worktrees|old-w2/ })).toBeNull();
     await waitFor(() => {

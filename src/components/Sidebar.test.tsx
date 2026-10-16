@@ -80,6 +80,8 @@ const rowOf = (name: RegExp | string) => {
   expect(rows).toHaveLength(1);
   return rows[0];
 };
+/** The line under a team that opens the list of its agents (they are folded until it is pressed). */
+const showAgents = (team = "audit sweep") => fireEvent.click(screen.getByRole("button", { name: new RegExp(`agents? in ${team}`) }));
 /** The × at the end of an open chat's row. */
 const closeOf = (title: string) => screen.getByRole("button", { name: `Close ${title}` });
 
@@ -156,8 +158,37 @@ describe("the open sidebar's projects", () => {
     expect(row.querySelector(".spinner")).not.toBeNull();
   });
 
+  it("folds a team's agents under a line that says how many and what they do, and opens them on a press", () => {
+    setup();
+    expect(screen.queryByRole("list", { name: "Agents in audit sweep" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^ui pass/ })).toBeNull();
+    const line = screen.getByRole("button", { name: "2 agents in audit sweep, 1 working" });
+    expect(line).toHaveAttribute("aria-expanded", "false");
+    expect(line).toHaveTextContent("2 agents");
+    expect(line).toHaveTextContent("1 working");
+    fireEvent.click(line);
+    expect(line).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("list", { name: "Agents in audit sweep" })).toBeInTheDocument();
+    fireEvent.click(line);
+    expect(screen.queryByRole("list", { name: "Agents in audit sweep" })).toBeNull();
+  });
+
+  it("says who needs you on the line that folds a team's agents", () => {
+    const team = { kind: "team" as const, ...chat("lead", "audit sweep", { state: "waiting" }), agents: [chat("a1", "security pass", { state: "waiting" }), chat("a2", "ui pass", { state: "waiting" })] };
+    setup({ open: { [LANTERN]: { ...lanternOpen, items: [team] } } });
+    const line = screen.getByRole("button", { name: "2 agents in audit sweep, 2 need you" });
+    expect(line.querySelector(".sb-agents-sum")).toHaveClass("waiting");
+  });
+
+  it("keeps a team's agents open while one of them is the chat on screen", () => {
+    const team = { kind: "team" as const, ...chat("lead", "audit sweep", { state: "running" }), agents: [chat("a1", "security pass", { state: "running", active: true }), chat("a2", "ui pass")] };
+    setup({ open: { [LANTERN]: { ...lanternOpen, items: [team] } } });
+    expect(screen.getByRole("list", { name: "Agents in audit sweep" })).toBeInTheDocument();
+  });
+
   it("shows a team with its agents nested under it, and marks an unread agent", () => {
     setup();
+    showAgents();
     const agents = screen.getByRole("list", { name: "Agents in audit sweep" });
     expect(within(agents).getAllByRole("button", { name: /, lantern,/ }).map((b) => b.getAttribute("title"))).toEqual(["security pass", "ui pass"]);
     expect(within(agents).getByRole("button", { name: "ui pass, lantern, Unread" })).toBeInTheDocument();
@@ -168,6 +199,7 @@ describe("the open sidebar's projects", () => {
 
   it("marks what works, what needs you and what finished unread; a plain finished chat has no mark", () => {
     setup();
+    showAgents();
     const marks = (name: RegExp) => Array.from(rowOf(name).querySelectorAll(".sb-mark")).map((m) => m.className);
     expect(marks(/Network tab polish/)).toEqual(["sb-mark running"]);
     expect(marks(/Fix restore mode/)).toEqual(["sb-mark waiting"]);
@@ -228,6 +260,7 @@ describe("clicking in the open sidebar", () => {
     expect(h.onChat).toHaveBeenCalledWith("s2");
     fireEvent.click(rowOf(/Team: audit sweep/));
     expect(h.onTeam).toHaveBeenCalledWith("lead");
+    showAgents();
     fireEvent.click(rowOf(/ui pass/));
     expect(h.onAgent).toHaveBeenCalledWith("a2", "lead");
   });
@@ -340,6 +373,7 @@ describe("closing from the sidebar", () => {
 
   it("closes an agent with nothing to lose at once, through the canvas's own check", async () => {
     const { h } = setup();
+    showAgents();
     fireEvent.click(closeOf("ui pass"));
     await waitFor(() => expect(h.closeWorker).toHaveBeenCalledWith("a2"));
     expect(h.closeCheck).toHaveBeenCalledWith("a2");
@@ -350,6 +384,7 @@ describe("closing from the sidebar", () => {
   it("asks before closing an agent that has uncommitted or unmerged work, and agrees to exactly what it was told", async () => {
     const closeCheck = vi.fn(async () => ({ ...noLoss, uncommitted: 3, unmerged_commits: 2 }));
     const { h } = setup({ closeCheck });
+    showAgents();
     fireEvent.click(closeOf("security pass"));
     const ask = await screen.findByRole("group", { name: "Close security pass" });
     expect(ask).toHaveTextContent("3 uncommitted files and 2 commits that aren't merged");
@@ -362,6 +397,7 @@ describe("closing from the sidebar", () => {
   it("says so when an agent can't be checked or closed, and offers another try", async () => {
     const closeCheck = vi.fn().mockRejectedValue("The worker is gone");
     setup({ closeCheck });
+    showAgents();
     fireEvent.click(closeOf("ui pass"));
     expect(await screen.findByRole("group", { name: "Close ui pass" })).toHaveTextContent("Couldn't close it: The worker is gone");
   });

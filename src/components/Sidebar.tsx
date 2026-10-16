@@ -313,19 +313,49 @@ function ChatRow({ chip, project, onClick, target, closer, full }: { chip: Compa
   );
 }
 
-function Item({ item, project, h, closer }: { item: SidebarItem; project: string; h: SidebarHandlers; closer: Closer }) {
+/** What a team's agents are doing, in a few words for the line that folds them: who needs you, else who works. */
+function agentsSummary(agents: SidebarChat[]): { text: string; waiting: boolean } {
+  const waiting = agents.filter((a) => a.state === "waiting").length;
+  if (waiting > 0) return { text: `${waiting} ${waiting === 1 ? "needs" : "need"} you`, waiting: true };
+  const working = agents.filter((a) => a.state === "running").length;
+  return { text: working > 0 ? `${working} working` : "", waiting: false };
+}
+
+/**
+ * A chat, or a team: its row, and under a team's row a line "3 agents" that opens the list of them. They are folded
+ * unless you opened them, or the one on screen is one of them (so the row you are in is never hidden). The team's own row
+ * already carries the team's combined state, and a line that says who needs you.
+ */
+function Item({ item, project, h, closer, agentsOpen, onAgents }: { item: SidebarItem; project: string; h: SidebarHandlers; closer: Closer; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
   const chip = chipOf(item);
   if (item.kind === "chat") return <ChatRow full chip={chip} project={project} onClick={() => h.onChat(item.slot)} target={itemTarget(item)} closer={closer} />;
+  const open = agentsOpen[item.slot] ?? item.agents.some((a) => a.active);
+  const sum = agentsSummary(item.agents);
   return (
     <>
       <ChatRow full chip={chip} project={project} onClick={() => h.onTeam(item.slot)} target={itemTarget(item)} closer={closer} />
       {item.agents.length > 0 && (
         <li className="sb-agents-wrap">
-          <ul className="sb-agents" aria-label={`Agents in ${item.title}`}>
-            {item.agents.map((a) => (
-              <ChatRow key={a.slot} full chip={chipOf(a)} project={project} onClick={() => h.onAgent(a.slot, item.slot)} target={targetOf(a, "agent")} closer={closer} />
-            ))}
-          </ul>
+          <button className="sb-agents-toggle" aria-expanded={open} aria-label={`${item.agents.length} ${item.agents.length === 1 ? "agent" : "agents"} in ${item.title}${sum.text ? `, ${sum.text}` : ""}`} onClick={() => onAgents(item.slot, !open)}>
+            <span className={`sb-fold${open ? " open" : ""}`} aria-hidden>
+              <ChevronIcon />
+            </span>
+            <span aria-hidden>
+              {item.agents.length} {item.agents.length === 1 ? "agent" : "agents"}
+            </span>
+            {sum.text && (
+              <span className={`sb-agents-sum${sum.waiting ? " waiting" : ""}`} aria-hidden>
+                {sum.text}
+              </span>
+            )}
+          </button>
+          {open && (
+            <ul className="sb-agents" aria-label={`Agents in ${item.title}`}>
+              {item.agents.map((a) => (
+                <ChatRow key={a.slot} full chip={chipOf(a)} project={project} onClick={() => h.onAgent(a.slot, item.slot)} target={targetOf(a, "agent")} closer={closer} />
+              ))}
+            </ul>
+          )}
         </li>
       )}
     </>
@@ -406,7 +436,7 @@ interface Reorder {
  * One project of the open pane: its header (the project's coloured initials, its name, the branch when it is the one on
  * screen, what needs you when it is folded, and + and ⋯ while the pointer is on it), then its open chats and teams.
  */
-function Project({ group, color, expanded, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice }: { group: CompactGroup; color: string; expanded: boolean; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void }) {
+function Project({ group, color, expanded, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents }: { group: CompactGroup; color: string; expanded: boolean; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
   const [menu, setMenu] = useState(false);
   // The chats that are done: not a working one, a draft, or a team.
   const finished = group.items.flatMap((item) => (item.kind === "chat" && item.state === "done" ? [item.slot] : []));
@@ -448,7 +478,7 @@ function Project({ group, color, expanded, onToggle, current, branch, moved, onR
       {expanded && (
         <ul className="sb-group">
           {group.items.map((item) => (
-            <Item key={item.slot} item={item} project={group.label} h={h} closer={closer} />
+            <Item key={item.slot} item={item} project={group.label} h={h} closer={closer} agentsOpen={agentsOpen} onAgents={onAgents} />
           ))}
         </ul>
       )}
@@ -483,6 +513,8 @@ export function Sidebar(props: Props) {
   if (memory) memory.recent = recent;
   // A project the user folded by hand: the others show their chats.
   const [by, setBy] = usePersistentState<Record<string, boolean>>("sidebar.expanded", {});
+  // The teams whose agents are listed: folded unless opened here, for as long as the app runs.
+  const [agentsOpen, setAgentsOpen] = useState<Record<string, boolean>>({});
   const [dragWidth, setDragWidth] = useState<number | null>(null);
 
   // Collapsed, it opens over the chat after the pointer rests on it, or while focus is in it; then it takes a moment to close.
@@ -777,6 +809,8 @@ export function Sidebar(props: Props) {
                   reorder={{ handle: onOrder ? reorder.handle(g.folder) : {}, style: reorder.styleFor(g.folder), lifted: reorder.lifted === g.folder, moves: movesOf(g.folder, i) }}
                   notice={notice?.folder === g.folder ? notice.text : null}
                   onNotice={(text) => say(g.folder, text)}
+                  agentsOpen={agentsOpen}
+                  onAgents={(slot, open) => setAgentsOpen((was) => ({ ...was, [slot]: open }))}
                 />
               ))}
               {groups.length === 0 && <div className="sb-note">Nothing open. Start a chat with New, or find an old one in History.</div>}

@@ -670,6 +670,7 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 .msg.user::before { content: var(--user-mark); flex: none; color: var(--accent); }
 .msg.user > * { min-width: 0; }
 /* What you sent, at most three lines until Show more. */
+.collapsible-wrap { flex: 1; min-width: 0; }
 .collapsible.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--clamp-lines, 3); overflow: hidden; }
 .collapsible-toggle { display: block; margin-top: 4px; font-size: calc(12px * var(--font-scale)); white-space: normal; }
 .msg.assistant { overflow-wrap: anywhere; }
@@ -2598,6 +2599,11 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-item { position: relative; display: flex; align-items: center; }
 /* A team's agents hang under its square, on a line from it. */
 .sb-agents-wrap { list-style: none; }
+.sb-agents-toggle { display: flex; align-items: center; gap: 6px; width: 100%; margin: 0 0 0 24px; padding: 2px 8px; max-width: calc(100% - 24px); background: none; border: 0; border-radius: var(--radius-chip); font: inherit; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); text-align: left; cursor: pointer; }
+.sb-agents-toggle:hover { color: var(--text); background: var(--bg-hover); }
+.sb-agents-toggle .sb-fold { flex: none; width: 12px; height: 12px; }
+.sb-agents-sum { margin-left: auto; white-space: nowrap; color: var(--muted-text); }
+.sb-agents-sum.waiting { color: var(--attn-text, var(--attn)); }
 .sb-agents { list-style: none; margin: 0 0 0 24px; padding: 0 0 0 8px; display: flex; flex-direction: column; gap: 4px; border-left: 1px solid var(--line-strong); }
 .sb-agents .sb-chip { width: 28px; height: 28px; font-size: calc(10.5px * var(--font-scale)); }
 .sb-agents .sb-row { gap: 8px; }

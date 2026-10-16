@@ -34,4 +34,14 @@ describe("CollapsibleText", () => {
     expect(body).toHaveClass("clamped");
     expect(screen.getByRole("button", { name: "Show more" })).toHaveAttribute("aria-expanded", "false");
   });
+
+  it("is one element, so a message that is a row (the terminal themes' > mark, then the text) doesn't put Show more in a column of its own", () => {
+    content = 300;
+    const { container } = render(<CollapsibleText>{"line\n".repeat(30)}</CollapsibleText>);
+    expect(container.children).toHaveLength(1);
+    const wrap = container.firstElementChild!;
+    expect(wrap).toHaveClass("collapsible-wrap");
+    expect(wrap.querySelector(".collapsible")).not.toBeNull();
+    expect(wrap).toContainElement(screen.getByRole("button", { name: "Show more" }));
+  });
 });

@@ -432,6 +432,9 @@ describe("a team in the sidebar", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^Restore( all)?$/ }));
     const acme = await project("acme-api");
     const row = await within(acme).findByRole("button", { name: /Team: / });
+    // Folded: only the team's line says it has an agent, until it is pressed.
+    expect(within(acme).queryByRole("list", { name: /^Agents in / })).toBeNull();
+    fireEvent.click(within(acme).getByRole("button", { name: /^1 agent in / }));
     const agents = within(acme).getByRole("list", { name: /^Agents in / });
     expect(within(agents).getAllByRole("button", { name: /, acme-api,/ }).map((b) => b.getAttribute("title"))).toEqual(["Login form"]);
     // The agent is under its team only: one row in the whole sidebar, and the agent's worktree isn't a project.
