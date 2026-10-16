@@ -16,7 +16,7 @@ export function ReviewRows({ main }: { main: string }) {
       <button role="menuitemcheckbox" aria-checked={review.on} className={review.on ? "current" : undefined} onClick={() => actions.setReview(main, { ...review, on: !review.on })}>
         <span className="team-text">
           <span className="team-name">Review and test what an agent builds</span>
-          <span className="team-line">When a Builder finishes work it has committed, a Reviewer (and a tester, if the team has one) checks it by itself. The Lead gets one note with what they found. Nothing is merged or changed for you.</span>
+          <span className="team-line">A Reviewer (and a tester) checks a Builder's committed work by itself. The Lead gets one note; nothing is merged for you.</span>
         </span>
         <span className="switch-state" aria-hidden>
           {review.on ? "On" : "Off"}
@@ -25,7 +25,7 @@ export function ReviewRows({ main }: { main: string }) {
       <button role="menuitemcheckbox" aria-checked={review.tidy} className={review.tidy ? "current" : undefined} onClick={() => actions.setReview(main, { ...review, tidy: !review.tidy })}>
         <span className="team-text">
           <span className="team-name">Tidy up reviewers after they report</span>
-          <span className="team-line">They close themselves and their copy of the code is removed. Off: they stay on the canvas for you to read.</span>
+          <span className="team-line">They close themselves and their copy of the code is removed. Off: they stay for you to read.</span>
         </span>
         <span className="switch-state" aria-hidden>
           {review.tidy ? "On" : "Off"}

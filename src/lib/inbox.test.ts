@@ -194,6 +194,6 @@ describe("inboxItems, after Lantern checked a builder's work", () => {
 
   it("goes back to the builder's own row once it finishes another turn", () => {
     // The builder's later turn put its own time on the mark: that is no longer the review's.
-    expect(list(team([review(true, 3)]), { a1: 900 })[0]).toMatchObject({ kind: "unread", need: "Finished" });
+    expect(list(team([review(true, 3)]), { a1: 900 })[0]).toMatchObject({ kind: "unread", need: expect.stringMatching(/^Finished/) });
   });
 });

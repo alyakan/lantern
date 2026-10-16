@@ -1355,3 +1355,73 @@ describe("motion", () => {
     expect(canvas.classList.contains("summary")).toBe(true);
   });
 });
+
+describe("Lantern's review and test of a builder's work", () => {
+  const ui = (chats: Chats, event: object): Chats => chatsReducer(chats, { type: "in", slot: "s1", action: { type: "ui_event", event: event as never } });
+  const check = (over: object) => ({ role: "reviewer", label: "Reviewer", slot: "w3", state: "running", findings: null, passed: null, ...over });
+  const update = (checks: object[], done = false) => ({ kind: "review_update", builder: "w1", name: "Worker 1", commit: "abc12345", checks, done });
+  const card = (name: string) => within(screen.getByLabelText(new RegExp(`^Agent ${name},`)));
+
+  it("shows a strip on the builder's card while it is checked and after, and on no other card", () => {
+    let chats = ui(team(2), update([check({}), check({ role: "qa", label: "QA / tester", slot: "w4", state: "waiting" })]));
+    const { store } = setup(chats);
+    expect(card("Worker 1").getByText("In review · Test: waiting for a free slot")).toHaveClass("node-review", "busy");
+    expect(card("Worker 2").queryByText(/review|Review/)).toBeNull();
+    // The checks report: the strip says what they found, and stops pulsing.
+    chats = ui(chats, update([check({ state: "done", findings: 2, passed: false }), check({ role: "qa", label: "QA / tester", slot: "w4", state: "done", findings: 1, passed: false })], true));
+    act(() => store.set(chats.slots));
+    expect(card("Worker 1").getByText("Review: 2 findings · Tested: failed")).not.toHaveClass("busy");
+  });
+
+  it("has no strip before there is a review", () => {
+    setup(team(1));
+    expect(document.querySelector(".node-review")).toBeNull();
+  });
+
+  it("has the team's switch in the controls beside Subagents, off to start with, that turns it on and tidying off", () => {
+    const { acts } = setup(team(1));
+    const button = screen.getByRole("button", { name: "Review: Off" });
+    fireEvent.click(button);
+    const menu = screen.getByRole("menu", { name: "Review and test" });
+    const on = within(menu).getByRole("menuitemcheckbox", { name: /Review and test what an agent builds/ });
+    const tidy = within(menu).getByRole("menuitemcheckbox", { name: /Tidy up reviewers after they report/ });
+    expect([on, tidy].map((i) => i.getAttribute("aria-checked"))).toEqual(["false", "true"]);
+    fireEvent.click(on);
+    expect(acts.setReview).toHaveBeenCalledWith("s1", { on: true, tidy: true, checks: ["reviewer"] });
+    fireEvent.click(tidy);
+    expect(acts.setReview).toHaveBeenLastCalledWith("s1", { on: false, tidy: false, checks: ["reviewer"] });
+  });
+
+  it("says On when the team has it on, and lists the same switches in the ⋯ menu", () => {
+    const chats = team(1);
+    chats.slots.s1 = { ...chats.slots.s1, review: { on: true, tidy: true, checks: ["reviewer", "qa"] } };
+    const { acts } = setup(chats);
+    expect(screen.getByRole("button", { name: "Review: On" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "More canvas controls" }));
+    const menu = screen.getByRole("menu", { name: "More canvas controls" });
+    const on = within(menu).getByRole("menuitemcheckbox", { name: /Review and test what an agent builds/ });
+    expect(on).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(on);
+    expect(acts.setReview).toHaveBeenCalledWith("s1", { on: false, tidy: true, checks: ["reviewer", "qa"] });
+  });
+
+  it("places an agent that checks a builder's work beside that builder, not beside the Lead", () => {
+    let chats = team(2);
+    chats = ui(chats, { kind: "agent_spawned", worker: "w3", name: "Reviewer: Worker 1", brief: "x", folder: "/wt/w3", branch: null, base: null, isolation: "worktree", mode: "auto", role: { id: "reviewer", label: "Reviewer", read_only: true }, review_of: "w2" });
+    const layout = newLayout();
+    placeNodes(layout, orchestraNodes(chats, () => "Lead"));
+    const w2 = layout.boxes.w2;
+    const w3 = layout.boxes.w3;
+    // To the right of its builder, level with it or just below, and clear of every other card.
+    expect(w3.x).toBeGreaterThanOrEqual(w2.x + w2.w + GAP);
+    expect(w3.x).toBeGreaterThan(layout.boxes.w1.x);
+    expect(w3.y).toBe(w2.y);
+    const boxes = Object.values(layout.boxes);
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) expect(overlaps(boxes[i], boxes[j])).toBe(false);
+    // Without it, the same agent goes beside the Lead like any other.
+    const plain = ui(team(2), { kind: "agent_spawned", worker: "w3", name: "Reviewer", brief: "x", folder: "/wt/w3", branch: null, base: null, isolation: "worktree", mode: "auto" });
+    const l2 = newLayout();
+    placeNodes(l2, orchestraNodes(plain, () => "Lead"));
+    expect(l2.boxes.w3.y).toBe(l2.boxes.s1.y);
+  });
+});
