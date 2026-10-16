@@ -12,6 +12,8 @@ export const FOLDER_RECORDS = [
   "settings.pinnedSessions",
   // The project's colour in the sidebar.
   "sidebar.projectColors",
+  // The project's setup lines for new worktrees, and its Run command.
+  "settings.projectSetupByFolder",
 ] as const;
 
 /** Lantern's lists of folders that name the folder itself: the moved folder takes the old one's place in them. */

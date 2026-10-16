@@ -9,6 +9,12 @@ export type Mode = "ask" | "auto" | "steps";
 export type RuleScope = "chat" | "folder";
 
 /** What a rule matches within its tool's input (src-tauri/src/permission/rules.rs). */
+/** What a project's files suggest for its setup lines and its Run command (see ProjectSetupDialog). */
+export interface SetupSuggestion {
+  commands: string[];
+  run: string | null;
+}
+
 export type RuleMatcher = { kind: "any" } | { kind: "exact"; text: string } | { kind: "prefix"; text: string } | { kind: "dir"; path: string };
 
 /** An "Always allow" rule: a tool and what of its calls it covers. */
@@ -85,6 +91,8 @@ export type UiEvent =
   /** On a worker's chat: its claude was stopped on purpose, or never started (`reason`). */
   | { kind: "agent_stopped"; reason: string | null }
   /** On a worker's chat: it now runs on this mode, because its main agent's was lowered. */
+  /** On a worker's slot: its worktree is being set up before it starts. "done": it starts now; "failed": it stopped at `command`. */
+  | { kind: "agent_setup"; phase: "running" | "failed" | "done"; index: number; total: number; command: string; line: string; reason: string; tail: string }
   | { kind: "agent_mode"; mode: Mode }
   /** On the main agent's chat: it asks the user to merge a worker's branch. */
   | { kind: "merge_proposed"; worker: string; name: string; branch: string; into: string; summary: string; commits: number; files: { path: string; added: number; removed: number }[]; uncommitted: number; loose: string[] }

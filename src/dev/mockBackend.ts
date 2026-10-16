@@ -944,6 +944,37 @@ function playShell(slot: string, id: string, command: string) {
   mockShells[`${slot}:${id}`] = () => finish(true);
 }
 
+/** What was saved in Project setup, by folder. */
+const mockSetups: Record<string, { commands: string[]; run: string | null }> = {};
+
+/**
+ * A new agent's setup, as ?setup=… plays it: "running" never ends, "failed" stops at the second line, "ok" finishes after a moment.
+ * The lines are the ones the project saved (npm ci, a copy). Told on the worker's own slot, as the backend does.
+ */
+function playSetup(worker: string, how: string, fromLine = 0) {
+  const lines = ["npm ci", "cp \"$LANTERN_PROJECT_DIR/.env\" .env"];
+  const send = sendTo(worker);
+  const running = (index: number, line = "") => send({ kind: "agent_setup", phase: "running", index, total: lines.length, command: line ? "" : lines[index], line, reason: "", tail: "" });
+  void (async () => {
+    await sleep(250);
+    await running(fromLine);
+    await sleep(300);
+    await running(fromLine, "added 412 packages in 9s");
+    if (how === "running") return;
+    await sleep(900);
+    if (how === "failed") {
+      await running(1);
+      await sleep(500);
+      await send({ kind: "agent_setup", phase: "failed", index: 1, total: lines.length, command: lines[1], line: "", reason: "it exited with code 1", tail: "cp: /Users/you/projects/acme-api/.env: No such file or directory" });
+      return;
+    }
+    await running(1);
+    await sleep(600);
+    await send({ kind: "agent_setup", phase: "done", index: lines.length, total: lines.length, command: "", line: "", reason: "", tail: "" });
+    await send({ kind: "thinking", parent: null });
+  })();
+}
+
 /** Documents exported in the mock, by the path "chosen" for them. */
 const mockExports: Record<string, string> = {};
 (globalThis as unknown as { claudeExports: () => Record<string, string> }).claudeExports = () => ({ ...mockExports });
@@ -1237,11 +1268,34 @@ export function installMockBackend() {
           const name = String(a.name ?? "").trim() || String(a.task).split(/\s+/).slice(0, 5).join(" ");
           void sendTo(String(a.main))({ kind: "agent_spawned", worker: id, name, brief: String(a.task), folder: worktree ? `/Users/you/Library/Application Support/lantern/worktrees/web-app/${id}` : FOLDER, branch: worktree ? `lantern/${id}` : null, base: worktree ? "main" : null, isolation: worktree ? "worktree" : "shared", mode: slotMode[String(a.main)] === "auto" ? "auto" : "ask" });
           // It starts thinking, which is also its first word: a card that then says nothing for minutes shows as quiet.
+          const setupHow = new URLSearchParams(location.search).get("setup");
+          if (worktree && setupHow) {
+            playSetup(id, setupHow);
+            return id;
+          }
           void sleep(150).then(async () => {
             await sendTo(id)({ kind: "thinking", parent: null });
             if (HOT) await sendTo(id)({ kind: "context_used", tokens: 150_000 });
           });
           return id;
+        }
+        // Project setup: saved as typed, and the files suggest the usual (?suggest=none finds nothing).
+        case "set_project_setup":
+          mockSetups[String(a.folder)] = { commands: a.commands as string[], run: (a.run as string | null) ?? null };
+          return null;
+        case "suggest_setup":
+          return new URLSearchParams(location.search).get("suggest") === "none" ? { commands: [], run: null } : { commands: ["npm ci"], run: "npm run dev" };
+        // The answers on a card whose setup stopped.
+        case "orchestra_setup_answer":
+          if (a.answer === "start") void sendTo(String(a.worker))({ kind: "agent_setup", phase: "done", index: 0, total: 0, command: "", line: "", reason: "", tail: "" }).then(() => sendTo(String(a.worker))({ kind: "thinking", parent: null }));
+          else if (a.answer === "again") playSetup(String(a.worker), new URLSearchParams(location.search).get("again") ?? "ok");
+          else void sendTo(String(a.worker))({ kind: "agent_setup", phase: "failed", index: 0, total: 2, command: "npm ci", line: "", reason: "setup was stopped", tail: "" });
+          return null;
+        case "run_project": {
+          const run = Object.values(mockSetups).find((s) => s.run)?.run;
+          if (!run) return Promise.reject("This project has no Run command: set one in its Project setup.");
+          playShell(String(a.slot), String(a.id), run);
+          return null;
         }
         case "run_shell":
           playShell(String(a.slot), String(a.id), String(a.command));

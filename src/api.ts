@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
-import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, SetupSuggestion, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -57,6 +57,14 @@ export const api = {
   /** Stops a worker and removes its worktree and branch (and tells its main agent). Work that would be thrown away needs `agreed`: the numbers the user confirmed, which a worker that has gone on since is refused over. */
   /** How many workers may run at once across all of Lantern (Settings → General). */
   setAgentLimit: (limit: number) => invoke<void>("set_agent_limit", { limit }),
+  /** What the user saved for a project (its setup lines, its Run command): the backend runs them from here, never from a file in the project. */
+  setProjectSetup: (folder: string, commands: string[], run: string | null) => invoke<void>("set_project_setup", { folder, commands, run }),
+  /** What the project's files suggest for its setup and Run command. Only offered: nothing is saved until the user presses Save. */
+  suggestSetup: (folder: string) => invoke<SetupSuggestion>("suggest_setup", { folder }),
+  /** The user's answer on an agent whose setup failed: "start" it anyway, or run the setup "again"; or "stop" a setup that is running. */
+  answerSetup: (worker: string, answer: "start" | "again" | "stop") => invoke<void>("orchestra_setup_answer", { worker, answer }),
+  /** Starts the project's saved Run command in the chat's folder; `id` starts with "run-". Output comes as shell_output, then shell_done. */
+  runProject: (slot: string, id: string) => invoke<void>("run_project", { slot, id }),
   closeWorker: (worker: string, agreed?: CloseAgreed) => invoke<void>("orchestra_close_worker", { worker, agreed: agreed ?? null }),
   /** Starts a worker for the main agent `main`, as the user's own doing (the main agent is told). Resolves to the worker's id. */
   spawnWorker: (main: string, w: NewWorker) => invoke<string>("orchestra_spawn", { main, task: w.task, name: w.name, isolation: w.isolation, model: w.model }),

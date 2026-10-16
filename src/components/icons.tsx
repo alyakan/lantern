@@ -268,3 +268,9 @@ export const PinIcon = () => (
     <path d="M3.2 1h3.6l-.5 3 1.7 1.7H2L3.7 4zM5 5.7V10" />
   </svg>
 );
+
+export const PlayIcon = () => (
+  <svg width="10" height="11" viewBox="0 0 10 11" {...base}>
+    <path d="M2 1.2v8.6L8.6 5.5z" />
+  </svg>
+);

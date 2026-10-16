@@ -30,6 +30,7 @@ describe("migrateFolderState", () => {
       "review.collapsedByFolder": { [OLD]: true },
       "settings.pinnedSessions": { [OLD]: ["s1"] },
       "sidebar.projectColors": { [OLD]: 3 },
+      "settings.projectSetupByFolder": { [OLD]: { commands: ["npm ci"], run: "npm run dev" } },
     });
     const changed = migrateFolderState(store, OLD, NEXT);
     expect(Object.keys(changed).sort()).toEqual([...FOLDER_RECORDS].sort());
@@ -41,6 +42,7 @@ describe("migrateFolderState", () => {
     expect(read(store, "review.collapsedByFolder")).toEqual({ [OLD]: true, [NEXT]: true });
     expect(read(store, "settings.pinnedSessions")).toEqual({ [OLD]: ["s1"], [NEXT]: ["s1"] });
     expect(read(store, "sidebar.projectColors")).toEqual({ [OLD]: 3, [NEXT]: 3 });
+    expect(read(store, "settings.projectSetupByFolder")[NEXT]).toEqual({ commands: ["npm ci"], run: "npm run dev" });
     // What was returned is what was written.
     expect(changed["settings.permissionsByFolder"]).toEqual(read(store, "settings.permissionsByFolder"));
   });

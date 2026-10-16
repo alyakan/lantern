@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { memo, useCallback, useContext, useEffect, useLayoutEffect, useReducer, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
   bounds,
   centerOn,
@@ -18,7 +18,8 @@ import {
   type Size,
   type View,
 } from "../lib/canvas";
-import { useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
+import { CloseAgentContext, useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
+import { ProjectSetupContext, runCommandOf } from "../lib/projectSetup";
 import { useAction } from "../lib/actions";
 import { lostText, nodeStatus, readyToMerge, statusLabel, summaryLine, usage, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
 import { usePopover } from "../lib/usePopover";
@@ -32,7 +33,7 @@ import { HiddenAgents } from "./HiddenAgents";
 import { NewAgent } from "./NewAgent";
 import { ModelChip } from "./ModelChip";
 import { NodeBody } from "./NodeBody";
-import { BranchIcon, ChevronIcon, OpenOutIcon } from "./icons";
+import { BranchIcon, ChevronIcon, OpenOutIcon, PlayIcon } from "./icons";
 import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
 import { SubagentsMenu } from "./SubagentsMenu";
 import { CanvasOverflow } from "./CanvasOverflow";
@@ -148,7 +149,10 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
   // on it turns amber and says what to do, since the agent may be stuck.
   const quiet = useQuiet(state?.activityAt ?? null, status === "working");
   const stuck = !!quiet?.stuck;
-  const label = stuck ? `Quiet ${quiet.span}` : statusLabel(status, role, ready);
+  const label = stuck ? `Quiet ${quiet.span}` : state?.setup ? (state.setup.status === "failed" ? "Setup stopped" : "Setting up") : statusLabel(status, role, ready);
+  // The project's Run command (saved in its setup), for a card whose agent has started.
+  const setups = useContext(ProjectSetupContext);
+  const runCommand = runCommandOf(setups, role === "main" ? state?.folder : owner?.folder);
   const spent = state ? usage(totalCost(state), totalTokens(state)) : "";
   const actions = useNodeActions();
   return (
@@ -196,6 +200,11 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, box, z, fo
           {label}
           {quiet && !stuck && <span className="node-quiet"> · {quiet.span} ago</span>}
         </span>
+        {runCommand && state?.folder && !state.setup && !folded && (
+          <button className="icon node-run" aria-label={`Run ${name}`} title={state.run?.status === "running" ? "It is running: see below" : `Run: ${runCommand}`} disabled={state.run?.status === "running"} onClick={() => actions.run(slot)}>
+            <PlayIcon />
+          </button>
+        )}
         {role === "worker" && (
           <button className="icon" aria-label={`More for ${name}`} aria-haspopup="menu" title="More: hide, or clean up and close" onClick={(e) => onMore(e, slot)}>
             ⋯
@@ -707,6 +716,10 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       (e) => setProblem(errText(e)),
     );
   };
+  // A card that offers "Close agent" (a setup that failed) asks the same way the menu does: through one function that never changes.
+  const askRef = useRef(askToClose);
+  askRef.current = askToClose;
+  const closeAsk = useCallback((slot: string) => askRef.current(slot), []);
   const menuNode = menu ? nodes.find((n) => n.slot === menu.slot) : undefined;
   const menuItems = (n: OrchestraNode): AgentMenuItem[] => {
     const needsYou = attention.includes(n.slot);
@@ -790,6 +803,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       onPointerUp={onBackgroundUp}
       onPointerCancel={onBackgroundUp}
     >
+      <CloseAgentContext.Provider value={closeAsk}>
       <div className="canvas-world" ref={world} style={{ transform: `translate(${initial.x}px, ${initial.y}px) scale(${initial.zoom})` }}>
         <svg className="canvas-tethers" aria-hidden>
           {visible.map((n) => {
@@ -824,6 +838,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
           />
         ))}
       </div>
+      </CloseAgentContext.Provider>
       <Announcer nodes={nodes} />
       <Controls zoom={zoomPct} attention={attention.length} nodes={nodes} onZoom={zoomBy} onFit={() => { layout.touched = false; fit(true); }} onNext={next} onGoTo={goTo} onShow={actions.show} main={nodes.find((n) => n.role === "main")?.slot} />
       {problem && (
