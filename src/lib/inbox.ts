@@ -6,7 +6,7 @@ import { nodeStatus } from "./orchestraView";
 import { projectLabels, type ProjectOpen } from "./sidebar";
 
 /** What a row is waiting for. `permission` is a plain request Allow and Deny answer; the others are answered where they are. */
-export type InboxKind = "permission" | "question" | "plan" | "reproduce" | "merge" | "held" | "unread";
+export type InboxKind = "permission" | "question" | "plan" | "reproduce" | "merge" | "held" | "unread" | "checks";
 
 /** One thing waiting on the user: a chat or an agent, in some project, with what it needs. */
 export interface InboxItem {
@@ -145,4 +145,34 @@ export function inboxItems(chats: Chats, open: Record<string, ProjectOpen>, opts
   // Oldest first within each group; one with no time known goes after the ones with.
   const age = (it: InboxItem) => it.since ?? Number.POSITIVE_INFINITY;
   return out.sort((a, b) => Number(b.needsYou) - Number(a.needsYou) || age(a) - age(b));
+}
+
+/** A pull request whose checks failed and that nothing is dealing with: the user has to. */
+export interface FailedChecks {
+  folder: string;
+  /** The chat in the project that Go takes the user to. */
+  slot: string;
+  where: string;
+  branch: string;
+  number: number;
+  failed: number;
+}
+
+/** One row for each, "Checks failed on <branch>". They wait on the user like a question does. */
+export function checkItems(list: FailedChecks[]): InboxItem[] {
+  return list.map((f) => ({
+    key: `checks:${f.folder}`,
+    kind: "checks" as const,
+    slot: f.slot,
+    role: "chat" as const,
+    team: null,
+    title: `Checks failed on ${f.branch}`,
+    where: f.where,
+    need: `Pull request #${f.number}: ${f.failed} ${f.failed === 1 ? "check" : "checks"} failed`,
+    since: null,
+    requestId: null,
+    canAllow: false,
+    detail: null,
+    needsYou: true,
+  }));
 }

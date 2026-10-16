@@ -31,6 +31,8 @@ describe("migrateFolderState", () => {
       "settings.pinnedSessions": { [OLD]: ["s1"] },
       "sidebar.projectColors": { [OLD]: 3 },
       "ship.ticksByFolder": { [OLD]: { commit: true, push: false } },
+      "prChecks.byFolder": { [OLD]: { mode: "fix", tries: 4 } },
+      "prChecks.loopByFolder": { [OLD]: { "57": { tries: 2, status: "waiting" } } },
     });
     const changed = migrateFolderState(store, OLD, NEXT);
     expect(Object.keys(changed).sort()).toEqual([...FOLDER_RECORDS].sort());
@@ -43,6 +45,8 @@ describe("migrateFolderState", () => {
     expect(read(store, "settings.pinnedSessions")).toEqual({ [OLD]: ["s1"], [NEXT]: ["s1"] });
     expect(read(store, "sidebar.projectColors")).toEqual({ [OLD]: 3, [NEXT]: 3 });
     expect(read(store, "ship.ticksByFolder")).toEqual({ [OLD]: { commit: true, push: false }, [NEXT]: { commit: true, push: false } });
+    expect(read(store, "prChecks.byFolder")).toEqual({ [OLD]: { mode: "fix", tries: 4 }, [NEXT]: { mode: "fix", tries: 4 } });
+    expect(read(store, "prChecks.loopByFolder")).toEqual({ [OLD]: { "57": { tries: 2, status: "waiting" } }, [NEXT]: { "57": { tries: 2, status: "waiting" } } });
     // What was returned is what was written.
     expect(changed["settings.permissionsByFolder"]).toEqual(read(store, "settings.permissionsByFolder"));
   });

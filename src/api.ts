@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
-import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, ShipInfo, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, GhAccess, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, ShipInfo, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -117,6 +117,12 @@ export const api = {
   gitBranch: (folder: string) => invoke<string | null>("git_branch", { folder }),
   /** Ship it's read-only look at the folder's repository: branch, remote, base branch, and whether gh is there. */
   shipInfo: (folder: string) => invoke<ShipInfo>("ship_info", { folder }),
+  /** The pull request on the folder's branch and how its checks stand (read-only). Rejects when gh failed for a reason that may pass. */
+  prWatch: (folder: string) => invoke<PrWatch>("pr_watch", { folder }),
+  /** The end of the log of a failed check's run (`runId` is digits). */
+  prFailureLog: (folder: string, runId: string) => invoke<string>("pr_failure_log", { folder, runId }),
+  /** Whether the GitHub CLI is installed and logged in. */
+  ghAccess: () => invoke<GhAccess>("gh_access"),
   /** The user's name for their messages (macOS full name, else git's user.name); null if none. */
   userName: () => invoke<string | null>("user_name"),
   /** Stops one of the chat's background tasks (a run_in_background command, a background agent). */

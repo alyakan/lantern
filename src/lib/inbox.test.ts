@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type MergeProposal, type State } from "../store";
 import type { Chats } from "../sessions";
-import { inboxItems, wholeRequest } from "./inbox";
+import { checkItems, inboxItems, wholeRequest } from "./inbox";
 import { openProjects } from "./sidebar";
 
 const idle = (over: Partial<State> = {}): State => ({ ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/work/lantern", ...over });
@@ -171,5 +171,15 @@ describe("which requests Allow is offered for", () => {
 
   it("does not offer it for a plan, a question or a reproduction, which have no Allow here at all", () => {
     expect(rowFor("ExitPlanMode", { plan: "x" })).toMatchObject({ canAllow: false, requestId: null });
+  });
+});
+
+describe("checkItems", () => {
+  it("makes a row that waits on the user for each pull request whose checks failed", () => {
+    const [row, ...rest] = checkItems([{ folder: "/work/lantern", slot: "s2", where: "lantern", branch: "feat/x", number: 57, failed: 2 }]);
+    expect(rest).toEqual([]);
+    expect(row).toMatchObject({ key: "checks:/work/lantern", kind: "checks", slot: "s2", role: "chat", team: null, title: "Checks failed on feat/x", where: "lantern", need: "Pull request #57: 2 checks failed", needsYou: true, canAllow: false, requestId: null });
+    expect(checkItems([{ folder: "/a", slot: "s", where: "a", branch: "b", number: 1, failed: 1 }])[0].need).toBe("Pull request #1: 1 check failed");
+    expect(checkItems([])).toEqual([]);
   });
 });
