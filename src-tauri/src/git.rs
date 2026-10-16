@@ -41,7 +41,7 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(180);
 /// anywhere), and neither signing nor checking signatures: each runs a program the config names, so those programs are
 /// pinned to `false` as well. git hands these on to the git commands it runs itself. Filter and merge drivers still
 /// run: git-lfs is one, and without it a commit or a merge would take its pointer files for the content.
-const HARDENED: [&str; 24] = [
+pub(crate) const HARDENED: [&str; 24] = [
     "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat", "-c", "submodule.recurse=false",
     "-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false", "-c", "merge.verifySignatures=false", "-c", "log.showSignature=false",
     "-c", "gpg.program=/usr/bin/false", "-c", "gpg.ssh.program=/usr/bin/false", "-c", "gpg.x509.program=/usr/bin/false",

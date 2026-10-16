@@ -12,7 +12,7 @@ export interface Role {
   brief: string;
   model: string;
   isolation: "worktree" | "shared";
-  /** It can only read: it has no editing tools and no shell. */
+  /** It can only read: it has no editing tools and no shell, only a read-only git tool. */
   readOnly: boolean;
 }
 

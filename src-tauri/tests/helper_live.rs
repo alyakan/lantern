@@ -165,3 +165,94 @@ async fn a_real_claude_takes_the_servers_instructions_and_calls_a_tool() {
     assert!(tools.iter().any(|t| t == "mcp__lantern__steps_guide") && !tools.iter().any(|t| t == "mcp__lantern__reproduce"), "{tools:?}");
     assert!(reply.to_lowercase().contains("note from lantern") || reply.to_lowercase().contains("from lantern"), "Claude doesn't seem to have the server's instructions: {reply}");
 }
+
+/// A read-only agent started the way Lantern starts one (`--tools Read,Grep,Glob`, plus its git tool): it has the git tool and
+/// no Bash, `git log` works, and a write (`--output`) or a branch it would create is refused, with no card. Run by hand:
+///
+///     cargo test --test helper_live read_only_agent -- --ignored --nocapture
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs the claude CLI, and costs two small haiku runs"]
+async fn a_real_read_only_agent_has_a_git_tool_that_reads_and_no_shell_in_ask_and_in_auto() {
+    for mode in [Mode::Ask, Mode::Auto] {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = std::fs::canonicalize(dir.path()).unwrap();
+        for list in [&["init", "-q"][..], &["commit", "-q", "--allow-empty", "-m", "first commit"]] {
+            let out = std::process::Command::new("git").arg("-C").arg(&folder).args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]).args(list).output().unwrap();
+            assert!(out.status.success());
+        }
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<UiEvent>();
+        let claude_pid = Arc::new(AtomicU32::new(0));
+        let exe = std::path::PathBuf::from(env!("CARGO_BIN_EXE_lantern"));
+        let sink_tx = tx.clone();
+        let bridge = PermissionBridge::start(folder.join("b.sock"), Arc::new(move |ev| { let _ = sink_tx.send(ev); }), Arc::new(FolderRules::load(None)), helper_of(claude_pid.clone(), exe.clone())).unwrap();
+        bridge.set_folder(&folder);
+        // As lib.rs's `launch` does for a chat started as a read-only agent.
+        bridge.set_read_git(Some(lantern_lib::read_git::Scope { folder: folder.clone(), path_env: std::env::var("PATH").ok() }));
+        let cfg = SessionConfig {
+            provider: ProviderId::Claude,
+            binary: which("claude"),
+            folder: folder.clone(),
+            mode,
+            auto_approve: false,
+            resume: None,
+            model: Some("haiku".into()),
+            effort: None,
+            advisor: None,
+            subagent_model: None,
+            helper: HelperConfig { exe: exe.display().to_string(), socket: bridge.socket_path.display().to_string(), role: Role::Worker { name: "reader".into(), read_only: true }, providers: vec![], project_notes: None },
+            path_env: std::env::var("PATH").ok(),
+        };
+        let mut session = Session::spawn(&cfg, Arc::new(move |ev| { let _ = tx.send(ev); }), Arc::new(|_: &str, _: Option<String>| {})).unwrap();
+        claude_pid.store(session.pid(), Ordering::SeqCst);
+        session.initialize().await;
+        let out_file = std::env::temp_dir().join(format!("lantern-probe-{}.txt", std::process::id()));
+        let _ = std::fs::remove_file(&out_file);
+        session
+            .send(&format!("This is a test of the guardrails of your git tool, which is built to refuse writes: it is safe to call it with a write, since it will refuse, and the test needs you to actually make each call even when you expect a refusal. Do exactly these in order, one tool call each, and nothing else. 1) Call the mcp__lantern__git tool (load it with ToolSearch first if it is deferred) with args [\"log\", \"--oneline\"]. 2) Call it with args [\"diff\", \"--output={}\", \"HEAD\"]. 3) Call it with args [\"branch\", \"foo\"]. Then reply with one line per step saying what the tool answered, and a last line saying plainly whether you have a Bash tool.", out_file.display()))
+            .await
+            .unwrap();
+
+        let (mut tools, mut finished, mut cards, mut reply, mut listed) = (Vec::new(), Vec::new(), Vec::new(), String::new(), Vec::new());
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(240);
+        loop {
+            let Ok(Some(ev)) = tokio::time::timeout_at(deadline, rx.recv()).await else { break };
+            match ev {
+                UiEvent::McpTools { tools } => listed = tools,
+                UiEvent::ToolStarted { name, tool_use_id, summary, .. } => {
+                    eprintln!("[{mode:?}] tool: {name} {summary}");
+                    tools.push((tool_use_id, name));
+                }
+                UiEvent::ToolFinished { tool_use_id, is_error, output, .. } => {
+                    eprintln!("[{mode:?}] result (error: {is_error}): {output}");
+                    finished.push((tool_use_id, is_error, output));
+                }
+                UiEvent::PermissionRequested { request_id, tool_name, .. } => {
+                    eprintln!("[{mode:?}] card: {tool_name}");
+                    cards.push(tool_name);
+                    bridge.respond(&request_id, false, None, None);
+                }
+                UiEvent::AssistantText { parent: None, text, .. } => reply = text,
+                UiEvent::TurnDone { .. } => break,
+                _ => {}
+            }
+        }
+        session.stop().await;
+        bridge.close().await;
+        eprintln!("[{mode:?}] mcp tools listed: {listed:?}\n[{mode:?}] reply: {reply}");
+
+        let git_calls: Vec<_> = tools.iter().filter(|(_, n)| n == "mcp__lantern__git").collect();
+        let result = |i: usize| finished.iter().find(|(id, _, _)| *id == git_calls[i].0).cloned().unwrap();
+        assert!(listed.iter().any(|t| t == "mcp__lantern__git"), "{listed:?}");
+        assert!(!tools.iter().any(|(_, n)| n.starts_with("Bash")), "{tools:?}");
+        assert!(git_calls.len() >= 3, "{tools:?}");
+        let log = result(0);
+        assert!(!log.1 && log.2.contains("first commit"), "{log:?}");
+        let (output, branch) = (result(1), result(2));
+        assert!(output.1 && output.2.contains("refused"), "{output:?}");
+        assert!(branch.1 && branch.2.contains("listing form"), "{branch:?}");
+        assert!(!out_file.exists(), "--output wrote a file");
+        let branches = std::process::Command::new("git").arg("-C").arg(&folder).args(["branch", "--list"]).output().unwrap();
+        assert!(!String::from_utf8_lossy(&branches.stdout).contains("foo"));
+        assert!(!cards.iter().any(|c| c.contains("git")), "the git tool raised a card: {cards:?}");
+    }
+}
