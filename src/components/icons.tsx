@@ -1,6 +1,14 @@
 // Small line icons in one stroke style (1.3px, currentColor) so the chrome reads as one set.
 const base = { fill: "none", stroke: "currentColor", strokeWidth: 1.3, strokeLinecap: "round", strokeLinejoin: "round", "aria-hidden": true } as const;
 
+// A speech bubble with a small one beside it: a question on the side.
+export const SideChatIcon = () => (
+  <svg width="14" height="13" viewBox="0 0 15 14" {...base}>
+    <path d="M1 2.4c0-.77.63-1.4 1.4-1.4h6.2c.77 0 1.4.63 1.4 1.4v3.7c0 .77-.63 1.4-1.4 1.4H5.2L2.8 9.4V7.5h-.4C1.63 7.5 1 6.87 1 6.1z" />
+    <path d="M12 5.2h.6c.77 0 1.4.63 1.4 1.4v3.2c0 .77-.63 1.4-1.4 1.4h-.2v1.6l-2-1.6H7.4c-.43 0-.82-.2-1.07-.5" />
+  </svg>
+);
+
 export const FolderIcon = () => (
   <svg width="14" height="12" viewBox="0 0 15 12" {...base}>
     <path d="M1 2.2c0-.66.54-1.2 1.2-1.2h3.3l1.4 1.6h5.9c.66 0 1.2.54 1.2 1.2v6.5c0 .66-.54 1.2-1.2 1.2H2.2c-.66 0-1.2-.54-1.2-1.2z" />

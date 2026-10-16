@@ -98,6 +98,13 @@ export type UiEvent =
   | { kind: "unknown"; raw: unknown }
   | { kind: "parse_error"; line: string };
 
+/** What a side chat's claude says (src-tauri/src/aside.rs): one of the events of an answer, or a note from Lantern (why an answer was stopped). Never a chat's own event. */
+export interface AsideEvent {
+  aside: string;
+  event?: UiEvent;
+  note?: string;
+}
+
 export interface DirEntry {
   name: string;
   path: string;

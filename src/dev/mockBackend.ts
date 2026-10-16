@@ -631,6 +631,34 @@ const MARKUP_REPLY = [
   "",
 ].join("\n");
 
+/**
+ * The side chat: its answer comes as its own `aside-event`s, apart from every chat's. ?aside=long makes the answer long (to see it
+ * scroll), ?aside=error fails the question, and ?aside=fresh says the chat had nothing to start from.
+ */
+const asideStopped = new Set<string>();
+async function playAside(aside: string, text: string) {
+  const mode = new URLSearchParams(location.search).get("aside");
+  const send = (event: UiEvent) => emit("aside-event", { aside, event }).catch(() => {});
+  asideStopped.delete(aside);
+  const done = (is_error = false, result: string | null = null) => send({ kind: "turn_done", is_error, result, cost_usd: null, tokens: null, session_cost_usd: 0.012, session_tokens: 41_800, duration_ms: 1800, auth_hint: false, denied: 0, context_window: 200_000 });
+  await sleep(300);
+  if (mode === "error") return void (await done(true, "The side chat couldn't answer: the model is overloaded."));
+  await send({ kind: "tool_started", parent: null, tool_use_id: `as-${aside}`, name: "Read", summary: `${FOLDER}/src/client/retry.ts` });
+  await sleep(500);
+  const block = `as-${aside}-${Date.now()}:0`;
+  const answer =
+    mode === "long"
+      ? ["`fetchJson` retries a failed request up to 3 times.", "- It only retries **429, 502, 503 and 504**: those are the ones that can pass on a second try.", "- It waits 500 ms, then 1 s, then 2 s between tries.", "- Any other error (a 404, say) is thrown straight away.", "", "```ts", "const RETRYABLE = new Set([429, 502, 503, 504]);", "```", "", "The numbers are in `src/client/retry.ts`, lines 1 to 12. Change `attempts` to retry more often.", "", "Nothing in the chat was touched by this question."].join("\n")
+      : `You asked about \`${text.slice(0, 40)}\`. It's in **src/client/retry.ts**: it retries 429, 502, 503 and 504, up to 3 times.`;
+  for (const word of answer.split(/(?<= )/)) {
+    if (asideStopped.has(aside)) return;
+    await send({ kind: "text_delta", parent: null, block_id: block, text: word });
+    await sleep(20);
+  }
+  await send({ kind: "assistant_text", parent: null, block_id: block, text: answer });
+  await done();
+}
+
 async function playTurn(slot: string) {
   const send = sendTo(slot);
   await send({ kind: "session_started", session_id: `mock-${slot}`, model: "claude-opus-5-5", cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
@@ -1215,6 +1243,16 @@ export function installMockBackend() {
           delete slotMode[String(a.slot)];
           return null;
         case "interrupt":
+          return null;
+        case "aside_ask":
+          void playAside(String(a.aside), String(a.text));
+          return new URLSearchParams(location.search).get("aside") !== "fresh";
+        case "aside_stop":
+          asideStopped.add(String(a.aside));
+          return null;
+        case "aside_stop_answering":
+          asideStopped.add(String(a.aside));
+          void emit("aside-event", { aside: String(a.aside), note: "Stopped." }).catch(() => {});
           return null;
         // The user's answers to a worker's merge proposal, which the main agent's chat hears of.
         case "orchestra_approve_merge":

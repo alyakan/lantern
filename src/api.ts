@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
-import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { AsideEvent, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -47,6 +47,18 @@ export const api = {
   setModel: (slot: string, model: string | null) => invoke<void>("set_model", { slot, model }),
   /** Resolves to the turn's number (see the Changes pane's per-turn views). */
   sendMessage: (slot: string, text: string) => invoke<number>("send_message", { slot, text }),
+  /**
+   * Asks a side question about the chat (`aside` names the popover's side chat, started by its first question): a read-only copy
+   * of the chat's conversation answers it, as aside events. `model` null is the chat's own. Resolves to whether it has the
+   * chat's conversation to go on (false: the chat has no messages yet).
+   */
+  asideAsk: (slot: string, aside: string, text: string, model: string | null) => invoke<boolean>("aside_ask", { slot, aside, text, model }),
+  /** Closes a side chat: its claude stops and nothing of it is kept. */
+  asideStop: (aside: string) => invoke<void>("aside_stop", { aside }),
+  /** Ends the answer being written; the side chat stays for another question. */
+  asideStopAnswering: (aside: string) => invoke<void>("aside_stop_answering", { aside }),
+  /** What side chats say: their own event, apart from every chat's `onUiEvent`. */
+  onAsideEvent: (cb: (e: AsideEvent) => void): Promise<UnlistenFn> => listen<AsideEvent>("aside-event", (e) => cb(e.payload)),
   /** The user approves a worker's merge: its branch goes into the main checkout (the outcome comes as `merge_resolved`). */
   approveMerge: (worker: string) => invoke<void>("orchestra_approve_merge", { worker }),
   declineMerge: (worker: string) => invoke<void>("orchestra_decline_merge", { worker }),

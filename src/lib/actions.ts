@@ -46,6 +46,8 @@ const CATALOGUE = [
   { id: "keyboard-shortcuts", title: "Keyboard Shortcuts", group: "Help", key: "/", menu: true, skipInEditor: true },
   { id: "report-bug", title: "Report a Bug…", group: "Help", menu: true },
   { id: "focus-input", title: "Focus the Message Box", group: "Chat", key: "l" },
+  // A quick question about the chat, answered apart from it (see SideChat.tsx).
+  { id: "side-chat", title: "Ask a Side Question…", group: "Chat", key: "b" },
   { id: "stop", title: "Stop Claude", group: "Chat", key: "." },
 ] as const satisfies readonly ActionDef[];
 

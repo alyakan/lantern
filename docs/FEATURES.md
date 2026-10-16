@@ -77,6 +77,15 @@ In the box:
 - Pasting more than a few lines shows `[Pasted text #1 · 120 lines]`; the whole text is still sent.
 - Send while Claude is working and the message is queued until its turn ends.
 
+### Side chat
+
+For a small question ("what does this flag do?", "which file was that in?") that shouldn't interrupt Claude or end up in the chat, press **⌘B**, click the speech-bubble button beside the context meter, or choose "Ask a side question…" in the command palette. A small panel opens over the box with a one-line field. The answer streams into the panel, and you can ask a follow-up in it. It works while Claude is in the middle of a turn, which carries on untouched.
+
+- The side chat starts from a copy of the chat's conversation, so it knows what you've been doing. **Nothing is added to the chat**: not the question, not the answer, and what it costs isn't counted in the chat's totals (the panel shows its own, in small text).
+- It is **read only**. It can read your files and search them, but can't change anything or run commands, and it never asks you for permission: anything beyond reading is simply refused.
+- The picker at the top chooses the model. The default is the chat's own; Haiku is the cheapest for a quick question. It is fixed once you've asked the first question.
+- It is kept short: 10 questions per side chat, and one question is stopped after 12 files looked at or 3 minutes. **Stop** ends an answer early, **Copy** copies the latest answer, and **Esc** or **Close** closes the panel and throws the side chat away. Nothing is saved, and it never shows up in History.
+
 ## Step by step
 
 In Step by step, Claude writes one page per message and stops. You use **Next** to approve a page, ask about it in the box (the answer stays on the page), or ask for a change, and only that page is rewritten. **Send & next** (⌘Enter) sends a change and approves in one go. **Previous** goes back.
@@ -333,6 +342,7 @@ The code editor and diffs, diagrams and shell output follow the theme, and a cho
 | ⌘S | Save the file in the editor |
 | ⌘Enter | Send & next (in Step by step) |
 | ⌘L | Focus the message box |
+| ⌘B | Ask a side question |
 | ⌘. | Stop Claude |
 | ⇧⌘C | Switch between a team's canvas and chat view |
 | ⌘= ⌘- ⌘0 | Zoom the canvas in, out, and fit everyone |
