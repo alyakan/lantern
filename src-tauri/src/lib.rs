@@ -8,6 +8,7 @@ pub mod git;
 pub mod history;
 pub mod mcp_config;
 pub mod menu;
+pub mod merge_tests;
 pub mod navigation;
 pub mod network;
 pub mod orchestra;
@@ -726,6 +727,36 @@ async fn orchestra_approve_merge(state: State<'_, AppState>, worker: String) -> 
 #[tauri::command]
 fn orchestra_decline_merge(state: State<'_, AppState>, worker: String) -> Result<(), String> {
     state.orchestra.decline_merge(&worker)
+}
+
+/// The merge card's test run for a worker: how it can be run, what is going, and the last result.
+#[tauri::command]
+async fn orchestra_merge_tests_info(state: State<'_, AppState>, worker: String) -> Result<orchestra::TestsInfo, String> {
+    state.orchestra.merge_tests_info(&worker).await
+}
+
+/// Runs the tests in a worker's worktree, when the user asks: `command` is the words of what they typed (null: what the
+/// worktree says). Resolves when they end; null when the user cancelled them.
+#[tauri::command]
+async fn orchestra_run_merge_tests(state: State<'_, AppState>, worker: String, command: Option<Vec<String>>) -> Result<Option<orchestra::LastInfo>, String> {
+    state.orchestra.run_merge_tests(&worker, command).await
+}
+
+#[tauri::command]
+fn orchestra_cancel_merge_tests(state: State<'_, AppState>, worker: String) {
+    state.orchestra.cancel_merge_tests(&worker)
+}
+
+/// What a command the user typed would run as: its words, or why it can't be run. Nothing is run.
+#[tauri::command]
+fn merge_tests_split_command(text: String) -> Result<Vec<String>, String> {
+    merge_tests::split_command(&text)
+}
+
+/// "Run tests when a merge is proposed" (Settings → General).
+#[tauri::command]
+fn set_auto_merge_tests(state: State<'_, AppState>, on: bool) {
+    state.orchestra.set_auto_tests(on)
 }
 
 /// Removes a worker's worktree. Without `force`, a worktree with loose work is kept (an error says so) and a branch
@@ -1717,6 +1748,11 @@ pub fn run() {
             network_unwatch,
             network_rewatch,
             orchestra_decline_merge,
+            orchestra_merge_tests_info,
+            orchestra_run_merge_tests,
+            orchestra_cancel_merge_tests,
+            merge_tests_split_command,
+            set_auto_merge_tests,
             orchestra_discard,
             run_shell,
             claude_request,

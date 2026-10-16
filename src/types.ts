@@ -443,3 +443,33 @@ export interface OpenPr {
   branch: string;
   draft: boolean;
 }
+
+/** How a worker's tests went when the user ran them from its merge card. */
+export interface MergeTestsReport {
+  command: string[];
+  result: "passed" | "failed" | "timed_out";
+  passed: number | null;
+  failed: number | null;
+  skipped: number | null;
+  exit_code: number | null;
+  took_ms: number;
+  /** The last lines of the output. */
+  tail: string;
+  /** What the numbers don't say (no packages installed, stopped for time). */
+  note: string | null;
+  /** Files the run left in the worktree that weren't there before. */
+  new_files: string[];
+  /** When it ended (unix milliseconds). */
+  at: number;
+  /** The branch (or its loose work) isn't what it was when the tests ran. */
+  stale: boolean;
+}
+
+/** What a merge card knows about its tests: how they would run, the run going now, and the last result. */
+export interface MergeTestsInfo {
+  /** The project's folder: the command a user types is remembered for it. */
+  project: string;
+  detected: { command: string[]; source: string } | null;
+  running: { command: string[]; elapsed_ms: number; last_line: string } | null;
+  last: MergeTestsReport | null;
+}

@@ -7,6 +7,7 @@ import { setChime, useChimeOn } from "../lib/chime";
 import { AGENT_LIMIT_MAX, AGENT_LIMIT_MIN, setAgentLimit, useAgentLimit } from "../lib/agentLimit";
 import { PAUSE_OPTIONS, setPauseAtPercent, usePauseAtPercent } from "../lib/planPause";
 import { QUIET_MINUTES, setQuietMinutes, useQuietMinutes } from "../lib/quietSetting";
+import { setAutoMergeTests, useAutoMergeTests } from "../lib/mergeTests";
 import { PAUSE_MS, type NotifyPrefs } from "../lib/notifyPrefs";
 import type { TextSize } from "../lib/theme";
 import type { CustomTheme, ThemeId } from "../lib/themes";
@@ -136,6 +137,7 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
   const agentLimit = useAgentLimit();
   const quiet = useQuietMinutes();
   const pauseAt = usePauseAtPercent();
+  const autoTests = useAutoMergeTests();
   const paused = notify.pausedUntil > Date.now();
   const set = (patch: Partial<NotifyPrefs>) => onNotify({ ...notify, ...patch });
   return (
@@ -249,6 +251,11 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
           </select>
         </label>
         <span className="settings-muted">Stops what every working agent of every team is doing (they stay on their teams) and tells you when the plan resets. Nothing starts again until you press Resume. You get a heads-up 5 points before, and it pauses once for each five-hour window.</span>
+        <label className="general-option">
+          <input type="checkbox" checked={autoTests} onChange={(e) => setAutoMergeTests(e.target.checked)} />
+          <span>Run tests when a merge is proposed</span>
+        </label>
+        <span className="settings-muted">Runs the project's tests in the agent's worktree as its merge card appears, so the result is waiting for you. Off, nothing runs until you press Run tests.</span>
         {onWarnTeams && (
           <label className="general-option">
             <input type="checkbox" checked={warnTeams ?? true} onChange={(e) => onWarnTeams(e.target.checked)} />

@@ -1,5 +1,6 @@
 import { setPlanUsage } from "./lib/planUsage";
 import { pushAgentLimit } from "./lib/agentLimit";
+import { pushAutoMergeTests } from "./lib/mergeTests";
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RevertOutcome } from "./api";
@@ -252,6 +253,7 @@ export default function App() {
   // The backend checks the user's limit on agents running at once: it learns it from here.
   useEffect(() => {
     void pushAgentLimit();
+    void pushAutoMergeTests();
   }, []);
   // When each chat's last turn ended, for the title bar's "Done | Today at 19:22".
   const [finishedAt, setFinishedAt] = useState<Record<string, Date>>({});

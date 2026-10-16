@@ -32,6 +32,7 @@ describe("migrateFolderState", () => {
       "sidebar.projectColors": { [OLD]: 3 },
       "settings.rolesByFolder": { [OLD]: [{ id: "api-reviewer" }] },
       "settings.teamTemplatesByFolder": { [OLD]: [{ id: "build-audit" }] },
+      "merge.testCommandByFolder": { [OLD]: "npm run test:unit" },
     });
     const changed = migrateFolderState(store, OLD, NEXT);
     expect(Object.keys(changed).sort()).toEqual([...FOLDER_RECORDS].sort());
@@ -46,6 +47,7 @@ describe("migrateFolderState", () => {
     // The project's own agent roles and team templates go with it.
     expect(read(store, "settings.rolesByFolder")).toEqual({ [OLD]: [{ id: "api-reviewer" }], [NEXT]: [{ id: "api-reviewer" }] });
     expect(read(store, "settings.teamTemplatesByFolder")).toEqual({ [OLD]: [{ id: "build-audit" }], [NEXT]: [{ id: "build-audit" }] });
+    expect(read(store, "merge.testCommandByFolder")).toEqual({ [OLD]: "npm run test:unit", [NEXT]: "npm run test:unit" });
     // What was returned is what was written.
     expect(changed["settings.permissionsByFolder"]).toEqual(read(store, "settings.permissionsByFolder"));
   });

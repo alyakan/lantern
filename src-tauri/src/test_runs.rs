@@ -61,6 +61,11 @@ fn re(s: &str) -> Regex {
 
 static ANSI: LazyLock<Regex> = LazyLock::new(|| re(r"\x1b\[[0-9;?]*[ -/]*[@-~]"));
 
+/// `text` without terminal colour and cursor codes.
+pub fn strip_ansi(text: &str) -> String {
+    ANSI.replace_all(text, "").into_owned()
+}
+
 /// Words a test command contains: "test" covers npm test, pytest, cargo/go/swift test, xcodebuild test, …
 const TEST_WORDS: &[&str] = &["test", "spec", "jest", "mocha"];
 
