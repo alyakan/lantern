@@ -42,12 +42,13 @@ describe("monacoTheme", () => {
     }
   });
 
-  it("has its own source colours for Terminal, Fallout, Solarized and Nord, and Xcode's for the rest", () => {
+  it("has its own source colours for Terminal, Fallout, Solarized, Nord and Paper, and Xcode's for the rest", () => {
     expect(syntaxFor("terminal", true)).not.toBe(syntaxFor("dark", true));
     expect(syntaxFor("fallout", true)).not.toBe(syntaxFor("terminal", true));
     expect(syntaxFor("fallout", true).string).not.toBe(syntaxFor("fallout", true).keyword);
     expect(syntaxFor("nord", true)).not.toBe(syntaxFor("solarized", true));
-    expect(syntaxFor("paper", false)).toBe(syntaxFor("light", false));
+    expect(syntaxFor("paper", false)).not.toBe(syntaxFor("light", false));
+    expect(syntaxFor("posthog", false)).toBe(syntaxFor("light", false));
     expect(syntaxFor("custom", true)).toBe(syntaxFor("dark", true));
     expect(syntaxFor(undefined, false)).toBe(syntaxFor("light", false));
   });
