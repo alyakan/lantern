@@ -85,6 +85,39 @@ describe("placeNodes", () => {
     expect(layout.order).toEqual(["s1", "w1"]);
   });
 
+  it("takes no room for hidden agents, so a new one is not sent far off", () => {
+    const layout = newLayout();
+    const chats = team(6);
+    placeNodes(layout, orchestraNodes(chats, () => "Lead"));
+    // The user hides the first five; a seventh agent arrives.
+    const nodes = orchestraNodes(chats, () => "Lead").map((n) => (["w1", "w2", "w3", "w4", "w5"].includes(n.slot) ? { ...n, hidden: true } : n));
+    const more = [...nodes, { slot: "w7", role: "worker" as const, parent: "s1" }];
+    placeNodes(layout, more);
+    const visible = Object.entries(layout.boxes).filter(([slot]) => !["w1", "w2", "w3", "w4", "w5"].includes(slot)).map(([, b]) => b);
+    for (let i = 0; i < visible.length; i++) for (let j = i + 1; j < visible.length; j++) expect(overlaps(visible[i], visible[j])).toBe(false);
+    // Level with the first row rather than a row below the hidden ones: only w6 is in the way.
+    expect(layout.boxes.w7.y).toBe(layout.boxes.w1.y);
+  });
+
+  it("moves an agent that is shown again only when something has taken its place", () => {
+    const layout = newLayout();
+    const base = orchestraNodes(team(3), () => "Lead");
+    placeNodes(layout, base);
+    const hideW1 = base.map((n) => (n.slot === "w1" ? { ...n, hidden: true } : n));
+    placeNodes(layout, hideW1);
+    // Back with nothing in its way: it stays where it was.
+    const was = { ...layout.boxes.w1 };
+    placeNodes(layout, base);
+    expect(layout.boxes.w1).toEqual(was);
+    // Hidden again; a new agent takes its place; shown, it moves clear.
+    placeNodes(layout, hideW1);
+    placeNodes(layout, [...hideW1, { slot: "w4", role: "worker" as const, parent: "s1" }]);
+    expect(layout.boxes.w4).toEqual(was);
+    placeNodes(layout, [...base, { slot: "w4", role: "worker" as const, parent: "s1" }]);
+    expect(overlaps(layout.boxes.w1, layout.boxes.w4)).toBe(false);
+    expect(layout.boxes.w4).toEqual(was);
+  });
+
   it("puts a second main agent below the first one's team", () => {
     const layout = newLayout();
     let chats = team(2);
@@ -1132,7 +1165,30 @@ describe("an agent at work that has gone quiet", () => {
     setup(working(200_000));
     const line = screen.getByText(/Quiet for 3 min\. It may be stuck\./);
     expect(line).toBeInTheDocument();
-    expect(within(line.parentElement!).getAllByRole("button").map((b) => b.textContent)).toEqual(["Nudge", "Interrupt", "Restart"]);
+    expect(within(line.parentElement!).getAllByRole("button").map((b) => b.textContent)).toEqual(["Nudge", "Interrupt", "Restart", "×"]);
+  });
+
+  it("can be dismissed with its ×, and comes back only after the agent says something new", () => {
+    const chats = working(200_000);
+    const { store, acts } = setup(chats);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText(/It may be stuck\./)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Nudge" })).toBeNull();
+    // It only hides the banner: nothing was sent to the agent, and the card is still marked quiet.
+    expect(acts.send).not.toHaveBeenCalled();
+    expect(acts.stop).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/Agent Worker 1, Quiet 3m/)).toHaveClass("stuck");
+    act(() => store.set({ ...chats.slots, w1: { ...chats.slots.w1, activityAt: Date.now() - 190_000 } }));
+    expect(screen.getByText(/It may be stuck\./)).toBeInTheDocument();
+  });
+
+  it("has no × on the Restart question: it is answered, not dismissed", () => {
+    const { acts } = setup(working(200_000));
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+    expect(screen.getByRole("alertdialog", { name: "Restart this agent?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Restart anyway" }));
+    expect(acts.restart).toHaveBeenCalledWith("w1");
   });
 
   it("Nudge asks for a one-line status once for each stretch of quiet", () => {

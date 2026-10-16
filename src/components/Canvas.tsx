@@ -7,6 +7,7 @@ import {
   fitView,
   GAP,
   moveBox,
+  overlaps,
   panBy,
   inView,
   placeCheck,
@@ -59,17 +60,27 @@ export interface CanvasLayout {
   order: string[];
   /** Agents already drawn on the canvas: one not in here is new, and arrives. */
   seen: Set<string>;
+  /** Agents hidden when the canvas was last laid out: a hidden agent takes no room, so one that comes back may need a new place. */
+  hidden: Set<string>;
 }
 
-export const newLayout = (): CanvasLayout => ({ boxes: {}, view: null, touched: false, collapsed: {}, order: [], seen: new Set() });
+export const newLayout = (): CanvasLayout => ({ boxes: {}, view: null, touched: false, collapsed: {}, order: [], seen: new Set(), hidden: new Set() });
 
-/** Gives every agent a place (new ones go below their main agent, in free space) and forgets agents that are gone. */
-export function placeNodes(layout: CanvasLayout, nodes: { slot: string; role: "main" | "worker"; parent: string | null; reviewOf?: string }[]): void {
+/**
+ * Gives every agent a place (new ones go below their main agent, in free space) and forgets agents that are gone. Hidden agents
+ * take no room, so a new agent goes where it would if they weren't there; one that is shown again keeps its place unless
+ * something else has taken it, and then moves to free space.
+ */
+export function placeNodes(layout: CanvasLayout, nodes: { slot: string; role: "main" | "worker"; parent: string | null; reviewOf?: string; hidden?: boolean }[]): void {
   const live = new Set(nodes.map((n) => n.slot));
   for (const slot of Object.keys(layout.boxes)) if (!live.has(slot)) delete layout.boxes[slot];
+  const hidden = new Set(nodes.filter((n) => n.hidden).map((n) => n.slot));
+  const taken = (except?: string) => Object.entries(layout.boxes).filter(([slot]) => slot !== except && !hidden.has(slot)).map(([, box]) => box);
   for (const n of nodes) {
-    if (layout.boxes[n.slot]) continue;
-    const all = Object.values(layout.boxes);
+    const was = layout.hidden.has(n.slot);
+    if (layout.boxes[n.slot] && !(was && !n.hidden && taken(n.slot).some((b) => overlaps(layout.boxes[n.slot], b)))) continue;
+    const all = taken(n.slot);
+    delete layout.boxes[n.slot];
     // An agent that checks a builder's work goes beside that builder; any other below its main agent, in the nearest free spot.
     const builder = n.reviewOf ? layout.boxes[n.reviewOf] : undefined;
     const parent = n.parent ? layout.boxes[n.parent] : undefined;
@@ -81,6 +92,7 @@ export function placeNodes(layout: CanvasLayout, nodes: { slot: string; role: "m
       layout.boxes[n.slot] = b ? { ...firstBox(), x: b.x, y: b.y + b.h + GAP * 2 } : firstBox();
     }
   }
+  layout.hidden = hidden;
   layout.order = [...layout.order.filter((s) => live.has(s)), ...nodes.map((n) => n.slot).filter((s) => !layout.order.includes(s))];
 }
 

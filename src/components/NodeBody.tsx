@@ -46,6 +46,8 @@ function QuietLine({ slot, activityAt, working, stopping }: { slot: string; acti
   const quiet = useQuiet(activityAt, working, useQuietAfter());
   // One nudge for each stretch of quiet: any word from the agent (a new activityAt) gives it a fresh one.
   const [nudged, setNudged] = useState<number | null>(null);
+  // Dismissed the same way: the banner stays hidden for this stretch of quiet only.
+  const [dismissed, setDismissed] = useState<number | null>(null);
   const [confirming, setConfirming] = useState(false);
   if (!quiet?.stuck) return null;
   if (confirming) {
@@ -61,6 +63,7 @@ function QuietLine({ slot, activityAt, working, stopping }: { slot: string; acti
       </div>
     );
   }
+  if (dismissed !== null && dismissed === activityAt) return null;
   const sent = nudged !== null && nudged === activityAt;
   return (
     <div className="node-banner node-quiet-line" role="status">
@@ -73,6 +76,9 @@ function QuietLine({ slot, activityAt, working, stopping }: { slot: string; acti
       </button>
       <button title="Start it again, losing the step it is on" onClick={() => setConfirming(true)}>
         Restart
+      </button>
+      <button className="node-banner-close" aria-label="Dismiss" title="Hide this until it says something new" onClick={() => setDismissed(activityAt)}>
+        ×
       </button>
     </div>
   );
