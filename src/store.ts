@@ -6,6 +6,7 @@ import { readPageNote } from "./lib/pageNote";
 import { revertSummary, undoOf, undoSummary, type RevertNote, type RevertUndo } from "./lib/revert";
 import { KEEP_CHARS, readShellContext, takesShellContext } from "./lib/shell";
 import { readSkillNote } from "./lib/skillNote";
+import { NO_REVIEW, type ReviewInfo, type ReviewSetting } from "./lib/reviewChain";
 import type { Subagents } from "./lib/workflow";
 
 export interface EditInfo {
@@ -144,6 +145,10 @@ export interface State {
   autoStreak: number;
   /** The merges the main agent asked for, oldest first. */
   proposals: MergeProposal[];
+  /** A Team's "Review and test what an agent builds" setting, as its Lead shows it (kept with the team). */
+  review: ReviewSetting;
+  /** Where the review and test of each builder's latest work stands, by builder (the Lead's). */
+  reviews: ReviewInfo[];
   /** What Claude last set the Changes pane to compare with review_target, as Lantern was told live (a reopened chat has none until it calls it again; see reviewTargetOf). */
   reviewTarget: { pr: number | null; base: string | null } | null;
   /**
@@ -250,6 +255,8 @@ export const initialState: State = {
   wakes: [],
   autoStreak: 0,
   proposals: [],
+  review: NO_REVIEW,
+  reviews: [],
   reviewTarget: null,
   costBase: 0,
   costSeen: 0,
@@ -314,6 +321,7 @@ export type Action =
   /** `autoApprove`: Step by step's Permissions (kept as it is when absent; other modes say it with the mode). */
   | { type: "mode_changed"; mode: Mode; autoApprove?: boolean; flavourStart?: Flavour | null; explainStart?: boolean }
   | { type: "subagents_set"; subagents: Subagents }
+  | { type: "review_set"; review: ReviewSetting }
   | { type: "flavour_picked"; flavour: Flavour | null; explain?: boolean }
   | { type: "permission_decided"; id: string; allow: boolean; note?: string }
   | { type: "stop_requested" }
@@ -399,7 +407,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -597,6 +605,21 @@ function applyEvent(state: State, ev: UiEvent): State {
         items: denyPending(failRunning(state.items)),
         banner: ev.reason ? { kind: "error", text: ev.reason, action: null } : { kind: "info", text: "The Lead stopped this agent. Restart it to carry on.", action: "restart" },
       };
+    // Lantern closed it after it reported on a builder's work: nothing to restart, and it isn't brought back with the team.
+    case "agent_tidied":
+      return {
+        ...state,
+        status: "ended",
+        thinking: false,
+        stopRequested: false,
+        leadStopped: true,
+        items: denyPending(failRunning(state.items)),
+        banner: { kind: "info", text: "Lantern closed this agent after it reported, and removed its copy of the code. What it said is above.", action: null },
+      };
+    case "review_update": {
+      const info: ReviewInfo = { builder: ev.builder, name: ev.name, commit: ev.commit, checks: ev.checks, done: ev.done, at: Date.now() };
+      return { ...state, reviews: [...state.reviews.filter((r) => r.builder !== ev.builder), info] };
+    }
     // The main agent's mode was lowered, so this worker's was too (its claude restarted on the same conversation).
     case "agent_mode":
       return { ...state, mode: ev.mode, autoApprove: ev.mode === "steps" ? state.autoApprove : false };
@@ -680,6 +703,8 @@ export function reducer(state: State, action: Action): State {
       return { ...state, mode: action.mode, autoApprove: action.mode === "steps" ? (action.autoApprove ?? state.autoApprove) : false, ...(action.flavourStart !== undefined ? { flavourStart: action.flavourStart } : {}), ...(action.explainStart !== undefined ? { explainStart: action.explainStart } : {}) };
     case "subagents_set":
       return { ...state, subagents: action.subagents };
+    case "review_set":
+      return { ...state, review: action.review };
     case "flavour_picked":
       return { ...state, flavourPick: action.flavour, explainPick: !!action.flavour && !!action.explain };
     case "permission_decided":

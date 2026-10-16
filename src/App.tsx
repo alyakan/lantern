@@ -64,6 +64,7 @@ import { architectureMap, coversOf } from "./lib/architecture";
 import { ArchitecturePane } from "./lib/architecturePane";
 import { summarize } from "./lib/stepsSummary";
 import { canExplain, flavourState, savedMode, withFlavourNote, type Flavour } from "./lib/flavour";
+import { NO_REVIEW, readReview, reviewFor, type ReviewSetting } from "./lib/reviewChain";
 import { launchOf, migrateModeSettings, permissionsOf, PERMISSIONS_LABEL, WORKFLOW_LABEL, workflowOf, savedModeOf, type Permissions, type Subagents, type Workflow } from "./lib/workflow";
 import { FileLinksProvider } from "./lib/fileLinks";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -119,7 +120,7 @@ function mergeOwner(chats: { slots: Record<string, { proposals: { worker: string
  * (`parentReady`), so the backend knows the main agent by the time it adopts the worker.
  */
 type TeamRole =
-  | { role: "main" }
+  | { role: "main"; review?: ReviewSetting }
   | { role: "worker"; parent: string; name: string; branch: string | null; base: string | null; isolation: "worktree" | "shared"; agentRole?: AgentRole; hidden?: boolean; model?: string; parentReady?: Promise<boolean> };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
@@ -418,12 +419,12 @@ export default function App() {
   };
 
   // `quiet`: reopening the remembered project at launch; if that fails (e.g. the folder is gone), just forget it.
-  const startFresh = (folder: string, quiet = false, team = false, first?: string) => {
-    if (state.claudePath) startIn(takeSlot(), folder, quiet, team, first);
+  const startFresh = (folder: string, quiet = false, team = false, first?: string, review?: ReviewSetting) => {
+    if (state.claudePath) startIn(takeSlot(), folder, quiet, team, first, review);
   };
 
   /** `team`: the chat is the Lead of a team, which can start agents, on the project's last Permissions (the agents never exceed them). */
-  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string) => {
+  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, review?: ReviewSetting) => {
     const { claudePath } = state;
     if (!claudePath) return;
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
@@ -437,7 +438,7 @@ export default function App() {
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode, autoApprove });
     to(slot)({ type: "orchestrator_set", on: orchestrator });
-    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first);
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first, review);
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
     api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}) }).then(
       () => {
@@ -446,6 +447,7 @@ export default function App() {
         if (orchestrator) {
           startSubagents(slot, folder);
           startRoles(slot, folder);
+          startReview(slot, review);
         }
         setLastFolder(folder);
         to(slot)({ type: "session_ready" });
@@ -557,7 +559,7 @@ export default function App() {
         claudePath,
         folder,
         // An agent comes back on the model it had (or Sonnet, the agents' default), not on its project's own model.
-        { mode, ...settingsFor(slot, h), ...(as?.role === "worker" ? { model: as.model ?? AGENT_MODEL } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared", read_only: !!as.agentRole?.read_only } } : {}) },
+        { mode, ...settingsFor(slot, h), ...(as?.role === "worker" ? { model: as.model ?? AGENT_MODEL } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared", read_only: !!as.agentRole?.read_only, ...(as.agentRole ? { role: as.agentRole } : {}) } } : {}) },
         sessionId,
       );
     // A worker waits for its main agent: if that one didn't open, this one stays closed too, under it, where Retry can try again.
@@ -576,6 +578,7 @@ export default function App() {
         if (as?.role === "main") {
           startSubagents(slot, folder);
           startRoles(slot, folder);
+          startReview(slot, as.review);
         }
         to(slot)({ type: "history_loaded", sessionId, events: opened.events, movedFrom: opened.moved_from });
         to(slot)({ type: "session_ready" });
@@ -630,7 +633,7 @@ export default function App() {
     if (c.draft) drafts.current[slot] = c.draft;
     const o = c.orchestra;
     let team: TeamRole | undefined;
-    if (o?.role === "main") team = { role: "main" };
+    if (o?.role === "main") team = { role: "main", review: o.review ? readReview(o.review) : undefined };
     else if (o?.role === "worker") {
       const parent = opened[o.parentSession] ?? openMainOf(o.parentSession);
       // An agent only comes back inside its team: without its main agent it stays closed, never an ordinary chat.
@@ -639,7 +642,7 @@ export default function App() {
     }
     if (c.sessionId) return resumeIn(slot, c.folder, c.sessionId, false, team);
     // Typed in the box but never sent: a new chat in its folder, as a main agent again if it was one.
-    startIn(slot, c.folder, false, team?.role === "main");
+    startIn(slot, c.folder, false, team?.role === "main", undefined, team?.role === "main" ? team.review : undefined);
     return Promise.resolve(true);
   };
   // What the restore card lists: agents aren't, they come back with their team.
@@ -887,14 +890,26 @@ export default function App() {
   useEffect(() => {
     for (const [slot, s] of Object.entries(chats.slots)) if (s.orchestrator && s.folder) startRoles(slot, s.folder);
   }, [roleStore]);
+  /** A team's review setting for a Lead that has just started or come back (a team from a template is on, any other off, until the user says): told to the backend and shown. */
+  const startReview = (slot: string, review: ReviewSetting = NO_REVIEW) => {
+    to(slot)({ type: "review_set", review });
+    api.setReview(slot, review).catch(() => {});
+  };
+  /** The team's "Review and test what an agent builds" setting: kept with the team, and told to the backend. */
+  const changeReview = (slot: string, review: ReviewSetting) => {
+    if (!chats.slots[slot]?.orchestrator) return;
+    to(slot)({ type: "review_set", review });
+    api.setReview(slot, review).catch((e) => to(slot)({ type: "notice", text: errText(e) }));
+  };
   const [templateDialog, setTemplateDialog] = useState(false);
   const startFromTemplate = (template: TeamTemplate, task: string) => {
     const folder = state.folder;
     if (!folder) return;
     setTemplateDialog(false);
-    const message = templateMessage(template, roleStore.roles(folder), task);
+    const review = reviewFor(template);
+    const message = templateMessage(template, roleStore.roles(folder), task, review.on);
     askTeam(null, () => {
-      startFresh(folder, false, true, message);
+      startFresh(folder, false, true, message, review);
       setView("canvas");
     });
   };
@@ -943,6 +958,7 @@ export default function App() {
         if (team && !s.orchestrator) {
           startSubagents(slot, s.folder ?? "");
           startRoles(slot, s.folder ?? "");
+          startReview(slot);
           focusAgent(slot);
           setView("canvas");
         }
@@ -1263,6 +1279,7 @@ export default function App() {
     setPermissions: (slot: string, permissions: Permissions) => changePermissions(permissions, slot),
     setWorkflow: (slot: string, workflow: Workflow) => changeWorkflow(workflow, slot),
     setSubagents: changeSubagents,
+    setReview: changeReview,
     draft: (slot: string) => drafts.current[slot] ?? "",
     setDraft: (slot: string, text: string) => {
       if (text) drafts.current[slot] = text;
@@ -1297,6 +1314,7 @@ export default function App() {
       setPermissions: (slot, permissions) => doingRef.current.setPermissions(slot, permissions),
       setWorkflow: (slot, workflow) => doingRef.current.setWorkflow(slot, workflow),
       setSubagents: (main, subagents) => doingRef.current.setSubagents(main, subagents),
+      setReview: (main, review) => doingRef.current.setReview(main, review),
       draft: (slot) => doingRef.current.draft(slot),
       setDraft: (slot, text) => doingRef.current.setDraft(slot, text),
     }),
@@ -1380,6 +1398,19 @@ export default function App() {
         if (a.kind === "finished" || a.kind === "failed") setUnread((u) => ({ ...u, [slot]: Date.now() }));
         const project = s.folder && s.folder !== state.folder ? basename(s.folder) : null;
         if (wanted) setHud({ key: Date.now(), kind: a.kind, body: a.body, chat: { slot, title: chats.agents[slot]?.name ?? chatTitle(s, titles), project } });
+      }
+    }
+  }, [chats.slots]);
+
+  // The review and test of a builder's work came in, and the builder isn't the chat on screen: the inbox says so until it is looked at.
+  const reviewSeen = useRef(new Set<string>());
+  useEffect(() => {
+    for (const lead of Object.values(chats.slots)) {
+      for (const r of lead.reviews) {
+        const key = `${r.builder}:${r.commit}`;
+        if (!r.done || reviewSeen.current.has(key)) continue;
+        reviewSeen.current.add(key);
+        if (r.builder !== active && chats.slots[r.builder]) setUnread((u) => ({ ...u, [r.builder]: r.at }));
       }
     }
   }, [chats.slots]);

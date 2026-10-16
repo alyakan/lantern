@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { Role } from "./lib/roles";
+import type { ReviewSetting } from "./lib/reviewChain";
 import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
@@ -63,6 +64,8 @@ export const api = {
   spawnWorker: (main: string, w: NewWorker) => invoke<string>("orchestra_spawn", { main, task: w.task, name: w.name, isolation: w.isolation, model: w.model, role: w.role ?? null }),
   /** Tells a Lead's team the project's own roles (the built-in ones need no telling), so the Lead may ask for one by id. */
   setRoles: (main: string, roles: Role[]) => invoke<void>("orchestra_set_roles", { main, roles }),
+  /** A team's "Review and test what an agent builds" setting, on its Lead (see src-tauri/src/orchestra/review.rs). */
+  setReview: (main: string, setting: ReviewSetting) => invoke<void>("orchestra_set_review", { main, setting }),
   /** Runs a command the user typed after "!" in the chat's folder; its output comes as shell_output, then shell_done. */
   runShell: (slot: string, id: string, command: string) => invoke<void>("run_shell", { slot, id, command }),
   /** Asks the chat's claude something for Settings (MCP status and actions, reloading skills); resolves to its reply. */

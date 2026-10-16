@@ -435,6 +435,60 @@ pub fn branch_summary(repo: &Path, base: &str, branch: &str, path_env: Option<&s
     Ok(BranchSummary { commits, files })
 }
 
+/// A builder's work as a reviewer that has no shell reads it: the files changed (a stat) and the diff, from where the builder
+/// started to its commit. `cut`: the diff is not all of it (it was too long to hand over whole).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReviewDiff {
+    pub stat: String,
+    pub diff: String,
+    pub cut: bool,
+}
+
+/// More changed lines than this and the diff text is left out altogether: git would have to write it all down before it could
+/// be cut, and nobody reviews that many lines from a brief. The stat is still there.
+const DIFF_LINES_MAX: u32 = 20_000;
+/// The most of the stat that is kept.
+const STAT_MAX: usize = 6_000;
+
+/// What `base...commit` changed, read by git with argument vectors only (never a shell), without running a diff or text
+/// conversion program the repository's config names, and cut to `max_bytes` of diff at a line. The merge base is what the
+/// builder started from, so it is the builder's work and not what the base branch gained since.
+pub fn review_diff(repo: &Path, base: &str, commit: &str, max_bytes: usize, path_env: Option<&str>) -> Result<ReviewDiff, String> {
+    if base.is_empty() || base.starts_with('-') || base.chars().any(char::is_control) {
+        return Err("The branch the work started from isn't usable.".into());
+    }
+    if commit.len() != 40 || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err("That isn't a commit.".into());
+    }
+    let range = format!("{base}...{commit}");
+    let plain = ["diff", "--no-ext-diff", "--no-textconv", "--no-color"];
+    let with = |extra: &[&str]| -> Vec<String> { plain.iter().map(|a| a.to_string()).chain(extra.iter().map(|a| a.to_string())).chain([range.clone()]).collect() };
+    let run_with = |extra: &[&str], raw: bool| {
+        let args = with(extra);
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        if raw { run_raw(repo, &refs, path_env) } else { run(repo, &refs, path_env) }
+    };
+    let mut stat = run_with(&["--stat=100,60"], false)?;
+    if stat.len() > STAT_MAX {
+        let at = (0..=STAT_MAX).rev().find(|i| stat.is_char_boundary(*i)).unwrap_or(0);
+        let keep = stat[..at].rfind('\n').unwrap_or(at);
+        stat.truncate(keep);
+        stat.push_str("\n…");
+    }
+    let changed: u32 = run_with(&["--numstat"], false)?.lines().filter_map(|l| l.split('\t').take(2).map(|n| n.parse::<u32>().unwrap_or(0)).reduce(|a, b| a + b)).sum();
+    if changed > DIFF_LINES_MAX {
+        return Ok(ReviewDiff { stat, diff: String::new(), cut: true });
+    }
+    let mut diff = run_with(&[], true)?;
+    let cut = diff.len() > max_bytes;
+    if cut {
+        let at = (0..=max_bytes).rev().find(|i| diff.is_char_boundary(*i)).unwrap_or(0);
+        let keep = diff[..at].rfind('\n').unwrap_or(at);
+        diff.truncate(keep);
+    }
+    Ok(ReviewDiff { stat, diff: diff.trim_end().to_string(), cut })
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Merged {
     /// Merged into this branch.
@@ -1066,5 +1120,53 @@ mod tests {
         let a = add_detached_worktree(main.path(), &parent, "x", "w1", &tip, None).unwrap();
         let b = add_detached_worktree(main.path(), &parent, "x", "w1", &tip, None).unwrap();
         assert_ne!(a.root, b.root);
+    }
+
+    #[test]
+    fn the_diff_of_a_builders_work_is_its_stat_and_text_from_where_it_started_and_never_the_bases_own_news() {
+        let main = repo();
+        let builder = add_worktree(main.path(), &worktrees(), "Builder", "w1", None).unwrap();
+        std::fs::write(builder.folder.join("built.txt"), "built\nmore\n").unwrap();
+        let checked = verify_worktree(main.path(), &builder.root, None).unwrap();
+        commit_all(At::Worktree(&checked), "build it", None).unwrap();
+        // The base branch moves on meanwhile: that is not the builder's work.
+        std::fs::write(main.path().join("elsewhere.txt"), "x\n").unwrap();
+        run(main.path(), &["add", "-A"], None).unwrap();
+        run(main.path(), &["commit", "-q", "-m", "elsewhere"], None).unwrap();
+        let tip = tip_of(main.path(), &builder.branch, None).unwrap();
+        let d = review_diff(main.path(), "main", &tip, 60_000, None).unwrap();
+        assert!(!d.cut && d.stat.contains("built.txt") && d.stat.contains("1 file changed"), "{d:?}");
+        assert!(d.diff.contains("diff --git a/built.txt b/built.txt") && d.diff.contains("+built") && d.diff.contains("+more"), "{}", d.diff);
+        assert!(!d.diff.contains("elsewhere"), "{}", d.diff);
+    }
+
+    #[test]
+    fn a_long_diff_is_cut_at_a_line_and_says_so_and_a_huge_one_is_left_to_its_stat() {
+        let main = repo();
+        let wt = add_worktree(main.path(), &worktrees(), "Builder", "w1", None).unwrap();
+        let body: String = (0..400).map(|i| format!("line number {i} of the new file\n")).collect();
+        std::fs::write(wt.folder.join("big.txt"), &body).unwrap();
+        let checked = verify_worktree(main.path(), &wt.root, None).unwrap();
+        commit_all(At::Worktree(&checked), "big", None).unwrap();
+        let tip = tip_of(main.path(), &wt.branch, None).unwrap();
+        let d = review_diff(main.path(), "main", &tip, 2_000, None).unwrap();
+        assert!(d.cut && d.diff.len() <= 2_000, "{}", d.diff.len());
+        assert!(d.diff.lines().last().unwrap().starts_with('+') && d.diff.lines().last().unwrap().ends_with("of the new file"), "cut mid-line: {:?}", d.diff.lines().last());
+        // Whole when it fits.
+        assert!(!review_diff(main.path(), "main", &tip, 60_000, None).unwrap().cut);
+    }
+
+    #[test]
+    fn the_diff_is_read_for_a_commit_and_a_base_that_cant_be_an_option() {
+        let main = repo();
+        let tip = tip_of(main.path(), "main", None).unwrap();
+        for base in ["", "--output=/tmp/pwned", "-x", "a\nb"] {
+            assert!(review_diff(main.path(), base, &tip, 100, None).is_err(), "{base:?}");
+        }
+        assert_eq!(review_diff(main.path(), "main", "--help", 100, None).unwrap_err(), "That isn't a commit.");
+        assert!(review_diff(main.path(), "no-such-branch", &tip, 100, None).is_err());
+        // Nothing changed: an empty diff, not an error.
+        let same = review_diff(main.path(), "main", &tip, 100, None).unwrap();
+        assert_eq!((same.diff.as_str(), same.cut), ("", false));
     }
 }

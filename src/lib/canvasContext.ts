@@ -2,6 +2,7 @@ import { createContext, useContext, useRef, useSyncExternalStore } from "react";
 import type { State } from "../store";
 import type { CloseAgreed, CloseCheck, NewWorker } from "../types";
 import type { Permissions, Subagents, Workflow } from "./workflow";
+import type { ReviewSetting } from "./reviewChain";
 
 /**
  * Every open chat's state, for the canvas: each agent on it subscribes to its own chat, so a streaming reply in one agent
@@ -105,6 +106,8 @@ export interface NodeActions {
   setWorkflow(slot: string, workflow: Workflow): void;
   /** The team's Subagents setting, on its Lead: where the Lead's built-in helpers run. */
   setSubagents(main: string, subagents: Subagents): void;
+  /** The team's "Review and test what an agent builds" setting, on its Lead. */
+  setReview(main: string, review: ReviewSetting): void;
 }
 
 export const NodeActionsContext = createContext<NodeActions | null>(null);

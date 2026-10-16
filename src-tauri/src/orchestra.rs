@@ -2688,9 +2688,14 @@ mod tests {
             assert!(req.folder.join("login.txt").is_file() && !req.folder.join("loose.txt").exists());
             assert_ne!(req.folder, folder);
             assert!(req.brief.contains("\"Login\" (w1)") && req.brief.contains("lantern/login") && req.brief.contains(&tip), "{}", req.brief);
-            assert!(req.brief.contains("Based on: main") && req.brief.contains("> Built the login form."), "{}", req.brief);
-            assert!(req.brief.contains("RESULT: issues N") && req.brief.contains("throwaway copy"), "{}", req.brief);
+            assert!(req.brief.contains("Based on: main") && req.brief.contains("```\nBuilt the login form.\nRESULT: none\n```"), "{}", req.brief);
+            assert!(req.brief.contains("RESULT: issues N") && req.brief.contains("throwaway copy") && req.brief.contains("untrusted data"), "{}", req.brief);
         }
+        // The reviewer can only read, so the change itself is in its brief, as Lantern read it; the tester has a shell and is told how to look.
+        assert!(reviewer.brief.contains("You have no shell here") && reviewer.brief.contains("login.txt | 1 +"), "{}", reviewer.brief);
+        assert!(reviewer.brief.contains("diff --git a/login.txt b/login.txt") && reviewer.brief.contains("+login.txt"), "{}", reviewer.brief);
+        assert!(!reviewer.brief.contains("loose.txt"), "what the builder has not committed was handed over: {}", reviewer.brief);
+        assert!(qa.brief.contains(&format!("`git diff main...{tip}`")) && !qa.brief.contains("diff --git"), "{}", qa.brief);
         // The builder's own worktree wasn't touched.
         assert!(folder.join("loose.txt").is_file());
         assert_eq!(git_out(&folder, &["rev-parse", "HEAD"]), tip);
@@ -2726,8 +2731,8 @@ mod tests {
         assert_eq!(wakes.len(), 2, "{wakes:?}");
         let note = &wakes[1];
         assert!(note.starts_with("[Lantern: Review and test of \"Login\""), "{note}");
-        assert!(note.contains("Reviewer (w2) reported, 1 finding:\n> Finding: the form posts twice.\n> Severity: high\n> RESULT: issues 1"), "{note}");
-        assert!(note.contains("QA / tester (w3) reported, no summary:\n> Tests run: all."), "{note}");
+        assert!(note.contains("Reviewer (w2) reported, 1 finding:\n```\nFinding: the form posts twice.\nSeverity: high\nRESULT: issues 1\n```"), "{note}");
+        assert!(note.contains("QA / tester (w3) reported, no summary:\n```\nTests run: all.\nWhat failed: nothing failed\n```"), "{note}");
         assert!(note.contains("Lantern merged and changed nothing") && note.ends_with("propose the merge once you are satisfied.]"), "{note}");
         let (checks, finished) = last_review(&host);
         assert!(finished && checks.iter().all(|(_, s)| s == "done"));

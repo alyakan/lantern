@@ -173,3 +173,27 @@ describe("which requests Allow is offered for", () => {
     expect(rowFor("ExitPlanMode", { plan: "x" })).toMatchObject({ canAllow: false, requestId: null });
   });
 });
+
+describe("inboxItems, after Lantern checked a builder's work", () => {
+  const review = (done: boolean, findings: number | null, at = 500) => ({ builder: "a1", name: "Login", commit: "abc", done, at, checks: [{ role: "reviewer", label: "Reviewer", slot: "w2", state: "done" as const, findings, passed: findings === null ? null : findings === 0 }] });
+  const team = (reviews: ReturnType<typeof review>[]) =>
+    chats({ lead: idle({ orchestrator: true, items: [said("Ship it")], reviews }), a1: idle({ folder: "/wt/a", items: [said("go"), ...reply("Built it")] }) }, { agents: { a1: meta("lead", "Login") } });
+
+  it("says what came back, once, until the user looks at the builder", () => {
+    const [row, ...rest] = list(team([review(true, 3)]), { a1: 500 });
+    expect(rest).toEqual([]);
+    expect(row).toMatchObject({ kind: "review", slot: "a1", role: "agent", team: "lead", title: "Login", need: "Review of Login found 3 things", since: 500, needsYou: false });
+    // Looked at (no unread mark): gone.
+    expect(list(team([review(true, 3)]))).toEqual([]);
+  });
+
+  it("says nothing while the checks are going, and has no row of its own when the report had no number", () => {
+    expect(list(team([review(false, null)]), { a1: 500 })[0].kind).toBe("unread");
+    expect(list(team([review(true, null)]), { a1: 500 })[0]).toMatchObject({ kind: "review", need: "Review of Login is in (no summary)" });
+  });
+
+  it("goes back to the builder's own row once it finishes another turn", () => {
+    // The builder's later turn put its own time on the mark: that is no longer the review's.
+    expect(list(team([review(true, 3)]), { a1: 900 })[0]).toMatchObject({ kind: "unread", need: "Finished" });
+  });
+});
