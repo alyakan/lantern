@@ -195,6 +195,8 @@ export interface RelocateOutcome {
 export interface CloseCheck {
   /** It has a worktree of its own; a worker in the shared folder only gets stopped. */
   worktree: boolean;
+  /** Its worktree's folder was removed outside Lantern: nothing in it can be lost, and only its branch is left to delete. */
+  gone?: boolean;
   branch: string | null;
   /** Files changed in its worktree and not committed. */
   uncommitted: number;

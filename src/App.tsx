@@ -2330,7 +2330,9 @@ export default function App() {
           <div className="app-modal">
             <ConfirmDialog title="Close this agent?" confirmLabel="Discard work and close" busyLabel="Closing…" busy={closingBusy} onConfirm={() => closeFullAgent(closingFull.slot, { uncommitted: closingFull.check.uncommitted, unmerged_commits: closingFull.check.unmerged_commits })} onCancel={() => setClosingFull(null)}>
               <p>
-                It has <strong>{lostText(closingFull.check)}</strong>. Closing it stops it and deletes its worktree{closingFull.check.branch ? <> and branch <code>{closingFull.check.branch}</code></> : null}, so that work is gone for good.
+                It has <strong>{lostText(closingFull.check)}</strong>.{" "}
+                {closingFull.check.gone ? "Its worktree is already gone. Closing it stops it and deletes" : "Closing it stops it and deletes its worktree"}
+                {closingFull.check.branch ? <>{closingFull.check.gone ? " its" : " and"} branch <code>{closingFull.check.branch}</code></> : null}, so that work is gone for good.
               </p>
             </ConfirmDialog>
           </div>

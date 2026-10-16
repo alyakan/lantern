@@ -657,7 +657,7 @@ export function Sidebar(props: Props) {
     } else if (target.kind === "agent") {
       // The canvas's own flow: nothing to lose closes it, otherwise it says what would be thrown away and waits.
       handlers.closeCheck(target.slot).then(
-        (check) => (lostText(check) ? question(`It has ${lostText(check)}. Closing it deletes its worktree, so that work is gone for good.`, "Discard work and close", { [target.slot]: agreeing(check) }) : handlers.closeWorker(target.slot).catch(failed)),
+        (check) => (lostText(check) ? question(`It has ${lostText(check)}. ${check.gone ? "Its worktree is already gone. Closing it deletes its branch" : "Closing it deletes its worktree"}, so that work is gone for good.`, "Discard work and close", { [target.slot]: agreeing(check) }) : handlers.closeWorker(target.slot).catch(failed)),
         failed,
       );
     } else {

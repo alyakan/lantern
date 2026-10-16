@@ -22,7 +22,7 @@ import {
   type View,
 } from "../lib/canvas";
 import { ChatStoreContext, CloseAgentContext, useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
-import { agreedOf, closeAll, closedLine, planClosing, riskyQuestion, stoppedAgents, isStopped, type ClosePlan } from "../lib/closeStopped";
+import { agreedOf, bulkEffect, closeAll, closedLine, planClosing, riskyQuestion, stoppedAgents, isStopped, type ClosePlan } from "../lib/closeStopped";
 import { ProjectSetupContext, runCommandOf } from "../lib/projectSetup";
 import { useAction } from "../lib/actions";
 import { lostText, nodeStatus, readyToMerge, statusLabel, summaryLine, usage, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
@@ -1007,13 +1007,15 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
           onCancel={() => setBulk(null)}
         >
           <p>{riskyQuestion(bulk.risky)}</p>
-          <p>Closing stops them and deletes their worktrees and branches, so that work is gone for good.{bulk.free.length > 0 ? ` ${bulk.free.length === 1 ? "1 other stopped agent has" : `${bulk.free.length} other stopped agents have`} nothing to lose and will be closed either way.` : ""}</p>
+          <p>{bulkEffect(bulk.risky)}, so that work is gone for good.{bulk.free.length > 0 ? ` ${bulk.free.length === 1 ? "1 other stopped agent has" : `${bulk.free.length} other stopped agents have`} nothing to lose and will be closed either way.` : ""}</p>
         </ConfirmDialog>
       )}
       {closing && (
         <ConfirmDialog title={`Close ${nodes.find((n) => n.slot === closing.slot)?.name ?? "this agent"}?`} confirmLabel="Discard work and close" busyLabel="Closing…" busy={closeBusy} onConfirm={() => closeAgent(closing.slot, { uncommitted: closing.check.uncommitted, unmerged_commits: closing.check.unmerged_commits })} onCancel={() => setClosing(null)}>
           <p>
-            It has <strong>{lostText(closing.check)}</strong>. Closing it stops it and deletes its worktree{closing.check.branch ? <> and branch <code>{closing.check.branch}</code></> : null}, so that work is gone for good.
+            It has <strong>{lostText(closing.check)}</strong>.{" "}
+            {closing.check.gone ? "Its worktree is already gone. Closing it stops it and deletes" : "Closing it stops it and deletes its worktree"}
+            {closing.check.branch ? <>{closing.check.gone ? " its" : " and"} branch <code>{closing.check.branch}</code></> : null}, so that work is gone for good.
           </p>
         </ConfirmDialog>
       )}

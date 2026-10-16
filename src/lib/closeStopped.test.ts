@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { initialState, type State } from "../store";
 import type { CloseCheck } from "../types";
-import { closeAll, closedLine, lostBrief, planClosing, riskyQuestion, stoppedAgents } from "./closeStopped";
+import { bulkEffect, closeAll, closedLine, lostBrief, planClosing, riskyQuestion, stoppedAgents } from "./closeStopped";
 import type { OrchestraNode } from "./orchestraView";
 
 const node = (slot: string, role: "main" | "worker" = "worker"): OrchestraNode => ({ slot, role, parent: role === "main" ? null : "s1", name: `Name ${slot}`, branch: null, isolation: "worktree" });
@@ -35,6 +35,15 @@ describe("the question about work that isn't merged", () => {
     ];
     expect(riskyQuestion(risky)).toBe("2 agents have work that isn't merged: Login form (3 commits), API docs (1 uncommitted file). Close them anyway?");
     expect(riskyQuestion(risky.slice(0, 1))).toBe("1 agent has work that isn't merged: Login form (3 commits). Close it anyway?");
+  });
+
+  it("says what closing does, leaving out a worktree that is already gone", () => {
+    const here = { slot: "a", name: "A", check: check(0, 1) };
+    const gone = (slot: string) => ({ slot, name: slot, check: { ...check(0, 1), gone: true } });
+    expect(bulkEffect([here, here])).toBe("Closing stops them and deletes their worktrees and branches");
+    expect(bulkEffect([gone("a")])).toBe("Its worktree is already gone. Closing stops it and deletes its branch");
+    expect(bulkEffect([gone("a"), gone("b")])).toBe("Their worktrees are already gone. Closing stops them and deletes their branches");
+    expect(bulkEffect([gone("a"), here])).toBe("1 of them has no worktree left. Closing stops them and deletes their branches, and the worktrees that are still there");
   });
 
   it("sorts the checked agents into those with nothing to lose, those with work, and those that can't be closed", async () => {

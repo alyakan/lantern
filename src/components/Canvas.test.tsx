@@ -888,6 +888,25 @@ describe("cleaning up and closing an agent", () => {
     expect(acts.closeWorker).not.toHaveBeenCalled();
   });
 
+  it("does not claim to delete a worktree that is already gone, and says so", async () => {
+    const closeCheck = vi.fn(() => Promise.resolve({ ...lost, uncommitted: 0, gone: true }));
+    const { acts } = setup(team(1), { actions: { closeCheck } });
+    chooseClose();
+    const dialog = await screen.findByRole("alertdialog", { name: "Close Worker 1?" });
+    expect(dialog.textContent).toContain("It has 2 commits that aren't merged. Its worktree is already gone. Closing it stops it and deletes its branch lantern/w1, so that work is gone for good.");
+    expect(dialog.textContent).not.toContain("deletes its worktree");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard work and close" }));
+    expect(acts.closeWorker).toHaveBeenCalledWith("w1", { uncommitted: 0, unmerged_commits: 2 });
+  });
+
+  it("closes an agent whose worktree is gone at once when its branch holds nothing", async () => {
+    const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.resolve({ worktree: true, gone: true, branch: null, uncommitted: 0, unmerged_commits: 0 })) } });
+    chooseClose();
+    await waitFor(() => expect(acts.closeWorker).toHaveBeenCalledWith("w1", undefined));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("cancels on Escape and on a press outside the box, and keeps Tab inside it", async () => {
     const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.resolve(lost)) } });
     chooseClose();
@@ -1585,6 +1604,20 @@ describe("Close stopped agents", () => {
     expect(within(dialog).getByText(/1 other stopped agent has nothing to lose/)).toBeInTheDocument();
     expect(acts.closeWorker).not.toHaveBeenCalled();
     expect(within(dialog).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cancel", "Keep those", "Close all"]);
+  });
+
+  it("closes stopped agents whose worktree is gone with the rest, without an error, and names only their branches in the question", async () => {
+    const gone = { worktree: true, gone: true, branch: "lantern/x", uncommitted: 0, unmerged_commits: 0 };
+    const closeCheck = vi.fn((slot: string) => Promise.resolve(slot === "w1" ? { ...gone, unmerged_commits: 2 } : slot === "w2" ? gone : check(0, 0)));
+    const { acts } = setup(withStopped(team(3), "w1", "w2", "w3"), { actions: { closeCheck } });
+    openTeam();
+    fireEvent.click(screen.getByRole("button", { name: "Close stopped agents (3)" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Close stopped agents?" });
+    expect(within(dialog).getByText(/^Its worktree is already gone\. Closing stops it and deletes its branch, so that work is gone for good\./)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close all" }));
+    expect(await screen.findByText("Closed 3 agents.")).toBeInTheDocument();
+    expect(screen.queryByText(/won't run git/)).toBeNull();
+    expect((acts.closeWorker as ReturnType<typeof vi.fn>).mock.calls).toEqual([["w2", undefined], ["w3", undefined], ["w1", { uncommitted: 0, unmerged_commits: 2 }]]);
   });
 
   it("Close all closes every one, each risky one with exactly what it was told it would lose", async () => {
