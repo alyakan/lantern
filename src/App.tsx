@@ -1,6 +1,7 @@
 import { setPlanUsage } from "./lib/planUsage";
 import { pushAgentLimit } from "./lib/agentLimit";
 import { pushAutoMergeTests } from "./lib/mergeTests";
+import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome } from "./api";
@@ -279,6 +280,7 @@ export default function App() {
   useEffect(() => {
     void pushAgentLimit();
     void pushAutoMergeTests();
+    void pushRestorePoints();
   }, []);
   // The backend runs a project's setup in a new worktree, and its Run command: it learns both from here, at launch and on every save.
   useEffect(() => {

@@ -94,6 +94,7 @@ export const api = {
   splitTestCommand: (text: string) => invoke<string[]>("merge_tests_split_command", { text }),
   /** "Run tests when a merge is proposed" (Settings). */
   setAutoMergeTests: (on: boolean) => invoke<void>("set_auto_merge_tests", { on }),
+  setRestorePoints: (on: boolean) => invoke<void>("set_restore_points", { on }),
   /** Removes a worker's worktree; loose work needs `force`, and an unmerged branch is kept either way. */
   discardWorktree: (worker: string, force: boolean) => invoke<void>("orchestra_discard", { worker, force }),
   /** What closing a worker would throw away. Nothing is stopped or removed by asking. */
