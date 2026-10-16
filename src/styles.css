@@ -557,7 +557,7 @@
 :root[data-theme="posthog"] {
   --bg: #eeefe9;
   --pc-tint: 13%;
-  --pc-ink: 78%;
+  --pc-ink: 70%;
   --pane: #eeefe9;
   --sidebar: #ffffff;
   --field: #ffffff;
@@ -573,21 +573,23 @@
   --line-strong: #b3b5aa;
   --text: #151515;
   --text-2: #4d4f46;
-  --muted: #7d7f74;
-  --faint: #b3b5aa;
-  --muted-text: #666860;
+  --muted: #686a60;
+  --faint: #80827a;
+  --muted-text: #5c5e55;
   --accent: #f54e00;
   --accent-soft: #fde4d8;
   --accent-text: #151515;
   --accent-hover: #f9bd2b;
-  --working: #d94600;
+  --md-pre-head-text: #5c5e55;
+  --on-attn: #151515;
+  --working: #bd3e00;
   --unread: #1d4aff;
-  --attn: #c68400;
+  --attn: #b87800;
   --attn-text: #805600;
   --add: #17722f;
-  --del: #cf222e;
+  --del: #c41e2a;
   --warn: #805600;
-  --sev-blocker: #d94600;
+  --sev-blocker: #bd3e00;
   --sev-should: #a88400;
   --sev-should-text: #7a5f00;
   --info-bg: #e7e8e1;
@@ -613,7 +615,9 @@
 /* PostHog's buttons: the primary is orange with a near-black outline and turns yellow under the pointer. */
 :root[data-theme="posthog"] button.primary { border-color: var(--text); }
 :root[data-theme="posthog"] button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--text); filter: none; }
-:root[data-theme="posthog"] button:focus-visible, :root[data-theme="posthog"] [tabindex]:focus-visible { outline: 2px solid var(--unread); outline-offset: 1px; }
+/* The accent is orange, so a red confirm button takes the white card's colour for its text, not the near-black accent text. */
+:root[data-theme="posthog"] .confirm-actions button.danger { color: var(--sidebar); }
+:root[data-theme="posthog"] button:focus-visible,:root[data-theme="posthog"] [tabindex]:focus-visible { outline: 2px solid var(--unread); outline-offset: 1px; }
 
 /* Base */
 * { box-sizing: border-box; }
