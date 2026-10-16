@@ -541,6 +541,68 @@
   --card-shadow: 0 0 0 0.5px rgba(60, 40, 10, 0.14), 0 2px 10px rgba(60, 40, 10, 0.07);
   color-scheme: light;
 }
+/* PostHog: a cream page with white cards, near-black text and one hot orange accent; thin warm-grey outlines, tighter
+   corners, blue for links, yellow for "look at this". System fonts only. */
+:root[data-theme="posthog"] {
+  --bg: #eeefe9;
+  --pc-tint: 13%;
+  --pc-ink: 78%;
+  --pane: #eeefe9;
+  --sidebar: #ffffff;
+  --field: #ffffff;
+  --glass: #1515150a;
+  --glass-line: #15151514;
+  --seg-track: #1515150d;
+  --seg-thumb: #ffffff;
+  --bg-subtle: #f6f6f1;
+  --bg-hover: #1515150d;
+  --bg-active: #15151514;
+  --bg-user: #eeefe9;
+  --line: #d0d1c9;
+  --line-strong: #b3b5aa;
+  --text: #151515;
+  --text-2: #4d4f46;
+  --muted: #7d7f74;
+  --faint: #b3b5aa;
+  --muted-text: #666860;
+  --accent: #f54e00;
+  --accent-soft: #fde4d8;
+  --accent-text: #151515;
+  --accent-hover: #f9bd2b;
+  --working: #d94600;
+  --unread: #1d4aff;
+  --attn: #c68400;
+  --attn-text: #805600;
+  --add: #17722f;
+  --del: #cf222e;
+  --warn: #805600;
+  --sev-blocker: #d94600;
+  --sev-should: #a88400;
+  --sev-should-text: #7a5f00;
+  --info-bg: #e7e8e1;
+  --error-bg: #fbe6e2;
+  --auth-bg: #fbefc9;
+  --code-bg: #e6e7df;
+  --shadow: 0 10px 30px rgba(21, 21, 21, 0.14), 0 0 0 1px var(--line);
+  --card-shadow: 0 0 0 1px var(--line), 0 1px 2px rgba(21, 21, 21, 0.05);
+  --md-link: #1d4aff;
+  --md-link-line: #1d4aff;
+  --md-quote-bar: #f54e00;
+  --md-marker: #f54e00;
+  --md-code-border: 1px solid var(--line);
+  --radius: 4px;
+  --radius-inner: 3px;
+  --radius-chip: 2px;
+  --radius-float: 8px;
+  --radius-md: 6px;
+  --radius-card: 6px;
+  --radius-hud: 10px;
+  color-scheme: light;
+}
+/* PostHog's buttons: the primary is orange with a near-black outline and turns yellow under the pointer. */
+:root[data-theme="posthog"] button.primary { border-color: var(--text); }
+:root[data-theme="posthog"] button.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--text); filter: none; }
+:root[data-theme="posthog"] button:focus-visible, :root[data-theme="posthog"] [tabindex]:focus-visible { outline: 2px solid var(--unread); outline-offset: 1px; }
 
 /* Base */
 * { box-sizing: border-box; }

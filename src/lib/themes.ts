@@ -1,11 +1,11 @@
 /**
- * The themes: what Settings offers, and the custom theme's colours. Light, Dark, Terminal, Fallout, Solarized, Nord and Paper are
+ * The themes: what Settings offers, and the custom theme's colours. Light, Dark, Terminal, Fallout, Solarized, Nord, Paper and PostHog are
  * token sets in styles.css (data-theme on <html>); "custom" is computed here from the few colours the user picks and set
  * on <html> as inline custom properties (see applyTheme).
  */
 import { alpha, contrast, ensureContrast, isDark, mix, normalizeHex, readableOn } from "./color";
 
-export type ThemeId = "system" | "light" | "dark" | "terminal" | "fallout" | "solarized" | "nord" | "paper" | "custom";
+export type ThemeId = "system" | "light" | "dark" | "terminal" | "fallout" | "solarized" | "nord" | "paper" | "posthog" | "custom";
 export type Scheme = "light" | "dark";
 
 /** The six colours a custom theme is made from; every other colour is derived from them. */
@@ -51,6 +51,7 @@ export const THEMES: ThemeInfo[] = [
   { id: "solarized", label: "Solarized Dark", scheme: "dark", picks: pick("#002b36", "#073642", "#a2b1b1", "#93a1a1", "#2aa198", "#0f3f4c") },
   { id: "nord", label: "Nord", scheme: "dark", picks: pick("#2e3440", "#3b4252", "#eceff4", "#d8dee9", "#88c0d0", "#3f4759") },
   { id: "paper", label: "Paper", scheme: "light", picks: pick("#fbf6ec", "#f3ecdc", "#2b2620", "#52483d", "#6b3f1d", "#e4dac6") },
+  { id: "posthog", label: "PostHog", scheme: "light", picks: pick("#eeefe9", "#ffffff", "#151515", "#4d4f46", "#f54e00", "#d0d1c9") },
   { id: "custom", label: "Custom", scheme: null, picks: null },
 ];
 

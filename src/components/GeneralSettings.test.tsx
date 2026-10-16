@@ -138,7 +138,7 @@ describe("Settings' General page", () => {
   it("offers every preset theme, Follow macOS and Custom", () => {
     view();
     const names = within(screen.getByRole("group", { name: "Theme" })).getAllByRole("radio").map((r) => r.closest("label")?.textContent);
-    expect(names).toEqual(["Follow macOS", "Light", "Dark", "Terminal", "Fallout", "Solarized Dark", "Nord", "Paper", "Custom"]);
+    expect(names).toEqual(["Follow macOS", "Light", "Dark", "Terminal", "Fallout", "Solarized Dark", "Nord", "Paper", "PostHog", "Custom"]);
     fireEvent.click(screen.getByLabelText("Terminal"));
     expect(general.onTheme).toHaveBeenCalledWith("terminal");
     fireEvent.click(screen.getByLabelText("Fallout"));
