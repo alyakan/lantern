@@ -49,7 +49,7 @@ export const THEMES: ThemeInfo[] = [
   { id: "terminal", label: "Terminal", scheme: "dark", picks: pick("#0d1117", "#141a22", "#d3d8e0", "#a9b1bb", "#58a6ff", "#21262d") },
   { id: "fallout", label: "Fallout", scheme: "dark", picks: pick("#020a04", "#09180e", "#2adb5f", "#24a54f", "#c4ffd8", "#11401f") },
   { id: "solarized", label: "Solarized Dark", scheme: "dark", picks: pick("#002b36", "#073642", "#adbcbc", "#9fb0b0", "#2aa198", "#0f3f4c") },
-  { id: "nord", label: "Nord", scheme: "dark", picks: pick("#2e3440", "#3b4252", "#eceff4", "#d8dee9", "#88c0d0", "#3f4759") },
+  { id: "nord", label: "Nord", scheme: "dark", picks: pick("#2e3440", "#3b4252", "#eceff4", "#d8dee9", "#88c0d0", "#444c5f") },
   { id: "paper", label: "Paper", scheme: "light", picks: pick("#fbf6ec", "#f3ecdc", "#2b2620", "#52483d", "#6b3f1d", "#e4dac6") },
   { id: "posthog", label: "PostHog", scheme: "light", picks: pick("#eeefe9", "#ffffff", "#151515", "#4d4f46", "#f54e00", "#d0d1c9") },
   { id: "custom", label: "Custom", scheme: null, picks: null },
