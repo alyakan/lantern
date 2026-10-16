@@ -72,6 +72,9 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
   // The chat box grows as you type, which makes this area shorter without scrolling it: stay at the end if you were
   // there, so the box doesn't end up over the last lines. Resized elsewhere (a wider pane, a card made bigger), it keeps
   // the place you were reading, which the same pixels no longer are.
+  // And what is in it grows too, a moment after the chat shows: code gets its colours, a diagram is drawn in place of its
+  // text, a picture loads. A chat opened at its end goes to the end once, so without this it would end up somewhere in the
+  // middle once those arrive (back from another chat or canvas, that is what happened).
   useEffect(() => {
     const el = scroller.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -79,8 +82,17 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
       if (nearBottom.current) el.scrollTop = el.scrollHeight;
       else if (anchor.current) scrollToAnchor(el, anchor.current);
     });
+    // Border box: any change in a turn's size counts, not only its content's.
+    const watch = () => Array.from(el.children).forEach((child) => observer.observe(child, { box: "border-box" }));
     observer.observe(el);
-    return () => observer.disconnect();
+    watch();
+    // A turn added later is watched too.
+    const added = typeof MutationObserver === "undefined" ? null : new MutationObserver(watch);
+    added?.observe(el, { childList: true });
+    return () => {
+      observer.disconnect();
+      added?.disconnect();
+    };
   }, []);
   // Scrolled up from the end: the pill to get back.
   const [away, setAway] = useState(false);

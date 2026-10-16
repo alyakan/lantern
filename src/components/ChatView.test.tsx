@@ -45,6 +45,53 @@ describe("ChatView", () => {
     expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
+  it("stays at the end when what is in the chat grows after it showed (code coloured, a diagram drawn), and leaves a reader who scrolled up alone", () => {
+    // jsdom has no ResizeObserver: ones that say what they watch and let the test say when something resized.
+    const observers: { targets: Element[]; cb: () => void }[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        targets: Element[] = [];
+        constructor(cb: () => void) {
+          observers.push({ targets: this.targets, cb });
+        }
+        observe(el: Element) {
+          this.targets.push(el);
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    try {
+      const { container } = render(<ChatView state={{ ...initialState, status: "idle", folder: "/p", items }} onDecide={() => {}} onOpenFile={() => {}} />);
+      const chat = container.querySelector(".chat") as HTMLElement;
+      // The chat's own observer: it watches the chat, and also what is in it, since that is what grows.
+      const mine = observers.find((o) => o.targets.includes(chat));
+      expect(mine).toBeDefined();
+      expect(mine!.targets.some((el) => el !== chat && chat.contains(el))).toBe(true);
+      const resized = () => mine!.cb();
+      let height = 2000;
+      Object.defineProperty(chat, "scrollHeight", { get: () => height, configurable: true });
+      Object.defineProperty(chat, "clientHeight", { value: 500, configurable: true });
+      let top = 0;
+      Object.defineProperty(chat, "scrollTop", { get: () => top, set: (v: number) => (top = v), configurable: true });
+      // At the end, as a chat shown at its end is.
+      top = 1500;
+      fireEvent.scroll(chat);
+      height = 2600;
+      resized();
+      expect(top).toBe(2600);
+      // A reader who scrolled up to read isn't pulled to the end by it.
+      top = 600;
+      fireEvent.scroll(chat);
+      height = 3200;
+      resized();
+      expect(top).not.toBe(3200);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("announces that Claude is thinking while it runs", () => {
     render(<ChatView state={{ ...initialState, status: "running", folder: "/p", items }} onDecide={() => {}} onOpenFile={() => {}} />);
     expect(screen.getByRole("status", { name: "Claude is thinking" })).toBeInTheDocument();

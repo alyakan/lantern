@@ -150,8 +150,16 @@ describe("a second team while another is working", () => {
   async function pick(chip: RegExp, row: RegExp) {
     const find = () => within(document.querySelector(".composer-meta") as HTMLElement).getByRole("button", { name: chip });
     await waitFor(() => expect(find()).toBeEnabled(), { timeout: LOAD });
-    fireEvent.click(find());
-    fireEvent.click(await screen.findByRole("menuitemradio", { name: row }, { timeout: LOAD }));
+    // A click that lands while the app is still re-rendering can leave the menu shut: open it again until the row shows.
+    let item: HTMLElement | undefined;
+    await waitFor(
+      () => {
+        if (find().getAttribute("aria-expanded") !== "true") fireEvent.click(find());
+        item = screen.getByRole("menuitemradio", { name: row });
+      },
+      { timeout: LOAD },
+    );
+    fireEvent.click(item!);
   }
   /** A team whose Lead is working on a message, so the next team start has something to ask about. */
   async function busyTeam() {
