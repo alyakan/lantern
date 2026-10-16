@@ -4,6 +4,9 @@
 //! index (a copy of the repository's own, kept in its git directory), so the branch, the index, the stash list and the
 //! working tree stay as they are, and the commit is on no branch, so `git log` and `git status` don't show it.
 //!
+//! An untracked file over 20 MB is not kept (a build output, a database, a video: copying it before every message would
+//! be slow and fill the repository). It is left alone by a restore too: never written over, never moved to the Trash.
+//!
 //! Putting the folder back writes only files inside the chat's folder, never through a link, never in a `.git` folder,
 //! and never ignored files (they are in no restore point). A file Claude created since is moved to the Trash. Before it
 //! writes anything it makes a restore point of what is there, which Undo puts back.
@@ -25,6 +28,9 @@ const STALE: Duration = Duration::from_secs(14 * 24 * 60 * 60);
 /// Longer than this and the checkpoint is given up: it is never worth holding a message back for.
 const LIMIT: Duration = Duration::from_secs(60);
 const REFS: &str = "refs/lantern/checkpoints";
+/// An untracked file bigger than this is not kept in a restore point, and a restore leaves it as it is.
+const BIG_FILE: u64 = 20 * 1024 * 1024;
+const BIG_REASON: &str = "It is over 20 MB, so restore points don't keep it and it is left alone.";
 /// Who a restore point's commit is by, so it never fails for want of a configured name.
 const WHO: [(&str, &str); 4] = [("GIT_AUTHOR_NAME", "Lantern"), ("GIT_AUTHOR_EMAIL", "lantern@localhost"), ("GIT_COMMITTER_NAME", "Lantern"), ("GIT_COMMITTER_EMAIL", "lantern@localhost")];
 
@@ -139,6 +145,10 @@ struct State {
     /// The private index this chat keeps: it remembers the files' times, so a checkpoint only reads what changed.
     index: Option<PathBuf>,
     undo: Option<Undo>,
+    /// The untracked files over BIG_FILE the last snapshot left out.
+    large: HashSet<String>,
+    /// For each tree kept, the big files that were left out of it: a restore to it leaves them alone, even once they are small.
+    left_out: std::collections::HashMap<String, HashSet<String>>,
 }
 
 /// A chat's restore points. Lives as long as the chat's slot.
@@ -249,8 +259,14 @@ impl State {
         }
         self.index = Some(index.clone());
         let env: [(&str, &OsStr); 1] = [("GIT_INDEX_FILE", index.as_os_str())];
-        match git(place, &["add", "-A"], &env, path_env).and_then(|_| git(place, &["write-tree"], &env, path_env)) {
-            Ok(tree) => Ok(tree.trim().to_string()),
+        let large = large_untracked(place, path_env);
+        match add_all_but(place, &large, &env, path_env).and_then(|_| git(place, &["write-tree"], &env, path_env)) {
+            Ok(tree) => {
+                let tree = tree.trim().to_string();
+                self.left_out.entry(tree.clone()).or_default().extend(large.iter().cloned());
+                self.large = large;
+                Ok(tree)
+            }
             Err(e) => {
                 // Started again from the repository's index next time.
                 let _ = std::fs::remove_file(&index);
@@ -282,9 +298,55 @@ impl State {
         Ok(point)
     }
 
+    /// The files a restore to `tree` leaves alone for being big: those the folder has now, and those left out of `tree`.
+    fn left_alone(&self, tree: &str) -> HashSet<String> {
+        self.large.iter().chain(self.left_out.get(tree).into_iter().flatten()).cloned().collect()
+    }
+
     fn point(&self, turn: usize) -> Result<Point, String> {
         self.points.iter().rev().find(|p| p.turn == Some(turn)).cloned().ok_or_else(|| "There is no restore point for that message.".to_string())
     }
+}
+
+/// The untracked files git doesn't ignore that are over BIG_FILE, as git names them. Found with git's own list and each
+/// file's size on disk (the link itself for a link, never what it points to; only plain files count).
+fn large_untracked(place: &Place, path_env: Option<&str>) -> HashSet<String> {
+    let Ok(listed) = git(place, &["ls-files", "--others", "--exclude-standard", "-z"], &[], path_env) else { return HashSet::new() };
+    listed
+        .split('\0')
+        .filter(|rel| !rel.is_empty() && !rel.contains('\u{fffd}'))
+        .filter(|rel| place.top.join(rel).symlink_metadata().is_ok_and(|m| m.file_type().is_file() && m.len() > BIG_FILE))
+        .map(String::from)
+        .collect()
+}
+
+/// `git add -A` into the private index of everything but `large` (which are also taken out of it, in case an earlier
+/// checkpoint kept them when they were small). The names go in a file, so a long list can't outgrow a command line.
+fn add_all_but(place: &Place, large: &HashSet<String>, env: &[(&str, &OsStr)], path_env: Option<&str>) -> Result<(), String> {
+    if large.is_empty() {
+        return git(place, &["add", "-A"], env, path_env).map(drop);
+    }
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
+    let (drop_list, add_list) = (Scratch(place.git_dir().join(format!("lantern-drop-{}-{nanos:x}", std::process::id()))), Scratch(place.git_dir().join(format!("lantern-add-{}-{nanos:x}", std::process::id()))));
+    let mut names: Vec<&String> = large.iter().collect();
+    names.sort();
+    let (mut drops, mut adds) = (String::new(), String::from(".\0"));
+    for rel in names {
+        drops.push_str(&format!(":(literal){rel}\0"));
+        adds.push_str(&format!(":(exclude,literal){rel}\0"));
+    }
+    std::fs::write(&drop_list.0, drops).map_err(|e| e.to_string())?;
+    std::fs::write(&add_list.0, adds).map_err(|e| e.to_string())?;
+    let from = |list: &Scratch| {
+        let mut flag = OsStr::new("--pathspec-from-file=").to_os_string();
+        flag.push(list.0.as_os_str());
+        flag
+    };
+    let (drop_flag, add_flag) = (from(&drop_list), from(&add_list));
+    // Nothing is read of the big files: they leave the index by name, and the add skips them.
+    git(place, &["rm", "--cached", "-f", "-q", "--ignore-unmatch", "--pathspec-file-nul", drop_flag.to_str().ok_or("The folder's name isn't plain text.")?], env, path_env)?;
+    git(place, &["add", "-A", "--pathspec-file-nul", add_flag.to_str().ok_or("The folder's name isn't plain text.")?], env, path_env)?;
+    Ok(())
 }
 
 /// Deletes the restore points (and private indexes) that earlier runs left in this repository once they are old.
@@ -383,12 +445,15 @@ fn vet(place: &Place, rel: &str) -> Result<PathBuf, String> {
     Ok(full)
 }
 
-/// Sorts changes into what is written, what is removed and what is left alone.
-fn sort(place: &Place, found: &[Change], keep: &HashSet<String>) -> Work {
+/// Sorts changes into what is written, what is removed and what is left alone. `big` are the files restore points don't keep
+/// (see BIG_FILE): they are never written or removed, however they differ.
+fn sort(place: &Place, found: &[Change], keep: &HashSet<String>, big: &HashSet<String>) -> Work {
     let mut work = Work::default();
     for c in found {
         if keep.contains(&c.path) {
             work.kept.push(place.shown(&c.path));
+        } else if big.contains(&c.path) {
+            work.skipped.push(skip(place, &c.path, BIG_REASON));
         } else if [&c.old_mode, &c.new_mode].iter().any(|m| m.starts_with("120") || m.starts_with("160")) {
             work.skipped.push(skip(place, &c.path, "It is a link, or another repository, so it isn't restored from here."));
         } else if c.path.contains('\u{fffd}') {
@@ -542,6 +607,7 @@ impl Checkpoints {
         let mut st = self.state.lock().unwrap();
         st.points.clear();
         st.undo = None;
+        st.left_out.clear();
     }
 
     /// What putting the folder back to before message `turn` would do.
@@ -550,7 +616,7 @@ impl Checkpoints {
         let target = st.point(turn)?.tree;
         let current = st.snapshot(place, slot, path_env)?;
         let found = changes(place, &current, &target, path_env)?;
-        let work = sort(place, &found, &HashSet::new());
+        let work = sort(place, &found, &HashSet::new(), &st.left_alone(&target));
         Ok(Plan {
             put_back: work.put.into_iter().map(|(shown, _)| shown).collect(),
             removed: work.remove.into_iter().map(|(shown, ..)| shown).collect(),
@@ -566,7 +632,7 @@ impl Checkpoints {
         let target = st.point(turn)?.tree;
         let before = st.snapshot(place, slot, path_env)?;
         let saved = st.record(place, slot, None, before.clone(), "Lantern: before restoring", path_env)?;
-        let work = sort(place, &changes(place, &before, &target, path_env)?, &HashSet::new());
+        let work = sort(place, &changes(place, &before, &target, path_env)?, &HashSet::new(), &st.left_alone(&target));
         let (put_back, removed, mut skipped) = apply(place, &work, &target, trash, path_env);
         skipped.extend(work.skipped);
         // What Undo is checked against. If it can't be made, the restore stands and can't be undone from here.
@@ -584,7 +650,7 @@ impl Checkpoints {
         };
         let current = st.snapshot(place, slot, path_env)?;
         let edited: HashSet<String> = changes(place, &after, &current, path_env)?.into_iter().map(|c| c.path).collect();
-        let work = sort(place, &changes(place, &current, &before, path_env)?, &edited);
+        let work = sort(place, &changes(place, &current, &before, path_env)?, &edited, &st.left_alone(&before));
         let (put_back, removed, mut skipped) = apply(place, &work, &before, trash, path_env);
         skipped.extend(work.skipped);
         st.undo = None;
@@ -718,6 +784,111 @@ mod tests {
         let tree = git_in(&repo.root(), &["for-each-ref", "--format=%(objectname)", "refs/lantern/checkpoints"]);
         assert_eq!(git_in(&repo.root(), &["show", &format!("{tree}:a.txt")]), "a1");
         assert_eq!(git_in(&repo.root(), &["show", &format!("{tree}:untracked.txt")]), "u");
+    }
+
+    /// A sparse file of `megabytes`: it takes no room on disk, but its size is what `metadata` says.
+    fn sparse(repo: &Repo, name: &str, megabytes: u64) {
+        let path = repo.root().join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::File::create(path).unwrap().set_len(megabytes * 1024 * 1024).unwrap();
+    }
+
+    fn size(repo: &Repo, name: &str) -> Option<u64> {
+        repo.root().join(name).symlink_metadata().ok().map(|m| m.len())
+    }
+
+    fn last_tree(repo: &Repo) -> String {
+        git_in(&repo.root(), &["for-each-ref", "--sort=-refname", "--count=1", "--format=%(objectname)", "refs/lantern/checkpoints"])
+    }
+
+    #[test]
+    fn an_untracked_file_over_twenty_megabytes_is_not_kept_and_the_rest_is() {
+        let repo = Repo::new();
+        let (place, points) = (repo.place(), Checkpoints::default());
+        sparse(&repo, "build/huge.bin", 30);
+        sparse(&repo, "just-under.bin", 19);
+        repo.write("small.txt", "s\n");
+        // A big file that git ignores or that is tracked is not the checkpoint's to decide on: ignored stays out as before.
+        sparse(&repo, "ignored.log", 30);
+        points.take(&place, "s1", 0, None).unwrap();
+        let commit = last_tree(&repo);
+        let files = git_in(&repo.root(), &["ls-tree", "-r", "--name-only", &commit]);
+        let files: Vec<&str> = files.lines().collect();
+        assert!(files.contains(&"small.txt") && files.contains(&"just-under.bin") && files.contains(&"a.txt"), "{files:?}");
+        assert!(!files.contains(&"build/huge.bin") && !files.contains(&"ignored.log"), "{files:?}");
+        // Nothing of the private lists is left lying in the repository.
+        let left: Vec<String> = fs::read_dir(repo.root().join(".git")).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.starts_with("lantern-") && !n.starts_with("lantern-index-")).collect();
+        assert!(left.is_empty(), "{left:?}");
+        // The file itself is untouched.
+        assert_eq!(size(&repo, "build/huge.bin"), Some(30 * 1024 * 1024));
+    }
+
+    #[test]
+    fn a_link_to_a_big_file_is_kept_as_a_link_and_the_big_file_behind_it_is_never_followed() {
+        let repo = Repo::new();
+        let (place, points) = (repo.place(), Checkpoints::default());
+        let outside = tempfile::tempdir().unwrap();
+        fs::File::create(outside.path().join("big.bin")).unwrap().set_len(40 * 1024 * 1024).unwrap();
+        std::os::unix::fs::symlink(outside.path().join("big.bin"), repo.root().join("link.bin")).unwrap();
+        assert!(large_untracked(&place, None).is_empty());
+        points.take(&place, "s1", 0, None).unwrap();
+        assert_eq!(git_in(&repo.root(), &["ls-tree", &last_tree(&repo), "link.bin"]).split(' ').next(), Some("120000"));
+    }
+
+    #[test]
+    fn a_restore_never_trashes_or_overwrites_a_file_that_was_left_out_for_its_size() {
+        let repo = Repo::new();
+        let (place, points) = (repo.place(), Checkpoints::default());
+        let trash_dir = repo.trash();
+        let trash = trash_into(trash_dir.clone());
+        // Big when message 0 is sent (so it is not in the restore point), and one that is small then and big after.
+        sparse(&repo, "was-big.bin", 25);
+        repo.write("grows.dat", "tiny\n");
+        repo.write("a.txt", "a1\n");
+        points.take(&place, "s1", 0, None).unwrap();
+        // The turn: the first becomes small (so a snapshot would hold it, and the point doesn't), the second becomes big.
+        fs::write(repo.root().join("was-big.bin"), "now small\n").unwrap();
+        sparse(&repo, "grows.dat", 22);
+        repo.write("a.txt", "a2\n");
+        repo.write("made.txt", "made\n");
+
+        let name = |n: &str| repo.root().join(n).display().to_string();
+        let plan = points.plan(&place, "s1", 0, None).unwrap();
+        let mut skipped: Vec<(String, String)> = plan.skipped.iter().map(|s| (s.path.clone(), s.reason.clone())).collect();
+        skipped.sort();
+        assert_eq!(skipped, vec![(name("grows.dat"), BIG_REASON.to_string()), (name("was-big.bin"), BIG_REASON.to_string())]);
+        assert_eq!(plan.put_back, vec![name("a.txt")]);
+        assert_eq!(plan.removed, vec![name("made.txt")]);
+
+        let done = points.restore(&place, "s1", 0, &trash, None).unwrap();
+        assert_eq!(done.put_back, vec![name("a.txt")]);
+        assert_eq!(done.removed, vec![name("made.txt")]);
+        assert_eq!(done.skipped.len(), 2, "{done:?}");
+        assert_eq!(repo.read("a.txt").as_deref(), Some("a1\n"));
+        // Both are exactly as the turn left them, and nothing of them went to the Trash.
+        assert_eq!(repo.read("was-big.bin").as_deref(), Some("now small\n"));
+        assert_eq!(size(&repo, "grows.dat"), Some(22 * 1024 * 1024));
+        let trashed: Vec<String> = fs::read_dir(&trash_dir).map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+        assert_eq!(trashed, vec!["made.txt".to_string()]);
+
+        // Undo does not touch them either.
+        let undone = points.undo(&place, "s1", done.id.unwrap(), &trash, None).unwrap();
+        assert_eq!(repo.read("was-big.bin").as_deref(), Some("now small\n"));
+        assert_eq!(size(&repo, "grows.dat"), Some(22 * 1024 * 1024));
+        assert_eq!(repo.read("a.txt").as_deref(), Some("a2\n"));
+        assert!(undone.skipped.iter().all(|s| s.reason == BIG_REASON), "{undone:?}");
+    }
+
+    #[test]
+    fn a_big_file_that_an_earlier_checkpoint_kept_small_is_taken_out_of_the_next_one() {
+        let repo = Repo::new();
+        let (place, points) = (repo.place(), Checkpoints::default());
+        repo.write("data.bin", "small\n");
+        points.take(&place, "s1", 0, None).unwrap();
+        assert!(git_in(&repo.root(), &["ls-tree", "-r", "--name-only", &last_tree(&repo)]).lines().any(|f| f == "data.bin"));
+        sparse(&repo, "data.bin", 21);
+        points.take(&place, "s1", 1, None).unwrap();
+        assert!(!git_in(&repo.root(), &["ls-tree", "-r", "--name-only", &last_tree(&repo)]).lines().any(|f| f == "data.bin"));
     }
 
     #[test]
