@@ -57,7 +57,7 @@ interface Props {
   /** The chat's queued messages; without it the box keeps its own queue. */
   queue?: { items: string[]; set: (next: string[]) => void };
   /** Context use and timing for the footer meter. */
-  usage?: { used: number | null; window: number; lastTurnMs: number | null; actions?: { onCompact: () => void; onClear: () => void }; session?: { cost: number | null; tokens: number } };
+  usage?: { used: number | null; window: number | null; lastTurnMs: number | null; actions?: { onCompact: () => void; onClear: () => void }; session?: { cost: number | null; tokens: number } };
   /** The Models chip: the model the user chose (null = default) and how to change it. */
   models?: { chosen: string | null; onChoose: (model: string | null) => void; defaultModel?: string | null; ids?: Record<string, string>; options?: ModelOption[] };
   /** Thinking effort, under the chip's Customize…: the chosen level (null = default) and how to change it. */

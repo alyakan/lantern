@@ -109,6 +109,13 @@ export interface NodeActions {
 
 export const NodeActionsContext = createContext<NodeActions | null>(null);
 
+/** The context windows seen so far, by model (saved by the app): what an agent that hasn't finished a turn yet can use. */
+export const KnownWindowsContext = createContext<Record<string, number>>({});
+
+export function useKnownWindows(): Record<string, number> {
+  return useContext(KnownWindowsContext);
+}
+
 export function useNodeActions(): NodeActions {
   const actions = useContext(NodeActionsContext);
   if (!actions) throw new Error("An agent on the canvas needs NodeActionsContext");

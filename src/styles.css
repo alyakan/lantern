@@ -2190,6 +2190,8 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .ctx-line { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ctx-bar { flex: 1; min-width: 48px; height: 6px; border-radius: var(--radius-pill); background: var(--bg-active); overflow: hidden; }
 .ctx-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--muted); }
+/* No window known: a dashed track that doesn't pretend to be a measure. */
+.ctx-bar.unknown { background: none; border: 1px dashed var(--line-strong); height: 4px; box-sizing: border-box; }
 .ctx-row.warn .ctx-bar > span { background: var(--warn); }
 .ctx-row.full .ctx-bar > span { background: var(--del); }
 .ctx-tokens { flex: none; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); font-variant-numeric: tabular-nums; }

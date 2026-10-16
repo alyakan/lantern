@@ -520,6 +520,36 @@ describe("oversight", () => {
     expect(chip).toHaveAccessibleName("Context: Lead 78% used, getting full");
   });
 
+  it("says tokens, not a percent, while no agent's window is known, and never calls it full", () => {
+    const chats = team(1);
+    // 312k used by a Lead whose window nothing has said (its first turn hasn't ended): not "312k of 200k".
+    chats.slots.s1 = { ...chats.slots.s1, contextUsed: 312_000, contextWindow: null };
+    setup(chats);
+    const chip = screen.getByRole("button", { name: /^Context:/ });
+    expect(chip.querySelector(".canvas-ctl-long")?.textContent).toBe("Context 312k");
+    expect(chip.querySelector(".canvas-ctl-short")?.textContent).toBe("312k");
+    expect(chip).toHaveAccessibleName("Context: Lead 312,000 tokens used, window not known yet");
+    expect(chip).not.toHaveClass("full");
+    expect(chip).not.toHaveClass("warn");
+    fireEvent.click(chip);
+    const list = screen.getByRole("dialog", { name: "Context by agent" });
+    expect(within(list).queryAllByRole("meter")).toHaveLength(0);
+    expect(within(list).getByText("window not known")).toBeTruthy();
+    expect(within(list).getByTitle("312,000 tokens, window not known until a turn ends")).toHaveTextContent("312k used");
+    // Nobody has a percent, so nobody is over the line "Compact all" uses.
+    expect(screen.getByRole("button", { name: /Compact all above 60%/ })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("counts only the agents whose window is known toward the chip, and says how many aren't", () => {
+    const chats = team(1);
+    chats.slots.s1 = { ...chats.slots.s1, contextUsed: 312_000, contextWindow: null };
+    chats.slots.w1 = { ...chats.slots.w1, contextUsed: 100_000, contextWindow: 200_000 };
+    setup(chats);
+    const chip = screen.getByRole("button", { name: /^Context:/ });
+    expect(chip).toHaveAccessibleName("Context: Worker 1 50% used");
+    expect(chip.getAttribute("title")).toContain("One agent's window isn't known yet, so it isn't counted.");
+  });
+
   it("shows no cost until something has cost anything", () => {
     setup(team(1));
     expect(screen.getByRole("button", { name: "Team" }).textContent).toBe("Team");
