@@ -451,6 +451,12 @@ fn helper_config(slot: &Slot, role: Role, project_notes: Option<String>) -> Resu
     Ok(HelperConfig { exe: exe.display().to_string(), socket: slot.bridge.socket_path.display().to_string(), role, providers: vec![], project_notes })
 }
 
+/// Where the git tool answers for a chat started with `cfg`: only for a read-only agent, and decided here from the role
+/// Lantern gives it, never from anything its helper or the model says (see PermissionBridge). None for every other chat.
+fn read_git_scope(cfg: &SessionConfig) -> Option<read_git::Scope> {
+    matches!(cfg.helper.role, Role::Worker { read_only: true, .. }).then(|| read_git::Scope { folder: cfg.folder.clone(), path_env: cfg.path_env.clone() })
+}
+
 /// Stops the slot's running session (denying its pending prompts) and starts `cfg` in it.
 async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, clear_changes: bool) -> Result<(), String> {
     // Told to the main agent as it starts (and again whenever it restarts, which is when a CLI installed since shows up).
@@ -464,9 +470,8 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, 
         old.stop().await;
     }
     slot.bridge.set_folder(&cfg.folder);
-    // Only a chat started as a read-only agent has the git tool answered (see PermissionBridge); the helper's word is not taken.
-    let reader = matches!(cfg.helper.role, Role::Worker { read_only: true, .. });
-    slot.bridge.set_read_git(reader.then(|| read_git::Scope { folder: cfg.folder.clone(), path_env: cfg.path_env.clone() }));
+    // Set (or cleared) at every start of this chat's claude, so a slot that is reused never keeps the last one's scope.
+    slot.bridge.set_read_git(read_git_scope(&cfg));
     if clear_changes {
         // A new conversation in this chat: the rules it made for its old one go. (A restart keeps them.)
         slot.bridge.clear_chat_rules();
@@ -2174,6 +2179,18 @@ mod tests {
             subagent_model: None,
             helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![], project_notes: None },
             path_env: None,
+        }
+    }
+
+    /// The git tool is answered for a read-only agent and no one else, from the role Lantern started the chat with: the same
+    /// slot started again as anything else (`launch` sets this at every start) has none.
+    #[test]
+    fn the_git_tool_is_scoped_to_a_chat_started_as_a_read_only_agent_and_to_no_other() {
+        let with = |role: Role| SessionConfig { folder: "/work".into(), path_env: Some("/usr/bin".into()), helper: HelperConfig { role, ..config(Mode::Ask, false).helper }, ..config(Mode::Ask, false) };
+        let reader = read_git_scope(&with(Role::Worker { name: "r".into(), read_only: true }));
+        assert_eq!(reader, Some(read_git::Scope { folder: "/work".into(), path_env: Some("/usr/bin".into()) }));
+        for role in [Role::Normal, Role::Main, Role::Worker { name: "b".into(), read_only: false }] {
+            assert_eq!(read_git_scope(&with(role.clone())), None, "{role:?}");
         }
     }
 

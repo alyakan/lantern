@@ -44,16 +44,26 @@ const DIFFING: &[&str] = &["diff", "log", "show"];
 /// lost but `--text`, which `-a` says.
 const DENIED_LONG: &[&str] = &[
     "output", "ext-diff", "textconv", "exec", "upload-pack", "receive-pack", "open-files-in-pager", "exec-path", "git-dir", "work-tree", "config-env", "namespace", "super-prefix", "no-index",
-    "contents", "file",
+    "contents", "file", "show-signature",
 ];
 
-/// Short options refused in a subcommand, wherever they sit in a cluster (`-nO`): grep's `-O` opens its matches in a pager
-/// program, and `-f` reads its patterns from a file anywhere on the disk.
+/// Short options refused in a subcommand, wherever they sit in a cluster (`-nO`): `-O` opens grep's matches in a pager
+/// program (and names an order file in the diffs), `-f` makes grep read its patterns from a file anywhere on the disk,
+/// and status's `-v` draws the diff of what is staged, which runs a textconv driver (there is no `--no-textconv` for it).
 fn denied_short(sub: &str) -> &'static str {
-    if sub == "grep" {
-        "Of"
+    match sub {
+        "grep" => "Of",
+        "status" => "Ov",
+        _ => "O",
+    }
+}
+
+/// What a subcommand refuses of its long options besides DENIED_LONG: status's `--verbose`, for the same reason as `-v`.
+fn denied_long_in(sub: &str) -> &'static [&'static str] {
+    if sub == "status" {
+        &["verbose"]
     } else {
-        ""
+        &[]
     }
 }
 
@@ -94,12 +104,14 @@ pub fn validate(args: &[String]) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-/// Refuses a denied option in a subcommand's arguments. Everything after a bare `--` is a path, and left alone.
+/// Refuses a denied option anywhere in a subcommand's arguments, after a bare `--` too: an option that takes its value
+/// as the next argument takes a `--` as that value (`grep -e -- -Ocmd`), and git then goes on reading options. A path
+/// named like an option is refused with them, which is the price of not having to know which options take a value.
 fn check_flags(sub: &str, rest: &[String]) -> Result<(), String> {
-    for a in rest.iter().take_while(|a| *a != "--") {
+    for a in rest.iter().filter(|a| *a != "--") {
         let denied = if let Some(long) = a.strip_prefix("--") {
             let name = long.split('=').next().unwrap_or("");
-            name.is_empty() || DENIED_LONG.iter().any(|d| d.starts_with(name))
+            name.is_empty() || DENIED_LONG.iter().chain(denied_long_in(sub)).any(|d| d.starts_with(name))
         } else if let Some(cluster) = a.strip_prefix('-') {
             cluster.chars().any(|c| denied_short(sub).contains(c))
         } else {
@@ -295,10 +307,10 @@ struct Output {
 /// The command that runs git in `repo` with `argv` after Lantern's own options. Nothing of the environment that git reads
 /// is kept (every GIT_* variable of `inherited`, the names the process has, goes), the user's and the system's git config
 /// are not read, and nothing here may start a program the repository's config names to watch the files
-/// (`core.fsmonitor`), page the output or draw a diff. It has no stdin, and its own process group.
+/// (`core.fsmonitor`), run a hook, check a signature (`gpg.program`), page the output or draw a diff. It has no stdin, and its own process group.
 fn command(repo: &Path, argv: &[String], path_env: Option<&str>, inherited: &[OsString]) -> Command {
     let mut cmd = Command::new("git");
-    cmd.arg("-C").arg(repo).args(["-c", "core.fsmonitor=false", "-c", "core.pager=cat", "-c", "diff.external="]).args(argv);
+    cmd.arg("-C").arg(repo).args(crate::git::HARDENED).args(["-c", "diff.external="]).args(argv);
     for name in inherited.iter().filter(|n| n.to_string_lossy().starts_with("GIT_")) {
         cmd.env_remove(name);
     }
@@ -394,6 +406,8 @@ mod tests {
         assert_eq!(allowed(&["log", "--oneline", "-5"]), ["log", "--no-ext-diff", "--no-textconv", "--oneline", "-5"]);
         assert_eq!(allowed(&["show", "HEAD:path"]), ["show", "--no-ext-diff", "--no-textconv", "HEAD:path"]);
         assert_eq!(allowed(&["status", "--short"]), ["status", "--short"]);
+        allowed(&["status", "-sb", "--porcelain=v2"]);
+        allowed(&["blame", "-f", "-L", "1,5", "a.txt"]);
         assert_eq!(allowed(&["branch", "--list"]), ["branch", "--list"]);
         assert_eq!(allowed(&["tag", "-l"]), ["tag", "-l"]);
         assert_eq!(allowed(&["worktree", "list", "--porcelain"]), ["worktree", "list", "--porcelain"]);
@@ -409,9 +423,7 @@ mod tests {
         allowed(&["tag", "--list", "v1.*", "-n5", "--sort=-v:refname"]);
         allowed(&["tag", "-l", "--contains", "HEAD~3"]);
         allowed(&["tag", "--points-at", "HEAD", "--list"]);
-        // A pattern, a path or a revision that starts like an option sits after `--`, where nothing is looked at.
-        allowed(&["log", "--", "--output=x"]);
-        allowed(&["diff", "HEAD", "--", "-O"]);
+        allowed(&["grep", "-e", "foo", "--", "src", "docs"]);
     }
 
     #[test]
@@ -445,10 +457,44 @@ mod tests {
             vec!["log", "--config-env=core.pager=X"],
             vec!["log", "--namespace=x"],
             vec!["log", "--out"],
+            // Options take their value as the next argument, and a `--` can be that value: what follows is still options.
+            vec!["grep", "-e", "--", "-Otouch /tmp/marker"],
+            vec!["grep", "-e", "--", "--open-files-in-pager=touch /tmp/marker"],
+            vec!["grep", "-e", "--", "-O"],
+            vec!["grep", "-f", "--", "x"],
+            vec!["shortlog", "--grep", "--", "--output=/tmp/x"],
+            vec!["blame", "-L", "--", "--contents", "/etc/passwd"],
+            vec!["blame", "-L", "--", "--contents=/etc/passwd", "a.txt"],
+            vec!["log", "--", "--output=x"],
+            vec!["diff", "HEAD", "--", "-O"],
+            vec!["diff", "HEAD", "--", "--no-index"],
+            vec!["status", "-v"],
+            vec!["status", "-vv"],
+            vec!["status", "--verbose"],
+            vec!["status", "--verb"],
+            vec!["status", "-sv"],
+            vec!["log", "--show-signature"],
+            vec!["log", "--show-sig"],
+            vec!["show", "--show-signature", "HEAD"],
         ] {
             let why = refused(&hostile);
             assert!(why.contains("refused") && why.contains("Only read-only git is available"), "{hostile:?}: {why}");
         }
+    }
+
+    #[test]
+    fn a_denied_option_is_refused_after_a_bare_double_dash_for_every_subcommand() {
+        for sub in LOOKING {
+            for hostile in ["--output=/tmp/x", "--ext-diff", "--textconv", "--exec=x", "--upload-pack=x", "--git-dir=/x", "--no-index", "--contents=x", "--show-signature"] {
+                for before in [&[][..], &["-e", "--"], &["--"]] {
+                    let list: Vec<&str> = [&[*sub][..], before, &[hostile]].concat();
+                    assert!(validate(&args(&list)).is_err(), "{list:?}");
+                }
+            }
+        }
+        // A bare `--` on its own is a separator, and a path after it that isn't an option is fine.
+        allowed(&["log", "--", "src/main.rs"]);
+        allowed(&["diff", "HEAD", "--", "a.txt"]);
     }
 
     #[test]
@@ -706,6 +752,90 @@ mod tests {
     }
 
     #[test]
+    fn an_option_that_swallows_a_double_dash_cannot_hide_a_pager_command_from_grep() {
+        let (_keep, scratch) = scratch();
+        let (project, tools) = (scratch.join("project"), scratch.join("tools"));
+        fs::create_dir_all(&tools).unwrap();
+        repo(&project);
+        // A file with a `--` in it, which `-e --` then matches, so `-O` has a file to open its pager on.
+        fs::write(project.join("notes.txt"), "a -- b\n").unwrap();
+        git_in(&project, &["add", "."]);
+        git_in(&project, &["commit", "-q", "-m", "notes"]);
+        let marker = tools.join("pager-ran");
+        let pager = format!("-Otouch '{}'", marker.display());
+        // The plain git does run the command, so the test is one that would notice.
+        let plain = Command::new("git").arg("-C").arg(&project).args(["grep", "-e", "--"]).arg(&pager).output().unwrap();
+        assert!(marker.exists(), "git grep -O doesn't run its pager command here: {}", String::from_utf8_lossy(&plain.stderr));
+        fs::remove_file(&marker).unwrap();
+        let scope = Scope { folder: project.clone(), path_env: None };
+        for list in [vec!["grep", "-e", "--", pager.as_str()], vec!["grep", "-e", "--", "-O", marker.to_str().unwrap()], vec!["grep", "--", "-e", "--", pager.as_str()]] {
+            let input = serde_json::json!({ "args": list });
+            let (called, ran) = (call(&scope, &input), run(&project, &args(&list), None));
+            assert!(!marker.exists(), "{list:?} ran the pager command");
+            assert!(called.is_err() && ran.is_err(), "{list:?}");
+        }
+        // And `--output`, which opens its file when it is parsed, hidden the same way.
+        let written = tools.join("written");
+        for list in [vec!["shortlog", "--grep", "--", &format!("--output={}", written.display())], vec!["log", "--grep", "--", &format!("--output={}", written.display())]] {
+            assert!(run(&project, &args(&list), None).is_err(), "{list:?}");
+        }
+        assert!(!written.exists());
+        // What a review needs still works with a `--`.
+        assert!(run_args(&project, &["grep", "-n", "a", "--", "notes.txt"]).unwrap().contains("notes.txt:1:"));
+    }
+
+    #[test]
+    fn status_verbose_is_refused_since_it_runs_a_textconv_driver_and_a_hook_does_not_run_on_diff() {
+        let (_keep, scratch) = scratch();
+        let (project, tools) = (scratch.join("project"), scratch.join("tools"));
+        fs::create_dir_all(&tools).unwrap();
+        repo(&project);
+        let marker = tools.join("ran");
+        let script = marker_script(&tools, "driver.sh", &marker);
+        let config = project.join(".git/config");
+        fs::write(&config, format!("{}[diff \"conv\"]\n\ttextconv = {}\n", fs::read_to_string(&config).unwrap(), script.display())).unwrap();
+        fs::write(project.join(".gitattributes"), "*.txt diff=conv\n").unwrap();
+        git_in(&project, &["add", ".gitattributes"]);
+        git_in(&project, &["commit", "-q", "-m", "attributes"]);
+        // One change staged and another on top of it, so both halves of `status -vv` have a diff to draw.
+        fs::write(project.join("a.txt"), "staged\n").unwrap();
+        git_in(&project, &["add", "a.txt"]);
+        fs::write(project.join("a.txt"), "staged and more\n").unwrap();
+        for flag in ["-v", "-vv", "--verbose"] {
+            assert!(plain_git_runs_it(&project, &marker, &["status", flag]), "plain git status {flag} doesn't run textconv here, so this can't tell");
+        }
+        // `status -v` has no `--no-textconv`, so it is refused; the rest of status works with the driver in the config.
+        for flag in ["-v", "-vv", "--verbose"] {
+            assert!(run_args(&project, &["status", flag]).unwrap_err().contains("refused"), "{flag}");
+            assert!(!marker.exists(), "git status {flag} ran the textconv driver");
+        }
+        assert!(run_args(&project, &["status", "--short"]).unwrap().contains("a.txt"));
+        assert!(!marker.exists());
+        // A hook that git runs after it rewrites the index, which `diff` does when it refreshes a file that was only touched.
+        fs::remove_file(project.join(".gitattributes")).unwrap();
+        git_in(&project, &["checkout", "-q", "--", ".gitattributes"]);
+        git_in(&project, &["reset", "-q", "--hard"]);
+        let hook = project.join(".git/hooks/post-index-change");
+        fs::create_dir_all(hook.parent().unwrap()).unwrap();
+        fs::copy(&script, &hook).unwrap();
+        let touch = || {
+            std::thread::sleep(Duration::from_millis(1100));
+            fs::write(project.join("a.txt"), fs::read_to_string(project.join("a.txt")).unwrap()).unwrap();
+        };
+        touch();
+        let hooked = plain_git_runs_it(&project, &marker, &["diff"]);
+        touch();
+        run_args(&project, &["diff"]).unwrap();
+        assert!(!marker.exists(), "git diff ran a hook");
+        for list in [&["describe", "--dirty", "--always"][..], &["status"], &["diff", "--stat"]] {
+            touch();
+            run_args(&project, list).unwrap();
+            assert!(!marker.exists(), "git {list:?} ran a hook");
+        }
+        eprintln!("plain git diff runs post-index-change here: {hooked}");
+    }
+
+    #[test]
     fn output_past_the_cap_is_cut_and_says_so() {
         let (_keep, root) = scratch();
         repo(&root);
@@ -748,6 +878,17 @@ mod tests {
             assert_eq!(envs.get(name), Some(&Some(value.to_string())), "{name}");
         }
         let argv: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
-        assert_eq!(argv, ["-C", "/some/repo", "-c", "core.fsmonitor=false", "-c", "core.pager=cat", "-c", "diff.external=", "log", "--no-ext-diff", "-1"]);
+        let pinned = |setting: &str| argv.windows(2).any(|w| w[0] == "-c" && w[1] == setting);
+        for setting in [
+            "core.fsmonitor=false", "core.pager=cat", "core.hooksPath=/dev/null", "diff.external=", "log.showSignature=false", "gpg.program=/usr/bin/false", "gpg.ssh.program=/usr/bin/false", "gpg.x509.program=/usr/bin/false",
+            "submodule.recurse=false",
+        ] {
+            assert!(pinned(setting), "{setting} is not on the command line: {argv:?}");
+        }
+        // All of them come before the subcommand, where git takes them as its own.
+        let sub = argv.iter().position(|a| a == "log").unwrap();
+        assert_eq!(&argv[..2], ["-C", "/some/repo"]);
+        assert!(argv.iter().rposition(|a| a == "-c").unwrap() < sub);
+        assert_eq!(&argv[sub..], ["log", "--no-ext-diff", "-1"]);
     }
 }
