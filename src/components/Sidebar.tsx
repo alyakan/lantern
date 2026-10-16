@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import type { CloseAgreed, CloseCheck, MovedFolder, RecentFolder } from "../types";
 import { usePersistentState } from "../lib/layout";
 import { ACTIONS, shortcutLabel } from "../lib/actions";
@@ -20,12 +20,25 @@ const clampWidth = (w: number) => Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, Ma
 
 /** How long the pointer rests on the collapsed bar before it opens, so passing over it on the way to the chat doesn't. */
 export const OPEN_AFTER_MS = 220;
-/** How long the bar takes to close again (the stylesheet's width transition): its pane stays drawn until then. */
-const CLOSE_MS = 240;
+/** How long the bar may take to close again: its pane stays drawn until the width transition ends (the stylesheet's 0.22s), or until this if that never reports. */
+const CLOSE_MS = 300;
 /** How long "Closed 3 finished chats" stays under a project's header. */
 const NOTICE_MS = 4000;
 
 const reducedMotion = () => typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/**
+ * Part of the open pane the collapsed bar doesn't have. As the pane closes it fades and folds away (its height, or its width
+ * with `across`) while the bar narrows, so what stays moves to its place in the bar instead of jumping when the bar takes over.
+ */
+function Away({ across, children }: { across?: boolean; children: ReactNode }) {
+  const Tag = across ? "span" : "div";
+  return (
+    <Tag className={across ? "sb-away-x" : "sb-away-y"}>
+      <Tag className="sb-away-in">{children}</Tag>
+    </Tag>
+  );
+}
 
 const shortcut = (id: string) => {
   const def = ACTIONS.find((a) => a.id === id);
@@ -168,8 +181,10 @@ function NewMenu({ canNew, onNewChat, onNewTeam, onNewTeamTemplate, onReviewPr }
     <div className="sb-new" ref={root}>
       <button className="sb-new-button" aria-haspopup="menu" aria-expanded={open} aria-label="New" title="Start something new" disabled={!canNew} onClick={() => setOpen(!open)}>
         <PlusIcon />
-        <span>New</span>
-        <span className="chev down" aria-hidden />
+        <Away across>
+          <span>New</span>
+          <span className="chev down" aria-hidden />
+        </Away>
       </button>
       {open && (
         <div className="menu sb-menu" role="menu" aria-label="New" ref={menuRef} style={menuStyle} onKeyDown={menuKeys}>
@@ -346,27 +361,29 @@ function Item({ item, project, h, closer, agentsOpen, onAgents }: { item: Sideba
     <>
       <ChatRow full chip={chip} project={project} onClick={() => h.onTeam(item.slot)} target={itemTarget(item)} closer={closer} />
       {item.agents.length > 0 && (
-        <li className="sb-agents-wrap">
-          <button className="sb-agents-toggle" aria-expanded={open} aria-label={`${item.agents.length} ${item.agents.length === 1 ? "agent" : "agents"} in ${item.title}${sum.text ? `, ${sum.text}` : ""}`} onClick={() => onAgents(item.slot, !open)}>
-            <span className={`sb-fold${open ? " open" : ""}`} aria-hidden>
-              <ChevronIcon />
-            </span>
-            <span aria-hidden>
-              {item.agents.length} {item.agents.length === 1 ? "agent" : "agents"}
-            </span>
-            {sum.text && (
-              <span className={`sb-agents-sum${sum.waiting ? " waiting" : ""}`} aria-hidden>
-                {sum.text}
+        <li className="sb-agents-wrap sb-away-y">
+          <div className="sb-away-in">
+            <button className="sb-agents-toggle" aria-expanded={open} aria-label={`${item.agents.length} ${item.agents.length === 1 ? "agent" : "agents"} in ${item.title}${sum.text ? `, ${sum.text}` : ""}`} onClick={() => onAgents(item.slot, !open)}>
+              <span className={`sb-fold${open ? " open" : ""}`} aria-hidden>
+                <ChevronIcon />
               </span>
+              <span aria-hidden>
+                {item.agents.length} {item.agents.length === 1 ? "agent" : "agents"}
+              </span>
+              {sum.text && (
+                <span className={`sb-agents-sum${sum.waiting ? " waiting" : ""}`} aria-hidden>
+                  {sum.text}
+                </span>
+              )}
+            </button>
+            {open && (
+              <ul className="sb-agents" aria-label={`Agents in ${item.title}`}>
+                {item.agents.map((a) => (
+                  <ChatRow key={a.slot} full chip={chipOf(a)} project={project} onClick={() => h.onAgent(a.slot, item.slot)} target={targetOf(a, "agent")} closer={closer} />
+                ))}
+              </ul>
             )}
-          </button>
-          {open && (
-            <ul className="sb-agents" aria-label={`Agents in ${item.title}`}>
-              {item.agents.map((a) => (
-                <ChatRow key={a.slot} full chip={chipOf(a)} project={project} onClick={() => h.onAgent(a.slot, item.slot)} target={targetOf(a, "agent")} closer={closer} />
-              ))}
-            </ul>
-          )}
+          </div>
         </li>
       )}
     </>
@@ -452,11 +469,22 @@ interface Reorder {
   moves: Moves;
 }
 
+/** A project's squares as the collapsed bar draws them (no agents, no titles): also what a folded project unfolds into as the open pane closes. */
+function BarGroup({ group, color, h, closer }: { group: CompactGroup; color: string; h: SidebarHandlers; closer: Closer }) {
+  return (
+    <ul className="sb-group" aria-label={group.label} style={{ "--pc": color } as CSSProperties}>
+      {group.items.map((item) => (
+        <ChatRow key={item.slot} chip={chipOf(item)} project={group.label} full={false} target={itemTarget(item)} closer={closer} onClick={() => (item.kind === "team" ? h.onTeam(item.slot) : h.onChat(item.slot))} />
+      ))}
+    </ul>
+  );
+}
+
 /**
  * One project of the open pane: its header (the project's coloured initials, its name, the branch when it is the one on
  * screen, what needs you when it is folded, and + and ⋯ while the pointer is on it), then its open chats and teams.
  */
-function Project({ group, color, noted, expanded, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents }: { group: CompactGroup; color: string; noted: boolean; expanded: boolean; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
+function Project({ group, color, noted, expanded, closing, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents }: { group: CompactGroup; color: string; noted: boolean; expanded: boolean; closing: boolean; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
   const [menu, setMenu] = useState(false);
   // The chats that are done: not a working one, a draft, or a team.
   const finished = group.items.flatMap((item) => (item.kind === "chat" && item.state === "done" ? [item.slot] : []));
@@ -494,18 +522,33 @@ function Project({ group, color, noted, expanded, onToggle, current, branch, mov
         </span>
         {menu && <ProjectMenu group={group} h={h} moves={reorder.moves} finished={finished} onClose={() => setMenu(false)} onClosed={(n) => onNotice(n === 0 ? "No finished chats to close" : `Closed ${n} finished ${n === 1 ? "chat" : "chats"}`)} />}
       </div>
-      {moved && <MovedNotice moved={moved} label={group.label} onRelocate={onRelocate} onDismiss={onDismissMoved} />}
-      {notice && (
-        <div className="sb-note" role="status">
-          {notice}
-        </div>
+      {moved && (
+        <Away>
+          <MovedNotice moved={moved} label={group.label} onRelocate={onRelocate} onDismiss={onDismissMoved} />
+        </Away>
       )}
-      {expanded && (
+      {notice && (
+        <Away>
+          <div className="sb-note" role="status">
+            {notice}
+          </div>
+        </Away>
+      )}
+      {expanded ? (
         <ul className="sb-group">
           {group.items.map((item) => (
             <Item key={item.slot} item={item} project={group.label} h={h} closer={closer} agentsOpen={agentsOpen} onAgents={onAgents} />
           ))}
         </ul>
+      ) : (
+        // A folded project's squares are in the bar: they unfold as the pane closes, not pop in.
+        closing && (
+          <div className="sb-unfold" aria-hidden>
+            <div className="sb-away-in">
+              <BarGroup group={group} color={color} h={h} closer={closer} />
+            </div>
+          </div>
+        )
       )}
     </section>
   );
@@ -552,6 +595,7 @@ export function Sidebar(props: Props) {
   const expanded = mode !== "collapsed" || floating;
   // Closing, the pane stays drawn while its width shrinks, then the bar takes its place.
   const full = expanded || closingBar;
+  const closingNow = closingBar && !expanded;
   const wasFloating = useRef(false);
   wasFloating.current = floating;
 
@@ -788,7 +832,11 @@ export function Sidebar(props: Props) {
   const history = (
     <button className={`icon sb-button${full ? " labelled" : ""}`} data-history-toggle aria-label="History" title="History" onClick={h.onHistory}>
       <ClockIcon />
-      {full && <span aria-hidden>History</span>}
+      {full && (
+        <Away across>
+          <span aria-hidden>History</span>
+        </Away>
+      )}
     </button>
   );
 
@@ -797,8 +845,9 @@ export function Sidebar(props: Props) {
       {/* Pinned and floating are different elements, so pinning or collapsing is at once, not a width transition. */}
       <div
         key={mode === "pinned" ? "pinned" : "floating"}
-        className={`sb-panel${expanded ? " expanded" : ""}`}
+        className={`sb-panel${expanded ? " expanded" : ""}${closingNow ? " closing" : ""}`}
         style={{ "--sb-open": `${shownWidth}px` } as CSSProperties}
+        onTransitionEnd={(e) => e.target === e.currentTarget && e.propertyName === "width" && stopClosing()}
         onPointerEnter={mode === "collapsed" ? enter : undefined}
         onPointerLeave={mode === "collapsed" ? leave : undefined}
         onFocus={mode === "collapsed" ? (e) => keyboardFocus(e.target) && setFocused(true) : undefined}
@@ -807,6 +856,7 @@ export function Sidebar(props: Props) {
         <div className="sb-head">
           <button className={`icon sb-button${mode === "pinned" ? " on" : ""}`} aria-label={pin} title={pin} onClick={toggleBar}>
             {full ? <span className="sb-pin-glyph"><PinIcon /></span> : <SidebarIcon />}
+            {closingNow && <span className="sb-side-glyph"><SidebarIcon /></span>}
           </button>
           {full ? (
             <NewMenu {...newMenu} />
@@ -827,6 +877,7 @@ export function Sidebar(props: Props) {
                   color={PROJECT_COLORS[colors[g.folder]]}
                   noted={noted.includes(g.folder)}
                   expanded={isExpanded(g)}
+                  closing={closingNow}
                   onToggle={() => toggle(g)}
                   current={g.folder === currentFolder}
                   branch={branch}
@@ -851,11 +902,7 @@ export function Sidebar(props: Props) {
                   <span className="sb-project-initials">{group.initials}</span>
                   <span className="sb-project-name">{group.label}</span>
                 </div>
-                <ul className="sb-group" aria-label={group.label} style={{ "--pc": PROJECT_COLORS[colors[group.folder]] } as CSSProperties}>
-                  {group.items.map((item) => (
-                    <ChatRow key={item.slot} chip={chipOf(item)} project={group.label} full={false} target={itemTarget(item)} closer={closer} onClick={() => (item.kind === "team" ? h.onTeam(item.slot) : h.onChat(item.slot))} />
-                  ))}
-                </ul>
+                <BarGroup group={group} color={PROJECT_COLORS[colors[group.folder]]} h={h} closer={closer} />
               </Fragment>
             ))
           )}

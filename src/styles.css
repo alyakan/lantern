@@ -2732,22 +2732,27 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sidebar { position: relative; z-index: 15; flex: none; width: 56px; }
 .sidebar.pinned { min-width: 200px; max-width: max(200px, calc(100vw - 840px)); }
 .sidebar.dragging { user-select: none; cursor: col-resize; }
-.sb-panel { position: absolute; inset: 0 auto 0 0; width: 56px; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; padding: 2px 0 8px var(--edge); overflow: hidden; background: var(--bg); border-radius: 0 var(--radius-float) var(--radius-float) 0; transition: width 0.22s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.22s; }
+.sb-panel { position: absolute; inset: 0 auto 0 0; width: 56px; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; padding: 2px 0 8px var(--edge); overflow: hidden; background: var(--bg); border-radius: 0 var(--radius-float) var(--radius-float) 0; --sb-close: 0.22s cubic-bezier(0.32, 0.72, 0, 1); transition: width var(--sb-close), box-shadow 0.22s; }
 .sb-panel.expanded { width: var(--sb-open, 260px); box-shadow: var(--panel-shadow); }
 .sidebar.pinned .sb-panel { width: 100%; box-shadow: none; transition: none; }
 .sidebar.peek .sb-panel { transition: none; }
 .sb-head { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 0 0 6px 8px; }
-.sb-head button.sb-button { width: 32px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border-radius: var(--radius-chip); color: var(--muted); }
+.sb-head button.sb-button { position: relative; width: 32px; height: 28px; padding: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; border-radius: var(--radius-chip); color: var(--muted); }
 .sb-head button.sb-button:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
 .sb-head button.sb-button.on { color: var(--text); }
 /* In the open pane the History button says what it is, in the pill's place under New. */
-.sb-head button.sb-button.labelled { width: auto; gap: 7px; padding: 0 10px 0 9px; font-size: calc(12.5px * var(--font-scale)); }
+.sb-head button.sb-button.labelled { width: auto; padding: 0 10px 0 9px; font-size: calc(12.5px * var(--font-scale)); transition: padding var(--sb-close); }
+.sb-head button.sb-button.labelled .sb-away-x { margin-left: 7px; }
 .sb-pin-glyph { display: grid; place-items: center; }
+/* Closing, the pin gives way to the bar's own icon, in the same place. */
+.sb-side-glyph { position: absolute; inset: 0; display: grid; place-items: center; animation: sb-fade-in 0.12s backwards; }
 .sb-pin-glyph svg { width: 13px; height: 14px; }
 .sb-head button.sb-button.on svg { fill: currentColor; }
 /* New ▾ and the menus. */
 .sb-new { position: relative; }
-.sb-new-button { display: inline-flex; align-items: center; gap: 6px; height: var(--pill-m); padding: 0 11px 0 9px; border: 0.5px solid var(--glass-line); border-radius: var(--radius-pill); background: var(--glass); color: var(--text); font-size: calc(12.5px * var(--font-scale)); font-weight: 500; }
+.sb-new-button { display: inline-flex; align-items: center; height: var(--pill-m); padding: 0 11px 0 9px; border: 0.5px solid var(--glass-line); border-radius: var(--radius-pill); background: var(--glass); color: var(--text); font-size: calc(12.5px * var(--font-scale)); font-weight: 500; transition: background 0.12s, border-color 0.12s, color 0.12s, padding var(--sb-close); }
+.sb-new-button .sb-away-x { margin-left: 6px; }
+.sb-new-button .sb-away-in { display: flex; align-items: center; gap: 6px; }
 .sb-new-button:hover:not(:disabled), .sb-new-button[aria-expanded="true"] { background: var(--bg-active); }
 .sb-new-button .chev { color: var(--muted); }
 .sb-menu { top: calc(100% + 4px); left: 0; min-width: 200px; }
@@ -2759,7 +2764,7 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-list::-webkit-scrollbar-thumb { border-radius: 2px; background: var(--line-strong); }
 .sb-group { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 /* Each project's colour (--pc, set per project) tints its label and squares; the one on screen is filled with it. */
-.sb-project { flex: none; display: flex; align-items: baseline; gap: 10px; margin-top: 6px; padding-left: 6px; color: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-ink), var(--text)); font-size: calc(9.5px * var(--font-scale)); font-weight: 600; letter-spacing: 0.06em; line-height: 1; white-space: nowrap; }
+.sb-project { flex: none; display: flex; align-items: center; gap: 10px; margin-top: 6px; padding-left: 6px; color: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-ink), var(--text)); font-size: calc(9.5px * var(--font-scale)); font-weight: 600; letter-spacing: 0.06em; line-height: 1; white-space: nowrap; }
 .sb-project-initials { flex: none; width: 36px; text-align: center; }
 .sb-project-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.02em; font-size: calc(11px * var(--font-scale)); }
 .sb-project:first-child { margin-top: 0; }
@@ -2800,10 +2805,11 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sidebar.reordering, .sidebar.reordering * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
 .sidebar.reordering .sb-header .sb-actions { display: none; }
 .sb-section.lifted { background: var(--bg); box-shadow: var(--lift-shadow); scale: 1.015; }
-.sb-header { position: relative; height: 16px; }
-.sb-header-toggle { position: absolute; left: 0; right: 0; top: -3px; height: 22px; display: flex; align-items: center; gap: 10px; padding: 0 6px; border: none; border-radius: var(--radius-card); background: none; color: var(--text); text-align: left; }
+.sb-header { position: relative; height: calc(11px * var(--font-scale)); }
+.sb-section + .sb-section { margin-top: 6px; }
+.sb-header-toggle { position: absolute; left: 0; right: 0; top: calc(50% - 11px); height: 22px; display: flex; align-items: center; gap: 10px; padding: 0 6px; border: none; border-radius: var(--radius-card); background: none; color: var(--text); text-align: left; }
 .sb-header-toggle:hover { background: var(--bg-hover); }
-.sb-header-toggle .sb-project-initials { display: grid; place-items: center; height: 16px; border-radius: var(--radius-chip); background: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-tint), var(--bg)); color: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-ink), var(--text)); font-size: calc(9.5px * var(--font-scale)); font-weight: 600; letter-spacing: 0.06em; line-height: 1; }
+.sb-header-toggle .sb-project-initials { height: 16px; border-radius: var(--radius-chip); background: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-tint), var(--bg)); color: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-ink), var(--text)); font-size: calc(9.5px * var(--font-scale)); font-weight: 600; letter-spacing: 0.06em; line-height: 16px; }
 .sb-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); font-weight: 600; color: color-mix(in srgb, var(--pc, var(--muted)) var(--pc-ink), var(--text)); }
 .sb-fold { flex: none; display: grid; place-items: center; width: 14px; color: var(--muted); transform: rotate(-90deg); transition: transform 0.12s; }
 .sb-fold.open { transform: none; }
@@ -2814,7 +2820,7 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 /* The note mark beside a project's name: it has notes every new chat starts with. */
 .sb-notes { flex: none; display: inline-flex; align-items: center; color: var(--muted-text); }
 /* + and ⋯ show over the branch or badge while the pointer (or focus) is on the project. */
-.sb-actions { position: absolute; right: 2px; top: -3px; bottom: -3px; display: none; align-items: center; gap: 1px; padding-left: 14px; background: linear-gradient(90deg, transparent, var(--bg) 14px); }
+.sb-actions { position: absolute; right: 2px; top: calc(50% - 11px); height: 22px; display: none; align-items: center; gap: 1px; padding-left: 14px; background: linear-gradient(90deg, transparent, var(--bg) 14px); }
 .sb-header:hover .sb-actions, .sb-header:focus-within .sb-actions { display: flex; }
 .sb-actions button.icon { width: 22px; height: 22px; display: grid; place-items: center; border-radius: var(--radius-chip); color: var(--muted); font-size: calc(14px * var(--font-scale)); line-height: 1; }
 .sb-actions button.icon:hover { background: var(--bg-hover); color: var(--text); }
@@ -2827,7 +2833,7 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-item { position: relative; display: flex; align-items: center; }
 /* A team's agents hang under its square, on a line from it. */
 .sb-agents-wrap { list-style: none; }
-.sb-agents-toggle { display: flex; align-items: center; gap: 6px; width: 100%; margin: 0 0 0 24px; padding: 2px 8px; max-width: calc(100% - 24px); background: none; border: 0; border-radius: var(--radius-chip); font: inherit; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); text-align: left; cursor: pointer; }
+.sb-agents-toggle { white-space: nowrap; display: flex; align-items: center; gap: 6px; width: 100%; margin: 0 0 0 24px; padding: 2px 8px; max-width: calc(100% - 24px); background: none; border: 0; border-radius: var(--radius-chip); font: inherit; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); text-align: left; cursor: pointer; }
 .sb-agents-toggle:hover { color: var(--text); background: var(--bg-hover); }
 .sb-agents-toggle .sb-fold { flex: none; width: 12px; height: 12px; }
 .sb-agents-sum { margin-left: auto; white-space: nowrap; color: var(--muted-text); }
@@ -2848,6 +2854,7 @@ button.sb-close:hover { background: var(--bg-active); color: var(--text); }
 nav > .sb-note { padding-left: 14px; }
 .sb-foot { flex: none; display: flex; align-items: center; gap: 7px; height: 28px; margin: 4px 8px 0 0; padding: 0 8px; border: none; background: none; border-radius: var(--radius-chip); color: var(--muted-text); text-align: left; }
 .sb-foot:hover { background: var(--bg-hover); color: var(--text); }
+.sb-foot span { white-space: nowrap; }
 .sb-resize { position: absolute; top: 0; bottom: 0; right: -3px; width: 7px; cursor: col-resize; touch-action: none; z-index: 3; }
 .sb-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; transition: background 0.12s; }
 .sb-resize:hover::after, .sidebar.dragging .sb-resize::after { background: var(--line-strong); }
@@ -2867,9 +2874,35 @@ nav > .sb-note { padding-left: 14px; }
 .sb-confirm-actions button:hover:not(:disabled) { background: var(--bg-hover); }
 .sb-confirm-actions .sb-confirm-yes { border-color: var(--del); color: var(--del); }
 .sb-context { position: fixed; z-index: 40; min-width: 150px; }
+/* Closing. The open pane stays drawn while the bar narrows, and what the bar doesn't have (names, branch, notes, the New and
+   History labels, agents, the foot) fades out and folds up in the same time and easing, as the bar's own squares stay where
+   they are: at the end the pane is the bar, so swapping its markup for the bar's changes nothing on screen. What the bar has and
+   a folded project hadn't (its squares) unfolds. */
+.sb-away-y { display: grid; grid-template-rows: 1fr; transition: grid-template-rows var(--sb-close), margin-top var(--sb-close), opacity 0.12s; }
+.sb-away-x { display: grid; grid-template-columns: 1fr; transition: grid-template-columns var(--sb-close), margin-left var(--sb-close), opacity 0.12s; }
+.sb-away-in { min-width: 0; min-height: 0; }
+.sb-away-x > .sb-away-in { white-space: nowrap; }
+.sb-unfold { display: grid; grid-template-rows: 1fr; animation: sb-unfold var(--sb-close) backwards; }
+@keyframes sb-unfold { from { grid-template-rows: 0fr; opacity: 0; } }
+/* Clipped to their own box, but with room for the marks on a square's corner. */
+.sb-panel.closing .sb-away-y > .sb-away-in, .sb-unfold > .sb-away-in { clip-path: inset(0 -8px -8px -8px); }
+.sb-panel.closing .sb-away-x > .sb-away-in { clip-path: inset(0); }
+.sb-panel.closing .sb-away-y { grid-template-rows: 0fr; opacity: 0; }
+.sb-panel.closing .sb-away-x { grid-template-columns: 0fr; margin-left: 0 !important; opacity: 0; }
+/* Between a team's square and the next, the list's own gap goes with the line that folds its agents. */
+.sb-panel.closing .sb-agents-wrap { margin-top: -6px; }
+.sb-panel.closing .sb-header-toggle > :not(.sb-project-initials), .sb-panel.closing .sb-note { opacity: 0; transition: opacity 0.12s; }
+.sb-header-toggle .sb-project-initials { transition: background 0.12s; }
+.sb-panel.closing .sb-header-toggle .sb-project-initials { background: transparent; }
+.sb-panel.closing .sb-pin-glyph { opacity: 0; transition: opacity 0.12s; }
+.sb-panel.closing .sb-new-button { background: transparent; border-color: transparent; color: var(--muted); padding-right: 0; }
+.sb-panel.closing .sb-head button.sb-button.labelled { padding-right: 0; }
+.sb-foot { transition: height var(--sb-close), margin-top var(--sb-close), padding var(--sb-close), opacity 0.12s; }
+.sb-panel.closing .sb-foot { height: 0; margin-top: -6px; padding-top: 0; padding-bottom: 0; overflow: hidden; opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
   .sb-mark.running { animation: none; }
   .sb-panel, .sb-text, .sb-project-name { transition: none !important; }
+  .sb-unfold, .sb-side-glyph { animation: none; }
   .sb-panel.expanded .sb-text, .sb-panel.expanded .sb-project-name, .sb-panel.expanded .sb-new, .sb-panel.expanded .sb-header, .sb-panel.expanded .sb-foot, .sb-panel.expanded .sb-note { animation: none; }
   .sb-section { transition: none; }
   .sb-section.lifted { scale: none; }
