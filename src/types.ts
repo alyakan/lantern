@@ -439,3 +439,17 @@ export interface OpenPr {
   branch: string;
   draft: boolean;
 }
+
+/** What Ship it learns about the folder's repository, read-only: where a push would go and whether a pull request can be opened. */
+export interface ShipInfo {
+  /** The checked-out branch (null: not a repository, or a detached HEAD). */
+  branch: string | null;
+  remote: string | null;
+  /** The remote's address, without any password or token in it. */
+  remote_url: string | null;
+  github: boolean;
+  /** The GitHub CLI can be run. */
+  gh: boolean;
+  /** The branch a pull request would go into. */
+  base: string | null;
+}

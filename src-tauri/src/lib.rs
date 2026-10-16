@@ -1210,6 +1210,14 @@ fn remove_permission_rule(state: State<'_, AppState>, slot: Option<String>, entr
     Ok(())
 }
 
+/// What the Ship it dialog shows about the folder's repository (read-only: see `git::ship_info`).
+#[tauri::command]
+async fn ship_info(state: State<'_, AppState>, folder: String) -> Result<git::ShipInfo, String> {
+    let path_env = login_path(&state).await;
+    let folder = std::path::PathBuf::from(folder);
+    tauri::async_runtime::spawn_blocking(move || git::ship_info(&folder, path_env.as_deref())).await.map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn git_branch(folder: String) -> Option<String> {
     git::current_branch(std::path::Path::new(&folder))
@@ -1736,6 +1744,7 @@ pub fn run() {
             add_permission_rule,
             remove_permission_rule,
             git_branch,
+            ship_info,
             list_dir,
             read_file,
             write_file,

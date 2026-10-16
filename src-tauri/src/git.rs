@@ -151,6 +151,73 @@ pub fn repo_root(folder: &Path, path_env: Option<&str>) -> Option<PathBuf> {
     run(folder, &["rev-parse", "--show-toplevel"], path_env).ok().filter(|p| !p.is_empty()).map(PathBuf::from)
 }
 
+/// What the Ship it dialog needs to know about a folder's repository, all read-only.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize)]
+pub struct ShipInfo {
+    /// The checked-out branch (None: not a git repository, or a detached HEAD).
+    pub branch: Option<String>,
+    /// The remote a push goes to: `origin`, else the first remote there is.
+    pub remote: Option<String>,
+    /// That remote's address, without any password or token in it.
+    pub remote_url: Option<String>,
+    /// The remote is on github.com.
+    pub github: bool,
+    /// The GitHub CLI (`gh`) can be run.
+    pub gh: bool,
+    /// The branch a pull request would go into: the remote's default, else main or master.
+    pub base: Option<String>,
+}
+
+/// A remote's address as it can be shown and sent to Claude: a password or token written before the `@` of an
+/// `https://user:token@host/…` address is dropped (`git@github.com:o/r.git` has none to drop).
+pub fn redact_url(url: &str) -> String {
+    let url = url.trim();
+    let Some((scheme, rest)) = url.split_once("://") else { return url.to_string() };
+    let (authority, path) = rest.split_once('/').map_or((rest, None), |(a, p)| (a, Some(p)));
+    let host = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    match path {
+        Some(path) => format!("{scheme}://{host}/{path}"),
+        None => format!("{scheme}://{host}"),
+    }
+}
+
+/// Whether `gh` starts (`gh --version`): it is what opens the pull request.
+fn gh_installed(path_env: Option<&str>) -> bool {
+    let mut cmd = Command::new("gh");
+    cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    if let Some(path) = path_env {
+        cmd.env("PATH", path);
+    }
+    cmd.status().is_ok_and(|s| s.success())
+}
+
+/// The branch pull requests go into: the remote's own default (`refs/remotes/<remote>/HEAD`), else main or master.
+fn default_branch(folder: &Path, remote: Option<&str>, path_env: Option<&str>) -> Option<String> {
+    if let Some(remote) = remote {
+        let head = format!("refs/remotes/{remote}/HEAD");
+        if let Ok(r) = run(folder, &["symbolic-ref", "--quiet", "--short", &head], path_env) {
+            if let Some(name) = r.strip_prefix(&format!("{remote}/")).filter(|n| !n.is_empty()) {
+                return Some(name.to_string());
+            }
+        }
+    }
+    let exists = |full: String| run(folder, &["rev-parse", "--verify", "--quiet", &full], path_env).is_ok();
+    ["main", "master"].into_iter().find(|name| exists(format!("refs/heads/{name}")) || remote.is_some_and(|r| exists(format!("refs/remotes/{r}/{name}")))).map(String::from)
+}
+
+/// Looks at the folder's repository for the Ship it dialog: its branch, where a push would go, and whether a pull request
+/// can be opened. Only reads: `rev-parse`, `remote`, `remote get-url`, `symbolic-ref`, and `gh --version`.
+pub fn ship_info(folder: &Path, path_env: Option<&str>) -> ShipInfo {
+    let branch = run(folder, &["rev-parse", "--abbrev-ref", "HEAD"], path_env).ok().filter(|b| !b.is_empty() && b != "HEAD");
+    let remotes = run(folder, &["remote"], path_env).unwrap_or_default();
+    let names = || remotes.lines().map(str::trim).filter(|r| !r.is_empty());
+    let remote = names().find(|r| *r == "origin").or_else(|| names().next()).map(String::from);
+    let remote_url = remote.as_deref().and_then(|r| run(folder, &["remote", "get-url", r], path_env).ok()).filter(|u| !u.is_empty()).map(|u| redact_url(&u));
+    let github = remote_url.as_deref().is_some_and(|u| u.contains("github.com"));
+    let base = default_branch(folder, remote.as_deref(), path_env);
+    ShipInfo { branch, remote, remote_url, github, gh: gh_installed(path_env), base }
+}
+
 /// Where `folder` is inside its repository's top ("" at the top, "packages/app/" below it).
 fn prefix_in_repo(folder: &Path, path_env: Option<&str>) -> String {
     run(folder, &["rev-parse", "--show-prefix"], path_env).unwrap_or_default()
@@ -553,6 +620,41 @@ mod tests {
         g(&["add", "-A"]);
         g(&["commit", "-q", "-m", "first"]);
         dir
+    }
+
+    #[test]
+    fn a_remote_address_loses_the_password_or_token_in_it() {
+        assert_eq!(redact_url("https://ada:ghp_secret@github.com/o/r.git"), "https://github.com/o/r.git");
+        assert_eq!(redact_url("https://token@github.com/o/r"), "https://github.com/o/r");
+        assert_eq!(redact_url("https://github.com/o/r.git\n"), "https://github.com/o/r.git");
+        assert_eq!(redact_url("git@github.com:o/r.git"), "git@github.com:o/r.git");
+        assert_eq!(redact_url("ssh://git@github.com/o/r.git"), "ssh://github.com/o/r.git");
+        assert_eq!(redact_url("https://u:p@host"), "https://host");
+    }
+
+    #[test]
+    fn ship_info_reads_the_branch_the_remote_and_the_default_branch() {
+        let dir = repo();
+        let none = ship_info(dir.path(), None);
+        assert_eq!((none.branch.as_deref(), none.remote.as_deref(), none.remote_url.as_deref(), none.github, none.base.as_deref()), (Some("main"), None, None, false, Some("main")));
+        let g = |args: &[&str]| run(dir.path(), args, None).unwrap();
+        g(&["remote", "add", "upstream", "git@example.com:o/r.git"]);
+        g(&["remote", "add", "origin", "https://ada:secret@github.com/o/r.git"]);
+        g(&["checkout", "-q", "-b", "feat/x"]);
+        let info = ship_info(dir.path(), None);
+        assert_eq!((info.branch.as_deref(), info.remote.as_deref(), info.remote_url.as_deref(), info.github), (Some("feat/x"), Some("origin"), Some("https://github.com/o/r.git"), true));
+        assert_eq!(info.base.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn ship_info_has_no_branch_on_a_detached_head_or_outside_a_repository() {
+        let dir = repo();
+        let sha = run(dir.path(), &["rev-parse", "HEAD"], None).unwrap();
+        run(dir.path(), &["checkout", "-q", "--detach", &sha], None).unwrap();
+        assert_eq!(ship_info(dir.path(), None).branch, None);
+        let empty = tempfile::tempdir().unwrap();
+        let outside = ship_info(empty.path(), None);
+        assert_eq!((outside.branch, outside.remote, outside.base), (None, None, None));
     }
 
     /// A directory for worktrees that outlives the statement it's made in (the OS clears /tmp).

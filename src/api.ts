@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
-import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, ShipInfo, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -115,6 +115,8 @@ export const api = {
   listPermissionRules: (slot: string | null) => invoke<RuleEntry[]>("list_permission_rules", { slot }),
   removePermissionRule: (slot: string | null, entry: RuleEntry) => invoke<void>("remove_permission_rule", { slot, entry }),
   gitBranch: (folder: string) => invoke<string | null>("git_branch", { folder }),
+  /** Ship it's read-only look at the folder's repository: branch, remote, base branch, and whether gh is there. */
+  shipInfo: (folder: string) => invoke<ShipInfo>("ship_info", { folder }),
   /** The user's name for their messages (macOS full name, else git's user.name); null if none. */
   userName: () => invoke<string | null>("user_name"),
   /** Stops one of the chat's background tasks (a run_in_background command, a background agent). */

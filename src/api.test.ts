@@ -93,6 +93,7 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ["listPermissionRules", () => api.listPermissionRules(null), ["list_permission_rules", { slot: null }]],
   ["removePermissionRule", () => api.removePermissionRule("s1", folderRule), ["remove_permission_rule", { slot: "s1", entry: folderRule }]],
   ["gitBranch", () => api.gitBranch("/repo"), ["git_branch", { folder: "/repo" }]],
+  ["shipInfo", () => api.shipInfo("/repo"), ["ship_info", { folder: "/repo" }]],
   ["userName", () => api.userName(), ["user_name"]],
   ["stopTask", () => api.stopTask("s1", "t1"), ["stop_task", { slot: "s1", taskId: "t1" }]],
   ["listSessions", () => api.listSessions("/repo"), ["list_sessions", { folder: "/repo" }]],
