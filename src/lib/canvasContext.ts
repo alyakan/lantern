@@ -67,6 +67,8 @@ export function useChatStates(slots: string[]): (State | undefined)[] {
 /** What an agent on the canvas can do, for whichever chat it is. Stable for the app's life, so agents needn't redraw for it. */
 export interface NodeActions {
   send(slot: string, text: string): void;
+  /** Starts the agent's conversation afresh (its files stay). The caller has already asked the user. */
+  clear(slot: string): void;
   stop(slot: string): void;
   /** Messages typed while the agent works, sent together when its turn ends. */
   queue(slot: string, items: string[]): void;

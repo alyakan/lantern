@@ -21,6 +21,7 @@ const folderRule: RuleEntry = { scope: "folder", folder: "/repo", tool: "Bash", 
 
 const wrappers: [string, () => unknown, unknown[]][] = [
   ["locateClaude", () => api.locateClaude(null), ["locate_claude", { pathOverride: null }]],
+  ["claudeLogin", () => api.claudeLogin("/bin/claude"), ["claude_login", { claudePath: "/bin/claude" }]],
   ["startSession", () => api.startSession("s1", "/bin/claude", "/repo", settings), ["start_session", { slot: "s1", claudePath: "/bin/claude", folder: "/repo", settings }]],
   [
     "applyHarness",

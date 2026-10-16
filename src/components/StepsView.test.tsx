@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { initialState, type ChatItem, type State } from "../store";
 import type { Flavour } from "../lib/flavour";
 import { StepsView, UPDATE_STEP } from "./StepsView";
 
-vi.mock("../api", () => ({ api: { userName: () => Promise.resolve("Ada Lovelace") } }));
+vi.mock("../api", () => ({ api: { userName: () => Promise.resolve("Ada Lovelace"), changeSummary: () => Promise.resolve([]), exportText: () => Promise.resolve(null) } }));
 
 const items: ChatItem[] = [
   { type: "user", id: "u1", text: "Add slugify", turn: 0 },
@@ -19,12 +19,62 @@ const handlers = (flavour: Flavour | null = "build") => ({ onDecide: () => {}, o
 const current = () => document.querySelector('.step-page[aria-hidden="false"]')!;
 
 describe("StepsView", () => {
+  it("names the stages in the header, with the one you're in lit, earlier ones checked and later ones waiting", () => {
+    render(<StepsView state={state()} {...handlers()} />);
+    const progress = screen.getByRole("navigation", { name: "Progress" });
+    const names = [...progress.querySelectorAll(".steps-phase-name")].map((n) => n.textContent);
+    expect(names).toEqual(["Frame", "Plan", "Build", "Done"]);
+    const plan = progress.querySelector('[aria-current="step"]')!;
+    expect(plan).toHaveTextContent("Plan");
+    // Frame is behind: checked, and a way back to its page. Build and Done are not reached.
+    const frame = within(progress).getByRole("button", { name: /Frame/ });
+    expect(frame).toHaveTextContent("✓");
+    expect(within(progress).getByRole("button", { name: /Build/ })).toBeDisabled();
+    expect(within(progress).getByRole("button", { name: /Done/ })).toBeDisabled();
+    fireEvent.click(frame);
+    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
+    expect(progress.querySelector('[aria-current="step"]')).toHaveTextContent("Frame");
+  });
+
+  it("keeps a dot for each page of the stage you're in, to move between them", () => {
+    const more: ChatItem[] = [...items, { type: "user", id: "u3", text: "Next", turn: 2 }, { type: "assistant", id: "a3", text: "# Plan step 2 — Export it\n\nFile: index.js" }, { type: "turn", id: "t3", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 }];
+    render(<StepsView state={state({ items: more })} {...handlers()} />);
+    const dots = screen.getAllByRole("tab");
+    expect(dots).toHaveLength(2);
+    expect(dots[1]).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(dots[0]);
+    expect(current().querySelector(".step-eyebrow")).toHaveTextContent("Plan step 1");
+  });
+
+  it("names the stages of the other flavours", () => {
+    const names = (flavour: Flavour) => {
+      const view = render(<StepsView state={state()} {...handlers(flavour)} />);
+      const found = [...view.container.querySelectorAll(".steps-phase-name")].map((n) => n.textContent);
+      view.unmount();
+      return found;
+    };
+    expect(names("debug")).toEqual(["Frame", "Evidence", "Fix", "Done"]);
+    expect(names("review")).toEqual(["Frame", "Files", "Summary"]);
+    expect(names("architecture")).toEqual(["Frame", "Overview", "Parts", "Summary"]);
+  });
+
+  it("ends a Build on the hand-off, and only the Done page has it", () => {
+    const done: ChatItem[] = [...items, { type: "user", id: "u3", text: "Next", turn: 2 }, { type: "assistant", id: "a3", text: "# Done — Added slugify\n\nIt is in." }, { type: "turn", id: "t3", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 }];
+    const handoff = { slot: "s", summary: null, changed: [], doc: { pages: [], title: "t", folder: "/p" }, running: false, onReviewChanges: vi.fn(), onStartNew: vi.fn() };
+    render(<StepsView state={state({ items: done })} {...handlers()} handoff={handoff} />);
+    expect(screen.getByRole("region", { name: "What next" })).toBeInTheDocument();
+    expect(screen.getByRole("navigation", { name: "Progress" }).querySelector('[aria-current="step"]')).toHaveTextContent("Done");
+    fireEvent.keyDown(window, { key: "ArrowLeft" });
+    expect(current().querySelector(".step-eyebrow")).toHaveTextContent("Plan step 1");
+    expect(current().querySelector(".handoff")).toBeNull();
+  });
+
   it("opens on the newest page, titled by its heading, and tells the Changes pane its turn", () => {
     const h = handlers();
     render(<StepsView state={state()} {...h} />);
     expect(current().querySelector(".step-title")).toHaveTextContent("Add the function");
     expect(current().querySelector(".step-eyebrow")).toHaveTextContent("Plan step 1");
-    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
     expect(h.onPage).toHaveBeenLastCalledWith({ from: 1, to: 1 });
   });
 
@@ -42,7 +92,7 @@ describe("StepsView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Next →" }));
     expect(h.onNext).not.toHaveBeenCalled();
     fireEvent.keyDown(window, { key: "ArrowLeft" });
-    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "ArrowRight" });
     fireEvent.click(screen.getByRole("button", { name: "Next step →" }));
     expect(h.onNext).toHaveBeenCalled();
@@ -91,18 +141,18 @@ describe("StepsView", () => {
     const view = <T extends { page: string; key: number } | null>(jump: T) => <StepsView state={state()} {...h} jump={jump} />;
     // A request left over from before this view was drawn (switching back to the chat) doesn't move it.
     const { rerender } = render(view({ page: "u1", key: 1 }));
-    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
     rerender(view({ page: "u1", key: 2 }));
-    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
     // Moved on by hand, asking for the same page again brings it back.
     fireEvent.keyDown(window, { key: "ArrowRight" });
-    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
     rerender(view({ page: "u1", key: 3 }));
-    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
     // A page that isn't there (the chat changed under it) is ignored.
     fireEvent.keyDown(window, { key: "ArrowRight" });
     rerender(view({ page: "gone", key: 4 }));
-    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
   });
 
   it("keeps a question about the step on its page, with the answer underneath", () => {
@@ -114,7 +164,7 @@ describe("StepsView", () => {
     ];
     const h = handlers();
     render(<StepsView state={state({ items: asked })} {...h} />);
-    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
     const thread = current().querySelector(".step-thread")!;
     expect(thread).toHaveTextContent("why not a regex?");
     expect(thread).toHaveTextContent("split reads more plainly");
@@ -129,7 +179,7 @@ describe("StepsView", () => {
       { type: "turn", id: "t3", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
     ];
     render(<StepsView state={state({ items: followed })} {...handlers()} />);
-    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
     const thread = current().querySelector(".step-thread")!;
     expect(thread.querySelector(".auto-turn")).toHaveTextContent("After npx vitest --watch ended");
     expect(thread.querySelector(".user-note")).toBeNull();
@@ -275,17 +325,18 @@ describe("StepsView", () => {
     dialog.setAttribute("open", "");
     document.body.appendChild(dialog);
     fireEvent.keyDown(window, { key: "ArrowLeft" });
-    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Page 2 of 2")).toBeInTheDocument();
     dialog.remove();
     fireEvent.keyDown(window, { key: "ArrowLeft" });
-    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Page 1 of 2")).toBeInTheDocument();
   });
 
   it("shows Claude working instead of Next while a step runs, and picks a flavour from the header's badge", () => {
     const h = handlers();
-    render(<StepsView state={state({ status: "running" })} {...h} />);
+    const running = render(<StepsView state={state({ status: "running" })} {...h} />);
     expect(screen.queryByRole("button", { name: "Next step →" })).toBeNull();
-    expect(screen.getByRole("button", { name: /^Build/ })).toBeDisabled();
+    expect(running.container.querySelector(".flavour-badge")).toBeDisabled();
+    running.unmount();
     const idle = handlers();
     const { container } = render(<StepsView state={state()} {...idle} />);
     fireEvent.click(container.querySelector(".flavour-badge")!);
@@ -343,8 +394,8 @@ describe("StepsView", () => {
   it("shows Explain as you go on the badge, and Design for the Architecture flavour", () => {
     const items: ChatItem[] = [{ type: "user", id: "u1", text: "add x", turn: 1 }, { type: "assistant", id: "a1", text: "# Frame — x" }, { type: "turn", id: "t1", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 }];
     const { rerender } = render(<StepsView state={state({ items })} {...handlers("build")} explain />);
-    expect(screen.getByRole("button", { name: /Build/ })).toHaveTextContent("explaining");
+    expect(document.querySelector(".flavour-badge")).toHaveTextContent("explaining");
     rerender(<StepsView state={state({ items })} {...handlers("architecture")} />);
-    expect(screen.getByRole("button", { name: /Design/ })).toBeInTheDocument();
+    expect(document.querySelector(".flavour-badge")).toHaveTextContent("Design");
   });
 });

@@ -44,4 +44,26 @@ describe("a dropdown kept inside the window", () => {
     expect(menu.style.bottom).toBe("");
     expect(menu.style.maxHeight).toBe("588px");
   });
+
+  // The menus under the chat box are styled to open upward: the button is at `anchor`, the menu ends just above it.
+  it("is left as styled when it opens upward and fits", () => {
+    const menu = open(60, 390, 456);
+    expect(menu.style.top).toBe("");
+    expect(menu.style.maxHeight).toBe("");
+  });
+
+  it("opens upward, capped to the room above, when it would stick out of the top", () => {
+    // Above the button at 456: 456 - 6 - 12 = 438. Below it: 800 - 480 - 6 - 12 = 302.
+    const menu = open(-30, 480, 456);
+    expect(menu.style.bottom).toBe("");
+    expect(menu.style.maxHeight).toBe("438px");
+  });
+
+  it("opens downward instead when an upward menu has more room below", () => {
+    // Above the button at 300: 300 - 6 - 12 = 282. Below it: 800 - 324 - 6 - 12 = 458.
+    const menu = open(-170, 460, 300);
+    expect(menu.style.top).toBe("calc(100% + 6px)");
+    expect(menu.style.bottom).toBe("auto");
+    expect(menu.style.maxHeight).toBe("458px");
+  });
 });

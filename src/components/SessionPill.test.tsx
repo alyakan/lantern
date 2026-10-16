@@ -14,6 +14,28 @@ describe("SessionPill", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("closes on Escape from a chat in the list, with focus back on its button", async () => {
+    render(<SessionPill loadSessions={async () => sessions} onOpen={() => {}} />);
+    const pill = screen.getByRole("button", { name: /New chat/ });
+    fireEvent.click(pill);
+    const row = await screen.findByRole("button", { name: /Fix the login redirect/ });
+    row.focus();
+    fireEvent.keyDown(row, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(pill).toHaveFocus();
+  });
+
+  it("walks the search box and the chats with the arrow keys", async () => {
+    render(<SessionPill loadSessions={async () => sessions} onOpen={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /New chat/ }));
+    const search = await screen.findByPlaceholderText("Search chats");
+    search.focus();
+    fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(screen.getByRole("button", { name: /Fix the login redirect/ })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowUp" });
+    expect(search).toHaveFocus();
+  });
+
   it("is disabled when told to be", () => {
     render(<SessionPill loadSessions={async () => []} onOpen={() => {}} disabled />);
     expect(screen.getByRole("button", { name: /New chat/ })).toBeDisabled();

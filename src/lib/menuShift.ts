@@ -30,9 +30,9 @@ const boundsOf = (clip: Element | null) => {
 /**
  * Keeps an open dropdown menu on screen. Returns a ref for the menu element and a style to spread on it: while open it
  * caps the menu's width to its clipping ancestor (or the window) and nudges it horizontally so it stays inside, both
- * recomputed as that region resizes.
+ * recomputed as that region resizes, and again when `deps` change (the menu's contents or width did).
  */
-export function useMenuShift(open: boolean) {
+export function useMenuShift(open: boolean, deps: unknown[] = []) {
   const ref = useRef<HTMLDivElement>(null);
   const [style, setStyle] = useState<CSSProperties>();
   useLayoutEffect(() => {
@@ -59,6 +59,6 @@ export function useMenuShift(open: boolean) {
     const observer = new ResizeObserver(reclamp);
     observer.observe(clip ?? document.documentElement);
     return () => observer.disconnect();
-  }, [open]);
+  }, [open, ...deps]);
   return { ref, style };
 }

@@ -1,4 +1,5 @@
 pub mod args;
+pub mod awake;
 pub mod changes;
 pub mod cli_locator;
 pub mod diagnostics;
@@ -69,10 +70,16 @@ pub(crate) fn scratch_dir() -> std::path::PathBuf {
 const DEFAULT_AGENT_LIMIT: usize = 3;
 const AGENT_LIMITS: std::ops::RangeInclusive<usize> = 1..=orchestra::MAX_WORKERS;
 
-/// The sidebar was hidden, shown, made compact or made full: View's two sidebar items now say what choosing them does.
+/// The sidebar was hidden, shown, collapsed or expanded: View's two sidebar items now say what choosing them does.
 #[tauri::command]
 fn sidebar_menu(app: tauri::AppHandle, hidden: bool, compact: bool) -> Result<(), String> {
     menu::sidebar_changed(&app, hidden, compact).map_err(|e| e.to_string())
+}
+
+/// The window says whether any chat or agent is working, and whether the user wants the Mac kept awake meanwhile.
+#[tauri::command]
+fn keep_awake(awake: State<'_, awake::Awake>, working: bool, allowed: bool) {
+    awake.update(working, allowed);
 }
 
 /// The user changed how many agents may run at once (or the window started and says what it was set to).
@@ -524,6 +531,33 @@ async fn locate_claude(path_override: Option<String>) -> Result<String, String> 
     tauri::async_runtime::spawn_blocking(move || ProviderId::Claude.provider().locate(path_override.as_deref()).map(|p| p.display().to_string()))
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// Whether claude is logged in, and as whom (`claude auth status`).
+#[derive(serde::Serialize)]
+struct Login {
+    logged_in: bool,
+    account: Option<String>,
+}
+
+/// Asks the claude at `claude_path` whether it is logged in, for the first-launch screen. An error means claude couldn't
+/// say (too old to have `auth status`, or it didn't answer): the screen then leaves it to the first chat to find out.
+#[tauri::command]
+async fn claude_login(state: State<'_, AppState>, claude_path: String) -> Result<Login, String> {
+    let path_env = login_path(&state).await;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = std::process::Command::new(&claude_path);
+        cmd.args(["auth", "status"]).stdin(std::process::Stdio::null());
+        if let Some(path) = path_env {
+            cmd.env("PATH", path);
+        }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        // A claude that isn't logged in may exit with an error and still say so, in the same JSON.
+        let status: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|_| "claude didn't say whether it is logged in.".to_string())?;
+        Ok(Login { logged_in: status["loggedIn"].as_bool().unwrap_or(false), account: status["email"].as_str().map(str::to_string) })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1622,6 +1656,7 @@ pub fn run() {
             });
             app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, agent_limit: DEFAULT_AGENT_LIMIT.into() });
             app.manage(updates::Updates::default());
+            app.manage(awake::Awake::default());
             if updates::checks_enabled() {
                 tauri::async_runtime::spawn(updates::watch(app.handle().clone()));
             }
@@ -1657,7 +1692,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             locate_claude,
+            claude_login,
             sidebar_menu,
+            keep_awake,
             user_name,
             start_session,
             restart_session,
@@ -1735,6 +1772,10 @@ pub fn run() {
         .expect("error while building Lantern")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                // The Mac may sleep again (caffeinate also ends by itself once Lantern's process is gone).
+                if let Some(awake) = app.try_state::<awake::Awake>() {
+                    awake.stop();
+                }
                 if let Some(state) = app.try_state::<AppState>() {
                     tauri::async_runtime::block_on(slots::shut_down_all(state.slots.drain()));
                 }

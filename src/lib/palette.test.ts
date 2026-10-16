@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { filterEntries, fuzzyScore, type PaletteEntry } from "./palette";
+import { filterEntries, fuzzyScore, sentenceCase, type PaletteEntry } from "./palette";
 
 const entry = (title: string): PaletteEntry => ({ id: title, title, group: "View", shortcut: null, run: () => {} });
+
+describe("sentenceCase", () => {
+  it("lowercases every word after the first, keeping names", () => {
+    expect(sentenceCase("Switch Canvas and Chat View")).toBe("Switch canvas and chat view");
+    expect(sentenceCase("Review a PR…")).toBe("Review a PR…");
+    expect(sentenceCase("Stop Claude")).toBe("Stop Claude");
+    expect(sentenceCase("Show/Hide Side Panel")).toBe("Show/Hide side panel");
+    expect(sentenceCase("Open Folder…")).toBe("Open folder…");
+  });
+});
 
 describe("fuzzyScore", () => {
   it("matches the letters of the query in order, with or without case", () => {

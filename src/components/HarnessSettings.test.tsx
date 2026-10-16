@@ -9,7 +9,7 @@ describe("HarnessSettings", () => {
   it("edits a preset, keeping its advisor one Claude Code accepts", () => {
     const onSave = vi.fn();
     render(<HarnessSettings {...props} onSave={onSave} />);
-    fireEvent.click(within(screen.getByRole("list", { name: "Harness presets" })).getByText("Thrifty"));
+    fireEvent.click(within(screen.getByRole("list", { name: "Model presets" })).getByText("Thrifty"));
     // Haiku main: Haiku can advise it.
     expect(within(screen.getByLabelText("Advisor")).getByRole("option", { name: "Haiku" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Advisor"), { target: { value: "haiku" } });
@@ -19,7 +19,7 @@ describe("HarnessSettings", () => {
   it("drops an advisor the new main model can't take", () => {
     const onSave = vi.fn();
     render(<HarnessSettings {...props} saved={[{ ...BUILT_IN[2], advisor: "haiku" }]} onSave={onSave} />);
-    fireEvent.click(within(screen.getByRole("list", { name: "Harness presets" })).getByText("Thrifty"));
+    fireEvent.click(within(screen.getByRole("list", { name: "Model presets" })).getByText("Thrifty"));
     fireEvent.change(screen.getByLabelText("Main model"), { target: { value: "opus" } });
     expect(onSave).toHaveBeenLastCalledWith([expect.objectContaining({ model: "opus", advisor: null })]);
   });
@@ -29,7 +29,7 @@ describe("HarnessSettings", () => {
     render(<HarnessSettings {...props} onSave={onSave} />);
     fireEvent.change(screen.getByRole("combobox", { name: /New chats in acme start with/ }), { target: { value: "max" } });
     expect(props.onFolderDefault).toHaveBeenCalledWith("max");
-    fireEvent.click(within(screen.getByRole("list", { name: "Harness presets" })).getByText("Max"));
+    fireEvent.click(within(screen.getByRole("list", { name: "Model presets" })).getByText("Max"));
     expect(screen.getByText(/run \/model fable in Claude Code/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "New preset" }));
     expect(onSave.mock.lastCall![0]).toHaveLength(4);

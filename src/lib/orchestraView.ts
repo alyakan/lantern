@@ -1,5 +1,6 @@
 import { wakesPaused, type Chats } from "../sessions";
 import type { ChatItem, State } from "../store";
+import type { ActivityStatus } from "./status";
 import type { CloseCheck } from "../types";
 
 /** What an agent on the canvas is doing, in the words a product owner would use. */
@@ -10,7 +11,8 @@ export const STATUS_LABEL: Record<NodeStatus, string> = {
   working: "Working",
   waiting: "Needs you",
   held: "Needs you · updates held",
-  idle: "Idle",
+  // Never shown as it is: see statusLabel, which says "Ready" for a lead and "Done" for an agent.
+  idle: "Ready",
   ended: "Stopped",
   failed: "Stopped · error",
 };
@@ -77,6 +79,21 @@ export function teamMain(chats: Chats, slot: string): string | null {
 /** The nodes of one team: its main agent and the workers it started. */
 export function teamNodes(nodes: OrchestraNode[], main: string): OrchestraNode[] {
   return nodes.filter((n) => n.slot === main || n.parent === main);
+}
+
+/**
+ * What the title bar says on a team's canvas, in place of the chat on screen's own turn ("Finished" says nothing about
+ * the others): how many agents are working, how many need the user, and how many stopped, or "all idle". The Lead counts.
+ */
+export function teamActivity(nodes: OrchestraNode[], slots: Record<string, State>): ActivityStatus {
+  const statuses = nodes.flatMap((n) => (slots[n.slot] ? [nodeStatus(slots[n.slot])] : []));
+  const count = (...of: NodeStatus[]) => statuses.filter((s) => of.includes(s)).length;
+  const working = count("working", "starting");
+  const needYou = needingYou(nodes, slots).length;
+  const failed = count("failed");
+  const stopped = count("ended");
+  const parts = [working && `${working} working`, needYou && `${needYou} ${needYou === 1 ? "needs" : "need"} you`, failed && `${failed} failed`, stopped && `${stopped} stopped`].filter(Boolean);
+  return { text: parts.length ? parts.join(", ") : "all idle", detail: null, working: working > 0 };
 }
 
 /** The first line of the last thing an agent said at the top level of its chat. */
