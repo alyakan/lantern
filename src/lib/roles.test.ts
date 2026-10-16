@@ -24,6 +24,11 @@ describe("the built-in roles", () => {
     const by = Object.fromEntries(BUILTIN_ROLES.map((r) => [r.id, r]));
     expect(by.reviewer.brief).toContain("you cannot edit anything");
     expect(by.security.brief).toContain("you cannot edit anything");
+    // They can only read, so neither brief sends them to run git or anything else.
+    for (const id of ["reviewer", "security"]) {
+      expect(by[id].brief).toContain("you cannot run commands");
+      expect(by[id].brief).not.toMatch(/git diff|git log|run commands that only read/);
+    }
     expect(by.qa.brief).toContain("Don't change the code you are testing");
     expect(by.docs.brief).toContain("documentation files only");
   });

@@ -214,7 +214,7 @@ export interface NewWorker {
   isolation: "worktree" | "shared";
   /** Null: Claude Code's default. */
   model: string | null;
-  /** The role it is started in, which is also what is kept of it on its card; absent: none. A read-only one has its editing tools switched off. */
+  /** The role it is started in, which is also what is kept of it on its card; absent: none. A read-only one has only the tools that read files: no editing and no commands. */
   role?: AgentRole;
 }
 

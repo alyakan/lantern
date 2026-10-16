@@ -62,6 +62,27 @@ describe("Settings' General page", () => {
     expect(set).toHaveBeenLastCalledWith(false);
   });
 
+  it("warns that merge tests run the project's own command without asking", () => {
+    view();
+    expect(screen.getByText(/comes from the project, including code the agent has just written/)).toBeInTheDocument();
+    expect(screen.getByText(/without asking you/)).toBeInTheDocument();
+  });
+
+  it("offers keeping restore points before each message, on by default, says what they copy, and tells the backend", () => {
+    const set = vi.fn(() => Promise.resolve());
+    (api as unknown as { setRestorePoints: typeof set }).setRestorePoints = set;
+    view();
+    const box = screen.getByRole("checkbox", { name: "Keep restore points before each message" });
+    expect(box).toBeChecked();
+    expect(screen.getByText(/such as a \.env that isn't in \.gitignore/)).toBeInTheDocument();
+    fireEvent.click(box);
+    expect(box).not.toBeChecked();
+    expect(localStorage.getItem("lantern.restorePoints")).toBe("false");
+    expect(set).toHaveBeenLastCalledWith(false);
+    fireEvent.click(box);
+    expect(set).toHaveBeenLastCalledWith(true);
+  });
+
   it("turns notifications off as a whole", () => {
     view();
     fireEvent.click(screen.getByLabelText("Tell me in macOS notifications and in the window"));

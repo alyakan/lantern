@@ -12,7 +12,7 @@ export interface Role {
   brief: string;
   model: string;
   isolation: "worktree" | "shared";
-  /** It may read but not edit: its editing tools are switched off. */
+  /** It can only read: it has no editing tools and no shell. */
   readOnly: boolean;
 }
 

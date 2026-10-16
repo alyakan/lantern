@@ -8,6 +8,7 @@ import { AGENT_LIMIT_MAX, AGENT_LIMIT_MIN, setAgentLimit, useAgentLimit } from "
 import { PAUSE_OPTIONS, setPauseAtPercent, usePauseAtPercent } from "../lib/planPause";
 import { QUIET_MINUTES, setQuietMinutes, useQuietMinutes } from "../lib/quietSetting";
 import { setAutoMergeTests, useAutoMergeTests } from "../lib/mergeTests";
+import { setRestorePoints, useRestorePoints } from "../lib/restorePointsSetting";
 import { PAUSE_MS, type NotifyPrefs } from "../lib/notifyPrefs";
 import type { TextSize } from "../lib/theme";
 import type { CustomTheme, ThemeId } from "../lib/themes";
@@ -149,6 +150,7 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
   const quiet = useQuietMinutes();
   const pauseAt = usePauseAtPercent();
   const autoTests = useAutoMergeTests();
+  const restorePoints = useRestorePoints();
   const paused = notify.pausedUntil > Date.now();
   const set = (patch: Partial<NotifyPrefs>) => onNotify({ ...notify, ...patch });
   return (
@@ -266,7 +268,12 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
           <input type="checkbox" checked={autoTests} onChange={(e) => setAutoMergeTests(e.target.checked)} />
           <span>Run tests when a merge is proposed</span>
         </label>
-        <span className="settings-muted">Runs the project's tests in the agent's worktree as its merge card appears, so the result is waiting for you. Off, nothing runs until you press Run tests.</span>
+        <span className="settings-muted">Runs the project's test command in the agent's worktree as soon as its merge card appears, without asking you. That command comes from the project, including code the agent has just written, so only turn this on for projects whose code you trust. Off, nothing runs until you press Run tests.</span>
+        <label className="general-option">
+          <input type="checkbox" checked={restorePoints} onChange={(e) => setRestorePoints(e.target.checked)} />
+          <span>Keep restore points before each message</span>
+        </label>
+        <span className="settings-muted">Before each message Lantern keeps a copy of your project's files inside its .git folder, so you can put them back. That includes files git doesn't track yet and doesn't ignore, such as a .env that isn't in .gitignore, and new files over 20 MB are skipped. Off, no copy is made and Restore files to here has nothing new to go back to.</span>
         {onWarnTeams && (
           <label className="general-option">
             <input type="checkbox" checked={warnTeams ?? true} onChange={(e) => onWarnTeams(e.target.checked)} />

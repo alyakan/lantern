@@ -70,6 +70,8 @@ pub struct AppState {
     asides: aside::Asides,
     /// What the user saved for each project: the setup run in a new worktree, and the Run command (the window sends it).
     setups: setup::SetupStore,
+    /// "Keep restore points before each message" (Settings → General; the window sends it). On until the user turns it off.
+    restore_points: std::sync::atomic::AtomicBool,
 }
 
 /// Where a test makes folders that must not be in the system temp dir (which recent folders leave out): the target dir
@@ -835,9 +837,12 @@ async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str) -> Resu
     // given a few seconds at most, and a late one is never kept (it would hold edits of the turn).
     let (late, slot_id) = (Arc::new(std::sync::atomic::AtomicBool::new(false)), id.to_string());
     let given_up = late.clone();
-    let taken = at_checkpoints(app, id, s, move |s, place, path_env| s.checkpoints.take_unless(place, &slot_id, turn, path_env, &given_up));
-    if tokio::time::timeout(std::time::Duration::from_secs(8), taken).await.is_err() {
-        late.store(true, std::sync::atomic::Ordering::SeqCst);
+    // Not at all when the user has turned restore points off.
+    if app.state::<AppState>().restore_points.load(std::sync::atomic::Ordering::SeqCst) {
+        let taken = at_checkpoints(app, id, s, move |s, place, path_env| s.checkpoints.take_unless(place, &slot_id, turn, path_env, &given_up));
+        if tokio::time::timeout(std::time::Duration::from_secs(8), taken).await.is_err() {
+            late.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
     }
     s.checkpoints.turn_started();
     if let Err(e) = claude.send(text).await {
@@ -887,6 +892,13 @@ fn orchestra_cancel_merge_tests(state: State<'_, AppState>, worker: String) {
 #[tauri::command]
 fn merge_tests_split_command(text: String) -> Result<Vec<String>, String> {
     merge_tests::split_command(&text)
+}
+
+/// "Keep restore points before each message" (Settings → General). Off, no file is copied before a message; restore points
+/// already made can still be used.
+#[tauri::command]
+fn set_restore_points(state: State<'_, AppState>, on: bool) {
+    state.restore_points.store(on, std::sync::atomic::Ordering::SeqCst);
 }
 
 /// "Run tests when a merge is proposed" (Settings → General).
@@ -1946,7 +1958,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default() });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into() });
             app.manage(updates::Updates::default());
             app.manage(awake::Awake::default());
             if updates::checks_enabled() {
@@ -2007,6 +2019,7 @@ pub fn run() {
             orchestra_cancel_merge_tests,
             merge_tests_split_command,
             set_auto_merge_tests,
+            set_restore_points,
             orchestra_discard,
             run_shell,
             claude_request,

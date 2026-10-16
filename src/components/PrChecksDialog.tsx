@@ -4,6 +4,8 @@ import type { GhAccess } from "../types";
 import { PR_MODES, TRIES_MAX, TRIES_MIN, type PrMode, type PrSetting } from "../lib/prChecks";
 
 /** What to tell the user when the GitHub CLI can't be used (the choice is still theirs to make). */
+/** Under Fix it myself: what the chat's Permissions mean for the fixes it makes. */
+export const FIX_NOTE = "With Auto permissions Claude will push fixes without asking you. With Ask it asks you on each command.";
 export const GH_NOTE = "Install and log in to the GitHub CLI to watch checks.";
 
 /** The GitHub CLI's state, once (null while it is being looked at). */
@@ -86,6 +88,11 @@ export function PrChecksDialog({ label, setting, onSave, onClose }: Props) {
             </label>
           ))}
         </fieldset>
+        {mode === "fix" && (
+          <p className="pr-mode-hint pr-fix-note">
+            {FIX_NOTE}
+          </p>
+        )}
         <label className={`pr-tries${mode === "fix" ? "" : " off"}`}>
           <span>Tries for Fix it myself</span>
           <select aria-label="Tries" value={tries} disabled={mode !== "fix"} onChange={(e) => setTries(Number(e.target.value))}>

@@ -219,7 +219,7 @@ export function NewAgent({ main, shown }: { main: string; shown?: { open: boolea
                 <input type="radio" name="access" checked={form.readOnly || shared} onChange={() => set({ readOnly: true })} />
                 Read only
               </label>
-              <p className="new-agent-hint">Read only switches its editing tools off, so it can read and report but not change files.</p>
+              <p className="new-agent-hint">Read only gives it just the tools that read files, so it can look and report but not change files or run commands.</p>
             </fieldset>
           )}
           <label>
