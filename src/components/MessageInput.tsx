@@ -7,7 +7,7 @@ import { matchCommands } from "../lib/slash";
 import { decodeDraft, encodeDraft, expandPastes, inUse, isBigPaste, nextNumber, placeholder as pasteToken, tokenBefore, type Pastes } from "../lib/paste";
 import { describeCommands, replaceTrigger, sections as menuSections, triggerAt, type MenuCommand } from "../lib/complete";
 import { CompletionMenu, type McpIssue } from "./CompletionMenu";
-import { ArrowUpIcon, BranchIcon, FolderIcon, SparkIcon } from "./icons";
+import { ArrowUpIcon, BranchIcon, FolderIcon, SideChatIcon, SparkIcon } from "./icons";
 import { ContextMeter } from "./ContextMeter";
 import { EFFORT_LEVELS } from "../lib/effort";
 import { FolderPill, type RelocateMenu } from "./FolderPill";
@@ -17,6 +17,7 @@ import type { Permissions, Workflow } from "../lib/workflow";
 import { ModelsPicker } from "./ModelsPicker";
 import type { Harness } from "../lib/harness";
 import { SessionPill } from "./SessionPill";
+import { SideChat } from "./SideChat";
 import { UpdateButton } from "./UpdateButton";
 
 const MAX_HEIGHT = 200; // about 8 lines
@@ -188,6 +189,15 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
 
   useShortcut("l", () => area.current?.focus(), canType);
   useShortcut(".", () => stop(), running);
+  // The side chat: a quick question about the chat, answered apart from it, open while Claude works too. Closing it puts
+  // the cursor back in the box.
+  const [asideOpen, setAsideOpen] = useState(false);
+  const sideChatReady = canType && !!folder && !hero && !terminal;
+  const closeAside = () => {
+    setAsideOpen(false);
+    area.current?.focus();
+  };
+  useShortcut("b", () => (asideOpen ? closeAside() : setAsideOpen(true)), sideChatReady);
 
   // The levels the chosen model takes (all of them until claude has listed its models); none hides the picker.
   const modelOption = models?.options?.find((o) => (models.chosen === null ? o.value === "default" : o.value === models.chosen));
@@ -400,6 +410,11 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           ))}
         </ul>
       )}
+      {asideOpen && (
+        <div className="aside-anchor">
+          <SideChat onClose={closeAside} />
+        </div>
+      )}
       <div className={`composer-box${running ? " working" : ""}${terminal ? " terminal" : ""}`} onClick={() => area.current?.focus()}>
         {menuShown && open && (
           <CompletionMenu
@@ -546,6 +561,11 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
             )
           )}
           <div className="spacer" />
+          {sideChatReady && (
+            <button type="button" className="ghost side-chat-button" aria-label="Ask a side question" aria-expanded={asideOpen} title="Side chat: a quick question that isn't added to this chat (⌘B)" onClick={() => (asideOpen ? closeAside() : setAsideOpen(true))}>
+              <SideChatIcon />
+            </button>
+          )}
           {usage && <ContextMeter used={usage.used} window={usage.window} running={running} lastTurnMs={usage.lastTurnMs} actions={usage.actions} session={usage.session} />}
           {terminal ? (
             <button className="send run" aria-label="Run" title="Run (Enter)" disabled={!canSend} onClick={submit}>

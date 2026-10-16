@@ -927,6 +927,28 @@ button.ghost.context-compact, button.ghost.context-clear { height: 20px; padding
 .send:hover:not(:disabled) { background: var(--text); opacity: 0.85; }
 .send:disabled { opacity: 0.6; }
 .stop-square { width: 8px; height: 8px; border-radius: 1.5px; background: currentColor; }
+/* The side chat: a popover over the message box, with its answer in a small scrolling area. */
+.side-chat-button { display: inline-flex; align-items: center; justify-content: center; height: 22px; padding: 0 6px; color: var(--muted); }
+.aside-anchor { position: relative; height: 0; }
+.aside { position: absolute; left: 0; right: 0; bottom: 8px; z-index: 20; display: flex; flex-direction: column; max-height: min(480px, calc(100vh - 200px)); background: var(--field); border: 1px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--shadow); font-size: calc(12.5px * var(--font-scale)); color: var(--text); }
+.aside-head { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; border-bottom: 1px solid var(--line); }
+.aside-title { font-weight: 500; }
+.aside-model { margin-left: auto; max-width: 200px; padding: 2px 6px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: var(--text-2); font: inherit; font-size: calc(11.5px * var(--font-scale)); }
+.aside-body { flex: 1 1 auto; min-height: 56px; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }
+.aside-turn { display: flex; flex-direction: column; gap: 6px; }
+.aside-q { color: var(--text-2); font-weight: 500; user-select: text; cursor: auto; overflow-wrap: anywhere; }
+.aside-a { user-select: text; cursor: auto; overflow-wrap: anywhere; line-height: 1.5; }
+.aside-a > :first-child { margin-top: 0; }
+.aside-a > :last-child { margin-bottom: 0; }
+.aside-empty, .aside-note { margin: 0; color: var(--muted); font-size: calc(12px * var(--font-scale)); }
+.aside-note.failed { color: var(--del); }
+.aside-step { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: calc(12px * var(--font-scale)); }
+.aside-ask { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.aside-ask input { flex: 1; min-width: 0; padding: 5px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--bg); color: var(--text); font: inherit; caret-color: var(--caret); }
+.aside-ask input:focus { outline: none; border-color: var(--faint); }
+.aside-ask input::placeholder { color: var(--muted-text); }
+.aside-foot { display: flex; align-items: flex-end; gap: 4px; padding: 6px 8px 8px 12px; border-top: 1px solid var(--line); }
+.aside-promise { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; color: var(--muted); font-size: calc(11px * var(--font-scale)); }
 .composer-meta { display: flex; align-items: center; gap: 12px; padding: 6px 4px 0; min-height: 26px; }
 .meta-item { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 6px; margin: 0 -6px; border: none; background: none; font-size: calc(12px * var(--font-scale)); color: var(--muted); border-radius: var(--radius-chip); }
 .meta-item:hover:not(:disabled):not(.static) { background: var(--bg-hover); color: var(--text-2); }

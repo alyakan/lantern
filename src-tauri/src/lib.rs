@@ -1,4 +1,5 @@
 pub mod args;
+pub mod aside;
 pub mod awake;
 pub mod changes;
 pub mod cli_locator;
@@ -63,6 +64,8 @@ pub struct AppState {
     agent_limit: std::sync::atomic::AtomicUsize,
     /// What History's full-text search has read of past chats, and the number of its newest search (see history_search.rs).
     chat_search: Arc<history_search::ChatSearch>,
+    /// The side chats that are open: quick questions about a chat, in their own read-only claude (see aside.rs).
+    asides: aside::Asides,
 }
 
 /// Where a test makes folders that must not be in the system temp dir (which recent folders leave out): the target dir
@@ -669,9 +672,51 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
 #[tauri::command]
 async fn close_session(state: State<'_, AppState>, slot: String) -> Result<(), String> {
     state.orchestra.forget(&slot);
+    state.asides.stop_slot(&slot).await;
     if let Some(s) = state.slots.remove(&slot) {
         s.shut_down().await;
     }
+    Ok(())
+}
+
+/// Asks a side question about a chat (see aside.rs): the first question of side chat `aside` starts a read-only copy of the
+/// chat's conversation, the rest follow up in it. The answer comes as `aside-event`s, never as the chat's own events.
+/// `model`: what the side chat runs on; None is the chat's. Resolves to whether it has the chat's conversation to start from.
+#[tauri::command]
+async fn aside_ask(app: AppHandle, state: State<'_, AppState>, slot: String, aside: String, text: String, model: Option<String>) -> Result<bool, String> {
+    let model = checked_model(model)?;
+    let s = state.slots.get(&slot)?;
+    let (provider, binary, folder, path_env, chat_model) = {
+        let cfg = s.config.lock().unwrap();
+        let cfg = cfg.as_ref().ok_or("No folder is open")?;
+        (cfg.provider, cfg.binary.clone(), cfg.folder.clone(), cfg.path_env.clone(), cfg.model.clone())
+    };
+    if provider != ProviderId::Claude {
+        return Err("Side chats need Claude Code.".into());
+    }
+    let session_id = s.session.lock().await.as_ref().and_then(|x| x.session_id());
+    // From the folder's own transcripts only: that is where the claude it starts looks.
+    let resume = aside::forkable(&projects_root()?, &folder, &[], session_id.as_deref());
+    let launch = aside::Launch { binary, folder, path_env, resume, model: model.or(chat_model) };
+    let emit: Arc<dyn Fn(aside::AsideEvent) + Send + Sync> = Arc::new(move |ev| {
+        let _ = app.emit("aside-event", &ev);
+    });
+    state.asides.ask(&aside, &slot, &launch, &text, emit).await
+}
+
+/// The side chat's popover closed: its claude is stopped and nothing of it is kept.
+#[tauri::command]
+async fn aside_stop(state: State<'_, AppState>, aside: String) -> Result<(), String> {
+    state.asides.stop(&aside).await;
+    Ok(())
+}
+
+/// Stops the answer being written, keeping the side chat for another question.
+#[tauri::command]
+async fn aside_stop_answering(app: AppHandle, state: State<'_, AppState>, aside: String) -> Result<(), String> {
+    state.asides.stop_answering(&aside, Arc::new(move |ev| {
+        let _ = app.emit("aside-event", &ev);
+    })).await;
     Ok(())
 }
 
@@ -1802,6 +1847,7 @@ pub fn run() {
                 following.tick();
             });
             app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default() });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, agent_limit: DEFAULT_AGENT_LIMIT.into(), asides: Default::default() });
             app.manage(updates::Updates::default());
             app.manage(awake::Awake::default());
             if updates::checks_enabled() {
@@ -1848,6 +1894,9 @@ pub fn run() {
             apply_harness,
             close_session,
             send_message,
+            aside_ask,
+            aside_stop,
+            aside_stop_answering,
             orchestra_approve_merge,
             network_state,
             network_response,
@@ -1936,6 +1985,7 @@ pub fn run() {
                     awake.stop();
                 }
                 if let Some(state) = app.try_state::<AppState>() {
+                    tauri::async_runtime::block_on(state.asides.stop_all());
                     tauri::async_runtime::block_on(slots::shut_down_all(state.slots.drain()));
                 }
                 // An update the user didn't restart for goes in now, for the next launch.
