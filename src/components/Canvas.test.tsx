@@ -1132,7 +1132,30 @@ describe("an agent at work that has gone quiet", () => {
     setup(working(200_000));
     const line = screen.getByText(/Quiet for 3 min\. It may be stuck\./);
     expect(line).toBeInTheDocument();
-    expect(within(line.parentElement!).getAllByRole("button").map((b) => b.textContent)).toEqual(["Nudge", "Interrupt", "Restart"]);
+    expect(within(line.parentElement!).getAllByRole("button").map((b) => b.textContent)).toEqual(["Nudge", "Interrupt", "Restart", "×"]);
+  });
+
+  it("can be dismissed with its ×, and comes back only after the agent says something new", () => {
+    const chats = working(200_000);
+    const { store, acts } = setup(chats);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText(/It may be stuck\./)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Nudge" })).toBeNull();
+    // It only hides the banner: nothing was sent to the agent, and the card is still marked quiet.
+    expect(acts.send).not.toHaveBeenCalled();
+    expect(acts.stop).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/Agent Worker 1, Quiet 3m/)).toHaveClass("stuck");
+    act(() => store.set({ ...chats.slots, w1: { ...chats.slots.w1, activityAt: Date.now() - 190_000 } }));
+    expect(screen.getByText(/It may be stuck\./)).toBeInTheDocument();
+  });
+
+  it("has no × on the Restart question: it is answered, not dismissed", () => {
+    const { acts } = setup(working(200_000));
+    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+    expect(screen.getByRole("alertdialog", { name: "Restart this agent?" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Restart anyway" }));
+    expect(acts.restart).toHaveBeenCalledWith("w1");
   });
 
   it("Nudge asks for a one-line status once for each stretch of quiet", () => {
