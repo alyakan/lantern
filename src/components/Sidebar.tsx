@@ -49,6 +49,8 @@ export interface SidebarHandlers {
   onBringOld: (folder: string) => void;
   /** Opens the project's notes: the text every new chat in it starts with. */
   onProjectNotes: (folder: string) => void;
+  /** Opens the project's setup: what runs in each new agent's worktree, and its Run command. */
+  onSetup: (folder: string) => void;
   onReveal: (folder: string) => void;
   onRemove: (folder: string) => void;
   onOpenFolder: () => void;
@@ -404,6 +406,9 @@ function ProjectMenu({ group, h, moves, finished, onClose, onClosed }: { group: 
       <button role="menuitem" className="menu-row" title="Text every new chat in this project starts knowing" onClick={pick(() => h.onProjectNotes(group.folder))}>
         <span className="menu-row-title">Project notes…</span>
       </button>
+      <button role="menuitem" className="menu-row" title="What runs in each new agent's worktree before it starts, and the command its Run button starts" onClick={pick(() => h.onSetup(group.folder))}>
+        <span className="menu-row-title">Project setup…</span>
+      </button>
       <button role="menuitem" className="menu-row" onClick={pick(() => h.onBringOld(group.folder))}>
         <span className="menu-row-title">Bring old chats here…</span>
       </button>
@@ -730,6 +735,7 @@ export function Sidebar(props: Props) {
           onNewTeamIn: then(handlers.onNewTeamIn),
           onBringOld: then(handlers.onBringOld),
           onProjectNotes: then(handlers.onProjectNotes),
+          onSetup: then(handlers.onSetup),
           onOpenFolder: then(handlers.onOpenFolder),
           onNewChat: then(handlers.onNewChat),
           onNewTeam: then(handlers.onNewTeam),

@@ -97,7 +97,8 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
   // For the whole turn, until Claude is fully done: a line at the bottom with the turn's word, like Claude Code's
   // spinner under its output.
   const prompt = [...state.items].reverse().find((it) => it.type === "user");
-  const thinkingLine = state.status === "running";
+  // A worker whose worktree is being set up hasn't started: nothing is thinking yet.
+  const thinkingLine = state.status === "running" && !state.setup;
   const jump = () => {
     nearBottom.current = true;
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });

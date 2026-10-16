@@ -13,7 +13,7 @@ import { ReviewPrDialog } from "./components/ReviewPrDialog";
 import { TeamWarning } from "./components/TeamWarning";
 import { usageRows, workingTeams, type WorkingTeam } from "./lib/usage";
 import { windowFocused } from "./lib/windowFocus";
-import { initialState, reducer, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
+import { initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend } from "./sessions";
 import type { Mode, UiEvent } from "./types";
@@ -31,7 +31,7 @@ import { agentGraph } from "./lib/agentGraph";
 import { BUILT_IN, CUSTOM_HARNESS, customOf, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
-import type { CloseAgreed, McpServer, MovedFolder, NewRule, NewWorker, OpenPr, RelocationEntry, SkillEntry, UpdateInfo } from "./types";
+import type { CloseAgreed, CloseCheck, McpServer, MovedFolder, NewRule, NewWorker, OpenPr, RelocationEntry, SkillEntry, UpdateInfo } from "./types";
 import { LAST_FOLDER, OPEN_CHATS, migrateFolderState, withMovedNote, type Migrated } from "./lib/relocate";
 import { BringOldSessionsDialog } from "./components/BringOldSessionsDialog";
 import { ProjectNotesDialog } from "./components/ProjectNotesDialog";
@@ -94,7 +94,12 @@ import { TopBar } from "./components/TopBar";
 import { Canvas, newLayout } from "./components/Canvas";
 import { ChatStoreContext, createChatStore, KnownWindowsContext, NodeActionsContext, type NodeActions } from "./lib/canvasContext";
 import { windowOf } from "./lib/contextShare";
-import { needingYou, orchestraNodes, teamActivity, teamMain, teamNodes } from "./lib/orchestraView";
+import { lostText, needingYou, orchestraNodes, teamActivity, teamMain, teamNodes } from "./lib/orchestraView";
+import { ProjectSetupContext, pushProjectSetups, runCommandOf, type ProjectSetup, type SetupByFolder } from "./lib/projectSetup";
+import { ConfirmDialog } from "./components/ConfirmDialog";
+import { ProjectSetupDialog } from "./components/ProjectSetupDialog";
+import { RunPanel } from "./components/RunPanel";
+import { SetupNotice } from "./components/SetupNotice";
 import "./styles.css";
 import { AGENT_MODEL } from "./lib/models";
 import { templateMessage, type AgentRole, type TeamTemplate } from "./lib/roles";
@@ -180,6 +185,8 @@ export default function App() {
   const [savedPresets, setSavedPresets] = usePersistentState<Harness[]>("settings.harnessPresets", BUILT_IN.slice(1));
   const presets = presetsOf(savedPresets);
   const [harnessByFolder, setHarnessByFolder] = usePersistentState<Record<string, string>>("settings.harnessByFolder", {});
+  // What each project runs in a new agent's worktree before it starts, and its Run command (see lib/projectSetup.ts).
+  const [setupBy, setSetupBy] = usePersistentState<SetupByFolder>("settings.projectSetupByFolder", {});
   const [harnessBySession, setHarnessBySession] = usePersistentState<Record<string, string>>("settings.harnessBySession", {});
   // General: which events are told about (and paused), the theme and the text size.
   const [notifyPrefs, setNotifyPrefs] = usePersistentState<NotifyPrefs>(NOTIFY_KEY, NOTIFY_DEFAULTS);
@@ -267,6 +274,10 @@ export default function App() {
     void pushAgentLimit();
     void pushAutoMergeTests();
   }, []);
+  // The backend runs a project's setup in a new worktree, and its Run command: it learns both from here, at launch and on every save.
+  useEffect(() => {
+    void pushProjectSetups(setupBy);
+  }, [setupBy]);
   // When each chat's last turn ended, for the title bar's "Done | Today at 19:22".
   const [finishedAt, setFinishedAt] = useState<Record<string, Date>>({});
   // The pop-up shown when the chat on screen finishes a turn.
@@ -836,6 +847,12 @@ export default function App() {
 
   // "!command" in the chat box: run in the chat's folder, its output streaming into the conversation.
   const shellSeq = useRef(0);
+  const runSeq = useRef(0);
+  // The project a chat belongs to: its Lead's folder for an agent (its own folder is a worktree), else its own.
+  const projectFolderOf = (slot: string) => {
+    const parent = chats.agents[slot]?.parent;
+    return (parent && chats.slots[parent]?.folder) || chats.slots[slot]?.folder || null;
+  };
   const runShell = (slot: string, command: string) => {
     const id = `sh-${Date.now().toString(36)}-${++shellSeq.current}`;
     to(slot)({ type: "shell_started", id, command });
@@ -1244,6 +1261,29 @@ export default function App() {
       if (chats.slots[slot]?.folder) setCollapsedBy({ ...collapsedBy, [chats.slots[slot].folder!]: false });
     },
     stopShell: (slot: string, id: string) => api.stopShell(slot, id).catch(() => {}),
+    answerSetup: (slot: string, answer: "start" | "again" | "stop") => api.answerSetup(slot, answer).catch((e) => Promise.reject(errText(e))),
+    // The project's Run command in the chat's folder. One that is going is stopped first; its own id keeps its ending from touching the new run.
+    run: (slot: string) => {
+      const s = chats.slots[slot];
+      const command = runCommandOf(setupBy, projectFolderOf(slot));
+      if (!s?.folder || !command) return;
+      if (s.run?.status === "running") api.stopShell(slot, s.run.id).catch(() => {});
+      const id = `${RUN_PREFIX}${Date.now().toString(36)}-${++runSeq.current}`;
+      to(slot)({ type: "run_started", id, command });
+      api.runProject(slot, id).catch((e) => {
+        to(slot)({ type: "ui_event", event: { kind: "shell_output", id, text: errText(e) } });
+        to(slot)({ type: "ui_event", event: { kind: "shell_done", id, code: null, stopped: false } });
+      });
+    },
+    stopRun: (slot: string) => {
+      const run = chats.slots[slot]?.run;
+      if (run?.status === "running") api.stopShell(slot, run.id).catch(() => {});
+    },
+    closeRun: (slot: string) => {
+      const run = chats.slots[slot]?.run;
+      if (run?.status === "running") api.stopShell(slot, run.id).catch(() => {});
+      to(slot)({ type: "run_closed" });
+    },
     shellInput: (slot: string, id: string, text: string) =>
       api.shellInput(slot, id, text).catch((e) => to(slot)({ type: "ui_event", event: { kind: "shell_output", id, text: `\n${errText(e)}\n` } })),
     restart: (slot: string) => {
@@ -1323,6 +1363,10 @@ export default function App() {
       openFile: (slot, path) => doingRef.current.openFile(slot, path),
       openTestRun: (slot, id) => doingRef.current.openTestRun(slot, id),
       stopShell: (slot, id) => doingRef.current.stopShell(slot, id),
+      answerSetup: (slot, answer) => doingRef.current.answerSetup(slot, answer),
+      run: (slot) => doingRef.current.run(slot),
+      stopRun: (slot) => doingRef.current.stopRun(slot),
+      closeRun: (slot) => doingRef.current.closeRun(slot),
       shellInput: (slot, id, text) => doingRef.current.shellInput(slot, id, text),
       restart: (slot) => doingRef.current.restart(slot),
       approveMerge: (worker) => doingRef.current.approveMerge(worker),
@@ -1583,9 +1627,8 @@ export default function App() {
     const themes = THEMES.filter((t) => t.id !== theme && t.id !== "custom").map((t): PaletteEntry => ({ id: `theme:${t.id}`, title: `Theme: ${t.label}`, group: "Theme", shortcut: null, run: () => setTheme(t.id) }));
     // History with its search box ready: what was said in any past chat.
     const searchChats: PaletteEntry = { id: "search-chats", title: "Search all chats…", group: "View", shortcut: null, run: () => void openHistory() };
-    return [...availableActions(), searchChats, ...permissions, ...workflows, ...harnesses, ...themes, ...tabs];
     const project = state.folder ? [{ id: "project-notes", title: "Project notes…", group: "Project", shortcut: null, run: () => setEditingNotes(state.folder) } satisfies PaletteEntry] : [];
-    return [...availableActions(), ...project, ...permissions, ...workflows, ...harnesses, ...themes, ...tabs];
+    return [...availableActions(), searchChats, ...project, ...permissions, ...workflows, ...harnesses, ...themes, ...tabs];
   };
   // The Work menu: Build, Debug and Design are Step by step in that flavour; Review a PR lists the open pull requests and
   // starts a review on the one chosen; Start a team makes an empty chat a team's Lead, and otherwise starts a new one.
@@ -1642,6 +1685,11 @@ export default function App() {
   const [moved, setMoved] = useState<MovedFolder[]>([]);
   const [dismissedMoves, setDismissedMoves] = usePersistentState<string[]>("relocate.dismissed", []);
   // The project the old sessions go to (null: not chosen yet), and the place a "moved?" notice was for, if any.
+  // The project whose setup dialog is open.
+  const [settingUp, setSettingUp] = useState<string | null>(null);
+  // Closing an agent from the full-size chat's setup card: asked what would be lost first, as the canvas does.
+  const [closingFull, setClosingFull] = useState<{ slot: string; check: CloseCheck } | null>(null);
+  const [closingBusy, setClosingBusy] = useState(false);
   const [bringing, setBringing] = useState<{ destination: string | null; from: string | null } | null>(null);
   const refreshMoved = () => api.movedFolderCandidates().then(setMoved, () => setMoved([]));
   useEffect(() => {
@@ -1683,6 +1731,8 @@ export default function App() {
     if (notes) setNotesBy(notes);
     const colors = take<Record<string, number>>("sidebar.projectColors");
     if (colors) setProjectColors(colors);
+    const setups = take<SetupByFolder>("settings.projectSetupByFolder");
+    if (setups) setSetupBy(setups);
     const order = take<string[]>("sidebar.projectOrder");
     if (order) setProjectOrder(order);
     const last = take<string>(LAST_FOLDER);
@@ -1785,6 +1835,7 @@ export default function App() {
     onNewTeamIn: (folder: string) => newOrchestra(folder),
     onBringOld: (folder: string) => setBringing({ destination: folder, from: null }),
     onProjectNotes: (folder: string) => setEditingNotes(folder),
+    onSetup: (folder: string) => setSettingUp(folder),
     onReveal: (folder: string) => void revealItemInDir(folder).catch(() => {}),
     onRemove: (folder: string) => setHiddenFolders([...hiddenFolders.filter((f) => f !== folder), folder]),
     onOpenFolder: openFolder,
@@ -1816,6 +1867,7 @@ export default function App() {
     onNewTeamIn: then(sidebarHandlers.onNewTeamIn),
     onBringOld: then(sidebarHandlers.onBringOld),
     onProjectNotes: then(sidebarHandlers.onProjectNotes),
+    onSetup: then(sidebarHandlers.onSetup),
     onOpenFolder: then(sidebarHandlers.onOpenFolder),
     onNewChat: then(sidebarHandlers.onNewChat),
     onNewTeam: then(sidebarHandlers.onNewTeam),
@@ -1904,11 +1956,37 @@ export default function App() {
     />
   );
 
+  // The project's Run command in the title bar, for a chat that isn't on the canvas (the canvas cards have their own).
+  const topRun = !showCanvas && state.folder && !state.setup && state.status !== "starting" ? runCommandOf(setupBy, projectFolderOf(active)) : null;
+  // A worker's setup, and the project's Run command, above the chat box.
+  const chatExtras = (state.setup || state.run) && (
+    <div className="chat-extras">
+      {state.setup && <SetupNotice key={active} card={state.setup} onAnswer={(answer) => doing.answerSetup(active, answer)} onClose={() => void closeFull(active)} />}
+      {state.run && <RunPanel key={state.run.id} run={state.run} onStop={() => doing.stopRun(active)} onRestart={() => doing.run(active)} onClose={() => doing.closeRun(active)} />}
+    </div>
+  );
+  // "Close agent" on a full-size card whose setup failed: nothing to lose closes at once, else the user is asked.
+  const closeFull = (slot: string) =>
+    doing.closeCheck(slot).then(
+      (check) => (lostText(check) ? setClosingFull({ slot, check }) : doing.closeWorker(slot)),
+      (e) => dispatch({ type: "failed", text: errText(e) }),
+    );
+  const closeFullAgent = (slot: string, agreed?: CloseAgreed) => {
+    setClosingBusy(true);
+    doing.closeWorker(slot, agreed).then(
+      () => setClosingFull(null),
+      (e) => {
+        setClosingFull(null);
+        dispatch({ type: "failed", text: errText(e) });
+      },
+    ).finally(() => setClosingBusy(false));
+  };
+
   if (state.status === "locating") return <div className="center muted">Looking for the claude CLI…</div>;
   if (state.status === "setup") return <SetupScreen error={state.setupError} onCheck={locate} />;
 
   return (
-    <SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}><KnownWindowsContext.Provider value={windows}><RoleStoreProvider store={roleStore}><TemplateTeamContext.Provider value={state.folder ? () => setTemplateDialog(true) : null}>
+    <ProjectSetupContext.Provider value={setupBy}><SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}><KnownWindowsContext.Provider value={windows}><RoleStoreProvider store={roleStore}><TemplateTeamContext.Provider value={state.folder ? () => setTemplateDialog(true) : null}>
       <div className="app">
         <TopBar
           folder={titleFolder}
@@ -1931,6 +2009,7 @@ export default function App() {
           usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo }}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
           inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox, paused: guards.pause, onResume: guards.resume }}
+          run={topRun ? { command: topRun, running: state.run?.status === "running", onRun: () => doing.run(active) } : undefined}
         />
         <Hud event={hud} onOpenChat={switchTo} />
         <div className="app-body">
@@ -1980,6 +2059,7 @@ export default function App() {
                     {offeredTop.length > 0 && state.claudePath && (
                       <RestoreCard chats={offeredTop} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />
                     )}
+                    {chatExtras}
                     {state.folder && <StartScreen picked={stepsMode ? state.flavourPick : null} explain={explain} onExplain={(on) => state.flavourPick && pickFlavour(state.flavourPick, on)} team={workflowOf(state) === "team"} onFlavour={pickFlavour} onReview={() => setPrPicker(true)} onTeam={() => changeWorkflow(workflowOf(state) === "team" ? "chat" : "team")} />}
                     {composer}
                   </div>
@@ -1998,6 +2078,7 @@ export default function App() {
                     </FileLinksProvider>
                     </ArchitecturePane.Provider>
                   </ErrorBoundary>
+                  {chatExtras}
                   {composer}
                 </>
               )}
@@ -2115,6 +2196,16 @@ export default function App() {
             onClose={() => setEditingNotes(null)}
           />
         )}
+        {settingUp && <ProjectSetupDialog folder={settingUp} saved={setupBy[settingUp]} onSave={(setup: ProjectSetup) => setSetupBy({ ...setupBy, [settingUp]: setup })} onClose={() => setSettingUp(null)} />}
+        {closingFull && (
+          <div className="app-modal">
+            <ConfirmDialog title="Close this agent?" confirmLabel="Discard work and close" busyLabel="Closing…" busy={closingBusy} onConfirm={() => closeFullAgent(closingFull.slot, { uncommitted: closingFull.check.uncommitted, unmerged_commits: closingFull.check.unmerged_commits })} onCancel={() => setClosingFull(null)}>
+              <p>
+                It has <strong>{lostText(closingFull.check)}</strong>. Closing it stops it and deletes its worktree{closingFull.check.branch ? <> and branch <code>{closingFull.check.branch}</code></> : null}, so that work is gone for good.
+              </p>
+            </ConfirmDialog>
+          </div>
+        )}
         {bringing && (
           <BringOldSessionsDialog
             destination={bringing.destination}
@@ -2172,6 +2263,6 @@ export default function App() {
           onClose={() => setGuideAt(null)}
         />
       </div>
-    </TemplateTeamContext.Provider></RoleStoreProvider></KnownWindowsContext.Provider></SessionActionsContext.Provider></ModeGuideContext.Provider></SlotContext.Provider>
+    </TemplateTeamContext.Provider></RoleStoreProvider></KnownWindowsContext.Provider></SessionActionsContext.Provider></ModeGuideContext.Provider></SlotContext.Provider></ProjectSetupContext.Provider>
   );
 }

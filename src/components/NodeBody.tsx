@@ -1,5 +1,5 @@
-import { memo, useMemo, useRef, useState } from "react";
-import { useChatState, useNodeActions } from "../lib/canvasContext";
+import { memo, useContext, useMemo, useRef, useState } from "react";
+import { CloseAgentContext, useChatState, useNodeActions } from "../lib/canvasContext";
 import { nodeStatus } from "../lib/orchestraView";
 import { longSpan, useQuiet } from "../lib/quiet";
 import { useQuietAfter } from "../lib/quietSetting";
@@ -10,6 +10,8 @@ import { ChatView } from "./ChatView";
 import type { StreamHandlers } from "./ChatStream";
 import { MergeCard } from "./MergeCard";
 import { NodeComposer } from "./NodeComposer";
+import { RunPanel } from "./RunPanel";
+import { SetupNotice } from "./SetupNotice";
 
 /**
  * The merges to show for an agent: open ones, and the latest answered one for each worker as a quiet line (a merged one
@@ -86,6 +88,7 @@ export const NodeBody = memo(function NodeBody({ slot, parent }: { slot: string;
   const state = useChatState(slot);
   const owner = useChatState(parent ?? slot);
   const actions = useNodeActions();
+  const closeAgent = useContext(CloseAgentContext);
   const latest = useRef(state);
   latest.current = state;
   const handlers = useMemo<StreamHandlers>(
@@ -106,6 +109,16 @@ export const NodeBody = memo(function NodeBody({ slot, parent }: { slot: string;
       <div className="node-chat">
         <ChatView state={state} {...handlers} />
       </div>
+      {state.setup && (
+        <div className="node-merges">
+          <SetupNotice card={state.setup} onAnswer={(answer) => actions.answerSetup(slot, answer)} onClose={() => closeAgent(slot)} />
+        </div>
+      )}
+      {state.run && (
+        <div className="node-run-panel">
+          <RunPanel run={state.run} onStop={() => actions.stopRun(slot)} onRestart={() => actions.run(slot)} onClose={() => actions.closeRun(slot)} />
+        </div>
+      )}
       {proposals.length > 0 && (
         <div className="node-merges">
           {proposals.map((p) => (

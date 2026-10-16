@@ -51,6 +51,10 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ["mcpEdit", () => api.mcpEdit("s1", { name: "linear", scope: "user" }, spec), ["mcp_edit", { slot: "s1", fromName: "linear", fromScope: "user", spec }]],
   ["shellInput", () => api.shellInput("s1", "r1", "y\r"), ["shell_input", { slot: "s1", id: "r1", text: "y\r" }]],
   ["stopShell", () => api.stopShell("s1", "r1"), ["stop_shell", { slot: "s1", id: "r1" }]],
+  ["setProjectSetup", () => api.setProjectSetup("/repo", ["npm ci"], "npm run dev"), ["set_project_setup", { folder: "/repo", commands: ["npm ci"], run: "npm run dev" }]],
+  ["suggestSetup", () => api.suggestSetup("/repo"), ["suggest_setup", { folder: "/repo" }]],
+  ["answerSetup", () => api.answerSetup("w1", "start"), ["orchestra_setup_answer", { worker: "w1", answer: "start" }]],
+  ["runProject", () => api.runProject("s1", "run-1"), ["run_project", { slot: "s1", id: "run-1" }]],
   ["interrupt", () => api.interrupt("s1"), ["interrupt", { slot: "s1" }]],
   ["restartSession", () => api.restartSession("s1", "ask", null), ["restart_session", { slot: "s1", mode: "ask", effort: null, autoApprove: null, team: null }]],
   [

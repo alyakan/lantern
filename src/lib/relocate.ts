@@ -21,6 +21,8 @@ export const FOLDER_RECORDS = [
   "ship.ticksByFolder",
   // The text every new chat in the project starts with (Project notes in the project's ⋯ menu).
   "settings.projectNotes",
+  // The project's setup lines for new worktrees, and its Run command.
+  "settings.projectSetupByFolder",
 ] as const;
 
 /** Lantern's lists of folders that name the folder itself: the moved folder takes the old one's place in them. */
