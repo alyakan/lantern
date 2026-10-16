@@ -3,9 +3,11 @@ import type { Hunk, ModelCost, ModelOption, Mode, Rule, RuleScope, SlashCommand,
 import { countChanges } from "./lib/diff";
 import { readFlavourNote, type Flavour } from "./lib/flavour";
 import { readPageNote } from "./lib/pageNote";
-import { revertSummary, undoOf, undoSummary, type RevertNote, type RevertUndo } from "./lib/revert";
+import { restoreNoteId, revertSummary, undoOf, undoSummary, type RevertNote, type RevertUndo } from "./lib/revert";
 import { KEEP_CHARS, readShellContext, takesShellContext } from "./lib/shell";
+import { localUrlIn } from "./lib/localUrl";
 import { readSkillNote } from "./lib/skillNote";
+import { NO_REVIEW, type ReviewInfo, type ReviewSetting } from "./lib/reviewChain";
 import type { Subagents } from "./lib/workflow";
 
 export interface EditInfo {
@@ -58,6 +60,33 @@ export interface ShellItem {
   shared: boolean;
   /** It's reading a secret (a password): echo is off in its terminal. */
   secret?: boolean;
+}
+
+/** A worker's setup in its new worktree, before its claude starts (see lib/projectSetup.ts): running a line, or stopped at one. */
+export interface SetupCard {
+  status: "running" | "failed";
+  /** The line it is at (from 0) and how many there are. */
+  index: number;
+  total: number;
+  command: string;
+  /** What the line printed last. */
+  line: string;
+  /** Failed: why, and the end of what it printed. */
+  reason: string;
+  tail: string;
+}
+
+/** The project's Run command, started from the Run button in the chat's folder (a command like the ones from the chat box). */
+export interface RunTask {
+  id: string;
+  command: string;
+  status: "running" | "stopped" | "failed";
+  code: number | null;
+  /** The end of what it printed (see KEEP_CHARS). */
+  output: string;
+  /** The first local address it printed (http://localhost:5173), kept even when the output moves on. */
+  url: string | null;
+  startedAt: number;
 }
 
 export type ChatItem =
@@ -132,6 +161,8 @@ export interface MergeProposal {
   attempts: number;
   /** When it arrived (ms): a card drawn soon after is one that just came, and says so. */
   at?: number;
+  /** Merged, and its agent was closed with its worktree and branch ("Tidy up"). */
+  tidied?: boolean;
 }
 
 export interface State {
@@ -144,6 +175,10 @@ export interface State {
   autoStreak: number;
   /** The merges the main agent asked for, oldest first. */
   proposals: MergeProposal[];
+  /** A Team's "Review and test what an agent builds" setting, as its Lead shows it (kept with the team). */
+  review: ReviewSetting;
+  /** Where the review and test of each builder's latest work stands, by builder (the Lead's). */
+  reviews: ReviewInfo[];
   /** What Claude last set the Changes pane to compare with review_target, as Lantern was told live (a reopened chat has none until it calls it again; see reviewTargetOf). */
   reviewTarget: { pr: number | null; base: string | null } | null;
   /**
@@ -216,11 +251,19 @@ export interface State {
   backgroundRuns: Record<string, BackgroundRun>;
   /** The last revert, which Undo can take back until the next message or quit. */
   revertUndo: RevertUndo | null;
+  /** The last "Restore files to here", which Undo can take back until the next message or quit. */
+  restoreUndo: { id: number; summary: string } | null;
   /** Files reverted since the last message, which Claude is told about with the next one. */
   revertNotes: RevertNote[];
   revertSeq: number;
   /** The folder this session was started in, when that was a place the folder moved from: Claude is told once. */
   movedFrom: string | null;
+  /** The project's notes this chat was started with (null: none), shown at the top as "Project notes applied". */
+  notesApplied: string | null;
+  /** A worker whose worktree is being set up before it starts, or whose setup stopped and waits for the user. */
+  setup: SetupCard | null;
+  /** The project's Run command in this chat, as it was last started. */
+  run: RunTask | null;
 }
 
 export interface BackgroundRun {
@@ -250,6 +293,8 @@ export const initialState: State = {
   wakes: [],
   autoStreak: 0,
   proposals: [],
+  review: NO_REVIEW,
+  reviews: [],
   reviewTarget: null,
   costBase: 0,
   costSeen: 0,
@@ -294,9 +339,13 @@ export const initialState: State = {
   lastEndedTask: null,
   backgroundRuns: {},
   revertUndo: null,
+  restoreUndo: null,
   revertNotes: [],
   revertSeq: 0,
   movedFrom: null,
+  notesApplied: null,
+  setup: null,
+  run: null,
 };
 
 export type Action =
@@ -307,6 +356,8 @@ export type Action =
   | { type: "folder_cleared" }
   | { type: "history_loaded"; sessionId: string; events: UiEvent[]; movedFrom?: string | null }
   | { type: "session_ready" }
+  /** The chat started with the project's notes: what it was told (after the chat opened, so the open doesn't clear it). */
+  | { type: "notes_applied"; text: string | null }
   /** `auto`: sent by Lantern from agents' notes, not typed by the user. */
   | { type: "user_sent"; text: string; switchedTo?: Flavour; explained?: boolean; draft?: string; auto?: boolean }
   | { type: "wakes_taken" }
@@ -314,6 +365,7 @@ export type Action =
   /** `autoApprove`: Step by step's Permissions (kept as it is when absent; other modes say it with the mode). */
   | { type: "mode_changed"; mode: Mode; autoApprove?: boolean; flavourStart?: Flavour | null; explainStart?: boolean }
   | { type: "subagents_set"; subagents: Subagents }
+  | { type: "review_set"; review: ReviewSetting }
   | { type: "flavour_picked"; flavour: Flavour | null; explain?: boolean }
   | { type: "permission_decided"; id: string; allow: boolean; note?: string }
   | { type: "stop_requested" }
@@ -326,10 +378,17 @@ export type Action =
   | { type: "dismiss_banner" }
   | { type: "queue_set"; items: string[] }
   | { type: "shell_started"; id: string; command: string }
+  /** The Run button was pressed: the run starts (its output arrives as shell events with this id). */
+  | { type: "run_started"; id: string; command: string }
+  /** The Run panel was closed (a run that is still going is stopped by the caller). */
+  | { type: "run_closed" }
   /** The backend numbered the turn the latest prompt started. */
   | { type: "turn_numbered"; turn: number }
   | { type: "revert_done"; since: string; outcomes: RevertOutcome[] }
   | { type: "revert_undone"; id: number; outcomes: RevertOutcome[] }
+  /** The folder was put back to before a message: `id` is what Undo is asked with (null: it can't be undone). */
+  | { type: "restore_done"; id: number | null; since: string; summary: string; files: { path: string; trashed: boolean }[] }
+  | { type: "restore_undone"; id: number; text: string }
   | { type: "notice"; text: string }
   /** The changed files as they stand on disk (from the backend): true counts, and files back to their original gone. */
   | { type: "changes_synced"; files: ChangedFile[] };
@@ -399,7 +458,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, revertNotes: [], movedFrom: null, wakes: [], autoStreak: 0, proposals: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -410,6 +469,9 @@ function wake(state: State): State {
   const text = state.lastEndedTask ? `After ${state.lastEndedTask} ended` : "Claude followed up on its own";
   return { ...state, status: "running", seq, lastEndedTask: null, items: [...state.items, { type: "user", id: `u${seq}`, text, at: Date.now(), auto: true }] };
 }
+
+/** The ids of the shells the Run button starts (the backend only runs those with this start as the project's Run command). */
+export const RUN_PREFIX = "run-";
 
 function mapShell(items: ChatItem[], id: string, fn: (s: ShellItem) => ShellItem): ChatItem[] {
   return items.map((it) => (it.type === "shell" && it.id === id ? fn(it) : it));
@@ -438,13 +500,22 @@ function applyEvent(state: State, ev: UiEvent): State {
       return { ...state, seq, items: [...state.items, ...shells, { type: "user", id: `u${seq}`, text, at: ev.at, ...(flavour ? { switchedTo: flavour, ...(explain ? { explained: true } : {}) } : {}) }] };
     }
     case "shell_output":
+      if (ev.id.startsWith(RUN_PREFIX)) {
+        if (state.run?.id !== ev.id) return state;
+        const output = (state.run.output + ev.text).slice(-KEEP_CHARS);
+        return { ...state, run: { ...state.run, output, url: state.run.url ?? localUrlIn(ev.text) ?? localUrlIn(output) } };
+      }
       return { ...state, items: mapShell(state.items, ev.id, (s) => ({ ...s, output: (s.output + ev.text).slice(-KEEP_CHARS) })) };
     case "shell_done":
+      if (ev.id.startsWith(RUN_PREFIX)) {
+        return state.run?.id === ev.id ? { ...state, run: { ...state.run, status: ev.stopped || ev.code === 0 ? "stopped" : "failed", code: ev.code } } : state;
+      }
       return {
         ...state,
         items: mapShell(state.items, ev.id, (s) => ({ ...s, status: ev.stopped ? "stopped" : ev.code === 0 ? "done" : "failed", code: ev.code, endedAt: Date.now(), secret: false })),
       };
     case "shell_secret":
+      if (ev.id.startsWith(RUN_PREFIX)) return state;
       return { ...state, items: mapShell(state.items, ev.id, (s) => ({ ...s, secret: ev.secret })) };
     case "thinking":
       return { ...wake(state), thinking: true };
@@ -578,6 +649,14 @@ function applyEvent(state: State, ev: UiEvent): State {
         banner: state.stopRequested ? state.banner : { kind: "error", text, action: "restart" },
       };
     }
+    case "agent_setup": {
+      // Nothing is thinking while it sets up: the worker's claude starts when setup is done.
+      if (ev.phase === "done") return state.setup ? { ...state, setup: null, thinking: true } : state;
+      if (ev.phase === "failed") return { ...state, thinking: false, setup: { status: "failed", index: ev.index, total: ev.total, command: ev.command, line: "", reason: ev.reason, tail: ev.tail } };
+      // A line starting names its command; a progress line after it only says what it printed.
+      const before = state.setup?.status === "running" ? state.setup : null;
+      return { ...state, thinking: false, setup: { status: "running", index: ev.index, total: ev.total, command: ev.command || before?.command || "", line: ev.command ? "" : ev.line, reason: "", tail: "" } };
+    }
     case "agent_wake":
       return { ...state, wakes: [...state.wakes, ev.text] };
     // The main agent wrote to this worker: it shows as a message from it, and the worker is at work on it.
@@ -597,6 +676,21 @@ function applyEvent(state: State, ev: UiEvent): State {
         items: denyPending(failRunning(state.items)),
         banner: ev.reason ? { kind: "error", text: ev.reason, action: null } : { kind: "info", text: "The Lead stopped this agent. Restart it to carry on.", action: "restart" },
       };
+    // Lantern closed it after it reported on a builder's work: nothing to restart, and it isn't brought back with the team.
+    case "agent_tidied":
+      return {
+        ...state,
+        status: "ended",
+        thinking: false,
+        stopRequested: false,
+        leadStopped: true,
+        items: denyPending(failRunning(state.items)),
+        banner: { kind: "info", text: "Lantern closed this agent after it reported, and removed its copy of the code. What it said is above.", action: null },
+      };
+    case "review_update": {
+      const info: ReviewInfo = { builder: ev.builder, name: ev.name, commit: ev.commit, checks: ev.checks, done: ev.done, at: Date.now() };
+      return { ...state, reviews: [...state.reviews.filter((r) => r.builder !== ev.builder), info] };
+    }
     // The main agent's mode was lowered, so this worker's was too (its claude restarted on the same conversation).
     case "agent_mode":
       return { ...state, mode: ev.mode, autoApprove: ev.mode === "steps" ? state.autoApprove : false };
@@ -634,7 +728,10 @@ export function reducer(state: State, action: Action): State {
     case "ui_event": {
       // An event it doesn't know leaves the chat as it is (and isn't counted as Claude doing something).
       const next = applyEvent(state, action.event);
-      return next === state ? state : { ...next, activityAt: Date.now() };
+      // A dev server's output and a setup command's progress aren't Claude doing something.
+      const ev = action.event;
+      const aside = ev.kind === "agent_setup" || ((ev.kind === "shell_output" || ev.kind === "shell_done") && ev.id.startsWith(RUN_PREFIX));
+      return next === state ? state : { ...next, activityAt: aside ? state.activityAt : Date.now() };
     }
     case "claude_found":
       return { ...state, claudePath: action.path, setupError: null, status: state.folder ? state.status : "no_folder" };
@@ -656,6 +753,8 @@ export function reducer(state: State, action: Action): State {
       if (at < 0) return state;
       return { ...state, items: state.items.map((it, i): ChatItem => (i === at && it.type === "user" ? { ...it, turn: action.turn } : it)) };
     }
+    case "notes_applied":
+      return state.notesApplied === action.text ? state : { ...state, notesApplied: action.text };
     case "session_ready":
       return state.status === "starting" ? { ...state, status: "idle" } : state;
     case "user_sent": {
@@ -670,7 +769,7 @@ export function reducer(state: State, action: Action): State {
       const movedFrom = takesShellContext(action.text) ? null : state.movedFrom;
       // Anything the user sends ends a run of automatic turns; the guard counts only the unattended ones.
       const autoStreak = action.auto ? state.autoStreak + 1 : 0;
-      return { ...state, status: "running", thinking: true, stopRequested: false, seq, autoStreak, flavourPick: action.switchedTo ? null : state.flavourPick, explainPick: action.switchedTo ? false : state.explainPick, items: [...sent, item], revertUndo: null, revertNotes: noted, movedFrom };
+      return { ...state, status: "running", thinking: true, stopRequested: false, seq, autoStreak, flavourPick: action.switchedTo ? null : state.flavourPick, explainPick: action.switchedTo ? false : state.explainPick, items: [...sent, item], revertUndo: null, restoreUndo: null, revertNotes: noted, movedFrom };
     }
     case "wakes_taken":
       return { ...state, wakes: [] };
@@ -680,6 +779,8 @@ export function reducer(state: State, action: Action): State {
       return { ...state, mode: action.mode, autoApprove: action.mode === "steps" ? (action.autoApprove ?? state.autoApprove) : false, ...(action.flavourStart !== undefined ? { flavourStart: action.flavourStart } : {}), ...(action.explainStart !== undefined ? { explainStart: action.explainStart } : {}) };
     case "subagents_set":
       return { ...state, subagents: action.subagents };
+    case "review_set":
+      return { ...state, review: action.review };
     case "flavour_picked":
       return { ...state, flavourPick: action.flavour, explainPick: !!action.flavour && !!action.explain };
     case "permission_decided":
@@ -728,6 +829,10 @@ export function reducer(state: State, action: Action): State {
       return { ...state, banner: null };
     case "queue_set":
       return { ...state, queued: action.items };
+    case "run_started":
+      return { ...state, run: { id: action.id, command: action.command, status: "running", code: null, output: "", url: null, startedAt: Date.now() } };
+    case "run_closed":
+      return state.run ? { ...state, run: null } : state;
     case "shell_started":
       return { ...state, items: [...state.items, { type: "shell", id: action.id, command: action.command, output: "", status: "running", code: null, startedAt: Date.now(), shared: false }] };
     case "revert_done": {
@@ -753,6 +858,14 @@ export function reducer(state: State, action: Action): State {
         revertNotes: state.revertNotes.filter((n) => n.revert !== action.id),
         banner: { kind: "info", text: undoSummary(action.outcomes), action: null },
       };
+    case "restore_done": {
+      // A restore's notes are filed under its undo's number, below the reverts' (which count up from 1); 0 if it can't be undone.
+      const revert = action.id === null ? 0 : restoreNoteId(action.id);
+      const notes = action.files.map((f): RevertNote => ({ path: f.path, trashed: f.trashed, since: action.since, revert }));
+      return { ...state, restoreUndo: action.id === null ? null : { id: action.id, summary: action.summary }, revertNotes: [...state.revertNotes, ...notes], banner: action.id === null ? { kind: "info", text: action.summary, action: null } : state.banner };
+    }
+    case "restore_undone":
+      return { ...state, restoreUndo: state.restoreUndo?.id === action.id ? null : state.restoreUndo, revertNotes: state.revertNotes.filter((n) => n.revert !== restoreNoteId(action.id)), banner: { kind: "info", text: action.text, action: null } };
     case "notice":
       return { ...state, banner: { kind: "info", text: action.text, action: null } };
     case "changes_synced": {

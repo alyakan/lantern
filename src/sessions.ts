@@ -1,4 +1,5 @@
 import { initialState, reducer, type Action, type State, type Status } from "./store";
+import type { AgentRole } from "./lib/roles";
 import type { UiEvent } from "./types";
 
 /** A worker agent: whose it is and where it works (told by the main agent's `agent_spawned`). */
@@ -12,6 +13,10 @@ export interface AgentMeta {
   branch: string | null;
   base: string | null;
   isolation: "worktree" | "shared";
+  /** The role it was started in (a Reviewer, a Builder…), when it has one. */
+  role?: AgentRole;
+  /** Lantern started it to review or test this builder's work (the builder's slot): its card is placed next to that one. */
+  reviewOf?: string;
   /** Taken off the canvas by the user: it keeps working, and comes back by itself when it needs them. Absent: on the canvas. */
   hidden?: boolean;
 }
@@ -62,7 +67,6 @@ function spawnWorker(chats: Chats, main: string, ev: Extract<UiEvent, { kind: "a
   const worker: State = {
     ...initialState,
     claudePath: parent.claudePath,
-    contextWindow: parent.contextWindow,
     mode: ev.mode,
     folder: ev.folder,
     status: "running",
@@ -70,7 +74,7 @@ function spawnWorker(chats: Chats, main: string, ev: Extract<UiEvent, { kind: "a
     seq: 1,
     items: [{ type: "user", id: "u1", text: ev.brief, at: Date.now(), from: "main agent" }],
   };
-  const meta: AgentMeta = { parent: main, name: ev.name, brief: ev.brief, folder: ev.folder, branch: ev.branch, base: ev.base, isolation: ev.isolation };
+  const meta: AgentMeta = { parent: main, name: ev.name, brief: ev.brief, folder: ev.folder, branch: ev.branch, base: ev.base, isolation: ev.isolation, ...(ev.role ? { role: ev.role } : {}), ...(ev.review_of ? { reviewOf: ev.review_of } : {}) };
   return { ...chats, slots: { ...chats.slots, [ev.worker]: worker }, agents: { ...chats.agents, [ev.worker]: meta } };
 }
 
@@ -85,7 +89,7 @@ export function chatsReducer(chats: Chats, action: ChatsAction): Chats {
     }
     case "add": {
       const from = chats.slots[chats.active] ?? initialState;
-      const fresh: State = { ...initialState, claudePath: from.claudePath, mode: from.mode, contextWindow: from.contextWindow, status: "no_folder" };
+      const fresh: State = { ...initialState, claudePath: from.claudePath, mode: from.mode, status: "no_folder" };
       return { ...chats, slots: { ...chats.slots, [action.slot]: fresh } };
     }
     case "activate":
@@ -100,7 +104,11 @@ export function chatsReducer(chats: Chats, action: ChatsAction): Chats {
     }
     case "close_agent": {
       const parent = chats.agents[action.slot]?.parent;
-      const left = chats.active === action.slot && parent && chats.slots[parent] ? { ...chats, active: parent } : chats;
+      const moved = chats.active === action.slot && parent && chats.slots[parent] ? { ...chats, active: parent } : chats;
+      // A merged branch whose agent goes is tidied: its merge card says so instead of offering to.
+      const owner = parent ? moved.slots[parent] : undefined;
+      const merged = (p: { worker: string; status: string }) => p.worker === action.slot && p.status === "merged";
+      const left = parent && owner?.proposals.some(merged) ? { ...moved, slots: { ...moved.slots, [parent]: { ...owner, proposals: owner.proposals.map((p) => (merged(p) ? { ...p, tidied: true } : p)) } } } : moved;
       return chatsReducer(left, { type: "remove", slot: action.slot });
     }
     case "close": {

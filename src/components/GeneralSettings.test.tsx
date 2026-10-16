@@ -3,6 +3,8 @@ import { fireEvent, render, renderHook, screen, act, within } from "@testing-lib
 import { NOTIFY_DEFAULTS, type NotifyPrefs } from "../lib/notifyPrefs";
 import { chimeOn, setChime, useChimeOn } from "../lib/chime";
 import { CUSTOM_DEFAULT, THEMES } from "../lib/themes";
+import { autoMergeTests } from "../lib/mergeTests";
+import { api } from "../api";
 
 vi.mock("../api", () => ({ api: {} }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: vi.fn(), revealItemInDir: vi.fn() }));
@@ -44,6 +46,41 @@ describe("Settings' General page", () => {
     expect(box).toBeChecked();
     fireEvent.click(box);
     expect(general.onKeepAwake).toHaveBeenCalledWith(false);
+  });
+
+  it("offers running the tests when a merge is proposed, off until chosen, and tells the backend", () => {
+    const set = vi.fn(() => Promise.resolve());
+    (api as unknown as { setAutoMergeTests: typeof set }).setAutoMergeTests = set;
+    view();
+    const box = screen.getByRole("checkbox", { name: "Run tests when a merge is proposed" });
+    expect(box).not.toBeChecked();
+    fireEvent.click(box);
+    expect(box).toBeChecked();
+    expect(autoMergeTests()).toBe(true);
+    expect(set).toHaveBeenLastCalledWith(true);
+    fireEvent.click(box);
+    expect(set).toHaveBeenLastCalledWith(false);
+  });
+
+  it("warns that merge tests run the project's own command without asking", () => {
+    view();
+    expect(screen.getByText(/comes from the project, including code the agent has just written/)).toBeInTheDocument();
+    expect(screen.getByText(/without asking you/)).toBeInTheDocument();
+  });
+
+  it("offers keeping restore points before each message, on by default, says what they copy, and tells the backend", () => {
+    const set = vi.fn(() => Promise.resolve());
+    (api as unknown as { setRestorePoints: typeof set }).setRestorePoints = set;
+    view();
+    const box = screen.getByRole("checkbox", { name: "Keep restore points before each message" });
+    expect(box).toBeChecked();
+    expect(screen.getByText(/such as a \.env that isn't in \.gitignore/)).toBeInTheDocument();
+    fireEvent.click(box);
+    expect(box).not.toBeChecked();
+    expect(localStorage.getItem("lantern.restorePoints")).toBe("false");
+    expect(set).toHaveBeenLastCalledWith(false);
+    fireEvent.click(box);
+    expect(set).toHaveBeenLastCalledWith(true);
   });
 
   it("turns notifications off as a whole", () => {
@@ -161,6 +198,41 @@ describe("Settings' General page", () => {
       expect(general.onTheme).toHaveBeenLastCalledWith("nord");
       expect(screen.queryByRole("group", { name: "Custom theme" })).toBeNull();
     });
+  });
+});
+
+describe("Settings' Teams section: quiet agents and the plan's limit", () => {
+  const props = (): GeneralSettingsProps => ({ keepAwake: true, onKeepAwake: vi.fn(), notify: { ...NOTIFY_DEFAULTS }, onNotify: vi.fn(), theme: "system", customTheme: CUSTOM_DEFAULT, onTheme: vi.fn(), onCustomTheme: vi.fn(), textSize: "default", onTextSize: vi.fn() });
+  const view = () => render(<SettingsView open="general" onClose={() => {}} slot={null} live={false} mcpTools={[]} commands={[]} general={props()} />);
+  beforeEach(() => localStorage.clear());
+
+  it("sets how long an agent may be quiet, 3 minutes until chosen", () => {
+    view();
+    const select = screen.getByRole("combobox", { name: "Say an agent is quiet after" });
+    expect(select).toHaveValue("3");
+    fireEvent.change(select, { target: { value: "10" } });
+    expect(localStorage.getItem("lantern.quietMinutes")).toBe("10");
+    expect(select).toHaveValue("10");
+  });
+
+  it("sets whether an agent is tidied up after its merge: Off until chosen, then Ask me or Automatically", () => {
+    view();
+    const select = screen.getByRole("combobox", { name: "Tidy up an agent after its merge" });
+    expect(select).toHaveValue("off");
+    expect([...select.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Off", "Ask me", "Automatically"]);
+    fireEvent.change(select, { target: { value: "auto" } });
+    expect(localStorage.getItem("lantern.tidyAfterMerge")).toBe("auto");
+    expect(select).toHaveValue("auto");
+  });
+
+  it("sets when a team's work is paused, Off until chosen", () => {
+    view();
+    const select = screen.getByRole("combobox", { name: "Pause a team's work when my plan reaches" });
+    expect(select).toHaveValue("0");
+    expect([...select.querySelectorAll("option")].map((o) => o.textContent)).toEqual(["Off", "90%", "95%"]);
+    fireEvent.change(select, { target: { value: "95" } });
+    expect(localStorage.getItem("lantern.pauseAtPercent")).toBe("95");
+    expect(select).toHaveValue("95");
   });
 });
 

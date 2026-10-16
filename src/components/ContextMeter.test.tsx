@@ -30,6 +30,15 @@ describe("ContextMeter", () => {
     expect(screen.getByLabelText("31% of context used").closest(".context-meter")).toHaveAttribute("title", "61,480 of 200,000 tokens of context used\nThis chat so far: 400k tokens");
   });
 
+  it("with no known window shows the tokens used, not a percent against a guess", () => {
+    render(<ContextMeter used={312_000} window={null} running={false} lastTurnMs={null} />);
+    const meter = screen.getByLabelText("312,000 tokens of context used, window not known yet");
+    expect(meter.closest(".context-meter")).toHaveTextContent(/^312k$/);
+    expect(meter.closest(".context-meter")).toHaveAttribute("title", "312,000 tokens of context used (the window isn't known until a turn ends)");
+    expect(meter.closest(".context-meter")).not.toHaveClass("warn");
+    expect(meter.closest(".context-meter")).not.toHaveClass("full");
+  });
+
   it("shows nothing before any reply", () => {
     const { container } = render(<ContextMeter used={null} window={200_000} running={false} lastTurnMs={null} />);
     expect(container).toBeEmptyDOMElement();

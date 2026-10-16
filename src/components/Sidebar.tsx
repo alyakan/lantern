@@ -5,7 +5,7 @@ import { ACTIONS, shortcutLabel } from "../lib/actions";
 import { PROJECT_COLORS, assignColors } from "../lib/projectColors";
 import { chipOf, compactGroups, markOf, projectFolders, type ChatDot, type CompactChip, type CompactGroup, type ProjectOpen, type SidebarChat, type SidebarItem } from "../lib/sidebar";
 import { lostText } from "../lib/orchestraView";
-import { ChevronIcon, ClockIcon, FolderOpenIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
+import { ChevronIcon, ClockIcon, FolderOpenIcon, NoteIcon, PinIcon, PlusIcon, SidebarIcon, TeamIcon } from "./icons";
 import { MovedNotice } from "./MovedFolders";
 import { moveFocus } from "./useMenuKeys";
 import { moveProject, orderProjects } from "../lib/projectOrder";
@@ -47,12 +47,20 @@ export interface SidebarHandlers {
   onNewChatIn: (folder: string) => void;
   onNewTeamIn: (folder: string) => void;
   onBringOld: (folder: string) => void;
+  /** Opens the project's notes: the text every new chat in it starts with. */
+  onProjectNotes: (folder: string) => void;
+  /** Opens the project's setup: what runs in each new agent's worktree, and its Run command. */
+  onSetup: (folder: string) => void;
   onReveal: (folder: string) => void;
   onRemove: (folder: string) => void;
+  /** Opens the project's "Pull request checks" choice (Off, Tell me, Fix it myself). */
+  onPrChecks: (folder: string) => void;
   onOpenFolder: () => void;
   /** New ▾, for the project on screen. */
   onNewChat: () => void;
   onNewTeam: () => void;
+  /** "Team from a template…"; absent: the menu has no such row. */
+  onNewTeamTemplate?: () => void;
   onReviewPr: () => void;
 }
 
@@ -101,6 +109,8 @@ interface Props extends SidebarHandlers {
   colors: Record<string, number>;
   /** The colours with a project new to them given one, to save. */
   onColors: (colors: Record<string, number>) => void;
+  /** The projects that have notes: each is marked on its header. */
+  noted?: string[];
 }
 
 /** Focus that came from the keyboard (a click focuses a button too, and that shouldn't open the column). */
@@ -135,7 +145,7 @@ function useDismiss(open: boolean, root: RefObject<HTMLElement | null>, close: (
 const menuKeys = (e: ReactKeyboardEvent<HTMLElement>) => void moveFocus(e, [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')]);
 
 /** New ▾: a chat or a team in the project on screen, or a review of one of its pull requests. */
-function NewMenu({ canNew, onNewChat, onNewTeam, onReviewPr }: Pick<Props, "canNew" | "onNewChat" | "onNewTeam" | "onReviewPr">) {
+function NewMenu({ canNew, onNewChat, onNewTeam, onNewTeamTemplate, onReviewPr }: Pick<Props, "canNew" | "onNewChat" | "onNewTeam" | "onNewTeamTemplate" | "onReviewPr">) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   useDismiss(open, root, () => setOpen(false), () => root.current?.querySelector<HTMLElement>("[aria-haspopup]"));
@@ -165,6 +175,7 @@ function NewMenu({ canNew, onNewChat, onNewTeam, onReviewPr }: Pick<Props, "canN
         <div className="menu sb-menu" role="menu" aria-label="New" ref={menuRef} style={menuStyle} onKeyDown={menuKeys}>
           {item("Chat", "new-session", onNewChat)}
           {item("Team", "work-team", onNewTeam)}
+          {onNewTeamTemplate && item("Team from a template…", null, onNewTeamTemplate)}
           {item("Review a PR…", null, onReviewPr)}
         </div>
       )}
@@ -245,7 +256,7 @@ function CloseConfirm({ closing, closer, floating }: { closing: Closing; closer:
 /** What a row says to VoiceOver (and shows, once the pane is open): the title, the project and the status. */
 const describe = (chip: CompactChip, project: string, full: boolean) => {
   const extra = full ? `${chip.pinned ? ", pinned" : ""}${chip.background > 0 ? `, ${chip.background} running in the background` : ""}` : "";
-  return `${chip.team ? "Team: " : ""}${chip.title}, ${project}, ${chip.status}${extra}`;
+  return `${chip.team ? "Team: " : ""}${chip.title}, ${chip.role ? `${chip.role}, ` : ""}${project}, ${chip.status}${extra}`;
 };
 
 /**
@@ -291,7 +302,7 @@ function ChatRow({ chip, project, onClick, target, closer, full }: { chip: Compa
             ) : (
               <span className="sb-title">{title}</span>
             )}
-            <span className={`sb-status ${mark}`}>{chip.status}</span>
+            <span className={`sb-status ${mark}`}>{chip.role ? `${chip.role} · ${chip.status}` : chip.status}</span>
           </span>
         </button>
         {full ? (
@@ -394,8 +405,17 @@ function ProjectMenu({ group, h, moves, finished, onClose, onClosed }: { group: 
       >
         <span className="menu-row-title">Close finished chats</span>
       </button>
+      <button role="menuitem" className="menu-row" title="Text every new chat in this project starts knowing" onClick={pick(() => h.onProjectNotes(group.folder))}>
+        <span className="menu-row-title">Project notes…</span>
+      </button>
+      <button role="menuitem" className="menu-row" title="What runs in each new agent's worktree before it starts, and the command its Run button starts" onClick={pick(() => h.onSetup(group.folder))}>
+        <span className="menu-row-title">Project setup…</span>
+      </button>
       <button role="menuitem" className="menu-row" onClick={pick(() => h.onBringOld(group.folder))}>
         <span className="menu-row-title">Bring old chats here…</span>
+      </button>
+      <button role="menuitem" className="menu-row" title="What happens after a pull request is open and its checks run" onClick={pick(() => h.onPrChecks(group.folder))}>
+        <span className="menu-row-title">Pull request checks…</span>
       </button>
       <button role="menuitem" className="menu-row" onClick={pick(() => h.onReveal(group.folder))}>
         <span className="menu-row-title">Reveal in Finder</span>
@@ -436,7 +456,7 @@ interface Reorder {
  * One project of the open pane: its header (the project's coloured initials, its name, the branch when it is the one on
  * screen, what needs you when it is folded, and + and ⋯ while the pointer is on it), then its open chats and teams.
  */
-function Project({ group, color, expanded, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents }: { group: CompactGroup; color: string; expanded: boolean; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
+function Project({ group, color, noted, expanded, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents }: { group: CompactGroup; color: string; noted: boolean; expanded: boolean; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
   const [menu, setMenu] = useState(false);
   // The chats that are done: not a working one, a draft, or a team.
   const finished = group.items.flatMap((item) => (item.kind === "chat" && item.state === "done" ? [item.slot] : []));
@@ -448,6 +468,11 @@ function Project({ group, color, expanded, onToggle, current, branch, moved, onR
             {group.initials}
           </span>
           <span className="sb-name">{group.label}</span>
+          {noted && (
+            <span className="sb-notes" role="img" aria-label="Has project notes" title="This project has notes every new chat starts with">
+              <NoteIcon />
+            </span>
+          )}
           <span className={`sb-fold${expanded ? " open" : ""}`} aria-hidden>
             <ChevronIcon />
           </span>
@@ -508,7 +533,7 @@ const lostIn = (checks: CloseCheck[]) => lostText({ worktree: true, branch: null
  * goes, Escape is pressed, or something is picked.
  */
 export function Sidebar(props: Props) {
-  const { mode, onToggle, width, onWidth, open, currentFolder, branch, canNew, loadRecent, hidden, moved, onRelocate, onDismissMoved, memory, order = [], onOrder, colors: savedColors, onColors, ...handlers } = props;
+  const { mode, onToggle, width, onWidth, open, currentFolder, branch, canNew, loadRecent, hidden, moved, onRelocate, onDismissMoved, memory, order = [], onOrder, colors: savedColors, onColors, noted = [], ...handlers } = props;
   const [recent, setRecent] = useState<RecentFolder[]>(() => memory?.recent ?? []);
   if (memory) memory.recent = recent;
   // A project the user folded by hand: the others show their chats.
@@ -714,9 +739,12 @@ export function Sidebar(props: Props) {
           onNewChatIn: then(handlers.onNewChatIn),
           onNewTeamIn: then(handlers.onNewTeamIn),
           onBringOld: then(handlers.onBringOld),
+          onProjectNotes: then(handlers.onProjectNotes),
+          onSetup: then(handlers.onSetup),
           onOpenFolder: then(handlers.onOpenFolder),
           onNewChat: then(handlers.onNewChat),
           onNewTeam: then(handlers.onNewTeam),
+          ...(handlers.onNewTeamTemplate ? { onNewTeamTemplate: then(handlers.onNewTeamTemplate) } : {}),
           onReviewPr: then(handlers.onReviewPr),
         };
   const toggleBar = () => {
@@ -753,7 +781,7 @@ export function Sidebar(props: Props) {
     e.preventDefault();
   };
 
-  const newMenu = { canNew, onNewChat: h.onNewChat, onNewTeam: h.onNewTeam, onReviewPr: h.onReviewPr };
+  const newMenu = { canNew, onNewChat: h.onNewChat, onNewTeam: h.onNewTeam, onNewTeamTemplate: h.onNewTeamTemplate, onReviewPr: h.onReviewPr };
   const pin = mode === "pinned" ? "Collapse sidebar" : full ? "Keep sidebar open" : "Expand sidebar";
   const label = full ? "Projects" : "Open chats";
   const shownWidth = dragWidth ?? width;
@@ -797,6 +825,7 @@ export function Sidebar(props: Props) {
                   key={g.folder}
                   group={g}
                   color={PROJECT_COLORS[colors[g.folder]]}
+                  noted={noted.includes(g.folder)}
                   expanded={isExpanded(g)}
                   onToggle={() => toggle(g)}
                   current={g.folder === currentFolder}

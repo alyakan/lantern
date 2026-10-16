@@ -132,6 +132,30 @@ describe("restoring a team at launch", () => {
     expect(open.map(([, a]) => (a?.settings as { model?: string }).model)).toEqual(["sonnet"]);
   });
 
+  it("brings the team back with the review setting it had, the builder's role told to the backend, and saves them again", async () => {
+    const review = { on: true, tidy: false, checks: ["reviewer", "qa"] };
+    const role = { id: "builder", label: "Builder", read_only: false };
+    const saved = team.map((c) => (c.orchestra?.role === "main" ? { ...c, orchestra: { role: "main", review } } : { ...c, orchestra: { ...c.orchestra, agentRole: role } }));
+    localStorage.setItem("session.openChats", JSON.stringify(saved));
+    const calls = await launch();
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
+    expect(await screen.findByRole("button", { name: "Review: On" })).toBeInTheDocument();
+    const told = calls.filter(([c]) => c === "orchestra_set_review").pop()?.[1];
+    expect(told).toMatchObject({ setting: review });
+    // The builder comes back as a builder, so what it builds is checked again.
+    const worker = calls.find(([c, a]) => c === "open_session" && a?.sessionId === "aaaa11")?.[1] as { settings: { worker: { role?: unknown } } };
+    expect(worker.settings.worker.role).toEqual(role);
+    await waitFor(() => expect(JSON.parse(localStorage.getItem("session.openChats") ?? "[]").find((c: SavedChat) => c.sessionId === "bbbb22").orchestra).toEqual({ role: "main", review }));
+  });
+
+  it("brings a team saved without the setting back with it off", async () => {
+    await launch();
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
+    expect(await screen.findByRole("button", { name: "Review: Off" })).toBeInTheDocument();
+  });
+
   it("brings the workers back on the mode they had, not just the ones the user had looked at", async () => {
     localStorage.setItem("settings.modeBySession", JSON.stringify({ bbbb22: "auto", aaaa11: "auto" }));
     await launch();

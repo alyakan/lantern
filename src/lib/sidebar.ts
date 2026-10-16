@@ -19,6 +19,8 @@ export interface SidebarChat {
   /** The chat on screen (an agent, when it's the one focused on the canvas). */
   active: boolean;
   pinned: boolean;
+  /** An agent started in a role: the role's name ("Reviewer"). */
+  role?: string;
 }
 
 /** A chat, or a team: its Lead's chat with the agents it runs nested under it. */
@@ -72,6 +74,8 @@ export interface CompactChip {
   pinned: boolean;
   /** How many tasks it still runs in the background. */
   background: number;
+  /** An agent started in a role: the role's name ("Reviewer"). */
+  role?: string;
 }
 
 export interface CompactGroup {
@@ -118,6 +122,7 @@ export function chipOf(item: SidebarChat | SidebarItem): CompactChip {
     initials: chatInitials(item.title),
     pinned: item.pinned,
     background: item.background,
+    ...(item.role ? { role: item.role } : {}),
   };
 }
 
@@ -176,6 +181,7 @@ export function openProjects(chats: Chats, opts: { titles: Record<string, string
       sessionId: s.sessionId,
       active: slot === chats.active,
       pinned: pinnedIn(s.folder, s.sessionId),
+      ...(agent?.role ? { role: agent.role.label } : {}),
     };
   };
   for (const [slot, s] of Object.entries(chats.slots)) {

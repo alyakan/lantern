@@ -10,8 +10,22 @@ export const FOLDER_RECORDS = [
   "settings.harnessByFolder",
   "review.collapsedByFolder",
   "settings.pinnedSessions",
+  // The command typed for a project's tests, when Lantern can't tell how it is tested (the merge card's Run tests).
+  "merge.testCommandByFolder",
   // The project's colour in the sidebar.
   "sidebar.projectColors",
+  // The project's own agent roles and team templates.
+  "settings.rolesByFolder",
+  "settings.teamTemplatesByFolder",
+  // Which of Ship it's steps (commit, push, pull request) were ticked last.
+  "ship.ticksByFolder",
+  // The text every new chat in the project starts with (Project notes in the project's ⋯ menu).
+  "settings.projectNotes",
+  // The project's setup lines for new worktrees, and its Run command.
+  "settings.projectSetupByFolder",
+  // What to do once a pull request's checks run (Off, Tell me, Fix it myself), and how far each pull request's fixing has got.
+  "prChecks.byFolder",
+  "prChecks.loopByFolder",
 ] as const;
 
 /** Lantern's lists of folders that name the folder itself: the moved folder takes the old one's place in them. */
@@ -19,6 +33,9 @@ export const FOLDER_LISTS = [
   // The user's order of the sidebar's projects.
   "sidebar.projectOrder",
 ] as const;
+
+/** Lantern's lists of things that each name their folder (routines): the moved folder takes the old one's place in each. */
+export const FOLDER_ITEMS = ["settings.routines"] as const;
 
 /** The folder that was open last, reopened at launch. */
 export const LAST_FOLDER = "settings.lastFolder";
@@ -119,6 +136,10 @@ export function migrateFolderState(store: KeyValueStore, old: string, next: stri
     const saved = readJson(store, key);
     if (!Array.isArray(saved) || !saved.includes(old) || saved.includes(next)) continue;
     changed[key] = saved.map((f) => (f === old ? next : f));
+  }
+  for (const key of FOLDER_ITEMS) {
+    const saved = readJson(store, key);
+    if (Array.isArray(saved) && saved.some((x) => isRecord(x) && x.folder === old)) changed[key] = saved.map((x) => (isRecord(x) && x.folder === old ? { ...x, folder: next } : x));
   }
   if (readJson(store, LAST_FOLDER) === old) changed[LAST_FOLDER] = next;
   const chats = readJson(store, OPEN_CHATS);

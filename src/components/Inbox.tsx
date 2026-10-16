@@ -1,6 +1,7 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
 import { REQUEST_KINDS, type InboxItem } from "../lib/inbox";
 import { useAction } from "../lib/actions";
+import { CONTINUE_MESSAGE, pausedLine, type PlanPause } from "../lib/planPause";
 import { elapsed } from "../lib/time";
 import { usePopover } from "../lib/usePopover";
 import { InboxIcon } from "./icons";
@@ -11,6 +12,10 @@ export interface InboxProps {
   onGo: (item: InboxItem) => void;
   /** Answers a plain permission request without going there. */
   onDecide: (item: InboxItem, allow: boolean) => void;
+  /** The teams' work was paused because the plan reached the user's limit: a row of its own, with Resume. */
+  paused?: PlanPause | null;
+  /** Tells each paused agent to continue. */
+  onResume?: () => void;
 }
 
 /** How often the times in the list are redrawn while it is open. */
@@ -44,10 +49,10 @@ function AllowButton({ title, onAllow }: { title: string; onAllow: () => void })
  * and how long it has waited. Go takes you there; a plain permission request can be answered here. Arrow keys move
  * between the rows (Left and Right between a row's buttons), Escape closes it.
  */
-export function Inbox({ items, onGo, onDecide }: InboxProps) {
+export function Inbox({ items, onGo, onDecide, paused = null, onResume }: InboxProps) {
   const [open, setOpen] = useState(false);
   const { box, button, list, id } = usePopover(open, () => setOpen(false), false);
-  const waiting = items.filter((it) => it.needsYou).length;
+  const waiting = items.filter((it) => it.needsYou).length + (paused ? 1 : 0);
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     if (!open) return;
@@ -65,7 +70,7 @@ export function Inbox({ items, onGo, onDecide }: InboxProps) {
     if (!open) return;
     const active = document.activeElement;
     if (!active || active === document.body || !list.current?.contains(active)) list.current?.querySelector<HTMLElement>("[data-go]")?.focus();
-  }, [items.length]);
+  }, [items.length, !!paused]);
 
   const go = (item: InboxItem) => {
     setOpen(false);
@@ -103,10 +108,28 @@ export function Inbox({ items, onGo, onDecide }: InboxProps) {
       {open && (
         <div id={id} ref={list} className="menu inbox-menu" role="dialog" aria-label="What needs you" onKeyDown={keys}>
           <div className="menu-heading">Needs you</div>
-          {items.length === 0 ? (
+          {items.length === 0 && !paused ? (
             <div className="menu-empty">Nothing is waiting for you.</div>
           ) : (
             <ul className="menu-list">
+              {paused && (
+                <li className="inbox-row paused" key="plan-paused">
+                  <span className="node-dot held" aria-hidden />
+                  <span className="inbox-text">
+                    <span className="inbox-head">
+                      <span className="inbox-title">{pausedLine(paused, now)}</span>
+                      <span className="inbox-time">{elapsed(now - paused.since)}</span>
+                    </span>
+                    <span className="inbox-where">{paused.slots.length === 1 ? "1 agent stopped" : `${paused.slots.length} agents stopped`}, none ended</span>
+                    <span className="inbox-need">Nothing starts again until you press Resume. Each agent is told: {CONTINUE_MESSAGE}</span>
+                  </span>
+                  <span className="inbox-actions">
+                    <button data-go className="primary" aria-label="Resume the paused agents" onClick={() => onResume?.()}>
+                      Resume
+                    </button>
+                  </span>
+                </li>
+              )}
               {items.map((it, at) => (
                 <li key={`${it.key}:${it.requestId ?? ""}`} className="inbox-row">
                   <span className={`node-dot ${it.needsYou ? "waiting" : "unread"}`} aria-hidden />

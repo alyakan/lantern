@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import rulesRs from "../../src-tauri/src/permission/rules.rs?raw";
 import * as mirror from "./permissionRules";
-import { describeRule, isPlainCommand, isPrefix, programName, ruleChoices, rulePattern } from "./permissionRules";
+import { describeRule, handRule, isPlainCommand, isPrefix, programName, ruleChoices, rulePattern, type HandForm } from "./permissionRules";
 
 /** The strings in a `const NAME: &[&str] = &[...]` list of rules.rs. */
 function rustStrings(name: string): string[] {
@@ -169,5 +169,61 @@ describe("rule text", () => {
   it("is plain only without shell operators, substitutions or controls", () => {
     expect(isPlainCommand("npm test -- --grep \"a b\"")).toBe(true);
     for (const c of ["a;b", "a&b", "a|b", "a`b`", "a$b", "a\\b", "a*", "a{b}", "a\tb", "a\u0007b"]) expect(isPlainCommand(c), JSON.stringify(c)).toBe(false);
+  });
+});
+
+describe("handRule", () => {
+  const form = (patch: Partial<HandForm>): HandForm => ({ tool: "Bash", otherName: "", match: "prefix", pattern: "", scope: "folder", ...patch });
+  const ok = (patch: Partial<HandForm>) => {
+    const made = handRule(form(patch));
+    if ("error" in made) throw new Error(made.error);
+    return made;
+  };
+
+  it("makes the same rules the card offers for the same call", () => {
+    expect(ruleChoices("Bash", { command: "npm test src" })).toContainEqual(ok({ pattern: "npm test" }).rule);
+    expect(ruleChoices("Bash", { command: "ls -la" })).toContainEqual(ok({ pattern: "ls" }).rule);
+    expect(ruleChoices("Bash", { command: "npm run build" })).toContainEqual(ok({ match: "exact", pattern: "npm run build" }).rule);
+    expect(ruleChoices("Edit", { file_path: "/Users/me/my project/src/a.ts" })).toContainEqual(ok({ tool: "Edit", match: "dir", pattern: "/Users/me/my project/src" }).rule);
+    expect(ruleChoices("Read", { file_path: "/a/b" })).toContainEqual(ok({ tool: "Read", match: "any" }).rule);
+    expect(ruleChoices("WebFetch", { url: "https://x.dev" })).toEqual([ok({ tool: "WebFetch", match: "any" }).rule]);
+    expect(ruleChoices("mcp__linear__save_issue", { title: "x" })).toEqual([ok({ tool: "other", otherName: " mcp__linear__save_issue ", match: "any" }).rule]);
+  });
+
+  it("describes the rule in words", () => {
+    expect(ok({ pattern: "npm  test" }).meaning).toBe("Always allow Bash commands starting with npm test");
+    expect(ok({ match: "exact", pattern: "npm run build" }).meaning).toBe("Always allow the Bash command npm run build");
+    expect(ok({ tool: "Edit", match: "dir", pattern: "/p/src/" }).meaning).toBe("Always allow Edit for files in /p/src");
+  });
+
+  it("refuses an empty pattern, a start the backend wouldn't make, and a pattern that covers everything", () => {
+    for (const pattern of ["", "  ", "*", "Bash", "rm", "sh", "npm", "npm install", "git push", "npm test; rm x", "-x"]) {
+      expect("error" in handRule(form({ pattern })), pattern).toBe(true);
+    }
+    for (const pattern of ["", "x", "npm test; rm x", "a\nb"]) {
+      expect("error" in handRule(form({ match: "exact", pattern })), pattern).toBe(true);
+    }
+    for (const pattern of ["", "src", "/", "/a/../b", "/p/.git", "/p/.git/hooks", "/p/package.json"]) {
+      expect("error" in handRule(form({ tool: "Write", match: "dir", pattern })), pattern).toBe(true);
+    }
+    for (const otherName of ["", "a b", "ExitPlanMode", "AskUserQuestion", "mcp__lantern__approve", "Bash", "Edit"]) {
+      expect("error" in handRule(form({ tool: "other", otherName, match: "any" })), otherName).toBe(true);
+    }
+  });
+
+  it("marks the very broad rules and not the narrow ones", () => {
+    expect(ok({ tool: "Write", match: "any" }).broad).toMatch(/any file it writes without asking/);
+    expect(ok({ tool: "WebSearch", match: "any" }).broad).toMatch(/every WebSearch call/);
+    expect(ok({ tool: "other", otherName: "mcp__a__b", match: "any" }).broad).toMatch(/every mcp__a__b call/);
+    expect(ok({ match: "exact", pattern: "rm -rf build" }).broad).toMatch(/delete files/);
+    expect(ok({ match: "exact", pattern: "sudo ls" }).broad).toMatch(/run other programs/);
+    expect(ok({ tool: "Edit", match: "dir", pattern: "/Users/me" }).broad).toMatch(/very large folder/);
+    expect(ok({ pattern: "npm test" }).broad).toBeNull();
+    expect(ok({ match: "exact", pattern: "npm run build" }).broad).toBeNull();
+    expect(ok({ tool: "Edit", match: "dir", pattern: "/Users/me/proj/src" }).broad).toBeNull();
+  });
+
+  it("falls back to a way the tool has when the form holds another one's", () => {
+    expect(ok({ tool: "WebFetch", match: "prefix", pattern: "x" }).rule).toEqual({ tool: "WebFetch", kind: "any" });
   });
 });

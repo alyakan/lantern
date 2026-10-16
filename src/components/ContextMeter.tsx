@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { usageLine } from "../lib/cost";
+import { shortTokens } from "../lib/contextShare";
 
 /** "4.2s", "38s", "2m 05s". */
 export function formatDuration(ms: number): string {
@@ -17,8 +18,8 @@ export const FULL_AT = 90;
 interface Props {
   /** Tokens in the conversation so far; null before the first reply. */
   used: number | null;
-  /** The model's context window: reported at the end of a turn, or the last one seen for this model until then. */
-  window: number;
+  /** The model's context window: reported at the end of a turn, or the last one seen for this model until then. Null when nothing says (then only the tokens used are shown, no percent). */
+  window: number | null;
   running: boolean;
   lastTurnMs: number | null;
   /** Compact and Clear, shown when the meter warns or is clicked, and only while Claude isn't working. */
@@ -43,30 +44,31 @@ export function ContextMeter({ used, window, running, lastTurnMs, actions, sessi
   }, [running]);
 
   if (used === null && !running) return null;
-  const percent = used !== null ? Math.round(Math.min(used / window, 1) * 100) : null;
+  const percent = used !== null && window !== null ? Math.round(Math.min(used / window, 1) * 100) : null;
   // The warning is said in words as well as colour: the label is what a screen reader and a colour-blind reader get.
   const level = percent === null ? null : percent >= FULL_AT ? "full" : percent >= WARN_AT ? "warn" : null;
   const note = level === "full" ? "Nearly full" : level === "warn" ? "Getting full" : null;
   const details = [
-    used !== null && `${used.toLocaleString()} of ${window.toLocaleString()} tokens of context used`,
+    used !== null && (window !== null ? `${used.toLocaleString()} of ${window.toLocaleString()} tokens of context used` : `${used.toLocaleString()} tokens of context used (the window isn't known until a turn ends)`),
     lastTurnMs !== null && `Last turn took ${formatDuration(lastTurnMs)}`,
     session && usageLine(session.cost, session.tokens) && `This chat so far: ${usageLine(session.cost, session.tokens)}`,
   ].filter(Boolean).join("\n");
-  const label = `${percent}% of context used${note ? `, ${note.toLowerCase()}` : ""}`;
+  const shown = percent !== null ? `${percent}%` : used !== null ? shortTokens(used) : "";
+  const label = percent !== null ? `${percent}% of context used${note ? `, ${note.toLowerCase()}` : ""}` : used !== null ? `${used.toLocaleString()} tokens of context used, window not known yet` : "";
   const showActions = !!actions && !running && (level !== null || open);
 
   return (
     <span className={`context-meter${level ? ` ${level}` : ""}`} title={details || undefined}>
       {running && started !== null && <span className="elapsed">{formatDuration(Math.max(0, now - started))}</span>}
-      {percent !== null &&
+      {shown !== "" &&
         (actions && !running ? (
           <button type="button" className="context-used" aria-expanded={open} aria-label={label} onClick={() => setOpen(!open)}>
-            <span>{percent}%</span>
+            <span>{shown}</span>
             {note && <span className="context-note">{note}</span>}
           </button>
         ) : (
           <span className="context-used" aria-label={label}>
-            <span>{percent}%</span>
+            <span>{shown}</span>
             {note && <span className="context-note">{note}</span>}
           </span>
         ))}

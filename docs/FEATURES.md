@@ -77,6 +77,15 @@ In the box:
 - Pasting more than a few lines shows `[Pasted text #1 · 120 lines]`; the whole text is still sent.
 - Send while Claude is working and the message is queued until its turn ends.
 
+### Side chat
+
+For a small question ("what does this flag do?", "which file was that in?") that shouldn't interrupt Claude or end up in the chat, press **⌘B**, click the speech-bubble button beside the context meter, or choose "Ask a side question…" in the command palette. A small panel opens over the box with a one-line field. The answer streams into the panel, and you can ask a follow-up in it. It works while Claude is in the middle of a turn, which carries on untouched.
+
+- The side chat starts from a copy of the chat's conversation, so it knows what you've been doing. **Nothing is added to the chat**: not the question, not the answer, and what it costs isn't counted in the chat's totals (the panel shows its own, in small text).
+- It is **read only**. It can read your files and search them, but can't change anything or run commands, and it never asks you for permission: anything beyond reading is simply refused.
+- The picker at the top chooses the model. The default is the chat's own; Haiku is the cheapest for a quick question. It is fixed once you've asked the first question.
+- It is kept short: 10 questions per side chat, and one question is stopped after 12 files looked at or 3 minutes. **Stop** ends an answer early, **Copy** copies the latest answer, and **Esc** or **Close** closes the panel and throws the side chat away. Nothing is saved, and it never shows up in History.
+
 ## Step by step
 
 In Step by step, Claude writes one page per message and stops. You use **Next** to approve a page, ask about it in the box (the answer stays on the page), or ask for a change, and only that page is rewritten. **Send & next** (⌘Enter) sends a change and approves in one go. **Previous** goes back.
@@ -95,7 +104,29 @@ Claude frames the task, plans one step per page (the files, the change, how to c
 
 ![A Build plan page with a "Why this way" section, and the plan in the side panel](images/build-explain.png)
 
-When the last step is built, the **Done** page ends on what to do next, as buttons: **Review the changes** (opens the side panel on Changes with everything the chat changed), **Commit…** and **Open a pull request…** (each shows the message it would send Claude and sends it only after you confirm; Lantern runs no git itself), **Export the plan** (the same export as the Plan tab's) and **Start something new** (a new chat in this project).
+When the last step is built, the **Done** page ends on what to do next, as buttons: **Review the changes** (opens the side panel on Changes with everything the chat changed), **Ship it…** (see below), **Export the plan** (the same export as the Plan tab's) and **Start something new** (a new chat in this project).
+
+### Ship it
+
+**Ship it…** commits, pushes and opens a pull request with one confirmation. It's on the Done page, in the Changes tab's header and in the command palette. A dialog lists the three steps, each with a checkbox and the text Claude will use, which you can edit:
+
+- **Commit the changes**: a commit message drafted from the chat's title (or from the files changed).
+- **Push the branch**: names the branch and the remote it goes to. On `main` or `master` it warns in amber and starts unticked.
+- **Open a pull request**: a title, a description and the branch it goes into. It's switched off, with the reason, when `gh` isn't installed, when the project has no GitHub remote, or when you're on the branch it would go into.
+
+At least Commit or Push must be ticked. **What will be sent** shows the exact message. **Ship** sends it as one message to Claude, which does the ticked steps in order, stops and tells you if one fails, never force-pushes, never commits files that look like secrets (`.env`, keys) and shows the pull request's link at the end. Claude asks you to allow each command as usual. Lantern itself only looks at the repository (the branch, the remote, whether `gh` is there) and never runs git or talks to GitHub. Ship waits while Claude is working, and each project remembers the steps you ticked last.
+
+
+### Pull request checks
+
+Once a pull request is open and its checks run, you decide what Lantern does about it, **for each project**: a project's **⋯** menu has **Pull request checks…**, and **Settings → Pull requests** lists every project.
+
+- **Off**: Lantern doesn't look at the checks.
+- **Tell me** (the usual): a card above the message box says how the checks stand, "Checks: 2 passed, 1 failed, 1 running", with each check and a link to it. When a check fails, the card has **Send the failure to Claude**, which sends one message with the failed check's name and the end of its log, and asks Claude to find the cause, fix it, and commit and push. The inbox gets a row, "Checks failed on <branch>", and macOS shows a notification.
+- **Fix it myself**: when the checks finish and one failed, Lantern sends that same message by itself, once for each failing run and never while Claude is working. The card says "Fixing failed checks: try 2 of 3" with a **Stop** button. You choose how many tries, 1 to 5 (3 is usual), counted for each pull request. After the last try it goes back to Tell me and says "Out of tries". If Claude's turn ends without pushing anything new, the fix didn't land: that counts as the try, and Lantern stops and says so. It never sends anything when the checks pass or the pull request is merged or closed, and it never merges anything. Under the choice, the dialog and Settings → Pull requests say who decides about the fixes: with **Auto** permissions Claude pushes fixes without asking you, and with **Ask** it asks you on each command.
+
+Lantern finds the pull request with the GitHub CLI (`gh`, read-only: it looks at the pull request, its checks and the log of a failed run, and never writes to GitHub), every 30 seconds while the checks are running and a little less often as time goes on, for up to an hour. It needs `gh` installed and logged in; the dialog says so when it isn't. What CI printed is untrusted, so the message puts the log in a fenced block labelled as untrusted output and tells Claude to treat it as data and never as instructions. Whether Claude asks permission for each command depends on the chat's Permissions: with Ask it does; with Auto it does not, and with Fix it myself it pushes fixes without asking.
+
 
 The plan is always in the side panel's **Plan** tab: each step, what was done, the files it changed, and whether it's built. A click opens the step's page, and **Export** copies or saves the plan as markdown.
 
@@ -149,8 +180,11 @@ The app becomes a canvas of floating chats tethered to the Lead:
 ![The team canvas: a Lead and three agents, one of which needs permission](images/team-canvas.png)
 
 - Drag a title to move a window and its corner to resize it. Drag the background to pan; pinch or ⌘-scroll to zoom. Zoomed out, agents become cards, and a click zooms in.
-- Every window says what its chat is doing in the same words: **Working**, **Needs you**, **Ready** (a Lead with nothing running), **Done** (an agent that finished its turn) or **Stopped**. The title bar says the same for the chat you're in, and the sidebar's rows say Working, Needs you or Done (Unread for a finish you haven't opened). A working agent that has been silent a while says "Working · 45s ago", and from three minutes on it turns amber and reads **Quiet 3m**; its tooltip says to send it a message, or stop it.
+- Every window says what its chat is doing in the same words: **Working**, **Needs you**, **Ready** (a Lead with nothing running), **Done** (an agent that finished its turn) or **Stopped**. The title bar says the same for the chat you're in, and the sidebar's rows say Working, Needs you or Done (Unread for a finish you haven't opened). A working agent that has been silent a while says "Working · 45s ago", and from three minutes on (you can change that, see below) it turns amber and reads **Quiet 3m**.
+- **A quiet agent**: its window then has a line, "Quiet for 4 min. It may be stuck.", with three buttons. **Nudge** sends it a short message asking for a one-line status (once for each stretch of quiet). **Interrupt** stops what it is doing now; it stays on the team and you can message it. **Restart** starts it again and says first what that loses: the step it is in the middle of and anything running in the background (its chat and files stay). The Team list counts how many are quiet ("Team · 2 quiet") and marks them, and the title bar's inbox lists each one ("Quiet while working", with how long) with **Go**.
 - An agent's permission prompts appear in its own window. The pill at the top ("1 agent needs you") takes you to the next one that does, at 100% so you can read it.
+- Every window says what its chat is doing in the same words: **Working**, **Needs you**, **Ready** (a Lead with nothing running), **Done** (an agent that finished its turn) or **Stopped**. The title bar says the same for the chat you're in, and the sidebar's rows say Working, Needs you or Done (Unread for a finish you haven't opened). A working agent that has been silent a while says "Working · 45s ago", and from three minutes on it turns amber and reads **Quiet 3m**; its tooltip says to send it a message, or stop it.
+- An agent's permission prompts appear in its own window. The pill at the start of the canvas toolbar ("1 agent needs you", shortened to "1 needs you" and then just the count as the canvas narrows) takes you to the next one that does, at 100% so you can read it. It sits in the toolbar, so it never covers an agent's title bar.
 - Fitting everything (**Fit**, or a new agent arriving) never zooms out past 80% by itself. A team too big for the window is shown from the Lead at 80% and you pan to the rest; zooming out further is yours to do.
 - Each window's title bar shows how full that agent's context is ("42%", amber from 75%, red from 90%). Click it for **Compact** (summarise the conversation to free up context) and **Clear** (a fresh conversation; the files stay, and you are asked first). Both wait until the agent has finished its turn.
 - The **Context** chip in the toolbar opens a list of every agent with its share as a bar, its tokens, and Compact and Clear on its row. **Compact all above 60%** compacts every agent over that which is free, and says how many it skipped because they were busy. A name in the list goes to that agent.
@@ -162,24 +196,66 @@ The same canvas in the dark theme:
 
 ![The team canvas in the dark theme](images/team-canvas-dark.png)
 
+### Roles and templates
+
+A **role** is a ready-made way to start an agent: what it is told, the model it runs on, where it works and whether it may change files. Pick one in **+ Agent** and the form fills in the rest; you can still change any of it, and the task you type goes into the brief. The agent is named from it ("Reviewer: login form").
+
+| Role | What it does | Works in | May edit |
+|---|---|---|---|
+| Builder | Builds a change and reports what it did | its own worktree | yes |
+| Reviewer | Reads files, and a diff you put in the task, and reports findings | your folder | no, read only |
+| QA / tester | Runs the project's tests and tries to break the change; may write tests | its own worktree | yes |
+| Docs | Writes and updates documentation | its own worktree | yes |
+| Security auditor | Reads the code for security problems | your folder | no, read only |
+
+Each role's brief asks for a report in a fixed, plain format (what it found, how serious, what to do). **Read only** is enforced, not just asked: the agent is started with only three tools, which read, search and list files, whatever its brief says and whatever you have set to Auto or allowed with **Always allow…**. It has no shell, so it cannot run commands (not even git), write, delete or commit by any route, and no web tools; it only reads the files and the diff its task gives it. Its card says **Read only** in an amber badge under the title bar. The role's name shows on the card, and in the sidebar's list of agents ("Reviewer · Working"). Docs is asked to touch documentation only; that part is a request, not a switch.
+
+**Save as a role…** at the bottom of the form keeps what you filled in as a role of your own for the project. Choose it later from "Your roles", save again under the same name to change it, or **Delete this role**. Roles and templates belong to a project and move with it if the folder moves.
+
+The Lead can ask for a role by name when it starts an agent, so its brief only says what to work on. An unknown role is refused with the list of roles there are.
+
+**Team from a template** (**New ▾** in the sidebar, or the Workflow menu under the box) starts a team that already has its members chosen: **Build and review** (a Builder and a Reviewer) or **Build, review and test** (adding a QA tester). Say what the team should do, and the Lead is told each member and its role and starts them. **Make a template of your own…** saves a named list of roles (yours included) for the project.
+
+### Review and test after a build
+
+Switch on **Review and test what an agent builds** (the **Review: On / Off** button in the canvas controls, next to Subagents) and a team checks its own work. It is on for a team started from a template with a Reviewer or a QA tester, and off for any other team until you switch it on. The setting stays with the team when Lantern is closed and opened again.
+
+When a **Builder** finishes its turn and has committed work on its branch, Lantern starts a Reviewer, and a QA tester if the team has one, by itself, the same way **+ Agent** starts an agent. Each gets a copy of exactly the Builder's committed work (never what the Builder has not committed, and the Builder's own folder is left alone), told who built it, the branch, where it started from and what the Builder said at the end. The Reviewer can only read, so Lantern puts the change itself (the files changed and the diff, cut at about 60 KB) in its instructions. The cards appear next to the Builder's. If too many agents are already running, they wait ("Waiting for a free slot") and start as soon as there is room.
+
+The Builder's card shows a small line while this goes on and after: "In review", "Review: 2 findings", "Tested: failed". When the Reviewer and the tester have all finished, the Lead gets **one** message, "Review and test of …", with each report (cut to about 3,000 characters, shown as the agent's words and not as instructions), and **Needs you** lists "Review of Login found 3 things". Findings are counted from the last line of a report ("RESULT: issues 3") when it has one; without that line the row says there is no summary. Lantern never merges, changes or sends anything to the Builder by itself: what to do about the findings is the Lead's and your call.
+
+A Builder's commit is checked once; a later commit (after fixes) is checked again, up to three times per Builder. A Builder that is itself a Reviewer or a tester never starts a review. **Tidy up reviewers after they report** (on by default) closes them once they have reported and removes their copy of the code; turn it off to keep them on the canvas to read.
+
 ### Merging
 
 An agent works on its own branch, and only you can approve merging it. When the Lead asks, a merge card appears on its window and the agent's:
 
 ![A merge card on the Lead and on the Login form agent: Review diff, Approve merge, Not yet](images/team-merge.png)
 
-- **Show files** lists the files with their line counts.
+- **Show files** lists the files with their line counts. The arrow before a file opens its changes right on the card; its name opens it in the side panel.
+- **Run tests** runs the project's tests in that agent's worktree, only when you press it. Lantern finds the command itself (a `test` script in package.json, Cargo.toml, pytest settings or a Makefile `test` target) and shows it next to the button; **Change** lets you type another, and it is remembered for the project. If Lantern can't tell, it says so and asks you to type one. What you type is shown back as the words it will run, and nothing goes through a shell (so `&&` and pipes are refused with a reason). While it runs you see the clock and the line it is on, with **Cancel**; a run stops by itself after 10 minutes. Afterwards the card says it plainly ("Tests passed: 214", "3 tests failed"), how long it took, and the end of the output on request. The result stays on the card, and says **Out of date** once the branch or its loose work has changed since. A run that leaves new files in the worktree says so, because they would no longer match what was proposed.
+- **Approve merge** merges the branch into your folder. If the tests failed on this very branch, or are still running, the card asks once more (**Tests failed: merge anyway?**); with passing tests, no tests, or an out-of-date result it merges as before. If your folder has uncommitted changes, it says so and offers to try again.
 - **Review diff** opens the side panel (which stays beside the canvas and remembers whether it was open) on that branch against its base, and each file listed opens its diff.
-- **Approve merge** merges the branch into your folder. If your folder has uncommitted changes, it says so and offers to try again.
 - **Not yet** leaves a quiet line that the Lead was told.
+
+Settings → General has **Run tests when a merge is proposed** (off by default): with it on, the tests start by themselves as the card appears, when Lantern knows the project's test command. That command comes from the project, including code the agent has just written, and it runs without asking you, so turn this on only for projects whose code you trust.
+
+### Project setup and Run
+
+A new agent works in a fresh copy of your project that has none of its installed packages or local files, so `npm test` or the app can't run there until it is set up. Each project has a **Project setup…** (in the project's **⋯** menu in the sidebar):
+
+- **Run in each new agent's worktree** is a short list of commands you write, one per line (for example `npm ci`, or `cp "$LANTERN_PROJECT_DIR/.env" .env`, where `$LANTERN_PROJECT_DIR` is your own project folder). They run in order, once, in each new agent's worktree, before the agent starts on its brief. Only lines written here run: Lantern never reads them from a file in your project or from anything an agent wrote. Each line gets 10 minutes, and nothing waits for you to type.
+- While it runs, the agent's window says "Setting up: npm ci…", with what the line printed last and a **Stop** button. If a line fails, the agent does not start: the window says which line, why, and the end of what it printed, and offers **Start anyway**, **Run setup again** (from the first line) and **Close agent**. The Lead is told, and can't message the agent until it has started.
+- Lantern suggests lines from the project (a `package-lock.json` suggests `npm ci`, `pnpm-lock.yaml` and `yarn.lock` their frozen installs, `requirements.txt` a `pip install`), with **Fill in**. Nothing is saved until you press **Save**.
+- **Run command** (for example `npm run dev`) gives every agent's window, and the title bar of a normal chat, a **Run** button. Nothing runs until you press it. The command starts in that agent's folder, and a panel under the window shows whether it is running, stopped or failed, the end of what it printed, **Stop** and **Restart**, and a link to the `http://localhost:…` address it printed, if any (only addresses on your own computer are offered). Closing the panel, closing the agent, or quitting Lantern stops it and everything it started.
 
 ### Usage
 
-The canvas controls at the bottom adapt to the width of the canvas, so they never wrap or get cut off beside the side panel: first Subagents, **+ Agent** and Hidden fold into a **⋯** menu, then the team cost and the Context chip's agent name drop out ("82%"). Their **Context** chip is the share of the fullest agent's context window in use now; it turns amber from 75%, and the tooltip says to open that agent and use Compact (a click on the chip lists every agent's). They show what the team has cost so far ("Team · $0.15") and **Plan usage**, how full your subscription's five-hour window is, with when it resets. It turns amber from 80% and red from 95%, and past 95% the Lead can't start new agents until the window resets. The meter is the account's, so it also shows in the title bar.
+The canvas controls at the bottom adapt to the width of the canvas, so they never wrap or get cut off beside the side panel: first Subagents, Review, **+ Agent** and Hidden fold into a **⋯** menu, then the team cost and the Context chip's agent name drop out ("82%"). Their **Context** chip is the share of the fullest agent's context window in use now; it turns amber from 75%, and the tooltip says to open that agent and use Compact (a click on the chip lists every agent's). The window is never guessed: it is what Claude reported for that agent's model (a model that has finished a turn in any chat counts for the others on it, and a `[1m]` model is 1M), and an agent whose window isn't known yet, such as a Lead still on its first long turn, shows its tokens ("312k") with no percent and no warning until it is. They show what the team has cost so far ("Team · $0.15") and **Plan usage**, how full your subscription's five-hour window is, with when it resets. It turns amber from 80% and red from 95%, and past 95% the Lead can't start new agents until the window resets. The meter is the account's, so it also shows in the title bar.
 
 Press the title bar's meter to see **where it went**: the plan's line ("62% of the 5-hour window, resets in 1h 40m") and every open chat and team, in any project, biggest first, each with its state, what it has used since it started (cost and tokens, when known) and the models it ran on ("Sonnet 62%, Opus 38%", from its latest turn, Opus in amber). A team is one row with its total, and opens to its Lead and agents; pressing a name goes to that chat. The figures are per chat or team since it started, not just this window, and closed chats aren't counted, so they needn't add up to the plan's percentage. Esc closes it.
 
-Each agent's **model** is on its window's title bar (the Lead's too) and in the Team list: "Sonnet" or "Haiku" quietly, "Opus" in amber, with the full model id as its tooltip, so an agent that has drifted onto Opus shows at a glance.
+Each agent's **model** is on its window's title bar (the Lead's too) and in the Team list: "Sonnet" or "Haiku" quietly, "Opus" in amber, with the full model id as its tooltip, so an agent that has drifted onto Opus shows at a glance. On a narrow card the model chip always stays whole: the branch and cost beside it are what get cut short (with an ellipsis and a tooltip with the full text), and a long title is cut before the buttons are squeezed. Narrower cards also drop the context share (under about 440 wide), then the Ask and Chat menus (under about 360).
 
 Starting a team (the Workflow menu's Team, New ▸ Team, Start a team, or **+ Agent** on a team) while another team is working asks first: "Another team is working (acme-api, 3 agents). Every agent spends the same plan. Start anyway?" **Don't ask again** turns it off; Settings ▸ General ▸ Teams brings it back.
 
@@ -194,6 +270,10 @@ A plain chat always runs its subagents inline.
 
 **Agents running at once** is in Settings → General → Teams: how many agents can work at the same time across all teams. Every agent spends the same plan, and a Lead asking for one more is told to wait for one to finish.
 
+**Say an agent is quiet after** (same place, 3 minutes until you change it) is how long a working agent may say nothing before it counts as quiet.
+
+**Pause a team's work when my plan reaches** (Off until you choose, or 90% or 95%) keeps the teams from using up the plan unwatched. Five points before the limit a toast says so, once. When the plan reaches it while any agent of any team is working, Lantern stops what each of them is doing (they stay on their teams, nothing is closed) and shows a card at the top of the window and a row in the inbox: "Paused: your plan is 95% used, it resets in 1h 12m", with **Resume**. Nothing starts again on its own, not even queued messages or the agents' notes to a Lead; Resume tells each agent that was stopped "Continue where you stopped." A window of the plan is paused once: after you resume, it doesn't pause again until the next window.
+
 The team runs on the Lead's Permissions, and an agent never gets more freedom than its Lead: change them from any window's title bar. A Lead can leave Team once its agents are closed.
 
 ## The sidebar and History
@@ -203,7 +283,7 @@ The sidebar is one pane with a group for every project that has a chat open, and
 **Expanded** is the whole pane, at the width you gave it (drag its edge to resize):
 
 - **New ▾** at the top starts a Chat (⌘N), a Team (⇧⌘N) or a PR review in the project on screen. The pin button above it collapses the sidebar (View ▸ Collapse sidebar, or Collapse sidebar in the command palette), and the **History** button under it opens History.
-- A project's header has its initials in the colour the project has been given, its name, the branch when it is the project on screen, and a badge for how many things need you when it is folded. Click it to fold or open the project. Hover it for **+** (a new chat there) and **⋯**: New team, Close finished chats, Bring old chats here…, Reveal in Finder, Move up, Move down and Remove from recents (which only hides it; Claude Code keeps the chats).
+- A project's header has its initials in the colour the project has been given, its name, the branch when it is the project on screen, and a badge for how many things need you when it is folded. Click it to fold or open the project. Hover it for **+** (a new chat there) and **⋯**: New team, Close finished chats, Project notes…, Bring old chats here…, Reveal in Finder, Move up, Move down and Remove from recents (which only hides it; Claude Code keeps the chats).
 - Under it are the project's open chats and teams as squares: the initials of the chat's title (a new chat is N) and a mark on its corner (a spinning ring while it works, an amber dot when it needs you, a blue dot when it finished while you were away), the title, and how it is. A team is one square (its Lead, with a small diamond badge) that shows the team's combined state. Its agents are folded under a line that says how many there are and who needs you or works; press it to list them (they stay listed while one of them is on screen). The collapsed column shows teams only. Each project has a colour of its own, kept across restarts (and when its folder moves): its squares are tinted with it, and the chat on screen is filled with it, with a bar beside it. A chat that needs you rises to the top of its group.
 - Click an open chat to switch to it, a team to open its canvas, an agent to focus it there. **Open folder…** at the bottom opens another project.
 - Every row has a **×** when you hover it (or tab to it) that closes the chat, and in the collapsed bar a right click has **Close chat** (and a small × shows on a square's corner). A chat that is done or only a draft closes at once, including the one on screen (Lantern then shows another chat, or the start screen). One that is working or waiting on you asks first, right under it: **Stop and close?** An agent is closed the way the canvas's *Clean up and close* does it: it checks for uncommitted and unmerged work and asks before deleting any. A team's Lead asks **Close the team and its N agents?** and says what would be lost. A project's ⋯ has **Close finished chats**, which closes every chat that is done (not the working ones, drafts or teams) and says how many.
@@ -234,11 +314,21 @@ Its width, whether it is collapsed and whether it is hidden are each remembered,
 
 The team canvas screenshot shows a team with its agents nested under it.
 
-**History** (the clock button in the sidebar, or ⌘K; View ▸ Chat History, or Chat history in the command palette) lists the past chats of every project, including ones started in the terminal with Claude Code, grouped by project in the sidebar's order. A project's pinned chats come first, then the newest. Type to search all of them, or pick a project in the chip beside the search box. ↑ and ↓ move through the chats, Return opens one in its own project, and Esc (or ⌘K again) closes it. Each chat's ⋯ pins, renames, exports it or copies the command that picks it up in a terminal. The chats that are open are in the sidebar, so History leaves them out. It works with nothing open too: each project's header has a **+** that starts a chat there, which is how to start a project that has nothing open (the other ways are **New ▾**, **Open folder…** and the folder menu in the title bar).
+**History** (the clock button in the sidebar, or ⌘K; View ▸ Chat History, or Chat history in the command palette) lists the past chats of every project, including ones started in the terminal with Claude Code, grouped by project in the sidebar's order. A project's pinned chats come first, then the newest. Type to search their titles, or pick a project in the chip beside the search box. From two characters, the box searches what was said in every chat instead (see Searching all your chats, below). ↑ and ↓ move through the chats, Return opens one in its own project, and Esc (or ⌘K again) closes it. Each chat's ⋯ pins, renames, exports it or copies the command that picks it up in a terminal. The chats that are open are in the sidebar, so History leaves them out. It works with nothing open too: each project's header has a **+** that starts a chat there, which is how to start a project that has nothing open (the other ways are **New ▾**, **Open folder…** and the folder menu in the title bar).
 
 ![History: the past chats of every project, grouped by project, with a search box and a project chip](images/history.png)
 
+**Searching all your chats.** Type two or more characters in History's search box (or choose **Search all chats…** in the command palette, which opens History on it) and, a moment after you stop typing, it looks through what you and Claude said in the past chats of every project. Chats that mention it are listed newest first, each with its title, project, when it last changed and up to two lines around the match with the text marked. The search is plain text and ignores capital letters: `a.*(` looks for exactly those characters. Tool results, Claude's thinking and the contents of files are not searched, only the messages themselves. ↑ and ↓ move through the results, Return opens the first (or the one you moved to) in its own project, and Esc clears the search, then closes History. "Searching…" shows while it works, "No chat mentions that" when nothing does, and "Showing the first results" when it stopped early (at 200 chats, or after about three seconds); typing more narrows it, and a second search is much faster because Lantern remembers what it read. Opening a result opens the chat, not the exact message. Everything happens on your Mac: the chats are read from Claude Code's own files, nothing is uploaded, and Lantern keeps what it read only in memory until you quit.
+
 After you move a repository, Claude Code leaves its chats under the old path. **Bring old chats here…** (the folder menu in the title bar, a project's ⋯ menu, or the palette) finds the places the project was before and copies the chats you check into its History. Nothing is moved or overwritten, and nothing happens until you confirm.
+
+### Project notes
+
+A project can have a short text of its own, the things you would otherwise repeat in every chat: "always use pnpm", "the API is in /server, never touch /legacy", "answer in plain language". Open it from a project's **⋯** menu in the sidebar (**Project notes…**) or from the command palette (**Project notes…**, for the project on screen). It is a box with room for about 4,000 characters (a counter shows how many are left), **Save**, **Cancel** (or Esc) and **Clear**, which empties the box; nothing changes until you press Save. A project that has notes shows a small note mark by its name in the sidebar.
+
+Every chat, agent and team Lead started in that project after you save starts knowing the notes, as your own words that it should always follow unless you say otherwise. A chat that is already running isn't changed (it keeps what it started with, even if you restart it to change Permissions), and saving offers it nothing new. An agent in a team gets the notes of its Lead's project, not those of its worktree's folder. A chat that started with notes says **Project notes applied** in a line at the top; open it to see what the chat was told.
+
+The notes are kept by Lantern, on this Mac, one set per project folder. They aren't written into your repository or your CLAUDE.md, and they follow the project when its folder moves.
 
 ## Away
 
@@ -248,11 +338,26 @@ People start work and walk away, so two things help while you are gone.
 
 **Keeping the Mac awake.** While any chat or agent is working, or paused on a question for you, Lantern stops the Mac from going to sleep on its own, so a long turn finishes while you are away (it holds macOS's `caffeinate` for as long as that lasts, and lets go when nothing is working or Lantern quits). Only idle sleep is prevented: the screen may still turn off, and closing the lid still sleeps the Mac. Turn it off in Settings ▸ General ▸ **Keep my Mac awake while Claude works**.
 
+**Routines.** A routine is a prompt Lantern sends by itself, at times you pick, in a project: for example "every weekday at 9, check the open TODOs and tell me what changed since yesterday" or "every hour, run the tests and tell me if anything broke". Set them up in Settings ▸ **Routines** (also **Routines…** in the command palette). Each one has a name, a project, the prompt, a schedule (every few minutes or hours, every day, every weekday, or every week on a day, with a time picker), Permissions, a model (Sonnet unless you choose otherwise), an on/off switch, **Run now**, and **Pause for 1 hour**. You can have up to 20.
+
+- Each run opens a new chat in the project, called "Routine: name". It shows in the sidebar and in your inbox like any chat, and the routine's list keeps its last ten runs (when, how it ended, and **Open chat**).
+- Permissions are **Ask** unless you choose **Auto**. With Ask, Claude's questions and permission requests wait in your inbox until you are back. Auto lets Claude act without asking while you may be away, so the form warns you in plain words. A routine's Permissions never rise above what you set, and looking at its chat never changes the project's own setting.
+- A routine runs only while Lantern is open and the Mac is awake. If a run was due while Lantern was closed or the Mac was asleep, it is **not** made up: the list shows "Missed 9:00" once, and you can **Run now**. Keeping the Mac awake (Settings) only holds while Claude is working, not between runs.
+- A routine runs one chat at a time (a run due while the last is still going is skipped, and the history says so), and at most two routine chats work at once. When your plan is at 95% or more, runs are skipped and the history says so.
+- The prompt is sent to Claude as your text; it is never run as a command. Routines follow a project that you move (see Bring old chats here).
+
 ## The side panel
 
 The side panel (⌘\ shows or hides it) always has six tabs, in this order. A tab with nothing to show yet says what will show there.
 
 **Changes.** Every file Claude touched, as a diff. Pick a file to see it in a full diff beside the chat, step through the files (or press `j` and `k`), switch between unified and split, edit the file, or **Revert** it (or **Revert all**). The button at the top right chooses what it compares: this chat's edits, or a whole branch. The first screenshot under [A chat](#a-chat) shows it.
+
+**Comments on lines.** Like a code review: point at any line in a diff, an added one, a removed one or one that didn't change, and a small **+** shows in the gutter. Click it (or put the cursor on the line and press `c`) and a box opens under the line: **Enter** adds the comment, **Shift+Enter** starts a new line, **Esc** cancels. Each comment then sits under its line with **Edit** and **Delete**. It works in unified and split views, for every file in Changes, and in a worker's branch review. In the split view the keyboard can reach removed lines too (the old side); in the unified view point at them.
+
+Once there is a comment, a bar over the diff says how many there are, with **Send to Claude** and **Discard** (which asks first). Send puts every comment, from every file, into one message to the chat whose changes you are looking at (a worker's chat when you are reviewing its branch), in a fixed format: the file, the line, whether it was added, removed or unchanged with the line's text quoted, and your comment. A removed line is numbered as it was before and says so. If Claude is in the middle of a turn, the message waits for it to finish; once it is sent, the comments are cleared.
+
+Comments stay while Lantern runs, for each chat, and survive switching tabs or chats. When Claude changes a file, each comment follows its line to where it is now. If the line is gone, the comment is marked **Outdated** and moves into a list above that file's diff; it stays (and is sent with the rest, saying the line has since changed) until you delete it.
+**Restore files to here.** In a project that uses git, Lantern quietly keeps how your files stand just before each message you send (the last 50 per chat). Hover one of your messages and press **Restore files to here** to put the project's files back to how they were right then. Lantern first lists what will happen: which files are put back, which files Claude made since (they go to the Trash), and about how many lines of changes will be lost. Nothing is touched until you confirm. Right before it restores, Lantern keeps how things stand now, so **Undo restore** (which stays until your next message) takes it back; a file you edited after the restore is left as it is. Only files inside the project change: not your branch or commits, not files git ignores, not links, and the conversation stays as it is (Claude is told the files were put back with your next message). It waits while Claude is working. The same works for each agent in a team, in its own folder. **What is copied, and how to switch it off.** The copies hold every file git tracks and every file it doesn't track yet and doesn't ignore: for example a `.env` that is not listed in `.gitignore` is copied too, into the project's own `.git` folder (files git ignores are never copied). New files over 20 MB are skipped, and a restore leaves them exactly as they are (the list before you confirm says so); it never moves one to the Trash. To stop copying, turn off **Keep restore points before each message** in Settings → General (on by default): with it off, no copy is made before a message, and restore points already made still work. The saved states are hidden refs under `refs/lantern/checkpoints`, so they never show in `git log` or `git status` (`git log --all` does list them); saved states left behind by an earlier run are removed after two weeks.
 
 **Files.** The project's files, with search by name (⌘P) and by text (⌘⇧F). A file opens in an editor with completion, hover docs and syntax errors for TypeScript, JavaScript, JSON, CSS and HTML: change it and press ⌘S. The change shows in Changes like Claude's, and if Claude (or git) changes the file while you have unsaved edits, you choose between your version and the one on disk before anything is overwritten. A markdown file opens as a styled document; **Edit** switches to the editor.
 
@@ -281,15 +386,16 @@ A few things to know:
 
 ## Settings
 
-**⌘,** opens Settings, with six tabs:
+**⌘,** opens Settings, with seven tabs:
 
 ![Settings, on the General tab](images/settings.png)
 
-- **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, keeping the Mac awake while Claude works, the theme (see below), the text size, and **Agents running at once** for teams.
+- **General**: which events notify you (a turn finishes, Claude needs you, a turn fails), a pause for an hour, the toast sound, keeping the Mac awake while Claude works, the theme (see below), the text size, and, for teams, **Agents running at once**, **Say an agent is quiet after** and **Pause a team's work when my plan reaches**.
 - **Models**: the model presets (who is the Lead, the advisor and the subagents) that the Models chip offers.
+- **Routines**: prompts that Lantern sends by itself at set times (see [Away](#away)).
 - **MCP servers**: your servers with their status. Log in, reconnect, turn off, add, edit or remove them (through Claude Code's own settings). When one is down or needs you to log in, a small amber dot sits on the Settings gear in the title bar (hover it to see which), and the `/` menu says so too. A secret never goes into the project's committed `.mcp.json`.
 - **Skills**: the project's and plugins' skills, each with a preview of its file.
-- **Allow rules**: the rules you saved with **Always allow…**, each on one line with its scope (this chat or this folder), what it covers and a **Remove** button. (The tab isn't called Permissions, so it can't be mistaken for the Permissions chip under the chat box.)
+- **Allow rules**: the rules you saved with **Always allow…**, each on one line with its scope (this chat or this folder), what it covers and a **Remove** button. **Add a rule** makes one by hand: pick the tool (Bash, Read, Edit, Write, WebFetch, WebSearch, or another tool typed by name, like an MCP tool), what it covers (a command's start like `npm test`, one exact command, a folder's files, or every call) and whether it's for this chat or this folder. It says in words what the rule means before you add it, and explains why a rule can't be made (a command's start can only be a read-only, build or test command; anything else is one exact command). A very broad rule (every call of a tool, every file, an exact `rm` or `sudo` command, a huge folder) is shown in amber and asks for a second click. Hand-made rules are the same as the ones a card makes, and there's still no Deny rule: a rule only ever allows. (The tab isn't called Permissions, so it can't be mistaken for the Permissions chip under the chat box.)
 - **Updates**: Lantern updates itself. When a new release is out, "Update ready" appears under the chat box; click it to restart onto the new version, or leave it and it installs when you quit. **Lantern ▸ Check for Updates…** looks right now.
 
 ### Themes
@@ -333,10 +439,12 @@ The code editor and diffs, diagrams and shell output follow the theme, and a cho
 | ⌘S | Save the file in the editor |
 | ⌘Enter | Send & next (in Step by step) |
 | ⌘L | Focus the message box |
+| ⌘B | Ask a side question |
 | ⌘. | Stop Claude |
 | ⇧⌘C | Switch between a team's canvas and chat view |
 | ⌘= ⌘- ⌘0 | Zoom the canvas in, out, and fit everyone |
 | ⌘] ⌘[ | Next and previous agent on the canvas |
 | `j` `k` | Next and previous changed file (outside the message box) |
+| `c` | Comment on the line the cursor is on (in a diff) |
 | ⌘, | Settings |
 | ⌘/ | Keyboard shortcuts |

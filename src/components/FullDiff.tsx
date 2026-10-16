@@ -7,6 +7,9 @@ import type { FileDiff } from "../types";
 import { languageFor } from "../lib/diff";
 import { usePrefersDark } from "../lib/theme";
 import { registerFindable } from "../lib/editorFind";
+import { reconcile, type CommentControls } from "../lib/diffComments";
+import { DiffCommentLayer, type Surface } from "./DiffCommentLayer";
+import { OutdatedNotes } from "./DiffComments";
 
 /** "inline": one unified view, removals above additions. "split": old and new side by side. */
 export type DiffLayout = "inline" | "split";
@@ -14,7 +17,7 @@ export type DiffLayout = "inline" | "split";
 /** A line to scroll to and flash in the new version; `key` changes for every request. */
 export type Reveal = { line: number; key: number } | null;
 
-export default function FullDiff({ path, refreshKey, layout, scope = "session", turn = null, toTurn = null, pr = null, base = null, reveal = null }: { path: string; refreshKey: number; layout: DiffLayout; scope?: ChangeScope; turn?: number | null; toTurn?: number | null; pr?: number | null; base?: string | null; reveal?: Reveal }) {
+export default function FullDiff({ path, refreshKey, layout, scope = "session", turn = null, toTurn = null, pr = null, base = null, reveal = null, comments }: { path: string; refreshKey: number; layout: DiffLayout; scope?: ChangeScope; turn?: number | null; toTurn?: number | null; pr?: number | null; base?: string | null; reveal?: Reveal; comments?: CommentControls }) {
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
   const dark = usePrefersDark();
@@ -36,6 +39,12 @@ export default function FullDiff({ path, refreshKey, layout, scope = "session", 
     };
   }, [path, refreshKey, slot, scope, turn, toTurn, pr, base]);
 
+  // Each time the file is read, the comments on it follow their lines, and one whose line is gone is marked outdated.
+  useEffect(() => {
+    if (!diff || diff.path !== path || !comments) return;
+    comments.update((all) => reconcile(all, path, diff.original, diff.current));
+  }, [diff, path]);
+
   if (error) return <div className="empty">{error}</div>;
   if (!diff) return <div className="empty">Loading…</div>;
 
@@ -46,11 +55,20 @@ export default function FullDiff({ path, refreshKey, layout, scope = "session", 
   // Diffed against an empty file, Monaco shows the empty original as one removed blank line. A file that was created
   // or deleted is shown whole instead, every line marked added or removed.
   const whole = diff.original === "" ? { text: diff.current, kind: "added" as const } : diff.deleted && diff.current === "" ? { text: diff.original, kind: "removed" as const } : null;
+  // Comments are only for the file this diff is of: while the next one loads, the last is still on screen.
+  const note = comments && current ? comments : undefined;
   return (
-    <div className="diff-body">
-      {diff.deleted && <div className="diff-note">This file was deleted.</div>}
-      {whole ? <WholeFile text={whole.text} kind={whole.kind} language={language} theme={theme} reveal={whole.kind === "added" && current ? reveal : null} /> : <Diff original={diff.original} modified={diff.current} language={language} theme={theme} layout={layout} reveal={current ? reveal : null} />}
-    </div>
+    <>
+      {note && <OutdatedNotes path={path} comments={note} />}
+      <div className="diff-body">
+        {diff.deleted && <div className="diff-note">This file was deleted.</div>}
+        {whole ? (
+          <WholeFile path={path} text={whole.text} kind={whole.kind} language={language} theme={theme} reveal={whole.kind === "added" && current ? reveal : null} comments={note} />
+        ) : (
+          <Diff path={path} original={diff.original} modified={diff.current} language={language} theme={theme} layout={layout} reveal={current ? reveal : null} comments={note} />
+        )}
+      </div>
+    </>
   );
 }
 
@@ -84,8 +102,10 @@ function useReveal(reveal: Reveal) {
   return { apply, queue };
 }
 
-function Diff({ original, modified, language, theme, layout, reveal }: { original: string; modified: string; language: string; theme: string; layout: DiffLayout; reveal: Reveal }) {
+function Diff({ path, original, modified, language, theme, layout, reveal, comments }: { path: string; original: string; modified: string; language: string; theme: string; layout: DiffLayout; reveal: Reveal; comments?: CommentControls }) {
   const editor = useRef<Parameters<DiffOnMount>[0] | null>(null);
+  // The editor once it's up, for the comments drawn over it.
+  const [mounted, setMounted] = useState<{ diff: Parameters<DiffOnMount>[0]; monaco: Parameters<DiffOnMount>[1] } | null>(null);
   // A finding's line: shown once the diff is worked out, since hidden unchanged regions move lines until then.
   const toLine = useReveal(reveal);
   useEffect(() => {
@@ -111,37 +131,42 @@ function Diff({ original, modified, language, theme, layout, reveal }: { origina
   );
 
   return (
-    <DiffEditor
-      height="100%"
-      original={original}
-      modified={modified}
-      language={language}
-      theme={theme}
-      keepCurrentOriginalModel
-      keepCurrentModifiedModel
-      onMount={(e) => {
-        editor.current = e;
-        const m = e.getModel();
-        if (m) models.current = [m.original, m.modified];
-        showOldNumbers();
-        e.onDidUpdateDiff(() => toLine.apply(e.getModifiedEditor()));
-        registerFindable(e.getModifiedEditor());
-      }}
-      options={{
-        ...EDITOR_OPTIONS,
-        renderSideBySide: layout === "split",
-        useInlineViewWhenSpaceIsLimited: false,
-        hideUnchangedRegions: { enabled: true },
-        renderOverviewRuler: false,
-        renderIndicators: false,
-        renderMarginRevertIcon: false,
-      }}
-    />
+    <>
+      <DiffEditor
+        height="100%"
+        original={original}
+        modified={modified}
+        language={language}
+        theme={theme}
+        keepCurrentOriginalModel
+        keepCurrentModifiedModel
+        onMount={(e, monaco) => {
+          editor.current = e;
+          setMounted({ diff: e, monaco });
+          const m = e.getModel();
+          if (m) models.current = [m.original, m.modified];
+          showOldNumbers();
+          e.onDidUpdateDiff(() => toLine.apply(e.getModifiedEditor()));
+          registerFindable(e.getModifiedEditor());
+        }}
+        options={{
+          ...EDITOR_OPTIONS,
+          renderSideBySide: layout === "split",
+          useInlineViewWhenSpaceIsLimited: false,
+          hideUnchangedRegions: { enabled: true },
+          renderOverviewRuler: false,
+          renderIndicators: false,
+          renderMarginRevertIcon: false,
+        }}
+      />
+      {comments && mounted && <DiffCommentLayer path={path} original={original} modified={modified} surface={{ kind: "diff", diff: mounted.diff, split: layout === "split" } satisfies Surface} monaco={mounted.monaco} comments={comments} />}
+    </>
   );
 }
 
-function WholeFile({ text, kind, language, theme, reveal }: { text: string; kind: "added" | "removed"; language: string; theme: string; reveal: Reveal }) {
+function WholeFile({ path, text, kind, language, theme, reveal, comments }: { path: string; text: string; kind: "added" | "removed"; language: string; theme: string; reveal: Reveal; comments?: CommentControls }) {
   const editor = useRef<CodeEditor | null>(null);
+  const [mounted, setMounted] = useState<{ editor: CodeEditor; monaco: Parameters<OnMount>[1] } | null>(null);
   const marks = useRef<ReturnType<CodeEditor["createDecorationsCollection"]> | null>(null);
   const toLine = useReveal(reveal);
   // The whole file is marked as one range, which has to follow the text: Claude writing the file changes its length.
@@ -158,13 +183,19 @@ function WholeFile({ text, kind, language, theme, reveal }: { text: string; kind
     toLine.queue();
     toLine.apply(editor.current);
   }, [reveal?.key]);
-  const onMount: OnMount = (e) => {
+  const onMount: OnMount = (e, monaco) => {
     editor.current = e;
+    setMounted({ editor: e, monaco });
     registerFindable(e);
     toLine.apply(e);
     marks.current = e.createDecorationsCollection(shade(shown.current.text, shown.current.kind));
   };
-  return <Editor height="100%" value={text} language={language} theme={theme} onMount={onMount} options={{ ...EDITOR_OPTIONS, renderLineHighlight: "none" }} />;
+  return (
+    <>
+      <Editor height="100%" value={text} language={language} theme={theme} onMount={onMount} options={{ ...EDITOR_OPTIONS, renderLineHighlight: "none" }} />
+      {comments && mounted && <DiffCommentLayer path={path} original={kind === "removed" ? text : ""} modified={kind === "added" ? text : ""} surface={{ kind: "whole", editor: mounted.editor, side: kind === "added" ? "new" : "old" } satisfies Surface} monaco={mounted.monaco} comments={comments} />}
+    </>
+  );
 }
 
 // Shared by the diff and the whole-file view.

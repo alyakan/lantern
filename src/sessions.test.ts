@@ -19,7 +19,7 @@ describe("chatsReducer", () => {
 
   it("gives a new chat the app-wide settings but nothing of the conversation", () => {
     let c = chatsReducer(initialChats({ ...ready, items: [{ type: "user", id: "u1", text: "hi" }], queued: ["x"] }), { type: "add", slot: "s2" });
-    expect(c.slots.s2).toMatchObject({ claudePath: "/bin/claude", mode: "auto", contextWindow: 200_000, status: "no_folder", items: [], queued: [], folder: null });
+    expect(c.slots.s2).toMatchObject({ claudePath: "/bin/claude", mode: "auto", contextWindow: null, status: "no_folder", items: [], queued: [], folder: null });
     // A result for a chat that has been closed is dropped.
     c = chatsReducer(c, { type: "in", slot: "gone", action: { type: "session_ready" } });
     expect(Object.keys(c.slots)).toEqual(["s1", "s2"]);

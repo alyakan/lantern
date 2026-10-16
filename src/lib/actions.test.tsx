@@ -62,6 +62,15 @@ describe("which action a keystroke names", () => {
     expect(actionForKey(key("r", { shiftKey: true }))).toBeUndefined();
   });
 
+  it("offers Ship It… in the palette only, with no shortcut and no menu item", () => {
+    const ship = ACTIONS.find((d) => d.id === "ship-it");
+    expect(ship).toMatchObject({ title: "Ship It…", group: "Chat" });
+    expect(ship?.key).toBeUndefined();
+    expect(ship?.menu).toBeUndefined();
+    render(<Owner id="ship-it" run={() => {}} />);
+    expect(availableActions().find((a) => a.id === "ship-it")).toMatchObject({ title: "Ship it…", shortcut: null });
+  });
+
   it("gives every shortcut to one action only", () => {
     const seen = new Map<string, string>();
     for (const def of ACTIONS) {

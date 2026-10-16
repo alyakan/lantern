@@ -2,7 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
-import type { CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, McpServerSpec, MovedFolder, Mode, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { Role } from "./lib/roles";
+import type { ReviewSetting } from "./lib/reviewChain";
+import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, GhAccess, McpServerSpec, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -28,6 +30,28 @@ export interface RevertOutcome {
   reason: string | null;
 }
 
+/** What putting the folder back to before one of the user's messages would do (paths are whole). */
+export interface RestorePlan {
+  /** Files that go back to how they were: changed since, or deleted since. */
+  put_back: string[];
+  /** Files made since, which go to the Trash. */
+  removed: string[];
+  /** Files left alone, with why (links, a folder in the way). */
+  skipped: { path: string; reason: string }[];
+  /** Lines changed since, which are lost. */
+  lines: number;
+}
+
+/** What a restore (or its undo) did. `id` is what Undo is asked with (null: it can't be undone). */
+export interface RestoreResult {
+  id: number | null;
+  put_back: string[];
+  removed: string[];
+  skipped: { path: string; reason: string }[];
+  /** After an undo: files edited since the restore, which were left as they are. */
+  kept: string[];
+}
+
 /** Whether claude is logged in, and as whom. */
 export interface ClaudeLogin {
   logged_in: boolean;
@@ -47,9 +71,31 @@ export const api = {
   setModel: (slot: string, model: string | null) => invoke<void>("set_model", { slot, model }),
   /** Resolves to the turn's number (see the Changes pane's per-turn views). */
   sendMessage: (slot: string, text: string) => invoke<number>("send_message", { slot, text }),
+  /**
+   * Asks a side question about the chat (`aside` names the popover's side chat, started by its first question): a read-only copy
+   * of the chat's conversation answers it, as aside events. `model` null is the chat's own. Resolves to whether it has the
+   * chat's conversation to go on (false: the chat has no messages yet).
+   */
+  asideAsk: (slot: string, aside: string, text: string, model: string | null) => invoke<boolean>("aside_ask", { slot, aside, text, model }),
+  /** Closes a side chat: its claude stops and nothing of it is kept. */
+  asideStop: (aside: string) => invoke<void>("aside_stop", { aside }),
+  /** Ends the answer being written; the side chat stays for another question. */
+  asideStopAnswering: (aside: string) => invoke<void>("aside_stop_answering", { aside }),
+  /** What side chats say: their own event, apart from every chat's `onUiEvent`. */
+  onAsideEvent: (cb: (e: AsideEvent) => void): Promise<UnlistenFn> => listen<AsideEvent>("aside-event", (e) => cb(e.payload)),
   /** The user approves a worker's merge: its branch goes into the main checkout (the outcome comes as `merge_resolved`). */
   approveMerge: (worker: string) => invoke<void>("orchestra_approve_merge", { worker }),
   declineMerge: (worker: string) => invoke<void>("orchestra_decline_merge", { worker }),
+  /** What the merge card knows about its worker's tests: how they would run, the run going now, the last result and whether it still holds. */
+  mergeTestsInfo: (worker: string) => invoke<MergeTestsInfo>("orchestra_merge_tests_info", { worker }),
+  /** Runs the tests in the worker's worktree (the user asked): `command` is the words of what they typed, null for what the worktree says. Resolves when they end; null if they were cancelled. */
+  runMergeTests: (worker: string, command: string[] | null) => invoke<MergeTestsReport | null>("orchestra_run_merge_tests", { worker, command }),
+  cancelMergeTests: (worker: string) => invoke<void>("orchestra_cancel_merge_tests", { worker }),
+  /** What a typed test command would run as: its words, or why it can't run. Nothing is run. */
+  splitTestCommand: (text: string) => invoke<string[]>("merge_tests_split_command", { text }),
+  /** "Run tests when a merge is proposed" (Settings). */
+  setAutoMergeTests: (on: boolean) => invoke<void>("set_auto_merge_tests", { on }),
+  setRestorePoints: (on: boolean) => invoke<void>("set_restore_points", { on }),
   /** Removes a worker's worktree; loose work needs `force`, and an unmerged branch is kept either way. */
   discardWorktree: (worker: string, force: boolean) => invoke<void>("orchestra_discard", { worker, force }),
   /** What closing a worker would throw away. Nothing is stopped or removed by asking. */
@@ -57,9 +103,21 @@ export const api = {
   /** Stops a worker and removes its worktree and branch (and tells its main agent). Work that would be thrown away needs `agreed`: the numbers the user confirmed, which a worker that has gone on since is refused over. */
   /** How many workers may run at once across all of Lantern (Settings → General). */
   setAgentLimit: (limit: number) => invoke<void>("set_agent_limit", { limit }),
+  /** What the user saved for a project (its setup lines, its Run command): the backend runs them from here, never from a file in the project. */
+  setProjectSetup: (folder: string, commands: string[], run: string | null) => invoke<void>("set_project_setup", { folder, commands, run }),
+  /** What the project's files suggest for its setup and Run command. Only offered: nothing is saved until the user presses Save. */
+  suggestSetup: (folder: string) => invoke<SetupSuggestion>("suggest_setup", { folder }),
+  /** The user's answer on an agent whose setup failed: "start" it anyway, or run the setup "again"; or "stop" a setup that is running. */
+  answerSetup: (worker: string, answer: "start" | "again" | "stop") => invoke<void>("orchestra_setup_answer", { worker, answer }),
+  /** Starts the project's saved Run command in the chat's folder; `id` starts with "run-". Output comes as shell_output, then shell_done. */
+  runProject: (slot: string, id: string) => invoke<void>("run_project", { slot, id }),
   closeWorker: (worker: string, agreed?: CloseAgreed) => invoke<void>("orchestra_close_worker", { worker, agreed: agreed ?? null }),
   /** Starts a worker for the main agent `main`, as the user's own doing (the main agent is told). Resolves to the worker's id. */
-  spawnWorker: (main: string, w: NewWorker) => invoke<string>("orchestra_spawn", { main, task: w.task, name: w.name, isolation: w.isolation, model: w.model }),
+  spawnWorker: (main: string, w: NewWorker) => invoke<string>("orchestra_spawn", { main, task: w.task, name: w.name, isolation: w.isolation, model: w.model, role: w.role ?? null }),
+  /** Tells a Lead's team the project's own roles (the built-in ones need no telling), so the Lead may ask for one by id. */
+  setRoles: (main: string, roles: Role[]) => invoke<void>("orchestra_set_roles", { main, roles }),
+  /** A team's "Review and test what an agent builds" setting, on its Lead (see src-tauri/src/orchestra/review.rs). */
+  setReview: (main: string, setting: ReviewSetting) => invoke<void>("orchestra_set_review", { main, setting }),
   /** Runs a command the user typed after "!" in the chat's folder; its output comes as shell_output, then shell_done. */
   runShell: (slot: string, id: string, command: string) => invoke<void>("run_shell", { slot, id, command }),
   /** Asks the chat's claude something for Settings (MCP status and actions, reloading skills); resolves to its reply. */
@@ -115,11 +173,20 @@ export const api = {
   listPermissionRules: (slot: string | null) => invoke<RuleEntry[]>("list_permission_rules", { slot }),
   removePermissionRule: (slot: string | null, entry: RuleEntry) => invoke<void>("remove_permission_rule", { slot, entry }),
   gitBranch: (folder: string) => invoke<string | null>("git_branch", { folder }),
+  /** Ship it's read-only look at the folder's repository: branch, remote, base branch, and whether gh is there. */
+  shipInfo: (folder: string) => invoke<ShipInfo>("ship_info", { folder }),
+  /** The pull request on the folder's branch and how its checks stand (read-only). Rejects when gh failed for a reason that may pass. */
+  prWatch: (folder: string) => invoke<PrWatch>("pr_watch", { folder }),
+  /** The end of the log of a failed check's run (`runId` is digits). */
+  prFailureLog: (folder: string, runId: string) => invoke<string>("pr_failure_log", { folder, runId }),
+  /** Whether the GitHub CLI is installed and logged in. */
+  ghAccess: () => invoke<GhAccess>("gh_access"),
   /** The user's name for their messages (macOS full name, else git's user.name); null if none. */
   userName: () => invoke<string | null>("user_name"),
   /** Stops one of the chat's background tasks (a run_in_background command, a background agent). */
   stopTask: (slot: string, taskId: string) => invoke<void>("stop_task", { slot, taskId }),
   listSessions: (folder: string) => invoke<SessionSummary[]>("list_sessions", { folder }),
+  searchHistory: (query: string) => invoke<ChatSearchResults>("search_history", { query }),
   /** Names a past session in Lantern (its History menu's Rename). The name beats every other title the session has. */
   renameSession: (sessionId: string, title: string) => invoke<void>("rename_session", { sessionId, title }),
   /** A past session's events, read from its transcript without starting claude (for Export as Markdown). */
@@ -162,6 +229,14 @@ export const api = {
     invoke<RevertOutcome[]>("revert_files", { slot, scope, turn, toTurn, files }),
   /** Undoes a revert: each file goes back to `target` (null: absent), if it still holds `expected` (what the revert left). */
   undoRevert: (slot: string, files: { path: string; target: string | null; expected: string | null }[]) => invoke<RevertOutcome[]>("undo_revert", { slot, files }),
+  /** The messages (by turn number) the chat has a restore point for: none when its folder isn't a git repository. */
+  restorePoints: (slot: string) => invoke<number[]>("restore_points", { slot }),
+  /** What putting the folder back to before message `turn` would change. Nothing is written. */
+  restorePreview: (slot: string, turn: number) => invoke<RestorePlan>("restore_preview", { slot, turn }),
+  /** Puts the folder back to before message `turn`, after keeping how it stands now. Rejects while Claude is working. */
+  restoreFiles: (slot: string, turn: number) => invoke<RestoreResult>("restore_files", { slot, turn }),
+  /** Takes the last restore back (`id` is what it returned). Files edited since stay as they are. */
+  undoRestore: (slot: string, id: number) => invoke<RestoreResult>("undo_restore", { slot, id }),
   /** Saves an exported document at a path from the save dialog (a markdown file, anywhere). */
   /** Opens the save dialog and writes the document where the user picks; the path picked, or null if they cancel. */
   exportText: (fileName: string, text: string) => invoke<string | null>("export_text", { fileName, text }),

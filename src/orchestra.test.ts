@@ -18,12 +18,20 @@ describe("a worker the main agent starts", () => {
   it("opens as a chat of its own, already working on its brief, before any of its own events", () => {
     const c = withWorker();
     expect(Object.keys(c.slots)).toEqual(["s1", "w1"]);
-    expect(c.slots.w1).toMatchObject({ folder: "/wt/login-form", mode: "auto", status: "running", thinking: true, claudePath: "/bin/claude", contextWindow: 200_000 });
+    expect(c.slots.w1).toMatchObject({ folder: "/wt/login-form", mode: "auto", status: "running", thinking: true, claudePath: "/bin/claude", contextWindow: null });
+    // Its window isn't its Lead's: it may run on another model, and says its own when its first turn ends.
     expect(c.slots.w1.items).toEqual([expect.objectContaining({ type: "user", text: "Build the login form", from: "main agent" })]);
     expect(c.agents.w1).toEqual({ parent: "s1", name: "Login form", brief: "Build the login form", folder: "/wt/login-form", branch: "lantern/login-form", base: "main", isolation: "worktree" });
     // The main agent's own chat gets no item for it.
     expect(c.slots.s1.items).toEqual([]);
     expect(c.active).toBe("s1");
+  });
+
+  it("keeps the role it was started in, and has none when it was started without one", () => {
+    const role = { id: "reviewer", label: "Reviewer", read_only: true };
+    const c = chatsReducer(initialChats(main), on("s1", { ...spawned, role }));
+    expect(c.agents.w1.role).toEqual(role);
+    expect("role" in withWorker().agents.w1).toBe(false);
   });
 
   it("starts in the mode the backend gave it, never assumed", () => {
@@ -296,6 +304,16 @@ describe("closing a worker from its card", () => {
     expect(c.active).toBe("s1");
   });
 
+  it("marks the merged proposal of that worker tidied, and leaves open ones and other workers' alone", () => {
+    const proposal = (worker: string, status: "open" | "merged") => ({ worker, name: worker, branch: `lantern/${worker}`, into: "main", summary: "", commits: 1, files: [], uncommitted: 0, loose: [], status, problem: null, attempts: 0 });
+    let c = withWorkers();
+    c = { ...c, slots: { ...c.slots, s1: { ...c.slots.s1, proposals: [proposal("w1", "merged"), proposal("w2", "open")] } } };
+    const after = chatsReducer(c, { type: "close_agent", slot: "w1" });
+    expect(after.slots.s1.proposals.map((p) => [p.worker, p.tidied])).toEqual([["w1", true], ["w2", undefined]]);
+    const open = chatsReducer(c, { type: "close_agent", slot: "w2" });
+    expect(open.slots.s1.proposals.map((p) => p.tidied)).toEqual([undefined, undefined]);
+  });
+
   it("is a plain removal for a chat that is not a worker", () => {
     const c = chatsReducer(initialChats(main), { type: "add", slot: "s2" });
     expect(chatsReducer(c, { type: "close_agent", slot: "s2" }).slots.s2).toBeUndefined();
@@ -317,5 +335,51 @@ describe("adopting a restored worker", () => {
     expect(chatsReducer(c, { type: "adopt", slot: "gone", meta })).toBe(c);
     const orphan = chatsReducer(c, { type: "add", slot: "s2" });
     expect(chatsReducer(orphan, { type: "adopt", slot: "s2", meta: { ...meta, parent: "nope" } })).toBe(orphan);
+  });
+});
+
+describe("the review and test of a builder's work", () => {
+  const update = (over: Partial<Extract<UiEvent, { kind: "review_update" }>> = {}): UiEvent => ({
+    kind: "review_update",
+    builder: "w1",
+    name: "Login form",
+    commit: "abc12345",
+    checks: [{ role: "reviewer", label: "Reviewer", slot: "w2", state: "running", findings: null, passed: null }],
+    done: false,
+    ...over,
+  });
+
+  it("starts off, with reviewers tidied up after they report, until the team is told otherwise", () => {
+    expect(initialState.review).toEqual({ on: false, tidy: true, checks: ["reviewer"] });
+    expect(reducer(initialState, { type: "review_set", review: { on: true, tidy: false, checks: ["reviewer", "qa"] } }).review).toEqual({ on: true, tidy: false, checks: ["reviewer", "qa"] });
+  });
+
+  it("keeps where the review of each builder's latest work stands, one entry per builder", () => {
+    let s = ev(main, update());
+    expect(s.reviews).toEqual([expect.objectContaining({ builder: "w1", name: "Login form", commit: "abc12345", done: false })]);
+    s = ev(s, update({ builder: "w3", name: "Signup" }));
+    s = ev(s, update({ done: true, checks: [{ role: "reviewer", label: "Reviewer", slot: "w2", state: "done", findings: 2, passed: false }] }));
+    expect(s.reviews.map((r) => [r.builder, r.done])).toEqual([["w3", false], ["w1", true]]);
+    expect(s.reviews[1].checks[0]).toMatchObject({ state: "done", findings: 2 });
+  });
+
+  it("forgets the reviews of a conversation that was cleared", () => {
+    const s = ev(main, update());
+    expect(reducer(s, { type: "folder_opened", folder: "/p" }).reviews).toEqual([]);
+  });
+
+  it("places an agent Lantern started to check a builder's work beside that builder, and remembers whose it checks", () => {
+    const role = { id: "reviewer", label: "Reviewer", read_only: true };
+    let c = chatsReducer(initialChats(main), on("s1", spawned));
+    c = chatsReducer(c, on("s1", { ...spawned, worker: "w2", name: "Reviewer: Login form", branch: null, base: null, role, review_of: "w1" }));
+    expect(c.agents.w2.reviewOf).toBe("w1");
+    expect("reviewOf" in c.agents.w1).toBe(false);
+  });
+
+  it("shows an agent Lantern closed after its report as finished, with nothing to restart, and leaves it out of what is saved", () => {
+    const c = chatsReducer(withWorker(), on("w1", { kind: "agent_tidied" }));
+    expect(c.slots.w1).toMatchObject({ status: "ended", thinking: false, leadStopped: true });
+    expect(c.slots.w1.banner).toMatchObject({ kind: "info", action: null });
+    expect(c.slots.w1.banner?.text).toContain("Lantern closed this agent after it reported");
   });
 });

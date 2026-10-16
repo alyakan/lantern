@@ -5,6 +5,7 @@ import { usePopover } from "../lib/usePopover";
 import { useMenuKeys } from "./useMenuKeys";
 import { NewAgent } from "./NewAgent";
 import { SubagentsRows } from "./SubagentsMenu";
+import { ReviewRows } from "./ReviewMenu";
 
 /**
  * The canvas controls that fold away when the canvas is narrow ("⋯"): where the Lead's subagents run, starting an agent, and
@@ -27,7 +28,7 @@ export function CanvasOverflow({ main, hidden, onShow }: { main: string; hidden:
 
   return (
     <div className="canvas-team canvas-ctl-more" ref={box}>
-      <button ref={button} className="icon" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} aria-label="More canvas controls" title="More: Subagents, a new agent, hidden agents" onClick={() => setOpen(!open)}>
+      <button ref={button} className="icon" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} aria-label="More canvas controls" title="More: Subagents, review and test, a new agent, hidden agents" onClick={() => setOpen(!open)}>
         ⋯
       </button>
       {open && (
@@ -36,6 +37,10 @@ export function CanvasOverflow({ main, hidden, onShow }: { main: string; hidden:
             Subagents
           </div>
           <SubagentsRows main={main} onPick={() => setOpen(false)} />
+          <div className="canvas-more-head" role="presentation">
+            Review and test
+          </div>
+          <ReviewRows main={main} />
           <div className="canvas-more-head" role="presentation">
             Agents
           </div>

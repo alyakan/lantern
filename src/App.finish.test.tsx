@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { clearMocks } from "@tauri-apps/api/mocks";
 
 // These render the whole app against the mock backend, which a loaded CI runner can take longer than
 // vitest's default 5 s to do.
 vi.setConfig({ testTimeout: 60_000 });
+// Their finds and waits take as long on such a runner: the default 1 s is for a component, not the whole app.
+configure({ asyncUtilTimeout: 20_000 });
 
 // The editor isn't needed here, and doesn't load in jsdom.
 vi.mock("./monaco", () => ({ LIGHT_THEME: "lantern-light", DARK_THEME: "lantern-dark" }));
@@ -32,7 +34,7 @@ async function launch(ready: RegExp | string): Promise<Call[]> {
 }
 
 const last = (calls: Call[], cmd: string) => [...calls].reverse().find(([c]) => c === cmd)?.[1];
-const settle = () => waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull(), { timeout: 15000 });
+const settle = () => waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).toBeNull(), { timeout: 40_000 });
 
 beforeEach(() => {
   vi.resetModules();
@@ -100,10 +102,10 @@ describe("the end of a Build", () => {
     return calls;
   }
 
-  it("hands off to the changes, a commit, a pull request, the plan's export and a new chat", async () => {
+  it("hands off to the changes, Ship it, the plan's export and a new chat", async () => {
     const calls = await build();
     const handoff = screen.getByRole("region", { name: "What next" });
-    expect(within(handoff).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Review the changes (1)", "Commit…", "Open a pull request…", "Export the plan", "Start something new"]);
+    expect(within(handoff).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Review the changes (1)", "Ship it…", "Export the plan", "Start something new"]);
     // Named stages: all the earlier ones done, Done lit.
     expect(screen.getByRole("navigation", { name: "Progress" }).querySelector('[aria-current="step"]')).toHaveTextContent("Done");
     expect(screen.getByRole("button", { name: "Show side panel" })).toBeInTheDocument();
@@ -113,21 +115,28 @@ describe("the end of a Build", () => {
     expect(await screen.findByRole("button", { name: "Hide side panel" })).toBeInTheDocument();
     expect(await screen.findByRole("tab", { name: /^Changes/ })).toHaveAttribute("aria-selected", "true");
 
-    // Commit… asks first, then sends the prompt.
+    // Ship it… asks first (one dialog, the steps ticked), then sends one message.
     const before = calls.filter(([c]) => c === "send_message").length;
-    fireEvent.click(within(handoff).getByRole("button", { name: "Commit…" }));
+    fireEvent.click(within(handoff).getByRole("button", { name: "Ship it…" }));
     expect(calls.filter(([c]) => c === "send_message")).toHaveLength(before);
-    fireEvent.click(screen.getByRole("button", { name: "Ask Claude to commit" }));
-    await waitFor(() => expect(last(calls, "send_message")?.text).toMatch(/^Commit these changes with a clear message/));
+    const dialog = await screen.findByRole("dialog", { name: "Ship it" });
+    await waitFor(() => expect(within(dialog).queryAllByText("Looking at the repository…")).toHaveLength(0));
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Open a pull request" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ship" }));
+    await waitFor(() => expect(last(calls, "send_message")?.text).toMatch(/^Please ship this work/));
+    expect(last(calls, "send_message")?.text).toMatch(/1\. Commit the changes[\s\S]*2\. Push the branch `feat\/slugify` to `origin`/);
+    expect(last(calls, "send_message")?.text).not.toMatch(/gh pr create/);
     await settle();
   });
 
-  it("opens a pull request the same way, and starts a new chat in the project", async () => {
+  it("opens a pull request through Ship it, and starts a new chat in the project", async () => {
     const calls = await build();
     const handoff = screen.getByRole("region", { name: "What next" });
-    fireEvent.click(within(handoff).getByRole("button", { name: "Open a pull request…" }));
-    fireEvent.click(screen.getByRole("button", { name: "Ask Claude to open it" }));
-    await waitFor(() => expect(last(calls, "send_message")?.text).toMatch(/^Open a pull request for this work/));
+    fireEvent.click(within(handoff).getByRole("button", { name: "Ship it…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Ship it" });
+    await waitFor(() => expect(within(dialog).queryAllByText("Looking at the repository…")).toHaveLength(0));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ship" }));
+    await waitFor(() => expect(last(calls, "send_message")?.text).toMatch(/3\. Open a pull request from `feat\/slugify` into `main` with `gh pr create`/));
     await settle();
     fireEvent.click(await screen.findByRole("button", { name: "Start something new" }));
     await waitFor(() => expect(calls.filter(([c]) => c === "start_session").length).toBeGreaterThan(1));
