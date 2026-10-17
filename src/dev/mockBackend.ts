@@ -72,6 +72,8 @@ async function streamText(send: Send, blockId: string, text: string) {
 }
 
 const pendingPermission: Record<string, (allow: boolean) => void> = {};
+/** The note the user wrote on the last approval card, per chat. */
+const lastNotes: Record<string, string | undefined> = {};
 /** The answers sent with the last allowed AskUserQuestion, per chat. */
 const lastAnswers: Record<string, Record<string, string> | undefined> = {};
 
@@ -486,6 +488,26 @@ async function playQuestionTurn(slot: string) {
   const allowed = await new Promise<boolean>((resolve) => (pendingPermission[slot] = resolve));
   const answers = lastAnswers[slot];
   await streamText(send, "q:0", allowed && answers ? `Going with: ${Object.values(answers).join("; ")}.` : "No answer, so I'll put retries in fetchJson for 429 and 503.");
+  await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.01, tokens: 12_000, session_cost_usd: 0.01, session_tokens: 12_000, duration_ms: 3000, auth_hint: false, denied: 0, context_window: 1_000_000 });
+}
+
+/** Claude asks to merge a pull request (sent with "approval" in the message): the request_approval card, then what it does with the answer. */
+async function playApprovalTurn(slot: string) {
+  const send = sendTo(slot);
+  await send({ kind: "thinking", parent: null });
+  await sleep(400);
+  await streamText(send, "ap:0", "CI is green and the review is approved, so I'll ask before merging.");
+  await send({ kind: "tool_started", parent: null, tool_use_id: `ap1-${slot}`, name: "mcp__lantern__request_approval", summary: "Merge PR #144 and release 0.1.42" });
+  await send({
+    kind: "permission_requested",
+    request_id: `approval-${slot}`,
+    tool_name: "Approval",
+    input: { action: "Merge PR #144 and release 0.1.42", details: "Squash-merges feat/retries into main, then tags v0.1.42.\nCI: 14/14 checks passed. Reviews: 1 approved.\n<b>Shown as plain text</b>, **not markdown**." },
+  });
+  const approved = await new Promise<boolean>((resolve) => (pendingPermission[slot] = resolve));
+  const note = lastNotes[slot] ? ` Their note: ${lastNotes[slot]}` : "";
+  await send({ kind: "tool_finished", parent: null, tool_use_id: `ap1-${slot}`, is_error: false, output: `The user ${approved ? "approved" : "declined"}: Merge PR #144 and release 0.1.42.${note}` });
+  await streamText(send, "ap:1", approved ? "Merging PR #144 now (only that), then I'll tag 0.1.42." : "Understood, I won't merge it.");
   await send({ kind: "turn_done", is_error: false, result: null, cost_usd: 0.01, tokens: 12_000, session_cost_usd: 0.01, session_tokens: 12_000, duration_ms: 3000, auth_hint: false, denied: 0, context_window: 1_000_000 });
 }
 
@@ -1639,12 +1661,13 @@ export function installMockBackend() {
             turnCount[slot] = (turnCount[slot] ?? -1) + 1;
             return turnCount[slot];
           }
-          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : /\bask me\b/i.test(String(a.text)) ? playQuestionTurn(slot) : /\bworkflow\b/i.test(String(a.text)) ? playWorkflowTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
+          void (String(a.text).startsWith("/") ? playCommand(slot, String(a.text)) : /\bteam\b/i.test(String(a.text)) ? playTeamTurn(slot) : /\bask me\b/i.test(String(a.text)) ? playQuestionTurn(slot) : /\bapproval\b/i.test(String(a.text)) ? playApprovalTurn(slot) : /\bworkflow\b/i.test(String(a.text)) ? playWorkflowTurn(slot) : mode === "steps" ? playStepByStep(slot, String(a.text)) : playTurn(slot));
           // Like the backend: the turn's number.
           turnCount[slot] = (turnCount[slot] ?? -1) + 1;
           return turnCount[slot];
         }
         case "respond_permission":
+          lastNotes[String(a.slot)] = (a.message as string | null) ?? undefined;
           lastAnswers[String(a.slot)] = (a.updatedInput as { answers?: Record<string, string> } | null)?.answers;
           pendingPermission[String(a.slot)]?.(Boolean(a.allow));
           delete pendingPermission[String(a.slot)];

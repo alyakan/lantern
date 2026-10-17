@@ -63,6 +63,8 @@ When Claude wants to do something Permissions don't allow, a permission card app
 
 ![A permission card asking to run npm test](images/chat-permission.png)
 
+Before an action that is hard to undo or reaches outside the project (merging a pull request, pushing a tag or a branch, publishing a release, deleting something outside its own worktree), Claude asks with an **Approval needed** card in any chat, Ask or Auto: the action, a few lines on what it does and what was checked, an optional note box, and **Approve** or **Decline**. The text is Claude's own and is shown exactly as written, as plain text. Your answer and note go straight back to Claude, and the chat keeps a line: "You approved: Merge PR #144". An approval covers that one action only: nothing is saved, there is no "always allow", and Lantern itself runs nothing (Claude does the action after a yes). If the card can't be shown, or the chat is closed or stopped, it counts as a decline.
+
 Under the box:
 
 - **The Models chip** shows who does the work in this chat, like "Balanced · Sonnet 5.5". Its menu lists presets: Standard (your own model and effort, Claude Code's settings), Balanced (Sonnet, with Opus as the advisor Claude asks at decision points and Haiku subagents), Thrifty, Max, or your own. **Customize…** picks the model and thinking effort directly, and **Edit presets…** opens Settings → Harness. Changing a model on a preset makes the chat **Custom**, and the chip says so.

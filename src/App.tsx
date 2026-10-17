@@ -1135,7 +1135,7 @@ export default function App() {
   };
   const stop = () => stopIn(active);
 
-  // `note`: what the user wrote on a reproduce card; it goes back to Claude with the answer.
+  // `note`: what the user wrote on a reproduce or approval card; it goes back to Claude with the answer.
   // `answered`: the tool's input with what the user chose in it (AskUserQuestion's answers).
   // `remember`: an "Always allow…" rule. It's saved first, so the chat's next matching request is answered by it; if it
   // can't be saved, this request is still answered and the error is shown.

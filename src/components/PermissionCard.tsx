@@ -12,6 +12,8 @@ type PermissionItem = Extract<ChatItem, { type: "permission" }>;
 export const PLAN_TOOL = "ExitPlanMode";
 /** Debug mode's request to reproduce the bug (from Lantern's own MCP tool). */
 export const REPRODUCE_TOOL = "Reproduce";
+/** Claude's request for approval of one named action (from Lantern's own MCP tool, request_approval). */
+export const APPROVAL_TOOL = "Approval";
 
 /** `remember`: an "Always allow…" choice, saved as a rule before the request is answered. */
 type Decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => void;
@@ -19,6 +21,7 @@ type Decide = (id: string, allow: boolean, note?: string, answered?: Record<stri
 export function PermissionCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }) {
   if (item.toolName === PLAN_TOOL) return <PlanCard item={item} onDecide={onDecide} />;
   if (item.toolName === REPRODUCE_TOOL) return <ReproduceCard item={item} onDecide={onDecide} />;
+  if (item.toolName === APPROVAL_TOOL) return <ApprovalCard item={item} onDecide={onDecide} />;
   if (item.toolName === QUESTION_TOOL) return <QuestionCard item={item} onDecide={onDecide} />;
   return <ToolCard item={item} onDecide={onDecide} />;
 }
@@ -166,6 +169,48 @@ function ReproduceCard({ item, onDecide }: { item: PermissionItem; onDecide: Dec
           I've reproduced it
         </button>
         <button onClick={() => answer(false)}>Couldn't reproduce</button>
+      </div>
+    </div>
+  );
+}
+
+const textOf = (input: unknown, key: string) => (input && typeof input === "object" && typeof (input as Record<string, unknown>)[key] === "string" ? ((input as Record<string, string>)[key]) : "");
+
+// Claude asks before one action that is hard to undo or reaches outside (merging a pull request, pushing a tag). The
+// action and details are Claude's own words, shown exactly as written and only as text: never markdown or HTML. Approving
+// covers that action alone; nothing is saved, and Lantern doesn't run it.
+function ApprovalCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }) {
+  const [note, setNote] = useState("");
+  const action = textOf(item.input, "action").trim() || "(no action named)";
+  const details = textOf(item.input, "details");
+  if (item.decision !== null) {
+    return (
+      <div className={`permission-done ${item.decision}`}>
+        <span className="decision">{item.decision === "allowed" ? "You approved:" : "You declined:"}</span> <span title={item.note ?? undefined}>{action}</span>
+        {item.note && <span className="permission-done-detail"> · {item.note.split("\n")[0]}</span>}
+      </div>
+    );
+  }
+  const answer = (approved: boolean) => onDecide(item.id, approved, note.trim() || undefined);
+  return (
+    <div className="permission plan-card approval-card">
+      <div className="permission-title">Approval needed</div>
+      <div className="approval-action">{action}</div>
+      {details && <pre className="permission-detail approval-details">{details}</pre>}
+      <textarea
+        className="repro-input"
+        rows={2}
+        autoCapitalize="off"
+        autoCorrect="off"
+        placeholder="Add a note for Claude (optional)"
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+      />
+      <div className="permission-actions">
+        <button className="primary" onClick={() => answer(true)}>
+          Approve
+        </button>
+        <button onClick={() => answer(false)}>Decline</button>
       </div>
     </div>
   );

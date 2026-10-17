@@ -150,7 +150,7 @@ describe("ruleChoices", () => {
 
   it("offers any call for another tool, and never for a tool no rule answers", () => {
     expect(ruleChoices("mcp__linear__save_issue", { title: "x" })).toEqual([{ tool: "mcp__linear__save_issue", kind: "any" }]);
-    for (const tool of ["ExitPlanMode", "AskUserQuestion", "Reproduce", "mcp__lantern__approve"]) {
+    for (const tool of ["ExitPlanMode", "AskUserQuestion", "Reproduce", "Approval", "mcp__lantern__approve", "mcp__lantern__request_approval"]) {
       expect(ruleChoices(tool, {}), tool).toEqual([]);
     }
   });

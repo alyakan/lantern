@@ -134,6 +134,56 @@ describe("reproduce card", () => {
   });
 });
 
+describe("approval card", () => {
+  const input = { action: "Merge PR #144 and release 0.1.42", details: "CI: 14/14 passed.\n<b>bold</b> **not markdown**" };
+  const item = (decision: "allowed" | "denied" | null, note?: string, given: unknown = input) => ({ type: "permission" as const, id: "a1", toolName: "Approval", input: given, decision, note });
+
+  it("shows the action and details as plain text, and Approve or Decline answers that one request", () => {
+    const onDecide = vi.fn();
+    const { container } = render(<PermissionCard item={item(null)} onDecide={onDecide} />);
+    expect(screen.getByText("Approval needed")).toBeInTheDocument();
+    expect(screen.getByText(input.action)).toBeInTheDocument();
+    // Claude's text is never read as markdown or HTML: it is on the page exactly as written.
+    expect(container.querySelector(".approval-details")?.textContent).toBe(input.details);
+    expect(container.querySelector("b, strong, em")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(onDecide).toHaveBeenLastCalledWith("a1", true, undefined);
+    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
+    expect(onDecide).toHaveBeenLastCalledWith("a1", false, undefined);
+  });
+
+  it("has no Always allow, and no rule is offered", () => {
+    render(<PermissionCard item={item(null)} onDecide={() => {}} />);
+    expect(screen.queryByRole("button", { name: /Always allow/ })).toBeNull();
+    expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Approve", "Decline"]);
+  });
+
+  it("sends the note, trimmed, with either answer", () => {
+    const onDecide = vi.fn();
+    render(<PermissionCard item={item(null)} onDecide={onDecide} />);
+    fireEvent.change(screen.getByPlaceholderText(/note for Claude/), { target: { value: "  after the standup  " } });
+    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
+    expect(onDecide).toHaveBeenCalledWith("a1", false, "after the standup");
+  });
+
+  it("works with no details, and with an input that isn't what it should be", () => {
+    const { rerender, container } = render(<PermissionCard item={item(null, undefined, { action: "Push tag v1" })} onDecide={() => {}} />);
+    expect(screen.getByText("Push tag v1")).toBeInTheDocument();
+    expect(container.querySelector(".approval-details")).toBeNull();
+    rerender(<PermissionCard item={item(null, undefined, { action: 5, details: { x: 1 } })} onDecide={() => {}} />);
+    expect(screen.getByText("(no action named)")).toBeInTheDocument();
+    expect(container.querySelector(".approval-details")).toBeNull();
+  });
+
+  it("leaves a one-line record once answered, with the note", () => {
+    const { rerender, container } = render(<PermissionCard item={item("allowed")} onDecide={() => {}} />);
+    expect(container.textContent).toBe(`You approved: ${input.action}`);
+    expect(screen.queryByRole("button")).toBeNull();
+    rerender(<PermissionCard item={item("denied", "not yet")} onDecide={() => {}} />);
+    expect(container.textContent).toBe(`You declined: ${input.action} · not yet`);
+  });
+});
+
 describe("WorkflowMenu: Team from a template", () => {
   const open = (ui: React.ReactElement, run: (() => void) | null) => {
     render(<TemplateTeamContext.Provider value={run}>{ui}</TemplateTeamContext.Provider>);

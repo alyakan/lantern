@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { initialState, type MergeProposal, type State } from "../store";
 import type { Chats } from "../sessions";
-import { checkItems, inboxItems, wholeRequest } from "./inbox";
+import { checkItems, inboxItems, REQUEST_KINDS, wholeRequest } from "./inbox";
 import { openProjects } from "./sidebar";
 
 const idle = (over: Partial<State> = {}): State => ({ ...initialState, status: "idle", claudePath: "/bin/claude", folder: "/work/lantern", ...over });
@@ -181,6 +181,11 @@ describe("which requests Allow is offered for", () => {
 
   it("does not offer it for a plan, a question or a reproduction, which have no Allow here at all", () => {
     expect(rowFor("ExitPlanMode", { plan: "x" })).toMatchObject({ canAllow: false, requestId: null });
+  });
+
+  it("gives an approval its own row: Go opens the card, and Allow can never answer it from here", () => {
+    expect(rowFor("Approval", { action: "Merge PR #144" })).toMatchObject({ kind: "approval", canAllow: false, requestId: null, detail: null, need: "Approval needed: Merge PR #144" });
+    expect(REQUEST_KINDS).toContain("approval");
   });
 });
 

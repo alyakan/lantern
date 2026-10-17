@@ -28,6 +28,12 @@ describe("attentionFor", () => {
     expect(attentionFor([user, ask("allowed")], "/p", describeInput)).toBeNull();
   });
 
+  it("announces an approval by its action, as plain text, never as a tool it wants to use", () => {
+    const ask = (input: unknown): ChatItem => ({ type: "permission", id: "a1", toolName: "Approval", input, decision: null });
+    expect(attentionFor([user, ask({ action: "Merge PR #144", details: "CI is green" })], "/p", describeInput)).toEqual({ key: "a1", kind: "waiting", title: "Claude · p", body: "Approval needed: Merge PR #144" });
+    expect(attentionFor([user, ask({ action: 5 })], "/p", describeInput)?.body).toBe("Approval needed");
+  });
+
   it("announces Claude's question as the question, not as a tool it wants to use", () => {
     const ask = (input: unknown): ChatItem => ({ type: "permission", id: "q1", toolName: "AskUserQuestion", input, decision: null });
     const one = { questions: [{ question: "Which database should it use?", header: "Database", options: [{ label: "SQLite", description: "" }], multiSelect: false }] };
