@@ -22,6 +22,17 @@ describe("withFrontMatterAsCode", () => {
     expect(withFrontMatterAsCode("text\n---\nx\n---\n")).toBe("text\n---\nx\n---\n");
   });
 
+  it("leaves a horizontal rule at the start, and the prose between two rules, alone", () => {
+    const rules = "---\n\nIntro text.\n\n---\n\n# Title";
+    expect(withFrontMatterAsCode(rules)).toBe(rules);
+    const prose = "---\nThis is not metadata.\n---\nBody";
+    expect(withFrontMatterAsCode(prose)).toBe(prose);
+  });
+
+  it("still takes a block of keys, list items, comments and blank lines, with indented values", () => {
+    expect(withFrontMatterAsCode("---\n# a note\nname: x\n\ntags:\n  - a\n- b\n---\nBody")).toBe("```yaml\n# a note\nname: x\n\ntags:\n  - a\n- b\n```\nBody");
+  });
+
   it("handles an empty block and Windows line endings", () => {
     expect(withFrontMatterAsCode("---\n---\nBody")).toBe("```yaml\n\n```\nBody");
     expect(withFrontMatterAsCode("---\r\na: 1\r\n---\r\nBody")).toBe("```yaml\na: 1\n```\nBody");
@@ -50,6 +61,19 @@ describe("parsePlanStep", () => {
   it("splits a File value into paths", () => {
     expect(filePaths("src/a.ts, `src/b.ts` (new)")).toEqual([{ path: "src/a.ts", note: "" }, { path: "src/b.ts", note: "(new)" }]);
     expect(filePaths("a.swift and b.swift").map((p) => p.path)).toEqual(["a.swift", "b.swift"]);
+    expect(filePaths("a.ts, b.ts")).toEqual([{ path: "a.ts", note: "" }, { path: "b.ts", note: "" }]);
+    expect(filePaths("a.ts (new)")).toEqual([{ path: "a.ts", note: "(new)" }]);
+  });
+
+  it("keeps a route group's parentheses in the path, and a note's comma in the note", () => {
+    expect(filePaths("app/(auth)/login/page.tsx (new)")).toEqual([{ path: "app/(auth)/login/page.tsx", note: "(new)" }]);
+    expect(filePaths("`app/(auth)/login/page.tsx`, src/a.ts")).toEqual([{ path: "app/(auth)/login/page.tsx", note: "" }, { path: "src/a.ts", note: "" }]);
+    expect(filePaths("src/a.ts (new, 40 lines)")).toEqual([{ path: "src/a.ts", note: "(new, 40 lines)" }]);
+    expect(filePaths("src/a.ts (new, 40 lines), src/b.ts and src/c.ts (edited)")).toEqual([
+      { path: "src/a.ts", note: "(new, 40 lines)" },
+      { path: "src/b.ts", note: "" },
+      { path: "src/c.ts", note: "(edited)" },
+    ]);
   });
 
   it("names a code block's language", () => {
