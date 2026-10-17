@@ -8,7 +8,6 @@ import { NetworkEmpty, NetworkTab, useNetworkView } from "./NetworkTab";
 import { ChecksTab, hasChecks } from "./ChecksTab";
 import { totals } from "../lib/prChecks";
 import type { PrView } from "../lib/usePrChecks";
-import { StorageTab, suggestedCount, useStorageView } from "./StorageTab";
 import type { NetworkItem } from "../types";
 import { basename, dirOf, relativeTo } from "../lib/diff";
 import { usePersistentState } from "../lib/layout";
@@ -16,19 +15,17 @@ import { Counts } from "./EditLine";
 import { RevertIcon, DocIcon } from "./icons";
 import { moveFocus, useMenuKeys } from "./useMenuKeys";
 import { FilesTab } from "./FilesTab";
-import { AgentsTab } from "./AgentsTab";
 import { TabEmpty } from "./TabEmpty";
 import { ArchitectureTab } from "./ArchitectureTab";
 import type { ArchitectureMap } from "../lib/architecture";
 import { SummaryTab, type ExportDoc } from "./SummaryTab";
 import type { StepsSummary } from "../lib/stepsSummary";
-import type { AgentTree } from "../lib/agents";
-import type { AgentGraph } from "../lib/agentGraph";
-import type { ModelCost } from "../types";
 import type { DiffLayout, Reveal } from "./FullDiff";
 import { RevertDialog } from "./RevertDialog";
 import { revertFor, type RevertControls, type RevertRequest } from "../lib/revert";
 import { useMenuInside } from "../lib/useMenuInside";
+import { DEFAULT_PINNED, TABS, migrateTab, validPinned, type Tab } from "../lib/reviewTabs";
+import { PaneTabsMenu, type TabBadge } from "./PaneTabsMenu";
 import { commentsMessage, type CommentControls } from "../lib/diffComments";
 import { CommentBar } from "./DiffComments";
 
@@ -64,8 +61,6 @@ interface Props {
   onSaved?: () => void;
   /** Show this run in the Tests tab (from the chat); `key` changes for every request. */
   focusRun?: { id: string; key: number } | null;
-  /** The Activity tab: the latest turn's agent tree, cost per model, and `openKey`, changed to bring the tab up. */
-  agents?: { tree: AgentTree; graph: AgentGraph; usage: ModelCost[]; openKey: number };
   /** The Plan tab, in a Step-by-step chat that has a step to show: the plan so far, and how to open a row's page. */
   summary?: { slot: string; data: StepsSummary; changed: ChangedFile[]; running: boolean; onOpenPage: (page: string) => void; doc?: ExportDoc };
   /**
@@ -75,8 +70,6 @@ interface Props {
   architecture?: { map: ArchitectureMap; current: string[]; pageNames: Record<string, string>; onOpenPage: (page: string) => void; openKey: number; box?: { id: string; key: number } | null };
   /** The Network tab's Summarize: asks Claude in this chat about one request (absent: no chat to ask). */
   onSummarizeRequest?: (item: NetworkItem) => void;
-  /** The Storage tab's Ask Claude: asks Claude in this chat to scan and suggest what to delete (absent: no chat to ask). */
-  onAskStorage?: () => void;
   /** Claude is in the middle of a turn in this chat. */
   chatBusy?: boolean;
   /** The Checks tab: what the checks loop knows about this folder's pull request, whether Claude is too busy to be sent the failure, and what the buttons do (absent: no chat to ask). */
@@ -97,27 +90,9 @@ interface Props {
 const LAYOUT_LABEL: Record<DiffLayout, string> = { inline: "Unified", split: "Split" };
 const NEXT_LAYOUT: Record<DiffLayout, DiffLayout> = { inline: "split", split: "inline" };
 
-/** The side panel's tabs, always these and always in this order; one with nothing to show says so. */
-export type Tab = "changes" | "files" | "plan" | "activity" | "tests" | "checks" | "network" | "storage";
-const TABS: { id: Tab; label: string }[] = [
-  { id: "changes", label: "Changes" },
-  { id: "files", label: "Files" },
-  { id: "plan", label: "Plan" },
-  { id: "activity", label: "Activity" },
-  { id: "tests", label: "Tests" },
-  { id: "checks", label: "Checks" },
-  { id: "network", label: "Network" },
-  { id: "storage", label: "Storage" },
-];
+export { migrateTab, type Tab };
 /** Each tab's button, which its panel is labelled by. */
 const tabId = (t: Tab) => `review-${t}-tab`;
-
-/** The tab a saved name stands for: Summary and Map became Plan, Agents became Activity; anything unknown is Changes. */
-export function migrateTab(saved: string): Tab {
-  if (saved === "summary" || saved === "map") return "plan";
-  if (saved === "agents") return "activity";
-  return TABS.some((t) => t.id === saved) ? (saved as Tab) : "changes";
-}
 
 export function ReviewPanel(props: Props) {
   const [savedTab, setTab] = usePersistentState<string>("review.tab", "changes");
@@ -129,9 +104,10 @@ export function ReviewPanel(props: Props) {
   const checksView = props.prChecks?.view;
   const checkTotals = hasChecks(checksView) && checksView.snap.pr.state === "OPEN" ? totals(checksView.snap.checks) : null;
   const hasNetwork = !!network && (network.watches.length > 0 || network.items.length > 0);
-  // The disk scan is the Mac's, not the folder's: one for every chat. Its tab shows how many deletions Claude suggested.
-  const storage = useStorageView();
-  // Every tab is always there, so the saved tab (shared by every chat) is always valid; one saved under an old name moves to its new one.
+  // The pinned tabs (shared by every chat) are the strip; any other tab is in the ⋯ menu, and shows in the strip only while it is the one open.
+  const [savedPinned, setPinned] = usePersistentState<unknown>("review.tabs", DEFAULT_PINNED);
+  const pinned = validPinned(savedPinned);
+  // Every tab always exists, so the saved tab (shared by every chat) is always valid; one saved under an old name moves to its new one.
   const tab = migrateTab(savedTab);
   useEffect(() => {
     if (savedTab !== tab) setTab(tab);
@@ -155,9 +131,6 @@ export function ReviewPanel(props: Props) {
     if (props.searchKey) setTab("files");
   }, [props.searchKey?.key]);
   useEffect(() => {
-    if (props.agents?.openKey) setTab("activity");
-  }, [props.agents?.openKey]);
-  useEffect(() => {
     if (props.architecture?.openKey) {
       setTab("plan");
       setPlanView("map");
@@ -178,6 +151,11 @@ export function ReviewPanel(props: Props) {
       setTab("files");
     }
   }, [props.openRequest?.key]);
+  const badges: Partial<Record<Tab, TabBadge>> = {};
+  if (count > 0) badges.changes = { text: `${count}`, failed: false, attention: false };
+  if (latestRun?.outcome === "failed") badges.tests = { text: `${latestRun.failed || "!"}`, failed: true, attention: true };
+  if (checkTotals && checkTotals.total > 0) badges.checks = { text: `${checkTotals.failed || checkTotals.total}`, failed: checkTotals.failed > 0, attention: checkTotals.failed > 0 };
+  if (hasNetwork && network.items.length > 0) badges.network = { text: `${network.items.length}`, failed: false, attention: true };
   const openLocation = (location: string) => {
     const { path, line } = parseLocation(location, props.folder);
     setReveal({ path, line, key: Date.now() });
@@ -191,6 +169,12 @@ export function ReviewPanel(props: Props) {
   const allRevert = scopeRevert !== null && scopeRevert !== "unknown" && !(scopeRevert.scope === "turn" && scopeRevert.turn !== null) ? scopeRevert : null;
   const revertOff = scopeRevert === "unknown" ? "This step's changes aren't known: the chat was reopened after it." : (rv?.blocked ?? null);
   const fileRevert = rv && scopeRevert !== null ? { off: revertOff, onFile: (file: ChangedFile) => scopeRevert !== "unknown" && setReverting({ title: `Revert ${basename(relativeTo(file.path, props.folder))}?`, files: [file], request: scopeRevert }) } : undefined;
+  // With many tabs pinned in a narrow pane the strip scrolls: the open tab is brought into view.
+  useEffect(() => {
+    document.getElementById(tabId(tab))?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [tab]);
+  // The strip: the pinned tabs, then the open one if it isn't pinned, so you always see where you are.
+  const strip = pinned.includes(tab) ? pinned : [...pinned, tab];
   return (
     <aside className="review">
       <div className="pane-tabs">
@@ -205,18 +189,14 @@ export function ReviewPanel(props: Props) {
             if (to !== null) tabs[to].click();
           }}
         >
-          {TABS.map(({ id, label }) => (
-            <button key={id} id={tabId(id)} role="tab" tabIndex={tab === id ? 0 : -1} aria-selected={tab === id} className={tab === id ? "active" : ""} title={TAB_TITLE[id]} onClick={() => setTab(id)}>
-              {label}
-              {id === "changes" && count > 0 && <span className="tab-count">{count}</span>}
-              {id === "activity" && props.agents?.tree.live && <span className="tab-live" aria-label="working" />}
-              {id === "tests" && latestRun?.outcome === "failed" && <span className="tab-count failed">{latestRun.failed || "!"}</span>}
-              {id === "checks" && checkTotals && checkTotals.total > 0 && <span className={`tab-count${checkTotals.failed > 0 ? " failed" : ""}`}>{checkTotals.failed || checkTotals.total}</span>}
-              {id === "network" && hasNetwork && network.items.length > 0 && <span className="tab-count">{network.items.length}</span>}
-              {id === "storage" && suggestedCount(storage) > 0 && <span className="tab-count" title="Claude's suggestions">{suggestedCount(storage)}</span>}
+          {strip.map((id) => (
+            <button key={id} id={tabId(id)} role="tab" tabIndex={tab === id ? 0 : -1} aria-selected={tab === id} className={tab === id ? "active" : ""} title={pinned.includes(id) ? TAB_TITLE[id] : "Not pinned: shown here until you open another tab"} onClick={() => setTab(id)}>
+              {TABS.find((t) => t.id === id)!.label}
+              {badges[id] && <span className={`tab-count${badges[id].failed ? " failed" : ""}`}>{badges[id].text}</span>}
             </button>
           ))}
         </div>
+        <PaneTabsMenu pinned={pinned} onPinned={setPinned} current={tab} badges={badges} onOpen={setTab} />
         {tab === "changes" && props.onScope && <ScopeMenu {...props} onScope={props.onScope} />}
         {tab === "changes" && props.onShip && count > 0 && (
           <button className="ghost ship-it" onClick={props.onShip} title="Commit, push and open a pull request: you check each step first">
@@ -279,11 +259,6 @@ export function ReviewPanel(props: Props) {
           <PlanTab {...props} view={planView} onView={setPlanView} />
         </div>
       )}
-      {tab === "activity" && (
-        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("activity")}>
-          {props.agents ? <AgentsTab tree={props.agents.tree} graph={props.agents.graph} usage={props.agents.usage} /> : <TabEmpty title="Activity">Each turn's subagents and tools show here.</TabEmpty>}
-        </div>
-      )}
       {tab === "tests" && (
         <div className="tab-body" role="tabpanel" aria-labelledby={tabId("tests")}>
           {runs.length > 0 ? <TestsTab runs={runs} selected={shownRun} onSelect={setShownRun} onOpenLocation={openLocation} /> : <TabEmpty title="Tests">Test runs show here when Claude runs your tests.</TabEmpty>}
@@ -297,11 +272,6 @@ export function ReviewPanel(props: Props) {
       {tab === "network" && (
         <div className="tab-body" role="tabpanel" aria-labelledby={tabId("network")}>
           {hasNetwork && props.folder ? <NetworkTab folder={props.folder} view={network} onSummarize={props.onSummarizeRequest ?? null} busy={props.chatBusy} /> : <NetworkEmpty link={network?.link ?? null} />}
-        </div>
-      )}
-      {tab === "storage" && (
-        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("storage")}>
-          <StorageTab view={storage} onAsk={props.onAskStorage ?? null} busy={props.chatBusy} />
         </div>
       )}
       {/* Kept mounted while hidden so the tree keeps its expanded folders across tab switches. */}
@@ -328,11 +298,9 @@ const TAB_TITLE: Record<Tab, string | undefined> = {
   changes: undefined,
   files: undefined,
   plan: "The plan so far, and the architecture map in a Design chat",
-  activity: "Each turn's agents, models and tools",
   tests: undefined,
   checks: "How the checks of this branch's pull request stand",
   network: "Requests matching this folder's watches, from Network Monitor",
-  storage: "Scan this Mac for what can be cleared to get disk space back",
 };
 
 /**

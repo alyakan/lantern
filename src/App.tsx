@@ -10,7 +10,6 @@ import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/rev
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
 import { summarizeRequest } from "./lib/network";
-import { FREE_UP_SPACE_REQUEST } from "./components/StorageTab";
 import { StartScreen } from "./components/StartScreen";
 import { ReviewPrDialog } from "./components/ReviewPrDialog";
 import { TeamWarning } from "./components/TeamWarning";
@@ -29,8 +28,6 @@ import { prependDraft } from "./lib/paste";
 import { withPrompt } from "./lib/promptHistory";
 import { latestTurnOf, sinceLabel, withRevertNote, type RevertRequest } from "./lib/revert";
 import { withSkillNote } from "./lib/skillNote";
-import { agentTree, usesAgents } from "./lib/agents";
-import { agentGraph } from "./lib/agentGraph";
 import { BUILT_IN, CUSTOM_HARNESS, customOf, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
@@ -1606,12 +1603,6 @@ export default function App() {
   const hero = state.items.length === 0 && !state.thinking;
   // At launch the last project is on its way back: say so, rather than flashing the screen for having none.
   const openingLast = !state.folder && lastFolder !== null && !reopened.current;
-  // The Activity tab: the latest turn's tree. It comes up by itself the first time a chat's turn uses a subagent or the
-  // advisor; after that it's left where you put it.
-  // Live while Claude works, and while anything it started runs on in the background (a workflow, a subagent).
-  const treeOpts = { live: state.status === "running" || state.backgroundTasks.length > 0, folder: state.folder, mainModel: state.model, effort: settingsFor(active).effort, advisor: settingsFor(active).advisor, background: state.backgroundRuns };
-  const tree = agentTree(state.items, treeOpts);
-  const graph = useMemo(() => agentGraph(state.items, treeOpts), [state.items, state.backgroundRuns, treeOpts.live, treeOpts.mainModel, treeOpts.advisor]);
   // The Plan tab: the plan so far, from the same pages the Step-by-step view shows. A row asks the view to open its
   // page; the chat it was for is kept so a request can't land in another one.
   const stepPages = useMemo(() => (stepsView ? pagesOf(state.items) : null), [stepsView, state.items]);
@@ -1668,14 +1659,6 @@ export default function App() {
     },
     label: (id: string) => (archMap?.kind === "native" ? (archMap.spec.nodes.find((n) => n.id === id)?.label ?? id) : id),
   };
-  const [agentsOpenKey, setAgentsOpenKey] = useState(0);
-  const agentsShown = useRef<Set<string>>(new Set());
-  const treeInUse = tree.live && usesAgents(tree);
-  useEffect(() => {
-    if (!treeInUse || agentsShown.current.has(active)) return;
-    agentsShown.current.add(active);
-    setAgentsOpenKey(Date.now());
-  }, [treeInUse, active]);
   // "How the modes work", open on a mode's page.
   const [guideAt, setGuideAt] = useState<GuideKey | null>(null);
   const [settingsAt, setSettingsAt] = useState<SettingsTab | null>(null);
@@ -2197,7 +2180,6 @@ export default function App() {
           right={
             <ErrorBoundary name="review pane">
               <ReviewPanel
-                agents={state.folder ? { tree, graph, usage: state.modelUsage, openKey: agentsOpenKey } : undefined}
                 architecture={archMap ? { map: archMap, current: shownCovers, pageNames: archPageNames, onOpenPage: openPageIn(active), openKey: archOpenKey, box: archBox } : undefined}
                 summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: openPageIn(active), doc: { pages: stepPages ?? [], title: chatTitle(state, titles), folder: state.folder } } : undefined}
                 folder={state.folder}
@@ -2226,11 +2208,6 @@ export default function App() {
                 onSummarizeRequest={
                   state.status === "idle" || state.status === "running"
                     ? (item) => (state.status === "running" ? dispatch({ type: "queue_set", items: [...state.queued, summarizeRequest(item)] }) : sendIn(active, summarizeRequest(item)))
-                    : undefined
-                }
-                onAskStorage={
-                  state.status === "idle" || state.status === "running"
-                    ? () => (state.status === "running" ? dispatch({ type: "queue_set", items: [...state.queued, FREE_UP_SPACE_REQUEST] }) : sendIn(active, FREE_UP_SPACE_REQUEST))
                     : undefined
                 }
                 comments={

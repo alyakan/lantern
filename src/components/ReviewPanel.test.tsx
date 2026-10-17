@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { ReviewPanel } from "./ReviewPanel";
+import { ReviewPanel, migrateTab } from "./ReviewPanel";
+import { api } from "../api";
+import type { TestRunItem } from "../store";
 import { NetworkEmpty } from "./NetworkTab";
 import type { RevertControls } from "../lib/revert";
 import type { CommentControls, DiffComment } from "../lib/diffComments";
@@ -193,14 +195,31 @@ const prView = (checks: PrCheck[], over: { setting?: PrView["setting"]; state?: 
 const checksProps = (view: PrView) => ({ view, busy: false, onSend: vi.fn(() => Promise.resolve()), onStop: vi.fn() });
 const tabs = () => screen.getAllByRole("tab").map((t) => t.textContent);
 const selected = () => screen.getAllByRole("tab").find((t) => t.getAttribute("aria-selected") === "true")?.textContent;
+// Tabs that aren't pinned are opened from the ⋯ menu, which closes when one is picked.
+const openMenu = () => fireEvent.click(screen.getByRole("button", { name: /^More tabs/ }));
+const openTab = (name: string) => {
+  openMenu();
+  fireEvent.click(within(screen.getByRole("menu", { name: "Side panel tabs" })).getByRole("menuitem", { name: new RegExp(`^${name}`) }));
+};
+const failedRun = (failed: number): TestRunItem => ({ id: "r1", command: "npm test", run: { framework: "vitest", outcome: "failed", passed: 3, failed, skipped: 0, duration_ms: 10, cases: [], tail: "" } });
+const SAVED = "review.tabs";
+const saved = () => JSON.parse(localStorage.getItem(SAVED)!);
 
-describe("ReviewPanel's fixed tabs", () => {
-  it("always has Changes, Files, Plan, Activity, Tests, Checks, Network and Storage, in that order", () => {
+describe("ReviewPanel's tabs", () => {
+  it("pins Changes, Files and Plan by default, with the rest in the ⋯ menu", () => {
     localStorage.clear();
     const { rerender } = render(<ReviewPanel {...base} selected={null} follow />);
-    expect(tabs()).toEqual(["Changes2", "Files", "Plan", "Activity", "Tests", "Checks", "Network", "Storage"]);
+    expect(tabs()).toEqual(["Changes2", "Files", "Plan"]);
     rerender(<ReviewPanel {...base} selected={null} follow summary={summary()} architecture={architecture()} />);
-    expect(tabs()).toEqual(["Changes2", "Files", "Plan", "Activity", "Tests", "Checks", "Network", "Storage"]);
+    expect(tabs()).toEqual(["Changes2", "Files", "Plan"]);
+    expect(screen.queryByRole("tab", { name: /Activity|Storage/ })).toBeNull();
+    openMenu();
+    const menu = screen.getByRole("menu", { name: "Side panel tabs" });
+    expect(within(menu).getAllByRole("menuitem").filter((i) => i.classList.contains("menu-row")).map((i) => i.textContent)).toEqual(["Changes2", "Files", "Plan", "Tests", "Checks", "Network", "Reset to default"]);
+    expect(within(menu).getAllByRole("menuitemcheckbox").map((c) => [c.getAttribute("aria-label"), c.getAttribute("aria-checked")])).toEqual([
+      ["Pin Changes", "true"], ["Pin Files", "true"], ["Pin Plan", "true"], ["Pin Tests", "false"], ["Pin Checks", "false"], ["Pin Network", "false"],
+    ]);
+    localStorage.clear();
   });
 
   it("Plan shows the plan and opens a row's page; it takes a click, so it doesn't take the pane over", () => {
@@ -247,14 +266,12 @@ describe("ReviewPanel's fixed tabs", () => {
     localStorage.clear();
   });
 
-  it("Tests, Activity and Network each say what will show there instead of going away", () => {
+  it("Tests and Network each say what will show there instead of going away", () => {
     localStorage.clear();
     render(<ReviewPanel {...base} selected={null} follow />);
-    fireEvent.click(screen.getByRole("tab", { name: "Tests" }));
+    openTab("Tests");
     expect(screen.getByText("Test runs show here when Claude runs your tests.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Activity" }));
-    expect(screen.getByText("Each turn's subagents and tools show here.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Network" }));
+    openTab("Network");
     expect(screen.getByText(/Network Monitor is a Mac app/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "github.com/alyakan/network-monitor" })).toHaveAttribute("href", "https://github.com/alyakan/network-monitor");
     localStorage.clear();
@@ -263,7 +280,7 @@ describe("ReviewPanel's fixed tabs", () => {
   it("moves between the tabs with the arrow keys, and each tab's panel is labelled by it", () => {
     localStorage.clear();
     render(<ReviewPanel {...base} selected={null} follow summary={summary()} />);
-    const [changes, files, , , , , , storage] = screen.getAllByRole("tab");
+    const [changes, files, plan] = screen.getAllByRole("tab");
     expect(changes).toHaveAttribute("tabindex", "0");
     expect(files).toHaveAttribute("tabindex", "-1");
     changes.focus();
@@ -272,15 +289,15 @@ describe("ReviewPanel's fixed tabs", () => {
     expect(files).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel", { name: "Files" })).toBeInTheDocument();
     fireEvent.keyDown(files, { key: "End" });
-    expect(storage).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tabpanel", { name: "Storage" })).toBeInTheDocument();
+    expect(plan).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: "Plan" })).toBeInTheDocument();
     localStorage.clear();
   });
 
   it("Checks says what will show there until a pull request has checks, and why not when it is off", () => {
     localStorage.clear();
     const { rerender } = render(<ReviewPanel {...base} selected={null} follow />);
-    fireEvent.click(screen.getByRole("tab", { name: "Checks" }));
+    openTab("Checks");
     expect(screen.getByText(/show here, once it has one/)).toBeInTheDocument();
     rerender(<ReviewPanel {...base} selected={null} follow prChecks={checksProps(prView(MIXED, { setting: { mode: "off", tries: 3 } }))} />);
     expect(screen.getByText(/Checks are off for this project/)).toBeInTheDocument();
@@ -292,7 +309,7 @@ describe("ReviewPanel's fixed tabs", () => {
     localStorage.clear();
     const props = checksProps(prView(MIXED));
     render(<ReviewPanel {...base} selected={null} follow prChecks={props} />);
-    fireEvent.click(screen.getByRole("tab", { name: /^Checks/ }));
+    openTab("Checks");
     const panel = screen.getByRole("tabpanel", { name: /^Checks/ });
     expect(within(panel).getAllByRole("listitem")).toHaveLength(4);
     expect(within(panel).getByRole("link", { name: "Pull request #57" })).toBeInTheDocument();
@@ -302,7 +319,7 @@ describe("ReviewPanel's fixed tabs", () => {
   });
 
   it("Checks shows how many failed on its tab, a plain count when none did, and nothing when the pull request is closed", () => {
-    localStorage.clear();
+    localStorage.setItem(SAVED, JSON.stringify(["changes", "checks"]));
     const { rerender } = render(<ReviewPanel {...base} selected={null} follow prChecks={checksProps(prView(MIXED))} />);
     expect(screen.getByRole("tab", { name: /Checks/ })).toHaveTextContent("Checks1");
     expect(screen.getByRole("tab", { name: /Checks/ }).querySelector(".tab-count")).toHaveClass("failed");
@@ -322,8 +339,8 @@ describe("ReviewPanel's fixed tabs", () => {
     localStorage.clear();
   });
 
-  it("a tab saved under an old name moves to its new one: Summary and Map to Plan, Agents to Activity", () => {
-    for (const [old, now] of [["summary", "Plan"], ["map", "Plan"], ["agents", "Activity"], ["tests", "Tests"], ["gone", "Changes2"]]) {
+  it("a tab saved under an old name moves to its new one: Summary and Map to Plan; Activity, Agents and Storage to Changes", () => {
+    for (const [old, now] of [["summary", "Plan"], ["map", "Plan"], ["agents", "Changes2"], ["activity", "Changes2"], ["storage", "Changes2"], ["tests", "Tests"], ["gone", "Changes2"]]) {
       localStorage.setItem("review.tab", JSON.stringify(old));
       const { unmount } = render(<ReviewPanel {...base} selected={null} follow />);
       expect(selected()).toBe(now);
@@ -332,7 +349,163 @@ describe("ReviewPanel's fixed tabs", () => {
     // The saved name is rewritten, so it migrates once.
     localStorage.setItem("review.tab", JSON.stringify("agents"));
     render(<ReviewPanel {...base} selected={null} follow />);
-    expect(JSON.parse(localStorage.getItem("review.tab")!)).toBe("activity");
+    expect(JSON.parse(localStorage.getItem("review.tab")!)).toBe("changes");
+    localStorage.clear();
+  });
+
+  it("migrateTab sends every tab that left the pane to Changes", () => {
+    expect(["activity", "agents", "storage", "nonsense"].map(migrateTab)).toEqual(["changes", "changes", "changes", "changes"]);
+    expect(["summary", "map"].map(migrateTab)).toEqual(["plan", "plan"]);
+    expect(["changes", "files", "plan", "tests", "checks", "network"].map(migrateTab)).toEqual(["changes", "files", "plan", "tests", "checks", "network"]);
+  });
+});
+
+describe("ReviewPanel's pinned tabs", () => {
+  it("pinning a tab puts it in the strip, unpinning takes it out, and both persist for the next panel", () => {
+    localStorage.clear();
+    const { unmount } = render(<ReviewPanel {...base} selected={null} follow />);
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Pin Tests" }));
+    expect(screen.getByRole("menuitemcheckbox", { name: "Pin Tests" })).toHaveAttribute("aria-checked", "true");
+    // The menu stays open to pin more.
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Pin Files" }));
+    expect(tabs()).toEqual(["Changes2", "Plan", "Tests"]);
+    expect(saved()).toEqual(["changes", "plan", "tests"]);
+    unmount();
+    render(<ReviewPanel {...base} selected={null} follow />);
+    expect(tabs()).toEqual(["Changes2", "Plan", "Tests"]);
+    localStorage.clear();
+  });
+
+  it("keeps at least one tab pinned", () => {
+    localStorage.setItem(SAVED, JSON.stringify(["files"]));
+    render(<ReviewPanel {...base} selected={null} follow />);
+    openMenu();
+    const pin = screen.getByRole("menuitemcheckbox", { name: "Pin Files" });
+    expect(pin).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(pin);
+    // (The open tab, Changes, is shown after it.)
+    expect(tabs()).toEqual(["Files", "Changes2"]);
+    localStorage.clear();
+  });
+
+  it("moves a pinned tab up and down, and the strip follows", () => {
+    localStorage.clear();
+    render(<ReviewPanel {...base} selected={null} follow />);
+    openMenu();
+    expect(screen.getByRole("menuitem", { name: "Move Changes up" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("menuitem", { name: "Move Plan down" })).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move Plan up" }));
+    expect(tabs()).toEqual(["Changes2", "Plan", "Files"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move Changes down" }));
+    expect(tabs()).toEqual(["Plan", "Changes2", "Files"]);
+    expect(saved()).toEqual(["plan", "changes", "files"]);
+    // A tab that isn't pinned has no arrows.
+    expect(screen.queryByRole("menuitem", { name: "Move Tests up" })).toBeNull();
+    localStorage.clear();
+  });
+
+  it("Reset to default puts back Changes, Files and Plan in that order", () => {
+    localStorage.setItem(SAVED, JSON.stringify(["network", "plan"]));
+    render(<ReviewPanel {...base} selected={null} follow />);
+    expect(tabs()).toEqual(["Network", "Plan", "Changes2"]);
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reset to default" }));
+    expect(tabs()).toEqual(["Changes2", "Files", "Plan"]);
+    localStorage.clear();
+  });
+
+  it("falls back to the default when what was saved isn't usable, and drops unknown names and repeats", () => {
+    for (const bad of [null, "files", 3, [], ["storage", "activity"], {}]) {
+      localStorage.setItem(SAVED, JSON.stringify(bad));
+      const { unmount } = render(<ReviewPanel {...base} selected={null} follow />);
+      expect(tabs()).toEqual(["Changes2", "Files", "Plan"]);
+      unmount();
+    }
+    localStorage.setItem(SAVED, JSON.stringify(["tests", "activity", "files", "tests", 7, "files"]));
+    render(<ReviewPanel {...base} selected={null} follow />);
+    // What is open (Changes, the default) isn't pinned any more, so it shows at the end.
+    expect(tabs()).toEqual(["Tests", "Files", "Changes2"]);
+    localStorage.clear();
+  });
+
+  it("a tab opened from the menu without being pinned shows in the strip until another is opened", () => {
+    localStorage.clear();
+    render(<ReviewPanel {...base} selected={null} follow />);
+    openTab("Tests");
+    expect(tabs()).toEqual(["Changes2", "Files", "Plan", "Tests"]);
+    expect(selected()).toBe("Tests");
+    // It was not pinned by being opened.
+    expect(saved()).toEqual(["changes", "files", "plan"]);
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+    expect(tabs()).toEqual(["Changes2", "Files", "Plan"]);
+    localStorage.clear();
+  });
+
+  it("a tab the app opens (a test run) shows in the strip while it is the one open, and unpinning the open tab keeps it there", () => {
+    localStorage.clear();
+    const { rerender } = render(<ReviewPanel {...base} selected={null} follow testRuns={[failedRun(2)]} />);
+    rerender(<ReviewPanel {...base} selected={null} follow testRuns={[failedRun(2)]} focusRun={{ id: "r1", key: 1 }} />);
+    expect(selected()).toBe("Tests2");
+    expect(tabs()).toEqual(["Changes2", "Files", "Plan", "Tests2"]);
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Pin Plan" }));
+    expect(tabs()).toEqual(["Changes2", "Files", "Tests2"]);
+    localStorage.clear();
+  });
+
+  it("the ⋯ carries a red count for a failed test run in a tab that isn't pinned, and the menu row shows it too", () => {
+    localStorage.clear();
+    const { rerender } = render(<ReviewPanel {...base} selected={null} follow />);
+    expect(screen.getByRole("button", { name: "More tabs" })).toHaveTextContent(/^⋯$/);
+    rerender(<ReviewPanel {...base} selected={null} follow testRuns={[failedRun(2)]} />);
+    const more = screen.getByRole("button", { name: "More tabs, 2 failed" });
+    expect(more.querySelector(".tab-count")).toHaveClass("failed");
+    expect(more).toHaveTextContent("⋯2");
+    openMenu();
+    expect(within(screen.getByRole("menu", { name: "Side panel tabs" })).getByRole("menuitem", { name: /^Tests/ }).querySelector(".tab-count")).toHaveClass("failed");
+    // Pinned, the tab has the count itself and the ⋯ has none.
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Pin Tests" }));
+    expect(screen.getByRole("button", { name: "More tabs" })).toHaveTextContent(/^⋯$/);
+    expect(screen.getByRole("tab", { name: /Tests/ })).toHaveTextContent("Tests2");
+    localStorage.clear();
+  });
+
+  it("the ⋯ doesn't count the tab that is open, which is in the strip already", () => {
+    localStorage.clear();
+    render(<ReviewPanel {...base} selected={null} follow testRuns={[failedRun(2)]} />);
+    openTab("Tests");
+    expect(screen.getByRole("button", { name: "More tabs" })).toHaveTextContent(/^⋯$/);
+    localStorage.clear();
+  });
+
+  it("the ⋯ counts failed checks that are in an unpinned tab, but not checks that merely passed", () => {
+    localStorage.clear();
+    const { rerender } = render(<ReviewPanel {...base} selected={null} follow prChecks={checksProps(prView([check("build", "pass")]))} />);
+    expect(screen.getByRole("button", { name: "More tabs" })).toBeInTheDocument();
+    rerender(<ReviewPanel {...base} selected={null} follow prChecks={checksProps(prView(MIXED))} />);
+    expect(screen.getByRole("button", { name: "More tabs, 1 failed" })).toHaveTextContent("⋯1");
+    localStorage.clear();
+  });
+
+  it("the ⋯ counts the requests in an unpinned Network tab, plainly", async () => {
+    localStorage.clear();
+    const view = { link: { status: "connected" }, watches: [], items: [{ id: "a" }, { id: "b" }, { id: "c" }] } as never;
+    const spy = vi.spyOn(api, "networkState").mockResolvedValue(view);
+    render(<ReviewPanel {...base} selected={null} follow />);
+    const more = await screen.findByRole("button", { name: "More tabs, 3 new" });
+    expect(more.querySelector(".tab-count")).not.toHaveClass("failed");
+    spy.mockRestore();
+    localStorage.clear();
+  });
+
+  it("Escape closes the menu", () => {
+    localStorage.clear();
+    render(<ReviewPanel {...base} selected={null} follow />);
+    openMenu();
+    expect(screen.getByRole("menu", { name: "Side panel tabs" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Side panel tabs" })).toBeNull();
     localStorage.clear();
   });
 });

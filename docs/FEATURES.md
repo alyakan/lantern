@@ -264,7 +264,7 @@ Starting a team (the Workflow menu's Team, New ▸ Team, Start a team, or **+ Ag
 ![The Subagents menu: On the canvas or Inline](images/team-subagents-menu.png)
 
 - **On the canvas** (the default): the Lead starts them as agents, with a window, a chat and, if they write, a branch of their own.
-- **Inline**: they run inside the Lead's chat, shown only in its Activity tab.
+- **Inline**: they run inside the Lead's chat, shown only in the Lead's chat.
 
 A plain chat always runs its subagents inline.
 
@@ -348,7 +348,9 @@ People start work and walk away, so two things help while you are gone.
 
 ## The side panel
 
-The side panel (⌘\ shows or hides it) always has six tabs, in this order. A tab with nothing to show yet says what will show there.
+The side panel (⌘\ shows or hides it) has six tabs: Changes, Files, Plan, Tests, Checks and Network. A tab with nothing to show yet says what will show there. Disk space (Storage) isn't one of them: it is a popover in the top bar.
+
+**Pinning tabs.** The strip shows only the tabs you pin: Changes, Files and Plan until you change that. The **⋯** after them opens a menu of every tab. Each row has a pin to put it in the strip or take it out, arrows to move a pinned tab up or down (there is always at least one pinned), and its name, which opens the tab even when it isn't pinned. **Reset to default** puts back Changes, Files and Plan. A tab you open without pinning shows at the end of the strip until you go to another. When a tab that isn't pinned needs a look (a failed test run, failed checks, requests in Network), the **⋯** carries a count, red for failures, and the menu shows each tab's count. Which tabs are pinned, and in what order, is kept for every chat.
 
 **Changes.** Every file Claude touched, as a diff. Pick a file to see it in a full diff beside the chat, step through the files (or press `j` and `k`), switch between unified and split, edit the file, or **Revert** it (or **Revert all**). The button at the top right chooses what it compares: this chat's edits, or a whole branch. The first screenshot under [A chat](#a-chat) shows it.
 
@@ -365,13 +367,11 @@ Comments stay while Lantern runs, for each chat, and survive switching tabs or c
 
 **Plan.** In a Step by step chat, the plan so far (Build) or the architecture map (Design), as described above. A chat without one says so.
 
-**Activity.** A live graph of the turn: the Lead at the root, the advisor beside it, subagents below with the model each runs on, and the kinds of tools each used, with work travelling the edges as it happens. Under it, a log of who did what, then what the turn cost per model.
-
-![The Activity tab: the main agent, the advisor and three subagents on different models](images/panel-activity.png)
-
 **Tests.** Test runs appear here when Claude runs your tests. Runs of pytest, jest, vitest, cargo and xcodebuild are parsed into passes and failures, with `file:line` links to the failing line.
 
 ![The Tests tab: one failed test with its error and a link to the line](images/panel-tests.png)
+
+**Checks.** How the checks of the branch's pull request stand, as described under Tell me above, with **Send the failure to Claude** when one failed.
 
 **Network.** Shows requests captured by [Network Monitor](https://github.com/alyakan/network-monitor), a separate app that acts as a proxy for your own app's traffic. With it open as your app's proxy, Claude can search and read what it captured. Tell Claude which requests matter and it saves a **watch** for the project; the tab then lists every matching request as it happens, newest first, with the response as a foldable JSON tree, an outline of its keys, and its headers. **Summarize** asks Claude to read a response and put a summary above the JSON.
 
