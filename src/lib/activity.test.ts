@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatItem, ToolItem } from "../store";
-import { describeStep, editsIn, failedCount, groupItems, runningStep, stepLabel, summarize } from "./activity";
+import { describeStep, editsIn, failedCount, groupItems, runningStep, sameRow, stepLabel, summarize, type Row } from "./activity";
 
 const tool = (id: string, name: string, extra: Partial<ToolItem> = {}): ToolItem => ({
   type: "tool", id, name, summary: "/p/src/a.ts", status: "done", output: null, edit: null, children: [], ...extra,
@@ -72,6 +72,31 @@ describe("groupItems", () => {
     const items: ChatItem[] = [tool("t1", "Read"), tool("t2", "Read")];
     groupItems(items);
     expect(items).toHaveLength(2);
+  });
+});
+
+describe("sameRow", () => {
+  const turn: ChatItem[] = [{ type: "user", id: "u1", text: "a" }, tool("t1", "Read"), say("m1", "ok"), tool("t2", "Bash", { status: "running" })];
+
+  it("is the same for an activity row made again from the same items", () => {
+    const [, before] = groupItems(turn, true);
+    const [, after] = groupItems([...turn], true);
+    expect(before).not.toBe(after);
+    expect(sameRow(before, after)).toBe(true);
+  });
+
+  it("changes when a step changes, a step is added, or the turn stops being live", () => {
+    const [, before] = groupItems(turn, true);
+    const finished = [...turn.slice(0, -1), tool("t2", "Bash", { status: "done" })];
+    expect(sameRow(before, groupItems(finished, true)[1])).toBe(false);
+    expect(sameRow(before, groupItems([...turn, tool("t3", "Read")], true)[1])).toBe(false);
+    expect(sameRow(before, groupItems(turn, false)[1])).toBe(false);
+  });
+
+  it("compares any other row by identity: a message whose text grew is a new object", () => {
+    const m: Row = { type: "assistant", id: "m9", text: "Hel" };
+    expect(sameRow(m, m)).toBe(true);
+    expect(sameRow(m, { ...m })).toBe(false);
   });
 });
 

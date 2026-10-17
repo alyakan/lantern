@@ -1264,6 +1264,8 @@ const mockResponse = (id: string): NetworkDetail => {
  * `&stress` (with `?mock=ready`): as busy as a real day's work, for measuring the sidebar and the canvas. About 20 open chats
  * in 4 projects (3 of them a team's Lead with 6 agents), transcripts of hundreds of messages, and the agents streaming
  * events all the time. `&stress=N` streams N events a second (default 25; 0 sets it up and leaves it still).
+ * `&agents=K` streams from the first team's first K agents only, N events a second each (for measuring the canvas with
+ * 1, 3 or 6 agents at work); the rest still show as working.
  * `window.__stress` says when it is set up. Every other scene is untouched.
  */
 const STRESS_PARAM = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("stress");
@@ -1355,13 +1357,15 @@ async function stressDrive() {
   for (const s of plain.slice(5)) await sendTo(s.slot)({ kind: "turn_done", is_error: false, result: "ok", cost_usd: 0.1, duration_ms: 4000, auth_hint: false, denied: 0, context_window: 200_000 });
   const working = [...leads.map((l) => l.slot), ...agents];
   for (const slot of working) await sendTo(slot)({ kind: "thinking", parent: null });
-  const rate = STRESS_PARAM === "" ? 25 : Number(STRESS_PARAM);
+  const only = new URLSearchParams(location.search).get("agents");
+  const streaming = only === null ? working : agents.slice(0, Number(only));
+  const rate = (STRESS_PARAM === "" ? 25 : Number(STRESS_PARAM)) * (only === null ? 1 : streaming.length);
   let n = 0;
-  if (rate > 0) {
+  if (rate > 0 && streaming.length > 0) {
     // Events in small bursts every 40ms: text a word at a time, and a tool now and then, as agents do.
     setInterval(() => {
       for (let e = 0; e < Math.max(1, Math.round(rate / 25)); e++) {
-        const slot = working[Math.floor(Math.random() * working.length)];
+        const slot = streaming[Math.floor(Math.random() * streaming.length)];
         const send = sendTo(slot);
         const i = ++n;
         if (i % 7 === 0) {

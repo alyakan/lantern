@@ -65,6 +65,57 @@ export function useChatStates(slots: string[]): (State | undefined)[] {
   return useSyncExternalStore(store.subscribe, snapshot, snapshot);
 }
 
+/**
+ * Which agents' cards are off the screen. Their chats are kept as they last were (see `useChatStateWhile`): an agent
+ * streaming where nobody can see it would otherwise be drawn, laid out and painted for every word.
+ */
+export interface OffScreen {
+  has(slot: string): boolean;
+  /** Tells subscribers only when the set is different. */
+  set(slots: ReadonlySet<string>): void;
+  subscribe(listener: () => void): () => void;
+}
+
+export function createOffScreen(): OffScreen {
+  let off: ReadonlySet<string> = new Set();
+  const listeners = new Set<() => void>();
+  return {
+    has: (slot) => off.has(slot),
+    set(next) {
+      if (next.size === off.size && [...next].every((s) => off.has(s))) return;
+      off = next;
+      listeners.forEach((l) => l());
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+}
+
+/** Outside a canvas nothing is off the screen. */
+export const OffScreenContext = createContext<OffScreen>(createOffScreen());
+
+/** Whether this agent's card is on the screen (or near enough to come into view), redrawing when that changes. */
+export function useOnScreen(slot: string): boolean {
+  const off = useContext(OffScreenContext);
+  return useSyncExternalStore(off.subscribe, () => !off.has(slot), () => !off.has(slot));
+}
+
+/**
+ * The state of one chat while `live`; while not, the state it had when it last was, and no redraws for its changes. It
+ * catches up the moment `live` is true again.
+ */
+export function useChatStateWhile(slot: string, live: boolean): State | undefined {
+  const store = useContext(ChatStoreContext);
+  const kept = useRef<{ slot: string; state: State | undefined } | null>(null);
+  const snapshot = () => {
+    if (live || kept.current?.slot !== slot) kept.current = { slot, state: store.get(slot) };
+    return kept.current.state;
+  };
+  return useSyncExternalStore(store.subscribe, snapshot, snapshot);
+}
+
 /** What an agent on the canvas can do, for whichever chat it is. Stable for the app's life, so agents needn't redraw for it. */
 export interface NodeActions {
   send(slot: string, text: string): void;

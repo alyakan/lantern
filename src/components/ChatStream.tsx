@@ -1,10 +1,10 @@
-import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { CollapsibleText } from "./CollapsibleText";
 import { Md } from "./Md";
 import { MessageActions, type MessageAction } from "./MessageActions";
 import type { ChatItem, TestRunItem } from "../store";
 import type { NewRule } from "../types";
-import { groupItems, type Row } from "../lib/activity";
+import { groupItems, sameRow, type Row } from "../lib/activity";
 import { draftOf } from "../lib/paste";
 import { workingVerb } from "../lib/verbs";
 import { friendlyNotes } from "../lib/wakeNote";
@@ -103,58 +103,10 @@ export function ChatStream({ items, folder, sections, live = false, resend, rest
     else if (row.type === "assistant") latest = row.id;
     if (row.type === "assistant" || row.type === "turn") answering.set(row.id, current);
   }
-  const resendOf = (p: UserRow | null | undefined) => (resend && p ? () => resend.onResend({ text: p.text, draft: p.draft }) : undefined);
-  const userActions = (row: UserRow): MessageAction[] => {
-    const actions: MessageAction[] = resend ? [{ label: "Edit", title: "Edit and send as a new message", onClick: () => resend.onEdit(row.draft ?? draftOf(row.text)) }] : [];
-    const turn = row.turn;
-    if (restore && turn !== undefined && restore.points.has(turn)) {
-      actions.push({ label: "Restore files to here", title: restore.blocked ?? RESTORE_TITLE, disabled: !!restore.blocked, onClick: () => restore.onRestore(turn) });
-    }
-    return actions;
-  };
-  const render = (row: Row): ReactNode => {
-    switch (row.type) {
-      case "user":
-        if (row.auto)
-          return (
-            <div key={row.id} className="auto-turn" role="note">
-              <span className="auto-turn-dot" aria-hidden />
-              {/* Notes from a team's agents read as what happened; anything else is shown as it was written. */}
-              <span>{friendlyNotes(row.text).map((line, i) => <NoteLine key={i} text={line} />)}</span>
-            </div>
-          );
-        return (
-          <Fragment key={row.id}>
-            <div className="msg user">
-              <CollapsibleText>{row.text}</CollapsibleText>
-            </div>
-            <MessageActions text={row.text} align="end" actions={userActions(row)} />
-          </Fragment>
-        );
-      case "assistant": {
-        const regen = row.id === latest ? resendOf(answering.get(row.id)) : undefined;
-        const actions: MessageAction[] = regen ? [{ label: "Regenerate", title: REGENERATE_TITLE, onClick: regen }] : [];
-        return (
-          <Fragment key={row.id}>
-            <div className="msg assistant">
-              <Md>
-                {row.text}
-              </Md>
-            </div>
-            <MessageActions text={row.text} align="start" actions={actions} />
-          </Fragment>
-        );
-      }
-      case "activity":
-        return <ActivityGroup key={row.id} steps={row.steps} entries={row.entries} live={row.live} verb={verbFor.get(row.id)} folder={folder} {...handlers} />;
-      case "permission":
-        return <PermissionCard key={row.id} item={row} onDecide={handlers.onDecide} />;
-      case "turn":
-        return <TurnNote key={row.id} item={row} onRetry={resendOf(answering.get(row.id))} />;
-      case "shell":
-        return <ShellBlock key={row.id} item={row} onStop={handlers.onStopShell} onInput={handlers.onShellInput} />;
-    }
-  };
+  // Each row gets what it shows, not closures made here, so one that hasn't changed isn't drawn again while another streams.
+  const render = (row: Row): ReactNode => (
+    <RowView key={row.id} row={row} folder={folder} verb={verbFor.get(row.id)} latest={row.id === latest} answers={answering.get(row.id)} resend={resend} restore={restore} {...handlers} />
+  );
 
   if (!sections) return <>{rows.map(render)}</>;
 
@@ -176,3 +128,74 @@ export function ChatStream({ items, folder, sections, live = false, resend, rest
     </>
   );
 }
+
+interface RowProps extends StreamHandlers {
+  row: Row;
+  folder: string | null;
+  /** An activity row's word for its turn. */
+  verb?: string;
+  /** A reply that is the latest answer, so it can be regenerated. */
+  latest: boolean;
+  /** The prompt a reply or a turn's note answers (null: none, for one Claude started on its own). */
+  answers?: UserRow | null;
+  resend?: ResendHandlers;
+  restore?: RestoreHandlers;
+}
+
+/** The same row as before, with the same everything else: nothing to draw again. */
+function sameRowProps(a: RowProps, b: RowProps): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)] as (keyof RowProps)[]);
+  return [...keys].every((k) => (k === "row" ? sameRow(a.row, b.row) : Object.is(a[k], b[k])));
+}
+
+/** One row of the stream. A message streaming in redraws its own row; the hundreds before it stay as they are. */
+const RowView = memo(function RowView({ row, folder, verb, latest, answers, resend, restore, ...handlers }: RowProps) {
+  const resendOf = (p: UserRow | null | undefined) => (resend && p ? () => resend.onResend({ text: p.text, draft: p.draft }) : undefined);
+  switch (row.type) {
+    case "user": {
+      if (row.auto)
+        return (
+          <div className="auto-turn" role="note">
+            <span className="auto-turn-dot" aria-hidden />
+            {/* Notes from a team's agents read as what happened; anything else is shown as it was written. */}
+            <span>{friendlyNotes(row.text).map((line, i) => <NoteLine key={i} text={line} />)}</span>
+          </div>
+        );
+      const actions: MessageAction[] = resend ? [{ label: "Edit", title: "Edit and send as a new message", onClick: () => resend.onEdit(row.draft ?? draftOf(row.text)) }] : [];
+      const turn = row.turn;
+      if (restore && turn !== undefined && restore.points.has(turn)) {
+        actions.push({ label: "Restore files to here", title: restore.blocked ?? RESTORE_TITLE, disabled: !!restore.blocked, onClick: () => restore.onRestore(turn) });
+      }
+      return (
+        <>
+          <div className="msg user">
+            <CollapsibleText>{row.text}</CollapsibleText>
+          </div>
+          <MessageActions text={row.text} align="end" actions={actions} />
+        </>
+      );
+    }
+    case "assistant": {
+      const regen = latest ? resendOf(answers) : undefined;
+      const actions: MessageAction[] = regen ? [{ label: "Regenerate", title: REGENERATE_TITLE, onClick: regen }] : [];
+      return (
+        <>
+          <div className="msg assistant">
+            <Md>
+              {row.text}
+            </Md>
+          </div>
+          <MessageActions text={row.text} align="start" actions={actions} />
+        </>
+      );
+    }
+    case "activity":
+      return <ActivityGroup steps={row.steps} entries={row.entries} live={row.live} verb={verb} folder={folder} {...handlers} />;
+    case "permission":
+      return <PermissionCard item={row} onDecide={handlers.onDecide} />;
+    case "turn":
+      return <TurnNote item={row} onRetry={resendOf(answers)} />;
+    case "shell":
+      return <ShellBlock item={row} onStop={handlers.onStopShell} onInput={handlers.onShellInput} />;
+  }
+}, sameRowProps);

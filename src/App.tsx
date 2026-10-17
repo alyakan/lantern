@@ -3,7 +3,7 @@ import { pushAgentLimit } from "./lib/agentLimit";
 import { pushAutoMergeTests } from "./lib/mergeTests";
 import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
-import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome } from "./api";
 import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
@@ -1841,7 +1841,10 @@ export default function App() {
           },
         }
       : null;
-  const sessionActions = actionsFor(state.folder);
+  // The same object until something in it changes: a new one each time the app drew made React look through every
+  // component for readers of it, for each word an agent streamed.
+  const sessionActions = useMemo(() => actionsFor(state.folder), [state.folder, pinnedBy, active]);
+  const startTemplate = useCallback(() => setTemplateDialog(true), []);
 
   // The sidebar: every project, and the chats open in each. It is pinned open, collapsed (a slim column of the open chats that
   // opens over the chat when the pointer rests on it) or hidden: whether it is hidden and whether it is collapsed ("compact")
@@ -2087,7 +2090,7 @@ export default function App() {
   if (state.status === "setup") return <SetupScreen error={state.setupError} onCheck={locate} />;
 
   return (
-    <ProjectSetupContext.Provider value={setupBy}><SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}><KnownWindowsContext.Provider value={windows}><RoleStoreProvider store={roleStore}><TemplateTeamContext.Provider value={state.folder ? () => setTemplateDialog(true) : null}>
+    <ProjectSetupContext.Provider value={setupBy}><SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}><KnownWindowsContext.Provider value={windows}><RoleStoreProvider store={roleStore}><TemplateTeamContext.Provider value={state.folder ? startTemplate : null}>
       <div className="app">
         <TopBar
           folder={titleFolder}

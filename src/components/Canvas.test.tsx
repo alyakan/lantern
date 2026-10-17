@@ -1470,11 +1470,26 @@ describe("motion", () => {
     expect(canvas.classList.contains("resizing")).toBe(false);
   });
 
+  it("moves the dots with the view, and leaves --zoom (which restyles every card) alone while chats show", () => {
+    setup(team(1));
+    const canvas = screen.getByTestId("canvas");
+    const zoom = canvas.style.getPropertyValue("--zoom");
+    act(() => void fireEvent.wheel(canvas, { deltaX: 40, deltaY: 30 }));
+    act(() => void fireEvent.wheel(canvas, { ctrlKey: true, deltaY: -10 }));
+    expect(canvas.classList.contains("summary")).toBe(false);
+    expect(canvas.style.getPropertyValue("--zoom")).toBe(zoom);
+    const world = canvas.querySelector<HTMLElement>(".canvas-world")!;
+    const [, x, y, z] = /translate\((-?[\d.]+)px, (-?[\d.]+)px\) scale\(([\d.]+)\)/.exec(world.style.transform)!.map(Number);
+    expect(canvas.style.backgroundPosition).toBe(`${x}px ${y}px`);
+    expect(canvas.style.backgroundSize).toBe(`${28 * z}px ${28 * z}px`);
+  });
+
   it("keeps cards and chats from flickering around the threshold, swapping the body with a fade", () => {
     setup(team(1));
     const canvas = screen.getByTestId("canvas");
     const zoomTo = (target: number) => {
-      const z = JSON.parse(canvas.style.getPropertyValue("--zoom") || "1");
+      const world = canvas.querySelector<HTMLElement>(".canvas-world")!;
+      const z = Number(/scale\(([\d.]+)\)/.exec(world.style.transform)?.[1] ?? 1);
       act(() => void fireEvent.wheel(canvas, { ctrlKey: true, deltaY: -Math.log(target / z) / 0.01 }));
     };
     zoomTo(0.4);

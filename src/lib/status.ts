@@ -1,4 +1,4 @@
-import type { State } from "../store";
+import { hasPendingPrompt, type State } from "../store";
 
 /** What the title bar's activity viewer says, like Xcode's "Build Succeeded | Today at 10:22". */
 export interface ActivityStatus {
@@ -16,7 +16,7 @@ export function activityStatus(s: State, finishedAt: Date | null, now = new Date
   if (!s.folder) return { text: "No folder open", detail: null, working: false };
   if (s.status === "starting") return { text: "Starting Claude…", detail: null, working: true };
   if (s.status === "ended") return { text: "Stopped", detail: null, working: false };
-  if (s.items.some((it) => it.type === "permission" && it.decision === null)) return { text: "Needs you", detail: null, working: false };
+  if (hasPendingPrompt(s.items)) return { text: "Needs you", detail: null, working: false };
   if (s.status === "running") return { text: "Working", detail: null, working: true };
   const last = [...s.items].reverse().find((it) => it.type === "turn");
   if (!last || last.type !== "turn") return { text: "Ready", detail: null, working: false };

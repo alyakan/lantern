@@ -34,6 +34,18 @@ export function groupItems(items: ChatItem[], live = false): Row[] {
   return rows;
 }
 
+/**
+ * Whether a row shows the same as before, so it needn't be drawn again. The store keeps an item that hasn't changed as
+ * the same object, so most rows are the same object; a turn's activity row is made afresh by each `groupItems`, and is
+ * the same when it holds the same items and is as live as it was.
+ */
+export function sameRow(a: Row, b: Row): boolean {
+  if (a === b) return true;
+  if (a.type !== "activity" || b.type !== "activity") return false;
+  const same = <T,>(x: T[], y: T[]) => x.length === y.length && x.every((it, i) => it === y[i]);
+  return a.id === b.id && a.live === b.live && same(a.steps, b.steps) && same(a.entries, b.entries);
+}
+
 /** Cards that stay in the conversation once answered, instead of folding into the turn's activity. */
 const KEPT_CARDS = ["ExitPlanMode", "Reproduce", "AskUserQuestion"];
 
