@@ -30,7 +30,7 @@ const TS_FOR_JS: Record<string, string[]> = {
 // Above this a file is skipped: it would dominate the budget and is rarely the thing being looked at.
 const MAX_FILE_CHARS = 100_000;
 
-/** Relative module specifiers ("./" or "../") in first-appearance order. Bare packages are left to the editor. */
+/** Relative module specifiers ("./", "../", or "." and ".." for a folder's index) in first-appearance order. Bare packages are left to the editor. */
 export function importSpecifiers(source: string): string[] {
   const code = stripComments(source);
   const hits: { at: number; spec: string }[] = [];
@@ -40,7 +40,7 @@ export function importSpecifiers(source: string): string[] {
   hits.sort((a, b) => a.at - b.at);
   const out = new Set<string>();
   for (const { spec } of hits) {
-    if ((spec.startsWith("./") || spec.startsWith("../")) && !spec.includes("${")) out.add(spec);
+    if (/^\.\.?(?:\/|$)/.test(spec) && !spec.includes("${")) out.add(spec);
   }
   return [...out];
 }
@@ -51,7 +51,11 @@ export function candidatePaths(fromFile: string, specifier: string): string[] {
   const base = normalisePosix(`${dir}/${specifier}`);
   const out: string[] = [];
   const ext = KNOWN_EXTS.find((e) => base.endsWith(e));
-  if (ext) {
+  // "." and ".." name the folder itself: its index, not a sibling file called like it.
+  const folder = /(?:^|\/)\.\.?$/.test(specifier);
+  if (folder) {
+    for (const e of PROBE_EXTS) out.push(normalisePosix(`${base}/index${e}`));
+  } else if (ext) {
     // Keep the written file first; the TypeScript source it stands for comes after.
     out.push(base);
     for (const tsExt of TS_FOR_JS[ext] ?? []) out.push(base.slice(0, -ext.length) + tsExt);
