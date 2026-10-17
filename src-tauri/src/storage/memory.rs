@@ -232,7 +232,7 @@ fn swap_used(value: &str) -> Option<u64> {
         _ => return None,
     };
     let n: f64 = number.parse().ok()?;
-    (n >= 0.0).then(|| (n * factor) as u64)
+    (n >= 0.0).then_some((n * factor) as u64)
 }
 
 /// Splits the RAM into used, cached and free so that the three add up to the total: used is active, wired and compressed pages;
@@ -495,7 +495,7 @@ kern.memorystatus_vm_pressure_level: 1
         let asked = PS_ARGS.join(" ");
         assert!(asked.contains("comm="));
         for banned in ["args", "command", "-ww"] {
-            assert!(!asked.split(|c: char| c == ',' || c == ' ' || c == '=').any(|w| w == banned), "ps was asked for {banned}");
+            assert!(!asked.split([',', ' ', '=']).any(|w| w == banned), "ps was asked for {banned}");
         }
         // No shell: the programs are absolute paths run directly.
         for program in [VM_STAT, SYSCTL, PS] {

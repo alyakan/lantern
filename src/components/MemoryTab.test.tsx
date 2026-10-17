@@ -70,7 +70,7 @@ describe("MemoryTab", () => {
   it("lists the apps by size with their process counts and shares, and Lantern and its agents stands out with what is in it", async () => {
     render(<MemoryTab />);
     await settle();
-    const list = screen.getByRole("region", { name: "Memory by app" });
+    const list = screen.getByRole("group", { name: "Memory by app" });
     const rows = within(list).getAllByRole("listitem");
     expect(rows.map((r) => within(r).getByText(/^(Google Chrome|Lantern and its agents|Xcode|macOS|Slack|Other apps)$/).textContent)).toEqual(["Google Chrome", "Lantern and its agents", "Xcode", "macOS", "Slack", "Other apps"]);
     expect(within(rows[0]).getByText("11 processes")).toBeInTheDocument();
@@ -200,7 +200,7 @@ describe("MemoryTab", () => {
     const swapped = { ...first, apps: first.apps.map((a) => (a.name === "Xcode" ? { ...a, bytes: 2000 * MB } : a.name === "Slack" ? { ...a, bytes: 1600 * MB } : a)) };
     vi.mocked(api.memorySnapshot).mockResolvedValue(swapped);
     await settle(POLL_MS);
-    const order = within(screen.getByRole("region", { name: "Memory by app" })).getAllByRole("listitem").map((r) => r.querySelector(".memory-name")!.textContent);
+    const order = within(screen.getByRole("group", { name: "Memory by app" })).getAllByRole("listitem").map((r) => r.querySelector(".memory-name")!.textContent);
     expect(order).toEqual(["Google Chrome", "Lantern and its agents", "Xcode", "macOS", "Slack", "Other apps"]);
   });
 
@@ -214,7 +214,7 @@ describe("MemoryTab", () => {
     const grown = { ...first, apps: apps.map((a) => (a.name === "Music" ? { ...a, bytes: 5000 * MB } : a)) };
     vi.mocked(api.memorySnapshot).mockResolvedValue(grown);
     await settle(POLL_MS);
-    const order = within(screen.getByRole("region", { name: "Memory by app" })).getAllByRole("listitem").map((r) => r.querySelector(".memory-name")!.textContent);
+    const order = within(screen.getByRole("group", { name: "Memory by app" })).getAllByRole("listitem").map((r) => r.querySelector(".memory-name")!.textContent);
     expect(order[0]).toBe("Music");
     expect(order[order.length - 1]).toBe("Other apps");
   });
@@ -222,7 +222,7 @@ describe("MemoryTab", () => {
   it("is reachable from the keyboard: the Refresh button, then the list to scroll it", async () => {
     render(<MemoryTab />);
     await settle();
-    expect(screen.getByRole("region", { name: "Memory by app" })).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("region", { name: "Memory" })).toHaveAttribute("tabindex", "0");
     expect(screen.getByRole("button", { name: "Refresh" })).not.toHaveAttribute("tabindex", "-1");
   });
 });

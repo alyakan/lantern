@@ -119,33 +119,35 @@ export function MemoryTab() {
         <div className="tests-note storage-empty">No apps were found.</div>
       ) : (
         <>
-          <div className="storage-chart memory-chart" onPointerLeave={() => setHot(null)}>
-            <div className="storage-stack" role="img" aria-label={`Memory by app. ${parts.map(partText).join(". ")}`}>
-              {parts.map((p) => (
-                <div key={p.key} className={`memory-seg${hot === p.key ? " hot" : ""}${hot && hot !== p.key ? " dim" : ""}`} style={{ width: `${p.width}%`, "--kind": p.colour } as CSSProperties} title={partText(p)} onPointerEnter={() => setHot(p.key)} />
-              ))}
+          <div className="storage-body memory-body" role="region" aria-label="Memory" tabIndex={0}>
+            <div className="storage-chart memory-chart" onPointerLeave={() => setHot(null)}>
+              <div className="storage-stack" role="img" aria-label={`Memory by app. ${parts.map(partText).join(". ")}`}>
+                {parts.map((p) => (
+                  <div key={p.key} className={`memory-seg${hot === p.key ? " hot" : ""}${hot && hot !== p.key ? " dim" : ""}`} style={{ width: `${p.width}%`, "--kind": p.colour } as CSSProperties} title={partText(p)} onPointerEnter={() => setHot(p.key)} />
+                ))}
+              </div>
+              <div className="storage-readout" aria-hidden>
+                {readout ? partText(readout) : "Hover a colour to read it"}
+              </div>
+              <Summary snapshot={snapshot} />
+              <ul className="storage-legend" aria-label="Memory legend">
+                {parts.map((p) => (
+                  <Legend key={p.key} part={p} dim={!!hot && hot !== p.key} onHot={setHot} />
+                ))}
+              </ul>
             </div>
-            <div className="storage-readout" aria-hidden>
-              {readout ? partText(readout) : "Hover a colour to read it"}
+            <div role="group" aria-label="Memory by app">
+              <div className="memory-list-head">Resident memory by app, about</div>
+              <ul className="storage-list">
+                {apps.map((a) => (
+                  <Row key={a.name} app={a} biggest={biggest} colour={colours.get(a.name) ?? "var(--muted)"} />
+                ))}
+              </ul>
+              <p className="memory-foot">
+                Sizes are resident memory: what each app holds in RAM right now. Shared pages count in every process that uses them, so{" "}
+                {snapshot.scaled ? "the apps were scaled down to fit what is used" : "the apps can add up to more than is used (they are scaled down if so)"}. macOS includes memory no process owns.
+              </p>
             </div>
-            <Summary snapshot={snapshot} />
-            <ul className="storage-legend" aria-label="Memory legend">
-              {parts.map((p) => (
-                <Legend key={p.key} part={p} dim={!!hot && hot !== p.key} onHot={setHot} />
-              ))}
-            </ul>
-          </div>
-          <div className="storage-body memory-body" role="region" aria-label="Memory by app" tabIndex={0}>
-            <div className="memory-list-head">Resident memory by app, about</div>
-            <ul className="storage-list">
-              {apps.map((a) => (
-                <Row key={a.name} app={a} biggest={biggest} colour={colours.get(a.name) ?? "var(--muted)"} />
-              ))}
-            </ul>
-            <p className="memory-foot">
-              Sizes are resident memory: what each app holds in RAM right now. Shared pages count in every process that uses them, so{" "}
-              {snapshot.scaled ? "the apps were scaled down to fit what is used" : "the apps can add up to more than is used (they are scaled down if so)"}. macOS includes memory no process owns.
-            </p>
           </div>
         </>
       )}
@@ -169,7 +171,7 @@ function Summary({ snapshot }: { snapshot: MemorySnapshot }) {
 function Legend({ part, dim, onHot }: { part: MemoryPart; dim: boolean; onHot: (key: string | null) => void }) {
   return (
     <li className={`storage-legend-item memory-legend-item${dim ? " dim" : ""}`} style={{ "--kind": part.colour } as CSSProperties} onPointerEnter={() => onHot(part.key)}>
-      <span className={`storage-swatch${part.key === "free" ? " empty" : ""}`} aria-hidden />
+      <span className={`storage-swatch${part.key === "free" ? " free" : ""}`} aria-hidden />
       <span className="storage-legend-name">{part.title}</span>
       <span className="storage-legend-size">{memoryText(part.bytes)}</span>
       <span className="storage-legend-share">{part.share === 0 ? "<1%" : `${part.share}%`}</span>
