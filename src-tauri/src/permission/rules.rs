@@ -57,9 +57,9 @@ pub struct RuleEntry {
 }
 
 /// Tools no rule answers: their card carries something the user must read or answer (a plan, a question, a bug to
-/// reproduce).
-const NEVER_AUTO: &[&str] = &["ExitPlanMode", "AskUserQuestion", "Reproduce"];
-/// Lantern's own MCP tools (its permission prompt and reproduce request), which are never a rule's tool.
+/// reproduce, an action to approve: an approval is for that one call, so nothing can be remembered for it).
+const NEVER_AUTO: &[&str] = &["ExitPlanMode", "AskUserQuestion", "Reproduce", "Approval"];
+/// Lantern's own MCP tools (its permission prompt, reproduce and approval requests), which are never a rule's tool.
 const OWN_TOOL_PREFIX: &str = "mcp__lantern__";
 /// Claude Code's file tools: each one's path key (the key it acts on), and every key its input may have. A rule checks
 /// the path under the tool's own key, and an input with any other key isn't one to allow by rule.
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn tools_no_rule_answers_are_never_matched() {
-        for tool in ["ExitPlanMode", "AskUserQuestion", "Reproduce", "mcp__lantern__approve", "mcp__lantern__reproduce"] {
+        for tool in ["ExitPlanMode", "AskUserQuestion", "Reproduce", "Approval", "mcp__lantern__approve", "mcp__lantern__reproduce", "mcp__lantern__request_approval"] {
             let r = Rule { tool: tool.into(), matcher: Matcher::Any };
             assert!(!matches(&r, tool, &json!({"x": 1})), "{tool}");
         }

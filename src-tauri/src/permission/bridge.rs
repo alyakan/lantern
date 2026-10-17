@@ -459,6 +459,40 @@ mod tests {
         assert!(!bridge.respond(&id, true, None, None), "a withdrawn prompt can't be answered");
     }
 
+    #[tokio::test]
+    async fn an_approval_always_shows_its_card_whatever_rules_there_are_and_a_cancelled_one_is_never_a_yes() {
+        let (bridge, mut rx, dir) = setup();
+        bridge.set_folder(dir.path());
+        // No rule can be made for it, in either scope, so none can answer it.
+        for tool in [crate::permission::helper::APPROVAL, "mcp__lantern__request_approval"] {
+            for scope in [Scope::Chat, Scope::Folder] {
+                assert!(bridge.add_rule(scope, Rule { tool: tool.into(), matcher: rules::Matcher::Any }).is_err(), "{tool}");
+            }
+        }
+        assert!(bridge.chat_rules().is_empty());
+        let input = json!({"action": "Merge PR #144", "details": "CI is green. <b>bold</b> **not markdown**"});
+        let asked = ask_tool_in_background(&bridge, crate::permission::helper::APPROVAL, input.clone());
+        let id = match next_event(&mut rx).await {
+            UiEvent::PermissionRequested { request_id, tool_name, input: shown } => {
+                assert_eq!((tool_name.as_str(), shown), ("Approval", input));
+                request_id
+            }
+            other => panic!("unexpected {other:?}"),
+        };
+        // The chat is closed or the turn interrupted: the helper is told no, and the card can't be answered after.
+        bridge.cancel_all();
+        assert!(!asked.await.unwrap().allow);
+        assert!(!bridge.respond(&id, true, None, None));
+        // Answered by the user: the answer and their note come back as given.
+        let asked = ask_tool_in_background(&bridge, "Approval", json!({"action": "Push tag v1"}));
+        let id = match next_event(&mut rx).await {
+            UiEvent::PermissionRequested { request_id, .. } => request_id,
+            other => panic!("unexpected {other:?}"),
+        };
+        assert!(bridge.respond(&id, true, Some("go ahead".into()), None));
+        assert_eq!(asked.await.unwrap(), BridgeResponse { allow: true, message: Some("go ahead".into()), updated_input: None, failed: false });
+    }
+
     fn orchestra_call() -> BridgeRequest {
         BridgeRequest { tool_name: "list_agents".into(), input: json!({}), tool_use_id: None, orchestra: true, network: false, review: false, git: false }
     }
