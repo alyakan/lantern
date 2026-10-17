@@ -160,19 +160,3 @@ describe("Resume", () => {
     expect(act_.send).not.toHaveBeenCalled();
   });
 });
-
-describe("the clock for quiet agents", () => {
-  it("moves on only when an agent has become quiet, so the app isn't redrawn for nothing", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(1_000_000);
-    const chats = withStatus(team(), { w1: "running" });
-    chats.slots.w1 = { ...chats.slots.w1, activityAt: 1_000_000 };
-    const { result } = renderHook(() => useTeamGuards(chats, actions()));
-    const first = result.current.quiet.now;
-    act(() => vi.advanceTimersByTime(60_000));
-    expect(result.current.quiet.now).toBe(first);
-    act(() => vi.advanceTimersByTime(125_000));
-    expect(result.current.quiet.now).toBeGreaterThan(first);
-    expect(result.current.quiet.after).toBe(180_000);
-  });
-});

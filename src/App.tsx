@@ -881,7 +881,7 @@ export default function App() {
   };
 
   // What keeps a team from running unwatched: the pause when the plan reaches the user's limit (while it lasts, nothing
-  // below starts a turn by itself), and the clock the inbox lists quiet agents by.
+  // below starts a turn by itself).
   const guards = useTeamGuards(chats, {
     stop: (slot) => stopIn(slot),
     send: (slot, text) => sendIn(slot, text),
@@ -1896,7 +1896,7 @@ export default function App() {
       return v.needsYou && v.snap && target ? [{ folder: v.folder, slot: target, where: basename(v.folder), branch: v.snap.pr.branch, number: v.snap.pr.number, failed: v.snap.checks.filter((c) => c.bucket === "fail").length }] : [];
     }),
   );
-  const inbox = [...inboxItems(chats, openByProject, { unread, describe: describeInput, quiet: guards.quiet }), ...prRows];
+  const inbox = [...inboxItems(chats, openByProject, { unread, describe: describeInput }), ...prRows];
   useAction("toggle-sidebar", () => setSidebarHidden(!sidebarHidden), true, sidebarHidden ? "Show Sidebar" : "Hide Sidebar");
   useAction("toggle-compact", () => setSidebarCompact(!sidebarCompact), true, sidebarCompact ? "Expand Sidebar" : "Collapse Sidebar");
   useEffect(() => {
@@ -2336,7 +2336,9 @@ export default function App() {
           <div className="app-modal">
             <ConfirmDialog title="Close this agent?" confirmLabel="Discard work and close" busyLabel="Closing…" busy={closingBusy} onConfirm={() => closeFullAgent(closingFull.slot, { uncommitted: closingFull.check.uncommitted, unmerged_commits: closingFull.check.unmerged_commits })} onCancel={() => setClosingFull(null)}>
               <p>
-                It has <strong>{lostText(closingFull.check)}</strong>. Closing it stops it and deletes its worktree{closingFull.check.branch ? <> and branch <code>{closingFull.check.branch}</code></> : null}, so that work is gone for good.
+                It has <strong>{lostText(closingFull.check)}</strong>.{" "}
+                {closingFull.check.gone ? "Its worktree is already gone. Closing it stops it and deletes" : "Closing it stops it and deletes its worktree"}
+                {closingFull.check.branch ? <>{closingFull.check.gone ? " its" : " and"} branch <code>{closingFull.check.branch}</code></> : null}, so that work is gone for good.
               </p>
             </ConfirmDialog>
           </div>

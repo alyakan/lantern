@@ -88,6 +88,8 @@ pub struct Agreed {
 pub struct CloseCheck {
     /// It has a worktree of its own; a worker in the shared folder only gets stopped.
     pub worktree: bool,
+    /// Its worktree's folder was removed outside Lantern: nothing in it can be lost, and only git's record of it is cleared.
+    pub gone: bool,
     pub branch: Option<String>,
     /// Files changed in its worktree and not committed.
     pub uncommitted: usize,
@@ -1259,7 +1261,8 @@ impl Orchestra {
         }
         let repo = self.host.main_folder(&main)?;
         let env = self.host.path_env().await;
-        if !force {
+        // A folder that was removed outside Lantern has no loose work to lose, and no git to run in it.
+        if !force && !git::worktree_gone(&wt.root) {
             let (r, root, e) = (repo.clone(), wt.root.clone(), env.clone());
             let loose = tokio::task::spawn_blocking(move || git::verify_worktree(&r, &root, e.as_deref()).and_then(|wt| git::loose_files(&wt, e.as_deref()))).await.map_err(|e| e.to_string())??;
             if !loose.is_empty() {
@@ -1300,16 +1303,26 @@ impl Orchestra {
         if merging {
             return Err("That agent's branch is being merged right now.".into());
         }
-        let Some(wt) = wt else { return Ok(CloseCheck { worktree: false, branch: None, uncommitted: 0, unmerged_commits: 0 }) };
+        let Some(wt) = wt else { return Ok(CloseCheck { worktree: false, gone: false, branch: None, uncommitted: 0, unmerged_commits: 0 }) };
         let repo = self.host.main_folder(&main)?;
         let env = self.host.path_env().await;
         let (root, branch, base) = (wt.root.clone(), wt.branch.clone(), into.or(wt.base.clone()));
-        let (uncommitted, unmerged_commits) = tokio::task::spawn_blocking(move || -> Result<_, String> {
-            let checked = git::verify_worktree(&repo, &root, env.as_deref())?;
-            let uncommitted = git::loose_files(&checked, env.as_deref())?.len();
+        let gone = git::worktree_gone(&root);
+        let (uncommitted, unmerged_commits, branch_kept) = tokio::task::spawn_blocking(move || -> Result<_, String> {
+            // A folder removed outside Lantern has no loose work, and nothing to run git in. Its branch may still be there.
+            let uncommitted = if gone {
+                0
+            } else {
+                let checked = git::verify_worktree(&repo, &root, env.as_deref())?;
+                git::loose_files(&checked, env.as_deref())?.len()
+            };
             // A copy of one commit has no branch: nothing it did is kept or merged, so only loose files are named.
             if branch.is_empty() {
-                return Ok((uncommitted, 0));
+                return Ok((uncommitted, 0, !gone));
+            }
+            // With the folder gone, a branch that is gone too leaves nothing at all.
+            if gone && git::tip_of(&repo, &branch, env.as_deref()).is_err() {
+                return Ok((0, 0, false));
             }
             // Counted from where the merge was proposed, else where the worker started; a branch since deleted or renamed is no
             // place to count from, so the main checkout's own HEAD is. Not knowing is an error, never "nothing".
@@ -1320,11 +1333,11 @@ impl Orchestra {
                     break;
                 }
             }
-            Ok((uncommitted, counted?.commits))
+            Ok((uncommitted, counted?.commits, true))
         })
         .await
         .map_err(|e| e.to_string())??;
-        Ok(CloseCheck { worktree: true, branch: Some(wt.branch), uncommitted, unmerged_commits })
+        Ok(CloseCheck { worktree: true, gone, branch: branch_kept.then_some(wt.branch), uncommitted, unmerged_commits })
     }
 
     /// The user closed a worker from its card: it is stopped, its worktree and branch removed, and it leaves the team. What
@@ -1352,7 +1365,18 @@ impl Orchestra {
             self.discard(worker, true).await?;
             let raw = check.branch.as_deref().unwrap_or_default();
             let branch = untrusted(raw, 120);
-            let cleaned = if git::is_workers_branch(raw) { format!("cleaned up its worktree and branch {branch}") } else { format!("cleaned up its worktree (its branch {branch} isn't one Lantern made, so it was kept)") };
+            let cleaned = if check.gone {
+                // Nothing of the worktree was left to remove; git's record of it was cleared.
+                match check.branch.as_deref() {
+                    Some(_) if git::is_workers_branch(raw) => format!("cleaned up what was left of it (its worktree folder was already gone) and its branch {branch}"),
+                    Some(_) => format!("cleaned up what was left of it (its worktree folder was already gone; its branch {branch} isn't one Lantern made, so it was kept)"),
+                    None => "cleaned up what was left of it (its worktree folder and branch were already gone)".to_string(),
+                }
+            } else if git::is_workers_branch(raw) {
+                format!("cleaned up its worktree and branch {branch}")
+            } else {
+                format!("cleaned up its worktree (its branch {branch} isn't one Lantern made, so it was kept)")
+            };
             if check.lost() {
                 format!("{cleaned}, throwing away {}", check.lost_text())
             } else {
@@ -2731,7 +2755,7 @@ mod tests {
     async fn closing_checks_for_loose_files_and_commits_that_are_not_merged() {
         let (_h, o, _r, _w) = setup();
         spawn_idle(&o, "login").await;
-        assert_eq!(o.close_check("w1").await.unwrap(), CloseCheck { worktree: true, branch: Some("lantern/login".into()), uncommitted: 0, unmerged_commits: 0 });
+        assert_eq!(o.close_check("w1").await.unwrap(), CloseCheck { worktree: true, gone: false, branch: Some("lantern/login".into()), uncommitted: 0, unmerged_commits: 0 });
         commit_in_worktree(&o, "w1", "b.txt", "b\n");
         let (_, _, wt) = o.worktree_of("w1").unwrap();
         std::fs::write(wt.folder.join("loose.txt"), "x\n").unwrap();
@@ -2838,11 +2862,76 @@ mod tests {
         assert!(!o.is_worker("w1"));
     }
 
+    /// The folders `git worktree list` knows, in the main checkout.
+    fn listed_worktrees(repo: &Path) -> String {
+        let out = std::process::Command::new("git").args(["worktree", "list", "--porcelain"]).current_dir(repo).output().unwrap();
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_worker_whose_worktree_folder_was_removed_outside_lantern_can_be_checked_and_still_reports_its_branch() {
+        let (_h, o, repo, _w) = setup();
+        spawn_idle(&o, "login").await;
+        commit_in_worktree(&o, "w1", "b.txt", "b\n");
+        let (_, _, wt) = o.worktree_of("w1").unwrap();
+        git(repo.path(), &["worktree", "remove", "--force", wt.root.to_str().unwrap()]);
+        assert!(!wt.root.exists());
+        let check = o.close_check("w1").await.unwrap();
+        assert_eq!(check, CloseCheck { worktree: true, gone: true, branch: Some("lantern/login".into()), uncommitted: 0, unmerged_commits: 1 });
+        // The branch went too: nothing is left to ask about.
+        git(repo.path(), &["worktree", "prune"]);
+        git(repo.path(), &["branch", "-D", "lantern/login"]);
+        assert_eq!(o.close_check("w1").await.unwrap(), CloseCheck { worktree: true, gone: true, branch: None, uncommitted: 0, unmerged_commits: 0 });
+    }
+
+    #[tokio::test]
+    async fn closing_a_worker_whose_worktree_folder_is_gone_clears_git_s_record_and_asks_before_losing_commits() {
+        let (host, o, repo, _w) = setup();
+        spawn_idle(&o, "login").await;
+        commit_in_worktree(&o, "w1", "b.txt", "b\n");
+        let (_, _, wt) = o.worktree_of("w1").unwrap();
+        // Removed with rm, not git: git still lists the worktree.
+        std::fs::remove_dir_all(&wt.root).unwrap();
+        assert!(listed_worktrees(repo.path()).contains("lantern/login"));
+        let err = o.close_worker("w1", None).await.unwrap_err();
+        assert!(err.contains("1 commit that isn't merged"), "{err}");
+        assert!(o.is_worker("w1") && host.stopped.lock().unwrap().is_empty());
+        o.close_worker("w1", Some(Agreed { uncommitted: 0, unmerged_commits: 1 })).await.unwrap();
+        assert!(!listed_worktrees(repo.path()).contains("lantern/login"), "{}", listed_worktrees(repo.path()));
+        assert_eq!(branches_like(repo.path(), "lantern/login"), "");
+        assert!(host.stopped.lock().unwrap().contains(&"w1".to_string()));
+        assert!(host.events_for("w1").iter().any(|e| matches!(e, UiEvent::AgentStopped { reason: None })));
+        assert_eq!(host.wakes(), vec!["[Lantern: the user closed agent \"login\" (w1) and cleaned up what was left of it (its worktree folder was already gone) and its branch lantern/login, throwing away 1 commit that isn't merged.]"]);
+        assert!(!o.is_worker("w1") && o.workers_of("s1").is_empty());
+    }
+
+    #[tokio::test]
+    async fn closing_a_worker_whose_worktree_and_branch_are_both_gone_just_closes() {
+        let (host, o, repo, _w) = setup();
+        spawn_idle(&o, "login").await;
+        let (_, _, wt) = o.worktree_of("w1").unwrap();
+        git(repo.path(), &["worktree", "remove", "--force", wt.root.to_str().unwrap()]);
+        git(repo.path(), &["branch", "-D", "lantern/login"]);
+        o.close_worker("w1", None).await.unwrap();
+        assert_eq!(host.wakes(), vec!["[Lantern: the user closed agent \"login\" (w1) and cleaned up what was left of it (its worktree folder and branch were already gone); nothing was lost.]"]);
+        assert!(!o.is_worker("w1"));
+    }
+
+    #[tokio::test]
+    async fn a_folder_that_is_there_but_not_its_worktree_is_still_refused_not_called_gone() {
+        let (_h, o, _r, _w) = setup();
+        spawn_idle(&o, "login").await;
+        let (_, _, wt) = o.worktree_of("w1").unwrap();
+        std::fs::remove_file(wt.root.join(".git")).unwrap();
+        let err = o.close_check("w1").await.unwrap_err();
+        assert!(err.contains("won't run git") && err.contains("isn't a plain file"), "{err}");
+    }
+
     #[tokio::test]
     async fn closing_a_worker_in_the_shared_folder_only_stops_it() {
         let (host, o, repo, _wt) = setup();
         call(&o, "spawn_agent", json!({"name": "research", "brief": "Read the code", "isolation": "shared"})).await.unwrap();
-        assert_eq!(o.close_check("w1").await.unwrap(), CloseCheck { worktree: false, branch: None, uncommitted: 0, unmerged_commits: 0 });
+        assert_eq!(o.close_check("w1").await.unwrap(), CloseCheck { worktree: false, gone: false, branch: None, uncommitted: 0, unmerged_commits: 0 });
         o.close_worker("w1", None).await.unwrap();
         assert!(repo.path().join("a.txt").is_file(), "the shared folder was touched");
         assert!(host.stopped.lock().unwrap().contains(&"w1".to_string()));
