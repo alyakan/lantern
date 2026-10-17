@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ToolItem } from "../store";
 import { ActivityGroup, SHOWN_OUTPUT_LINES } from "./ActivityGroup";
 
@@ -74,6 +74,32 @@ describe("ActivityGroup", () => {
     fireEvent.click(screen.getByRole("button", { name: /Read 1 file, ran 1 command/ }));
     const texts = [...document.querySelectorAll(".steps > *")].map((n) => n.textContent);
     expect(texts).toEqual(["Readsrc/a.ts", "Found it, running the tests.", "Bashnpm test"]);
+  });
+
+  it("lists everything the agent said between its steps as one collapsed line that expands, like the changed files", () => {
+    const steps = [tool("1", "Read"), tool("2", "Bash", { summary: "npm test" })];
+    const said = (id: string, text: string) => ({ type: "assistant" as const, id, text });
+    const entries = [steps[0], said("m1", "Found it, running the tests."), steps[1], said("m2", "**Two** failed; fixing.")];
+    render(<ActivityGroup steps={steps} entries={entries} folder="/p" {...handlers} />);
+    const line = screen.getByRole("button", { name: "2 messages" });
+    expect(line).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("list", { name: "Messages" })).toBeNull();
+    fireEvent.click(line);
+    const items = within(screen.getByRole("list", { name: "Messages" })).getAllByRole("listitem");
+    // Each message in the order it was said, written as markdown.
+    expect(items.map((n) => n.textContent)).toEqual(["Found it, running the tests.", "Two failed; fixing."]);
+    expect(items[1].querySelector("strong")).not.toBeNull();
+    fireEvent.click(line);
+    expect(screen.queryByRole("list", { name: "Messages" })).toBeNull();
+    // While the turn is still going the line is there too, so the messages the line above has moved on from can be read.
+    cleanup();
+    render(<ActivityGroup steps={steps} entries={entries.slice(0, 2)} live folder="/p" {...handlers} />);
+    expect(screen.getByRole("button", { name: "1 message" })).toBeInTheDocument();
+  });
+
+  it("has no messages line when the agent said nothing between its steps", () => {
+    render(<ActivityGroup steps={[tool("1", "Read"), tool("2", "Bash")]} folder="/p" {...handlers} />);
+    expect(screen.queryByRole("button", { name: /message/ })).toBeNull();
   });
 
   it("has no summary line when the group is only applied edits", () => {
