@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type UIEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { AWAY_FROM_END, JumpToLatest } from "./JumpToLatest";
 import { useSlot } from "../lib/slot";
 import { recallScroll, rememberScroll } from "../lib/scrollMemory";
@@ -30,6 +30,9 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
   const [confirming, setConfirming] = useState<number | null>(null);
   const [undoFailed, setUndoFailed] = useState<string | null>(null);
   const blocked = state.status === "running" ? "Wait for Claude to finish before restoring files." : state.status === "starting" ? "Claude isn't ready yet." : null;
+  // The same object while nothing in it changes, so the messages that offer it aren't drawn again for every word streamed.
+  const canRestore = !!restore;
+  const restoreRows = useMemo(() => (canRestore ? { points, blocked, onRestore: setConfirming } : undefined), [canRestore, points, blocked]);
   const undoRestore = () => {
     const undo = state.restoreUndo;
     if (!undo || !restore) return;
@@ -85,7 +88,9 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
   const lastSent = (items: State["items"]) => [...items].reverse().find((it) => it.type === "user" && !it.auto)?.id;
   const sent = useRef(lastSent(state.items));
   // Only the chat scrolls: scrollIntoView would scroll the page around it too, and slide the whole app out of the window.
-  useEffect(() => {
+  // Before the frame is drawn: the height it reads is the layout the frame needs anyway. Read after the frame (an effect),
+  // it laid the chat out a second time for every word a streaming agent added.
+  useLayoutEffect(() => {
     const el = scroller.current;
     const id = lastSent(state.items);
     if (id !== sent.current) {
@@ -170,7 +175,7 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
         onTouchMove={byHand}
       >
         {state.items.length === 0 && !state.thinking && <div className="empty">What should Claude work on?</div>}
-        <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} resend={resend} restore={restore ? { points, blocked, onRestore: setConfirming } : undefined} {...handlers} />
+        <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} resend={resend} restore={restoreRows} {...handlers} />
         {thinkingLine && (
           <div className="activity live thinking-line" role="status" aria-label="Claude is thinking">
             <span className="activity-line">

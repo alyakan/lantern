@@ -1,4 +1,4 @@
-import { memo, useContext, useMemo, useRef } from "react";
+import { memo, useContext, useMemo } from "react";
 import { CloseAgentContext, useChatState, useNodeActions } from "../lib/canvasContext";
 import { SlotContext } from "../lib/slot";
 import { WAKE_LIMIT, wakesPaused } from "../sessions";
@@ -32,8 +32,8 @@ export function visibleProposals(all: MergeProposal[], worker: string | null): M
 
 /**
  * An agent's conversation on the canvas, with its box: the same chat view as the full-size app, for this agent's own
- * chat. It subscribes to that chat alone and keeps its handlers fixed, so it redraws when the agent does something and
- * not when the canvas pans, zooms or moves another agent. `parent`: the main agent a worker reports to, whose merge
+ * chat. It subscribes to that chat alone and keeps its handlers fixed (but for its test runs), so it redraws when the
+ * agent does something and not when the canvas pans, zooms or moves another agent. `parent`: the main agent a worker reports to, whose merge
  * proposals for it are shown here too.
  */
 export const NodeBody = memo(function NodeBody({ slot, parent }: { slot: string; parent: string | null }) {
@@ -41,18 +41,19 @@ export const NodeBody = memo(function NodeBody({ slot, parent }: { slot: string;
   const owner = useChatState(parent ?? slot);
   const actions = useNodeActions();
   const closeAgent = useContext(CloseAgentContext);
-  const latest = useRef(state);
-  latest.current = state;
+  // New only when its test runs change: a row of the chat is drawn again when what it is given changes, and a work line
+  // shows the test run its step started.
+  const testRuns = state?.testRuns;
   const handlers = useMemo<StreamHandlers>(
     () => ({
       onDecide: (id, allow, note, answered) => actions.decide(slot, id, allow, note, answered),
       onOpenFile: (path) => actions.openFile(slot, path),
       onStopShell: (id) => actions.stopShell(slot, id),
       onShellInput: (id, text) => actions.shellInput(slot, id, text),
-      testRunFor: (id) => latest.current?.testRuns.find((r) => r.id === id),
+      testRunFor: (id) => testRuns?.find((r) => r.id === id),
       onOpenTestRun: (id) => actions.openTestRun(slot, id),
     }),
-    [slot, actions],
+    [slot, actions, testRuns],
   );
   if (!state) return null;
   const proposals = visibleProposals(owner?.proposals ?? [], parent ? slot : null);
