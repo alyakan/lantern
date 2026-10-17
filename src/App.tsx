@@ -1576,7 +1576,7 @@ export default function App() {
   useEffect(() => {
     if (team) teamView.current[team] = view === "chat" ? active : "canvas";
   }, [team, view, active]);
-  useAction("toggle-canvas",() => setView((v) => (v === "canvas" ? "chat" : "canvas")), inOrchestra);
+  useAction("toggle-canvas", () => setView((v) => (v === "canvas" ? "chat" : "canvas")), inOrchestra);
 
   const lastTurn = [...state.items].reverse().find((it) => it.type === "turn");
   const lastTurnMs = lastTurn?.type === "turn" ? lastTurn.durationMs : null;
