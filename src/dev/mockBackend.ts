@@ -1171,6 +1171,22 @@ const MOCK_CHECKLISTS = {
   meta: { page: 1, per_page: 3, total: 41, next_cursor: "eyJpZCI6NDgxNX0" },
 };
 let mockWatches = [{ label: "Checklists", method: "GET", url: "/v1/checklists" }];
+
+// The Storage tab's scan in the browser preview: a few items of each kind, one blocked, one with a suggestion from Claude.
+const mockStorageItem = (id: string, kind: string, name: string, gb: number, over: Record<string, unknown> = {}) => ({
+  id, kind, name, path: `/Users/you/${name}`, bytes: Math.round(gb * 1e9), risk: "safe", removal: kind === "worktree" ? "worktree" : kind === "repo" ? "trash" : "permanent", note: "Comes back with a build.", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, ...over,
+});
+let mockStorageItems = [
+  mockStorageItem("a1", "worktree", "acme-api/wt-retry", 3.2, { ticked: true, note: "A worktree of acme-api on lantern/retry. Removing it leaves the branch and its commits in the repository." }),
+  mockStorageItem("a2", "worktree", "acme-api/wt-login", 1.9, { risk: "blocked", warning: "3 uncommitted changes that exist nowhere else.", idle_days: 2 }),
+  mockStorageItem("b1", "repo", "old-prototype", 2.4, { ticked: true, idle_days: 140, note: "A project nothing has changed in for a long time. It goes to the Trash." }),
+  mockStorageItem("c1", "build_output", "web-dashboard/node_modules", 1.1, { suggestion: "Not touched for 40 days, `npm install` brings it back" }),
+  mockStorageItem("c2", "build_output", "acme-api/target", 6.8, { ticked: true, note: "Rust build output: the next `cargo build` rebuilds it." }),
+  mockStorageItem("d1", "simulator", "iOS 16.4 simulator runtime", 6.2, { risk: "review", warning: "Last used 50 day(s) ago; downloading it again takes a while.", idle_days: 50 }),
+  mockStorageItem("e1", "cache", "Caches/com.apple.dt.Xcode", 4.4, { ticked: true }),
+  mockStorageItem("f1", "trash", "Trash/Old movie.mov", 2.0, { ticked: true }),
+];
+let mockStorageScannedAt: number | null = null;
 const mockItems = (): NetworkItem[] =>
   mockWatches.length === 0
     ? []
@@ -1669,6 +1685,24 @@ export function installMockBackend() {
           mockWatches = mockWatches.filter((w) => w.label !== a.label);
           void emit("network-changed");
           return true;
+        case "storage_state":
+          return { items: mockStorageScannedAt ? mockStorageItems : [], scanning: false, progress: "", scanned_at: mockStorageScannedAt, free_bytes: 8_300_000_000, snapshots: 0, notes: [], deleting: false };
+        case "storage_scan":
+          mockStorageScannedAt = Date.now();
+          void emit("storage-changed");
+          return true;
+        case "storage_cancel":
+          return undefined;
+        case "storage_delete": {
+          const ids = a.ids as string[];
+          const out = ids.map((id) => {
+            const item = mockStorageItems.find((i) => i.id === id);
+            return item ? { id, name: item.name, ok: item.risk !== "blocked", freed: item.risk !== "blocked" ? item.bytes : 0, error: item.risk !== "blocked" ? null : item.warning } : { id, name: id, ok: false, freed: 0, error: "Not in the last scan." };
+          });
+          mockStorageItems = mockStorageItems.filter((i) => !out.some((o) => o.ok && o.id === i.id));
+          void emit("storage-changed");
+          return out;
+        }
         case "session_events":
           return REPLAY;
         case "open_session":

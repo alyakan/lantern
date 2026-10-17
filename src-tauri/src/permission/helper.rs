@@ -112,8 +112,9 @@ impl Server {
             // A read-only agent's git: run by the app, which checks that this chat is one (the helper's word is not taken).
             READ_ONLY_GIT_TOOL if self.offer.git => app_result(tool, ask(BridgeRequest { tool_name: tool.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: false, review: false, git: true })),
             READ_ONLY_GIT_TOOL => result_json("git is only available to a read-only agent, which has no shell; use your shell for git.".into(), true),
-            // Answered by the app at once (it reads Network Monitor on loopback), for any chat.
-            t if crate::network::TOOLS.contains(&t) => app_result(t, ask(BridgeRequest { tool_name: t.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: true, review: false, git: false })),
+            // Answered by the app (it reads Network Monitor on loopback, or the Storage scan), for any chat: the storage
+            // tools use the same call, told apart by name, and a scan waits at most a few seconds for itself.
+            t if crate::network::TOOLS.contains(&t) || crate::storage::TOOLS.contains(&t) => app_result(t, ask(BridgeRequest { tool_name: t.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: true, review: false, git: false })),
             "reproduce" if self.offer.steps => {
                 let resp = ask(BridgeRequest::permission(REPRODUCE.into(), args.clone(), None));
                 if resp.failed {
@@ -527,7 +528,7 @@ mod tests {
         assert_eq!(r["result"]["isError"], true);
         let text = r["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.starts_with("Lantern has no tool \"frobnicate\". Its tools here are: steps_guide, review_target, network_requests"), "{text}");
-        assert!(!text.contains("approve") && !text.contains("spawn_agent") && text.ends_with("network_summarize."), "{text}");
+        assert!(!text.contains("approve") && !text.contains("spawn_agent") && text.ends_with("storage_suggest."), "{text}");
         let tools = handle_message(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}), &allow_all).unwrap();
         let approve = tools["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "approve").unwrap().clone();
         assert_eq!(approve["description"], "Internal: Claude Code's permission prompt. Lantern calls it for the CLI; never call it yourself.");
@@ -547,7 +548,7 @@ mod tests {
     #[test]
     fn only_the_main_agents_helper_lists_the_orchestra_tools() {
         let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
-        let every_chats: Vec<&str> = ["approve", "steps_guide", "review_target"].into_iter().chain(crate::network::TOOLS.iter().copied()).collect();
+        let every_chats: Vec<&str> = ["approve", "steps_guide", "review_target"].into_iter().chain(crate::network::TOOLS.iter().copied()).chain(crate::storage::TOOLS.iter().copied()).collect();
         assert_eq!(tool_names(&handle_message_as(&list, &allow_all, Offer::default()).unwrap()), every_chats);
         let names = tool_names(&handle_message_as(&list, &allow_all, LEAD).unwrap());
         assert_eq!(names[..every_chats.len()], every_chats);

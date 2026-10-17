@@ -85,6 +85,14 @@ impl Slots {
         self.slots.lock().unwrap().remove(id)
     }
 
+    /// The folders of the chats whose claude is running (or being started or stopped, which can't be told from here, so
+    /// it counts): a worktree or project one of them is in is in use. A stopped agent's chat has no session, so its folder
+    /// isn't in the list.
+    pub fn running_folders(&self) -> Vec<PathBuf> {
+        let slots: Vec<Arc<Slot>> = self.slots.lock().unwrap().values().cloned().collect();
+        slots.iter().filter(|s| s.session.try_lock().map(|g| g.is_some()).unwrap_or(true)).filter_map(|s| s.folder().ok()).collect()
+    }
+
     pub fn drain(&self) -> Vec<Arc<Slot>> {
         self.slots.lock().unwrap().drain().map(|(_, s)| s).collect()
     }

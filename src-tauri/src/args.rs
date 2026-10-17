@@ -345,6 +345,8 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
     allowed.extend(crate::permission::helper::LANTERN_TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
     // The network tools read the traffic the user captured themselves and change nothing outside Lantern.
     allowed.extend(crate::network::TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
+    // The storage tools scan and mark suggestions inside Lantern (read-only on disk): only the Storage tab's Delete deletes.
+    allowed.extend(crate::storage::TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
     if helper.role == Role::Main {
         allowed.extend(crate::permission::helper::ORCHESTRA_TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
     }
@@ -594,7 +596,7 @@ mod tests {
     }
 
     /// Every chat's network tools, allowed without asking (see network.rs).
-    const NETWORK_TOOLS: &str = "mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize";
+    const NETWORK_TOOLS: &str = "mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest";
 
     fn value_after<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
         args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str())
@@ -631,7 +633,7 @@ mod tests {
             lantern_prompt(Mode::Steps, true, &Role::Main)
         ));
         expected.push("--allowedTools".into());
-        expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
+        expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
         expected.extend(strs(&["--resume", "sess-9", "--model", "opus", "--effort", "high", "--advisor", "fable"]));
         let mut got = build_args(Mode::Steps, true, Some("sess-9"), Some("opus"), Some("high"), &main);
         got.extend(harness_args(Some("fable")));

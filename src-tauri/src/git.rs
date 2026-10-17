@@ -63,7 +63,7 @@ pub(crate) enum At<'a> {
 
 /// Runs `git` in `dir` and returns its trimmed stdout; a failure is git's own message. Blocking: call it off the async
 /// threads. Never asks for a password or opens an editor, and is stopped after `GIT_TIMEOUT`.
-fn run(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, String> {
+pub(crate) fn run(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, String> {
     run_at(At::Dir(dir), args, path_env)
 }
 
@@ -77,7 +77,7 @@ fn run_within(dir: &Path, args: &[&str], path_env: Option<&str>, limit: Duration
 }
 
 /// What `run` returns, exactly as git wrote it: for lists of file names (`-z`), where a name's own spaces count.
-fn run_raw(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, String> {
+pub(crate) fn run_raw(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, String> {
     run_raw_within(At::Dir(dir), args, path_env, GIT_TIMEOUT)
 }
 
