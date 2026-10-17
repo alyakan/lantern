@@ -250,6 +250,40 @@ describe("tethers", () => {
     expect([above.from.y, above.to.y]).toEqual([0, -200]);
   });
 
+  it("go vertical when the agents overlap on x, even for a tall one, so they never run backwards through the cards", () => {
+    const tall: Box = { x: 0, y: 0, w: 300, h: 1000 };
+    const t = tether(tall, { x: 200, y: 1056, w: 420, h: 520 });
+    expect([t.from.y, t.to.y]).toEqual([1000, 1056]);
+    const up = tether({ x: 200, y: 1056, w: 420, h: 520 }, tall);
+    expect([up.from.y, up.to.y]).toEqual([1056, 1000]);
+  });
+
+  it("stay horizontal when the agents overlap on y but not on x, and let the aspect decide when apart on both", () => {
+    const side = tether({ x: 0, y: 0, w: 300, h: 1000 }, { x: 320, y: 900, w: 300, h: 300 });
+    expect([side.from.x, side.to.x]).toEqual([300, 320]);
+    // Apart on both: far to the right and a little below is side by side, far below and a little right is above and below.
+    const wide = tether({ x: 0, y: 0, w: 300, h: 300 }, { x: 1000, y: 400, w: 300, h: 300 });
+    expect([wide.from.x, wide.to.x]).toEqual([300, 1000]);
+    const deep = tether({ x: 0, y: 0, w: 300, h: 300 }, { x: 400, y: 2000, w: 300, h: 300 });
+    expect([deep.from.y, deep.to.y]).toEqual([300, 2000]);
+  });
+
+  it("never end on the wrong side of where they start along their main axis, for agents that don't overlap", () => {
+    const sizes = [{ w: 300, h: 300 }, { w: 300, h: 1000 }, { w: 800, h: 240 }];
+    for (const sa of sizes) for (const sb of sizes) for (const x of [-1500, -400, -250, 0, 250, 400, 1500]) for (const y of [-1500, -1100, -300, 0, 300, 1100, 1500]) {
+      const a: Box = { x: 0, y: 0, ...sa };
+      const b: Box = { x, y, ...sb };
+      if (overlaps(a, b)) continue;
+      const t = tether(a, b);
+      const horizontal = !t.d.startsWith(`M ${t.from.x} ${t.from.y} C ${t.from.x} `);
+      const dx = b.x + b.w / 2 - (a.x + a.w / 2);
+      const dy = b.y + b.h / 2 - (a.y + a.h / 2);
+      // Boxes that touch have nothing between them, so the end may be level with the start but never behind it.
+      if (horizontal) expect(Math.sign(t.to.x - t.from.x) * Math.sign(dx), JSON.stringify({ a, b })).toBeGreaterThanOrEqual(0);
+      else expect(Math.sign(t.to.y - t.from.y) * Math.sign(dy), JSON.stringify({ a, b })).toBeGreaterThanOrEqual(0);
+    }
+  });
+
   it("stay on the edges for agents of any size, and never produce NaN", () => {
     for (const b of [{ x: 0, y: 0, w: 400, h: 600 }, { x: 10, y: 10, w: 1, h: 1 }, { x: 400, y: 0, w: 10, h: 10 }, { x: -3000, y: 9000, w: 300, h: 240 }]) {
       const t = tether(a, b);

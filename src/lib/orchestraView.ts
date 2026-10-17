@@ -122,8 +122,8 @@ export function summaryLine(s: State, max = 160): string {
   const tool = [...s.items].reverse().find((it): it is Extract<ChatItem, { type: "tool" }> => it.type === "tool");
   if (tool) return clip(`${tool.name} ${tool.summary}`.trim());
   const asked = s.items.find((it) => it.type === "user");
-  if (asked?.type === "user") return clip(asked.text.split("\n")[0]);
-  return "Waiting to start";
+  const first = asked?.type === "user" ? asked.text.split("\n").map((l) => l.trim()).find(Boolean) : undefined;
+  return first ? clip(first) : "Waiting to start";
 }
 
 /** The workers whose branch the main agent has asked the user to merge, and the user hasn't answered. */
@@ -148,7 +148,7 @@ export function money(usd: number): string {
 /** Tokens for a screen, short: "950 tok", "12k tok", "3.1M tok"; nothing for none. */
 export function tokens(n: number): string {
   if (n <= 0) return "";
-  const text = n < 1_000 ? `${n}` : n < 1_000_000 ? `${Math.round(n / 1_000)}k` : `${(n / 1_000_000).toFixed(1)}M`;
+  const text = n < 1_000 ? `${n}` : Math.round(n / 1_000) < 1_000 ? `${Math.round(n / 1_000)}k` : `${(n / 1_000_000).toFixed(1)}M`;
   return `${text} tok`;
 }
 

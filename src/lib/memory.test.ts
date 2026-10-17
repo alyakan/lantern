@@ -20,6 +20,9 @@ describe("memory text", () => {
     expect(memoryText(1500 * MB)).toBe("1.5 GB");
     expect(memoryText(0)).toBe("0 MB");
     expect(memoryText(1023 * MB)).toBe("1.0 GB");
+    // Rounds first, then picks the unit: never "1000 MB".
+    expect(memoryText(1048200000)).toBe("1.0 GB");
+    expect(memoryText(999 * MB)).toBe("999 MB");
   });
 
   it("writes a share as a whole percent, and a small one as under 1%", () => {

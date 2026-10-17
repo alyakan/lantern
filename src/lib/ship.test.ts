@@ -242,6 +242,16 @@ describe("the drafts", () => {
     expect(draftCommitMessage(null, [], "/p")).toBe("Update the project");
   });
 
+  it("calls a change that adds and removes files an update, and never says Add for one that removes", () => {
+    const mixed = [file("/p/a.ts", { created: true }), file("/p/old.ts", { deleted: true })];
+    expect(draftCommitMessage(null, mixed, "/p")).toBe("Update a.ts and old.ts");
+    expect(draftCommitMessage(null, [file("/p/a.ts", { created: true }), file("/p/b.ts", { created: true })], "/p")).toBe("Add a.ts and b.ts");
+    expect(draftCommitMessage(null, [file("/p/a.ts", { deleted: true }), file("/p/b.ts", { deleted: true })], "/p")).toBe("Remove a.ts and b.ts");
+    expect(draftCommitMessage(null, [...mixed, file("/p/c.ts", { created: true }), file("/p/d.ts", { deleted: true })], "/p")).toBe("Update 4 files");
+    expect(draftCommitMessage(null, [1, 2, 3, 4].map((i) => file(`/p/${i}.ts`, { created: true })), "/p")).toBe("Add 4 files");
+    expect(draftCommitMessage(null, [1, 2, 3, 4].map((i) => file(`/p/${i}.ts`, { deleted: true })), "/p")).toBe("Remove 4 files");
+  });
+
   it("lists the files in the pull request description, with how many more there are", () => {
     expect(draftPrBody([], "/p")).toBe("");
     expect(draftPrBody([file("/p/src/a.ts", { added: 3, removed: 1 }), file("/p/b.ts", { created: true }), file("/p/c.ts", { deleted: true })], "/p")).toBe(
