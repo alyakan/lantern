@@ -177,6 +177,9 @@ export function NewAgent({ main, shown }: { main: string; shown?: { open: boolea
               placeholder={role ? "What should it work on? For example: the login form." : "What should it do? This is the brief it starts from."}
               aria-required
               aria-invalid={!!problem && !form.task.trim()}
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
               onChange={(e) => set({ task: e.target.value })}
               onKeyDown={(e) => {
                 if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -189,7 +192,7 @@ export function NewAgent({ main, shown }: { main: string; shown?: { open: boolea
           {role && (
             <label>
               Brief <span className="new-agent-optional">what it is told; you can change it</span>
-              <textarea className="new-agent-brief" rows={7} value={brief} onChange={(e) => set({ brief: e.target.value })} />
+              <textarea className="new-agent-brief" rows={7} value={brief} autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => set({ brief: e.target.value })} />
             </label>
           )}
           <label>
