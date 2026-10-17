@@ -779,7 +779,9 @@
 
 /* The sidebar: a dock on the desktop, ruled off with an outline on its right. Its squares keep their places; the open one is outlined. */
 :root[data-theme="posthog"] .sb-panel { background: transparent; border-radius: 0; }
-:root[data-theme="posthog"] .sb-panel.expanded { background: var(--bg); }
+:root[data-theme="posthog"] .sb-panel.expanded, :root[data-theme="posthog"] .sb-panel.closing { background: var(--bg); }
+/* Its collapsed bar has no background, so the border goes with it the moment the pane is the bar, not as a fade around nothing. */
+:root[data-theme="posthog"] .sb-panel:not(.expanded):not(.closing) { transition: width var(--sb-close); }
 :root[data-theme="posthog"] .sidebar.pinned .sb-panel { background: var(--bg); }
 :root[data-theme="posthog"] .sidebar.pinned .sb-panel { box-shadow: inset -2px 0 0 var(--ph-ink); }
 :root[data-theme="posthog"] .sb-chip { outline: 1px solid var(--ph-ink); }
@@ -3028,6 +3030,10 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sidebar.dragging { user-select: none; cursor: col-resize; }
 .sb-panel { position: absolute; inset: 0 auto 0 0; width: 56px; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px; padding: 2px 0 8px var(--edge); overflow: hidden; background: var(--bg); border-radius: 0 var(--radius-float) var(--radius-float) 0; --sb-close: 0.22s cubic-bezier(0.32, 0.72, 0, 1); transition: width var(--sb-close), box-shadow 0.22s; }
 .sb-panel.expanded { width: var(--sb-open, 260px); box-shadow: var(--panel-shadow); }
+/* Closing, the border (the shadow's ring) is kept at full strength while the width narrows, so it follows the edge in, and only
+   fades once the pane is the bar, where it has no border. */
+.sb-panel.closing { box-shadow: var(--panel-shadow); }
+.sb-panel:not(.expanded):not(.closing) { transition: width var(--sb-close), box-shadow 0.12s; }
 .sidebar.pinned .sb-panel { width: 100%; box-shadow: none; transition: none; }
 .sidebar.peek .sb-panel { transition: none; }
 .sb-head { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 0 0 6px 8px; }
