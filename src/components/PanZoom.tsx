@@ -24,6 +24,14 @@ interface Props {
   label: string;
   /** When this changes the view frames the content again (new content); a resize does too, until you pan or zoom. */
   fitKey?: string;
+  /** Fit never zooms out past this by itself: something too big for the room is shown at this size, from its top left, and the user pans. */
+  minFit?: number;
+  /** The margin Fit leaves around the content (default 20). */
+  pad?: number;
+  /** Controls to put with the zoom buttons. */
+  tools?: ReactNode;
+  /** Something drawn over the surface (a legend, a note), out of the layout; it takes the pointer only where it asks for it. */
+  overlay?: ReactNode;
   children: ReactNode;
 }
 
@@ -32,7 +40,7 @@ interface Props {
  * zooms around the pointer, dragging pans, and the buttons zoom or fit it back. A press that doesn't move is still a click
  * on what's under it.
  */
-export function PanZoom({ width, height, label, fitKey = "", children }: Props) {
+export function PanZoom({ width, height, label, fitKey = "", minFit = 0, pad = FIT_PAD, tools, overlay, children }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, zoom: 1 });
   const current = useRef(view);
@@ -54,10 +62,11 @@ export function PanZoom({ width, height, label, fitKey = "", children }: Props) 
     const h = el.clientHeight;
     if (w <= 0 || h <= 0) return setView({ x: 0, y: 0, zoom: 1 });
     // The whole thing, centred, as big as the room allows.
-    const zoom = clampZoom(Math.min(FIT_MAX, (w - 2 * FIT_PAD) / width, (h - 2 * FIT_PAD) / height));
-    const next = { zoom, x: (w - width * zoom) / 2, y: (h - height * zoom) / 2 };
-    setView(next);
-  }, [width, height]);
+    const zoom = clampZoom(Math.max(minFit, Math.min(FIT_MAX, (w - 2 * pad) / width, (h - 2 * pad) / height)));
+    // Too big even at the smallest fit: it starts at its top left, with the rest a pan away.
+    const place = (room: number, size: number) => (size > room - 2 * pad ? pad : (room - size) / 2);
+    setView({ zoom, x: place(w, width * zoom), y: place(h, height * zoom) });
+  }, [width, height, minFit, pad]);
   useLayoutEffect(() => {
     touched.current = false;
     fit();
@@ -172,7 +181,9 @@ export function PanZoom({ width, height, label, fitKey = "", children }: Props) 
           <PanZoomReveal.Provider value={reveal}>{children}</PanZoomReveal.Provider>
         </div>
       </div>
+      {overlay}
       <div className="pz-tools" role="group" aria-label="Zoom">
+        {tools}
         <button aria-label="Zoom out" title="Zoom out (or pinch, or ⌘-scroll)" onClick={() => ease(zoomAt(view, 1 / 1.25, centre()))}>
           −
         </button>

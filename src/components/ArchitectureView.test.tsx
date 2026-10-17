@@ -2,12 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { initialState, type ChatItem, type State } from "../store";
 import { StepsView } from "./StepsView";
+import { act } from "@testing-library/react";
 import { ArchitectureTab } from "./ArchitectureTab";
 import { Md } from "./Md";
 import { ArchitecturePane } from "../lib/architecturePane";
 import { architectureMap } from "../lib/architecture";
 import { pagesOf } from "../lib/steps";
 import { TESTO_MAP } from "../lib/testoMap";
+import { DENSE_MAP } from "../lib/denseMap";
 
 vi.mock("../api", () => ({ api: { userName: () => Promise.resolve("Ada Lovelace") } }));
 // Mermaid needs a real browser's layout: older maps and other diagrams are tested on a stand-in drawing.
@@ -234,22 +236,199 @@ describe("a layered map in the Map tab", () => {
 
   it("lists every issue, Claude's and the boundary crossing Lantern found, and marks the arrows", () => {
     const { container } = render(<ArchitectureTab map={map} current={[]} pageNames={{}} onOpenPage={() => {}} />);
+    // The issues are under a chip over the map (not in the layout, so the map has the room); a click opens the list.
+    expect(within(screen.getByLabelText("Issues")).getByText("3 issues")).toBeInTheDocument();
+    expect(screen.queryByText(/goes around Device boundary/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /3 issues/ }));
     const list = within(screen.getByLabelText("Issues"));
-    expect(list.getByText("3 issues")).toBeInTheDocument();
     expect(list.getByText(/goes around Device boundary/)).toBeInTheDocument();
     expect(list.getByText(/found by Lantern from the layers/)).toBeInTheDocument();
     expect(container.querySelectorAll(".arch-edge.skip")).toHaveLength(1);
     expect(container.querySelectorAll(".arch-edge.issue")).toHaveLength(1);
     expect(container.querySelectorAll(".arch-crossing").length).toBeGreaterThan(10);
-    // Hovering a box shows what it is, its layer and its issue, in the same tall slot the list was in (a slot that
-    // changed size would refit the map and move the box from under the pointer).
-    const slot = container.querySelector(".arch-panel-slot")!;
-    expect(slot).toHaveClass("tall");
+    // Hovering an issue lights its box or arrow; hovering a box shows what it is, its layer and its issue, over the map
+    // (an overlay, so the map doesn't refit and move the box from under the pointer).
+    fireEvent.mouseEnter(list.getByText(/two jobs in one type/).closest("li")!);
+    expect(box(/^Window events/).getAttribute("data-focus")).toBe("full");
+    expect(box(/^Gating/).getAttribute("data-focus")).toBe("dim");
+    fireEvent.mouseLeave(list.getByText(/two jobs in one type/).closest("ul")!);
     fireEvent.mouseEnter(box(/^Window events/));
     expect(screen.getByText("Testo implementation", { selector: ".arch-panel-layer" })).toBeInTheDocument();
     expect(screen.getByText(/two jobs in one type/, { selector: ".arch-panel-issue" })).toBeInTheDocument();
-    expect(container.querySelector(".arch-panel-slot")).toBe(slot);
-    expect(slot).toHaveClass("tall");
   });
 });
 
+
+describe("the focus while stepping through the design", () => {
+  const pages = pagesOf(chat(4));
+  const map = architectureMap(pages)!;
+  const names = { [pages[2].key]: "Part 1 of 2 — Gateway", [pages[3].key]: "Part 2 of 2 — Auth service" };
+  const box = (name: RegExp) => screen.getByRole("button", { name });
+  const focusOf = (el: Element) => el.getAttribute("data-focus");
+  const edgeFocus = (container: HTMLElement) => [...container.querySelectorAll(".arch-edge")].map((e) => focusOf(e));
+
+  it("draws everything at full strength on the Overview, where nothing is covered", () => {
+    const { container } = render(<ArchitectureTab map={map} current={[]} pageNames={names} onOpenPage={() => {}} />);
+    expect(container.querySelector(".arch-graph")).not.toHaveClass("focused");
+    for (const el of container.querySelectorAll("[data-node], .arch-edge")) expect(focusOf(el)).toBe("full");
+  });
+
+  it("steps back the boxes and arrows a part is not about, and half-lights an arrow out of it", () => {
+    const { container } = render(<ArchitectureTab map={map} current={["gw"]} pageNames={names} onOpenPage={() => {}} />);
+    expect(container.querySelector(".arch-graph")).toHaveClass("focused");
+    expect(focusOf(box(/^Gateway/))).toBe("full");
+    expect(focusOf(box(/^Auth service/))).toBe("dim");
+    expect(focusOf(box(/^Logs/))).toBe("dim");
+    // gw → authSvc leaves the covered box; authSvc → logs touches none.
+    expect(edgeFocus(container)).toEqual(["context", "dim"]);
+    // A faint arrow's label is faint with it.
+    expect(container.querySelector('[data-pill]')?.getAttribute("data-focus")).toBe("context");
+  });
+
+  it("shows a faint box at full strength when it is the one looked at", () => {
+    render(<ArchitectureTab map={map} current={["gw"]} pageNames={names} onOpenPage={() => {}} />);
+    fireEvent.mouseEnter(box(/^Logs/));
+    expect(box(/^Logs/)).toHaveClass("shown");
+  });
+
+  describe("Show all", () => {
+    const button = () => screen.getByRole("button", { name: "Show everything while held" });
+    const drawn = (container: HTMLElement) => [...container.querySelectorAll("[data-node], .arch-edge")].map((e) => focusOf(e));
+    const setup = () => render(<ArchitectureTab map={map} current={["gw"]} pageNames={names} onOpenPage={() => {}} />);
+
+    it("is a button that says what it does and is not pressed to begin with", () => {
+      setup();
+      expect(button()).toHaveAttribute("aria-pressed", "false");
+      expect(button()).toHaveTextContent("Show all");
+      expect(button().querySelector("svg")).not.toBeNull();
+    });
+
+    it("shows everything while a press (mouse, touch or pen) is held, and goes back when it is let go", () => {
+      for (const pointerType of ["mouse", "touch", "pen"]) {
+        const { container, unmount } = setup();
+        expect(drawn(container)).toContain("dim");
+        fireEvent.pointerDown(button(), { pointerType, button: 0 });
+        expect(button()).toHaveAttribute("aria-pressed", "true");
+        expect(drawn(container).every((v) => v === "full")).toBe(true);
+        fireEvent.pointerUp(button(), { pointerType });
+        expect(button()).toHaveAttribute("aria-pressed", "false");
+        expect(drawn(container)).toContain("dim");
+        unmount();
+      }
+    });
+
+    it("is not a switch: a click that stays on it twice leaves it off", () => {
+      const { container } = setup();
+      fireEvent.pointerDown(button(), { button: 0 });
+      fireEvent.pointerUp(button());
+      fireEvent.click(button());
+      fireEvent.pointerDown(button(), { button: 0 });
+      fireEvent.pointerUp(button());
+      fireEvent.click(button());
+      expect(button()).toHaveAttribute("aria-pressed", "false");
+      expect(drawn(container)).toContain("dim");
+    });
+
+    it("lets go when the press is cancelled, or the pointer leaves it", () => {
+      const { container } = setup();
+      fireEvent.pointerDown(button(), { button: 0 });
+      fireEvent.pointerCancel(button());
+      expect(drawn(container)).toContain("dim");
+      fireEvent.pointerDown(button(), { button: 0 });
+      fireEvent.pointerLeave(button());
+      expect(button()).toHaveAttribute("aria-pressed", "false");
+      expect(drawn(container)).toContain("dim");
+    });
+
+    it("lets go when the press ends away from the button, the window loses focus or is hidden", () => {
+      const { container } = setup();
+      fireEvent.pointerDown(button(), { button: 0 });
+      act(() => void window.dispatchEvent(new Event("pointerup")));
+      expect(button()).toHaveAttribute("aria-pressed", "false");
+      fireEvent.pointerDown(button(), { button: 0 });
+      act(() => void window.dispatchEvent(new Event("blur")));
+      expect(button()).toHaveAttribute("aria-pressed", "false");
+      fireEvent.pointerDown(button(), { button: 0 });
+      act(() => void document.dispatchEvent(new Event("visibilitychange")));
+      expect(button()).toHaveAttribute("aria-pressed", "false");
+      expect(drawn(container)).toContain("dim");
+    });
+
+    it("ignores a press of another mouse button", () => {
+      setup();
+      fireEvent(button(), new MouseEvent("pointerdown", { button: 2, bubbles: true }));
+      expect(button()).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("works from the keyboard: Space or Enter held shows everything, released puts it back, and focus leaving puts it back", () => {
+      const { container } = setup();
+      for (const key of [" ", "Enter"]) {
+        fireEvent.keyDown(button(), { key });
+        expect(button()).toHaveAttribute("aria-pressed", "true");
+        expect(drawn(container).every((v) => v === "full")).toBe(true);
+        fireEvent.keyUp(button(), { key });
+        expect(button()).toHaveAttribute("aria-pressed", "false");
+      }
+      fireEvent.keyDown(button(), { key: "a" });
+      expect(button()).toHaveAttribute("aria-pressed", "false");
+      fireEvent.keyDown(button(), { key: " " });
+      fireEvent.blur(button());
+      expect(button()).toHaveAttribute("aria-pressed", "false");
+      expect(drawn(container)).toContain("dim");
+    });
+
+    it("is let go when the map goes away, so the next one doesn't start lit", () => {
+      const { unmount } = setup();
+      fireEvent.pointerDown(button(), { button: 0 });
+      unmount();
+      const { container } = setup();
+      expect(button()).toHaveAttribute("aria-pressed", "false");
+      expect(drawn(container)).toContain("dim");
+    });
+  });
+});
+
+describe("the labels on a dense map in the Map tab", () => {
+  const overview = `# Overview — dense\n\n\`\`\`architecture\n${JSON.stringify(DENSE_MAP)}\n\`\`\``;
+  const map = architectureMap(pagesOf([{ type: "user", id: "u0", text: "map it" }, { type: "assistant", id: "a0", text: overview }]))!;
+
+  it("draws a pill for each label placed, cut short when long, and a dot for one left off that shows when its arrow is looked at", () => {
+    const { container } = render(<ArchitectureTab map={map} current={[]} pageNames={{}} onOpenPage={() => {}} />);
+    const pills = [...container.querySelectorAll("[data-pill]")];
+    expect(pills.length).toBeGreaterThan(35);
+    expect(container.querySelector(".arch-pills")).toHaveAttribute("aria-hidden", "true");
+    expect(pills.some((p) => p.textContent === "pairs, measures a…")).toBe(true);
+    const dots = container.querySelectorAll(".arch-edge-dot");
+    // Every labelled arrow has a pill or a dot.
+    expect(pills.length + dots.length).toBe(DENSE_MAP.edges.filter((e) => "label" in e && e.label).length);
+    // The arrow says its whole label, to a screen reader and as a tooltip.
+    const edge = [...container.querySelectorAll(".arch-edge")].find((e) => e.querySelector("title")?.textContent?.includes("pairs, measures and reports back"))!;
+    expect(edge).toBeTruthy();
+    // Pointing at it shows the label whole, over the others.
+    fireEvent.mouseEnter(edge);
+    expect(container.querySelector('[data-pill].open')?.textContent).toContain("pairs, measures and reports back");
+    fireEvent.mouseLeave(edge);
+    expect(container.querySelector("[data-pill].open")).toBeNull();
+  });
+
+  it("shows a box's arrows' labels whole while the box is looked at", () => {
+    const { container } = render(<ArchitectureTab map={map} current={[]} pageNames={{}} onOpenPage={() => {}} />);
+    fireEvent.mouseEnter(screen.getByRole("button", { name: /^Bluetooth bridge/ }));
+    expect([...container.querySelectorAll("[data-pill].open")].map((p) => p.textContent).sort()).toEqual(["BLE", "logs", "pairs, measures and reports back to the…", "reading"].sort());
+  });
+
+  it("gives an arrow a wide line to point at", () => {
+    const { container } = render(<ArchitectureTab map={map} current={[]} pageNames={{}} onOpenPage={() => {}} />);
+    expect(container.querySelectorAll(".arch-edge-hit")).toHaveLength(DENSE_MAP.edges.length);
+  });
+
+  it("opens the map larger, in a dialog with the same map in it", () => {
+    render(<ArchitectureTab map={map} current={[]} pageNames={{}} onOpenPage={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open the map larger" }));
+    const big = within(screen.getByRole("dialog", { name: "Architecture map, larger", hidden: true }));
+    expect(big.getAllByRole("button", { name: /^App shell/, hidden: true }).length).toBeGreaterThan(0);
+    expect(big.getByRole("button", { name: "Show everything while held", hidden: true })).toBeInTheDocument();
+    fireEvent.click(big.getByRole("button", { name: "Close", hidden: true }));
+    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
+  });
+});
