@@ -159,6 +159,31 @@ describe("the pull request loop", () => {
     expect(result.current.views[FOLDER].needsYou).toBe(true);
   });
 
+  it("Fix it myself: a turn that ends while gh fails or finds no pull request still counts at the next look", async () => {
+    for (const miss of [() => prWatch.mockRejectedValueOnce("network"), () => prWatch.mockResolvedValueOnce({ kind: "no_pr" })]) {
+      cleanup();
+      localStorage.clear();
+      prWatch.mockReset();
+      prWatch.mockResolvedValue(FAILED());
+      const { result, send, onFailed, rerender, props } = setup({ mode: "fix", tries: 3 });
+      await settle();
+      expect(send).toHaveBeenCalledTimes(1);
+      rerender(props([chat(true)]));
+      await settle();
+      // The look made when the turn ends gets nothing back...
+      miss();
+      rerender(props([chat(false)]));
+      await settle();
+      expect(send).toHaveBeenCalledTimes(1);
+      // ...so the next one (a refresh: with no pull request found there is no poll) sees the same failure on the same commit, and stops.
+      await act(async () => result.current.refresh(FOLDER));
+      await settle();
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(result.current.views[FOLDER].loop.status).toBe("stalled");
+      expect(onFailed).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it("Fix it myself: each new failure after a push is another try, up to the limit, then Out of tries", async () => {
     let n = 0;
     prWatch.mockImplementation(async () => FAILED(String(++n), `c${n}`));

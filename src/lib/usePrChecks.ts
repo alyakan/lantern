@@ -132,9 +132,11 @@ export function usePrChecks(opts: PrChecksOptions) {
     }
     clearTimeout(timers.current[folder]);
     inFlight.current.add(folder);
-    // A turn that ended before this look counts for it; one that ends during it needs a look of its own.
+    // A turn that ended before this look counts for it; one that ends during it needs a look of its own. The signal is kept
+    // until a look decides with it (gh failing or no pull request found leaves it for the next look).
     const ended = turnEnded.current[folder] === true;
     turnEnded.current[folder] = false;
+    let decided = false;
     try {
       let found = null;
       try {
@@ -153,8 +155,10 @@ export function usePrChecks(opts: PrChecksOptions) {
       const before = looksRef.current[folder]?.snap;
       if (!before || before.pr.number !== snap.pr.number || before.pr.head_sha !== snap.pr.head_sha) startedAt.current[folder] = Date.now();
       show(folder, { snap, access: "ok" });
+      decided = true;
       await decide(folder, snap, ended);
     } finally {
+      if (ended && !decided) turnEnded.current[folder] = true;
       inFlight.current.delete(folder);
       if (again.current.delete(folder)) void look(folder);
       else schedule(folder);

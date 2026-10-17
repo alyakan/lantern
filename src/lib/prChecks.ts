@@ -151,10 +151,16 @@ export function step({ setting, snap, loop, busy, turnEnded }: StepInput): StepR
     if (sig === loop.sentSig) {
       // The same failing run as the one sent. Claude's turn is over and the branch hasn't moved: the fix did not land.
       if (turnEnded && sameCommit(snap.pr.head_sha, loop.sentHead)) return tell({ ...loop, status: "stalled" });
-      return idle;
+      // A new commit that fails a check with no run to tell it by (the signature can't change) is a new failure; with a run,
+      // the checks shown are still the old ones, so wait for the new run.
+      const newCommit = snap.pr.head_sha !== loop.sentHead;
+      const hasRun = snap.checks.some((c) => c.bucket === "fail" && c.run_id);
+      if (!(turnEnded && newCommit && !hasRun)) return idle;
+    } else if (sameCommit(snap.pr.head_sha, loop.sentHead)) {
+      // Another failing run on the same commit. While Claude is still working it may yet push, so wait; once its turn is over,
+      // nothing was pushed since the last try.
+      return turnEnded && !busy ? tell({ ...loop, status: "stalled" }) : idle;
     }
-    // Another failing run. On the same commit, nothing was pushed since the last try.
-    if (sameCommit(snap.pr.head_sha, loop.sentHead)) return tell({ ...loop, status: "stalled" });
   }
   // Wait for Claude to finish what it is doing.
   if (busy) return idle;
