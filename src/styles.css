@@ -687,10 +687,12 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 .viewer-status { flex: 0 0 auto; max-width: 55%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--text-2); font-variant-numeric: tabular-nums; }
 .viewer-detail { color: var(--muted); }
 .viewer.working .viewer-status { color: var(--working); }
-/* While Claude works, an orange glint runs along the viewer's bottom edge. */
+/* While Claude works, an orange glint runs along the viewer's bottom edge. It moves by transform, which WebKit animates off
+   the main thread: moved by `left`, it laid the page out every frame for as long as Claude worked. */
 .viewer-progress { position: absolute; left: 14px; right: 14px; bottom: 0; height: 2px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, var(--working) 18%, transparent); }
-.viewer-progress::after { content: ""; position: absolute; top: 0; bottom: 0; width: 35%; border-radius: inherit; background: linear-gradient(90deg, transparent, var(--working), transparent); animation: glint 1.6s ease-in-out infinite; }
-@keyframes glint { from { left: -35%; } to { left: 100%; } }
+.viewer-progress::after { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 35%; border-radius: inherit; background: linear-gradient(90deg, transparent, var(--working), transparent); animation: glint 1.6s ease-in-out infinite; }
+/* From just off the left edge to just off the right one: the glint is 35% of the bar, so the bar is 100/35 of it. */
+@keyframes glint { from { transform: translateX(-100%); } to { transform: translateX(286%); } }
 @media (prefers-reduced-motion: reduce) { .viewer-progress::after { animation: none; left: 0; width: 100%; } }
 .banner { display: flex; align-items: center; gap: 10px; padding: 6px 12px; margin: 0 var(--edge) var(--edge); font-size: calc(12.5px * var(--font-scale)); border: 1px solid var(--line-strong); border-radius: var(--radius-inner); }
 .banner span { flex: 1; }
@@ -831,13 +833,14 @@ button.msg-action:disabled { opacity: 0.5; cursor: default; }
 .activity-line:hover:not(:disabled) { background: var(--bg-hover); color: var(--text-2); }
 .activity-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activity-count { flex: none; color: var(--muted-text); font-variant-numeric: tabular-nums; }
-/* While Claude works, a light sweep runs across the current step so it reads as live, not static. */
+/* While Claude works, a light sweep runs across the current step so it reads as live, not static. In steps, ten a second:
+   each one repaints the text, and with an agent at work in every card on the canvas, a sweep each frame kept WebKit busy all the time. */
 .activity.live > .activity-line:first-child .activity-text {
   color: transparent;
   background: linear-gradient(90deg, var(--muted) 0%, var(--muted) 25%, var(--working) 50%, var(--muted) 75%, var(--muted) 100%) 0 0 / 220% 100%;
   -webkit-background-clip: text;
   background-clip: text;
-  animation: shimmer 1.8s linear infinite;
+  animation: shimmer 1.8s steps(18) infinite;
 }
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0% 0; } }
 @media (prefers-reduced-motion: reduce) { .activity.live > .activity-line:first-child .activity-text { animation: none; color: var(--text-2); background: none; } }
@@ -2334,8 +2337,9 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .canvas-world.animating { transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1); }
 .canvas-tethers { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: visible; pointer-events: none; }
 .tether { fill: none; stroke: color-mix(in srgb, var(--text) 30%, transparent); stroke-width: 3px; vector-effect: non-scaling-stroke; stroke-linecap: round; transition: stroke 0.3s; }
-.tether.working { stroke: var(--working); stroke-width: 3.5px; stroke-dasharray: 1 9; animation: graph-flow 0.6s linear infinite; }
-.tether.waiting { stroke: var(--attn); stroke-width: 3.5px; stroke-dasharray: 8 7; animation: graph-flow 1.2s linear infinite; }
+/* The dashes flow in steps, ten a second: a dash offset is repainted on the main thread, and moved every frame on every tether it kept the canvas repainting the whole time agents worked. */
+.tether.working { stroke: var(--working); stroke-width: 3.5px; stroke-dasharray: 1 9; animation: graph-flow 0.6s steps(6) infinite; }
+.tether.waiting { stroke: var(--attn); stroke-width: 3.5px; stroke-dasharray: 8 7; animation: graph-flow 1.2s steps(12) infinite; }
 .tether.idle { stroke: color-mix(in srgb, var(--add) 70%, var(--text) 10%); }
 .tether.ended { stroke: var(--faint); stroke-dasharray: 3 7; }
 .tether.failed { stroke: var(--del); stroke-dasharray: 3 7; opacity: 0.7; }
