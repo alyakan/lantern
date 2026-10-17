@@ -4,6 +4,7 @@ import type { FoundFile, ModelOption, RecentFolder, SessionSummary, SkillEntry, 
 import { basename } from "../lib/diff";
 import { useShortcut } from "../lib/shortcuts";
 import { matchCommands } from "../lib/slash";
+import { listKey } from "../lib/listKey";
 import { decodeDraft, encodeDraft, expandPastes, inUse, isBigPaste, nextNumber, placeholder as pasteToken, tokenBefore, type Pastes } from "../lib/paste";
 import { describeCommands, replaceTrigger, sections as menuSections, triggerAt, type MenuCommand } from "../lib/complete";
 import { CompletionMenu, type McpIssue } from "./CompletionMenu";
@@ -484,6 +485,8 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
                 return;
               }
               if (onMenuKey(e)) return;
+              // Shift+Enter and Tab in a list line continue and indent the list (not in a terminal command).
+              if (!terminal && listKey(e, composingKey(e))) return;
               // ↑ at the start of the box (or in an empty one) recalls the last prompt; ↓ goes forward again.
               if (history && !terminal && !composingKey(e) && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
                 const { selectionStart: from, selectionEnd: to } = e.currentTarget;
