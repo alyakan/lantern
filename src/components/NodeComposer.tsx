@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useNodeActions } from "../lib/canvasContext";
+import { listKey } from "../lib/listKey";
 import type { Status } from "../store";
 import { ArrowUpIcon, HudStopIcon } from "./icons";
 
@@ -37,6 +38,7 @@ export function NodeComposer({ slot, status, queued }: { slot: string; status: S
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (listKey(e)) return;
     if (e.key !== "Enter" || e.shiftKey || e.nativeEvent.isComposing) return;
     e.preventDefault();
     submit();

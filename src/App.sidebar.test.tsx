@@ -450,6 +450,59 @@ describe("a team in the sidebar", () => {
     // The team is still on its canvas.
     expect(screen.getByLabelText(/^Lead,/)).toBeInTheDocument();
   });
+
+  describe("coming back to a team", () => {
+    /** Restores the team, opens its canvas, then goes to another chat: the team row is what is left to click. */
+    async function awayFrom(maximize: RegExp | null) {
+      localStorage.setItem("session.openChats", JSON.stringify(team));
+      await launch();
+      fireEvent.click(await screen.findByRole("button", { name: /^Restore( all)?$/ }));
+      const acme = await project("acme-api");
+      fireEvent.click(await within(acme).findByRole("button", { name: /Team: / }));
+      await screen.findByLabelText(/^Lead,/);
+      if (maximize) {
+        fireEvent.click(await screen.findByRole("button", { name: maximize }));
+        await waitFor(() => expect(screen.queryByLabelText(/^Lead,/)).toBeNull());
+      }
+      fireEvent.click(screen.getByRole("button", { name: "New" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: /^Chat/ }));
+      await waitFor(() => expect(screen.queryByLabelText(/^Lead,/)).toBeNull());
+      fireEvent.click(within(acme).getByRole("button", { name: /^1 agent in / }));
+      return acme;
+    }
+    const teamRow = (acme: HTMLElement) => within(acme).getByRole("button", { name: /Team: / });
+
+    it("shows an agent that was open full size, still full size", async () => {
+      const acme = await awayFrom(/^Open Login form full size$/);
+      fireEvent.click(teamRow(acme));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Canvas" })).toHaveAttribute("aria-pressed", "false"));
+      expect(screen.queryByLabelText(/^Lead,/)).toBeNull();
+      expect(within(screen.getByRole("complementary", { name: "Projects" })).getByRole("button", { name: /^Login form, acme-api/ })).toHaveAttribute("aria-current", "true");
+    });
+
+    it("shows the Lead when it was open full size", async () => {
+      const acme = await awayFrom(/^Open Lead full size$/);
+      fireEvent.click(teamRow(acme));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Canvas" })).toHaveAttribute("aria-pressed", "false"));
+      expect(screen.queryByLabelText(/^Lead,/)).toBeNull();
+      expect(within(screen.getByRole("complementary", { name: "Projects" })).getByRole("button", { name: /^Login form, acme-api/ })).not.toHaveAttribute("aria-current", "true");
+    });
+
+    it("shows the canvas when the agent that was open full size has been closed", async () => {
+      const acme = await awayFrom(/^Open Login form full size$/);
+      fireEvent.click(within(within(acme).getByRole("list", { name: /^Agents in / })).getByRole("button", { name: /^Close Login form/ }));
+      fireEvent.click(within(await screen.findByRole("group", { name: /^Close / })).getByRole("button", { name: "Discard work and close" }));
+      await waitFor(() => expect(within(acme).queryByRole("button", { name: /^1 agent in / })).toBeNull());
+      fireEvent.click(teamRow(acme));
+      expect(await screen.findByLabelText(/^Lead,/)).toBeInTheDocument();
+    });
+
+    it("shows the canvas when it was on the canvas", async () => {
+      const acme = await awayFrom(null);
+      fireEvent.click(teamRow(acme));
+      expect(await screen.findByLabelText(/^Lead,/)).toBeInTheDocument();
+    });
+  });
 });
 
 describe("closing chats from the sidebar", () => {
