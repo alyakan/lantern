@@ -2327,8 +2327,7 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .canvas { container: canvas / inline-size; position: relative; flex: 1; min-height: 0; margin: 0 var(--edge) var(--edge); overflow: hidden; overflow: clip; border-radius: var(--radius-float); box-shadow: var(--card-shadow); cursor: grab; touch-action: none; overscroll-behavior: none;
   background-color: var(--bg-subtle);
   background-image: radial-gradient(circle, color-mix(in srgb, var(--text) 16%, transparent) 1px, transparent 1.3px);
-  background-size: calc(28px * var(--zoom, 1)) calc(28px * var(--zoom, 1));
-  background-position: var(--vx, 0) var(--vy, 0); }
+  background-size: 28px 28px; }
 .split-left .canvas { margin: 0; }
 .canvas.panning { cursor: grabbing; }
 /* A layer of its own only while it moves: kept at rest, WebKit scales the picture it drew at the first zoom, so text is soft. */

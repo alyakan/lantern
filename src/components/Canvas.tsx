@@ -487,6 +487,8 @@ function Announcer({ nodes }: { nodes: OrchestraNode[] }) {
 }
 
 const sameSize = (a: Size, b: Size) => a.w === b.w && a.h === b.h;
+/** The canvas's dots, spaced 28 apart in the world and moving with it: set on the canvas itself, so nothing inside it is styled again. */
+const dotGrid = (v: View) => ({ backgroundSize: `${28 * v.zoom}px ${28 * v.zoom}px`, backgroundPosition: `${v.x}px ${v.y}px` });
 
 /**
  * The orchestra's canvas: each agent a floating chat, tethered to the main agent it works for. Drag a title to move one,
@@ -554,12 +556,14 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       if (animate) window.setTimeout(() => w.classList.remove("animating"), 320);
     }
     if (vp) {
-      vp.style.setProperty("--zoom", String(v.zoom));
-      vp.style.setProperty("--vx", `${v.x}px`);
-      vp.style.setProperty("--vy", `${v.y}px`);
+      Object.assign(vp.style, dotGrid(v));
     }
     // Cards below SUMMARY_ENTER, chats again above SUMMARY_EXIT; in between, whichever it was.
     summaryRef.current = inSummary(summaryRef.current, v.zoom);
+    // --zoom is inherited, so every element of every card is styled again when it changes: it is kept up to date only
+    // while the cards are summaries, which are drawn by it. Changed on each frame of a pan or a pinch with chats showing,
+    // it made restyling the whole canvas most of what a frame cost.
+    if (summaryRef.current && vp) vp.style.setProperty("--zoom", String(v.zoom));
     refreshUnseen();
     refreshOffScreen();
     // A folded card's height depends on the zoom once it is a card, and its tether meets it.
@@ -937,12 +941,15 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   useAction("canvas-previous-agent", () => cycle(-1), hasFocus);
 
   const initial = view.current;
+  // The canvas's own style as it first was: from then on apply() sets it, and a style drawn from the current view would have
+  // React set --zoom again with each zoom step (see apply).
+  const first = useRef(view.current).current;
   return (
     <div
       className={`canvas${summary ? " summary" : ""}`}
       ref={viewport}
       data-testid="canvas"
-      style={{ "--zoom": initial.zoom, "--vx": `${initial.x}px`, "--vy": `${initial.y}px` } as CSSProperties}
+      style={{ "--zoom": first.zoom, ...dotGrid(first) } as CSSProperties}
       onFocus={() => setHasFocus(true)}
       onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setHasFocus(false)}
       onPointerDown={onBackgroundDown}
