@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { architectureBlock, edgeCrossings, edgesThroughBoxes, issuesOf, layoutArchitecture, nearest, parseArchitecture, pillText, pillWidth, placeLabels, PILL_CHARS, PILL_H, rowMaxFor, routePath, wrapLabel, type ArchLayout, type ArchSpec, type LabelInput, type Rect } from "./archGraph";
+import { architectureBlock, edgeCrossings, edgesThroughBoxes, issuesOf, layoutArchitecture, nearest, parseArchitecture, pillText, pillWidth, placeLabels, PILL_CHARS, PILL_H, bestRows, routePath, wrapLabel, type ArchLayout, type ArchSpec, type LabelInput, type Rect } from "./archGraph";
 import { DENSE_MAP } from "./denseMap";
 import { TESTO_MAP } from "./testoMap";
 
@@ -235,6 +235,14 @@ describe("the labels on the arrows (pills)", () => {
     expect(edgeCrossings(l.edges)).toBeLessThanOrEqual(49);
   });
 
+  it("keeps the layer names' column clear of arrows and pills", () => {
+    for (const layout of [l, layoutArchitecture(testo()), layoutArchitecture(dense(), "LR", 2)]) {
+      expect(layout.gutter).toBeGreaterThan(0);
+      for (const e of layout.edges) for (const p of e.poly) expect(p.x).toBeGreaterThanOrEqual(layout.gutter);
+      for (const e of layout.edges) if (e.pill?.placed) expect(e.pill.x - e.pill.w / 2).toBeGreaterThanOrEqual(layout.gutter);
+    }
+  });
+
   it("draws two arrows between the same boxes, one each way, side by side", () => {
     const a = l.edges.find((e) => e.from === "ble" && e.to === "device")!;
     const b = l.edges.find((e) => e.from === "device" && e.to === "ble")!;
@@ -269,13 +277,20 @@ describe("the labels on the arrows (pills)", () => {
     for (const p of placed) for (const n of f.nodes) expect(overlap(p, boxOf(n))).toBe(false);
   });
 
-  it("takes fewer boxes to a row in a narrow room, so the map stays readable", () => {
-    const wide = rowMaxFor(dense(), 1600);
-    const narrow = rowMaxFor(dense(), 600);
-    expect(wide).toBe(5);
-    expect(narrow).toBeLessThan(wide);
-    expect(narrow).toBeGreaterThanOrEqual(2);
-    expect(rowMaxFor(dense(), 0)).toBe(5);
+  it("takes fewer boxes to a row in a narrow room, so the map needn't be panned sideways", () => {
+    const made: number[] = [];
+    const layoutFor = (r: number) => (made.push(r), layoutArchitecture(dense(), "LR", r));
+    const wide = bestRows(layoutFor, { w: 1800, h: 1400 }, 0.75);
+    // Room for the widest: it is the only one made.
+    expect(wide.rowMax).toBe(5);
+    expect(made).toEqual([5]);
+    const narrow = bestRows((r) => layoutArchitecture(dense(), "LR", r), { w: 600, h: 700 }, 0.75);
+    expect(narrow.rowMax).toBeLessThan(5);
+    expect(narrow.rowMax).toBeGreaterThanOrEqual(2);
+    // The one it takes is no wider than the room at the smallest fit (or the narrowest there is).
+    expect(narrow.layout.width * 0.75 <= 600 - 16 || narrow.rowMax === 2).toBe(true);
+    // No room yet: the widest.
+    expect(bestRows((r) => layoutArchitecture(dense(), "LR", r), { w: 0, h: 0 }, 0.75).rowMax).toBe(5);
     const rows = (max: number) => new Set(layoutArchitecture(dense(), "LR", max).nodes.filter((n) => n.layer === "domain").map((n) => n.y)).size;
     expect(rows(2)).toBeGreaterThan(rows(5));
   });

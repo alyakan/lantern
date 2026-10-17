@@ -432,3 +432,31 @@ describe("the labels on a dense map in the Map tab", () => {
     expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
   });
 });
+
+describe("fitting the map in the room", () => {
+  const overview = `# Overview — dense\n\n\`\`\`architecture\n${JSON.stringify(DENSE_MAP)}\n\`\`\``;
+  const map = architectureMap(pagesOf([{ type: "user", id: "u0", text: "map it" }, { type: "assistant", id: "a0", text: overview }]))!;
+
+  it("keeps the fitted map clear of the legend at the top and the controls at the bottom", () => {
+    const w = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth");
+    const h = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 1400 });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => 900 });
+    try {
+      render(<ArchitectureTab map={map} current={[]} pageNames={{}} onOpenPage={() => {}} />);
+      const t = /translate\((-?[\d.]+)px, (-?[\d.]+)px\) scale\(([\d.]+)\)/.exec((document.querySelector(".pz-world") as HTMLElement).style.transform)!;
+      const [x, y, zoom] = [Number(t[1]), Number(t[2]), Number(t[3])];
+      const world = document.querySelector(".pz-world") as HTMLElement;
+      const height = Number(world.style.height.replace("px", ""));
+      expect(y).toBeGreaterThanOrEqual(34);
+      expect(y + height * zoom).toBeLessThanOrEqual(900 - 44);
+      expect(x).toBeGreaterThanOrEqual(0);
+      expect(zoom).toBeGreaterThanOrEqual(0.75);
+    } finally {
+      if (w) Object.defineProperty(HTMLElement.prototype, "clientWidth", w);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientWidth;
+      if (h) Object.defineProperty(HTMLElement.prototype, "clientHeight", h);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientHeight;
+    }
+  });
+});

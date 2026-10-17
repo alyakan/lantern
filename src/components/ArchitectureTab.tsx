@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { fitScale, issuesOf, layoutArchitecture, nearest, parseArchitecture, pillWidth, rowMaxFor, routePath, type ArchLayout, type Change, type MapIssue, type PlacedNode, type Status } from "../lib/archGraph";
+import { bestRows, fitScale, issuesOf, layoutArchitecture, nearest, parseArchitecture, pillWidth, routePath, type ArchLayout, type Change, type MapIssue, type PlacedNode, type Status } from "../lib/archGraph";
 import { focusOf } from "../lib/archFocus";
 import type { ArchitectureMap } from "../lib/architecture";
 import { MapDiagram, useDiagram } from "./Diagram";
@@ -13,6 +13,8 @@ export const STATUS_LABEL: Record<Status, string> = { done: "Done", "in-progress
 const CAPTION: Record<Status, string> = { done: "Done ✓", "in-progress": "In progress", planned: "Planned" };
 /** Fit never zooms the map out past this: a box's name stays about 9px, and a map that doesn't fit is panned. */
 const MIN_FIT = 0.75;
+/** The room the legend (top) and the controls and issues chip (bottom) take over the map, which Fit keeps the drawing clear of. */
+const OVERLAY_INSET = { top: 34, bottom: 44 };
 const ARROWS: Record<string, "up" | "down" | "left" | "right"> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
 interface GraphProps {
@@ -360,19 +362,30 @@ function MapLightbox({ onClose, children }: { onClose: () => void; children: Rea
 export function ArchitectureTab({ map, box, current, pageNames, onOpenPage, large = false }: TabProps) {
   const body = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState({ w: 0, h: 0 });
-  // A map with layers has one way to be laid out (its bands, top to bottom), with as many boxes to a row as the room's
-  // width allows; one without is laid out both ways, and the one that shows bigger in the pane is drawn (a pane is
+  // A map with layers has one way to be laid out (its bands, top to bottom), with as many boxes to a row as shows it
+  // biggest in the room; one without is laid out both ways, and the one that shows bigger in the pane is drawn (a pane is
   // usually taller than it is wide).
   const layered = map.kind === "native" && map.spec.layers.length > 0;
-  const rowMax = map.kind === "native" && layered ? rowMaxFor(map.spec, room.w, MIN_FIT) : 0;
+  const made = useRef<{ spec: unknown; rows: Map<number, ArchLayout> }>({ spec: null, rows: new Map() });
+  const fitted = useMemo(() => {
+    if (map.kind !== "native" || !layered) return null;
+    if (made.current.spec !== map.spec) made.current = { spec: map.spec, rows: new Map() };
+    const rows = made.current.rows;
+    return bestRows(
+      (r) => {
+        if (!rows.has(r)) rows.set(r, layoutArchitecture(map.spec, "LR", r));
+        return rows.get(r)!;
+      },
+      room,
+      MIN_FIT,
+    );
+  }, [map, layered, room.w, room.h]);
+  const rowMax = fitted?.rowMax ?? 0;
   const both = useMemo(() => {
     if (map.kind !== "native") return null;
-    if (layered) {
-      const l = layoutArchitecture(map.spec, "LR", rowMax || undefined);
-      return { LR: l, TB: l };
-    }
+    if (fitted) return { LR: fitted.layout, TB: fitted.layout };
     return { LR: layoutArchitecture(map.spec, "LR"), TB: layoutArchitecture(map.spec, "TB") };
-  }, [map, rowMax, layered]);
+  }, [map, fitted]);
   useEffect(() => {
     const el = body.current;
     if (!el) return;
@@ -420,6 +433,7 @@ export function ArchitectureTab({ map, box, current, pageNames, onOpenPage, larg
             fitKey={direction + rowMax + map.page + JSON.stringify(map.kind === "native" ? map.spec : "")}
             minFit={MIN_FIT}
             pad={8}
+            inset={OVERLAY_INSET}
             tools={<ShowAll onHeld={setAll} />}
             overlay={
               <>

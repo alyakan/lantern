@@ -501,15 +501,20 @@ export function layoutArchitecture(spec: ArchSpec, direction: "LR" | "TB" = "LR"
 }
 
 /**
- * How many boxes a band should have in a row to be drawn at a readable size in a room this wide (a narrow pane wants
- * fewer, so more rows; the most is ROW_MAX). A room of no size gets the most.
+ * The row size for a layered map in a room: the most boxes to a row whose map is no wider than the room at `minFit`
+ * (so it needn't be panned sideways, which is worse than panning down), trying wide first. A room too narrow for any
+ * gets the narrowest. `layoutFor` makes (or remembers) the layout for a row size; a room that fits the widest, or has no
+ * size yet, needs only that one.
  */
-export function rowMaxFor(spec: ArchSpec, roomWidth: number, zoom = 0.75): number {
-  if (roomWidth <= 0 || spec.nodes.length === 0) return ROW_MAX;
-  const mean = spec.nodes.reduce((s, n) => s + boxOf(n).w, 0) / spec.nodes.length;
-  const gap = 40;
-  const available = (roomWidth - 16) / zoom - GUTTER_MAX * 0.8 - 2 * SIDE;
-  return Math.max(2, Math.min(ROW_MAX, Math.floor((available + gap) / (mean + gap))));
+export function bestRows(layoutFor: (rowMax: number) => ArchLayout, room: { w: number; h: number }, minFit: number): { rowMax: number; layout: ArchLayout } {
+  let layout = layoutFor(ROW_MAX);
+  if (room.w <= 0 || room.h <= 0) return { rowMax: ROW_MAX, layout };
+  let rowMax = ROW_MAX;
+  while (layout.width * minFit > room.w - 16 && rowMax > 2) {
+    rowMax--;
+    layout = layoutFor(rowMax);
+  }
+  return { rowMax, layout };
 }
 
 // The layered layout's measures.

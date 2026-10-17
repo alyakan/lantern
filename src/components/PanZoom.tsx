@@ -4,6 +4,7 @@ import { clampZoom, panBy, zoomAt, type View } from "../lib/canvas";
 /** How far Fit zooms in on something small: enough to fill the room, not so far that a two-box map looks blown up. */
 const FIT_MAX = 1.3;
 const FIT_PAD = 20;
+const NO_INSET = { top: 0, bottom: 0 };
 
 /** A rectangle in the content's own units. */
 export interface Rect {
@@ -28,6 +29,8 @@ interface Props {
   minFit?: number;
   /** The margin Fit leaves around the content (default 20). */
   pad?: number;
+  /** Room Fit (and what brings a box into view) keeps clear at the top (for a legend over the map) and bottom (a strip the drawing is cut off above, for the controls). */
+  inset?: { top: number; bottom: number };
   /** Controls to put with the zoom buttons. */
   tools?: ReactNode;
   /** Something drawn over the surface (a legend, a note), out of the layout; it takes the pointer only where it asks for it. */
@@ -40,7 +43,7 @@ interface Props {
  * zooms around the pointer, dragging pans, and the buttons zoom or fit it back. A press that doesn't move is still a click
  * on what's under it.
  */
-export function PanZoom({ width, height, label, fitKey = "", minFit = 0, pad = FIT_PAD, tools, overlay, children }: Props) {
+export function PanZoom({ width, height, label, fitKey = "", minFit = 0, pad = FIT_PAD, inset = NO_INSET, tools, overlay, children }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, zoom: 1 });
   const current = useRef(view);
@@ -62,11 +65,12 @@ export function PanZoom({ width, height, label, fitKey = "", minFit = 0, pad = F
     const h = el.clientHeight;
     if (w <= 0 || h <= 0) return setView({ x: 0, y: 0, zoom: 1 });
     // The whole thing, centred, as big as the room allows.
-    const zoom = clampZoom(Math.max(minFit, Math.min(FIT_MAX, (w - 2 * pad) / width, (h - 2 * pad) / height)));
+    const roomH = h - inset.top - inset.bottom;
+    const zoom = clampZoom(Math.max(minFit, Math.min(FIT_MAX, (w - 2 * pad) / width, (roomH - 2 * pad) / height)));
     // Too big even at the smallest fit: it starts at its top left, with the rest a pan away.
     const place = (room: number, size: number) => (size > room - 2 * pad ? pad : (room - size) / 2);
-    setView({ zoom, x: place(w, width * zoom), y: place(h, height * zoom) });
-  }, [width, height, minFit, pad]);
+    setView({ zoom, x: place(w, width * zoom), y: inset.top + place(roomH, height * zoom) });
+  }, [width, height, minFit, pad, inset.top, inset.bottom]);
   useLayoutEffect(() => {
     touched.current = false;
     fit();
@@ -103,12 +107,12 @@ export function PanZoom({ width, height, label, fitKey = "", minFit = 0, pad = F
     const pad = 24;
     const left = r.x * v.zoom + v.x;
     const top = r.y * v.zoom + v.y;
-    const shift = (from: number, size: number, room: number) => (from < pad ? pad - from : from + size > room - pad ? Math.min(0, room - pad - (from + size)) : 0) ;
+    const shift = (from: number, size: number, lo: number, hi: number) => (from < lo ? lo - from : from + size > hi ? Math.min(0, hi - (from + size)) : 0);
     // Wider than the room: its start is what is wanted.
-    const dx = r.w * v.zoom > el.clientWidth - 2 * pad ? pad - left : shift(left, r.w * v.zoom, el.clientWidth);
-    const dy = r.h * v.zoom > el.clientHeight - 2 * pad ? pad - top : shift(top, r.h * v.zoom, el.clientHeight);
+    const dx = r.w * v.zoom > el.clientWidth - 2 * pad ? pad - left : shift(left, r.w * v.zoom, pad, el.clientWidth - pad);
+    const dy = r.h * v.zoom > el.clientHeight - 2 * pad - inset.top - inset.bottom ? pad + inset.top - top : shift(top, r.h * v.zoom, pad + inset.top, el.clientHeight - pad - inset.bottom);
     if (dx !== 0 || dy !== 0) ease(panBy(v, dx, dy));
-  }, []);
+  }, [inset.top, inset.bottom]);
   const centre = () => ({ x: (box.current?.clientWidth ?? 0) / 2, y: (box.current?.clientHeight ?? 0) / 2 });
 
   // Native listeners, because React's wheel handlers can't cancel the page's own zoom. WebKit sends a pinch as gestures.
@@ -177,8 +181,11 @@ export function PanZoom({ width, height, label, fitKey = "", minFit = 0, pad = F
   return (
     <div className="pz">
       <div ref={box} className={`pz-surface${drag.current?.moved ? " dragging" : ""}`} role="group" aria-label={label} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={() => (drag.current = null)}>
-        <div ref={world} className="pz-world" style={{ width, height, transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
-          <PanZoomReveal.Provider value={reveal}>{children}</PanZoomReveal.Provider>
+        {/* The drawing is cut off above the strip the controls sit on (`inset.bottom`), so they never cover it. */}
+        <div className="pz-clip" style={{ bottom: inset.bottom }}>
+          <div ref={world} className="pz-world" style={{ width, height, transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
+            <PanZoomReveal.Provider value={reveal}>{children}</PanZoomReveal.Provider>
+          </div>
         </div>
       </div>
       {overlay}
