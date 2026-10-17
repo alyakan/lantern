@@ -112,8 +112,12 @@ type Entry = StepEntry | { n: null; page: StepPage } | { n: null; gap: { from: n
  */
 function inStepOrder(entries: Entry[]): Entry[] {
   const out: Entry[] = [];
+  // The numbers already shown or marked in this plan: a later run of it doesn't mark them again. A new plan (its Frame) starts over.
+  let covered = new Set<number>();
   for (let i = 0; i < entries.length; ) {
-    if (entries[i].n === null) {
+    const first = entries[i];
+    if (first.n === null) {
+      if ("page" in first && first.page.heading?.kind === "frame") covered = new Set();
       out.push(entries[i++]);
       continue;
     }
@@ -122,7 +126,15 @@ function inStepOrder(entries: Entry[]): Entry[] {
     run.sort((a, b) => a.n - b.n);
     let expected = 1;
     for (const e of run) {
-      if (e.n > expected) out.push({ n: null, gap: { from: expected, to: e.n - 1 } });
+      for (let from = expected; from < e.n; from++) {
+        if (covered.has(from)) continue;
+        let to = from;
+        while (to + 1 < e.n && !covered.has(to + 1)) to++;
+        for (let k = from; k <= to; k++) covered.add(k);
+        out.push({ n: null, gap: { from, to } });
+        from = to;
+      }
+      covered.add(e.n);
       out.push(e);
       expected = e.n + 1;
     }

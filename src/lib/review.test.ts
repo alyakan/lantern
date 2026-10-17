@@ -69,6 +69,12 @@ describe("review pages", () => {
 
   it("drops a closing cue from any message", () => {
     expect(withoutCue("All good.\n\nI'll stop here. Say \"Next\" to open file 1.")).toBe("All good.");
+    expect(withoutCue("All good.\n\nSay next to open file 1")).toBe("All good.");
+    expect(withoutCue("Say \"Next\" to continue.")).toBe("");
+  });
+
+  it("only drops a last line that is the cue, never the end of a line that mentions it", () => {
+    for (const t of ["Looks fine.\nThen reply next if it looks fine", "I'd say next to the loop is fine, say next when ready"]) expect(withoutCue(t), t).toBe(t);
   });
 });
 

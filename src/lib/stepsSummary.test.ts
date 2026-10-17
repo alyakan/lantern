@@ -118,6 +118,14 @@ describe("summarize a Build chat", () => {
     expect(s.rows.map((r) => `${r.kind}:${r.label}:${r.title}`)).toEqual(["frame:Frame:one", "step:Step 1:A", "step:Step 2:B", "done:Done:one built", "frame:Frame:two", "step:Step 1:A2", "step:Step 2:B2"]);
   });
 
+  it("doesn't mark steps already shown earlier as missing when a later run of the same plan starts higher", () => {
+    const s = summaryOf(PLAN(1, "A", "a"), PLAN(2, "B", "b"), PLAN(3, "C", "c"), PLAN(4, "D", "d"), "# Evidence 1 — a snag\n\nLogged.", PLAN(5, "E", "e"), PLAN(6, "F", "f"));
+    expect(s.rows.map((r) => r.label)).toEqual(["Step 1", "Step 2", "Step 3", "Step 4", "Evidence 1", "Step 5", "Step 6"]);
+    // Numbers that were never written still get their marker, once.
+    const t = summaryOf(PLAN(1, "A", "a"), "# Evidence 1 — a snag\n\nLogged.", PLAN(5, "E", "e"), "# Evidence 2 — again\n\nLogged.", PLAN(8, "H", "h"));
+    expect(t.rows.map((r) => r.label)).toEqual(["Step 1", "Evidence 1", "Steps 2–4", "Step 5", "Evidence 2", "Steps 6–7", "Step 8"]);
+  });
+
   it("puts the first Frame at the top even when it was written after other pages", () => {
     const s = summaryOf(PLAN(5, "E", "e"), PLAN(6, "F", "f"), PLAN(1, "A", "a"), frame, PLAN(2, "B", "b"));
     expect(s.rows.map((r) => r.label)).toEqual(["Frame", "Step 1", "Step 2", "Steps 3–4", "Step 5", "Step 6"]);
