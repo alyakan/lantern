@@ -7,7 +7,7 @@ import { reviewHeadline } from "./reviewChain";
 import { projectLabels, type ProjectOpen } from "./sidebar";
 
 /** What a row is waiting for. `permission` is a plain request Allow and Deny answer; the others are answered where they are. */
-export type InboxKind = "permission" | "question" | "plan" | "reproduce" | "merge" | "held" | "unread" | "checks" | "review";
+export type InboxKind = "permission" | "question" | "plan" | "reproduce" | "approval" | "merge" | "held" | "unread" | "checks" | "review";
 
 /** One thing waiting on the user: a chat or an agent, in some project, with what it needs. */
 export interface InboxItem {
@@ -46,10 +46,10 @@ const pendingIn = (items: ChatItem[]): { at: number; item: Pending } | null => {
 };
 
 /** The tools that aren't a plain permission: Allow and Deny can't answer them (each has its own card in the chat). */
-const KIND: Record<string, InboxKind> = { ExitPlanMode: "plan", Reproduce: "reproduce", [QUESTION_TOOL]: "question" };
+const KIND: Record<string, InboxKind> = { ExitPlanMode: "plan", Reproduce: "reproduce", Approval: "approval", [QUESTION_TOOL]: "question" };
 
 /** The kinds that are a request Claude is waiting on: Go opens its own card, which shows all of it. */
-export const REQUEST_KINDS: readonly InboxKind[] = ["permission", "question", "plan", "reproduce"];
+export const REQUEST_KINDS: readonly InboxKind[] = ["permission", "question", "plan", "reproduce", "approval"];
 
 /** A command longer than this, or a web address longer than the second, is too much to approve from a row. */
 const COMMAND_MAX = 160;

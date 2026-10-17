@@ -1072,6 +1072,9 @@ button.edit-toggle:hover:not(:disabled) { color: var(--text); }
 .repro-input:focus { border-color: var(--faint); }
 .repro-input::placeholder { color: var(--muted-text); font-family: var(--ui); }
 .repro-note { margin: 4px 0 6px 16px; }
+.approval-action { font-weight: 600; overflow-wrap: anywhere; white-space: pre-wrap; }
+.approval-card .approval-action { margin-bottom: 6px; }
+.approval-details { margin-bottom: 8px; }
 .permission-done { font-size: calc(12px * var(--font-scale)); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .permission-done.allowed .decision { color: var(--add); }
 .permission-done.denied .decision { color: var(--del); }

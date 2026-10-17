@@ -63,6 +63,14 @@ describe("groupItems", () => {
     expect(describeStep(tool("t2", "ExitPlanMode", { summary: "" }), "/p")).toBe("Proposing a plan");
   });
 
+  it("keeps an answered approval in the conversation, and names the tool for what it did", () => {
+    const approval: ChatItem = { type: "permission", id: "ap-1", toolName: "Approval", input: { action: "Merge PR #144" }, decision: "allowed" };
+    const rows = groupItems([{ type: "user", id: "u1", text: "a" }, tool("t1", "Read"), approval, tool("t2", "mcp__lantern__request_approval", { summary: "Merge PR #144" }), tool("t3", "Edit"), done]);
+    expect(rows.map((r) => r.id)).toEqual(["u1", "a:t1", "ap-1", "end"]);
+    expect(summarize((rows[1] as { steps: ToolItem[] }).steps)).toBe("Read 1 file, made 1 edit, asked for your approval");
+    expect(describeStep(tool("t2", "mcp__lantern__request_approval", { summary: "Merge PR #144" }), "/p")).toBe("Waiting for your approval Merge PR #144");
+  });
+
   it("leaves a turn without tools alone", () => {
     const items: ChatItem[] = [{ type: "user", id: "u1", text: "hi" }, say("m1", "hello"), done];
     expect(groupItems(items)).toEqual(items);

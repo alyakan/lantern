@@ -158,7 +158,7 @@ export const api = {
     invoke<ChangedFile[]>("change_summary", { slot, scope, turn, toTurn, pr, hints, base }),
   /** `base`: the branch the review says it is stacked on; null lets Lantern work it out. */
   branchReview: (slot: string, hints: string[], base: string | null = null) => invoke<BranchReview>("branch_review", { slot, hints, base }),
-  /** `message` goes back to Claude: a reason, or the user's note on a reproduce request. */
+  /** `message` goes back to Claude: a reason, or the user's note on a reproduce or approval request. */
   /** `updatedInput`: on allow, the tool's input as it should run (AskUserQuestion's, with the user's answers). */
   respondPermission: (slot: string, requestId: string, allow: boolean, message: string | null = null, updatedInput: Record<string, unknown> | null = null) =>
     invoke<void>("respond_permission", { slot, requestId, allow, message, updatedInput }),

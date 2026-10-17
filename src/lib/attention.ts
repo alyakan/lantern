@@ -28,8 +28,9 @@ export function attentionFor(items: ChatItem[], folder: string | null, describe:
   const last = items[items.length - 1];
   const title = folder ? `Claude · ${basename(folder)}` : "Claude";
   if (last?.type === "permission" && last.decision === null) {
-    const input = (last.input ?? {}) as { plan?: string; steps?: string };
+    const input = (last.input ?? {}) as { plan?: string; steps?: string; action?: unknown };
     if (last.toolName === "ExitPlanMode") return { key: last.id, kind: "waiting", title, body: `Plan ready for review: ${firstLine(input.plan ?? "")}` };
+    if (last.toolName === "Approval") return { key: last.id, kind: "waiting", title, body: `Approval needed${typeof input.action === "string" && input.action.trim() ? `: ${firstLine(input.action)}` : ""}` };
     if (last.toolName === "Reproduce") return { key: last.id, kind: "waiting", title, body: `Reproduce the bug: ${firstLine(input.steps ?? "")}` };
     if (last.toolName === QUESTION_TOOL) {
       // Claude's question: the question itself, not the tool it asks with.

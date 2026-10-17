@@ -5,7 +5,7 @@ import type { NewRule, Rule, RuleScope } from "../types";
 // permissionRules.test.ts checks the two agree.
 
 /** Tools no rule answers: their card carries something to read or answer, or it's Lantern's own. */
-export const NEVER_AUTO_TOOLS = ["ExitPlanMode", "AskUserQuestion", "Reproduce"];
+export const NEVER_AUTO_TOOLS = ["ExitPlanMode", "AskUserQuestion", "Reproduce", "Approval"];
 /** The Bash input keys a rule can read. */
 export const BASH_KEYS = ["command", "description", "timeout", "run_in_background"];
 /** Claude Code's file tools, with the path key each acts on and every key its input may have. */

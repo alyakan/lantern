@@ -47,7 +47,7 @@ export function sameRow(a: Row, b: Row): boolean {
 }
 
 /** Cards that stay in the conversation once answered, instead of folding into the turn's activity. */
-const KEPT_CARDS = ["ExitPlanMode", "Reproduce", "AskUserQuestion"];
+const KEPT_CARDS = ["ExitPlanMode", "Reproduce", "Approval", "AskUserQuestion"];
 
 function lastIndexWhere<T>(xs: T[], pred: (x: T) => boolean): number {
   for (let i = xs.length - 1; i >= 0; i--) if (pred(xs[i])) return i;
@@ -72,7 +72,7 @@ function foldTurn(items: ChatItem[], live: boolean): Row[] {
   return [...before, block, ...rest.slice(before.length)];
 }
 
-export type Category = "read" | "search" | "run" | "skill" | "agent" | "advisor" | "web" | "edit" | "plan" | "reproduce" | "network" | "storage" | "mcp" | "other";
+export type Category = "read" | "search" | "run" | "skill" | "agent" | "advisor" | "web" | "edit" | "plan" | "reproduce" | "approval" | "network" | "storage" | "mcp" | "other";
 
 const CATEGORY_OF: Record<string, Category> = {
   Read: "read", NotebookRead: "read",
@@ -85,6 +85,7 @@ const CATEGORY_OF: Record<string, Category> = {
   Edit: "edit", MultiEdit: "edit", Write: "edit", NotebookEdit: "edit",
   ExitPlanMode: "plan",
   mcp__lantern__reproduce: "reproduce",
+  mcp__lantern__request_approval: "approval",
   mcp__lantern__network_requests: "network", mcp__lantern__network_request: "network", mcp__lantern__network_watch: "network",
   mcp__lantern__network_unwatch: "network", mcp__lantern__network_watches: "network", mcp__lantern__network_summarize: "network",
   mcp__lantern__storage_scan: "storage", mcp__lantern__storage_results: "storage", mcp__lantern__storage_suggest: "storage",
@@ -103,6 +104,7 @@ const PHRASE: Record<Category, (n: number) => string> = {
   edit: (n) => `made ${plural(n, "edit")}`,
   plan: (n) => (n === 1 ? "proposed a plan" : `proposed ${n} plans`),
   reproduce: (n) => (n === 1 ? "had you reproduce it" : `had you reproduce it ${n} times`),
+  approval: (n) => (n === 1 ? "asked for your approval" : `asked for your approval ${n} times`),
   network: (n) => (n === 1 ? "used Network Monitor" : `used Network Monitor ${n} times`),
   storage: (n) => (n === 1 ? "checked disk space" : `checked disk space ${n} times`),
   // Said per server instead (see summarize).
@@ -158,7 +160,7 @@ export function runningStep(steps: Step[]): ToolItem | null {
   return null;
 }
 
-const VERB: Partial<Record<Category, string>> = { advisor: "Consulting the advisor", read: "Reading", search: "Searching", run: "Running", skill: "Using skill", plan: "Proposing a plan", reproduce: "Waiting for you to reproduce", network: "Reading Network Monitor", storage: "Checking disk space", agent: "Running subagent:", web: "Fetching", edit: "Editing" };
+const VERB: Partial<Record<Category, string>> = { advisor: "Consulting the advisor", read: "Reading", search: "Searching", run: "Running", skill: "Using skill", plan: "Proposing a plan", reproduce: "Waiting for you to reproduce", approval: "Waiting for your approval", network: "Reading Network Monitor", storage: "Checking disk space", agent: "Running subagent:", web: "Fetching", edit: "Editing" };
 
 export function stepTarget(tool: ToolItem, folder: string | null): string {
   return relativeTo(tool.edit?.path ?? tool.summary, folder);

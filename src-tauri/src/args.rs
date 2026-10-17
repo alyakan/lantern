@@ -41,7 +41,8 @@ Workflow:
 - Step by step: one page per message, in a flavour (Build, Review, Debug or Design), and Build and Debug have an Explain as you go option.
 - Team: a Lead runs a team of agents, each with a chat of its own on a canvas. An agent never has more freedom than its Lead: a Lead on Ask means every agent asks.
 This chat's Permissions are {permissions} and its Workflow is {workflow}. A message the user starts with `!` in Lantern's box is a shell command they ran themselves in this folder; its output reaches you with their next message as <bash-input> and <bash-stdout>. If they ask how Lantern works, its README lists what it does.
-Lantern's own tools are on its MCP server (mcp__lantern__…), whose instructions say what each is for. Lantern also reads your messages' format: the Step-by-step headings make your pages, and it will tell you when it couldn't read one."
+Lantern's own tools are on its MCP server (mcp__lantern__…), whose instructions say what each is for. Lantern also reads your messages' format: the Step-by-step headings make your pages, and it will tell you when it couldn't read one.
+Before an action the user must approve that is hard to reverse or outward-facing (merging a pull request, pushing a tag or a branch, publishing a release, deleting something outside your own worktree), call mcp__lantern__request_approval instead of asking in the chat. A yes covers exactly the action you named and nothing more."
     )
 }
 
@@ -334,7 +335,7 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
     }
     a.push("--append-system-prompt".into());
     a.push(prompt);
-    // Tools that are their own confirmation shouldn't also need approving: the reproduce card, and the main agent's
+    // Tools that are their own confirmation shouldn't also need approving: the reproduce and approval cards, and the main agent's
     // orchestra tools (the user already chose to run an orchestra; a merge still waits for their approval). The network
     // tools read the traffic the user captured themselves and change nothing outside Lantern.
     let mut allowed: Vec<String> = Vec::new();
@@ -347,6 +348,8 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
     allowed.extend(crate::network::TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
     // The storage tools scan and mark suggestions inside Lantern (read-only on disk): only the Storage tab's Delete deletes.
     allowed.extend(crate::storage::TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
+    // The approval card is the user's own say on one named action; Lantern runs nothing and remembers nothing.
+    allowed.push(format!("mcp__lantern__{}", crate::permission::helper::APPROVAL_TOOL));
     if helper.role == Role::Main {
         allowed.extend(crate::permission::helper::ORCHESTRA_TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
     }
@@ -596,7 +599,7 @@ mod tests {
     }
 
     /// Every chat's network tools, allowed without asking (see network.rs).
-    const NETWORK_TOOLS: &str = "mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest";
+    const NETWORK_TOOLS: &str = "mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__request_approval";
 
     fn value_after<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
         args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str())
@@ -633,7 +636,7 @@ mod tests {
             lantern_prompt(Mode::Steps, true, &Role::Main)
         ));
         expected.push("--allowedTools".into());
-        expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
+        expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__request_approval,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
         expected.extend(strs(&["--resume", "sess-9", "--model", "opus", "--effort", "high", "--advisor", "fable"]));
         let mut got = build_args(Mode::Steps, true, Some("sess-9"), Some("opus"), Some("high"), &main);
         got.extend(harness_args(Some("fable")));
@@ -779,9 +782,11 @@ mod tests {
             let a = build_args(mode, auto, None, None, None, &helper);
             assert_eq!(a.iter().filter(|x| *x == "--append-system-prompt").count(), 1, "{says}: one prompt, not several");
             let prompt = value_after(&a, "--append-system-prompt").unwrap();
-            for part in ["running inside Lantern", "Permissions, which means the same in every workflow", "- Ask:", "- Auto:", "- Chat:", "- Step by step:", "- Team:", "Build, Review, Debug or Design", "<bash-input>", "Lantern's own tools are on its MCP server", "instructions"] {
+            for part in ["running inside Lantern", "Permissions, which means the same in every workflow", "- Ask:", "- Auto:", "- Chat:", "- Step by step:", "- Team:", "Build, Review, Debug or Design", "<bash-input>", "Lantern's own tools are on its MCP server", "instructions", "mcp__lantern__request_approval", "publishing a release", "covers exactly the action you named and nothing more"] {
                 assert!(prompt.contains(part), "{says}: {part}");
             }
+            // Its card is its own confirmation, so the CLI's permission prompt doesn't come first, in every chat.
+            assert!(value_after(&a, "--allowedTools").unwrap().split(',').any(|t| t == "mcp__lantern__request_approval"), "{says}");
             assert!(prompt.contains(&format!("This chat's {says}")), "{says}");
             // The old three-mode model is gone from what Claude is told.
             assert!(!prompt.contains("three modes") && !prompt.contains("This chat is in"), "{says}");
