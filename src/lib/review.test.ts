@@ -71,6 +71,8 @@ describe("review pages", () => {
     expect(withoutCue("All good.\n\nI'll stop here. Say \"Next\" to open file 1.")).toBe("All good.");
     expect(withoutCue("All good.\n\nSay next to open file 1")).toBe("All good.");
     expect(withoutCue("Say \"Next\" to continue.")).toBe("");
+    // The lead-in after other words on the same line still counts as the cue.
+    expect(withoutCue("All good. I'll stop here. Say next.")).toBe("All good.");
   });
 
   it("only drops a last line that is the cue, never the end of a line that mentions it", () => {

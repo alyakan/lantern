@@ -42,7 +42,9 @@ export function splitFileTitle(title: string): { path: string; added: number | n
 
 /** The line a message ends on to say what to type next, which the page's buttons already say. */
 const CUE = /(?:^|\n)\s*(?:I'll stop here\.?\s*)?(?:Say|Reply|Type|Answer)\s+["“]?next["”]?[^\n]*\s*$/i;
-export const withoutCue = (text: string) => text.replace(CUE, "").trimEnd();
+// The same cue after other words on its line, when it opens with "I'll stop here.": "All good. I'll stop here. Say next."
+const STOP_CUE = /\s+I'll stop here\.?\s*(?:Say|Reply|Type|Answer)\s+["“]?next["”]?[^\n]*\s*$/i;
+export const withoutCue = (text: string) => text.replace(CUE, "").replace(STOP_CUE, "").trimEnd();
 
 const SEVERITY: Record<string, Severity> = { blocker: "blocker", "should-fix": "should-fix", "should fix": "should-fix", shouldfix: "should-fix", nit: "nit" };
 const FINDING = /^\s*(?:[-*]\s*)?⚠️?\s*(?:lines?\s+(\d+)(?:\s*[–-]\s*(\d+))?\s*)?(?:\(([^)]+)\))?\s*:?\s*(.*)$/i;
