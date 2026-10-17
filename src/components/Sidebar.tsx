@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
 import type { CloseAgreed, CloseCheck, MovedFolder, RecentFolder } from "../types";
 import { usePersistentState } from "../lib/layout";
 import { ACTIONS, shortcutLabel } from "../lib/actions";
@@ -25,10 +25,13 @@ const CLOSE_MS = 300;
 /** How long "Closed 3 finished chats" stays under a project's header. */
 const NOTICE_MS = 4000;
 
+/** The pane changing between the bar and open: the bar's look is what it moves to when closing and from when opening. */
+type Phase = "opening" | "closing" | null;
+
 const reducedMotion = () => typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /**
- * Part of the open pane the collapsed bar doesn't have. As the pane closes it fades and folds away (its height, or its width
+ * Part of the open pane the collapsed bar doesn't have. As the pane opens it unfolds and fades in, and as it closes it fades and folds away (its height, or its width
  * with `across`) while the bar narrows, so what stays moves to its place in the bar instead of jumping when the bar takes over.
  */
 function Away({ across, children }: { across?: boolean; children: ReactNode }) {
@@ -484,7 +487,7 @@ function BarGroup({ group, color, h, closer }: { group: CompactGroup; color: str
  * One project of the open pane: its header (the project's coloured initials, its name, the branch when it is the one on
  * screen, what needs you when it is folded, and + and ⋯ while the pointer is on it), then its open chats and teams.
  */
-function Project({ group, color, noted, expanded, closing, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents }: { group: CompactGroup; color: string; noted: boolean; expanded: boolean; closing: boolean; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
+function Project({ group, color, noted, expanded, phase, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents }: { group: CompactGroup; color: string; noted: boolean; expanded: boolean; phase: Phase; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
   const [menu, setMenu] = useState(false);
   // The chats that are done: not a working one, a draft, or a team.
   const finished = group.items.flatMap((item) => (item.kind === "chat" && item.state === "done" ? [item.slot] : []));
@@ -541,9 +544,9 @@ function Project({ group, color, noted, expanded, closing, onToggle, current, br
           ))}
         </ul>
       ) : (
-        // A folded project's squares are in the bar: they unfold as the pane closes, not pop in.
-        closing && (
-          <div className="sb-unfold" aria-hidden>
+        // A folded project's squares are in the bar: they unfold as the pane closes and fold away as it opens, not pop in or out.
+        phase && (
+          <div className={`sb-unfold${phase === "opening" ? " folding" : ""}`} aria-hidden>
             <div className="sb-away-in">
               <BarGroup group={group} color={color} h={h} closer={closer} />
             </div>
@@ -596,8 +599,34 @@ export function Sidebar(props: Props) {
   // Closing, the pane stays drawn while its width shrinks, then the bar takes its place.
   const full = expanded || closingBar;
   const closingNow = closingBar && !expanded;
+  // Opening, the pane is drawn in the bar's look for one frame and then lets go of it, so everything moves to its open place
+  // (stage 1: in the bar's look; 2: letting go, until the transitions are done).
+  const [openingStage, setOpeningStage] = useState<0 | 1 | 2>(0);
+  const openingNow = openingStage > 0 && expanded;
+  const phase: Phase = closingNow ? "closing" : openingNow ? "opening" : null;
+  const panel = useRef<HTMLDivElement>(null);
+  const settle = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasFloating = useRef(false);
   wasFloating.current = floating;
+
+  useLayoutEffect(() => {
+    if (settle.current) clearTimeout(settle.current);
+    settle.current = null;
+    setOpeningStage(floating && !reducedMotion() ? 1 : 0);
+  }, [floating]);
+  useLayoutEffect(() => {
+    if (openingStage !== 1) return;
+    // Reading the layout makes the browser compute the bar's look first, so letting go of it is a change it animates.
+    panel.current?.getBoundingClientRect();
+    setOpeningStage(2);
+    settle.current = setTimeout(() => setOpeningStage(0), CLOSE_MS);
+  }, [openingStage]);
+  useEffect(
+    () => () => {
+      if (settle.current) clearTimeout(settle.current);
+    },
+    [],
+  );
 
   const openKey = Object.keys(open).sort().join("\n");
   useEffect(() => {
@@ -844,8 +873,9 @@ export function Sidebar(props: Props) {
     <aside className={`sidebar ${mode}${dragWidth !== null ? " dragging" : ""}${reorder.drag ? " reordering" : ""}`} aria-label={label} style={mode === "collapsed" ? undefined : { width: shownWidth }}>
       {/* Pinned and floating are different elements, so pinning or collapsing is at once, not a width transition. */}
       <div
+        ref={panel}
         key={mode === "pinned" ? "pinned" : "floating"}
-        className={`sb-panel${expanded ? " expanded" : ""}${closingNow ? " closing" : ""}`}
+        className={`sb-panel${expanded ? " expanded" : ""}${closingNow ? " closing" : ""}${openingStage === 1 && expanded ? " opening" : ""}`}
         style={{ "--sb-open": `${shownWidth}px` } as CSSProperties}
         onTransitionEnd={(e) => e.target === e.currentTarget && e.propertyName === "width" && stopClosing()}
         onPointerEnter={mode === "collapsed" ? enter : undefined}
@@ -856,7 +886,7 @@ export function Sidebar(props: Props) {
         <div className="sb-head">
           <button className={`icon sb-button${mode === "pinned" ? " on" : ""}`} aria-label={pin} title={pin} onClick={toggleBar}>
             {full ? <span className="sb-pin-glyph"><PinIcon /></span> : <SidebarIcon />}
-            {closingNow && <span className="sb-side-glyph"><SidebarIcon /></span>}
+            {phase && <span className={`sb-side-glyph${phase === "opening" ? " leaving" : ""}`}><SidebarIcon /></span>}
           </button>
           {full ? (
             <NewMenu {...newMenu} />
@@ -877,7 +907,7 @@ export function Sidebar(props: Props) {
                   color={PROJECT_COLORS[colors[g.folder]]}
                   noted={noted.includes(g.folder)}
                   expanded={isExpanded(g)}
-                  closing={closingNow}
+                  phase={phase}
                   onToggle={() => toggle(g)}
                   current={g.folder === currentFolder}
                   branch={branch}

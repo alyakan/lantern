@@ -821,6 +821,14 @@ describe("the collapsed sidebar", () => {
     try {
       bar();
       await hover();
+      // Opening is the same move the other way: the bar's squares of a folded project fold away and the bar's icon fades, and
+      // the pane has let go of the bar's look (no "opening" class) by the time it is drawn.
+      expect(panel()).not.toHaveClass("opening");
+      expect(document.querySelector(".sb-unfold.folding")).not.toBeNull();
+      expect(document.querySelector(".sb-head .sb-side-glyph.leaving")).not.toBeNull();
+      act(() => vi.advanceTimersByTime(300));
+      expect(document.querySelector(".sb-unfold")).toBeNull();
+      expect(document.querySelector(".sb-side-glyph")).toBeNull();
       // Open: the monitor's squares are not listed, and the team's agents have a line of their own.
       expect(within(project("network-monitor")).queryByRole("button", { name: /Retry the proxy/ })).toBeNull();
       expect(document.querySelector(".sb-unfold")).toBeNull();
