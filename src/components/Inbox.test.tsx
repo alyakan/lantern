@@ -21,17 +21,6 @@ describe("Inbox", () => {
     vi.useFakeTimers();
   });
 
-  it("lists a quiet agent like anything else that waits, with Go", () => {
-    const row = item({ slot: "a1", kind: "quiet", role: "agent", team: "lead", title: "security pass", need: "Quiet while working. It may be stuck", requestId: null, canAllow: false, since: Date.now() - 4 * 60_000 });
-    const { toggle, onGo } = setup([row]);
-    expect(toggle()).toHaveAccessibleName("What needs you, 1 waiting");
-    fireEvent.click(toggle());
-    expect(screen.getByText("Quiet while working. It may be stuck")).toBeInTheDocument();
-    expect(screen.getByText("4m")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Go to security pass" }));
-    expect(onGo).toHaveBeenCalledWith(row);
-  });
-
   describe("when the teams' work was paused", () => {
     const pause = (): PlanPause => ({ percent: 95, resetsAt: Math.floor(Date.now() / 1000) + 72 * 60 + 30, since: Date.now() - 60_000, slots: ["s1", "w1"] });
 

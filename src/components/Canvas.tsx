@@ -22,7 +22,7 @@ import {
   type View,
 } from "../lib/canvas";
 import { ChatStoreContext, CloseAgentContext, useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
-import { agreedOf, closeAll, closedLine, planClosing, riskyQuestion, stoppedAgents, isStopped, type ClosePlan } from "../lib/closeStopped";
+import { agreedOf, bulkEffect, closeAll, closedLine, planClosing, riskyQuestion, stoppedAgents, isStopped, type ClosePlan } from "../lib/closeStopped";
 import { ProjectSetupContext, runCommandOf } from "../lib/projectSetup";
 import { useAction } from "../lib/actions";
 import { lostText, nodeStatus, readyToMerge, statusLabel, summaryLine, usage, type NodeStatus, type OrchestraNode } from "../lib/orchestraView";
@@ -229,7 +229,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, agentRole,
             <WorkflowMenu compact workflow={workflowOf(state)} agent={role === "worker"} holdsAgents={holdsAgents} onChange={(w) => actions.setWorkflow(slot, w)} disabled={isBusy(state)} />
           </span>
         )}
-        <span className="node-status" title={stuck ? `No word from it for ${longSpan(quiet.ms)}. It may be stuck: nudge it, interrupt it or restart it.` : quiet ? `Its last step was ${quiet.span} ago` : undefined}>
+        <span className="node-status" title={stuck ? `No word from it for ${longSpan(quiet.ms)}. It may be stuck.` : quiet ? `Its last step was ${quiet.span} ago` : undefined}>
           {label}
           {quiet && !stuck && <span className="node-quiet"> · {quiet.span} ago</span>}
         </span>
@@ -254,7 +254,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, agentRole,
         <div className="node-role-bar">
           {agentRole && <span className="role-chip">{agentRole.label}</span>}
           {readOnly && (
-            <span className="role-chip read-only" title="It can only read files, search and list them: it cannot change files or run commands">
+            <span className="role-chip read-only" title="It can read files, search and list them and run read-only git: it cannot change files or run other commands">
               Read only
             </span>
           )}
@@ -1007,13 +1007,15 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
           onCancel={() => setBulk(null)}
         >
           <p>{riskyQuestion(bulk.risky)}</p>
-          <p>Closing stops them and deletes their worktrees and branches, so that work is gone for good.{bulk.free.length > 0 ? ` ${bulk.free.length === 1 ? "1 other stopped agent has" : `${bulk.free.length} other stopped agents have`} nothing to lose and will be closed either way.` : ""}</p>
+          <p>{bulkEffect(bulk.risky)}, so that work is gone for good.{bulk.free.length > 0 ? ` ${bulk.free.length === 1 ? "1 other stopped agent has" : `${bulk.free.length} other stopped agents have`} nothing to lose and will be closed either way.` : ""}</p>
         </ConfirmDialog>
       )}
       {closing && (
         <ConfirmDialog title={`Close ${nodes.find((n) => n.slot === closing.slot)?.name ?? "this agent"}?`} confirmLabel="Discard work and close" busyLabel="Closing…" busy={closeBusy} onConfirm={() => closeAgent(closing.slot, { uncommitted: closing.check.uncommitted, unmerged_commits: closing.check.unmerged_commits })} onCancel={() => setClosing(null)}>
           <p>
-            It has <strong>{lostText(closing.check)}</strong>. Closing it stops it and deletes its worktree{closing.check.branch ? <> and branch <code>{closing.check.branch}</code></> : null}, so that work is gone for good.
+            It has <strong>{lostText(closing.check)}</strong>.{" "}
+            {closing.check.gone ? "Its worktree is already gone. Closing it stops it and deletes" : "Closing it stops it and deletes its worktree"}
+            {closing.check.branch ? <>{closing.check.gone ? " its" : " and"} branch <code>{closing.check.branch}</code></> : null}, so that work is gone for good.
           </p>
         </ConfirmDialog>
       )}

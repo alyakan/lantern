@@ -34,6 +34,14 @@ export interface Checked extends StoppedAgent {
   check: CloseCheck;
 }
 
+/** What closing does to the agents in the question: an agent whose worktree is already gone has only its branch left to delete. */
+export function bulkEffect(risky: Checked[]): string {
+  const gone = risky.filter((a) => a.check.gone).length;
+  if (gone === 0) return "Closing stops them and deletes their worktrees and branches";
+  if (gone === risky.length) return `${risky.length === 1 ? "Its worktree is" : "Their worktrees are"} already gone. Closing stops ${risky.length === 1 ? "it" : "them"} and deletes ${risky.length === 1 ? "its branch" : "their branches"}`;
+  return `${gone === 1 ? "1 of them has" : `${gone} of them have`} no worktree left. Closing stops them and deletes their branches, and the worktrees that are still there`;
+}
+
 /** What the check of every stopped agent found: those that can go now, those with work to lose, and those that can't be closed at all. */
 export interface ClosePlan {
   free: Checked[];

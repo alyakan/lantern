@@ -48,7 +48,8 @@ const fileTitle = (file: RegExpExecArray) => `${file[1].trim()} (${file[2].repla
 /** The line after the heading, if it's the skill's file line. */
 const fileLineUnder = (text: string) => FILE_LINE.exec((text.split("\n").filter((l) => l.trim())[1] ?? "").trim());
 
-export function parseHeading(text: string): Heading | null {
+/** The heading a message's first line is, if it is one. */
+function parseHeadingLine(text: string): Heading | null {
   const first = (text.split("\n").find((l) => l.trim()) ?? "").trim();
   const file = FILE_LINE.exec(first);
   if (file) return { kind: "file", n: null, total: null, title: fileTitle(file) };
@@ -86,6 +87,36 @@ export function parseHeading(text: string): Heading | null {
   return { kind: "done", n: null, total: null, title };
 }
 
+/** How many lines of its own Claude may write before a page's heading, and still have the page read. */
+const LEAD_IN_LINES = 2;
+
+/**
+ * The line a message's heading is on: its first line, or, when Claude opened with a sentence or two of its own ("Feature
+ * flags are … so here is the map."), the "#" heading after that lead-in. 0 when the first line is the heading, or when
+ * there is no heading to be found in the first few lines: a message that goes on in prose is no page.
+ */
+function headingAt(text: string): number {
+  const lines = text.split("\n");
+  const firstAt = lines.findIndex((l) => l.trim());
+  // A first line that is a heading of any kind, a fence, a list or a table isn't a lead-in to one.
+  if (firstAt < 0 || /^(#|\*\*|```|~~~|[-*+>|]\s|\d+[.)]\s)/.test(lines[firstAt].trim())) return 0;
+  let prose = 0;
+  for (let i = firstAt + 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    if (/^```|^~~~/.test(line)) return 0;
+    if (/^#{1,3}\s/.test(line)) return parseHeadingLine(lines.slice(i).join("\n")) ? i : 0;
+    if (++prose >= LEAD_IN_LINES) return 0;
+  }
+  return 0;
+}
+
+/** The heading a page's message opens with (see `headingAt`), or null when it has none. */
+export function parseHeading(text: string): Heading | null {
+  const at = headingAt(text);
+  return parseHeadingLine(at > 0 ? text.split("\n").slice(at).join("\n") : text);
+}
+
 /** One exchange on a page: what you sent, and Claude's reply to it. */
 export interface StepTurn {
   prompt: UserItem;
@@ -120,10 +151,19 @@ export interface StepPage {
 
 // The heading line comes out of the message (it's the page's title): a "#" heading, a bold one, or the skill's bold file
 // or summary line. A file line right under a heading says the same as the heading, so it goes too.
-const withoutHeading = (text: string) => {
+const withoutHeadingLine = (text: string) => {
   const first = (text.split("\n").find((l) => l.trim()) ?? "").trim();
   const rest = text.replace(/^\s*[^\n]*\n?/, "").replace(/^\s+/, "");
   return !FILE_LINE.test(first) && fileLineUnder(text) ? rest.replace(/^[^\n]*\n?/, "").replace(/^\s+/, "") : rest;
+};
+// A sentence Claude wrote before the heading stays, above what follows it.
+const withoutHeading = (text: string) => {
+  const at = headingAt(text);
+  if (at === 0) return withoutHeadingLine(text);
+  const lines = text.split("\n");
+  const lead = lines.slice(0, at).join("\n").trim();
+  const rest = withoutHeadingLine(lines.slice(at).join("\n"));
+  return lead ? `${lead}\n\n${rest}` : rest;
 };
 
 // Files the skill's way (and Evidence pages without a number) are told apart by title; suggestions by flavour.

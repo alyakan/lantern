@@ -36,18 +36,19 @@ describe("monacoTheme", () => {
   });
 
   it("keeps every source colour readable on the editor's background, whatever the theme's palette", () => {
-    for (const [name, tokens, isDark] of [["light", light, false], ["dark", dark, true], ["terminal", { ...dark, pane: "#0d1117", text: "#d3d8e0" }, true], ["fallout", { ...dark, pane: "#020a04", text: "#2adb5f" }, true], ["solarized", { ...dark, pane: "#002b36", text: "#a2b1b1" }, true], ["nord", { ...dark, pane: "#2e3440", text: "#eceff4" }, true], ["paper", { ...light, pane: "#fffdf8", text: "#2b2620" }, false]] as const) {
+    for (const [name, tokens, isDark] of [["light", light, false], ["dark", dark, true], ["terminal", { ...dark, pane: "#0d1117", text: "#d3d8e0" }, true], ["fallout", { ...dark, pane: "#020a04", text: "#2adb5f" }, true], ["solarized", { ...dark, pane: "#002b36", text: "#b5c3c3" }, true], ["nord", { ...dark, pane: "#2e3440", text: "#eceff4" }, true], ["paper", { ...light, pane: "#fffdf8", text: "#2b2620" }, false], ["posthog", { ...light, pane: "#eeefe9", text: "#151515" }, false]] as const) {
       const t = monacoTheme(tokens, isDark, syntaxFor(name, isDark));
       for (const rule of t.rules) expect(contrast(`#${rule.foreground}`, tokens.pane), `${name}: ${rule.token || "plain"}`).toBeGreaterThanOrEqual(4.5);
     }
   });
 
-  it("has its own source colours for Terminal, Fallout, Solarized and Nord, and Xcode's for the rest", () => {
+  it("has its own source colours for Terminal, Fallout, Solarized, Nord and Paper, and Xcode's for the rest", () => {
     expect(syntaxFor("terminal", true)).not.toBe(syntaxFor("dark", true));
     expect(syntaxFor("fallout", true)).not.toBe(syntaxFor("terminal", true));
     expect(syntaxFor("fallout", true).string).not.toBe(syntaxFor("fallout", true).keyword);
     expect(syntaxFor("nord", true)).not.toBe(syntaxFor("solarized", true));
-    expect(syntaxFor("paper", false)).toBe(syntaxFor("light", false));
+    expect(syntaxFor("paper", false)).not.toBe(syntaxFor("light", false));
+    expect(syntaxFor("posthog", false)).toBe(syntaxFor("light", false));
     expect(syntaxFor("custom", true)).toBe(syntaxFor("dark", true));
     expect(syntaxFor(undefined, false)).toBe(syntaxFor("light", false));
   });

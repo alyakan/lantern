@@ -54,6 +54,13 @@ describe("architectureMap", () => {
     expect(coversOf(pages[0])).toEqual([]);
   });
 
+  it("draws the map of an Overview Claude opened with a sentence of its own before the heading", () => {
+    // What a real Design chat did: "Feature flags … here is the map." and then the heading. The map didn't draw at all.
+    const map = architectureMap(pagesOf([u("u1", "map it"), a("a1", `Flags are read in three places, so here is the map.\n\n${NATIVE}`), ...parts]))!;
+    expect(map.kind).toBe("native");
+    if (map.kind === "native") expect(map.spec.nodes.map((n) => n.id)).toEqual(["gw", "authSvc", "tokenStore"]);
+  });
+
   it("shows an Overview written in Mermaid (before Lantern drew maps) as that diagram", () => {
     const map = architectureMap(pagesOf([u("u1", "map it"), a("a1", OVERVIEW), ...parts]))!;
     expect(map.kind).toBe("mermaid");

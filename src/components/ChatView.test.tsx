@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { initialState, type ChatItem } from "../store";
+import { recallScroll } from "../lib/scrollMemory";
 import { ChatView } from "./ChatView";
 
 const items: ChatItem[] = [
@@ -87,6 +88,50 @@ describe("ChatView", () => {
       height = 3200;
       resized();
       expect(top).not.toBe(3200);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("doesn't take the scroll event its own move to the end makes for the reader scrolling up, even when the chat has grown by then", () => {
+    // Lantern puts a chat at its end by setting its scroll position; the browser reports that a frame later, and by then
+    // the code in it has its colours and the chat is taller. Read as the reader's, it said "scrolled up": what was
+    // remembered was the middle of the chat, and coming back to it put you there.
+    const observers: { targets: Element[]; cb: () => void }[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        targets: Element[] = [];
+        constructor(cb: () => void) {
+          observers.push({ targets: this.targets, cb });
+        }
+        observe(el: Element) {
+          this.targets.push(el);
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    try {
+      const props = { onDecide: () => {}, onOpenFile: () => {} };
+      const { container, rerender } = render(<ChatView state={{ ...initialState, status: "idle", folder: "/p", items }} {...props} />);
+      const chat = container.querySelector(".chat") as HTMLElement;
+      const mine = observers.find((o) => o.targets.includes(chat))!;
+      let height = 2000;
+      Object.defineProperty(chat, "scrollHeight", { get: () => height, configurable: true });
+      Object.defineProperty(chat, "clientHeight", { value: 500, configurable: true });
+      let top = 0;
+      Object.defineProperty(chat, "scrollTop", { get: () => top, set: (v: number) => (top = v), configurable: true });
+      // A new message: Lantern follows it to the end.
+      rerender(<ChatView state={{ ...initialState, status: "idle", folder: "/p", items: [...items, { type: "assistant", id: "a2", text: "More." }] }} {...props} />);
+      expect(top).toBe(2000);
+      // The chat grows before the browser reports that move, which is then 200px from the end.
+      height = 2700;
+      fireEvent.scroll(chat);
+      mine.cb();
+      expect(top).toBe(2700);
+      // And what was remembered is "at the end" (-1): coming back to this chat follows its end.
+      expect(recallScroll("s1:chat")).toBe(-1);
     } finally {
       vi.unstubAllGlobals();
     }
