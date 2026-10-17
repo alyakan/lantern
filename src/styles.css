@@ -552,8 +552,10 @@
   --card-shadow: 0 0 0 0.5px rgba(60, 40, 10, 0.14), 0 2px 10px rgba(60, 40, 10, 0.07);
   color-scheme: light;
 }
-/* PostHog: a cream page with white cards, near-black text and one hot orange accent; thin warm-grey outlines, tighter
-   corners, blue for links, yellow for "look at this". System fonts only. */
+/* PostHog: posthog.com's playful desktop. A dotted cream desktop with windows on it (title-bar strips, thick near-black
+   outlines, hard offset shadows with no blur, square-ish corners), chunky buttons that press down, sticky-note messages;
+   one hot orange accent, blue for links, yellow for "look at this". System fonts only; the rules after this block are all
+   under [data-theme="posthog"], so no other theme changes. */
 :root[data-theme="posthog"] {
   --bg: #eeefe9;
   --pc-tint: 13%;
@@ -564,13 +566,13 @@
   --glass: #1515150a;
   --glass-line: #15151514;
   --seg-track: #1515150d;
-  --seg-thumb: #ffffff;
+  --seg-thumb: #f9bd2b;
   --bg-subtle: #f6f6f1;
   --bg-hover: #1515150d;
   --bg-active: #15151514;
-  --bg-user: #eeefe9;
+  --bg-user: #fdf0b3;
   --line: #d0d1c9;
-  --line-strong: #b3b5aa;
+  --line-strong: #151515;
   --text: #151515;
   --text-2: #4d4f46;
   --muted: #686a60;
@@ -580,7 +582,6 @@
   --accent-soft: #fde4d8;
   --accent-text: #151515;
   --accent-hover: #f9bd2b;
-  --md-pre-head-text: #5c5e55;
   --on-attn: #151515;
   --working: #bd3e00;
   --unread: #1d4aff;
@@ -596,20 +597,48 @@
   --error-bg: #fbe6e2;
   --auth-bg: #fbefc9;
   --code-bg: #e6e7df;
-  --shadow: 0 10px 30px rgba(21, 21, 21, 0.14), 0 0 0 1px var(--line);
-  --card-shadow: 0 0 0 1px var(--line), 0 1px 2px rgba(21, 21, 21, 0.05);
+  --ph-ink: #151515;       /* every outline and hard shadow */
+  --ph-bar: #f9e08a;       /* a window's title-bar strip */
+  --ph-dot: #bcbdb0;       /* the dots on the desktop */
+  --ph-hit: #f9bd2b;       /* a hover or a selection: PostHog's yellow */
+  --ph-bar-h: 26px;
+  --ph-title:              /* the strip: three outlined squares on the left, then the bar's colour */
+    linear-gradient(var(--accent), var(--accent)) 10px 50% / 8px 8px no-repeat,
+    linear-gradient(var(--ph-hit), var(--ph-hit)) 26px 50% / 8px 8px no-repeat,
+    linear-gradient(var(--sidebar), var(--sidebar)) 42px 50% / 8px 8px no-repeat,
+    linear-gradient(var(--ph-ink), var(--ph-ink)) 8px 50% / 12px 12px no-repeat,
+    linear-gradient(var(--ph-ink), var(--ph-ink)) 24px 50% / 12px 12px no-repeat,
+    linear-gradient(var(--ph-ink), var(--ph-ink)) 40px 50% / 12px 12px no-repeat,
+    var(--ph-bar);
+  --ph-drop: 4px 4px 0 var(--ph-ink);
+  --ph-drop-s: 2px 2px 0 var(--ph-ink);
+  --shadow: 0 0 0 2px var(--ph-ink), 4px 4px 0 2px var(--ph-ink);
+  --card-shadow: 0 0 0 2px var(--ph-ink), 4px 4px 0 2px var(--ph-ink);
+  --pane-edge: 0 0 0 2px var(--ph-ink), 4px 4px 0 2px var(--ph-ink);
+  --thumb-lift: 0 0 0 1.5px var(--ph-ink);
+  --thumb-shadow: 0 0 0 1.5px var(--ph-ink);
+  --badge-shadow: 2px 2px 0 var(--ph-ink);
+  --lift-shadow: 0 0 0 2px var(--ph-ink), 4px 4px 0 2px var(--ph-ink);
+  --hud-shadow: 0 0 0 0 transparent;
+  --panel-shadow: inset -2px 0 0 var(--ph-ink), 4px 0 0 var(--ph-ink);
   --md-link: #1d4aff;
   --md-link-line: #1d4aff;
   --md-quote-bar: #f54e00;
+  --md-quote-bar-width: 4px;
   --md-marker: #f54e00;
-  --md-code-border: 1px solid var(--line);
-  --radius: 4px;
-  --radius-inner: 3px;
+  --md-code-border: 1px solid var(--ph-ink);
+  --md-pre-line: var(--ph-ink);
+  --md-pre-head-bg: var(--ph-bar);
+  --md-pre-head-text: var(--text);
+  --gutter: 14px;
+  --radius: 3px;
+  --radius-inner: 2px;
   --radius-chip: 2px;
-  --radius-float: 8px;
-  --radius-md: 6px;
-  --radius-card: 6px;
-  --radius-hud: 10px;
+  --radius-float: 4px;
+  --radius-md: 3px;
+  --radius-card: 4px;
+  --radius-hud: 4px;
+  --radius-pill: 3px;
   color-scheme: light;
 }
 /* PostHog's buttons: the primary is orange with a near-black outline and turns yellow under the pointer. */
@@ -618,6 +647,145 @@
 /* The accent is orange, so a red confirm button takes the white card's colour for its text, not the near-black accent text. */
 :root[data-theme="posthog"] .confirm-actions button.danger { color: var(--sidebar); }
 :root[data-theme="posthog"] button:focus-visible,:root[data-theme="posthog"] [tabindex]:focus-visible { outline: 2px solid var(--unread); outline-offset: 1px; }
+
+/* ── PostHog's desktop ───────────────────────────────────────────────────────────────────────────────────────────────
+   Everything below is under [data-theme="posthog"]. Outlines are --ph-ink, shadows are hard offsets with no blur, and the
+   windows (the chat, the side panel, dialogs, permission cards) wear a title-bar strip with three square window controls:
+   a ::before, decorative, with no text. The tokens above (--shadow, --card-shadow, --line-strong, the radii) already
+   restyle every card and menu that uses them; these rules add what tokens can't. */
+/* The desktop: dots on the cream, the windows sitting on it with room for their shadows. */
+:root[data-theme="posthog"] body { background-image: radial-gradient(circle, var(--ph-dot) 1.3px, transparent 1.7px); background-size: 16px 16px; }
+:root[data-theme="posthog"] ::selection { background: var(--ph-hit); color: var(--ph-ink); }
+:root[data-theme="posthog"] .split { padding-left: 10px; }
+:root[data-theme="posthog"] .split-left { padding-bottom: 14px; }
+:root[data-theme="posthog"] .split-left.fill { padding-right: 10px; }
+:root[data-theme="posthog"] .review { margin: 0 10px 14px 0; }
+:root[data-theme="posthog"] .canvas { margin: 0 10px 14px 10px; }
+:root[data-theme="posthog"] .split-left .canvas { margin: 0; }
+:root[data-theme="posthog"] .banner { margin: 0 10px 14px 10px; border: 2px solid var(--ph-ink); box-shadow: var(--ph-drop-s); }
+/* A window's title bar: a strip in the cream-yellow with its bottom outline and three small square controls. */
+:root[data-theme="posthog"] .chat-pane::before, :root[data-theme="posthog"] .review::before, :root[data-theme="posthog"] .permission::before { content: ""; flex: none; height: var(--ph-bar-h); border-bottom: 2px solid var(--ph-ink); background: var(--ph-title); }
+/* Over a dialog's top, on top of its own padding so what is below keeps its place. */
+:root[data-theme="posthog"] .mode-guide, :root[data-theme="posthog"] .palette, :root[data-theme="posthog"] .shortcuts, :root[data-theme="posthog"] .whats-new, :root[data-theme="posthog"] .arch-big { padding-top: var(--ph-bar-h); }
+:root[data-theme="posthog"] .mode-guide::before, :root[data-theme="posthog"] .palette::before, :root[data-theme="posthog"] .shortcuts::before, :root[data-theme="posthog"] .whats-new::before, :root[data-theme="posthog"] .arch-big::before { content: ""; position: absolute; left: 0; right: 0; top: 0; z-index: 1; height: var(--ph-bar-h); border-bottom: 2px solid var(--ph-ink); background: var(--ph-title); }
+:root[data-theme="posthog"] .palette-body { max-height: calc(min(460px, 100vh - 96px) - var(--ph-bar-h)); }
+:root[data-theme="posthog"] .shortcuts-body, :root[data-theme="posthog"] .whats-new-body { max-height: calc(min(560px, 100vh - 96px) - var(--ph-bar-h)); }
+:root[data-theme="posthog"] .confirm-dialog::before, :root[data-theme="posthog"] .revert-body::before, :root[data-theme="posthog"] .updating-body::before { content: ""; align-self: stretch; flex: none; display: block; height: var(--ph-bar-h); border-bottom: 2px solid var(--ph-ink); background: var(--ph-title); }
+:root[data-theme="posthog"] .confirm-dialog::before { margin: -16px -18px 14px; }
+:root[data-theme="posthog"] .revert-body::before { margin: -20px -22px 0; }
+:root[data-theme="posthog"] .updating-body::before { margin: -28px -28px 10px; }
+/* A permission card is a small dialog: the strip is its first row, pulled out to the card's edges. */
+:root[data-theme="posthog"] .permission { border: 2px solid var(--ph-ink); box-shadow: var(--ph-drop); }
+:root[data-theme="posthog"] .permission::before { margin: -10px -12px 0; }
+
+/* The top bar is a menu bar: white with a bottom outline, its items inverted under the pointer. */
+:root[data-theme="posthog"] .topbar { background: var(--sidebar); border-bottom: 2px solid var(--ph-ink); }
+:root[data-theme="posthog"] .toolbar-group { gap: 4px; padding: 0; border: none; background: none; }
+:root[data-theme="posthog"] .toolbar-group button.icon, :root[data-theme="posthog"] .viewer-scheme { border-radius: var(--radius-inner); }
+:root[data-theme="posthog"] .toolbar-group button.icon:hover:not(:disabled), :root[data-theme="posthog"] .toolbar-group button.icon.pressed, :root[data-theme="posthog"] .viewer-scheme:hover:not(:disabled), :root[data-theme="posthog"] .viewer-scheme.pressed, :root[data-theme="posthog"] .topbar button.sidebar-toggle:hover:not(:disabled) { background: var(--ph-ink); color: var(--bg); }
+:root[data-theme="posthog"] .viewer-scheme:hover:not(:disabled) .viewer-branch, :root[data-theme="posthog"] .viewer-scheme.pressed .viewer-branch, :root[data-theme="posthog"] .viewer-scheme:hover:not(:disabled) svg, :root[data-theme="posthog"] .viewer-scheme.pressed svg { color: var(--bg); }
+:root[data-theme="posthog"] .viewer { border: 2px solid var(--ph-ink); border-radius: var(--radius); background: var(--field); box-shadow: inset 2px 2px 0 var(--line); }
+:root[data-theme="posthog"] .viewer-crumb { border-color: var(--ph-ink); }
+
+/* Buttons: an outline and a hard shadow, yellow under the pointer, pressed flat. The orange primary is the loudest. */
+:root[data-theme="posthog"] button:not([class]), :root[data-theme="posthog"] button.primary, :root[data-theme="posthog"] .permission-actions button, :root[data-theme="posthog"] .always-group button, :root[data-theme="posthog"] .confirm-actions button, :root[data-theme="posthog"] .canvas-problem button, :root[data-theme="posthog"] .node-banner button, :root[data-theme="posthog"] .ctx-actions button, :root[data-theme="posthog"] .ctx-confirm button, :root[data-theme="posthog"] .merge-card.quiet button, :root[data-theme="posthog"] .merge-actions button, :root[data-theme="posthog"] .merge-tests-buttons button:not(.merge-link), :root[data-theme="posthog"] .sb-confirm-actions button, :root[data-theme="posthog"] .run-actions button:not(.icon), :root[data-theme="posthog"] .canvas-note button, :root[data-theme="posthog"] button.background-task-stop, :root[data-theme="posthog"] button.step-update, :root[data-theme="posthog"] .handoff-export .summary-export-button, :root[data-theme="posthog"] .inbox-actions button, :root[data-theme="posthog"] .pill, :root[data-theme="posthog"] .sb-new-button, :root[data-theme="posthog"] .scope-button, :root[data-theme="posthog"] .history-filter, :root[data-theme="posthog"] .meta-item.mode-chip, :root[data-theme="posthog"] .flavour-badge, :root[data-theme="posthog"] .node-chip, :root[data-theme="posthog"] .claude-check.warn button { border: 2px solid var(--ph-ink); border-radius: var(--radius); box-shadow: var(--ph-drop-s); }
+:root[data-theme="posthog"] button:not([class]):hover:not(:disabled), :root[data-theme="posthog"] button.primary:hover:not(:disabled), :root[data-theme="posthog"] .permission-actions button:hover:not(:disabled), :root[data-theme="posthog"] .always-group button:hover:not(:disabled), :root[data-theme="posthog"] .confirm-actions button:hover:not(:disabled), :root[data-theme="posthog"] .canvas-problem button:hover:not(:disabled), :root[data-theme="posthog"] .node-banner button:hover:not(:disabled), :root[data-theme="posthog"] .ctx-actions button:hover:not(:disabled), :root[data-theme="posthog"] .ctx-confirm button:hover:not(:disabled), :root[data-theme="posthog"] .merge-card.quiet button:hover:not(:disabled), :root[data-theme="posthog"] .merge-actions button:hover:not(:disabled), :root[data-theme="posthog"] .merge-tests-buttons button:not(.merge-link):hover:not(:disabled), :root[data-theme="posthog"] .sb-confirm-actions button:hover:not(:disabled), :root[data-theme="posthog"] .run-actions button:not(.icon):hover:not(:disabled), :root[data-theme="posthog"] .canvas-note button:hover:not(:disabled), :root[data-theme="posthog"] button.background-task-stop:hover:not(:disabled), :root[data-theme="posthog"] button.step-update:hover:not(:disabled), :root[data-theme="posthog"] .handoff-export .summary-export-button:hover:not(:disabled), :root[data-theme="posthog"] .inbox-actions button:hover:not(:disabled), :root[data-theme="posthog"] .sb-new-button:hover:not(:disabled), :root[data-theme="posthog"] .scope-button:hover:not(:disabled), :root[data-theme="posthog"] .history-filter:hover:not(:disabled), :root[data-theme="posthog"] .meta-item.mode-chip:hover:not(:disabled), :root[data-theme="posthog"] .flavour-badge:hover:not(:disabled), :root[data-theme="posthog"] .node-chip:hover:not(:disabled), :root[data-theme="posthog"] .claude-check.warn button:hover:not(:disabled) { background: var(--ph-hit); color: var(--ph-ink); }
+:root[data-theme="posthog"] .pill:hover:not(:disabled) { background: var(--ph-hit); color: var(--ph-ink); }
+:root[data-theme="posthog"] button:not([class]):active:not(:disabled), :root[data-theme="posthog"] button.primary:active:not(:disabled), :root[data-theme="posthog"] .permission-actions button:active:not(:disabled), :root[data-theme="posthog"] .always-group button:active:not(:disabled), :root[data-theme="posthog"] .confirm-actions button:active:not(:disabled), :root[data-theme="posthog"] .canvas-problem button:active:not(:disabled), :root[data-theme="posthog"] .node-banner button:active:not(:disabled), :root[data-theme="posthog"] .ctx-actions button:active:not(:disabled), :root[data-theme="posthog"] .ctx-confirm button:active:not(:disabled), :root[data-theme="posthog"] .merge-card.quiet button:active:not(:disabled), :root[data-theme="posthog"] .merge-actions button:active:not(:disabled), :root[data-theme="posthog"] .merge-tests-buttons button:not(.merge-link):active:not(:disabled), :root[data-theme="posthog"] .sb-confirm-actions button:active:not(:disabled), :root[data-theme="posthog"] .run-actions button:not(.icon):active:not(:disabled), :root[data-theme="posthog"] .canvas-note button:active:not(:disabled), :root[data-theme="posthog"] button.background-task-stop:active:not(:disabled), :root[data-theme="posthog"] button.step-update:active:not(:disabled), :root[data-theme="posthog"] .handoff-export .summary-export-button:active:not(:disabled), :root[data-theme="posthog"] .inbox-actions button:active:not(:disabled), :root[data-theme="posthog"] .pill:active:not(:disabled), :root[data-theme="posthog"] .sb-new-button:active:not(:disabled), :root[data-theme="posthog"] .scope-button:active:not(:disabled), :root[data-theme="posthog"] .history-filter:active:not(:disabled), :root[data-theme="posthog"] .meta-item.mode-chip:active:not(:disabled), :root[data-theme="posthog"] .flavour-badge:active:not(:disabled), :root[data-theme="posthog"] .node-chip:active:not(:disabled), :root[data-theme="posthog"] .claude-check.warn button:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: none; }
+:root[data-theme="posthog"] button.primary { background: var(--accent); color: var(--accent-text); font-weight: 600; }
+:root[data-theme="posthog"] .confirm-actions button.danger { background: var(--del); border-color: var(--ph-ink); }
+:root[data-theme="posthog"] .scope-button.pressed, :root[data-theme="posthog"] .sb-new-button[aria-expanded="true"] { background: var(--ph-hit); }
+:root[data-theme="posthog"] .pill svg, :root[data-theme="posthog"] .pill .chev { color: var(--ph-ink); }
+
+/* Tabs and segments: outlined tracks, the chosen one filled yellow (--seg-thumb). */
+:root[data-theme="posthog"] .pane-tabs-track, :root[data-theme="posthog"] .scope-track { border: 2px solid var(--ph-ink); border-radius: var(--radius); background: var(--field); }
+:root[data-theme="posthog"] .pane-tabs-track button, :root[data-theme="posthog"] .scope-track button, :root[data-theme="posthog"] .plan-toggle { border-radius: var(--radius-inner); color: var(--text-2); }
+:root[data-theme="posthog"] .pane-tabs-track button.active, :root[data-theme="posthog"] .scope-track button.active, :root[data-theme="posthog"] .plan-toggle.active { color: var(--ph-ink); font-weight: 600; }
+:root[data-theme="posthog"] .pane-tabs-track button:hover:not(.active), :root[data-theme="posthog"] .scope-track button:hover:not(.active) { background: var(--ph-ink); color: var(--bg); }
+:root[data-theme="posthog"] .pane-tabs { border-bottom: 2px solid var(--ph-ink); background: var(--bg-subtle); }
+
+/* The chat: your messages as sticky notes, code in outlined blocks with a title strip, steps as dashed rows. */
+:root[data-theme="posthog"] .turn-head .msg.user { border-top: 2px solid var(--ph-ink); border-bottom: 2px solid var(--ph-ink); }
+:root[data-theme="posthog"] .chat > .turn-section:first-child .turn-head .msg.user { border-top-color: transparent; }
+:root[data-theme="posthog"] .msg.user { border: 2px solid var(--ph-ink); box-shadow: var(--ph-drop-s); }
+:root[data-theme="posthog"] .turn-head .msg.user { box-shadow: none; }
+:root[data-theme="posthog"] .turn-head::after { display: none; }
+:root[data-theme="posthog"] .code-block { border: 2px solid var(--ph-ink); box-shadow: var(--ph-drop-s); }
+:root[data-theme="posthog"] .code-block-head { border-bottom: 2px solid var(--ph-ink); }
+:root[data-theme="posthog"] .msg.assistant pre, :root[data-theme="posthog"] .edit-hunks pre, :root[data-theme="posthog"] .step-output, :root[data-theme="posthog"] .permission-detail { border: 1px solid var(--ph-ink); }
+:root[data-theme="posthog"] .activity-line, :root[data-theme="posthog"] .step-line { border: 1px dashed var(--muted); padding: 1px 5px; }
+:root[data-theme="posthog"] .edit-line { border: 1px dashed var(--ph-ink); }
+:root[data-theme="posthog"] .activity-line:hover:not(:disabled), :root[data-theme="posthog"] .step-line:hover:not(:disabled), :root[data-theme="posthog"] .edit-line:hover:not(:disabled) { border-style: solid; border-color: var(--ph-ink); background: var(--ph-hit); color: var(--ph-ink); }
+:root[data-theme="posthog"] .steps, :root[data-theme="posthog"] .file-changes, :root[data-theme="posthog"] .step-children, :root[data-theme="posthog"] .plan-card.done .plan-body { border-left: 2px dashed var(--ph-ink); }
+:root[data-theme="posthog"] .md-table { border: 2px solid var(--ph-ink); }
+:root[data-theme="posthog"] .callout { border: 2px solid var(--ph-ink); border-left-width: 6px; border-radius: var(--radius-inner); }
+:root[data-theme="posthog"] .steps-intro-flavour { border: 2px solid var(--ph-ink); box-shadow: var(--ph-drop-s); }
+:root[data-theme="posthog"] .steps-intro-flavour:hover:not(:disabled), :root[data-theme="posthog"] .steps-intro-flavour.picked { background: var(--ph-hit); border-color: var(--ph-ink); box-shadow: var(--ph-drop-s); }
+:root[data-theme="posthog"] .steps-intro-flavour:active { transform: translate(2px, 2px); box-shadow: none; }
+:root[data-theme="posthog"] .plan-card, :root[data-theme="posthog"] .always-menu, :root[data-theme="posthog"] .steps-intro { border: 2px solid var(--ph-ink); box-shadow: var(--ph-drop-s); }
+:root[data-theme="posthog"] .composer-box { border: 2px solid var(--ph-ink); box-shadow: var(--ph-drop-s); background: var(--field); }
+:root[data-theme="posthog"] .composer-box:focus-within { border-color: var(--ph-ink); box-shadow: var(--ph-drop-s), 0 0 0 2px var(--unread); }
+:root[data-theme="posthog"] .composer-box.working::before { display: none; }
+:root[data-theme="posthog"] .composer-box textarea { box-shadow: none; }
+:root[data-theme="posthog"] .jump-latest { border: 2px solid var(--ph-ink); background: var(--ph-hit); color: var(--ph-ink); box-shadow: var(--ph-drop-s); -webkit-backdrop-filter: none; backdrop-filter: none; }
+
+/* Floating windows: menus, popovers, toasts and the like take their outline and hard shadow from --shadow; the toast also drops its glow. */
+:root[data-theme="posthog"] .menu, :root[data-theme="posthog"] .palette, :root[data-theme="posthog"] .shortcuts, :root[data-theme="posthog"] .whats-new, :root[data-theme="posthog"] .mode-guide, :root[data-theme="posthog"] .confirm-dialog, :root[data-theme="posthog"] .new-agent, :root[data-theme="posthog"] .canvas-menu, :root[data-theme="posthog"] .usage-pop, :root[data-theme="posthog"] .canvas-note, :root[data-theme="posthog"] .canvas-problem, :root[data-theme="posthog"] .canvas-team-list, :root[data-theme="posthog"] .pz-tools, :root[data-theme="posthog"] .aside, :root[data-theme="posthog"] .updating-body, :root[data-theme="posthog"] .revert-body { border-color: var(--ph-ink); }
+:root[data-theme="posthog"] .hud { border: 2px solid var(--ph-ink); border-left: 8px solid var(--hud-accent); box-shadow: var(--shadow) !important; -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-theme="posthog"] .hud-icon { border: 2px solid var(--ph-ink); border-radius: var(--radius); background: var(--field); color: var(--ph-ink); }
+:root[data-theme="posthog"] .hud-timer { height: 3px; background: var(--ph-ink); }
+:root[data-theme="posthog"] dialog::backdrop, :root[data-theme="posthog"] .palette::backdrop, :root[data-theme="posthog"] .mode-guide::backdrop, :root[data-theme="posthog"] .shortcuts::backdrop, :root[data-theme="posthog"] .whats-new::backdrop, :root[data-theme="posthog"] .arch-big::backdrop { background: var(--overlay); -webkit-backdrop-filter: none; backdrop-filter: none; }
+:root[data-theme="posthog"] .menu-row:hover:not(:disabled), :root[data-theme="posthog"] .palette-row.current, :root[data-theme="posthog"] .inbox-row:hover, :root[data-theme="posthog"] .mode-guide-tab:hover:not(.active) { background: var(--ph-hit); color: var(--ph-ink); }
+:root[data-theme="posthog"] .menu-row:hover:not(:disabled) *, :root[data-theme="posthog"] .palette-row.current *, :root[data-theme="posthog"] .inbox-row:hover *, :root[data-theme="posthog"] .mode-guide-tab:hover:not(.active) *, :root[data-theme="posthog"] .activity-line:hover:not(:disabled) *, :root[data-theme="posthog"] .step-line:hover:not(:disabled) *, :root[data-theme="posthog"] .edit-line:hover:not(:disabled) *, :root[data-theme="posthog"] .steps-intro-flavour:hover *, :root[data-theme="posthog"] .steps-intro-flavour.picked * { color: var(--ph-ink); }
+:root[data-theme="posthog"] .mode-guide-tab.active { background: var(--ph-ink); color: var(--bg); }
+:root[data-theme="posthog"] .mode-guide-tab.active:hover:not(:disabled) { background: var(--ph-ink); color: var(--bg); }
+:root[data-theme="posthog"] .mode-guide-nav { border-right: 2px solid var(--ph-ink); }
+
+/* Badges, chips and marks are stickers: an outline and a small hard shadow. */
+:root[data-theme="posthog"] .settings-row { border: 2px solid var(--ph-ink); box-shadow: var(--ph-drop-s); }
+:root[data-theme="posthog"] .tag, :root[data-theme="posthog"] .skill-kind, :root[data-theme="posthog"] .palette-shortcut, :root[data-theme="posthog"] .shortcuts-key, :root[data-theme="posthog"] .switch-state { border: 1px solid var(--ph-ink); border-radius: var(--radius-inner); box-shadow: 1px 1px 0 var(--ph-ink); }
+:root[data-theme="posthog"] .sidebar-toggle-badge, :root[data-theme="posthog"] .inbox-badge { border: 2px solid var(--ph-ink); border-radius: var(--radius-inner); box-shadow: var(--ph-drop-s); line-height: 11px; }
+:root[data-theme="posthog"] .sb-mark.waiting, :root[data-theme="posthog"] .sb-mark.unread, :root[data-theme="posthog"] .sb-team { outline: 1.5px solid var(--ph-ink); }
+
+/* Controls: square-ish checkboxes and radios with an outline; inputs look pressed in; scrollbars are chunky. */
+:root[data-theme="posthog"] input[type="checkbox"], :root[data-theme="posthog"] input[type="radio"] { -webkit-appearance: none; appearance: none; position: relative; flex: none; width: 15px; height: 15px; margin: 0 2px; border: 2px solid var(--ph-ink); border-radius: var(--radius-inner); background: var(--field); vertical-align: -3px; }
+:root[data-theme="posthog"] input[type="radio"] { border-radius: 50%; }
+:root[data-theme="posthog"] input[type="checkbox"]:checked, :root[data-theme="posthog"] input[type="radio"]:checked { background: var(--accent); }
+:root[data-theme="posthog"] input[type="checkbox"]:checked::after { content: ""; position: absolute; left: 3px; top: -1px; width: 4px; height: 8px; border: solid var(--ph-ink); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+:root[data-theme="posthog"] input[type="radio"]:checked::after { content: ""; position: absolute; inset: 2px; border-radius: 50%; background: var(--ph-ink); }
+:root[data-theme="posthog"] input[type="checkbox"]:focus-visible, :root[data-theme="posthog"] input[type="radio"]:focus-visible { outline: 2px solid var(--unread); outline-offset: 1px; }
+:root[data-theme="posthog"] input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]), :root[data-theme="posthog"] textarea, :root[data-theme="posthog"] select { border-color: var(--ph-ink); border-radius: var(--radius-inner); box-shadow: inset 2px 2px 0 var(--line); }
+:root[data-theme="posthog"] ::-webkit-scrollbar { width: 14px; height: 14px; background: var(--bg-subtle); }
+:root[data-theme="posthog"] ::-webkit-scrollbar-track { background: var(--bg-subtle); border-left: 2px solid var(--ph-ink); }
+:root[data-theme="posthog"] ::-webkit-scrollbar-thumb { background: var(--field); border: 2px solid var(--ph-ink); border-radius: var(--radius-inner); }
+:root[data-theme="posthog"] ::-webkit-scrollbar-thumb:hover { background: var(--ph-hit); }
+:root[data-theme="posthog"] ::-webkit-scrollbar:horizontal { height: 12px; }
+:root[data-theme="posthog"] ::-webkit-scrollbar-track:horizontal { border-left: none; border-top: 2px solid var(--ph-ink); }
+:root[data-theme="posthog"] .chat, :root[data-theme="posthog"] .slash-list, :root[data-theme="posthog"] .palette-list { overflow-x: hidden; }
+:root[data-theme="posthog"] ::-webkit-scrollbar-corner { background: var(--bg-subtle); }
+:root[data-theme="posthog"] .sb-list::-webkit-scrollbar { width: 4px; background: none; }
+:root[data-theme="posthog"] .sb-list::-webkit-scrollbar-track { background: none; border: none; }
+:root[data-theme="posthog"] .sb-list::-webkit-scrollbar-thumb { border: none; border-radius: 2px; background: var(--ph-ink); }
+
+/* The sidebar: a dock on the desktop, ruled off with an outline on its right. Its squares keep their places; the open one is outlined. */
+:root[data-theme="posthog"] .sb-panel { background: transparent; border-radius: 0; }
+:root[data-theme="posthog"] .sb-panel.expanded { background: var(--bg); }
+:root[data-theme="posthog"] .sidebar.pinned .sb-panel { background: var(--bg); }
+:root[data-theme="posthog"] .sidebar.pinned .sb-panel { box-shadow: inset -2px 0 0 var(--ph-ink); }
+:root[data-theme="posthog"] .sb-chip { outline: 1px solid var(--ph-ink); }
+:root[data-theme="posthog"] .sb-chip.current { outline: 2px solid var(--ph-ink); box-shadow: var(--ph-drop-s); }
+:root[data-theme="posthog"] .sb-chip.current::before { background: var(--ph-ink); }
+:root[data-theme="posthog"] .sb-new-button { height: var(--pill-m); }
+:root[data-theme="posthog"] .sb-section.lifted { background: var(--bg); }
+
+/* The team canvas: its agents are windows too, their heads title bars. */
+:root[data-theme="posthog"] .canvas { background-image: radial-gradient(circle, var(--ph-dot) 1.3px, transparent 1.7px); background-color: var(--bg); }
+:root[data-theme="posthog"] .node-head { background: var(--ph-bar); border-bottom: 2px solid var(--ph-ink); }
+:root[data-theme="posthog"] .canvas-node.folded .node-head { border-bottom: none; }
+:root[data-theme="posthog"] .canvas-node.focused .node-head { background: var(--ph-hit); }
+
+/* Motion: the press-down is the only movement, and it is instant; with reduced motion the button keeps its place and only loses its shadow. */
+@media (prefers-reduced-motion: reduce) { :root[data-theme="posthog"] button:not([class]):active:not(:disabled), :root[data-theme="posthog"] button.primary:active:not(:disabled), :root[data-theme="posthog"] .permission-actions button:active:not(:disabled), :root[data-theme="posthog"] .always-group button:active:not(:disabled), :root[data-theme="posthog"] .confirm-actions button:active:not(:disabled), :root[data-theme="posthog"] .canvas-problem button:active:not(:disabled), :root[data-theme="posthog"] .node-banner button:active:not(:disabled), :root[data-theme="posthog"] .ctx-actions button:active:not(:disabled), :root[data-theme="posthog"] .ctx-confirm button:active:not(:disabled), :root[data-theme="posthog"] .merge-card.quiet button:active:not(:disabled), :root[data-theme="posthog"] .merge-actions button:active:not(:disabled), :root[data-theme="posthog"] .merge-tests-buttons button:not(.merge-link):active:not(:disabled), :root[data-theme="posthog"] .sb-confirm-actions button:active:not(:disabled), :root[data-theme="posthog"] .run-actions button:not(.icon):active:not(:disabled), :root[data-theme="posthog"] .canvas-note button:active:not(:disabled), :root[data-theme="posthog"] button.background-task-stop:active:not(:disabled), :root[data-theme="posthog"] button.step-update:active:not(:disabled), :root[data-theme="posthog"] .handoff-export .summary-export-button:active:not(:disabled), :root[data-theme="posthog"] .inbox-actions button:active:not(:disabled), :root[data-theme="posthog"] .pill:active:not(:disabled), :root[data-theme="posthog"] .sb-new-button:active:not(:disabled), :root[data-theme="posthog"] .scope-button:active:not(:disabled), :root[data-theme="posthog"] .history-filter:active:not(:disabled), :root[data-theme="posthog"] .meta-item.mode-chip:active:not(:disabled), :root[data-theme="posthog"] .flavour-badge:active:not(:disabled), :root[data-theme="posthog"] .node-chip:active:not(:disabled), :root[data-theme="posthog"] .claude-check.warn button:active:not(:disabled), :root[data-theme="posthog"] .steps-intro-flavour:active { transform: none; } }
 
 /* Base */
 * { box-sizing: border-box; }
