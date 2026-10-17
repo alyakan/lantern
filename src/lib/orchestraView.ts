@@ -1,5 +1,5 @@
 import { wakesPaused, type Chats } from "../sessions";
-import type { ChatItem, State } from "../store";
+import { hasPendingPrompt, type ChatItem, type State } from "../store";
 import type { ActivityStatus } from "./status";
 import type { CloseCheck } from "../types";
 import type { AgentRole } from "./roles";
@@ -30,7 +30,7 @@ export function statusLabel(status: NodeStatus, role: "main" | "worker", readyTo
 export function nodeStatus(s: State): NodeStatus {
   // Its worktree is being set up, or setup stopped and it is the user's to answer: it hasn't started working yet.
   if (s.setup) return s.setup.status === "failed" ? "waiting" : "starting";
-  if (s.items.some((it) => it.type === "permission" && it.decision === null)) return "waiting";
+  if (hasPendingPrompt(s.items)) return "waiting";
   // Stopped is quiet; only one that stopped on an error says so in red.
   if (s.status === "ended") return s.banner?.kind === "error" ? "failed" : "ended";
   if (s.status === "running" || s.thinking) return "working";
