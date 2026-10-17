@@ -19,11 +19,15 @@ pub struct BridgeRequest {
     /// A review_target call: the app shows what it names in the Changes pane (UiEvent::ReviewTarget). Set by the helper only.
     #[serde(default)]
     pub review: bool,
+    /// A `git` call from a read-only agent (see read_git.rs): `input` is its arguments. The app runs it only for a chat it
+    /// started as a read-only agent, whatever the helper says. Set by the helper only.
+    #[serde(default)]
+    pub git: bool,
 }
 
 impl BridgeRequest {
     pub fn permission(tool_name: String, input: Value, tool_use_id: Option<String>) -> Self {
-        Self { tool_name, input, tool_use_id, orchestra: false, network: false, review: false }
+        Self { tool_name, input, tool_use_id, orchestra: false, network: false, review: false, git: false }
     }
 }
 

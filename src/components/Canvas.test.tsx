@@ -7,7 +7,6 @@ import { ChatStoreContext, createChatStore, NodeActionsContext, type NodeActions
 import { needingYou, orchestraNodes } from "../lib/orchestraView";
 import { firstBox, GAP, MAIN_SIZE, overlaps, SUMMARY_ZOOM, WORKER_SIZE } from "../lib/canvas";
 import { Canvas, newLayout, placeNodes, UPDATE_REQUEST } from "./Canvas";
-import { NUDGE_MESSAGE } from "./NodeBody";
 
 // jsdom has no PointerEvent, so its clientX, button and pointerId would never reach a handler.
 if (typeof window.PointerEvent === "undefined") {
@@ -889,6 +888,25 @@ describe("cleaning up and closing an agent", () => {
     expect(acts.closeWorker).not.toHaveBeenCalled();
   });
 
+  it("does not claim to delete a worktree that is already gone, and says so", async () => {
+    const closeCheck = vi.fn(() => Promise.resolve({ ...lost, uncommitted: 0, gone: true }));
+    const { acts } = setup(team(1), { actions: { closeCheck } });
+    chooseClose();
+    const dialog = await screen.findByRole("alertdialog", { name: "Close Worker 1?" });
+    expect(dialog.textContent).toContain("It has 2 commits that aren't merged. Its worktree is already gone. Closing it stops it and deletes its branch lantern/w1, so that work is gone for good.");
+    expect(dialog.textContent).not.toContain("deletes its worktree");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Discard work and close" }));
+    expect(acts.closeWorker).toHaveBeenCalledWith("w1", { uncommitted: 0, unmerged_commits: 2 });
+  });
+
+  it("closes an agent whose worktree is gone at once when its branch holds nothing", async () => {
+    const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.resolve({ worktree: true, gone: true, branch: null, uncommitted: 0, unmerged_commits: 0 })) } });
+    chooseClose();
+    await waitFor(() => expect(acts.closeWorker).toHaveBeenCalledWith("w1", undefined));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("cancels on Escape and on a press outside the box, and keeps Tab inside it", async () => {
     const { acts } = setup(team(1), { actions: { closeCheck: vi.fn(() => Promise.resolve(lost)) } });
     chooseClose();
@@ -1155,78 +1173,20 @@ describe("an agent at work that has gone quiet", () => {
     const stuck = screen.getByLabelText(/Agent Worker 1, Quiet 3m/);
     expect(stuck).toHaveClass("stuck");
     expect(stuck.querySelector(".node-status")).toHaveTextContent("Quiet 3m");
-    expect(stuck.querySelector(".node-status")?.getAttribute("title")).toMatch(/nudge it, interrupt it or restart it/);
+    expect(stuck.querySelector(".node-status")?.getAttribute("title")).toMatch(/It may be stuck\./);
   });
 
-  it("says so in its card, with Nudge, Interrupt and Restart, only once it is quiet", () => {
-    setup(working(45_000));
-    expect(screen.queryByRole("button", { name: "Nudge" })).toBeNull();
-    cleanup();
-    setup(working(200_000));
-    const line = screen.getByText(/Quiet for 3 min\. It may be stuck\./);
-    expect(line).toBeInTheDocument();
-    expect(within(line.parentElement!).getAllByRole("button").map((b) => b.textContent)).toEqual(["Nudge", "Interrupt", "Restart", "×"]);
-  });
-
-  it("can be dismissed with its ×, and comes back only after the agent says something new", () => {
-    const chats = working(200_000);
-    const { store, acts } = setup(chats);
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(screen.queryByText(/It may be stuck\./)).toBeNull();
-    expect(screen.queryByRole("button", { name: "Nudge" })).toBeNull();
-    // It only hides the banner: nothing was sent to the agent, and the card is still marked quiet.
-    expect(acts.send).not.toHaveBeenCalled();
-    expect(acts.stop).not.toHaveBeenCalled();
-    expect(screen.getByLabelText(/Agent Worker 1, Quiet 3m/)).toHaveClass("stuck");
-    act(() => store.set({ ...chats.slots, w1: { ...chats.slots.w1, activityAt: Date.now() - 190_000 } }));
-    expect(screen.getByText(/It may be stuck\./)).toBeInTheDocument();
-  });
-
-  it("has no × on the Restart question: it is answered, not dismissed", () => {
-    const { acts } = setup(working(200_000));
-    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
-    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
-    expect(screen.getByRole("alertdialog", { name: "Restart this agent?" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Restart anyway" }));
-    expect(acts.restart).toHaveBeenCalledWith("w1");
-  });
-
-  it("Nudge asks for a one-line status once for each stretch of quiet", () => {
-    const { acts } = setup(working(200_000));
-    fireEvent.click(screen.getByRole("button", { name: "Nudge" }));
-    expect(acts.send).toHaveBeenCalledTimes(1);
-    expect(acts.send).toHaveBeenCalledWith("w1", NUDGE_MESSAGE);
-    expect(screen.getByRole("button", { name: "Nudged" })).toBeDisabled();
-    expect(acts.stop).not.toHaveBeenCalled();
-    expect(acts.restart).not.toHaveBeenCalled();
-  });
-
-  it("Interrupt stops its turn and nothing else: it isn't restarted or closed", () => {
-    const { acts } = setup(working(200_000));
-    fireEvent.click(screen.getByRole("button", { name: "Interrupt" }));
-    expect(acts.stop).toHaveBeenCalledWith("w1");
-    expect(acts.restart).not.toHaveBeenCalled();
-    expect(acts.closeWorker).not.toHaveBeenCalled();
-  });
-
-  it("Restart says what it loses first, and does nothing until it is confirmed", () => {
-    const { acts } = setup(working(200_000));
-    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
-    expect(screen.getByRole("alertdialog", { name: "Restart this agent?" })).toHaveTextContent(/step it is in the middle of is lost/);
-    expect(acts.restart).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(acts.restart).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Nudge" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Restart" }));
-    fireEvent.click(screen.getByRole("button", { name: "Restart anyway" }));
-    expect(acts.restart).toHaveBeenCalledWith("w1");
+  it("has no banner in its chat, however long it has been quiet", () => {
+    setup(working(20 * 60_000));
+    expect(screen.queryByText(/Quiet for/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Nudge|Interrupt|Restart/ })).toBeNull();
+    expect(screen.getByLabelText(/Agent Worker 1/)).toHaveClass("stuck");
   });
 
   it("follows the quiet time in Settings", () => {
     localStorage.setItem("lantern.quietMinutes", "5");
     try {
       setup(working(200_000));
-      expect(screen.queryByRole("button", { name: "Nudge" })).toBeNull();
       expect(screen.getByLabelText(/Agent Worker 1/)).not.toHaveClass("stuck");
     } finally {
       localStorage.removeItem("lantern.quietMinutes");
@@ -1644,6 +1604,20 @@ describe("Close stopped agents", () => {
     expect(within(dialog).getByText(/1 other stopped agent has nothing to lose/)).toBeInTheDocument();
     expect(acts.closeWorker).not.toHaveBeenCalled();
     expect(within(dialog).getAllByRole("button").map((b) => b.textContent)).toEqual(["Cancel", "Keep those", "Close all"]);
+  });
+
+  it("closes stopped agents whose worktree is gone with the rest, without an error, and names only their branches in the question", async () => {
+    const gone = { worktree: true, gone: true, branch: "lantern/x", uncommitted: 0, unmerged_commits: 0 };
+    const closeCheck = vi.fn((slot: string) => Promise.resolve(slot === "w1" ? { ...gone, unmerged_commits: 2 } : slot === "w2" ? gone : check(0, 0)));
+    const { acts } = setup(withStopped(team(3), "w1", "w2", "w3"), { actions: { closeCheck } });
+    openTeam();
+    fireEvent.click(screen.getByRole("button", { name: "Close stopped agents (3)" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Close stopped agents?" });
+    expect(within(dialog).getByText(/^Its worktree is already gone\. Closing stops it and deletes its branch, so that work is gone for good\./)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close all" }));
+    expect(await screen.findByText("Closed 3 agents.")).toBeInTheDocument();
+    expect(screen.queryByText(/won't run git/)).toBeNull();
+    expect((acts.closeWorker as ReturnType<typeof vi.fn>).mock.calls).toEqual([["w2", undefined], ["w3", undefined], ["w1", { uncommitted: 0, unmerged_commits: 2 }]]);
   });
 
   it("Close all closes every one, each risky one with exactly what it was told it would lose", async () => {

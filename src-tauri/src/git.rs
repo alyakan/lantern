@@ -41,7 +41,7 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(180);
 /// anywhere), and neither signing nor checking signatures: each runs a program the config names, so those programs are
 /// pinned to `false` as well. git hands these on to the git commands it runs itself. Filter and merge drivers still
 /// run: git-lfs is one, and without it a commit or a merge would take its pointer files for the content.
-const HARDENED: [&str; 24] = [
+pub(crate) const HARDENED: [&str; 24] = [
     "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat", "-c", "submodule.recurse=false",
     "-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false", "-c", "merge.verifySignatures=false", "-c", "log.showSignature=false",
     "-c", "gpg.program=/usr/bin/false", "-c", "gpg.ssh.program=/usr/bin/false", "-c", "gpg.x509.program=/usr/bin/false",
@@ -284,10 +284,21 @@ fn new_root(repo: &Path, parent: &Path, slug: &str, id: &str) -> Result<PathBuf,
     Ok(root)
 }
 
+/// Held while a worktree is added or removed, one at a time in the whole app. A team's agents are started at once, and git
+/// doesn't take that: a `worktree add` that reads the repository's worktree records while another is making its own fails
+/// ("failed to read .git/worktrees/…/commondir"), and two that pick the free branch name or folder at the same moment pick
+/// the same one. A lock that a panic left behind is not a reason to refuse every later agent.
+static WORKTREE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn worktree_lock() -> std::sync::MutexGuard<'static, ()> {
+    WORKTREE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Creates a worktree for `name` under `parent` on a new branch `lantern/<name>` (numbered if that exists), starting
 /// from the commit the main checkout is on. Work not committed yet is not in it.
 pub fn add_worktree(folder: &Path, parent: &Path, name: &str, id: &str, path_env: Option<&str>) -> Result<Worktree, String> {
     let repo = repo_root(folder, path_env).ok_or("This folder isn't in a git repository, so an agent can't get a worktree of its own.")?;
+    let _one_at_a_time = worktree_lock();
     let base = current_branch(&repo).filter(|b| branch_exists(&repo, b, path_env));
     let slug = self::slug(name);
     let mut branch = format!("lantern/{slug}");
@@ -313,6 +324,7 @@ pub fn add_detached_worktree(folder: &Path, parent: &Path, name: &str, id: &str,
     if commit.len() != 40 || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err("That isn't a commit.".into());
     }
+    let _one_at_a_time = worktree_lock();
     let root = new_root(&repo, parent, &self::slug(name), id)?;
     let root_arg = root.to_string_lossy().to_string();
     run(&repo, &["worktree", "add", "--detach", &root_arg, commit], path_env)?;
@@ -365,12 +377,22 @@ impl Checked {
     }
 }
 
+/// Whether the folder of a worktree is no longer on disk at all (removed outside Lantern), as opposed to being there but not
+/// a worktree `verify_worktree` accepts. Only "not found" counts: a folder that can't be read is not known to be gone.
+pub fn worktree_gone(root: &Path) -> bool {
+    std::fs::symlink_metadata(root).is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+}
+
 /// Checks that `root` is a linked worktree of the repository `repo` is in, before Lantern runs git there. A worktree's
 /// `.git` is a plain file in the worker's own folder, saying where its git directory is: rewritten to point at one the
 /// worker made, the config there would have git run the worker's commands for Lantern (a filesystem monitor, a hook).
 /// So the file has to point into the repository's own `worktrees`, and that directory has to say it belongs to this
 /// repository and to this worktree. All of it is read from disk: no git runs in the worktree before it is checked.
 pub fn verify_worktree(repo: &Path, root: &Path, path_env: Option<&str>) -> Result<Checked, String> {
+    // A folder that isn't there isn't a forged one: there is nothing to run git in, and nothing in it to lose.
+    if worktree_gone(root) {
+        return Err(format!("Its worktree folder {} is gone: it was removed outside Lantern, so there is nothing to run git in.", root.display()));
+    }
     let refuse = |why: &str| format!("Lantern won't run git in {}: {why}, so it isn't the worktree Lantern made for this repository.", root.display());
     let common = common_dir(repo, path_env).ok_or("The main folder isn't in a git repository.")?;
     let worktrees = std::fs::canonicalize(common.join("worktrees")).map_err(|_| refuse("the repository has no linked worktrees"))?;
@@ -657,20 +679,41 @@ pub fn is_workers_branch(branch: &str) -> bool {
     branch.strip_prefix("lantern/").is_some_and(|rest| !rest.is_empty())
 }
 
+/// Whether the repository has a record of a worktree at `root`. When git can't say it is taken that it does, so an error
+/// that came from something else is never hidden.
+fn is_listed(repo: &Path, root: &Path, path_env: Option<&str>) -> bool {
+    let Ok(list) = run_raw(repo, &["worktree", "list", "--porcelain"], path_env) else { return true };
+    let wanted = root.to_string_lossy();
+    // git writes the real path (/private/var for /var on a Mac).
+    list.lines().filter_map(|l| l.strip_prefix("worktree ")).any(|p| p == wanted || p.strip_prefix("/private").is_some_and(|rest| rest == wanted))
+}
+
 /// Removes a worktree and, when asked, its branch. `force` throws away uncommitted work and an unmerged branch. A branch
-/// that isn't one of Lantern's own (see `is_workers_branch`) is never deleted: asked to, nothing is removed.
+/// that isn't one of Lantern's own (see `is_workers_branch`) is never deleted: asked to, nothing is removed. A worktree whose
+/// folder is already gone (see `worktree_gone`) has nothing to remove: git is told to forget its record instead, and a
+/// branch that is gone too is nothing to delete.
 pub fn remove_worktree(repo: &Path, root: &Path, branch: &str, delete_branch: bool, force: bool, path_env: Option<&str>) -> Result<(), String> {
     if delete_branch && !is_workers_branch(branch) {
         return Err(format!("{branch} isn't a branch Lantern made for an agent, so Lantern won't delete it."));
     }
+    let _one_at_a_time = worktree_lock();
+    let gone = worktree_gone(root);
     let root_arg = root.to_string_lossy().to_string();
     let mut args = vec!["worktree", "remove"];
     if force {
         args.push("--force");
     }
     args.push(&root_arg);
-    run(repo, &args, path_env)?;
-    if delete_branch {
+    // Git removes the record of a worktree whose folder is already gone, and only that one (a `worktree prune` would forget
+    // every worktree of the repository whose folder is missing, the user's on an unmounted drive among them). It does so
+    // before the branch goes: git won't delete a branch that a worktree record still has checked out.
+    if let Err(e) = run(repo, &args, path_env) {
+        // A record that is not there any more (forgotten by a prune, say) is already what was asked for.
+        if !(gone && !is_listed(repo, root, path_env)) {
+            return Err(e);
+        }
+    }
+    if delete_branch && !(gone && tip_of(repo, branch, path_env).is_err()) {
         // Unforced, a branch with commits that were never merged is kept (git refuses): the worktree is gone either way.
         let deleted = run(repo, &["branch", if force { "-D" } else { "-d" }, branch], path_env);
         if force {
@@ -778,6 +821,28 @@ mod tests {
     /// A directory for worktrees that outlives the statement it's made in (the OS clears /tmp).
     fn worktrees() -> PathBuf {
         tempfile::tempdir().unwrap().keep()
+    }
+
+    #[test]
+    fn agents_started_at_the_same_moment_each_get_a_worktree_of_their_own() {
+        // A team's agents are started at once; git alone fails one of them reading another's half-made worktree record,
+        // and two of the same name would pick the same branch.
+        let main = repo();
+        let parent = worktrees();
+        let (folder, parent_ref) = (main.path(), &parent);
+        let made: Vec<Result<Worktree, String>> = std::thread::scope(|s| {
+            let jobs: Vec<_> = (0..8).map(|i| s.spawn(move || add_worktree(folder, parent_ref, "Same name", &format!("w{i}"), None))).collect();
+            jobs.into_iter().map(|j| j.join().unwrap()).collect()
+        });
+        let all: Vec<&Worktree> = made.iter().map(|r| r.as_ref().unwrap_or_else(|e| panic!("{e}"))).collect();
+        let mut branches: Vec<&str> = all.iter().map(|w| w.branch.as_str()).collect();
+        branches.sort();
+        branches.dedup();
+        assert_eq!(branches.len(), 8, "{branches:?}");
+        let mut roots: Vec<&Path> = all.iter().map(|w| w.root.as_path()).collect();
+        roots.sort();
+        roots.dedup();
+        assert_eq!(roots.len(), 8);
     }
 
     #[test]
@@ -1032,6 +1097,65 @@ mod tests {
         assert!(wt.root.exists(), "unforced removal deleted uncommitted work");
         assert!(remove_worktree(main.path(), &wt.root, &wt.branch, true, true, None).is_ok());
         assert!(!wt.root.exists() && !branch_exists(main.path(), &wt.branch, None));
+    }
+
+    #[test]
+    fn a_worktree_folder_that_is_gone_is_said_to_be_gone_and_one_that_is_there_but_wrong_is_still_refused() {
+        let main = repo();
+        let wt = add_worktree(main.path(), &worktrees(), "w", "w1", None).unwrap();
+        assert!(!worktree_gone(&wt.root));
+        // A folder that is there but isn't a worktree: the old refusal, not "gone".
+        let plain = tempfile::tempdir().unwrap();
+        assert!(!worktree_gone(plain.path()));
+        assert!(verify_worktree(main.path(), plain.path(), None).unwrap_err().contains("isn't a plain file"));
+        // A link that points at nothing is something there, not a folder that is gone.
+        let dangling = plain.path().join("dangling");
+        std::os::unix::fs::symlink(plain.path().join("nowhere"), &dangling).unwrap();
+        assert!(!worktree_gone(&dangling));
+        assert!(verify_worktree(main.path(), &dangling, None).unwrap_err().contains("won't run git"));
+        run(main.path(), &["worktree", "remove", "--force", &wt.root.to_string_lossy()], None).unwrap();
+        assert!(worktree_gone(&wt.root));
+        let err = verify_worktree(main.path(), &wt.root, None).unwrap_err();
+        assert!(err.contains("is gone") && err.contains("removed outside Lantern") && !err.contains("plain file"), "{err}");
+    }
+
+    #[test]
+    fn removing_a_worktree_whose_folder_is_gone_clears_git_s_record_and_deletes_the_branch_only_when_allowed() {
+        let main = repo();
+        let make = |name: &str, id: &str| {
+            let wt = add_worktree(main.path(), &worktrees(), name, id, None).unwrap();
+            std::fs::write(wt.folder.join("b.txt"), "b\n").unwrap();
+            run(&wt.folder, &["add", "b.txt"], None).unwrap();
+            run(&wt.folder, &["commit", "-q", "-m", "add b"], None).unwrap();
+            // Removed outside Lantern, and outside git.
+            std::fs::remove_dir_all(&wt.root).unwrap();
+            wt
+        };
+        let listed = || run(main.path(), &["worktree", "list", "--porcelain"], None).unwrap();
+        // Another worktree of the repository whose folder is missing too (an unmounted drive, say): none of this touches it.
+        let bystander = make("o", "w0");
+        // Not asked to delete the branch: the record goes, the branch stays.
+        let kept = make("k", "w1");
+        assert!(listed().contains(&kept.branch));
+        remove_worktree(main.path(), &kept.root, &kept.branch, false, true, None).unwrap();
+        assert!(!listed().contains(&kept.branch) && branch_exists(main.path(), &kept.branch, None));
+        // Unforced, a branch with a commit that was never merged is kept too.
+        let unmerged = make("u", "w2");
+        remove_worktree(main.path(), &unmerged.root, &unmerged.branch, true, false, None).unwrap();
+        assert!(!listed().contains(&unmerged.branch) && branch_exists(main.path(), &unmerged.branch, None));
+        // Forced, it goes; and one that is gone already is nothing to delete.
+        let forced = make("f", "w3");
+        remove_worktree(main.path(), &forced.root, &forced.branch, true, true, None).unwrap();
+        assert!(!branch_exists(main.path(), &forced.branch, None));
+        remove_worktree(main.path(), &forced.root, &forced.branch, true, true, None).unwrap();
+        // The bystander's record is still there after all of that: only the one asked for was removed.
+        assert!(listed().contains(&bystander.branch), "{}", listed());
+        // A record that was forgotten already (someone ran `git worktree prune`) is nothing left to remove, not an error.
+        let forgotten = make("g", "w4");
+        run(main.path(), &["worktree", "prune"], None).unwrap();
+        remove_worktree(main.path(), &forgotten.root, &forgotten.branch, false, true, None).unwrap();
+        // A branch that isn't Lantern's is still never deleted.
+        assert!(remove_worktree(main.path(), &forced.root, "main", true, true, None).is_err());
     }
 
     /// An executable script at `path` that leaves `marker` behind when it runs.

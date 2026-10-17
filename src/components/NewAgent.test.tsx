@@ -174,7 +174,7 @@ describe("a role in the form to start an agent", () => {
     expect((within(form()).getByLabelText("Shared folder") as HTMLInputElement).checked).toBe(true);
     expect((within(form()).getByLabelText("Model") as HTMLSelectElement).value).toBe("sonnet");
     expect((within(form()).getByLabelText("Read only") as HTMLInputElement).checked).toBe(true);
-    expect(form().textContent).toContain("Reads files and a diff you give it and reports findings");
+    expect(form().textContent).toContain("Reads files and a branch's diff and reports findings");
     expect(brief().value).toContain("You are a Reviewer. Review this: (your task)");
     type(task(), "the login form");
     expect(brief().value).toContain("You are a Reviewer. Review this: the login form");
@@ -217,6 +217,28 @@ describe("a role in the form to start an agent", () => {
     type(roleSelect(), "");
     expect(within(form()).queryByLabelText(/^Brief/)).toBeNull();
     expect((within(form()).getByLabelText("Model") as HTMLSelectElement).value).toBe("");
+  });
+
+  it("goes back to what the role allows when Own worktree is chosen after Shared folder, so a Builder isn't left read only", () => {
+    const { spawn } = mount();
+    open();
+    type(roleSelect(), "builder");
+    fireEvent.click(within(form()).getByLabelText("Shared folder"));
+    expect((within(form()).getByLabelText("Read only") as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(within(form()).getByLabelText("Own worktree"));
+    expect((within(form()).getByLabelText("Can edit") as HTMLInputElement).checked).toBe(true);
+    expect((within(form()).getByLabelText("Can edit") as HTMLInputElement).disabled).toBe(false);
+    type(task(), "dark mode");
+    fireEvent.click(within(form()).getByRole("button", { name: "Start agent" }));
+    expect(spawn).toHaveBeenCalledWith("s1", expect.objectContaining({ isolation: "worktree", role: { id: "builder", label: "Builder", read_only: false } }));
+  });
+
+  it("keeps a read-only role read only in a worktree of its own", () => {
+    mount();
+    open();
+    type(roleSelect(), "reviewer");
+    fireEvent.click(within(form()).getByLabelText("Own worktree"));
+    expect((within(form()).getByLabelText("Read only") as HTMLInputElement).checked).toBe(true);
   });
 
   it("still wants a task before it starts a role", () => {

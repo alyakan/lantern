@@ -11,6 +11,9 @@ import { api, type RestoreResult } from "../api";
 import { restoredFiles, restoreSummary, undoRestoreSummary, useRestorePoints } from "../lib/restorePoint";
 import { sinceLabel } from "../lib/revert";
 
+/** How long after the reader's last wheel, touch or key a scroll still counts as theirs (a trackpad's glide goes on after the fingers lift). */
+const READER_WINDOW_MS = 600;
+
 /** What "Restore files to here" tells the app: a restore was done or undone, so it can show it and say it to Claude. */
 export interface RestoreEvents {
   onRestored: (since: string, result: RestoreResult, summary: string, files: { path: string; trashed: boolean }[]) => void;
@@ -53,8 +56,30 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
     });
     return () => cancelAnimationFrame(frame);
   }, []);
+  // Where the chat is meant to be (at its end, or at a place in it) is the reader's to say, and only the reader's: by the
+  // wheel or trackpad, a finger, the keys, the scrollbar, or the pill. The browser scrolls the chat by itself too, whenever
+  // the layout changes under it (it grew, it was resized, it was clamped, it came back from another view), and read as the
+  // reader's those scrolls said "you scrolled up" and made the middle of the chat the place to come back to. So a scroll
+  // with no input of theirs just before it never changes what is meant.
+  const lastInput = useRef(-Infinity);
+  const dragging = useRef(false);
   const byHand = () => {
     restoring.current = false;
+    lastInput.current = performance.now();
+  };
+  useEffect(() => {
+    const release = () => (dragging.current = false);
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+    return () => {
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+    };
+  }, []);
+  // Following the end: the chat is put there, and that is what is remembered for coming back (never an older place).
+  const toEnd = (el: HTMLElement) => {
+    el.scrollTop = el.scrollHeight;
+    rememberScroll<ChatAnchor | -1>(`${slot}:chat`, -1);
   };
   // Your own message goes to the end, even if you'd scrolled up to read: you're following what you just sent.
   const lastSent = (items: State["items"]) => [...items].reverse().find((it) => it.type === "user" && !it.auto)?.id;
@@ -67,7 +92,7 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
       sent.current = id;
       nearBottom.current = true;
     }
-    if (nearBottom.current && el) el.scrollTop = el.scrollHeight;
+    if (nearBottom.current && el) toEnd(el);
   }, [state.items, state.thinking]);
   // The chat box grows as you type, which makes this area shorter without scrolling it: stay at the end if you were
   // there, so the box doesn't end up over the last lines. Resized elsewhere (a wider pane, a card made bigger), it keeps
@@ -79,7 +104,7 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
     const el = scroller.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (nearBottom.current) el.scrollTop = el.scrollHeight;
+      if (nearBottom.current) toEnd(el);
       else if (anchor.current) scrollToAnchor(el, anchor.current);
     });
     // Border box: any change in a turn's size counts, not only its content's.
@@ -101,6 +126,8 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
     const fromEnd = el.scrollHeight - el.scrollTop - el.clientHeight;
     setAway(fromEnd > AWAY_FROM_END);
     if (restoring.current) return;
+    // Not the reader's (see byHand): the pill still tells how far from the end it is, and nothing else changes.
+    if (!dragging.current && performance.now() - lastInput.current > READER_WINDOW_MS) return;
     nearBottom.current = fromEnd < 80;
     anchor.current = nearBottom.current ? null : anchorOf(el);
     // -1: at the end, so coming back follows the end even if it grew meanwhile.
@@ -113,6 +140,8 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
   const thinkingLine = state.status === "running" && !state.setup;
   const jump = () => {
     nearBottom.current = true;
+    anchor.current = null;
+    rememberScroll<ChatAnchor | -1>(`${slot}:chat`, -1);
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
   };
   return (
@@ -126,7 +155,20 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
           </button>
         </div>
       )}
-      <div className="chat" ref={scroller} onScroll={onScroll} onWheel={byHand} onPointerDown={byHand} onKeyDown={byHand}>
+      <div
+        className="chat"
+        ref={scroller}
+        onScroll={onScroll}
+        onWheel={byHand}
+        onPointerDown={() => {
+          // The scrollbar is dragged with the pointer down: those scrolls are the reader's however long it takes.
+          dragging.current = true;
+          byHand();
+        }}
+        onKeyDown={byHand}
+        onTouchStart={byHand}
+        onTouchMove={byHand}
+      >
         {state.items.length === 0 && !state.thinking && <div className="empty">What should Claude work on?</div>}
         <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} resend={resend} restore={restore ? { points, blocked, onRestore: setConfirming } : undefined} {...handlers} />
         {thinkingLine && (
