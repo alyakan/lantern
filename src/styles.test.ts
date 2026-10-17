@@ -38,6 +38,21 @@ describe("the sidebar's closing", () => {
   });
 });
 
+describe("the message boxes", () => {
+  it("keeps PostHog's inset field shadow off a textarea that sits in a box of its own, and shows the focus on all four sides", () => {
+    // The theme gives every textarea an inset top-left shadow; one inside the chatbox or a Teams box would show it as a stray inner border.
+    expect(css).toContain(':root[data-theme="posthog"] .composer-box textarea, :root[data-theme="posthog"] .node-composer textarea { box-shadow: none; }');
+    // A ring listed after the hard drop shadow is painted under it, so it only showed on the top and left.
+    const focus = css.match(/:root\[data-theme="posthog"\] \.composer-box:focus-within \{([^}]*)\}/)?.[1] ?? "";
+    expect(focus).toMatch(/border-color:\s*var\(--unread\)/);
+    expect(focus).not.toMatch(/0 0 0 2px/);
+  });
+
+  it("gives the lists in what you sent in Step by step the answers' room, not the browser's 40px", () => {
+    expect(css.match(/\.user-note-body ul, \.user-note-body ol \{([^}]*)\}/)?.[1] ?? "").toMatch(/padding-left:\s*20px/);
+  });
+});
+
 describe("text you can select and copy", () => {
   it("includes a review's findings, what changed, notes and summary table", () => {
     for (const cls of [".finding-text", ".review-preface", ".review-changed", ".review-notes", ".review-table"]) {
