@@ -74,7 +74,7 @@ function parseHeadingLine(text: string): Heading | null {
   if (word.startsWith("part")) return { kind: "part", n: Number(m[11]), total: Number(m[12]), title };
   if (word.startsWith("plan step")) return { kind: "plan", n: Number(m[2]), total: null, title, ...sub(m[3]) };
   if (word === "plan update") return { kind: "plan-update", n: null, total: null, title };
-  if (word === "plan complete") return { kind: "plan-complete", n: null, total: Number(/(\d+)/.exec(title)?.[1] ?? NaN) || null, title };
+  if (word === "plan complete") return { kind: "plan-complete", n: null, total: Number(/(\d+)\s*steps?\b/i.exec(title)?.[1] ?? /(\d+)/.exec(title)?.[1] ?? NaN) || null, title };
   if (word.startsWith("step")) {
     // "of 5" is the plan's length; "of LUM-2614" is a ticket, not a count.
     const total = m[6] && /^\d+$/.test(m[6]) ? Number(m[6]) : null;
@@ -310,7 +310,10 @@ function planShaped(text: string): boolean {
 }
 
 // "Can you also handle the empty list?" ends with "?" but asks for a change: a modal or "you" with an action verb.
-const CHANGE_ASK = /^(?:(?:please|also|and|ok|okay|so|then)[,]?\s+)*(?:(?:can|could|would|will)\s+)?you\s+(?:(?:also|just|now|please|first|still)\s+)*(?:add|change|fix|handle|rename|update|make|remove|delete|use|move|include|drop|split|merge|replace|rewrite|reword|implement|support|skip|keep)\b/i;
+const CHANGE_VERBS = "add|change|fix|handle|rename|update|make|remove|delete|use|move|include|drop|split|merge|replace|rewrite|reword|implement|support|skip|keep";
+const CHANGE_ASK = new RegExp(`^(?:(?:please|also|and|ok|okay|so|then)[,]?\\s+)*(?:(?:can|could|would|will)\\s+)?you\\s+(?:(?:also|just|now|please|first|still)\\s+)*(?:${CHANGE_VERBS})\\b`, "i");
+// "Could add a test for the empty case" / "Should rename it to X": no "you", no "?", and an action verb right after the modal.
+const BARE_CHANGE_ASK = new RegExp(`^(?:(?:please|also|and|ok|okay|so|then)[,]?\\s+)*(?:could|should)\\s+(?:(?:also|just|now|please|first|still)\\s+)*(?:${CHANGE_VERBS})\\b`, "i");
 
 /**
  * A prompt that asks about the step rather than asking to change it: it ends with "?", or opens like a question or a
@@ -318,7 +321,7 @@ const CHANGE_ASK = /^(?:(?:please|also|and|ok|okay|so|then)[,]?\s+)*(?:(?:can|co
  */
 export const isQuestion = (text: string) => {
   const t = promptText(text).trim();
-  if (movesOn(text) || CHANGE_ASK.test(t)) return false;
+  if (movesOn(text) || CHANGE_ASK.test(t) || (BARE_CHANGE_ASK.test(t) && !/\?\s*$/.test(t))) return false;
   return /\?\s*$/.test(t) || /^(why|what|what's|whats|how|when|where|which|who|whose|is|are|was|were|does|do|did|should|would|could|can|will|explain|elaborate|clarify|tell me|walk me through|help me understand|i don'?t (get|understand)|remind me)\b/i.test(t);
 };
 

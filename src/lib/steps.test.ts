@@ -7,6 +7,10 @@ describe("parseHeading", () => {
     expect(parseHeading("# Frame — Add slugify(s) to utils.js\n\nTask: …")).toEqual({ kind: "frame", n: null, total: null, title: "Add slugify(s) to utils.js" });
     expect(parseHeading("# Plan step 2 — Add tests for slugify")).toMatchObject({ kind: "plan", n: 2, title: "Add tests for slugify" });
     expect(parseHeading("# Plan complete — 3 steps")).toMatchObject({ kind: "plan-complete", total: 3 });
+    // The number before "steps" is the total, not a ticket's number.
+    expect(parseHeading("# Plan complete — LUM-2614, 5 steps")).toMatchObject({ kind: "plan-complete", total: 5 });
+    expect(parseHeading("# Plan complete — 1 step")).toMatchObject({ kind: "plan-complete", total: 1 });
+    expect(parseHeading("# Plan complete — 4")).toMatchObject({ kind: "plan-complete", total: 4 });
     expect(parseHeading("# Plan update — the 404 case needs its own step")).toEqual({ kind: "plan-update", n: null, total: null, title: "the 404 case needs its own step" });
     expect(pageLabel(parseHeading("# Plan update — x"))).toBe("Plan update");
     expect(parseHeading("## Step 1 of 3 - Add slugify")).toMatchObject({ kind: "step", n: 1, total: 3, title: "Add slugify" });
@@ -169,6 +173,11 @@ describe("questions about a step", () => {
     for (const c of ["Can you also handle the empty list?", "could you rename it to Config?", "Will you update the test?"]) expect(isQuestion(c), c).toBe(false);
     expect(isQuestion("Can you explain the retry logic?")).toBe(true);
     expect(isQuestion("Do you want me to change it?")).toBe(true);
+  });
+
+  it("reads a could/should with an action verb and no \"you\" as a change, but real questions stay questions", () => {
+    for (const c of ["Could add a test for the empty case", "Should rename it to Config", "also should handle the empty list."]) expect(isQuestion(c), c).toBe(false);
+    for (const q of ["Should this be async?", "Should we add a test?", "Could this loop forever", "Should it rename the file or copy it", "Could add a test?"]) expect(isQuestion(q), q).toBe(true);
   });
 
   it("keeps the step when a reply to a suggestion discusses it instead of rewriting its plan", () => {
