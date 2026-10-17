@@ -520,12 +520,12 @@ describe("themes", () => {
   describe("PostHog", () => {
     const px = (name: string) => parseFloat(token(block("posthog"), name));
 
-    it("has tighter corners than the default, with pills still round", () => {
+    it("has tighter corners than the default, square-ish all through: no corner above 4px, pills included", () => {
       const root = css.match(/:root \{([^}]*)\}/)![1];
-      for (const name of ["radius", "radius-inner", "radius-chip", "radius-float", "radius-md", "radius-card", "radius-hud"]) {
+      for (const name of ["radius", "radius-inner", "radius-chip", "radius-float", "radius-md", "radius-card", "radius-hud", "radius-pill"]) {
         expect(px(name), name).toBeLessThan(parseFloat(token(root, name)));
+        expect(px(name), name).toBeLessThanOrEqual(4);
       }
-      expect(names(block("posthog"))).not.toContain("radius-pill");
     });
 
     it("reads blue links and a visible focus ring on the cream and the white", () => {
@@ -535,6 +535,40 @@ describe("themes", () => {
         expect(contrast(token(b, "unread"), token(b, surface)), surface).toBeGreaterThanOrEqual(3);
       }
       expect(css).toMatch(/:root\[data-theme="posthog"\] button:focus-visible[^{]*\{ outline: 2px solid var\(--unread\)/);
+    });
+
+    it("is a desktop: near-black outlines, hard shadows with no blur, a title-bar strip on the windows", () => {
+      const b = block("posthog");
+      // Every shadow layer is an offset and a spread, never a blur: "x y blur spread colour" with blur 0.
+      for (const name of ["shadow", "card-shadow", "pane-edge", "thumb-lift", "thumb-shadow", "badge-shadow", "lift-shadow", "hud-shadow", "panel-shadow", "ph-drop", "ph-drop-s"]) {
+        for (const layer of token(b, name).split(",")) {
+          const lengths = layer.replace(/var\([^)]*\)|inset|transparent/g, "").match(/-?[\d.]+(?:px)?/g) ?? [];
+          expect(parseFloat(lengths[2]), `${name}: ${layer}`).toBe(0);
+        }
+      }
+      expect(token(b, "shadow")).toContain("var(--ph-ink)");
+      expect(contrast(token(b, "ph-ink"), token(b, "bg"))).toBeGreaterThanOrEqual(7);
+      expect(px("ph-bar-h")).toBeGreaterThanOrEqual(22);
+      expect(px("ph-bar-h")).toBeLessThanOrEqual(26);
+      expect(token(b, "ph-title")).toContain("var(--ph-bar)");
+      // The strip is a ::before with no text on the chat and the side panel, and over a dialog's top.
+      expect(css).toMatch(/:root\[data-theme="posthog"\] \.chat-pane::before, :root\[data-theme="posthog"\] \.review::before[^{]*\{[^}]*background: var\(--ph-title\)/);
+      expect(css).not.toMatch(/:root\[data-theme="posthog"\][^{]*::(?:before|after)[^{]*\{[^}]*content: "[^"]/);
+      // Ink on the strip, the yellow hover and the sticky note reads.
+      for (const surface of ["ph-bar", "ph-hit", "bg-user"]) expect(contrast(token(b, "text"), token(b, surface)), surface).toBeGreaterThanOrEqual(7);
+      // The press-down: a button moves 2px and loses its shadow; reduced motion keeps its place.
+      expect(css).toMatch(/:root\[data-theme="posthog"\] button\.primary:active:not\(:disabled\)[^{]*\{ transform: translate\(2px, 2px\); box-shadow: none; \}/);
+      expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{ :root\[data-theme="posthog"\][^{]*:active[^{]*\{ transform: none; \} \}/);
+    });
+
+    it("keeps every desktop rule under [data-theme=\"posthog\"], so no other theme changes", () => {
+      const section = css.slice(css.indexOf("/* ── PostHog's desktop"), css.indexOf("/* Base */"));
+      const rules = section.split("\n").filter((l) => l.includes("{"));
+      expect(rules.length).toBeGreaterThan(40);
+      for (const line of rules) {
+        const selectors = line.replace(/^@media[^{]*\{\s*/, "").split("{")[0];
+        for (const sel of selectors.split(",")) expect(sel.trim().startsWith(':root[data-theme="posthog"]'), line).toBe(true);
+      }
     });
 
     it("turns the orange primary button yellow under the pointer, text still readable", () => {
