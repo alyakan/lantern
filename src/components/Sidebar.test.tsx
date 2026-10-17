@@ -737,6 +737,127 @@ describe("the collapsed sidebar", () => {
     }
   });
 
+  /** The width transition ending on the panel (jsdom has no TransitionEvent, so the one property React reads is put on a plain event). */
+  const widthEnded = () => {
+    const ev = new Event("transitionend", { bubbles: true });
+    Object.defineProperty(ev, "propertyName", { value: "width" });
+    fireEvent(panel(), ev);
+  };
+  const hover = async () => {
+    await act(async () => {});
+    fireEvent.pointerEnter(panel());
+    act(() => vi.advanceTimersByTime(OPEN_AFTER_MS));
+    expect(panel()).toHaveClass("expanded");
+  };
+
+  it("keeps drawing the open pane while it narrows, and swaps in the bar when the width transition ends", async () => {
+    vi.useFakeTimers();
+    try {
+      bar();
+      await hover();
+      fireEvent.pointerLeave(panel());
+      // Closing: not "expanded" any more, but still the pane (projects, labels, the foot), folding away as the width goes.
+      expect(panel()).not.toHaveClass("expanded");
+      expect(panel()).toHaveClass("closing");
+      expect(screen.getByRole("complementary", { name: "Projects" })).toBeInTheDocument();
+      expect(regions()).toEqual(["lantern", "network-monitor"]);
+      expect(screen.getByRole("button", { name: "Open folder…" })).toBeInTheDocument();
+      expect(document.querySelectorAll(".sb-project")).toHaveLength(0);
+      // Some other property ending (or a part of the pane) isn't the bar's width.
+      const other = new Event("transitionend", { bubbles: true });
+      Object.defineProperty(other, "propertyName", { value: "opacity" });
+      fireEvent(panel(), other);
+      expect(panel()).toHaveClass("closing");
+      act(() => vi.advanceTimersByTime(100));
+      expect(panel()).toHaveClass("closing");
+      widthEnded();
+      expect(panel()).not.toHaveClass("closing");
+      expect(screen.getByRole("complementary", { name: "Open chats" })).toBeInTheDocument();
+      expect(document.querySelectorAll(".sb-project")).toHaveLength(2);
+      expect(screen.queryByRole("button", { name: "Open folder…" })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("swaps in the bar after a moment even when no transition ends", async () => {
+    vi.useFakeTimers();
+    try {
+      bar();
+      await hover();
+      fireEvent.pointerLeave(panel());
+      act(() => vi.advanceTimersByTime(200));
+      expect(panel()).toHaveClass("closing");
+      act(() => vi.advanceTimersByTime(150));
+      expect(panel()).not.toHaveClass("closing");
+      expect(screen.getByRole("complementary", { name: "Open chats" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("opens again from a half-closed pane without swapping in the bar in between", async () => {
+    vi.useFakeTimers();
+    try {
+      bar();
+      await hover();
+      fireEvent.pointerLeave(panel());
+      act(() => vi.advanceTimersByTime(80));
+      fireEvent.pointerEnter(panel());
+      act(() => vi.advanceTimersByTime(OPEN_AFTER_MS));
+      expect(panel()).toHaveClass("expanded");
+      expect(panel()).not.toHaveClass("closing");
+      widthEnded();
+      act(() => vi.advanceTimersByTime(400));
+      expect(screen.getByRole("complementary", { name: "Projects" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("while it closes, what the bar doesn't have is folded away and the pin gives way to the bar's own icon; a folded project's squares unfold", async () => {
+    vi.useFakeTimers();
+    localStorage.setItem("sidebar.expanded", JSON.stringify({ [MONITOR]: false }));
+    try {
+      bar();
+      await hover();
+      // Open: the monitor's squares are not listed, and the team's agents have a line of their own.
+      expect(within(project("network-monitor")).queryByRole("button", { name: /Retry the proxy/ })).toBeNull();
+      expect(document.querySelector(".sb-unfold")).toBeNull();
+      expect(document.querySelector(".sb-side-glyph")).toBeNull();
+      fireEvent.pointerLeave(panel());
+      expect(document.querySelector(".sb-agents-wrap")).toHaveClass("sb-away-y");
+      expect(within(project("network-monitor")).getByRole("list", { hidden: true, name: "network-monitor" })).toBeInTheDocument();
+      expect(document.querySelector(".sb-unfold")).not.toBeNull();
+      expect(document.querySelector(".sb-head .sb-side-glyph")).not.toBeNull();
+      expect(document.querySelector(".sb-head .sb-pin-glyph")).not.toBeNull();
+      widthEnded();
+      expect(document.querySelector(".sb-unfold")).toBeNull();
+      expect(document.querySelector(".sb-side-glyph")).toBeNull();
+      expect(screen.getByRole("list", { name: "network-monitor" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("swaps at once when motion is reduced: no closing pane is kept", async () => {
+    vi.useFakeTimers();
+    const was = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ matches: query.includes("reduce"), media: query, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })) as unknown as typeof window.matchMedia;
+    try {
+      bar();
+      await hover();
+      fireEvent.pointerLeave(panel());
+      expect(panel()).not.toHaveClass("expanded");
+      expect(panel()).not.toHaveClass("closing");
+      expect(screen.getByRole("complementary", { name: "Open chats" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Open folder…" })).toBeNull();
+    } finally {
+      window.matchMedia = was;
+      vi.useRealTimers();
+    }
+  });
+
   it("stays open while a question about closing is asked, and shuts once it is answered and the pointer is elsewhere", async () => {
     vi.useFakeTimers();
     try {

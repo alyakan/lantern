@@ -7,13 +7,13 @@ const dark: CustomTheme = { ...DARK_PICKS, mono: false, square: false };
 
 describe("the themes", () => {
   it("lists Follow macOS, Light and Dark, then the presets, then Custom", () => {
-    expect(THEMES.map((t) => t.id)).toEqual(["system", "light", "dark", "terminal", "fallout", "solarized", "nord", "paper", "custom"]);
+    expect(THEMES.map((t) => t.id)).toEqual(["system", "light", "dark", "terminal", "fallout", "solarized", "nord", "paper", "posthog", "custom"]);
     expect(THEMES.every((t) => t.label)).toBe(true);
   });
 
   it("says which are dark and which light", () => {
     const scheme = Object.fromEntries(THEMES.map((t) => [t.id, t.scheme]));
-    expect(scheme).toMatchObject({ light: "light", dark: "dark", terminal: "dark", fallout: "dark", solarized: "dark", nord: "dark", paper: "light", system: null });
+    expect(scheme).toMatchObject({ light: "light", dark: "dark", terminal: "dark", fallout: "dark", solarized: "dark", nord: "dark", paper: "light", posthog: "light", system: null });
   });
 
   it("knows a theme id from anything else", () => {
@@ -27,6 +27,7 @@ describe("the themes", () => {
     expect(schemeOf("system", true, light)).toBe("dark");
     expect(schemeOf("system", false, dark)).toBe("light");
     expect(schemeOf("paper", true, dark)).toBe("light");
+    expect(schemeOf("posthog", true, dark)).toBe("light");
     expect(schemeOf("terminal", false, light)).toBe("dark");
     expect(schemeOf("custom", false, dark)).toBe("dark");
     expect(schemeOf("custom", true, light)).toBe("light");

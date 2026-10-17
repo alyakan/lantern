@@ -53,8 +53,17 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
     });
     return () => cancelAnimationFrame(frame);
   }, []);
+  // Where Lantern itself last put the chat (its end). The browser reports that move as a scroll a frame later, and by then
+  // the code in the chat has its colours and the chat is taller: read as the reader's, it said "scrolled up", and what was
+  // remembered was the middle of the chat. So a scroll that is just that move is not the reader's.
+  const pinned = useRef<number | null>(null);
+  const toEnd = (el: HTMLElement) => {
+    el.scrollTop = el.scrollHeight;
+    pinned.current = el.scrollTop;
+  };
   const byHand = () => {
     restoring.current = false;
+    pinned.current = null;
   };
   // Your own message goes to the end, even if you'd scrolled up to read: you're following what you just sent.
   const lastSent = (items: State["items"]) => [...items].reverse().find((it) => it.type === "user" && !it.auto)?.id;
@@ -67,7 +76,7 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
       sent.current = id;
       nearBottom.current = true;
     }
-    if (nearBottom.current && el) el.scrollTop = el.scrollHeight;
+    if (nearBottom.current && el) toEnd(el);
   }, [state.items, state.thinking]);
   // The chat box grows as you type, which makes this area shorter without scrolling it: stay at the end if you were
   // there, so the box doesn't end up over the last lines. Resized elsewhere (a wider pane, a card made bigger), it keeps
@@ -79,7 +88,7 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
     const el = scroller.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (nearBottom.current) el.scrollTop = el.scrollHeight;
+      if (nearBottom.current) toEnd(el);
       else if (anchor.current) scrollToAnchor(el, anchor.current);
     });
     // Border box: any change in a turn's size counts, not only its content's.
@@ -101,6 +110,12 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
     const fromEnd = el.scrollHeight - el.scrollTop - el.clientHeight;
     setAway(fromEnd > AWAY_FROM_END);
     if (restoring.current) return;
+    if (pinned.current !== null && Math.abs(el.scrollTop - pinned.current) < 2) {
+      // Lantern's own move to the end, reported late: the chat is still at its end, however much taller it is by now.
+      if (nearBottom.current) rememberScroll<ChatAnchor | -1>(`${slot}:chat`, -1);
+      return;
+    }
+    pinned.current = null;
     nearBottom.current = fromEnd < 80;
     anchor.current = nearBottom.current ? null : anchorOf(el);
     // -1: at the end, so coming back follows the end even if it grew meanwhile.
