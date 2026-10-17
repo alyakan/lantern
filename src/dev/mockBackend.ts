@@ -1172,7 +1172,7 @@ const MOCK_CHECKLISTS = {
 };
 let mockWatches = [{ label: "Checklists", method: "GET", url: "/v1/checklists" }];
 
-// The Storage tab's scan in the browser preview: a few items of each kind, one blocked, one with a suggestion from Claude.
+// The Storage panel's scan in the browser preview: items of every kind (one a hair of the scan, one inside another), one blocked, two with a suggestion from Claude.
 const mockStorageItem = (id: string, kind: string, name: string, gb: number, over: Record<string, unknown> = {}) => ({
   id, kind, name, path: `/Users/you/${name}`, bytes: Math.round(gb * 1e9), risk: "safe", removal: kind === "worktree" ? "worktree" : kind === "repo" ? "trash" : "permanent", note: "Comes back with a build.", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, ...over,
 });
@@ -1184,7 +1184,14 @@ let mockStorageItems = [
   mockStorageItem("c2", "build_output", "acme-api/target", 6.8, { ticked: true, note: "Rust build output: the next `cargo build` rebuilds it." }),
   mockStorageItem("d1", "simulator", "iOS 16.4 simulator runtime", 6.2, { risk: "review", warning: "Last used 50 day(s) ago; downloading it again takes a while.", idle_days: 50 }),
   mockStorageItem("e1", "cache", "Caches/com.apple.dt.Xcode", 4.4, { ticked: true }),
+  mockStorageItem("e2", "cache", "npm/_cacache", 2.1, { suggestion: "Rebuilt by the next install; untouched for 3 weeks" }),
+  mockStorageItem("e3", "cache", "Logs/DiagnosticReports", 0.3, { ticked: true }),
+  mockStorageItem("e4", "cache", "Caches/com.apple.Safari", 0.04),
   mockStorageItem("f1", "trash", "Trash/Old movie.mov", 2.0, { ticked: true }),
+  mockStorageItem("g1", "download", "Downloads/Xcode_17.dmg", 3.1, { removal: "trash", idle_days: 90, note: "Yours: it goes to the Trash." }),
+  mockStorageItem("g2", "download", "Downloads/Screen Recording.mov", 1.2, { removal: "trash", idle_days: 30, note: "Yours: it goes to the Trash." }),
+  mockStorageItem("a3", "worktree", "web-dashboard/wt-charts", 0.9, { within: null, idle_days: 21 }),
+  mockStorageItem("c3", "build_output", "acme-api/wt-retry/target", 2.2, { within: "a1", ticked: true, note: "Inside the worktree above: it goes with it." }),
 ];
 let mockStorageScannedAt: number | null = null;
 const mockItems = (): NetworkItem[] =>

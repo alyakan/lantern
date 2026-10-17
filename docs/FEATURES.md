@@ -384,6 +384,18 @@ A few things to know:
 - The traffic itself isn't per project: Claude in any chat can search everything Network Monitor captured, not just what a project's watches match.
 - Until there's a watch, the tab explains Network Monitor and how to add one.
 
+## Storage
+
+The **disk button** in the title bar, just before the Settings gear, opens **Storage**: a panel like Settings (the same size, over the window, closed with **Close**, Esc or a click outside) that scans your Mac for what can be cleared to get disk space back. It is for the whole app, not for one chat or project. It used to be a tab in the side panel. A small dot on the button means Claude has suggested deletions (hover it for how many). The command palette (⇧⌘P) lists it as **Storage**.
+
+**What it finds.** Git worktrees, stale projects (nothing changed in 60 days and everything pushed), build output (`node_modules`, `target`…), simulators, caches and logs, Downloads and the Trash. A worktree or project with unsaved work in it is shown but can't be ticked. **Scan this Mac** starts a scan; **Ask Claude** asks the chat on screen to scan and tick what it thinks is safe, with a reason each, and **Claude's picks** ticks only those.
+
+**The bar.** At the top, one bar for the whole scan, split by kind, each kind with its own colour, and a legend under it: a swatch, the kind, its size and its share of the total. Things inside another item (a `target` folder inside a worktree) are counted once. Hover or tab to a segment or a legend entry and the others fade and a line names it ("Build output: 7.9 GB (22%)"); press it to jump to that kind's list. A kind that is a hair of the total still gets a sliver you can point at (its share reads "<1%"). The bar has a text version for screen readers, and it grows in gently unless your Mac is set to reduce motion.
+
+**The colours.** Seven tokens, `--storage-1` to `--storage-7`, one per kind in the order above. Every theme gives its own set (a custom theme gets one derived for its light or dark background), each readable at 3:1 against the panel and clearly different from the others; the tests check that for every built-in theme.
+
+**The list.** Under the bar, each kind is a group with **Tick safe** and **Clear**. Each row has a thin bar in its kind's colour, sized against the biggest item of the whole scan, with its size beside it; the bar is stronger on a ticked row. The footer says "Total scanned 35.6 GB, selected to delete 22.3 GB (frees 19.9 GB; 2.4 GB goes to Trash first)", and **Delete…** asks first, naming how many go to the Trash (which frees nothing until the Trash is emptied) and what you or Claude ticked that isn't a plain regenerable file. Each item is checked again just before it goes. Nothing about what is blocked, what goes to the Trash, or the confirmation changed when it moved.
+
 ## Settings
 
 **⌘,** opens Settings, with seven tabs:

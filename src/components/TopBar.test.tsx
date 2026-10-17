@@ -193,3 +193,41 @@ describe("TopBar", () => {
     expect(onToggleReview).toHaveBeenCalled();
   });
 });
+
+describe("TopBar's Storage button", () => {
+  const bar = (storage?: { onOpen: () => void; suggested: number; open?: boolean }) => <TopBar {...base} folder="/p" reviewCollapsed={false} onToggleReview={() => {}} onOpenSettings={() => {}} storage={storage} />;
+
+  it("opens the Storage panel, sits just before the Settings gear, and can be reached by keyboard", () => {
+    const onOpen = vi.fn();
+    render(bar({ onOpen, suggested: 0 }));
+    const button = screen.getByRole("button", { name: "Storage" });
+    expect(button).toHaveAttribute("title", "Storage");
+    expect(button.nextElementSibling).toBe(screen.getByRole("button", { name: "Settings" }));
+    expect(button.tabIndex).toBe(0);
+    button.focus();
+    expect(button).toHaveFocus();
+    fireEvent.click(button);
+    expect(onOpen).toHaveBeenCalled();
+  });
+
+  it("wears a dot, and says how many deletions Claude suggested, only when it suggested some", () => {
+    const { rerender } = render(bar({ onOpen: () => {}, suggested: 0 }));
+    expect(screen.getByRole("button", { name: "Storage" }).querySelector(".dot")).toBeNull();
+    rerender(bar({ onOpen: () => {}, suggested: 1 }));
+    expect(screen.getByRole("button", { name: "Storage, Claude suggested 1 deletion" }).querySelector(".dot")).not.toBeNull();
+    rerender(bar({ onOpen: () => {}, suggested: 3 }));
+    expect(screen.getByRole("button", { name: "Storage, Claude suggested 3 deletions" })).toHaveAttribute("title", "Storage: Claude suggested 3 deletions");
+  });
+
+  it("says whether its panel is open", () => {
+    const { rerender } = render(bar({ onOpen: () => {}, suggested: 0, open: false }));
+    expect(screen.getByRole("button", { name: "Storage" })).toHaveAttribute("aria-expanded", "false");
+    rerender(bar({ onOpen: () => {}, suggested: 0, open: true }));
+    expect(screen.getByRole("button", { name: "Storage" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("isn't there when the app gives it nothing to open", () => {
+    render(bar(undefined));
+    expect(screen.queryByRole("button", { name: /^Storage/ })).toBeNull();
+  });
+});
