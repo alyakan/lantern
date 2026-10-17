@@ -20,6 +20,9 @@ pub const LANTERN_TOOLS: &[&str] = &["steps_guide", "review_target"];
 /// time, so a call that waited would hold up the permission prompts behind it.
 pub const ORCHESTRA_TOOLS: &[&str] = &["spawn_agent", "list_agents", "read_agent", "message_agent", "stop_agent", "propose_merge"];
 
+/// The git tool of a read-only agent (see read_git.rs), the only one that has it.
+pub const READ_ONLY_GIT_TOOL: &str = "git";
+
 /// A tool call's result as the model reads it.
 fn result_json(text: String, is_error: bool) -> Value {
     json!({"isError": is_error, "content": [{"type": "text", "text": text}]})
@@ -85,7 +88,7 @@ impl Server {
             }
             t if ORCHESTRA_TOOLS.contains(&t) => {
                 if self.offer.orchestrator {
-                    app_result(t, ask(BridgeRequest { tool_name: t.into(), input: args.clone(), tool_use_id: None, orchestra: true, network: false, review: false }))
+                    app_result(t, ask(BridgeRequest { tool_name: t.into(), input: args.clone(), tool_use_id: None, orchestra: true, network: false, review: false, git: false }))
                 } else {
                     result_json(format!("{t} is only available to a Team's lead."), true)
                 }
@@ -97,7 +100,7 @@ impl Server {
             // The app is told what the pane should compare, and answers once the window has it.
             "review_target" => match ReviewTargetArgs::parse(args) {
                 Ok(target) => {
-                    let resp = ask(BridgeRequest { tool_name: tool.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: false, review: true });
+                    let resp = ask(BridgeRequest { tool_name: tool.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: false, review: true, git: false });
                     if resp.allow && resp.message.is_none() {
                         result_json(target.says(), false)
                     } else {
@@ -106,9 +109,12 @@ impl Server {
                 }
                 Err(text) => result_json(text, true),
             },
+            // A read-only agent's git: run by the app, which checks that this chat is one (the helper's word is not taken).
+            READ_ONLY_GIT_TOOL if self.offer.git => app_result(tool, ask(BridgeRequest { tool_name: tool.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: false, review: false, git: true })),
+            READ_ONLY_GIT_TOOL => result_json("git is only available to a read-only agent, which has no shell; use your shell for git.".into(), true),
             // Answered by the app (it reads Network Monitor on loopback, or the Storage scan), for any chat: the storage
             // tools use the same call, told apart by name, and a scan waits at most a few seconds for itself.
-            t if crate::network::TOOLS.contains(&t) || crate::storage::TOOLS.contains(&t) => app_result(t, ask(BridgeRequest { tool_name: t.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: true, review: false })),
+            t if crate::network::TOOLS.contains(&t) || crate::storage::TOOLS.contains(&t) => app_result(t, ask(BridgeRequest { tool_name: t.into(), input: args.clone(), tool_use_id: None, orchestra: false, network: true, review: false, git: false })),
             "reproduce" if self.offer.steps => {
                 let resp = ask(BridgeRequest::permission(REPRODUCE.into(), args.clone(), None));
                 if resp.failed {
@@ -290,7 +296,7 @@ fn run_helper_with(mut input: impl BufRead + Send, output: impl Write, socket: O
         let closed = Cell::new(false);
         let ask = |req: BridgeRequest| -> BridgeResponse {
             // A card waits on the user; the rest the app answers at once.
-            let card = !(req.orchestra || req.network || req.review);
+            let card = !(req.orchestra || req.network || req.review || req.git);
             if card && closed.get() {
                 called_off.set(true);
                 return failed(&io::Error::new(io::ErrorKind::BrokenPipe, "Claude Code has gone"));
@@ -381,8 +387,9 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const LEAD: Offer = Offer { orchestrator: true, steps: false };
-    const STEPS: Offer = Offer { orchestrator: false, steps: true };
+    const LEAD: Offer = Offer { orchestrator: true, steps: false, git: false };
+    const STEPS: Offer = Offer { orchestrator: false, steps: true, git: false };
+    const READER: Offer = Offer { orchestrator: false, steps: false, git: true };
 
     fn allow_all(_: BridgeRequest) -> BridgeResponse {
         BridgeResponse { allow: true, message: None, updated_input: None, failed: false }
@@ -590,6 +597,48 @@ mod tests {
             assert!(text.contains(&r.id), "{}", r.id);
         }
         assert!(text.contains("read only") && text.contains("can edit"));
+    }
+
+    #[test]
+    fn git_is_listed_and_forwarded_flagged_for_a_read_only_agent_and_for_no_one_else() {
+        let list = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"});
+        for offer in [Offer::default(), LEAD, STEPS] {
+            assert!(!tool_names(&handle_message_as(&list, &allow_all, offer).unwrap()).contains(&"git".to_string()));
+        }
+        assert_eq!(tool_names(&handle_message_as(&list, &allow_all, READER).unwrap()).last().map(String::as_str), Some("git"));
+        let msg = json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "git", "arguments": {"args": ["log", "--oneline"]}}});
+        // Not a read-only agent's helper: told so, and the app is never asked.
+        for offer in [Offer::default(), LEAD, STEPS] {
+            let asked = std::cell::Cell::new(false);
+            let r = handle_message_as(&msg, &|_| {
+                asked.set(true);
+                BridgeResponse { allow: true, message: Some("ran".into()), updated_input: None, failed: false }
+            }, offer)
+            .unwrap();
+            assert!(!asked.get() && r["result"]["isError"] == true, "{offer:?}");
+            assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("only available to a read-only agent"));
+        }
+        let seen = std::cell::RefCell::new(None);
+        let r = handle_message_as(&msg, &|req| {
+            *seen.borrow_mut() = Some(req);
+            BridgeResponse { allow: true, message: Some("abc first commit".into()), updated_input: None, failed: false }
+        }, READER)
+        .unwrap();
+        assert_eq!((r["result"]["isError"].clone(), r["result"]["content"][0]["text"].clone()), (json!(false), json!("abc first commit")));
+        let req = seen.borrow().clone().unwrap();
+        assert!(req.git && !req.orchestra && !req.network && !req.review);
+        assert_eq!((req.tool_name.as_str(), req.input["args"].clone()), ("git", json!(["log", "--oneline"])));
+        // The app's refusal is the model's error, with its reason.
+        let r = handle_message_as(&msg, &|_| BridgeResponse { allow: false, message: Some("git branch is refused.".into()), updated_input: None, failed: false }, READER).unwrap();
+        assert_eq!((r["result"]["isError"].clone(), r["result"]["content"][0]["text"].clone()), (json!(true), json!("git branch is refused.")));
+        // And a permission prompt can't pose as one.
+        let seen = std::cell::RefCell::new(None);
+        let prompt = json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "approve", "arguments": {"tool_name": "git", "input": {"args": ["log"]}, "git": true}}});
+        handle_message_as(&prompt, &|req| {
+            *seen.borrow_mut() = Some(req);
+            BridgeResponse { allow: true, message: None, updated_input: None, failed: false }
+        }, READER);
+        assert!(!seen.borrow().clone().unwrap().git);
     }
 
     #[test]

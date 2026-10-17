@@ -125,10 +125,12 @@ mod tests {
             assert!(valid_id(&r.id) && crate::args::valid_model(&r.model), "{}", r.id);
             assert!(["worktree", "shared"].contains(&r.isolation.as_str()), "{}", r.id);
             assert!(r.brief.contains(TASK_MARK) && r.brief.to_lowercase().contains("report in exactly this format"), "{}", r.id);
-            // A reader has only the tools that read (see args::READ_ONLY_TOOLS), so its brief never sends it to run commands.
+            // A reader has only the tools that read and Lantern's read-only git tool (see args::READ_ONLY_TOOLS), so its brief
+            // may send it to that and never to a shell, tests or a build.
             if r.read_only {
                 let brief = r.brief.to_lowercase();
-                assert!(brief.contains("cannot run commands") && !brief.contains("git diff") && !brief.contains("git log") && !brief.contains("run commands that only read"), "{}", r.id);
+                assert!(brief.contains("your git tool") && brief.contains("no shell, cannot run commands, tests or builds, and you cannot edit anything"), "{}", r.id);
+                assert!(!brief.contains("not even git") && !brief.contains("run commands that only read") && !brief.contains("run the project's tests") && !brief.contains("git commit"), "{}", r.id);
             }
             // A reader works where it can read what the others made: not in a worktree of its own.
             assert_eq!(r.read_only, r.isolation == "shared", "{}", r.id);

@@ -46,8 +46,10 @@ const XCODE_DARK: Syntax = { keyword: "#fc5fa3", string: "#fc6a5d", number: "#d0
 // Terminal: a modern terminal scheme (purple keywords, light-blue strings, orange numbers). Fallout: green phosphor, with amber strings and aqua numbers so code isn't one colour.
 const TERMINAL: Syntax = { keyword: "#d2a8ff", string: "#a5d6ff", number: "#ffa657", comment: "#8b949e", type: "#56d4dd", tag: "#7ee787", attrName: "#ffa657", attrValue: "#a5d6ff", regexp: "#7ee787" };
 const FALLOUT: Syntax = { keyword: "#c4ffd8", string: "#ffc933", number: "#6bffe0", comment: "#229e4e", type: "#8dffb0", tag: "#c4ffd8", attrName: "#8dffb0", attrValue: "#ffc933", regexp: "#ffc933" };
-const SOLARIZED: Syntax = { keyword: "#9cc41e", string: "#2aa198", number: "#e0709f", comment: "#657b83", type: "#d9a520", tag: "#4aa3e8", attrName: "#d9a520", attrValue: "#2aa198", regexp: "#e07a45" };
-const NORD: Syntax = { keyword: "#81a1c1", string: "#a3be8c", number: "#b48ead", comment: "#7b88a1", type: "#8fbcbb", tag: "#81a1c1", attrName: "#8fbcbb", attrValue: "#a3be8c", regexp: "#ebcb8b" };
+const SOLARIZED: Syntax = { keyword: "#9cc41e", string: "#2aa198", number: "#e0709f", comment: "#7f9396", type: "#d9a520", tag: "#4aa3e8", attrName: "#d9a520", attrValue: "#2aa198", regexp: "#e07a45" };
+// Paper: Xcode's light colours, warmed and deepened so they read on its sepia code blocks as well as on the page.
+const PAPER: Syntax = { keyword: "#8a2f7a", string: "#a3281f", number: "#1f4fb0", comment: "#6f6354", type: "#0b5675", tag: "#8a2f7a", attrName: "#7a5600", attrValue: "#a3281f", regexp: "#a3281f" };
+const NORD: Syntax = { keyword: "#81a1c1", string: "#a3be8c", number: "#bd97b6", comment: "#8e9ab0", type: "#8fbcbb", tag: "#81a1c1", attrName: "#8fbcbb", attrValue: "#a3be8c", regexp: "#ebcb8b" };
 
 /** The source colours for a theme: its own where it has some, otherwise Xcode's for its light or dark. */
 export function syntaxFor(theme: ThemeId | undefined, dark: boolean): Syntax {
@@ -55,6 +57,7 @@ export function syntaxFor(theme: ThemeId | undefined, dark: boolean): Syntax {
   if (theme === "fallout") return FALLOUT;
   if (theme === "solarized") return SOLARIZED;
   if (theme === "nord") return NORD;
+  if (theme === "paper") return PAPER;
   return dark ? XCODE_DARK : XCODE_LIGHT;
 }
 

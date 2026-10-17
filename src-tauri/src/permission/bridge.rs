@@ -59,6 +59,9 @@ pub struct PermissionBridge {
     network: Mutex<Option<NetworkHandler>>,
     /// The team's Subagents setting, for a chat that is its Lead (see `Subagents`).
     subagents: Mutex<Subagents>,
+    /// Set only while this chat's claude runs as a read-only agent: where its git tool runs (see read_git.rs). Every other
+    /// chat's git calls are refused, whatever its helper offered.
+    read_git: Mutex<Option<crate::read_git::Scope>>,
 }
 
 /// Whether the process with this pid, on the other end of the socket, is this chat's own helper. Every request is asked
@@ -79,6 +82,7 @@ pub fn helper_of(claude: Arc<std::sync::atomic::AtomicU32>, exe: PathBuf) -> Cal
     })
 }
 
+const NOT_READ_ONLY: &str = "git is only available to a read-only agent: this chat is not one, so it has no git tool.";
 const NOT_AUTHORIZED: &str = "Not authorized: only this chat's own Lantern helper may ask.";
 
 impl PermissionBridge {
@@ -104,6 +108,7 @@ impl PermissionBridge {
             auth,
             network: Mutex::new(None),
             subagents: Mutex::new(Subagents::default()),
+            read_git: Mutex::new(None),
         });
         let b = bridge.clone();
         let accept = tauri::async_runtime::spawn(async move {
@@ -148,6 +153,25 @@ impl PermissionBridge {
             let resp = match orchestra {
                 Some(handle) => handle(req.tool_name, req.input).await,
                 None => BridgeResponse { allow: false, message: Some("This chat is not the Lead of a team.".into()), updated_input: None, failed: false },
+            };
+            if let Ok(json) = serde_json::to_string(&resp) {
+                let _ = write.write_all(format!("{json}\n").as_bytes()).await;
+            }
+            return;
+        }
+        // A read-only agent's git call is run here, from its argument list: no shell, no card. Anyone else is refused.
+        if req.git {
+            let scope = self.read_git.lock().unwrap().clone();
+            let resp = match scope {
+                Some(scope) if req.tool_name == "git" => {
+                    let result = tokio::task::spawn_blocking(move || crate::read_git::call(&scope, &req.input)).await.unwrap_or_else(|e| Err(e.to_string()));
+                    let (allow, text) = match result {
+                        Ok(text) => (true, text),
+                        Err(text) => (false, text),
+                    };
+                    BridgeResponse { allow, message: Some(text), updated_input: None, failed: false }
+                }
+                _ => BridgeResponse { allow: false, message: Some(NOT_READ_ONLY.into()), updated_input: None, failed: false },
             };
             if let Ok(json) = serde_json::to_string(&resp) {
                 let _ = write.write_all(format!("{json}\n").as_bytes()).await;
@@ -232,6 +256,11 @@ impl PermissionBridge {
     /// Lets this chat's network_* calls through to `handler`.
     pub fn set_network(&self, handler: NetworkHandler) {
         *self.network.lock().unwrap() = Some(handler);
+    }
+
+    /// This chat's claude runs as a read-only agent whose git tool runs in `scope`, or (None) as anything else.
+    pub fn set_read_git(&self, scope: Option<crate::read_git::Scope>) {
+        *self.read_git.lock().unwrap() = scope;
     }
 
     /// Makes this the main agent's bridge: its helper's orchestra tool calls go to `handler`.
@@ -431,7 +460,7 @@ mod tests {
     }
 
     fn orchestra_call() -> BridgeRequest {
-        BridgeRequest { tool_name: "list_agents".into(), input: json!({}), tool_use_id: None, orchestra: true, network: false, review: false }
+        BridgeRequest { tool_name: "list_agents".into(), input: json!({}), tool_use_id: None, orchestra: true, network: false, review: false, git: false }
     }
 
     #[tokio::test]
@@ -445,18 +474,89 @@ mod tests {
             Box::pin(async { BridgeResponse { allow: true, message: Some("3 requests".into()), updated_input: None, failed: false } })
         }));
         let socket = bridge.socket_path.display().to_string();
-        let call = BridgeRequest { tool_name: "network_requests".into(), input: json!({}), tool_use_id: None, orchestra: false, network: true, review: false };
+        let call = BridgeRequest { tool_name: "network_requests".into(), input: json!({}), tool_use_id: None, orchestra: false, network: true, review: false, git: false };
         let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &call)).await.unwrap();
         assert_eq!(reply.message.as_deref(), Some("3 requests"));
         assert_eq!(seen.lock().unwrap().clone(), Some((Some(rules::folder_key(dir.path())), "network_requests".to_string())));
         assert!(tokio::time::timeout(Duration::from_millis(100), rx.recv()).await.is_err(), "no card");
     }
 
+    fn git_call(input: Value) -> BridgeRequest {
+        BridgeRequest { tool_name: "git".into(), input, tool_use_id: None, orchestra: false, network: false, review: false, git: true }
+    }
+
+    /// A folder with a repository in it, and one commit.
+    fn project_with_a_commit(dir: &Path) -> PathBuf {
+        let root = std::fs::canonicalize(dir).unwrap().join("project");
+        std::fs::create_dir_all(&root).unwrap();
+        for list in [&["init", "-q"][..], &["add", "."], &["commit", "-q", "--allow-empty", "-m", "first commit"]] {
+            let out = std::process::Command::new("git").arg("-C").arg(&root).args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]).args(list).output().unwrap();
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        }
+        root
+    }
+
+    #[tokio::test]
+    async fn a_git_call_is_refused_for_any_chat_that_is_not_a_read_only_agent_and_runs_nothing() {
+        // The default chat, whatever its helper offered: the app decides from how it started this chat's claude.
+        let (bridge, mut rx, dir) = setup();
+        let project = project_with_a_commit(dir.path());
+        bridge.set_folder(&project);
+        let socket = bridge.socket_path.display().to_string();
+        let target = dir.path().join("written.txt");
+        for input in [json!({"args": ["log", "--oneline"]}), json!({"args": ["diff", format!("--output={}", target.display())]}), json!({"args": ["log"], "repo": project.display().to_string()})] {
+            let (socket, req) = (socket.clone(), git_call(input));
+            let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &req)).await.unwrap();
+            assert!(!reply.allow && !reply.failed, "{reply:?}");
+            assert!(reply.message.unwrap().contains("only available to a read-only agent"));
+        }
+        assert!(!target.exists());
+        // It stops being one when the chat's claude is started as something else.
+        bridge.set_read_git(Some(crate::read_git::Scope { folder: project.clone(), path_env: None }));
+        bridge.set_read_git(None);
+        let socket2 = socket.clone();
+        let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket2), &git_call(json!({"args": ["log"]})))).await.unwrap();
+        assert!(!reply.allow);
+        assert!(tokio::time::timeout(Duration::from_millis(100), rx.recv()).await.is_err(), "a card was shown");
+    }
+
+    #[tokio::test]
+    async fn a_read_only_agents_git_call_runs_read_only_git_in_its_folder_and_shows_no_card() {
+        let (bridge, mut rx, dir) = setup();
+        let project = project_with_a_commit(dir.path());
+        bridge.set_read_git(Some(crate::read_git::Scope { folder: project.clone(), path_env: None }));
+        let socket = bridge.socket_path.display().to_string();
+        let ask = |input: Value| {
+            let (socket, req) = (socket.clone(), git_call(input));
+            async move { tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &req)).await.unwrap() }
+        };
+        let reply = ask(json!({"args": ["log", "--oneline", "-5"]})).await;
+        assert!(reply.allow && reply.message.as_deref().unwrap().contains("first commit"), "{reply:?}");
+        // What would write, run a program or leave the project is refused with its reason, and nothing happens.
+        let target = dir.path().join("written.txt");
+        for (input, why) in [
+            (json!({"args": ["diff", format!("--output={}", target.display())]}), "refused"),
+            (json!({"args": ["branch", "created"]}), "listing form"),
+            (json!({"args": ["config", "user.name", "x"]}), "is not available"),
+            (json!({"args": ["-c", "core.pager=sh", "log"]}), "subcommand"),
+            (json!({"args": "log"}), "array of strings"),
+            (json!({"args": ["log"], "repo": dir.path().display().to_string()}), "not in this project's repository"),
+        ] {
+            let reply = ask(input.clone()).await;
+            assert!(!reply.allow, "{input}");
+            assert!(reply.message.as_deref().unwrap().contains(why), "{input}: {reply:?}");
+        }
+        assert!(!target.exists());
+        let branches = ask(json!({"args": ["branch", "--list"]})).await;
+        assert!(!branches.message.unwrap().contains("created"));
+        assert!(tokio::time::timeout(Duration::from_millis(100), rx.recv()).await.is_err(), "a card was shown");
+    }
+
     #[tokio::test]
     async fn a_review_target_call_tells_the_window_what_to_compare_and_never_shows_a_card() {
         let (bridge, mut rx, _dir) = setup();
         let socket = bridge.socket_path.display().to_string();
-        let call = |input: Value| BridgeRequest { tool_name: "review_target".into(), input, tool_use_id: None, orchestra: false, network: false, review: true };
+        let call = |input: Value| BridgeRequest { tool_name: "review_target".into(), input, tool_use_id: None, orchestra: false, network: false, review: true, git: false };
         let ask = |req: BridgeRequest| {
             let socket = socket.clone();
             async move { tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &req)).await.unwrap() }
@@ -503,11 +603,12 @@ mod tests {
         // Even a request a rule would allow.
         bridge.add_rule(Scope::Chat, prefix_rule("npm test")).unwrap();
         let socket = bridge.socket_path.display().to_string();
-        let network = BridgeRequest { tool_name: "network_requests".into(), input: json!({}), tool_use_id: None, orchestra: false, network: true, review: false };
+        let network = BridgeRequest { tool_name: "network_requests".into(), input: json!({}), tool_use_id: None, orchestra: false, network: true, review: false, git: false };
         let reproduce = BridgeRequest::permission("reproduce".into(), json!({"steps": "x"}), None);
         let question = BridgeRequest::permission("AskUserQuestion".into(), json!({"questions": []}), None);
-        let review = BridgeRequest { tool_name: "review_target".into(), input: json!({"pr": 1}), tool_use_id: None, orchestra: false, network: false, review: true };
-        for req in [orchestra_call(), network, request(), reproduce, question, review] {
+        let review = BridgeRequest { tool_name: "review_target".into(), input: json!({"pr": 1}), tool_use_id: None, orchestra: false, network: false, review: true, git: false };
+        bridge.set_read_git(Some(crate::read_git::Scope { folder: dir.path().to_path_buf(), path_env: None }));
+        for req in [orchestra_call(), network, request(), reproduce, question, review, git_call(json!({"args": ["status"]}))] {
             let socket = socket.clone();
             let reply = tokio::task::spawn_blocking(move || ask_bridge(Some(&socket), &req)).await.unwrap();
             // Refused: told so, or (when the bridge hangs up before it has read the request, which it does, so the client's
