@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inSummary, bounds, centerOn, clampZoom, firstBox, fitView, GAP, READABLE_ZOOM, MAIN_SIZE, MAX_ZOOM, MIN_NODE, MIN_ZOOM, moveBox, overlaps, panBy, PLACE_COLUMNS, placeCheck, placeWorker, inView, resizeBox, SUMMARY_ZOOM, tether, toScreen, toWorld, WORKER_SIZE, zoomAt, type Box, type View } from "./canvas";
+import { inSummary, bounds, centerOn, clampZoom, firstBox, fitView, GAP, READABLE_ZOOM, MAIN_SIZE, MAX_ZOOM, MIN_NODE, MIN_ZOOM, moveBox, offScreen, overlaps, panBy, PLACE_COLUMNS, placeCheck, placeWorker, inView, resizeBox, SUMMARY_ZOOM, tether, toScreen, toWorld, WORKER_SIZE, zoomAt, type Box, type View } from "./canvas";
 
 const view: View = { x: 100, y: 50, zoom: 0.5 };
 
@@ -277,5 +277,33 @@ describe("inSummary", () => {
     expect(inSummary(true, 0.5)).toBe(true);
     expect(inSummary(true, 0.53)).toBe(false);
     expect(inSummary(false, 1)).toBe(false);
+  });
+});
+
+describe("offScreen", () => {
+  const view: View = { x: 0, y: 0, zoom: 0.5 };
+  const screen = { w: 1000, h: 800 };
+  const at = (x: number, y: number): Box => ({ x, y, w: 400, h: 400 });
+
+  it("names the boxes wholly off the screen, at the zoom it is at", () => {
+    // At 50%, a box at x 2400 starts 1200px across: off a 1000px screen by more than the margin.
+    const boxes = { seen: at(0, 0), right: at(2400, 0), below: at(0, 2000), left: at(-1200, 0) };
+    expect([...offScreen(view, screen, boxes)].sort()).toEqual(["below", "left", "right"]);
+  });
+
+  it("counts a box partly on the screen, or just past its edge, as on it", () => {
+    const boxes = { partly: at(1800, 0), near: at(2100, 0) };
+    // `near` starts at 1050px: 50px past the edge, inside the margin, so it is drawn before it shows.
+    expect(offScreen(view, screen, boxes).size).toBe(0);
+    expect([...offScreen(view, screen, boxes, 0)]).toEqual(["near"]);
+  });
+
+  it("follows the view: panned, what was off is on", () => {
+    const boxes = { right: at(2400, 0) };
+    expect(offScreen({ ...view, x: -1000 }, screen, boxes).size).toBe(0);
+  });
+
+  it("names none while the screen's size isn't known", () => {
+    expect(offScreen(view, { w: 0, h: 0 }, { far: at(99_999, 0) }).size).toBe(0);
   });
 });

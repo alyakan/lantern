@@ -1,5 +1,5 @@
 import { memo, useContext, useMemo } from "react";
-import { CloseAgentContext, useChatState, useNodeActions } from "../lib/canvasContext";
+import { CloseAgentContext, useChatState, useChatStateWhile, useNodeActions, useOnScreen } from "../lib/canvasContext";
 import { SlotContext } from "../lib/slot";
 import { WAKE_LIMIT, wakesPaused } from "../sessions";
 import type { MergeProposal } from "../store";
@@ -33,17 +33,21 @@ export function visibleProposals(all: MergeProposal[], worker: string | null): M
 /**
  * An agent's conversation on the canvas, with its box: the same chat view as the full-size app, for this agent's own
  * chat. It subscribes to that chat alone and keeps its handlers fixed (but for its test runs), so it redraws when the
- * agent does something and not when the canvas pans, zooms or moves another agent. `parent`: the main agent a worker reports to, whose merge
- * proposals for it are shown here too.
+ * agent does something and not when the canvas pans, zooms or moves another agent, and its conversation not at all while
+ * its card is off the screen. `parent`: the main agent a worker reports to, whose merge proposals for it are shown here too.
  */
 export const NodeBody = memo(function NodeBody({ slot, parent }: { slot: string; parent: string | null }) {
   const state = useChatState(slot);
   const owner = useChatState(parent ?? slot);
+  // Off the screen, the conversation stays as it was (the box, banners and cards below it stay current): an agent at work
+  // where nobody can see it isn't drawn again for every word. It catches up as it comes into view.
+  const onScreen = useOnScreen(slot);
+  const shown = useChatStateWhile(slot, onScreen);
   const actions = useNodeActions();
   const closeAgent = useContext(CloseAgentContext);
   // New only when its test runs change: a row of the chat is drawn again when what it is given changes, and a work line
   // shows the test run its step started.
-  const testRuns = state?.testRuns;
+  const testRuns = shown?.testRuns;
   const handlers = useMemo<StreamHandlers>(
     () => ({
       onDecide: (id, allow, note, answered) => actions.decide(slot, id, allow, note, answered),
@@ -55,13 +59,13 @@ export const NodeBody = memo(function NodeBody({ slot, parent }: { slot: string;
     }),
     [slot, actions, testRuns],
   );
+  // The same element while the conversation shown is the same, so React leaves it be when only the box or a banner changed.
+  const chat = useMemo(() => shown && <ChatView state={shown} {...handlers} />, [shown, handlers]);
   if (!state) return null;
   const proposals = visibleProposals(owner?.proposals ?? [], parent ? slot : null);
   return (
     <SlotContext.Provider value={slot}>
-      <div className="node-chat">
-        <ChatView state={state} {...handlers} />
-      </div>
+      <div className={`node-chat${onScreen ? "" : " off-screen"}`}>{chat}</div>
       {state.setup && (
         <div className="node-merges">
           <SetupNotice card={state.setup} onAnswer={(answer) => actions.answerSetup(slot, answer)} onClose={() => closeAgent(slot)} />

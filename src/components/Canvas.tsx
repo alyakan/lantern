@@ -7,6 +7,7 @@ import {
   fitView,
   GAP,
   moveBox,
+  offScreen,
   overlaps,
   panBy,
   inView,
@@ -21,7 +22,7 @@ import {
   type Size,
   type View,
 } from "../lib/canvas";
-import { ChatStoreContext, CloseAgentContext, useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
+import { ChatStoreContext, CloseAgentContext, createOffScreen, OffScreenContext, useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
 import { agreedOf, bulkEffect, closeAll, closedLine, planClosing, riskyQuestion, stoppedAgents, isStopped, type ClosePlan } from "../lib/closeStopped";
 import { ProjectSetupContext, runCommandOf } from "../lib/projectSetup";
 import { useAction } from "../lib/actions";
@@ -515,6 +516,11 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     unseenRef.current = next;
     setUnseen(next);
   }, [layout]);
+  // Which cards are nowhere near the screen: their chats stay as they were until they come into view (see NodeBody). Told
+  // again whenever the view, the canvas or a card moves.
+  const [offStore] = useState(createOffScreen);
+  const refreshOffScreen = useCallback(() => offStore.set(offScreen(view.current, size.current, layout.boxes)), [offStore, layout]);
+  useEffect(() => refreshOffScreen());
 
   // Hidden agents keep their place (so one comes back where it was) but are not drawn, tethered or framed.
   placeNodes(layout, nodes);
@@ -555,12 +561,13 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     // Cards below SUMMARY_ENTER, chats again above SUMMARY_EXIT; in between, whichever it was.
     summaryRef.current = inSummary(summaryRef.current, v.zoom);
     refreshUnseen();
+    refreshOffScreen();
     // A folded card's height depends on the zoom once it is a card, and its tether meets it.
     if (Object.values(layout.collapsed).some(Boolean)) paintTethersRef.current();
     // Only these two things in React depend on the zoom: the label, and whether agents are cards. Both are cheap.
     setSummary(summaryRef.current);
     setZoomPct((prev) => (Math.round(prev * 100) === Math.round(v.zoom * 100) ? prev : v.zoom));
-  }, [layout, refreshUnseen]);
+  }, [layout, refreshUnseen, refreshOffScreen]);
 
   const fit = useCallback((animate: boolean) => {
     const boxes = shownSlots.current.map((s) => layout.boxes[s]).filter(Boolean);
@@ -578,6 +585,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       if (sameSize(size.current, next)) return;
       const first = size.current.w === 0;
       size.current = next;
+      refreshOffScreen();
       if (first && !layout.view) fit(false);
       else if (first) apply(layout.view!, false);
     };
@@ -586,7 +594,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [apply, fit, layout]);
+  }, [apply, fit, layout, refreshOffScreen]);
 
   // A new agent appears: until the user has framed the canvas, bring everyone into view.
   const slotKey = visible.map((n) => n.slot).join(",");
@@ -731,7 +739,8 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       if (!layout.collapsed[n.slot]) el.style.height = `${box.h}px`;
     }
     paintTethers();
-  }, [layout, paintTethers]);
+    refreshOffScreen();
+  }, [layout, paintTethers, refreshOffScreen]);
 
   const bringToFront = useCallback((slot: string) => {
     if (layout.order[layout.order.length - 1] === slot) return;
@@ -942,6 +951,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       onPointerCancel={onBackgroundUp}
     >
       <CloseAgentContext.Provider value={closeAsk}>
+      <OffScreenContext.Provider value={offStore}>
       <div className="canvas-world" ref={world} style={{ transform: `translate(${initial.x}px, ${initial.y}px) scale(${initial.zoom})` }}>
         <svg className="canvas-tethers" aria-hidden>
           {visible.map((n) => {
@@ -978,6 +988,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
           />
         ))}
       </div>
+      </OffScreenContext.Provider>
       </CloseAgentContext.Provider>
       <Announcer nodes={nodes} />
       <Controls zoom={zoomPct} attention={attention.length} nodes={nodes} onZoom={zoomBy} onFit={() => { layout.touched = false; fit(true); }} onNext={next} onGoTo={goTo} onShow={actions.show} onCloseStopped={closeStopped} main={nodes.find((n) => n.role === "main")?.slot} />
