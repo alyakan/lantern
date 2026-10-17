@@ -247,6 +247,15 @@ export const GearIcon = () => (
   </svg>
 );
 
+// A disk drive: Storage.
+export const DiskIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 14 14" {...base}>
+    <path d="M2.2 8.2 3.6 2.6c.1-.5.5-.8 1-.8h4.8c.5 0 .9.3 1 .8l1.4 5.6" />
+    <rect x="1.2" y="8.2" width="11.6" height="3.8" rx="1.2" />
+    <circle cx="10.2" cy="10.1" r=".5" fill="currentColor" />
+  </svg>
+);
+
 // Xcode's "show/hide navigator": a window with its left-hand pane marked.
 export const SidebarIcon = () => (
   <svg width="15" height="13" viewBox="0 0 16 14" {...base}>

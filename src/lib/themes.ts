@@ -105,6 +105,11 @@ const STATUS: Record<Scheme, Record<string, string>> = {
   light: { working: "#d4693f", unread: "#0a84ff", attn: "#c47f00", "attn-text": "#8a5d00", add: "#1a7f37", del: "#cf222e", warn: "#9a6700", "sev-blocker": "#d9661f", "sev-should": "#a88400", "sev-should-text": "#7a5f00" },
   dark: { working: "#ef8a5c", unread: "#0a84ff", attn: "#f0b44c", "attn-text": "#f0b44c", add: "#6bd488", del: "#ff8a93", warn: "#e3b341", "sev-blocker": "#f0914a", "sev-should": "#e3b341", "sev-should-text": "#e3b341" },
 };
+// The Storage panel's seven kinds, apart from each other and from the status colours; moved until they show at 3:1 like the rest.
+const STORAGE: Record<Scheme, string[]> = {
+  light: ["#1d6fd6", "#c4570c", "#1f8a4c", "#8a4fc7", "#0f8a8f", "#c2307a", "#8a7a10"],
+  dark: ["#5aa2ff", "#f0914a", "#5fd08a", "#b48bf0", "#4ccfd0", "#f074b0", "#e3c341"],
+};
 // Text-sized ones need 4.5:1, the rest (rings, dots, bars) 3:1.
 const AS_TEXT = new Set(["add", "del", "warn", "attn-text", "sev-should-text"]);
 
@@ -162,6 +167,7 @@ export function deriveTokens(c: CustomTheme): Record<string, string> {
     "card-shadow": dark ? "0 0 0 0.5px rgba(0, 0, 0, 0.6), 0 4px 16px rgba(0, 0, 0, 0.3)" : "0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 2px 10px rgba(0, 0, 0, 0.06)",
   };
   for (const [name, colour] of Object.entries(STATUS[scheme])) t[name] = reads(colour, AS_TEXT.has(name) ? 4.5 : 3);
+  STORAGE[scheme].forEach((colour, i) => (t[`storage-${i + 1}`] = reads(colour, 3)));
   t["error-bg"] = mix(c.bg, t.del, dark ? 0.18 : 0.1);
   t["auth-bg"] = mix(c.bg, t.warn, dark ? 0.18 : 0.12);
 

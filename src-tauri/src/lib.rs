@@ -479,6 +479,13 @@ fn storage_cancel(state: State<'_, AppState>) {
     state.storage.cancel_scan();
 }
 
+/// How the RAM is used and by which apps, for the Storage panel's Memory tab. Read-only: it runs vm_stat, sysctl and ps (names
+/// only, never command lines) and signals nothing (see storage/memory.rs).
+#[tauri::command]
+async fn memory_snapshot() -> Result<storage::memory::Snapshot, String> {
+    tauri::async_runtime::spawn_blocking(storage::memory::snapshot).await.map_err(|e| e.to_string())?
+}
+
 /// Deletes the checked items, by the ids of the last scan. Each is checked again first, and the ones git or the file
 /// system say have changed are refused with a reason.
 #[tauri::command]
@@ -2079,6 +2086,7 @@ pub fn run() {
             storage_scan,
             storage_cancel,
             storage_delete,
+            memory_snapshot,
             orchestra_decline_merge,
             orchestra_merge_tests_info,
             orchestra_run_merge_tests,

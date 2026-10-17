@@ -516,6 +516,36 @@ export interface StorageOutcome {
   error: string | null;
 }
 
+export type MemoryKind = "app" | "lantern" | "macos" | "other";
+
+/** One app's part of the RAM: name, size, process count and share only (no paths, pids or arguments reach the screen). */
+export interface MemoryApp {
+  name: string;
+  /** Resident memory of its processes, scaled so every app together adds up to the used memory. */
+  bytes: number;
+  processes: number;
+  /** Its part of the Mac's whole RAM, 0 to 1. */
+  share: number;
+  kind: MemoryKind;
+}
+
+/** What the Storage panel's Memory tab shows (read-only). */
+export interface MemorySnapshot {
+  total_bytes: number;
+  used_bytes: number;
+  cached_bytes: number;
+  free_bytes: number;
+  compressed_bytes: number;
+  swap_used_bytes: number | null;
+  pressure: "normal" | "warning" | "critical";
+  /** "kernel": macOS's own level; "estimated": worked out from the free, cached and compressed shares. */
+  pressure_source: "kernel" | "estimated";
+  /** The apps' resident sizes added up to more than is used (shared pages), so they were scaled down. */
+  scaled: boolean;
+  /** Largest first, "Other apps" last; their bytes add up to used_bytes. */
+  apps: MemoryApp[];
+}
+
 export interface NetworkBody {
   encoding: "utf8" | "base64";
   data: string;

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type UIEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import { AWAY_FROM_END, JumpToLatest } from "./JumpToLatest";
 import { useSlot } from "../lib/slot";
 import { recallScroll, rememberScroll } from "../lib/scrollMemory";
@@ -10,6 +10,9 @@ import { RestoreDialog } from "./RestoreDialog";
 import { api, type RestoreResult } from "../api";
 import { restoredFiles, restoreSummary, undoRestoreSummary, useRestorePoints } from "../lib/restorePoint";
 import { sinceLabel } from "../lib/revert";
+
+/** How long after the reader's last wheel, touch or key a scroll still counts as theirs (a trackpad's glide goes on after the fingers lift). */
+const READER_WINDOW_MS = 600;
 
 /** What "Restore files to here" tells the app: a restore was done or undone, so it can show it and say it to Claude. */
 export interface RestoreEvents {
@@ -27,6 +30,9 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
   const [confirming, setConfirming] = useState<number | null>(null);
   const [undoFailed, setUndoFailed] = useState<string | null>(null);
   const blocked = state.status === "running" ? "Wait for Claude to finish before restoring files." : state.status === "starting" ? "Claude isn't ready yet." : null;
+  // The same object while nothing in it changes, so the messages that offer it aren't drawn again for every word streamed.
+  const canRestore = !!restore;
+  const restoreRows = useMemo(() => (canRestore ? { points, blocked, onRestore: setConfirming } : undefined), [canRestore, points, blocked]);
   const undoRestore = () => {
     const undo = state.restoreUndo;
     if (!undo || !restore) return;
@@ -53,23 +59,38 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
     });
     return () => cancelAnimationFrame(frame);
   }, []);
-  // Where Lantern itself last put the chat (its end). The browser reports that move as a scroll a frame later, and by then
-  // the code in the chat has its colours and the chat is taller: read as the reader's, it said "scrolled up", and what was
-  // remembered was the middle of the chat. So a scroll that is just that move is not the reader's.
-  const pinned = useRef<number | null>(null);
-  const toEnd = (el: HTMLElement) => {
-    el.scrollTop = el.scrollHeight;
-    pinned.current = el.scrollTop;
-  };
+  // Where the chat is meant to be (at its end, or at a place in it) is the reader's to say, and only the reader's: by the
+  // wheel or trackpad, a finger, the keys, the scrollbar, or the pill. The browser scrolls the chat by itself too, whenever
+  // the layout changes under it (it grew, it was resized, it was clamped, it came back from another view), and read as the
+  // reader's those scrolls said "you scrolled up" and made the middle of the chat the place to come back to. So a scroll
+  // with no input of theirs just before it never changes what is meant.
+  const lastInput = useRef(-Infinity);
+  const dragging = useRef(false);
   const byHand = () => {
     restoring.current = false;
-    pinned.current = null;
+    lastInput.current = performance.now();
+  };
+  useEffect(() => {
+    const release = () => (dragging.current = false);
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+    return () => {
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
+    };
+  }, []);
+  // Following the end: the chat is put there, and that is what is remembered for coming back (never an older place).
+  const toEnd = (el: HTMLElement) => {
+    el.scrollTop = el.scrollHeight;
+    rememberScroll<ChatAnchor | -1>(`${slot}:chat`, -1);
   };
   // Your own message goes to the end, even if you'd scrolled up to read: you're following what you just sent.
   const lastSent = (items: State["items"]) => [...items].reverse().find((it) => it.type === "user" && !it.auto)?.id;
   const sent = useRef(lastSent(state.items));
   // Only the chat scrolls: scrollIntoView would scroll the page around it too, and slide the whole app out of the window.
-  useEffect(() => {
+  // Before the frame is drawn: the height it reads is the layout the frame needs anyway. Read after the frame (an effect),
+  // it laid the chat out a second time for every word a streaming agent added.
+  useLayoutEffect(() => {
     const el = scroller.current;
     const id = lastSent(state.items);
     if (id !== sent.current) {
@@ -110,12 +131,8 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
     const fromEnd = el.scrollHeight - el.scrollTop - el.clientHeight;
     setAway(fromEnd > AWAY_FROM_END);
     if (restoring.current) return;
-    if (pinned.current !== null && Math.abs(el.scrollTop - pinned.current) < 2) {
-      // Lantern's own move to the end, reported late: the chat is still at its end, however much taller it is by now.
-      if (nearBottom.current) rememberScroll<ChatAnchor | -1>(`${slot}:chat`, -1);
-      return;
-    }
-    pinned.current = null;
+    // Not the reader's (see byHand): the pill still tells how far from the end it is, and nothing else changes.
+    if (!dragging.current && performance.now() - lastInput.current > READER_WINDOW_MS) return;
     nearBottom.current = fromEnd < 80;
     anchor.current = nearBottom.current ? null : anchorOf(el);
     // -1: at the end, so coming back follows the end even if it grew meanwhile.
@@ -128,6 +145,8 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
   const thinkingLine = state.status === "running" && !state.setup;
   const jump = () => {
     nearBottom.current = true;
+    anchor.current = null;
+    rememberScroll<ChatAnchor | -1>(`${slot}:chat`, -1);
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
   };
   return (
@@ -141,9 +160,22 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
           </button>
         </div>
       )}
-      <div className="chat" ref={scroller} onScroll={onScroll} onWheel={byHand} onPointerDown={byHand} onKeyDown={byHand}>
+      <div
+        className="chat"
+        ref={scroller}
+        onScroll={onScroll}
+        onWheel={byHand}
+        onPointerDown={() => {
+          // The scrollbar is dragged with the pointer down: those scrolls are the reader's however long it takes.
+          dragging.current = true;
+          byHand();
+        }}
+        onKeyDown={byHand}
+        onTouchStart={byHand}
+        onTouchMove={byHand}
+      >
         {state.items.length === 0 && !state.thinking && <div className="empty">What should Claude work on?</div>}
-        <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} resend={resend} restore={restore ? { points, blocked, onRestore: setConfirming } : undefined} {...handlers} />
+        <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} resend={resend} restore={restoreRows} {...handlers} />
         {thinkingLine && (
           <div className="activity live thinking-line" role="status" aria-label="Claude is thinking">
             <span className="activity-line">

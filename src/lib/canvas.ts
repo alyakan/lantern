@@ -144,6 +144,22 @@ export function inView(view: View, viewport: Size, box: Box, min = 80): boolean 
   return w >= min && h >= min;
 }
 
+/**
+ * The agents whose boxes are nowhere on the screen, not even within `margin` screen pixels of its edge (so one about to come
+ * into view is already drawn). None while the viewport's size isn't known.
+ */
+export function offScreen(view: View, viewport: Size, boxes: Record<string, Box>, margin = 160): Set<string> {
+  const out = new Set<string>();
+  if (viewport.w <= 0 || viewport.h <= 0) return out;
+  for (const [slot, box] of Object.entries(boxes)) {
+    const a = toScreen(view, box);
+    const right = a.x + box.w * view.zoom;
+    const bottom = a.y + box.h * view.zoom;
+    if (right < -margin || bottom < -margin || a.x > viewport.w + margin || a.y > viewport.h + margin) out.add(slot);
+  }
+  return out;
+}
+
 export interface Tether {
   from: Point;
   to: Point;

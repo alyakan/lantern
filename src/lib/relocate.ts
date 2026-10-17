@@ -68,6 +68,7 @@ export const NOT_FOLDER_KEYED = [
   "review.ratio",
   "review.scope",
   "review.tab",
+  "review.tabs",
   "review.diffLayout",
   "review.commitsOpen",
   "files.markdownView",

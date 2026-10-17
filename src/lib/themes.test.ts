@@ -56,7 +56,7 @@ describe("the custom theme's colours", () => {
 
 describe("deriveTokens", () => {
   // Every token styles.css gives each theme, from the six colours.
-  const COLOUR_TOKENS = ["bg", "pane", "sidebar", "field", "glass", "glass-line", "seg-track", "seg-thumb", "bg-subtle", "bg-hover", "bg-active", "bg-user", "line", "line-strong", "text", "text-2", "muted", "faint", "muted-text", "accent", "accent-soft", "accent-text", "working", "unread", "attn", "attn-text", "add", "del", "warn", "sev-blocker", "sev-should", "sev-should-text", "info-bg", "error-bg", "auth-bg", "code-bg", "pc-tint", "pc-ink", "shadow", "card-shadow", "md-strong", "md-heading", "md-link", "md-code-bg", "md-code-text", "md-quote-bar", "md-marker"];
+  const COLOUR_TOKENS = ["bg", "pane", "sidebar", "field", "glass", "glass-line", "seg-track", "seg-thumb", "bg-subtle", "bg-hover", "bg-active", "bg-user", "line", "line-strong", "text", "text-2", "muted", "faint", "muted-text", "accent", "accent-soft", "accent-text", "working", "unread", "attn", "attn-text", "add", "del", "warn", "sev-blocker", "sev-should", "sev-should-text", "info-bg", "error-bg", "auth-bg", "code-bg", "pc-tint", "pc-ink", "shadow", "card-shadow", "md-strong", "md-heading", "md-link", "md-code-bg", "md-code-text", "md-quote-bar", "md-marker", "storage-1", "storage-2", "storage-3", "storage-4", "storage-5", "storage-6", "storage-7"];
 
   it("gives every colour token from just the six picks", () => {
     for (const c of [light, dark, { ...light, bg: "#fbf6ec", panel: "#f3ecdc" }]) {
@@ -91,8 +91,15 @@ describe("deriveTokens", () => {
       for (const surface of [c.bg, c.panel]) {
         for (const n of ["muted-text", "add", "del", "warn", "attn-text", "sev-should-text"]) expect(contrast(t[`--${n}`], surface), `${n} on ${surface} in ${c.bg}`).toBeGreaterThanOrEqual(4.5);
         for (const n of ["working", "unread", "attn", "sev-blocker", "sev-should"]) expect(contrast(t[`--${n}`], surface), `${n} on ${surface} in ${c.bg}`).toBeGreaterThanOrEqual(3);
+        for (let i = 1; i <= 7; i++) expect(contrast(t[`--storage-${i}`], surface), `storage-${i} on ${surface} in ${c.bg}`).toBeGreaterThanOrEqual(3);
       }
     }
+  });
+
+  it("gives the Storage panel seven different colours, and different ones for a light theme and a dark one", () => {
+    const palette = (c: CustomTheme) => [1, 2, 3, 4, 5, 6, 7].map((i) => deriveTokens(c)[`--storage-${i}`]);
+    for (const c of [light, dark]) expect(new Set(palette(c)).size).toBe(7);
+    expect(palette(light)).not.toEqual(palette(dark));
   });
 
   it("styles bold, headings, links and inline code so they read on the surfaces they sit on, and bold stands out from the text", () => {

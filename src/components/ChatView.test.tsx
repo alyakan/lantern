@@ -9,6 +9,12 @@ const items: ChatItem[] = [
   { type: "assistant", id: "a1", text: "Done." },
 ];
 
+/** A scroll the reader makes: a turn of the wheel, then the scroll it causes. (A bare scroll event is the browser's own.) */
+const byHand = (el: HTMLElement) => {
+  fireEvent.wheel(el);
+  fireEvent.scroll(el);
+};
+
 describe("ChatView", () => {
   it("offers a way back to the end once you've scrolled up from it", () => {
     const { container } = render(<ChatView state={{ ...initialState, status: "idle", folder: "/p", items }} onDecide={() => {}} onOpenFile={() => {}} />);
@@ -21,13 +27,13 @@ describe("ChatView", () => {
     chat.scrollTo = ((opts: ScrollToOptions) => (top = opts.top ?? top)) as typeof chat.scrollTo;
 
     top = 1500;
-    fireEvent.scroll(chat);
+    byHand(chat);
     expect(screen.queryByRole("button", { name: /Latest/ })).toBeNull();
     top = 600;
-    fireEvent.scroll(chat);
+    byHand(chat);
     fireEvent.click(screen.getByRole("button", { name: /Latest/ }));
     expect(top).toBe(2000);
-    fireEvent.scroll(chat);
+    byHand(chat);
     expect(screen.queryByRole("button", { name: /Latest/ })).toBeNull();
   });
 
@@ -78,13 +84,13 @@ describe("ChatView", () => {
       Object.defineProperty(chat, "scrollTop", { get: () => top, set: (v: number) => (top = v), configurable: true });
       // At the end, as a chat shown at its end is.
       top = 1500;
-      fireEvent.scroll(chat);
+      byHand(chat);
       height = 2600;
       resized();
       expect(top).toBe(2600);
       // A reader who scrolled up to read isn't pulled to the end by it.
       top = 600;
-      fireEvent.scroll(chat);
+      byHand(chat);
       height = 3200;
       resized();
       expect(top).not.toBe(3200);
@@ -137,6 +143,58 @@ describe("ChatView", () => {
     }
   });
 
+  it("keeps the reader's choice through scrolls the browser makes by itself, whichever way they would read", () => {
+    const observers: { targets: Element[]; cb: () => void }[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        targets: Element[] = [];
+        constructor(cb: () => void) {
+          observers.push({ targets: this.targets, cb });
+        }
+        observe(el: Element) {
+          this.targets.push(el);
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    // The clock the chat tells the reader's last input by.
+    let now = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+    try {
+      const { container } = render(<ChatView state={{ ...initialState, status: "idle", folder: "/p", items }} onDecide={() => {}} onOpenFile={() => {}} />);
+      const chat = container.querySelector(".chat") as HTMLElement;
+      const mine = observers.find((o) => o.targets.includes(chat))!;
+      let height = 2000;
+      Object.defineProperty(chat, "scrollHeight", { get: () => height, configurable: true });
+      Object.defineProperty(chat, "clientHeight", { value: 500, configurable: true });
+      let top = 0;
+      Object.defineProperty(chat, "scrollTop", { get: () => top, set: (v: number) => (top = v), configurable: true });
+      // The reader scrolls up to read: that is what is meant now.
+      top = 600;
+      byHand(chat);
+      now += 5000;
+      // The browser scrolls the chat by itself (clamped after a resize, say) to where it reads as the end: not the reader's.
+      top = 1500;
+      fireEvent.scroll(chat);
+      height = 3000;
+      mine.cb();
+      expect(top).not.toBe(3000);
+      now += 5000;
+      // The reader goes to the end by hand: now the end is meant, and it follows what grows.
+      top = 2500;
+      byHand(chat);
+      height = 3400;
+      mine.cb();
+      expect(top).toBe(3400);
+      expect(recallScroll("s1:chat")).toBe(-1);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
   it("announces that Claude is thinking while it runs", () => {
     render(<ChatView state={{ ...initialState, status: "running", folder: "/p", items }} onDecide={() => {}} onOpenFile={() => {}} />);
     expect(screen.getByRole("status", { name: "Claude is thinking" })).toBeInTheDocument();
@@ -151,7 +209,7 @@ describe("ChatView", () => {
     let top = 0;
     Object.defineProperty(chat, "scrollTop", { get: () => top, set: (v: number) => (top = v), configurable: true });
     top = 600;
-    fireEvent.scroll(chat);
+    byHand(chat);
     rerender(<ChatView state={{ ...initialState, status: "running", folder: "/p", items: [...items, { type: "user", id: "u2", text: "Also this" }] }} {...props} />);
     expect(top).toBe(2000);
   });

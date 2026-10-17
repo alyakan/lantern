@@ -7,6 +7,7 @@ import {
   fitView,
   GAP,
   moveBox,
+  offScreen,
   overlaps,
   panBy,
   inView,
@@ -21,7 +22,7 @@ import {
   type Size,
   type View,
 } from "../lib/canvas";
-import { ChatStoreContext, CloseAgentContext, useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
+import { ChatStoreContext, CloseAgentContext, createOffScreen, OffScreenContext, useChatState, useChatStates, useNodeActions } from "../lib/canvasContext";
 import { agreedOf, bulkEffect, closeAll, closedLine, planClosing, riskyQuestion, stoppedAgents, isStopped, type ClosePlan } from "../lib/closeStopped";
 import { ProjectSetupContext, runCommandOf } from "../lib/projectSetup";
 import { useAction } from "../lib/actions";
@@ -486,6 +487,8 @@ function Announcer({ nodes }: { nodes: OrchestraNode[] }) {
 }
 
 const sameSize = (a: Size, b: Size) => a.w === b.w && a.h === b.h;
+/** The canvas's dots, spaced 28 apart in the world and moving with it: set on the canvas itself, so nothing inside it is styled again. */
+const dotGrid = (v: View) => ({ backgroundSize: `${28 * v.zoom}px ${28 * v.zoom}px`, backgroundPosition: `${v.x}px ${v.y}px` });
 
 /**
  * The orchestra's canvas: each agent a floating chat, tethered to the main agent it works for. Drag a title to move one,
@@ -515,6 +518,11 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     unseenRef.current = next;
     setUnseen(next);
   }, [layout]);
+  // Which cards are nowhere near the screen: their chats stay as they were until they come into view (see NodeBody). Told
+  // again whenever the view, the canvas or a card moves.
+  const [offStore] = useState(createOffScreen);
+  const refreshOffScreen = useCallback(() => offStore.set(offScreen(view.current, size.current, layout.boxes)), [offStore, layout]);
+  useEffect(() => refreshOffScreen());
 
   // Hidden agents keep their place (so one comes back where it was) but are not drawn, tethered or framed.
   placeNodes(layout, nodes);
@@ -548,19 +556,22 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       if (animate) window.setTimeout(() => w.classList.remove("animating"), 320);
     }
     if (vp) {
-      vp.style.setProperty("--zoom", String(v.zoom));
-      vp.style.setProperty("--vx", `${v.x}px`);
-      vp.style.setProperty("--vy", `${v.y}px`);
+      Object.assign(vp.style, dotGrid(v));
     }
     // Cards below SUMMARY_ENTER, chats again above SUMMARY_EXIT; in between, whichever it was.
     summaryRef.current = inSummary(summaryRef.current, v.zoom);
+    // --zoom is inherited, so every element of every card is styled again when it changes: it is kept up to date only
+    // while the cards are summaries, which are drawn by it. Changed on each frame of a pan or a pinch with chats showing,
+    // it made restyling the whole canvas most of what a frame cost.
+    if (summaryRef.current && vp) vp.style.setProperty("--zoom", String(v.zoom));
     refreshUnseen();
+    refreshOffScreen();
     // A folded card's height depends on the zoom once it is a card, and its tether meets it.
     if (Object.values(layout.collapsed).some(Boolean)) paintTethersRef.current();
     // Only these two things in React depend on the zoom: the label, and whether agents are cards. Both are cheap.
     setSummary(summaryRef.current);
     setZoomPct((prev) => (Math.round(prev * 100) === Math.round(v.zoom * 100) ? prev : v.zoom));
-  }, [layout, refreshUnseen]);
+  }, [layout, refreshUnseen, refreshOffScreen]);
 
   const fit = useCallback((animate: boolean) => {
     const boxes = shownSlots.current.map((s) => layout.boxes[s]).filter(Boolean);
@@ -578,6 +589,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       if (sameSize(size.current, next)) return;
       const first = size.current.w === 0;
       size.current = next;
+      refreshOffScreen();
       if (first && !layout.view) fit(false);
       else if (first) apply(layout.view!, false);
     };
@@ -586,7 +598,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [apply, fit, layout]);
+  }, [apply, fit, layout, refreshOffScreen]);
 
   // A new agent appears: until the user has framed the canvas, bring everyone into view.
   const slotKey = visible.map((n) => n.slot).join(",");
@@ -716,11 +728,13 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     }
   }, [layout]);
   paintTethersRef.current = paintTethers;
+  // The agents are read when it paints, not when it was made: `nodes` is a new list each time the app draws, and a new
+  // `paint` would make new drag handlers, which would redraw every card each time any agent said a word.
   const paint = useCallback(() => {
     frame.current = 0;
     const w = world.current;
     if (!w) return;
-    for (const n of nodes) {
+    for (const n of nodesNow.current) {
       const box = layout.boxes[n.slot];
       const el = w.querySelector<HTMLElement>(`[data-node="${n.slot}"]`);
       if (!box || !el) continue;
@@ -729,7 +743,8 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       if (!layout.collapsed[n.slot]) el.style.height = `${box.h}px`;
     }
     paintTethers();
-  }, [layout, nodes, paintTethers]);
+    refreshOffScreen();
+  }, [layout, paintTethers, refreshOffScreen]);
 
   const bringToFront = useCallback((slot: string) => {
     if (layout.order[layout.order.length - 1] === slot) return;
@@ -926,12 +941,15 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
   useAction("canvas-previous-agent", () => cycle(-1), hasFocus);
 
   const initial = view.current;
+  // The canvas's own style as it first was: from then on apply() sets it, and a style drawn from the current view would have
+  // React set --zoom again with each zoom step (see apply).
+  const first = useRef(view.current).current;
   return (
     <div
       className={`canvas${summary ? " summary" : ""}`}
       ref={viewport}
       data-testid="canvas"
-      style={{ "--zoom": initial.zoom, "--vx": `${initial.x}px`, "--vy": `${initial.y}px` } as CSSProperties}
+      style={{ "--zoom": first.zoom, ...dotGrid(first) } as CSSProperties}
       onFocus={() => setHasFocus(true)}
       onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setHasFocus(false)}
       onPointerDown={onBackgroundDown}
@@ -940,6 +958,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       onPointerCancel={onBackgroundUp}
     >
       <CloseAgentContext.Provider value={closeAsk}>
+      <OffScreenContext.Provider value={offStore}>
       <div className="canvas-world" ref={world} style={{ transform: `translate(${initial.x}px, ${initial.y}px) scale(${initial.zoom})` }}>
         <svg className="canvas-tethers" aria-hidden>
           {visible.map((n) => {
@@ -976,6 +995,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
           />
         ))}
       </div>
+      </OffScreenContext.Provider>
       </CloseAgentContext.Provider>
       <Announcer nodes={nodes} />
       <Controls zoom={zoomPct} attention={attention.length} nodes={nodes} onZoom={zoomBy} onFit={() => { layout.touched = false; fit(true); }} onNext={next} onGoTo={goTo} onShow={actions.show} onCloseStopped={closeStopped} main={nodes.find((n) => n.role === "main")?.slot} />

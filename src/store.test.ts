@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialState, reducer, type State, type ToolItem } from "./store";
+import { hasPendingPrompt, initialState, reducer, type State, type ToolItem } from "./store";
 import { chatState, isBusy } from "./sessions";
 import type { UiEvent } from "./types";
 
@@ -71,6 +71,39 @@ describe("reducer", () => {
     expect(s.items).toEqual([{ type: "assistant", id: "m:1", text: "Hello" }]);
     s = ev(s, { kind: "assistant_text", parent: null, block_id: "m:1", text: "Hello!" });
     expect(s.items).toEqual([{ type: "assistant", id: "m:1", text: "Hello!" }]);
+  });
+
+  it("keeps every item a word or a step didn't change as the same object, so the chat draws only what changed", () => {
+    let s = ev(running, tool("t1", "Read"));
+    s = ev(s, { kind: "tool_finished", parent: null, tool_use_id: "t1", is_error: false, output: "ok" });
+    s = ev(s, tool("t2", "Task"));
+    s = ev(s, tool("t3", "Bash", "t2"));
+    s = ev(s, { kind: "text_delta", parent: null, block_id: "m:1", text: "Hel" });
+    const [read, task, message] = s.items;
+    s = ev(s, { kind: "text_delta", parent: null, block_id: "m:1", text: "lo" });
+    expect(s.items[0]).toBe(read);
+    expect(s.items[1]).toBe(task);
+    expect(s.items[2]).not.toBe(message);
+    expect(s.items[2]).toMatchObject({ text: "Hello" });
+    // A step finishing inside a subagent: that step and the one it is in are new, the rest are not.
+    const before = s.items;
+    s = ev(s, { kind: "tool_finished", parent: "t2", tool_use_id: "t3", is_error: false, output: "done" });
+    expect(s.items[0]).toBe(before[0]);
+    expect(s.items[1]).not.toBe(before[1]);
+    expect((s.items[1] as ToolItem).children[0]).toMatchObject({ id: "t3", status: "done" });
+    expect(s.items[2]).toBe(before[2]);
+    // A step it doesn't have changes nothing.
+    expect(ev(s, { kind: "tool_finished", parent: null, tool_use_id: "nope", is_error: false, output: "" }).items).toBe(s.items);
+  });
+
+  it("says whether a prompt is waiting, again for each new list of items", () => {
+    const asked = ev(running, { kind: "permission_requested", request_id: "r1", tool_name: "Bash", input: { command: "ls" } });
+    expect(hasPendingPrompt(asked.items)).toBe(true);
+    expect(hasPendingPrompt(asked.items)).toBe(true);
+    const answered = reducer(asked, { type: "permission_decided", id: "r1", allow: true });
+    expect(answered.items).not.toBe(asked.items);
+    expect(hasPendingPrompt(answered.items)).toBe(false);
+    expect(hasPendingPrompt(running.items)).toBe(false);
   });
 
   it("nests subagent tools under their parent", () => {

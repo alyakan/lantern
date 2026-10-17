@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { StorageTab } from "./StorageTab";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StorageTab, suggestedCount } from "./StorageTab";
 import { api } from "../api";
 import type { StorageItem, StorageView } from "../types";
 
@@ -15,6 +15,15 @@ beforeEach(() => {
   vi.mocked(api.storageScan).mockResolvedValue(true);
   vi.mocked(api.storageDelete).mockResolvedValue([]);
 });
+
+const GB = 1_000_000_000;
+// A spread of the kinds: 50 / 30 / 15 / 5 percent of 20 GB.
+const spread = [
+  item("wt", { kind: "worktree", removal: "worktree", name: "app/wt-1", bytes: 10 * GB }),
+  item("nm", { kind: "build_output", name: "web/node_modules", bytes: 6 * GB, ticked: true }),
+  item("c", { kind: "cache", name: "Xcode DerivedData", bytes: 3 * GB }),
+  item("t", { kind: "trash", name: "Trash", bytes: 1 * GB, ticked: true }),
+];
 
 describe("StorageTab", () => {
   it("offers a first scan, and says nothing is deleted until you tick it", () => {
@@ -39,7 +48,8 @@ describe("StorageTab", () => {
     expect(screen.getByText("Claude: old project, 40 days idle")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Delete busy" })).toBeDisabled();
     expect(screen.getByText(/Can't be deleted: 2 uncommitted changes/)).toBeInTheDocument();
-    expect(screen.getByText(/2 ticked · frees up to 4\.0 GB/)).toBeInTheDocument();
+    expect(screen.getByText(/Total scanned 6\.0 GB, selected to delete 4\.0 GB \(frees 4\.0 GB\)/)).toBeInTheDocument();
+    expect(screen.getByText(/2 ticked/)).toBeInTheDocument();
   });
 
   it("deletes the ticked ids after a confirmation, and says what was freed and what was refused", async () => {
@@ -102,5 +112,109 @@ describe("StorageTab", () => {
     expect(screen.getByText("Measured 10 of 40 places")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Rescan" })).toBeNull();
+  });
+
+  describe("the distribution bar", () => {
+    const seg = (kind: string) => document.querySelector(`.storage-seg[data-kind="${kind}"]`) as HTMLElement;
+
+    it("splits the whole scan by kind, each with its own colour, and says it in words too", () => {
+      render(<StorageTab view={view({ items: spread })} onAsk={null} />);
+      const bar = screen.getByRole("img", { name: /^Storage by kind\./ });
+      expect(bar).toHaveAccessibleName("Storage by kind. Git worktrees: 10.0 GB (50%). Build output: 6.0 GB (30%). Caches and logs: 3.0 GB (15%). Trash: 1.0 GB (5%)");
+      expect([...document.querySelectorAll(".storage-seg")].map((e) => (e as HTMLElement).dataset.kind)).toEqual(["worktree", "build_output", "cache", "trash"]);
+      expect(seg("worktree").style.getPropertyValue("--kind")).toBe("var(--storage-1)");
+      expect(seg("build_output").style.getPropertyValue("--kind")).toBe("var(--storage-3)");
+      expect(seg("trash").style.getPropertyValue("--kind")).toBe("var(--storage-7)");
+      expect(parseFloat(seg("worktree").style.width)).toBeCloseTo(50, 5);
+      expect(parseFloat(seg("trash").style.width)).toBeCloseTo(5, 5);
+    });
+
+    it("has a legend with a swatch, the kind, its size and its share", () => {
+      render(<StorageTab view={view({ items: spread })} onAsk={null} />);
+      const legend = screen.getByRole("list", { name: "Storage kinds" });
+      const entry = within(legend).getByRole("button", { name: /Build output/ });
+      expect(entry).toHaveTextContent("Build output6.0 GB30%");
+      expect(entry.querySelector(".storage-swatch")).not.toBeNull();
+      expect(within(legend).getAllByRole("button")).toHaveLength(4);
+    });
+
+    it("reads a kind out when the pointer or the keyboard is on its segment or its legend entry, and dims the others", () => {
+      render(<StorageTab view={view({ items: spread })} onAsk={null} />);
+      expect(screen.getByText(/Hover a colour/)).toBeInTheDocument();
+      fireEvent.pointerEnter(seg("build_output"));
+      expect(screen.getByText("Build output: 6.0 GB (30%)")).toBeInTheDocument();
+      expect(seg("build_output")).toHaveClass("hot");
+      expect(seg("cache")).toHaveClass("dim");
+      expect(screen.getByRole("region", { name: "Build output" })).toHaveClass("hot");
+      fireEvent.pointerLeave(document.querySelector(".storage-chart")!);
+      expect(screen.getByText(/Hover a colour/)).toBeInTheDocument();
+      expect(seg("cache")).not.toHaveClass("dim");
+      act(() => screen.getByRole("button", { name: /Caches and logs/ }).focus());
+      expect(screen.getByText("Caches and logs: 3.0 GB (15%)")).toBeInTheDocument();
+      expect(seg("cache")).toHaveClass("hot");
+      act(() => screen.getByRole("button", { name: /Caches and logs/ }).blur());
+      expect(screen.getByText(/Hover a colour/)).toBeInTheDocument();
+    });
+
+    it("goes to the kind's list when its segment or legend entry is pressed", () => {
+      const scrollIntoView = vi.fn();
+      Element.prototype.scrollIntoView = scrollIntoView;
+      render(<StorageTab view={view({ items: spread })} onAsk={null} />);
+      fireEvent.click(seg("cache"));
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+      expect(scrollIntoView.mock.contexts[0]).toBe(screen.getByRole("region", { name: "Caches and logs" }));
+      fireEvent.click(screen.getByRole("button", { name: /Trash/ }));
+      expect(scrollIntoView.mock.contexts[1]).toBe(screen.getByRole("region", { name: "Trash" }));
+      // The group stays in the list whether or not anything scrolls (jsdom has no scrollIntoView).
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+      fireEvent.click(seg("cache"));
+    });
+
+    it("gives a kind that is a hair of the scan a segment you can still see, and no bar when nothing was found", () => {
+      const { unmount } = render(<StorageTab view={view({ items: [item("big", { kind: "worktree", removal: "worktree", bytes: 900 * GB }), item("t", { kind: "trash", bytes: 1_000_000 })] })} onAsk={null} />);
+      expect(parseFloat(seg("trash").style.width)).toBe(2);
+      expect(screen.getByRole("button", { name: /Trash/ })).toHaveTextContent("<1%");
+      unmount();
+      render(<StorageTab view={view({ items: [] })} onAsk={null} />);
+      expect(screen.queryByRole("img", { name: /Storage by kind/ })).toBeNull();
+    });
+  });
+
+  describe("each item's own bar", () => {
+    const fill = (name: string) => screen.getByRole("checkbox", { name: `Delete ${name}` }).closest("li")!.querySelector(".storage-rowbar span") as HTMLElement;
+
+    it("is sized against the biggest item of the scan and tinted with its kind's colour", () => {
+      render(<StorageTab view={view({ items: spread })} onAsk={null} />);
+      expect(fill("app/wt-1").style.width).toBe("100%");
+      expect(fill("web/node_modules").style.width).toBe("60%");
+      expect(fill("Xcode DerivedData").style.width).toBe("30%");
+      expect(fill("Trash").style.width).toBe("10%");
+      expect(screen.getByRole("region", { name: "Build output" }).style.getPropertyValue("--kind")).toBe("var(--storage-3)");
+    });
+
+    it("is hidden from a screen reader, which reads the size beside it, and is stronger on a ticked row", () => {
+      render(<StorageTab view={view({ items: spread })} onAsk={null} />);
+      const row = screen.getByRole("checkbox", { name: "Delete web/node_modules" }).closest("li")!;
+      expect(row.querySelector(".storage-rowbar")).toHaveAttribute("aria-hidden", "true");
+      expect(within(row).getByText("6.0 GB")).toBeInTheDocument();
+      expect(row).toHaveClass("ticked");
+      expect(screen.getByRole("checkbox", { name: "Delete app/wt-1" }).closest("li")).not.toHaveClass("ticked");
+    });
+  });
+
+  it("totals the scan from what is not inside another item, and says what is selected and what goes to the Trash first", () => {
+    const items = [
+      item("wt", { kind: "worktree", removal: "worktree", bytes: 10 * GB }),
+      item("inner", { kind: "build_output", bytes: 4 * GB, within: "wt" }),
+      item("r", { kind: "repo", removal: "trash", bytes: 3 * GB, ticked: true }),
+      item("c", { kind: "cache", bytes: 2 * GB, ticked: true }),
+    ];
+    render(<StorageTab view={view({ items })} onAsk={null} />);
+    expect(screen.getByText(/Total scanned 15\.0 GB, selected to delete 5\.0 GB \(frees 2\.0 GB; 3\.0 GB goes to Trash first\)/)).toBeInTheDocument();
+  });
+
+  it("counts what Claude suggested for the title bar's dot", () => {
+    expect(suggestedCount(null)).toBe(0);
+    expect(suggestedCount(view({ items: [item("a"), item("b", { suggestion: "idle" }), item("c", { suggestion: "old" })] }))).toBe(2);
   });
 });

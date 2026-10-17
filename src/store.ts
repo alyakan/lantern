@@ -348,6 +348,20 @@ export const initialState: State = {
   run: null,
 };
 
+const pendingIn = new WeakMap<ChatItem[], boolean>();
+/**
+ * Whether a permission prompt in the chat is waiting for an answer. Kept per list of items: the sidebar, the inbox and the
+ * canvas ask it of every open chat each time any of them changes, and a chat that didn't change keeps its list.
+ */
+export function hasPendingPrompt(items: ChatItem[]): boolean {
+  let pending = pendingIn.get(items);
+  if (pending === undefined) {
+    pending = items.some((it) => it.type === "permission" && it.decision === null);
+    pendingIn.set(items, pending);
+  }
+  return pending;
+}
+
 export type Action =
   | { type: "ui_event"; event: UiEvent }
   | { type: "claude_found"; path: string }
@@ -397,12 +411,24 @@ function containsTool(items: ChatItem[], id: string): boolean {
   return items.some((it) => it.type === "tool" && (it.id === id || containsTool(it.children, id)));
 }
 
+/**
+ * The items with one changed, rebuilding only the path to it: an item that didn't change stays the same object (and a
+ * list with nothing changed in it stays the same list), which is how the chat tells which rows to draw again.
+ */
 function mapTools(items: ChatItem[], id: string, fn: (t: ToolItem) => ToolItem): ChatItem[] {
-  return items.map((it): ChatItem => {
+  let changed = false;
+  const out = items.map((it): ChatItem => {
     if (it.type !== "tool") return it;
-    if (it.id === id) return fn(it);
-    return { ...it, children: mapTools(it.children, id, fn) };
+    if (it.id === id) {
+      changed = true;
+      return fn(it);
+    }
+    const children = mapTools(it.children, id, fn);
+    if (children === it.children) return it;
+    changed = true;
+    return { ...it, children };
   });
+  return changed ? out : items;
 }
 
 function insert(items: ChatItem[], parent: string | null, item: ChatItem): ChatItem[] {
@@ -414,12 +440,21 @@ function containsAssistant(items: ChatItem[], id: string): boolean {
   return items.some((it) => (it.type === "assistant" && it.id === id) || (it.type === "tool" && containsAssistant(it.children, id)));
 }
 
+/** Like mapTools: only the message and the steps it is inside are new. */
 function mapAssistant(items: ChatItem[], id: string, fn: (text: string) => string): ChatItem[] {
-  return items.map((it): ChatItem => {
-    if (it.type === "assistant" && it.id === id) return { ...it, text: fn(it.text) };
-    if (it.type === "tool") return { ...it, children: mapAssistant(it.children, id, fn) };
-    return it;
+  let changed = false;
+  const out = items.map((it): ChatItem => {
+    if (it.type === "assistant" && it.id === id) {
+      changed = true;
+      return { ...it, text: fn(it.text) };
+    }
+    if (it.type !== "tool") return it;
+    const children = mapAssistant(it.children, id, fn);
+    if (children === it.children) return it;
+    changed = true;
+    return { ...it, children };
   });
+  return changed ? out : items;
 }
 
 function upsertText(items: ChatItem[], parent: string | null, blockId: string, fn: (text: string) => string): ChatItem[] {

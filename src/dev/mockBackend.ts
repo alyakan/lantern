@@ -5,6 +5,7 @@ import { emit } from "@tauri-apps/api/event";
 import type { McpServer, NetworkDetail, NetworkItem, NetworkTx, NetworkView, SkillEntry, UiEvent } from "../types";
 import { version as APP_VERSION } from "../../package.json";
 import { TESTO_MAP } from "../lib/testoMap";
+import { DENSE_MAP, DENSE_PARTS } from "../lib/denseMap";
 import type { ReviewCheck } from "../lib/reviewChain";
 
 // The next patch release, which the update checks find.
@@ -159,6 +160,18 @@ async function playArchitecture(slot: string, text: string) {
   const moves = /^(next|ok|yes|start)/i.test(text.trim());
   const n = stepPage[slot] === undefined ? 0 : moves ? stepPage[slot] + 1 : stepPage[slot];
   stepPage[slot] = n;
+  // ?densemap: a crowded map (25 boxes, 46 arrows) with three parts, to see how the layout copes.
+  if (new URLSearchParams(location.search).has("densemap")) {
+    const parts = DENSE_PARTS.map((p, i) => `# Part ${i + 1} of ${DENSE_PARTS.length} — ${p.title}\n\nCovers: ${p.covers.join(", ")}\n\n### Role\nWhat ${p.title.toLowerCase()} does.\n\n### Boundaries\nTalks to its neighbours on the map.\n\n### Design\nOne type owns the state; the rest is plain functions.\n\n### Concerns\nNone.`);
+    const dense = [
+      "# Frame — A checklist app's data and sync path\n\nA **design review** of the app side, in six layers.",
+      "# Overview — Six layers; sync and the upload queue are the weak spots\n\n```architecture\n" + JSON.stringify(DENSE_MAP) + "\n```\n\nThe repository is the one door to storage.",
+      ...parts,
+      "# Summary — 3 parts, 0 concerns",
+    ];
+    await streamText(send, `ar${n}-${Date.now()}:0`, dense[Math.min(n, dense.length - 1)]);
+    return done();
+  }
   const pages = [
     "# Frame — The Testo sensor integration on iOS: built so far, and planned\n\nA **design review** of the five stacked PRs and the tech spec. In scope: the app side, from the sensor field to the Bluetooth handle. Out of scope: the backend's credentials endpoint. I'll judge it by five layers: UI, business logic, the device boundary, the Testo implementation, and what's outside the app.",
     "# Overview — Five layers; the device boundary is in, the Bluetooth device and the UI are still planned\n\n```architecture\n" + JSON.stringify(TESTO_MAP) + "\n```\n\nThe vendor-neutral device protocols are the spine: everything above them is Testo-free. Two things lean on that: the field reads the battery level straight from the Testo device, and the window type carries two jobs.",
@@ -1172,7 +1185,7 @@ const MOCK_CHECKLISTS = {
 };
 let mockWatches = [{ label: "Checklists", method: "GET", url: "/v1/checklists" }];
 
-// The Storage tab's scan in the browser preview: a few items of each kind, one blocked, one with a suggestion from Claude.
+// The Storage panel's scan in the browser preview: items of every kind (one a hair of the scan, one inside another), one blocked, two with a suggestion from Claude.
 const mockStorageItem = (id: string, kind: string, name: string, gb: number, over: Record<string, unknown> = {}) => ({
   id, kind, name, path: `/Users/you/${name}`, bytes: Math.round(gb * 1e9), risk: "safe", removal: kind === "worktree" ? "worktree" : kind === "repo" ? "trash" : "permanent", note: "Comes back with a build.", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, ...over,
 });
@@ -1184,9 +1197,45 @@ let mockStorageItems = [
   mockStorageItem("c2", "build_output", "acme-api/target", 6.8, { ticked: true, note: "Rust build output: the next `cargo build` rebuilds it." }),
   mockStorageItem("d1", "simulator", "iOS 16.4 simulator runtime", 6.2, { risk: "review", warning: "Last used 50 day(s) ago; downloading it again takes a while.", idle_days: 50 }),
   mockStorageItem("e1", "cache", "Caches/com.apple.dt.Xcode", 4.4, { ticked: true }),
+  mockStorageItem("e2", "cache", "npm/_cacache", 2.1, { suggestion: "Rebuilt by the next install; untouched for 3 weeks" }),
+  mockStorageItem("e3", "cache", "Logs/DiagnosticReports", 0.3, { ticked: true }),
+  mockStorageItem("e4", "cache", "Caches/com.apple.Safari", 0.04),
   mockStorageItem("f1", "trash", "Trash/Old movie.mov", 2.0, { ticked: true }),
+  mockStorageItem("g1", "download", "Downloads/Xcode_17.dmg", 3.1, { removal: "trash", idle_days: 90, note: "Yours: it goes to the Trash." }),
+  mockStorageItem("g2", "download", "Downloads/Screen Recording.mov", 1.2, { removal: "trash", idle_days: 30, note: "Yours: it goes to the Trash." }),
+  mockStorageItem("a3", "worktree", "web-dashboard/wt-charts", 0.9, { within: null, idle_days: 21 }),
+  mockStorageItem("c3", "build_output", "acme-api/wt-retry/target", 2.2, { within: "a1", ticked: true, note: "Inside the worktree above: it goes with it." }),
 ];
 let mockStorageScannedAt: number | null = null;
+// The Memory tab's snapshot in the browser preview: a 16 GB Mac with the usual apps, sizes drifting a little on each read so the bars move.
+let mockMemoryReads = 0;
+const mockMemory = () => {
+  const n = mockMemoryReads++;
+  const GiB = 1024 ** 3;
+  const MiB = 1024 ** 2;
+  const mb = (base: number, amp: number) => Math.round(base + Math.sin(n / 2 + base) * amp) * MiB;
+  const named = [
+    ["Google Chrome", "app", 11, mb(2100, 70)],
+    ["Lantern and its agents", "lantern", 9, mb(1900, 120)],
+    ["Xcode", "app", 14, mb(1650, 20)],
+    ["Slack", "app", 6, mb(780, 15)],
+    ["node", "app", 5, mb(620, 25)],
+    ["Figma", "app", 5, mb(540, 10)],
+    ["Docker Desktop", "app", 4, mb(480, 5)],
+    ["Spotify", "app", 5, mb(390, 8)],
+    ["Notion", "app", 4, mb(350, 6)],
+    ["zsh", "app", 7, mb(60, 2)],
+    ["Other apps", "other", 31, mb(800, 20)],
+  ] as const;
+  const total = 16 * GiB;
+  const used = Math.round(11.4 * GiB);
+  const cached = Math.round(3.1 * GiB);
+  const apps: { name: string; kind: string; processes: number; bytes: number; share: number }[] = named.map(([name, kind, processes, bytes]) => ({ name, kind, processes, bytes, share: bytes / total }));
+  const macos = used - apps.reduce((a, x) => a + x.bytes, 0);
+  apps.push({ name: "macOS", kind: "macos", processes: 380, bytes: macos, share: macos / total });
+  apps.sort((a, b) => (a.kind === "other" ? 1 : b.kind === "other" ? -1 : b.bytes - a.bytes));
+  return { total_bytes: total, used_bytes: used, cached_bytes: cached, free_bytes: total - used - cached, compressed_bytes: Math.round(3.6 * GiB), swap_used_bytes: Math.round(2.3 * GiB), pressure: "normal", pressure_source: "kernel", scaled: false, apps };
+};
 const mockItems = (): NetworkItem[] =>
   mockWatches.length === 0
     ? []
@@ -1215,6 +1264,8 @@ const mockResponse = (id: string): NetworkDetail => {
  * `&stress` (with `?mock=ready`): as busy as a real day's work, for measuring the sidebar and the canvas. About 20 open chats
  * in 4 projects (3 of them a team's Lead with 6 agents), transcripts of hundreds of messages, and the agents streaming
  * events all the time. `&stress=N` streams N events a second (default 25; 0 sets it up and leaves it still).
+ * `&agents=K` streams from the first team's first K agents only, N events a second each (for measuring the canvas with
+ * 1, 3 or 6 agents at work); the rest still show as working.
  * `window.__stress` says when it is set up. Every other scene is untouched.
  */
 const STRESS_PARAM = typeof location === "undefined" ? null : new URLSearchParams(location.search).get("stress");
@@ -1306,13 +1357,15 @@ async function stressDrive() {
   for (const s of plain.slice(5)) await sendTo(s.slot)({ kind: "turn_done", is_error: false, result: "ok", cost_usd: 0.1, duration_ms: 4000, auth_hint: false, denied: 0, context_window: 200_000 });
   const working = [...leads.map((l) => l.slot), ...agents];
   for (const slot of working) await sendTo(slot)({ kind: "thinking", parent: null });
-  const rate = STRESS_PARAM === "" ? 25 : Number(STRESS_PARAM);
+  const only = new URLSearchParams(location.search).get("agents");
+  const streaming = only === null ? working : agents.slice(0, Number(only));
+  const rate = (STRESS_PARAM === "" ? 25 : Number(STRESS_PARAM)) * (only === null ? 1 : streaming.length);
   let n = 0;
-  if (rate > 0) {
+  if (rate > 0 && streaming.length > 0) {
     // Events in small bursts every 40ms: text a word at a time, and a tool now and then, as agents do.
     setInterval(() => {
       for (let e = 0; e < Math.max(1, Math.round(rate / 25)); e++) {
-        const slot = working[Math.floor(Math.random() * working.length)];
+        const slot = streaming[Math.floor(Math.random() * streaming.length)];
         const send = sendTo(slot);
         const i = ++n;
         if (i % 7 === 0) {
@@ -1693,6 +1746,8 @@ export function installMockBackend() {
           return true;
         case "storage_cancel":
           return undefined;
+        case "memory_snapshot":
+          return mockMemory();
         case "storage_delete": {
           const ids = a.ids as string[];
           const out = ids.map((id) => {

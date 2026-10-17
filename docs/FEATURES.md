@@ -264,7 +264,7 @@ Starting a team (the Workflow menu's Team, New ▸ Team, Start a team, or **+ Ag
 ![The Subagents menu: On the canvas or Inline](images/team-subagents-menu.png)
 
 - **On the canvas** (the default): the Lead starts them as agents, with a window, a chat and, if they write, a branch of their own.
-- **Inline**: they run inside the Lead's chat, shown only in its Activity tab.
+- **Inline**: they run inside the Lead's chat, shown only in the Lead's chat.
 
 A plain chat always runs its subagents inline.
 
@@ -348,7 +348,9 @@ People start work and walk away, so two things help while you are gone.
 
 ## The side panel
 
-The side panel (⌘\ shows or hides it) always has six tabs, in this order. A tab with nothing to show yet says what will show there.
+The side panel (⌘\ shows or hides it) has six tabs: Changes, Files, Plan, Tests, Checks and Network. A tab with nothing to show yet says what will show there. Disk space (Storage) isn't one of them: it is a popover in the top bar.
+
+**Pinning tabs.** The strip shows only the tabs you pin: Changes, Files and Plan until you change that. The **⋯** after them opens a menu of every tab. Each row has a pin to put it in the strip or take it out, arrows to move a pinned tab up or down (there is always at least one pinned), and its name, which opens the tab even when it isn't pinned. **Reset to default** puts back Changes, Files and Plan. A tab you open without pinning shows at the end of the strip until you go to another. When a tab that isn't pinned needs a look (a failed test run, failed checks, requests in Network), the **⋯** carries a count, red for failures, and the menu shows each tab's count. Which tabs are pinned, and in what order, is kept for every chat.
 
 **Changes.** Every file Claude touched, as a diff. Pick a file to see it in a full diff beside the chat, step through the files (or press `j` and `k`), switch between unified and split, edit the file, or **Revert** it (or **Revert all**). The button at the top right chooses what it compares: this chat's edits, or a whole branch. The first screenshot under [A chat](#a-chat) shows it.
 
@@ -365,13 +367,11 @@ Comments stay while Lantern runs, for each chat, and survive switching tabs or c
 
 **Plan.** In a Step by step chat, the plan so far (Build) or the architecture map (Design), as described above. A chat without one says so.
 
-**Activity.** A live graph of the turn: the Lead at the root, the advisor beside it, subagents below with the model each runs on, and the kinds of tools each used, with work travelling the edges as it happens. Under it, a log of who did what, then what the turn cost per model.
-
-![The Activity tab: the main agent, the advisor and three subagents on different models](images/panel-activity.png)
-
 **Tests.** Test runs appear here when Claude runs your tests. Runs of pytest, jest, vitest, cargo and xcodebuild are parsed into passes and failures, with `file:line` links to the failing line.
 
 ![The Tests tab: one failed test with its error and a link to the line](images/panel-tests.png)
+
+**Checks.** How the checks of the branch's pull request stand, as described under Tell me above, with **Send the failure to Claude** when one failed.
 
 **Network.** Shows requests captured by [Network Monitor](https://github.com/alyakan/network-monitor), a separate app that acts as a proxy for your own app's traffic. With it open as your app's proxy, Claude can search and read what it captured. Tell Claude which requests matter and it saves a **watch** for the project; the tab then lists every matching request as it happens, newest first, with the response as a foldable JSON tree, an outline of its keys, and its headers. **Summarize** asks Claude to read a response and put a summary above the JSON.
 
@@ -383,6 +383,26 @@ A few things to know:
 - Watches and summaries are kept per project. The responses themselves stay in memory, never on disk.
 - The traffic itself isn't per project: Claude in any chat can search everything Network Monitor captured, not just what a project's watches match.
 - Until there's a watch, the tab explains Network Monitor and how to add one.
+
+## Storage
+
+The **disk button** in the title bar, just before the Settings gear, opens **Storage**: a panel like Settings (the same size, over the window, closed with **Close**, Esc or a click outside) that scans your Mac for what can be cleared to get disk space back. It is for the whole app, not for one chat or project. It used to be a tab in the side panel. A small dot on the button means Claude has suggested deletions (hover it for how many). The command palette (⇧⌘P) lists it as **Storage**.
+
+**What it finds.** Git worktrees, stale projects (nothing changed in 60 days and everything pushed), build output (`node_modules`, `target`…), simulators, caches and logs, Downloads and the Trash. A worktree or project with unsaved work in it is shown but can't be ticked. **Scan this Mac** starts a scan; **Ask Claude** asks the chat on screen to scan and tick what it thinks is safe, with a reason each, and **Claude's picks** ticks only those.
+
+**The bar.** At the top, one bar for the whole scan, split by kind, each kind with its own colour, and a legend under it: a swatch, the kind, its size and its share of the total. Things inside another item (a `target` folder inside a worktree) are counted once. Hover or tab to a segment or a legend entry and the others fade and a line names it ("Build output: 7.9 GB (22%)"); press it to jump to that kind's list. A kind that is a hair of the total still gets a sliver you can point at (its share reads "<1%"). The bar has a text version for screen readers, and it grows in gently unless your Mac is set to reduce motion.
+
+**The colours.** Seven tokens, `--storage-1` to `--storage-7`, one per kind in the order above. Every theme gives its own set (a custom theme gets one derived for its light or dark background), each readable at 3:1 against the panel and clearly different from the others; the tests check that for every built-in theme.
+
+**The list.** Under the bar, each kind is a group with **Tick safe** and **Clear**. Each row has a thin bar in its kind's colour, sized against the biggest item of the whole scan, with its size beside it; the bar is stronger on a ticked row. The footer says "Total scanned 35.6 GB, selected to delete 22.3 GB (frees 19.9 GB; 2.4 GB goes to Trash first)", and **Delete…** asks first, naming how many go to the Trash (which frees nothing until the Trash is emptied) and what you or Claude ticked that isn't a plain regenerable file. Each item is checked again just before it goes. Nothing about what is blocked, what goes to the Trash, or the confirmation changed when it moved.
+
+**The Memory tab.** The panel has two tabs at the top, **Disk** and **Memory**; it opens on the one you used last. Memory is view only: it shows how your Mac's RAM is used and by which apps, and there is nothing in it that quits or stops anything. It reads once when the tab opens and then every 3 seconds, but only while the Memory tab is showing and the window is visible; closing the panel, switching to Disk or hiding the window stops it. **Refresh** reads again at once, and "Updated just now" counts up between reads. If a read fails the last one stays on screen with "Couldn't read memory: …" above it.
+
+- **The bar.** The whole RAM in one stacked bar, in the Disk view's look and the same `--storage-N` colours (so every theme already has them at a readable contrast): the biggest four apps each in their own colour, **Lantern and its agents**, **macOS**, the other apps, **Cached** (inactive pages macOS gives back when something needs them) and **Free**. Under it: "About 11.8 GB used of 16.0 GB, pressure: normal, swap 2.3 GB", the pressure as a coloured chip with the word in it. Sizes are written the way Activity Monitor writes them (1 GB = 1024 MB), so a 16 GB Mac reads 16.0 GB.
+- **The pressure** is macOS's own level (`kern.memorystatus_vm_pressure_level`: normal, warning, critical). If that can't be read it is estimated from the share that is free or cached and the share that is compressed, and the chip's tooltip says so.
+- **The list.** Apps by memory, each with a bar against the biggest, its process count ("Google Chrome: 11 processes") and its share of the RAM. Processes are grouped by the app they belong to (a helper like `Google Chrome Helper (Renderer)` counts for Google Chrome), else by name (every `node` is one row), and the system's own (kernel, WindowServer, Finder, Dock…) are **macOS**. The biggest 15 are listed and the rest are **Other apps**. **Lantern and its agents** is highlighted: it is Lantern plus everything below it in the process tree (`claude`, `node`, `vite` and what they started), so a team of agents shows what it costs; Lantern's web view runs in a macOS process and counts there. Rows keep their order between reads unless an app moves by more than three rows, so the list doesn't jump; bars glide to their new size unless your Mac is set to reduce motion.
+- **What the sizes are.** Resident memory per process. Shared pages are counted in every process that maps them, so the sum can be more than the Mac uses; then every app is scaled down to fit and the tab says so. If it is less, what no process owns (the kernel's own memory) goes to macOS. Either way the apps add up to the used memory.
+- **What it runs.** Only `vm_stat`, `sysctl hw.memsize vm.swapusage kern.memorystatus_vm_pressure_level` and `ps -axo pid=,ppid=,rss=,comm=`, each by its full path with no shell, a 5-second limit and an output cap. `ps` is asked for the executable's name and never for the command line, which can hold a token or a password. Nothing is written and no signal is sent; only an app's name, size, process count and share reach the screen (no paths, pids or arguments).
 
 ## Settings
 
@@ -408,7 +428,7 @@ Settings ▸ General ▸ Theme picks how Lantern looks, with a small preview of 
 - **Terminal**: a modern terminal scheme (think Warp or Ghostty): near-black with a cool tint, light text, monospace everywhere, square corners and thin lines instead of shadows. Colour is used the way syntax highlighting does: green for what you typed and for additions, yellow for "working", red for errors and removals, blue for links, purple for emphasis. **Bold** is white, `inline code` is an orange chip, headings are cyan and a quote has a purple bar.
 - **Fallout**: a Pip-Boy terminal, all phosphor green on green-black, in three levels: bright for headings and bold (with a soft glow), normal for text, dim for what is secondary. Inline code and code headers are in reverse video (dark on bright green), code blocks and what you send sit in boxes (what you send starts with a `>` prompt), small labels are in capitals, the cursor in the chat box is a block, and faint scanlines and a darkened edge sit over the window. They are still, don't catch clicks, and text keeps its contrast (4.5:1 or more).
 - **Solarized Dark**, **Nord** and **Paper** (a warm light theme): colours only.
-- **PostHog**: a cream page with white cards, near-black text and one hot orange accent. Thin warm-grey outlines, slightly tighter corners, blue links and a yellow hover on the orange buttons.
+- **PostHog**: posthog.com's playful retro desktop. A dotted cream desktop with the chat, the side panel, dialogs and permission cards as little windows: a yellow title-bar strip with three square window controls, a thick near-black outline and a hard offset shadow with no blur, square-ish corners. Buttons are chunky and press down (orange for the main one, yellow under the pointer), the chosen tab is filled yellow, what you send is a yellow sticky note, steps are dashed rows, code blocks have their own title strip, and the top bar is a menu bar whose items invert under the pointer. Blue links, system fonts, no artwork; the only motion is the press-down, which stays put when Reduce motion is on.
 - **Custom**: **Customize…** opens six colour pickers (background, panels, text, secondary text, accent and lines), a **Monospace everywhere** switch and a **Rounded or Square** corners choice. It starts from the theme you have now, the app changes as you pick, and it warns you when your text colour would be hard to read on your background (under 4.5:1). The rest of the colours are worked out from your six.
 
 The code editor and diffs, diagrams and shell output follow the theme, and a chosen theme is on before the first screen is drawn, so nothing flashes the default.

@@ -1,4 +1,4 @@
-import { initialState, reducer, type Action, type State, type Status } from "./store";
+import { hasPendingPrompt, initialState, reducer, type Action, type State, type Status } from "./store";
 import type { AgentRole } from "./lib/roles";
 import type { UiEvent } from "./types";
 
@@ -154,12 +154,12 @@ export function wakesPaused(s: State): boolean {
 
 /** A chat that must not be closed when the user leaves it: it's working, waiting on them, or has messages queued. */
 export function isBusy(s: State): boolean {
-  return s.status === "running" || s.queued.length > 0 || s.items.some((it) => it.type === "permission" && it.decision === null);
+  return s.status === "running" || s.queued.length > 0 || hasPendingPrompt(s.items);
 }
 
 /** How a background chat reads in the menu. `draft`: text typed in its box but not sent. */
 export function chatState(s: State, draft = ""): "running" | "waiting" | "draft" | "done" {
-  if (s.items.some((it) => it.type === "permission" && it.decision === null)) return "waiting";
+  if (hasPendingPrompt(s.items)) return "waiting";
   if (s.status === "running" || s.status === "starting" || s.queued.length > 0) return "running";
   return draft.trim() ? "draft" : "done";
 }

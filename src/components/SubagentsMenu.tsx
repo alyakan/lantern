@@ -5,7 +5,7 @@ import { SUBAGENTS_LABEL, type Subagents } from "../lib/workflow";
 
 const ROWS: { value: Subagents; hint: string }[] = [
   { value: "canvas", hint: "The Lead's subagents become agents with a window, a chat and, if they write, a branch of their own" },
-  { value: "inline", hint: "They run inside the Lead's chat, shown only in its Activity tab" },
+  { value: "inline", hint: "They run inside the Lead's chat, shown only in its chat" },
 ];
 
 /** The two places the Lead's subagents can run, as menu rows: the chosen one is checked. `onPick` is called after a choice. */

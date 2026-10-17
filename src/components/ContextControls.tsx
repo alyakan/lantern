@@ -9,6 +9,9 @@ import { useMenuKeys } from "./useMenuKeys";
 
 const COMPACT_HINT = "Summarise the conversation to free up context";
 const CLEAR_HINT = "Start a fresh conversation (files stay as they are)";
+/** Token counts with the reader's digit grouping, as toLocaleString writes them. One formatter: toLocaleString makes one each call, and a title bar is drawn for every word its agent streams. */
+const GROUPED = new Intl.NumberFormat();
+const grouped = (n: number) => GROUPED.format(n);
 
 /**
  * An agent's context share, on its title bar ("42%", amber from 75%, red from 90%, as the chat's own meter): a click opens
@@ -51,8 +54,8 @@ export function NodeContext({ slot, name }: { slot: string; name: string }) {
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? id : undefined}
-        aria-label={share.percent !== null ? `${name} context, ${share.percent}% used${note}` : `${name} context, ${share.used.toLocaleString()} tokens used, window not known yet`}
-        title={share.percent !== null ? `${share.percent}% of ${name}'s context window is in use. Click to Compact or Clear it.` : `${share.used.toLocaleString()} tokens are in ${name}'s context. Its window isn't known until it finishes a turn. Click to Compact or Clear it.`}
+        aria-label={share.percent !== null ? `${name} context, ${share.percent}% used${note}` : `${name} context, ${grouped(share.used)} tokens used, window not known yet`}
+        title={share.percent !== null ? `${share.percent}% of ${name}'s context window is in use. Click to Compact or Clear it.` : `${grouped(share.used)} tokens are in ${name}'s context. Its window isn't known until it finishes a turn. Click to Compact or Clear it.`}
         onClick={() => (open ? close() : setOpen(true))}
       >
         {share.percent !== null ? `${share.percent}%` : shortTokens(share.used)}
@@ -153,8 +156,8 @@ export function TeamContext({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo:
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? id : undefined}
-        aria-label={fullest.percent !== null ? `Context: ${fullest.node.name} ${fullest.percent}% used${note ? `, ${note}` : ""}` : `Context: ${fullest.node.name} ${fullest.used.toLocaleString()} tokens used, window not known yet`}
-        title={fullest.percent !== null ? `The share of ${fullest.node.name}'s context window in use now: the fullest agent's on the team. ${advice}${unknownNote} Click for every agent's.` : `${fullest.node.name}'s context holds ${fullest.used.toLocaleString()} tokens. A window isn't known until an agent finishes a turn, so there is no percent yet. Click for every agent's.`}
+        aria-label={fullest.percent !== null ? `Context: ${fullest.node.name} ${fullest.percent}% used${note ? `, ${note}` : ""}` : `Context: ${fullest.node.name} ${grouped(fullest.used)} tokens used, window not known yet`}
+        title={fullest.percent !== null ? `The share of ${fullest.node.name}'s context window in use now: the fullest agent's on the team. ${advice}${unknownNote} Click for every agent's.` : `${fullest.node.name}'s context holds ${grouped(fullest.used)} tokens. A window isn't known until an agent finishes a turn, so there is no percent yet. Click for every agent's.`}
         onClick={() => (open ? close() : setOpen(true))}
       >
         <span className="canvas-ctl-long">
@@ -196,7 +199,7 @@ export function TeamContext({ nodes, onGoTo }: { nodes: OrchestraNode[]; onGoTo:
                     ) : (
                       <span className="ctx-bar unknown" aria-hidden />
                     )}
-                    <span className="ctx-tokens" title={r.window !== null ? `${r.used.toLocaleString()} of ${r.window.toLocaleString()} tokens` : `${r.used.toLocaleString()} tokens, window not known until a turn ends`}>
+                    <span className="ctx-tokens" title={r.window !== null ? `${grouped(r.used)} of ${grouped(r.window)} tokens` : `${grouped(r.used)} tokens, window not known until a turn ends`}>
                       {r.window !== null ? `${shortTokens(r.used)} of ${shortTokens(r.window)}` : `${shortTokens(r.used)} used`}
                     </span>
                     {asking ? (
