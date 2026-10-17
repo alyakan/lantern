@@ -98,13 +98,12 @@ export interface Segment {
   width: number;
 }
 
-/** What each kind is of the scan, for the stacked bar and its legend: kinds with something in them, in GROUPS' order. */
-export function segments(items: StorageItem[]): Segment[] {
-  const kinds = GROUPS.map(({ kind, title }) => ({ kind, title, bytes: groupOf(items, kind).bytes })).filter((k) => k.bytes > 0);
-  const total = kinds.reduce((n, k) => n + k.bytes, 0);
-  if (total === 0) return [];
+/** What each piece of a stacked bar is: whole percents that add up to 100, and the width each is drawn at (at least MIN_SEGMENT). */
+export function layout(sizes: number[]): { share: number; width: number }[] {
+  const total = sizes.reduce((n, s) => n + s, 0);
+  if (total === 0) return sizes.map(() => ({ share: 0, width: 0 }));
   // Whole percents by the largest remainder, so they add up to 100 and no rounding makes one kind vanish or the sum drift.
-  const exact = kinds.map((k) => (k.bytes / total) * 100);
+  const exact = sizes.map((s) => (s / total) * 100);
   const share = exact.map(Math.floor);
   let left = 100 - share.reduce((n, s) => n + s, 0);
   [...exact.keys()].sort((a, b) => exact[b] - share[b] - (exact[a] - share[a]) || a - b).forEach((i) => left-- > 0 && share[i]++);
@@ -120,7 +119,14 @@ export function segments(items: StorageItem[]): Segment[] {
       if (!small[i] && w < MIN_SEGMENT) again = small[i] = true;
     });
   }
-  return kinds.map((k, i) => ({ ...k, share: share[i], width: widths[i] }));
+  return sizes.map((_, i) => ({ share: share[i], width: widths[i] }));
+}
+
+/** What each kind is of the scan, for the stacked bar and its legend: kinds with something in them, in GROUPS' order. */
+export function segments(items: StorageItem[]): Segment[] {
+  const kinds = GROUPS.map(({ kind, title }) => ({ kind, title, bytes: groupOf(items, kind).bytes })).filter((k) => k.bytes > 0);
+  const laid = layout(kinds.map((k) => k.bytes));
+  return kinds.map((k, i) => ({ ...k, ...laid[i] }));
 }
 
 /** How wide an item's own bar is, in percent: its size against the biggest item of the scan, but never so thin it can't be seen. */

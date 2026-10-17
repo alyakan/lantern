@@ -1,6 +1,13 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { lastStorageTab, rememberStorageTab, type StorageTabName } from "../lib/memory";
 import type { StorageView } from "../types";
+import { MemoryTab } from "./MemoryTab";
 import { StorageTab } from "./StorageTab";
+
+const TABS: { name: StorageTabName; label: string }[] = [
+  { name: "disk", label: "Disk" },
+  { name: "memory", label: "Memory" },
+];
 
 interface Props {
   open: boolean;
@@ -14,10 +21,24 @@ interface Props {
 
 /**
  * The disk scan, opened from the title bar's Storage button. A dialog like Settings: the same size, Escape or a press on
- * the backdrop closes it, and focus stays inside while it is open. Not tied to a chat or a folder.
+ * the backdrop closes it, and focus stays inside while it is open. Not tied to a chat or a folder. Two tabs: Disk (the scan) and
+ * Memory (how the RAM is used, view only); the one last used is the one it opens on.
  */
 export function StoragePanel({ open, onClose, view, onAsk, busy }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
+  const [tab, setTab] = useState(lastStorageTab);
+  const pick = (next: StorageTabName) => {
+    setTab(next);
+    rememberStorageTab(next);
+  };
+  // Left and Right move between the tabs, as in any tab list.
+  const arrow = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const next = TABS[(TABS.findIndex((t) => t.name === tab) + (e.key === "ArrowRight" ? 1 : TABS.length - 1)) % TABS.length].name;
+    pick(next);
+    (e.currentTarget as HTMLElement).querySelector<HTMLElement>(`#storage-tab-${next}`)?.focus();
+  };
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -50,7 +71,18 @@ export function StoragePanel({ open, onClose, view, onAsk, busy }: Props) {
             <div className="spacer" />
             <button onClick={onClose}>Close</button>
           </header>
-          <StorageTab view={view} onAsk={onAsk} busy={busy} />
+          <div className="storage-tabs">
+            <div className="pane-tabs-track" role="tablist" aria-label="Storage view" onKeyDown={arrow}>
+              {TABS.map((t) => (
+                <button key={t.name} id={`storage-tab-${t.name}`} role="tab" aria-selected={tab === t.name} aria-controls="storage-tabpanel" tabIndex={tab === t.name ? 0 : -1} className={tab === t.name ? "active" : ""} onClick={() => pick(t.name)}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div id="storage-tabpanel" className="storage-tabpanel" role="tabpanel" aria-labelledby={`storage-tab-${tab}`}>
+            {tab === "memory" ? <MemoryTab /> : <StorageTab view={view} onAsk={onAsk} busy={busy} />}
+          </div>
         </div>
       )}
     </dialog>

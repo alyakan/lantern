@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StorageItem } from "../types";
-import { GROUPS, groupOf, idleText, isTicked, kindColour, MIN_SEGMENT, outcomeText, rowWidth, segments, selection, shareText, sizeText, summaryText } from "./storage";
+import { GROUPS, groupOf, idleText, isTicked, kindColour, layout, MIN_SEGMENT, outcomeText, rowWidth, segments, selection, shareText, sizeText, summaryText } from "./storage";
 
 const item = (id: string, over: Partial<StorageItem> = {}): StorageItem => ({
   id,
@@ -138,6 +138,23 @@ describe("the stacked bar's segments", () => {
   it("gives each kind its own colour token, --storage-1 to --storage-7 in the list's order", () => {
     expect(KINDS.map(kindColour)).toEqual([1, 2, 3, 4, 5, 6, 7].map((n) => `var(--storage-${n})`));
     expect(new Set(KINDS.map(kindColour)).size).toBe(7);
+  });
+});
+
+describe("layout, the stacked bars' arithmetic", () => {
+  it("gives whole percents that add up to 100 and widths that fill the bar, with a floor for a sliver", () => {
+    const out = layout([1, 1, 1]);
+    expect(out.map((o) => o.share)).toEqual([34, 33, 33]);
+    expect(out.reduce((n, o) => n + o.width, 0)).toBeCloseTo(100, 5);
+    const sliver = layout([10_000, 1]);
+    expect(sliver[1].width).toBe(MIN_SEGMENT);
+    expect(sliver[0].width).toBeCloseTo(100 - MIN_SEGMENT, 5);
+    expect(sliver.reduce((n, o) => n + o.share, 0)).toBe(100);
+  });
+
+  it("is all zero for nothing", () => {
+    expect(layout([0, 0])).toEqual([{ share: 0, width: 0 }, { share: 0, width: 0 }]);
+    expect(layout([])).toEqual([]);
   });
 });
 
