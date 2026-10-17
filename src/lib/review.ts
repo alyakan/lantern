@@ -41,7 +41,7 @@ export function splitFileTitle(title: string): { path: string; added: number | n
 }
 
 /** The line a message ends on to say what to type next, which the page's buttons already say. */
-const CUE = /\n*(?:I'll stop here\.?\s*)?(?:Say|Reply|Type|Answer)\s+["“]?next["”]?[^\n]*\s*$/i;
+const CUE = /(?:^|\n)\s*(?:I'll stop here\.?\s*)?(?:Say|Reply|Type|Answer)\s+["“]?next["”]?[^\n]*\s*$/i;
 export const withoutCue = (text: string) => text.replace(CUE, "").trimEnd();
 
 const SEVERITY: Record<string, Severity> = { blocker: "blocker", "should-fix": "should-fix", "should fix": "should-fix", shouldfix: "should-fix", nit: "nit" };
