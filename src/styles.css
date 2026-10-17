@@ -3070,7 +3070,7 @@ button.code-block-copy.arch-block-open { opacity: 1; color: var(--text-2); }
 .sb-text, .sb-project-name { opacity: 0; transition: opacity 0.12s; }
 .sb-panel.expanded .sb-text, .sb-panel.expanded .sb-project-name { opacity: 1; animation: sb-fade-in 0.18s 0.06s backwards; }
 /* What is new in the open pane (the rest of it) comes in the same way. */
-.sb-panel.expanded .sb-new, .sb-panel.expanded .sb-header, .sb-panel.expanded .sb-foot, .sb-panel.expanded .sb-note { animation: sb-fade-in 0.18s 0.06s backwards; }
+.sb-panel.expanded .sb-new { animation: sb-fade-in 0.18s 0.06s backwards; }
 @keyframes sb-fade-in { from { opacity: 0; } }
 .sb-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; white-space: nowrap; }
 .sb-title { overflow: hidden; text-overflow: ellipsis; font-size: calc(12.5px * var(--font-scale)); color: var(--text); }
@@ -3179,26 +3179,31 @@ nav > .sb-note { padding-left: 14px; }
 .sb-away-x > .sb-away-in { white-space: nowrap; }
 .sb-unfold { display: grid; grid-template-rows: 1fr; animation: sb-unfold var(--sb-close) backwards; }
 @keyframes sb-unfold { from { grid-template-rows: 0fr; opacity: 0; } }
+/* Opening, a folded project's squares are drawn as the bar has them and fold away as the pane lets go of the bar's look. */
+.sb-unfold.folding { animation: none; transition: grid-template-rows var(--sb-close), opacity 0.12s; }
+.sb-panel:not(.opening) .sb-unfold.folding { grid-template-rows: 0fr; opacity: 0; }
+.sb-side-glyph.leaving { animation: sb-fade-out 0.12s forwards; }
+@keyframes sb-fade-out { to { opacity: 0; } }
 /* Clipped to their own box, but with room for the marks on a square's corner. */
-.sb-panel.closing .sb-away-y > .sb-away-in, .sb-unfold > .sb-away-in { clip-path: inset(0 -8px -8px -8px); }
-.sb-panel.closing .sb-away-x > .sb-away-in { clip-path: inset(0); }
-.sb-panel.closing .sb-away-y { grid-template-rows: 0fr; opacity: 0; }
-.sb-panel.closing .sb-away-x { grid-template-columns: 0fr; margin-left: 0 !important; opacity: 0; }
+.sb-panel:is(.closing, .opening) .sb-away-y > .sb-away-in, .sb-unfold > .sb-away-in { clip-path: inset(0 -8px -8px -8px); }
+.sb-panel:is(.closing, .opening) .sb-away-x > .sb-away-in { clip-path: inset(0); }
+.sb-panel:is(.closing, .opening) .sb-away-y { grid-template-rows: 0fr; opacity: 0; }
+.sb-panel:is(.closing, .opening) .sb-away-x { grid-template-columns: 0fr; margin-left: 0 !important; opacity: 0; }
 /* Between a team's square and the next, the list's own gap goes with the line that folds its agents. */
-.sb-panel.closing .sb-agents-wrap { margin-top: -6px; }
-.sb-panel.closing .sb-header-toggle > :not(.sb-project-initials), .sb-panel.closing .sb-note { opacity: 0; transition: opacity 0.12s; }
+.sb-panel:is(.closing, .opening) .sb-agents-wrap { margin-top: -6px; }
+.sb-panel:is(.closing, .opening) .sb-header-toggle > :not(.sb-project-initials), .sb-panel:is(.closing, .opening) .sb-note { opacity: 0; transition: opacity 0.12s; }
 .sb-header-toggle .sb-project-initials { transition: background 0.12s; }
-.sb-panel.closing .sb-header-toggle .sb-project-initials { background: transparent; }
-.sb-panel.closing .sb-pin-glyph { opacity: 0; transition: opacity 0.12s; }
-.sb-panel.closing .sb-new-button { background: transparent; border-color: transparent; color: var(--muted); padding-right: 0; }
-.sb-panel.closing .sb-head button.sb-button.labelled { padding-right: 0; }
+.sb-panel:is(.closing, .opening) .sb-header-toggle .sb-project-initials { background: transparent; }
+.sb-panel:is(.closing, .opening) .sb-pin-glyph { opacity: 0; transition: opacity 0.12s; }
+.sb-panel:is(.closing, .opening) .sb-new-button { background: transparent; border-color: transparent; color: var(--muted); padding-right: 0; }
+.sb-panel:is(.closing, .opening) .sb-head button.sb-button.labelled { padding-right: 0; }
 .sb-foot { transition: height var(--sb-close), margin-top var(--sb-close), padding var(--sb-close), opacity 0.12s; }
-.sb-panel.closing .sb-foot { height: 0; margin-top: -6px; padding-top: 0; padding-bottom: 0; overflow: hidden; opacity: 0; }
+.sb-panel:is(.closing, .opening) .sb-foot { height: 0; margin-top: -6px; padding-top: 0; padding-bottom: 0; overflow: hidden; opacity: 0; }
 @media (prefers-reduced-motion: reduce) {
   .sb-mark.running { animation: none; }
   .sb-panel, .sb-text, .sb-project-name { transition: none !important; }
-  .sb-unfold, .sb-side-glyph { animation: none; }
-  .sb-panel.expanded .sb-text, .sb-panel.expanded .sb-project-name, .sb-panel.expanded .sb-new, .sb-panel.expanded .sb-header, .sb-panel.expanded .sb-foot, .sb-panel.expanded .sb-note { animation: none; }
+  .sb-unfold, .sb-side-glyph, .sb-side-glyph.leaving { animation: none; }
+  .sb-panel.expanded .sb-text, .sb-panel.expanded .sb-project-name, .sb-panel.expanded .sb-new { animation: none; }
   .sb-section { transition: none; }
   .sb-section.lifted { scale: none; }
 }
