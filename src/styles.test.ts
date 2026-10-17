@@ -24,6 +24,20 @@ describe("the History menu", () => {
   });
 });
 
+describe("the sidebar's closing", () => {
+  it("keeps the pane's border while its width narrows, so the border follows the edge in, and lets it go at the end", () => {
+    // Without these, taking away `expanded` fades the border out on its own clock, while the pane is still wide.
+    expect(css.match(/^\.sb-panel\.closing \{([^}]*)\}/m)?.[1] ?? "").toMatch(/box-shadow:\s*var\(--panel-shadow\)/);
+    const bar = css.match(/^\.sb-panel:not\(\.expanded\):not\(\.closing\) \{([^}]*)\}/m)?.[1] ?? "";
+    expect(bar).toMatch(/transition:[^;]*width[^;]*box-shadow/);
+    // PostHog's bar has no background, so its border goes with the pane at once and doesn't fade around nothing.
+    const posthog = css.match(/:root\[data-theme="posthog"\] \.sb-panel:not\(\.expanded\):not\(\.closing\) \{([^}]*)\}/)?.[1] ?? "";
+    expect(posthog).toMatch(/transition:\s*width/);
+    expect(posthog).not.toMatch(/box-shadow/);
+    expect(css).toContain(':root[data-theme="posthog"] .sb-panel.closing { background: var(--bg); }');
+  });
+});
+
 describe("text you can select and copy", () => {
   it("includes a review's findings, what changed, notes and summary table", () => {
     for (const cls of [".finding-text", ".review-preface", ".review-changed", ".review-notes", ".review-table"]) {
