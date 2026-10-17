@@ -66,6 +66,17 @@ describe("parseHeading", () => {
     expect(parseHeading("# Notes\nsomething")).toBeNull();
   });
 
+  it("reads a heading Claude put a sentence or two after (a lead-in of its own), and no further down than that", () => {
+    // From a real Design chat: one sentence, then the Overview.
+    expect(parseHeading("Feature flags are read in three places, so here is the map.\n\n# Overview — one flag service\n\n```architecture\n{}\n```")).toMatchObject({ kind: "overview", title: "one flag service" });
+    expect(parseHeading("Looking at the code first.\nThen the plan.\n\n## Step 1 of 3 — Add slugify")).toMatchObject({ kind: "step", n: 1, total: 3 });
+    // A page's heading doesn't turn up in a message that goes on in prose, in a code block or in a list.
+    expect(parseHeading("One.\nTwo.\nThree.\n\n# Overview — too far down")).toBeNull();
+    expect(parseHeading("Here is how it looks:\n\n```md\n# Overview — an example\n```")).toBeNull();
+    expect(parseHeading("- a point\n\n# Overview — after a list")).toBeNull();
+    expect(parseHeading("Some prose.\n\n# Notes\nsomething")).toBeNull();
+  });
+
   it("labels pages", () => {
     expect(pageLabel(parseHeading("# Step 2 of 5 — x"))).toBe("Step 2 of 5");
     expect(pageLabel(null)).toBe("Step");
@@ -83,6 +94,12 @@ describe("pagesOf", () => {
       ["u2", "plan", { from: 1, to: 1 }],
     ]);
     expect(pages[0].turns[0].items.map((it) => (it.type === "assistant" ? it.text : ""))).toEqual(["Loading the skill.", "**Task:** …"]);
+  });
+
+  it("makes a page of a message that opens with a lead-in sentence, keeping the sentence above the page's text", () => {
+    const pages = pagesOf([u("u1", "Map it", 0), a("a1", "Flags are read in three places.\n\n# Overview — one service\n\nIt is one box.")]);
+    expect(pages.map((p) => [p.key, p.heading?.kind, p.heading?.title])).toEqual([["u1", "overview", "one service"]]);
+    expect(pages[0].turns[0].items.map((it) => (it.type === "assistant" ? it.text : ""))).toEqual(["Flags are read in three places.\n\nIt is one box."]);
   });
 
   it("reads incremental-pr-review's own format: a page per file line, numbered in order", () => {
