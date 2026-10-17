@@ -171,7 +171,7 @@ function subjectFromFiles(files: ChangedFile[], folder: string | null): string {
   const live = files.filter((f) => !f.deleted);
   const gone = files.filter((f) => f.deleted);
   if (files.length === 0) return "Update the project";
-  const verb = live.length === 0 ? "Remove" : live.every((f) => f.created) ? "Add" : "Update";
+  const verb = live.length === 0 ? "Remove" : gone.length === 0 && live.every((f) => f.created) ? "Add" : "Update";
   const names = files.map((f) => basename(relativeTo(f.path, folder)));
   if (files.length > 3) return `${gone.length === files.length ? "Remove" : verb} ${files.length} files`;
   return `${verb} ${names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`}`;

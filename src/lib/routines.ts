@@ -192,7 +192,8 @@ export function planUsedNow(p: PlanUsage | null, now: number): number | null {
   return p.used;
 }
 
-const withRun = (r: Routine, run: Run): Routine => ({ ...r, runs: [run, ...r.runs].slice(0, MAX_RUNS) });
+/** The run at the top of the history, which keeps the latest MAX_RUNS, and any run still going however old: dropping it would let a second one start. */
+const withRun = (r: Routine, run: Run): Routine => ({ ...r, runs: [run, ...r.runs].filter((x, i) => i < MAX_RUNS || inProgress(x)) });
 
 /**
  * One look of the scheduler. Each enabled routine that is due: starts (a new run, "working", is put at the top of its
@@ -253,7 +254,11 @@ export function draftProblem(d: Pick<Routine, "name" | "folder" | "prompt" | "sc
   if (!absolute(d.folder)) return "Pick the project it runs in.";
   if (!d.prompt.trim()) return "Write what Claude should do.";
   if (d.prompt.length > MAX_PROMPT) return `The prompt is too long (the most is ${MAX_PROMPT.toLocaleString()} characters).`;
-  if (!validSchedule(d.schedule)) return d.schedule.kind === "every" ? `Pick a gap of at least ${MIN_EVERY_MINUTES} minutes.` : "Pick a time.";
+  if (!validSchedule(d.schedule)) {
+    if (d.schedule.kind !== "every") return "Pick a time.";
+    if (!Number.isInteger(d.schedule.every)) return "Pick a gap that is a whole number.";
+    return everyMinutes(d.schedule) > MAX_EVERY_MINUTES ? "Pick a gap of at most 7 days." : `Pick a gap of at least ${MIN_EVERY_MINUTES} minutes.`;
+  }
   return null;
 }
 

@@ -4,7 +4,7 @@ import { layout } from "./storage";
 /** Memory sizes the way Activity Monitor writes them: 1024-based, so a 16 GB Mac reads "16.0 GB" and not "17.2 GB". */
 export function memoryText(bytes: number): string {
   const mb = bytes / 1024 ** 2;
-  if (mb < 1000) return `${Math.max(0, Math.round(mb))} MB`;
+  if (Math.round(mb) < 1000) return `${Math.max(0, Math.round(mb))} MB`;
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 

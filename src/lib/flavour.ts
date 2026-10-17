@@ -81,10 +81,10 @@ export function flavourNote(flavour: Flavour, { guide, explain = false, explainG
 }
 export const withFlavourNote = (flavour: Flavour, text: string, options?: NoteOptions) => `${flavourNote(flavour, options)}\n\n${text}`;
 
-// A note with the flavour's instructions in it runs to its end mark. Older notes named a mode ("Step-by-step Review
+// A note with the flavour's instructions in it runs to its end mark. Its "How … works" comes before any `]`, which tells it from a bare note that ends in `]`. Older notes named a mode ("Step-by-step Review
 // mode", "Teach mode"), a flavour that is now Build with Explain as you go (Learn) or one that has been renamed
 // (Architecture, now Design); they're read the same way.
-const NOTE_WITH_GUIDE = new RegExp(`^\\[Lantern: this chat switched to (${FLAVOUR_WORDS})\\b(${EXPLAINING})?[\\s\\S]*?\\(end of Lantern's note\\)\\]\\s*`);
+const NOTE_WITH_GUIDE = new RegExp(`^\\[Lantern: this chat switched to (${FLAVOUR_WORDS})\\b(${EXPLAINING})?[^\\]]*? How [\\s\\S]*?\\(end of Lantern's note\\)\\]\\s*`);
 const NOTE = new RegExp(`^\\[Lantern: this chat switched to (?:Step-by-step )?(${FLAVOUR_WORDS})\\b(${EXPLAINING})?[^\\]]*\\]\\s*`);
 
 /** A prompt as you wrote it, and the flavour a note Lantern put before it picked (with whether Explain as you go is on). */

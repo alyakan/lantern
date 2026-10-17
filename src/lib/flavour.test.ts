@@ -28,6 +28,9 @@ describe("the note a picked flavour goes with", () => {
     expect(readFlavourNote("[Lantern: this chat switched to Step-by-step Teach mode. From here on …, not the format used earlier in this chat.]\n\nNext")).toEqual({ text: "Next", flavour: "build", explain: true });
     expect(readFlavourNote(withFlavourNote("build", "x", { guide: "Build: …" }).replace("switched to Build", "switched to Learn"))).toMatchObject({ text: "x", flavour: "build", explain: true });
     expect(readFlavourNote("[Lantern] something else")).toEqual({ text: "[Lantern] something else", flavour: null, explain: false });
+    // A note without a guide ends at its own `]`, even when the message after it quotes a guided note's end mark.
+    const later = "see (end of Lantern's note)] above";
+    expect(readFlavourNote(withFlavourNote("debug", later))).toEqual({ text: later, flavour: "debug", explain: false });
   });
 });
 

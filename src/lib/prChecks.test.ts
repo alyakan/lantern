@@ -174,11 +174,37 @@ describe("the loop", () => {
     expect(step({ setting: fix(), snap: failed(), loop: stalled.loop, ...idle }).send).toBe(false);
   });
 
-  it("a different failure on the same commit is not a new try either", () => {
+  it("a different failure on the same commit, once Claude's turn is over, is not a new try either", () => {
     const sent = step({ setting: fix(), snap: failed("aaa", "1"), loop: freshLoop(), ...idle }).loop;
-    const rerun = step({ setting: fix(), snap: failed("aaa", "9"), loop: sent, ...idle });
+    const rerun = step({ setting: fix(), snap: failed("aaa", "9"), loop: sent, busy: false, turnEnded: true });
     expect(rerun.send).toBe(false);
     expect(rerun.loop.status).toBe("stalled");
+  });
+
+  it("a second check failing on the same commit while Claude is still working waits, and doesn't stall the loop", () => {
+    const sent = step({ setting: fix(), snap: failed("aaa", "1"), loop: freshLoop(), ...idle }).loop;
+    const both = snap([check("build", "fail", "2"), check("test", "fail", "1")], { head_sha: "aaa" });
+    for (const input of [{ busy: true, turnEnded: false }, { busy: false, turnEnded: false }, { busy: true, turnEnded: true }]) {
+      expect(step({ setting: fix(), snap: both, loop: sent, ...input })).toEqual({ loop: sent, send: false, notify: false });
+    }
+    // Claude then pushes a fix that fails again: it is the next try, as if nothing had happened.
+    const pushed = step({ setting: fix(), snap: failed("bbb", "3"), loop: sent, ...idle });
+    expect(pushed).toMatchObject({ send: true, loop: { tries: 2, status: "waiting" } });
+  });
+
+  it("a push that still fails the same check, which has no run to tell it by, is a new try", () => {
+    const status = (head: string) => snap([{ name: "lint", state: "FAILURE", bucket: "fail", link: "https://ci.example/lint", workflow: null, run_id: null }], { head_sha: head });
+    const sent = step({ setting: fix(2), snap: status("aaa"), loop: freshLoop(), ...idle }).loop;
+    expect(sent.sentSig).toBe("https://ci.example/lint");
+    // Waiting for Claude's turn: nothing yet. Once it ended on a new commit, the failure goes again.
+    expect(step({ setting: fix(2), snap: status("bbb"), loop: sent, busy: true, turnEnded: false }).send).toBe(false);
+    const second = step({ setting: fix(2), snap: status("bbb"), loop: sent, busy: false, turnEnded: true });
+    expect(second).toMatchObject({ send: true, loop: { tries: 2, status: "waiting", sentHead: "bbb" } });
+    // With the tries used, a third commit that fails the same way is out, not idle forever.
+    const third = step({ setting: fix(2), snap: status("ccc"), loop: second.loop, busy: false, turnEnded: true });
+    expect(third).toMatchObject({ send: false, notify: true, loop: { status: "out" } });
+    // The same commit still failing after the turn is stalled, as before.
+    expect(step({ setting: fix(2), snap: status("aaa"), loop: sent, busy: false, turnEnded: true }).loop.status).toBe("stalled");
   });
 
   it("a push that hasn't started its checks yet is waited for, not counted as stalled", () => {

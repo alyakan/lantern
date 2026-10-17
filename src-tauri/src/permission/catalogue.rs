@@ -176,10 +176,11 @@ fn orchestra_tools() -> Vec<Value> {
         }),
         json!({
             "name": "read_agent",
-            "description": "An agent's conversation, as plain entries numbered from 0 at its oldest. Without a cursor you get the newest page (the last `limit` entries); with one, the entries from that index on. The reply says which cursor reads the previous page and which the next.",
+            "description": "An agent's conversation, as plain entries numbered from 0 at its oldest. Without a cursor you get the newest page (the last `limit` entries); with one, the entries from that index on. The reply says which cursor reads the previous page and which the next. An agent's newest message comes whole (up to 8000 characters), older entries are cut at 1500 and a page at about 60000 characters; anything cut says so, and `entry` reads one entry in full (up to 20000 characters).",
             "inputSchema": {"type": "object", "properties": {
                 "id": id_schema(),
                 "cursor": {"type": "integer", "minimum": 0, "description": "Index of the first entry to return, counted from the oldest entry (0)."},
+                "entry": {"type": "integer", "minimum": 0, "description": "Read just this entry, in full, instead of a page."},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 30, "description": "How many entries."}
             }, "required": ["id"], "additionalProperties": false}
         }),

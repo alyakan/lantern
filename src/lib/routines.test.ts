@@ -296,6 +296,19 @@ describe("tick", () => {
     expect(runs[0].at).toBe(now);
     expect(runs[MAX_RUNS - 1].at).toBe(MAX_RUNS - 2);
   });
+
+  it("never lets skipped notes push out a run that is still going, so it doesn't start a second one", () => {
+    const every = { kind: "every", every: 5, unit: "minutes" } as const;
+    let rs = [routine({ schedule: every, nextAt: 0, runs: [{ at: -1, outcome: "running" }] })];
+    for (let i = 1; i <= MAX_RUNS + 3; i++) {
+      const out = tick(rs, ctx(i * 5 * MIN));
+      expect(out.start).toEqual([]);
+      rs = out.routines;
+    }
+    expect(rs[0].runs.some((x) => x.outcome === "running")).toBe(true);
+    expect(rs[0].runs.filter((x) => x.outcome === "skipped")).toHaveLength(MAX_RUNS);
+    expect(rs[0].runs).toHaveLength(MAX_RUNS + 1);
+  });
 });
 
 describe("skipReason", () => {
@@ -388,6 +401,8 @@ describe("draftProblem and newRoutine", () => {
     expect(draftProblem({ ...draft, prompt: "x".repeat(20_001) })).toMatch(/too long/);
     expect(draftProblem({ ...draft, schedule: { kind: "every", every: 1, unit: "minutes" } })).toMatch(/at least 5 minutes/);
     expect(draftProblem({ ...draft, schedule: { kind: "daily", at: "" } })).toMatch(/time/);
+    expect(draftProblem({ ...draft, schedule: { kind: "every", every: 8 * 24, unit: "hours" } })).toMatch(/at most 7 days/);
+    expect(draftProblem({ ...draft, schedule: { kind: "every", every: 7.5, unit: "minutes" } })).toMatch(/whole number/);
   });
 
   it("makes a routine that is on and due at its next time", () => {
