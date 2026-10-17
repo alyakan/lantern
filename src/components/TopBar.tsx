@@ -9,7 +9,7 @@ import { FolderMenu } from "./FolderPill";
 import { Inbox, type InboxProps } from "./Inbox";
 import { useMenuKeys } from "./useMenuKeys";
 import type { ActivityStatus } from "../lib/status";
-import { BranchIcon, CanvasIcon, FailIcon, FolderIcon, GearIcon, PaneIcon, PlayIcon, SidebarIcon } from "./icons";
+import { BranchIcon, CanvasIcon, DiskIcon, FailIcon, FolderIcon, GearIcon, PaneIcon, PlayIcon, SidebarIcon } from "./icons";
 
 interface Props {
   folder: string | null;
@@ -21,6 +21,8 @@ interface Props {
   onToggleReview?: () => void;
   /** Opens Settings (MCP servers, skills). */
   onOpenSettings?: () => void;
+  /** Opens the Storage panel (the disk scan); `suggested` is how many deletions Claude has marked there, shown as a dot. */
+  storage?: { onOpen: () => void; suggested: number; open?: boolean };
   /** MCP servers that are down or need a login ("sentry needs you to log in"): the Settings button wears a warning dot. */
   mcpIssues?: string[];
   branch?: string | null;
@@ -71,7 +73,7 @@ function taskKind(type: string): string {
 // Xcode's activity viewer: the folder and branch on the left (it opens the folder menu, like Xcode's scheme), what
 // Claude is doing on the right, and a progress bar along its bottom edge while it works. The projects, new chats and
 // teams, and past chats are in the sidebar.
-export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, mcpIssues = [], branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, onBringOld, orchestra, usage, sidebar, inbox, run }: Props) {
+export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, storage, mcpIssues = [], branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, onBringOld, orchestra, usage, sidebar, inbox, run }: Props) {
   // A working chat keeps running in the background when you switch away, so only a starting one blocks switching.
   const busy = status === "starting";
   const toggleLabel = reviewCollapsed ? "Show side panel" : "Hide side panel";
@@ -269,6 +271,19 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
         <PlanMeter usage={usage} />
         <div className="toolbar-group">
           {inbox && <Inbox {...inbox} />}
+          {storage && (
+            <button
+              className="icon storage-button"
+              aria-label={storage.suggested > 0 ? `Storage, Claude suggested ${storage.suggested} ${storage.suggested === 1 ? "deletion" : "deletions"}` : "Storage"}
+              aria-haspopup="dialog"
+              aria-expanded={!!storage.open}
+              title={storage.suggested > 0 ? `Storage: Claude suggested ${storage.suggested} ${storage.suggested === 1 ? "deletion" : "deletions"}` : "Storage"}
+              onClick={storage.onOpen}
+            >
+              <DiskIcon />
+              {storage.suggested > 0 && <span className="dot" aria-hidden="true" />}
+            </button>
+          )}
           {onOpenSettings && (
             <button
               className="icon settings-button"

@@ -81,3 +81,60 @@ export function outcomeText(outcomes: StorageOutcome[], items: StorageItem[]): {
   if (parts.length === 0) parts.push(done.length > 0 ? "Those were already gone." : "Nothing was deleted.");
   return { text: parts.join(" "), failures: outcomes.filter((o) => !o.ok).map((o) => ({ name: o.name, error: o.error ?? "It couldn't be deleted." })) };
 }
+
+/** The theme colour of a kind (--storage-1 … --storage-7, in GROUPS' order): the same everywhere that kind is drawn. */
+export const kindColour = (kind: StorageKind): string => `var(--storage-${GROUPS.findIndex((g) => g.kind === kind) + 1})`;
+
+/** The narrowest a kind's piece of the stacked bar is drawn, in percent of its width, so a tiny kind can still be seen and pointed at. */
+export const MIN_SEGMENT = 2;
+
+export interface Segment {
+  kind: StorageKind;
+  title: string;
+  bytes: number;
+  /** Whole percent of the total, the ones shown; they add up to exactly 100. */
+  share: number;
+  /** How wide its piece of the bar is drawn, in percent: its share, but at least MIN_SEGMENT, the rest narrowed to make room. */
+  width: number;
+}
+
+/** What each kind is of the scan, for the stacked bar and its legend: kinds with something in them, in GROUPS' order. */
+export function segments(items: StorageItem[]): Segment[] {
+  const kinds = GROUPS.map(({ kind, title }) => ({ kind, title, bytes: groupOf(items, kind).bytes })).filter((k) => k.bytes > 0);
+  const total = kinds.reduce((n, k) => n + k.bytes, 0);
+  if (total === 0) return [];
+  // Whole percents by the largest remainder, so they add up to 100 and no rounding makes one kind vanish or the sum drift.
+  const exact = kinds.map((k) => (k.bytes / total) * 100);
+  const share = exact.map(Math.floor);
+  let left = 100 - share.reduce((n, s) => n + s, 0);
+  [...exact.keys()].sort((a, b) => exact[b] - share[b] - (exact[a] - share[a]) || a - b).forEach((i) => left-- > 0 && share[i]++);
+  // Widths: a kind that would come out under the minimum is drawn at the minimum, and the others give up the room in proportion to their size.
+  const small = exact.map(() => false);
+  let widths: number[] = [];
+  for (let again = true; again; ) {
+    const room = 100 - small.filter(Boolean).length * MIN_SEGMENT;
+    const bigTotal = exact.reduce((n, e, i) => n + (small[i] ? 0 : e), 0);
+    widths = exact.map((e, i) => (small[i] ? MIN_SEGMENT : (e / bigTotal) * room));
+    again = false;
+    widths.forEach((w, i) => {
+      if (!small[i] && w < MIN_SEGMENT) again = small[i] = true;
+    });
+  }
+  return kinds.map((k, i) => ({ ...k, share: share[i], width: widths[i] }));
+}
+
+/** How wide an item's own bar is, in percent: its size against the biggest item of the scan, but never so thin it can't be seen. */
+export function rowWidth(bytes: number, biggest: number): number {
+  return biggest <= 0 ? 0 : Math.min(100, Math.max(MIN_SEGMENT, (bytes / biggest) * 100));
+}
+
+/** "Total scanned 41.2 GB, selected to delete 5.0 GB (frees 3.0 GB; 2.0 GB goes to Trash first)". */
+export function summaryText(totalBytes: number, sel: Selection): string {
+  const scanned = `Total scanned ${sizeText(totalBytes)}`;
+  if (sel.ids.length === 0) return `${scanned}, nothing selected to delete`;
+  const frees = `frees ${sizeText(sel.bytes - sel.toTrashBytes)}`;
+  return `${scanned}, selected to delete ${sizeText(sel.bytes)} (${sel.toTrashBytes > 0 ? `${frees}; ${sizeText(sel.toTrashBytes)} goes to Trash first` : frees})`;
+}
+
+/** A share as the legend writes it: a kind with something in it never reads "0%". */
+export const shareText = (share: number) => (share === 0 ? "<1%" : `${share}%`);

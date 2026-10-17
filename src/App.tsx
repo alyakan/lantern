@@ -10,7 +10,8 @@ import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/rev
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
 import { summarizeRequest } from "./lib/network";
-import { FREE_UP_SPACE_REQUEST } from "./components/StorageTab";
+import { FREE_UP_SPACE_REQUEST, suggestedCount, useStorageView } from "./components/StorageTab";
+import { StoragePanel } from "./components/StoragePanel";
 import { StartScreen } from "./components/StartScreen";
 import { ReviewPrDialog } from "./components/ReviewPrDialog";
 import { TeamWarning } from "./components/TeamWarning";
@@ -1680,6 +1681,12 @@ export default function App() {
   const [guideAt, setGuideAt] = useState<GuideKey | null>(null);
   const [settingsAt, setSettingsAt] = useState<SettingsTab | null>(null);
   useAction("settings", () => setSettingsAt(settingsAt ?? "general"));
+  // The disk scan: a panel like Settings, from the title bar's Storage button (or the palette), for the whole app. Claude's
+  // suggestions on it wear a dot on the button.
+  const [storageOpen, setStorageOpen] = useState(false);
+  const storage = useStorageView();
+  // Sent now when Claude is free, queued behind the turn when it's working.
+  const askStorage = state.status === "idle" || state.status === "running" ? () => (state.status === "running" ? dispatch({ type: "queue_set", items: [...state.queued, FREE_UP_SPACE_REQUEST] }) : sendIn(active, FREE_UP_SPACE_REQUEST)) : null;
   // ⇧⌘P: every action that can run, and the things that aren't shortcuts: switching Permissions, Workflow or Models, and each Settings
   // page. Listed as they are when the palette opens.
   const [palette, setPalette] = useState<PaletteEntry[] | null>(null);
@@ -1700,9 +1707,10 @@ export default function App() {
     const routinesEntry: PaletteEntry = { id: "routines", title: "Routines…", group: "Routines", shortcut: null, run: () => setSettingsAt("routines") };
     const themes = THEMES.filter((t) => t.id !== theme && t.id !== "custom").map((t): PaletteEntry => ({ id: `theme:${t.id}`, title: `Theme: ${t.label}`, group: "Theme", shortcut: null, run: () => setTheme(t.id) }));
     // History with its search box ready: what was said in any past chat.
+    const storageEntry: PaletteEntry = { id: "storage", title: "Storage", group: "View", shortcut: null, run: () => setStorageOpen(true) };
     const searchChats: PaletteEntry = { id: "search-chats", title: "Search all chats…", group: "View", shortcut: null, run: () => void openHistory() };
     const project = state.folder ? [{ id: "project-notes", title: "Project notes…", group: "Project", shortcut: null, run: () => setEditingNotes(state.folder) } satisfies PaletteEntry] : [];
-    return [...availableActions(), searchChats, ...project, ...permissions, ...workflows, ...harnesses, routinesEntry, ...themes, ...tabs];
+    return [...availableActions(), searchChats, storageEntry, ...project, ...permissions, ...workflows, ...harnesses, routinesEntry, ...themes, ...tabs];
   };
   // The Work menu: Build, Debug and Design are Step by step in that flavour; Review a PR lists the open pull requests and
   // starts a review on the one chosen; Start a team makes an empty chat a team's Lead, and otherwise starts a new one.
@@ -2105,6 +2113,7 @@ export default function App() {
           onOpenFolder={openFolder}
           onToggleReview={state.folder ? () => setReviewCollapsed(!reviewCollapsed) : undefined}
           onOpenSettings={() => setSettingsAt("general")}
+          storage={{ onOpen: () => setStorageOpen(true), suggested: suggestedCount(storage), open: storageOpen }}
           mcpIssues={(mcpIssues[active] ?? []).map((i) => `${i.name} ${i.problem}`)}
           onBringOld={bringHere}
           branch={branch}
@@ -2307,6 +2316,7 @@ export default function App() {
             fallbackModel: defaultModel,
           }}
         />
+        <StoragePanel open={storageOpen} onClose={() => setStorageOpen(false)} view={storage} onAsk={askStorage} busy={state.status === "running"} />
         {installing && <UpdatingOverlay state={updates.state} version={update?.version ?? null} />}
         {palette && <CommandPalette entries={palette} onClose={() => setPalette(null)} />}
         {prDialog && (

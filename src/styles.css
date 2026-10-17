@@ -56,6 +56,8 @@
   --sev-blocker: #d9661f;
   --sev-should: #a88400;
   --sev-should-text: #7a5f00;
+  /* The Storage panel's seven kinds (worktrees, stale projects, build output, simulators, caches, downloads, Trash), each at 3:1 or more on the pane and the card and well apart from each other; styles.test.ts checks every theme. */
+  --storage-1: #1d6fd6; --storage-2: #c4570c; --storage-3: #1f8a4c; --storage-4: #8a4fc7; --storage-5: #0f8a8f; --storage-6: #c2307a; --storage-7: #8a7a10;
   --ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   --mono: "SF Mono", ui-monospace, Menlo, monospace;
   --col: 720px;
@@ -151,6 +153,7 @@
     --sev-blocker: #f0914a;
     --sev-should: #e3b341;
     --sev-should-text: #e3b341;
+    --storage-1: #5aa2ff; --storage-2: #f0914a; --storage-3: #5fd08a; --storage-4: #b48bf0; --storage-5: #4ccfd0; --storage-6: #f074b0; --storage-7: #e3c341;
     --info-bg: #2a2a30;
     --error-bg: #3a1f22;
     --auth-bg: #37301a;
@@ -194,6 +197,7 @@
   --sev-blocker: #f0914a;
   --sev-should: #e3b341;
   --sev-should-text: #e3b341;
+  --storage-1: #5aa2ff; --storage-2: #f0914a; --storage-3: #5fd08a; --storage-4: #b48bf0; --storage-5: #4ccfd0; --storage-6: #f074b0; --storage-7: #e3c341;
   --info-bg: #2a2a30;
   --error-bg: #3a1f22;
   --auth-bg: #37301a;
@@ -244,6 +248,7 @@
   --sev-blocker: #ffa657;
   --sev-should: #e3b341;
   --sev-should-text: #e3b341;
+  --storage-1: #58a6ff; --storage-2: #f0883e; --storage-3: #7ee787; --storage-4: #d2a8ff; --storage-5: #56d4dd; --storage-6: #ff7b72; --storage-7: #e3b341;
   --info-bg: #1a222c;
   --error-bg: #2d1518;
   --auth-bg: #2a2410;
@@ -345,6 +350,7 @@
   --sev-blocker: #ff8a3d;
   --sev-should: #ffc933;
   --sev-should-text: #ffc933;
+  --storage-1: #2adb5f; --storage-2: #ffb000; --storage-3: #6bffe0; --storage-4: #ff5f56; --storage-5: #c4ffd8; --storage-6: #d6ff5e; --storage-7: #4f9cf0;
   --info-bg: #0c2013;
   --error-bg: #2a0c0b;
   --auth-bg: #261e06;
@@ -451,6 +457,7 @@
   --sev-blocker: #e3865d;
   --sev-should: #b58900;
   --sev-should-text: #d9a520;
+  --storage-1: #4aa3e8; --storage-2: #e2814e; --storage-3: #6dc870; --storage-4: #b88cf0; --storage-5: #2aa198; --storage-6: #ff7b9c; --storage-7: #d9a520;
   --info-bg: #05323d;
   --error-bg: #3a2428;
   --auth-bg: #2f3320;
@@ -497,6 +504,7 @@
   --sev-blocker: #dea491;
   --sev-should: #ebcb8b;
   --sev-should-text: #ebcb8b;
+  --storage-1: #7f9ce6; --storage-2: #d08770; --storage-3: #a3be8c; --storage-4: #b48ead; --storage-5: #88c0d0; --storage-6: #ee8fbf; --storage-7: #ebcb8b;
   --info-bg: #353c4a;
   --error-bg: #40303a;
   --auth-bg: #3f3d36;
@@ -544,6 +552,7 @@
   --sev-blocker: #ac4813;
   --sev-should: #9a7800;
   --sev-should-text: #7a5300;
+  --storage-1: #1d69ba; --storage-2: #ac4813; --storage-3: #236d37; --storage-4: #7a3fa8; --storage-5: #0f7a80; --storage-6: #b02a6c; --storage-7: #7a6a10;
   --info-bg: #f1e9d8;
   --error-bg: #fbe9e4;
   --auth-bg: #f9eccb;
@@ -592,6 +601,7 @@
   --sev-blocker: #bd3e00;
   --sev-should: #a88400;
   --sev-should-text: #7a5f00;
+  --storage-1: #1d4aff; --storage-2: #bd3e00; --storage-3: #17722f; --storage-4: #7a3fa8; --storage-5: #0f7a80; --storage-6: #b02a6c; --storage-7: #7a6600;
   --info-bg: #e7e8e1;
   --error-bg: #fbe6e2;
   --auth-bg: #fbefc9;
@@ -669,7 +679,8 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 .pane-toggle .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--text-2); }
 /* On the history button: a chat is running in the background. */
 .title-center button.icon { position: relative; }
-.canvas-toggle, .settings-button { position: relative; }
+.canvas-toggle, .settings-button, .storage-button { position: relative; }
+.storage-button .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn); }
 .settings-button .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
 .canvas-toggle .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn); }
 .title-center .dot { position: absolute; top: 4px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
@@ -1424,7 +1435,8 @@ button.network-row.current { background: var(--bg-active); color: var(--text); }
 .network-actions { display: flex; gap: 4px; margin-left: -8px; }
 .network-error { font-size: calc(12px * var(--font-scale)); color: var(--del); }
 
-/* Storage tab: a scan of the Mac as a checklist, grouped by kind, with a bar at the bottom that deletes what is ticked. */
+/* Storage panel (a dialog from the title bar, sized like Settings): a bar of the whole scan split by kind, then the scan as a checklist
+   grouped by kind, each row with a bar against the biggest item, and a bar at the bottom that deletes what is ticked. Each kind has its own colour (--storage-1…7). */
 .storage-bar { gap: 8px; }
 .storage-free { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
 .storage-status { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1 !important; min-width: 0; }
@@ -1458,6 +1470,30 @@ button.network-row.current { background: var(--bg-active); color: var(--text); }
 .storage-actions { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }
 .storage-confirm-list { margin: 4px 0 0; padding-left: 18px; font-size: calc(12px * var(--font-scale)); line-height: 1.45; overflow-wrap: anywhere; }
 .storage-selected { font-size: calc(12px * var(--font-scale)); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.storage-panel-body { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.storage-panel-head { flex: none; display: flex; align-items: center; gap: 8px; padding: 14px 16px 10px; }
+.storage-panel-head h2 { margin: 0; font-size: calc(16px * var(--font-scale)); font-weight: 600; letter-spacing: -0.01em; }
+.storage-panel-body .tab-empty { flex: 1; overflow-y: auto; }
+.storage-panel .storage-group-head { background: var(--field); }
+.storage-chart { flex: none; padding: 10px 16px 10px; border-bottom: 1px solid var(--line); }
+.storage-stack { display: flex; gap: 2px; height: 16px; overflow: hidden; border-radius: var(--radius-inner); background: var(--bg-subtle); }
+.storage-seg { flex: 0 1 auto; min-width: 0; background: var(--kind); cursor: pointer; transform-origin: left; animation: storage-grow 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; transition: opacity 0.15s, filter 0.15s; }
+.storage-seg.hot { filter: brightness(1.15); }
+.storage-seg.dim, .storage-legend-item.dim { opacity: 0.4; }
+.storage-readout { height: 18px; margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(12px * var(--font-scale)); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.storage-legend { list-style: none; margin: 4px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(205px, 1fr)); gap: 1px 8px; }
+.storage-legend-item { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; padding: 3px 6px; border: none; border-radius: var(--radius-chip); background: none; color: var(--text); font-size: calc(12px * var(--font-scale)); text-align: left; transition: opacity 0.15s; }
+.storage-legend-item:hover:not(:disabled) { background: var(--bg-hover); }
+.storage-swatch { flex: none; width: 10px; height: 10px; border-radius: var(--radius-chip); background: var(--kind); }
+.storage-legend-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.storage-legend-size, .storage-legend-share { flex: none; font-variant-numeric: tabular-nums; }
+.storage-legend-share { min-width: 32px; text-align: right; color: var(--muted-text); }
+.storage-group.hot .storage-group-head { background: color-mix(in srgb, var(--kind) 14%, var(--field)); }
+.storage-rowbar { height: 4px; margin: 3px 0 2px; overflow: hidden; border-radius: var(--radius-pill); background: var(--bg-hover); }
+.storage-rowbar span { display: block; height: 100%; border-radius: inherit; background: var(--kind); opacity: 0.5; transform-origin: left; animation: storage-grow 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; transition: opacity 0.2s; }
+.storage-row.ticked .storage-rowbar span { opacity: 1; }
+@keyframes storage-grow { from { transform: scaleX(0); } }
+@media (prefers-reduced-motion: reduce) { .storage-seg, .storage-rowbar span { animation: none; transition: none; } }
 .network-summary { padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg-subtle); font-size: calc(13px * var(--font-scale)); display: flex; flex-direction: column; gap: 6px; }
 .network-summary > :first-child > :first-child { margin-top: 0; }
 .network-outline { display: flex; flex-direction: column; gap: 4px; }
