@@ -22,6 +22,8 @@ const item = (id: string, over: Partial<StorageItem> = {}): StorageItem => ({
 describe("storage", () => {
   it("writes sizes as the backend does", () => {
     expect([sizeText(999), sizeText(1_500_000), sizeText(12_345_678_901)]).toEqual(["999 B", "1.5 MB", "12.3 GB"]);
+    // The unit rolls over when the rounded value would read 1000.
+    expect([sizeText(999_950), sizeText(999.6), sizeText(999.4), sizeText(999_940)]).toEqual(["1.0 MB", "1.0 KB", "999 B", "999.9 KB"]);
   });
 
   it("ticks what the scan or Claude ticked until the user chooses, and never a blocked item", () => {

@@ -177,6 +177,8 @@ describe("summaryLine", () => {
     expect(summaryLine({ ...base, items: [asked, tool] })).toBe("Bash npm test");
     expect(summaryLine({ ...base, items: [asked] })).toBe("Build the login form");
     expect(summaryLine(base)).toBe("Waiting to start");
+    expect(summaryLine({ ...base, items: [{ ...asked, text: "\n\n  Build the form\nmore" }] })).toBe("Build the form");
+    expect(summaryLine({ ...base, items: [{ ...asked, text: "\n  \n" }] })).toBe("Waiting to start");
   });
 });
 
@@ -226,6 +228,8 @@ describe("lostText", () => {
     expect(lostText(check(3, 2))).toBe("3 uncommitted files and 2 commits that aren't merged");
     expect([usage(1.2, 3_100_000), usage(0, 950), usage(0.5, 0), usage(0, 0)]).toEqual(["$1.20 · 3.1M tok", "950 tok", "$0.50", ""]);
     expect(tokens(12_400)).toBe("12k tok");
+    expect(tokens(999_600)).toBe("1.0M tok");
+    expect(tokens(999_400)).toBe("999k tok");
     expect(lostText(check(1, 1))).toBe("1 uncommitted file and 1 commit that isn't merged");
     expect(lostText(check(0, 2))).toBe("2 commits that aren't merged");
     expect(lostText(check(4, 0))).toBe("4 uncommitted files");

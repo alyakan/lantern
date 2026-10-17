@@ -173,8 +173,11 @@ export function tether(a: Box, b: Box): Tether {
   const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
   const dx = bc.x - ac.x;
   const dy = bc.y - ac.y;
-  // Side by side when there is daylight between them horizontally, else above and below.
-  const horizontal = b.x >= a.x + a.w || a.x >= b.x + b.w || Math.abs(dx) * a.h >= Math.abs(dy) * a.w;
+  // Side by side when there is daylight between them horizontally only, above and below when there is vertically only; when there is
+  // both or neither, the way they are apart decides.
+  const apartX = b.x >= a.x + a.w || a.x >= b.x + b.w;
+  const apartY = b.y >= a.y + a.h || a.y >= b.y + b.h;
+  const horizontal = apartX !== apartY ? apartX : Math.abs(dx) * a.h >= Math.abs(dy) * a.w;
   let from: Point;
   let to: Point;
   if (horizontal) {
