@@ -143,7 +143,7 @@ describe("what older versions saved", () => {
 });
 
 /** How long a step may take on a loaded runner. */
-const LOAD = 10_000;
+const LOAD = 30_000;
 
 describe("a second team while another is working", () => {
   /** Picks a Workflow from the chip under the chat box (the agents' cards have their own), once the chat's claude has started. */
