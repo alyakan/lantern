@@ -716,11 +716,13 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
     }
   }, [layout]);
   paintTethersRef.current = paintTethers;
+  // The agents are read when it paints, not when it was made: `nodes` is a new list each time the app draws, and a new
+  // `paint` would make new drag handlers, which would redraw every card each time any agent said a word.
   const paint = useCallback(() => {
     frame.current = 0;
     const w = world.current;
     if (!w) return;
-    for (const n of nodes) {
+    for (const n of nodesNow.current) {
       const box = layout.boxes[n.slot];
       const el = w.querySelector<HTMLElement>(`[data-node="${n.slot}"]`);
       if (!box || !el) continue;
@@ -729,7 +731,7 @@ export function Canvas({ nodes, layout, activeSlot, attention, onFocus, onOpen }
       if (!layout.collapsed[n.slot]) el.style.height = `${box.h}px`;
     }
     paintTethers();
-  }, [layout, nodes, paintTethers]);
+  }, [layout, paintTethers]);
 
   const bringToFront = useCallback((slot: string) => {
     if (layout.order[layout.order.length - 1] === slot) return;
