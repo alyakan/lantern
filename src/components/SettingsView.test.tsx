@@ -256,7 +256,8 @@ describe("SettingsView", () => {
     });
     const { rerender } = render(<SettingsView open="mcp" {...props} />);
     const list = await screen.findByRole("list", { name: "MCP servers" });
-    fireEvent.click(within(list).getByRole("button", { name: "Log in" }));
+    // The list is there before its servers are (they come from the status request): wait for the row too.
+    fireEvent.click(await within(list).findByRole("button", { name: "Log in" }));
     expect(await screen.findByText("Opening the login page…")).toBeInTheDocument();
 
     rerender(<SettingsView open="mcp" {...props} slot="s2" />);
