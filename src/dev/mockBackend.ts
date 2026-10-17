@@ -5,6 +5,7 @@ import { emit } from "@tauri-apps/api/event";
 import type { McpServer, NetworkDetail, NetworkItem, NetworkTx, NetworkView, SkillEntry, UiEvent } from "../types";
 import { version as APP_VERSION } from "../../package.json";
 import { TESTO_MAP } from "../lib/testoMap";
+import { DENSE_MAP, DENSE_PARTS } from "../lib/denseMap";
 import type { ReviewCheck } from "../lib/reviewChain";
 
 // The next patch release, which the update checks find.
@@ -159,6 +160,18 @@ async function playArchitecture(slot: string, text: string) {
   const moves = /^(next|ok|yes|start)/i.test(text.trim());
   const n = stepPage[slot] === undefined ? 0 : moves ? stepPage[slot] + 1 : stepPage[slot];
   stepPage[slot] = n;
+  // ?densemap: a crowded map (25 boxes, 46 arrows) with three parts, to see how the layout copes.
+  if (new URLSearchParams(location.search).has("densemap")) {
+    const parts = DENSE_PARTS.map((p, i) => `# Part ${i + 1} of ${DENSE_PARTS.length} — ${p.title}\n\nCovers: ${p.covers.join(", ")}\n\n### Role\nWhat ${p.title.toLowerCase()} does.\n\n### Boundaries\nTalks to its neighbours on the map.\n\n### Design\nOne type owns the state; the rest is plain functions.\n\n### Concerns\nNone.`);
+    const dense = [
+      "# Frame — A checklist app's data and sync path\n\nA **design review** of the app side, in six layers.",
+      "# Overview — Six layers; sync and the upload queue are the weak spots\n\n```architecture\n" + JSON.stringify(DENSE_MAP) + "\n```\n\nThe repository is the one door to storage.",
+      ...parts,
+      "# Summary — 3 parts, 0 concerns",
+    ];
+    await streamText(send, `ar${n}-${Date.now()}:0`, dense[Math.min(n, dense.length - 1)]);
+    return done();
+  }
   const pages = [
     "# Frame — The Testo sensor integration on iOS: built so far, and planned\n\nA **design review** of the five stacked PRs and the tech spec. In scope: the app side, from the sensor field to the Bluetooth handle. Out of scope: the backend's credentials endpoint. I'll judge it by five layers: UI, business logic, the device boundary, the Testo implementation, and what's outside the app.",
     "# Overview — Five layers; the device boundary is in, the Bluetooth device and the UI are still planned\n\n```architecture\n" + JSON.stringify(TESTO_MAP) + "\n```\n\nThe vendor-neutral device protocols are the spine: everything above them is Testo-free. Two things lean on that: the field reads the battery level straight from the Testo device, and the window type carries two jobs.",
