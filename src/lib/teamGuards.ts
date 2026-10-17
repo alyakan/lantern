@@ -1,15 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Chats } from "../sessions";
-import { anythingWorking } from "./awake";
 import { nodeStatus, orchestraNodes } from "./orchestraView";
 import { CONTINUE_MESSAGE, loadPauseMemory, pauseStep, pausedLine, pauseWarning, savePauseMemory, usePauseAtPercent, windowKey, type PlanPause } from "./planPause";
 import { usePlanUsage } from "./planUsage";
-import { quietFor } from "./quiet";
-import { useQuietAfter } from "./quietSetting";
 import type { State } from "../store";
-
-/** How often the app looks again for agents that have gone quiet, which no event announces. */
-const LOOK_MS = 10_000;
 
 /** What the guards do to chats and to the user; the app's own functions. */
 export interface GuardActions {
@@ -36,15 +30,13 @@ function stoppedAtRest(s: State): boolean {
 }
 
 /**
- * The two things that keep a team from running unwatched: the pause when the plan reaches the user's limit (the setting
- * "Pause a team's work when my plan reaches"), and the clock the inbox uses to list agents that have gone quiet.
- * `pause` is set while the teams are paused, and while it is set no queued message or agent's note starts a turn:
+ * What keeps a team from running unwatched: the pause when the plan reaches the user's limit (the setting
+ * "Pause a team's work when my plan reaches"). `pause` is set while the teams are paused, and while it is set no queued message or agent's note starts a turn:
  * `resume` tells each agent that was stopped to continue, and nothing else does.
  */
 export function useTeamGuards(chats: Chats, actions: GuardActions) {
   const plan = usePlanUsage();
   const pauseAt = usePauseAtPercent();
-  const quietAfter = useQuietAfter();
   const [pause, setPause] = useState<PlanPause | null>(null);
   const done = useRef(loadPauseMemory());
   // The effects and handlers below run later than the render that made them: they read what is current from here.
@@ -92,23 +84,5 @@ export function useTeamGuards(chats: Chats, actions: GuardActions) {
     setPause(null);
   }, []);
 
-  // The inbox lists an agent once it has been quiet for the user's time. That moment is not an event, so the app looks
-  // again every few seconds while something works, and redraws only when the set of quiet agents has changed.
-  const working = anythingWorking(chats);
-  const [clock, setClock] = useState(Date.now);
-  useEffect(() => {
-    if (!working) return;
-    const quietNow = (at: number) =>
-      Object.entries(latest.current.chats.slots)
-        .filter(([, s]) => quietFor(s, at, quietAfter) !== null)
-        .map(([slot]) => slot)
-        .join(",");
-    const timer = setInterval(() => setClock((was) => {
-      const at = Date.now();
-      return quietNow(was) === quietNow(at) ? was : at;
-    }), LOOK_MS);
-    return () => clearInterval(timer);
-  }, [working, quietAfter]);
-
-  return { pause, resume, quiet: { now: clock, after: quietAfter } };
+  return { pause, resume };
 }

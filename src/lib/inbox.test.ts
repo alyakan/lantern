@@ -110,44 +110,13 @@ describe("inboxItems", () => {
   });
 });
 
-describe("agents that have gone quiet", () => {
-  const NOW = 10_000_000;
-  const AFTER = 180_000;
-  const quiet = (c: Chats) => inboxItems(c, openProjects(c, { titles: {}, drafts: {}, unread: {}, pinned: {} }), { unread: {}, describe: describe_, quiet: { now: NOW, after: AFTER } });
-  const team = (worker: Partial<State>, lead: Partial<State> = {}) =>
-    chats(
-      { lead: idle({ orchestrator: true, items: [said("Ship it")], ...lead }), a1: idle({ folder: "/wt/a", items: [said("go")], status: "running", ...worker }) },
+describe("an agent that has gone quiet while working", () => {
+  it("is not listed: being quiet isn't something the inbox asks the user about", () => {
+    const c = chats(
+      { lead: idle({ orchestrator: true, items: [said("Ship it")] }), a1: idle({ folder: "/wt/a", items: [said("go")], status: "running", activityAt: Date.now() - 20 * 60_000 }) },
       { agents: { a1: meta("lead", "security pass") } },
     );
-
-  it("lists a team's agent that has worked a while without a word, with how long it has been", () => {
-    const [row] = quiet(team({ activityAt: NOW - 4 * 60_000 }));
-    expect(row).toMatchObject({ kind: "quiet", slot: "a1", role: "agent", team: "lead", title: "security pass", where: "lantern · Ship it", since: NOW - 4 * 60_000, needsYou: true, requestId: null, canAllow: false });
-    expect(row.need).toMatch(/Quiet while working/);
-  });
-
-  it("lists a Lead too", () => {
-    const rows = quiet(team({ status: "idle" }, { status: "running", activityAt: NOW - AFTER }));
-    expect(rows.map((r) => [r.slot, r.role, r.kind])).toEqual([["lead", "lead", "quiet"]]);
-  });
-
-  it("does not list one that is only thinking, has been heard from, or isn't working", () => {
-    expect(quiet(team({ activityAt: NOW - AFTER + 1_000 }))).toEqual([]);
-    expect(quiet(team({ activityAt: null }))).toEqual([]);
-    expect(quiet(team({ activityAt: NOW - 10 * 60_000, status: "idle" }))).toEqual([]);
-  });
-
-  it("does not list a plain chat, which may sit on one long command", () => {
-    expect(quiet(chats({ s1: idle({ status: "running", items: [said("build"), ], activityAt: NOW - 20 * 60_000 }) }))).toEqual([]);
-  });
-
-  it("lists what it is waiting on instead when it is waiting on you", () => {
-    const [row] = quiet(team({ activityAt: NOW - 20 * 60_000, items: [said("go"), asks("p1", 5)] }));
-    expect(row.kind).toBe("permission");
-  });
-
-  it("is not listed at all unless the caller says what counts as quiet", () => {
-    expect(list(team({ activityAt: NOW - 20 * 60_000 }))).toEqual([]);
+    expect(list(c)).toEqual([]);
   });
 });
 

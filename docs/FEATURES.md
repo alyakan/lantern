@@ -203,12 +203,12 @@ A **role** is a ready-made way to start an agent: what it is told, the model it 
 | Role | What it does | Works in | May edit |
 |---|---|---|---|
 | Builder | Builds a change and reports what it did | its own worktree | yes |
-| Reviewer | Reads files, and a diff you put in the task, and reports findings | your folder | no, read only |
+| Reviewer | Reads files and the branch's diff (it can run read-only git), and reports findings | your folder | no, read only |
 | QA / tester | Runs the project's tests and tries to break the change; may write tests | its own worktree | yes |
 | Docs | Writes and updates documentation | its own worktree | yes |
 | Security auditor | Reads the code for security problems | your folder | no, read only |
 
-Each role's brief asks for a report in a fixed, plain format (what it found, how serious, what to do). **Read only** is enforced, not just asked: the agent is started with only three tools, which read, search and list files, whatever its brief says and whatever you have set to Auto or allowed with **Always allow…**. It has no shell, so it cannot run commands (not even git), write, delete or commit by any route, and no web tools; it only reads the files and the diff its task gives it. Its card says **Read only** in an amber badge under the title bar. The role's name shows on the card, and in the sidebar's list of agents ("Reviewer · Working"). Docs is asked to touch documentation only; that part is a request, not a switch.
+Each role's brief asks for a report in a fixed, plain format (what it found, how serious, what to do). **Read only** is enforced, not just asked: the agent is started with only three built-in tools, which read, search and list files, whatever its brief says and whatever you have set to Auto or allowed with **Always allow…**, plus one tool of Lantern's own, `git`. Lantern runs that from a list of arguments with no shell, and only read-only git (log, diff, show, status, blame, grep, `branch --list`, `tag --list`, `worktree list` and a few more), in the agent's own folder or a worktree of the same project: every option that writes a file or starts a program, and every other command, is refused. It has no shell, so it cannot run any other command, write, delete or commit by any route, and no web tools; it reads the files and can look at the history and the diff itself. The project's own git config is trusted: its `filter.*` drivers (git-lfs, say) can still run when `status` or `diff` looks at a changed file, while `core.fsmonitor`, hooks, diff drivers and signature programs are switched off. Its card says **Read only** in an amber badge under the title bar. The role's name shows on the card, and in the sidebar's list of agents ("Reviewer · Working"). Docs is asked to touch documentation only; that part is a request, not a switch.
 
 **Save as a role…** at the bottom of the form keeps what you filled in as a role of your own for the project. Choose it later from "Your roles", save again under the same name to change it, or **Delete this role**. Roles and templates belong to a project and move with it if the folder moves.
 
@@ -408,11 +408,16 @@ Settings ▸ General ▸ Theme picks how Lantern looks, with a small preview of 
 - **Terminal**: a modern terminal scheme (think Warp or Ghostty): near-black with a cool tint, light text, monospace everywhere, square corners and thin lines instead of shadows. Colour is used the way syntax highlighting does: green for what you typed and for additions, yellow for "working", red for errors and removals, blue for links, purple for emphasis. **Bold** is white, `inline code` is an orange chip, headings are cyan and a quote has a purple bar.
 - **Fallout**: a Pip-Boy terminal, all phosphor green on green-black, in three levels: bright for headings and bold (with a soft glow), normal for text, dim for what is secondary. Inline code and code headers are in reverse video (dark on bright green), code blocks and what you send sit in boxes (what you send starts with a `>` prompt), small labels are in capitals, the cursor in the chat box is a block, and faint scanlines and a darkened edge sit over the window. They are still, don't catch clicks, and text keeps its contrast (4.5:1 or more).
 - **Solarized Dark**, **Nord** and **Paper** (a warm light theme): colours only.
+- **PostHog**: a cream page with white cards, near-black text and one hot orange accent. Thin warm-grey outlines, slightly tighter corners, blue links and a yellow hover on the orange buttons.
 - **Custom**: **Customize…** opens six colour pickers (background, panels, text, secondary text, accent and lines), a **Monospace everywhere** switch and a **Rounded or Square** corners choice. It starts from the theme you have now, the app changes as you pick, and it warns you when your text colour would be hard to read on your background (under 4.5:1). The rest of the colours are worked out from your six.
 
 The code editor and diffs, diagrams and shell output follow the theme, and a chosen theme is on before the first screen is drawn, so nothing flashes the default.
 
 ![Terminal: a chat with every kind of markdown, and its diff](images/theme-terminal.png)
+
+![PostHog: a chat with a permission card, and a diff](images/theme-posthog.png)
+
+![PostHog chosen in Settings' theme picker](images/theme-posthog-picker.png)
 
 ![Fallout: the same chat in phosphor green](images/theme-fallout.png)
 
