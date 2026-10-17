@@ -60,7 +60,7 @@ function foldTurn(items: ChatItem[], live: boolean): Row[] {
   return [...before, block, ...rest.slice(before.length)];
 }
 
-export type Category = "read" | "search" | "run" | "skill" | "agent" | "advisor" | "web" | "edit" | "plan" | "reproduce" | "network" | "mcp" | "other";
+export type Category = "read" | "search" | "run" | "skill" | "agent" | "advisor" | "web" | "edit" | "plan" | "reproduce" | "network" | "storage" | "mcp" | "other";
 
 const CATEGORY_OF: Record<string, Category> = {
   Read: "read", NotebookRead: "read",
@@ -75,6 +75,7 @@ const CATEGORY_OF: Record<string, Category> = {
   mcp__lantern__reproduce: "reproduce",
   mcp__lantern__network_requests: "network", mcp__lantern__network_request: "network", mcp__lantern__network_watch: "network",
   mcp__lantern__network_unwatch: "network", mcp__lantern__network_watches: "network", mcp__lantern__network_summarize: "network",
+  mcp__lantern__storage_scan: "storage", mcp__lantern__storage_results: "storage", mcp__lantern__storage_suggest: "storage",
 };
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -91,6 +92,7 @@ const PHRASE: Record<Category, (n: number) => string> = {
   plan: (n) => (n === 1 ? "proposed a plan" : `proposed ${n} plans`),
   reproduce: (n) => (n === 1 ? "had you reproduce it" : `had you reproduce it ${n} times`),
   network: (n) => (n === 1 ? "used Network Monitor" : `used Network Monitor ${n} times`),
+  storage: (n) => (n === 1 ? "checked disk space" : `checked disk space ${n} times`),
   // Said per server instead (see summarize).
   mcp: (n) => `used ${plural(n, "MCP tool")}`,
   other: (n) => `used ${plural(n, "other tool")}`,
@@ -110,6 +112,7 @@ export function stepLabel(step: Step): string {
   const mcp = mcpTool(step.name);
   if (step.name === "advisor") return "Advisor";
   if (CATEGORY_OF[step.name] === "network") return `Network Monitor · ${step.name.replace("mcp__lantern__network_", "").replace(/_/g, " ")}`;
+  if (CATEGORY_OF[step.name] === "storage") return `Storage · ${step.name.replace("mcp__lantern__storage_", "").replace(/_/g, " ")}`;
   return mcp ? `${mcp.server} · ${mcp.tool}` : step.name;
 }
 
@@ -143,7 +146,7 @@ export function runningStep(steps: Step[]): ToolItem | null {
   return null;
 }
 
-const VERB: Partial<Record<Category, string>> = { advisor: "Consulting the advisor", read: "Reading", search: "Searching", run: "Running", skill: "Using skill", plan: "Proposing a plan", reproduce: "Waiting for you to reproduce", network: "Reading Network Monitor", agent: "Running subagent:", web: "Fetching", edit: "Editing" };
+const VERB: Partial<Record<Category, string>> = { advisor: "Consulting the advisor", read: "Reading", search: "Searching", run: "Running", skill: "Using skill", plan: "Proposing a plan", reproduce: "Waiting for you to reproduce", network: "Reading Network Monitor", storage: "Checking disk space", agent: "Running subagent:", web: "Fetching", edit: "Editing" };
 
 export function stepTarget(tool: ToolItem, folder: string | null): string {
   return relativeTo(tool.edit?.path ?? tool.summary, folder);

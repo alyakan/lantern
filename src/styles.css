@@ -1408,6 +1408,41 @@ button.network-row.current { background: var(--bg-active); color: var(--text); }
 .network-detail-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: -4px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
 .network-actions { display: flex; gap: 4px; margin-left: -8px; }
 .network-error { font-size: calc(12px * var(--font-scale)); color: var(--del); }
+
+/* Storage tab: a scan of the Mac as a checklist, grouped by kind, with a bar at the bottom that deletes what is ticked. */
+.storage-bar { gap: 8px; }
+.storage-free { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text); }
+.storage-status { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 1 !important; min-width: 0; }
+.storage-notes, .storage-result { flex: none; padding: 6px 12px; border-bottom: 1px solid var(--line); font-size: calc(12px * var(--font-scale)); line-height: 1.45; color: var(--text-2); }
+.storage-notes p, .storage-result p { margin: 2px 0; }
+.storage-result { background: var(--bg-active); }
+.storage-failure { color: var(--del); overflow-wrap: anywhere; }
+.storage-body { flex: 1; min-height: 0; overflow-y: auto; }
+.storage-empty { padding: 16px 14px; }
+.storage-group { border-bottom: 1px solid var(--line); }
+.storage-group-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: baseline; gap: 8px; padding: 6px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
+.storage-group-title { font-weight: 600; font-size: calc(12.5px * var(--font-scale)); }
+.storage-group-size { font-variant-numeric: tabular-nums; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
+.storage-group-hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.storage-group-head button.ghost { height: var(--pill-s); padding: 0 8px; border-radius: var(--radius-pill); font-size: calc(11.5px * var(--font-scale)); }
+.storage-list { list-style: none; margin: 0; padding: 0; }
+.storage-row { display: flex; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.storage-row:last-child { border-bottom: none; }
+.storage-row.ticked { background: var(--bg-active); }
+.storage-row.risk-blocked { opacity: 0.75; }
+.storage-check { flex: none; display: flex; align-items: flex-start; padding-top: 2px; }
+.storage-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; user-select: text; }
+.storage-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.storage-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: calc(12px * var(--font-scale)); }
+.storage-size { flex: none; font-variant-numeric: tabular-nums; font-size: calc(12px * var(--font-scale)); font-weight: 600; }
+.storage-meta, .storage-note { font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); line-height: 1.4; overflow-wrap: anywhere; }
+.storage-warn { font-size: calc(11.5px * var(--font-scale)); line-height: 1.4; color: var(--warn); overflow-wrap: anywhere; }
+.storage-warn.risk-blocked { color: var(--del); }
+.storage-claude { font-size: calc(11.5px * var(--font-scale)); line-height: 1.4; color: var(--text); overflow-wrap: anywhere; }
+.storage-more { margin: 4px 12px 8px; }
+.storage-actions { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.storage-confirm-list { margin: 4px 0 0; padding-left: 18px; font-size: calc(12px * var(--font-scale)); line-height: 1.45; overflow-wrap: anywhere; }
+.storage-selected { font-size: calc(12px * var(--font-scale)); color: var(--text-2); font-variant-numeric: tabular-nums; }
 .network-summary { padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg-subtle); font-size: calc(13px * var(--font-scale)); display: flex; flex-direction: column; gap: 6px; }
 .network-summary > :first-child > :first-child { margin-top: 0; }
 .network-outline { display: flex; flex-direction: column; gap: 4px; }

@@ -233,7 +233,9 @@ describe("SettingsView", () => {
     });
     const { rerender } = render(<SettingsView open="mcp" {...props} />);
     const list = await screen.findByRole("list", { name: "MCP servers" });
-    fireEvent.click(within(within(list).getAllByRole("listitem")[1]).getByRole("button", { name: "Reconnect" }));
+    // The list is there before its servers are (they load after it renders): wait for the rows, not just the list.
+    const rows = await within(list).findAllByRole("listitem");
+    fireEvent.click(within(rows[1]).getByRole("button", { name: "Reconnect" }));
     await waitFor(() => expect(claudeRequest).toHaveBeenCalledWith("s1", { subtype: "mcp_reconnect", serverName: "postgres" }));
     rerender(<SettingsView open="mcp" {...props} slot="s2" />);
     expect(await screen.findByText("other-chat")).toBeInTheDocument();

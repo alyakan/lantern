@@ -2717,7 +2717,7 @@ mod tests {
         let socket = sock.display().to_string();
         let out = tokio::task::spawn_blocking(move || {
             let mut out = Vec::new();
-            crate::permission::helper::run_helper_as(lines.as_bytes(), &mut out, Some(&socket), crate::permission::catalogue::Offer { orchestrator: true, steps: false }).unwrap();
+            crate::permission::helper::run_helper_as(lines.as_bytes(), &mut out, Some(&socket), crate::permission::catalogue::Offer { orchestrator: true, steps: false, git: false }).unwrap();
             String::from_utf8(out).unwrap()
         })
         .await

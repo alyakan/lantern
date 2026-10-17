@@ -41,7 +41,7 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(180);
 /// anywhere), and neither signing nor checking signatures: each runs a program the config names, so those programs are
 /// pinned to `false` as well. git hands these on to the git commands it runs itself. Filter and merge drivers still
 /// run: git-lfs is one, and without it a commit or a merge would take its pointer files for the content.
-const HARDENED: [&str; 24] = [
+pub(crate) const HARDENED: [&str; 24] = [
     "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "core.pager=cat", "-c", "submodule.recurse=false",
     "-c", "commit.gpgSign=false", "-c", "tag.gpgSign=false", "-c", "merge.verifySignatures=false", "-c", "log.showSignature=false",
     "-c", "gpg.program=/usr/bin/false", "-c", "gpg.ssh.program=/usr/bin/false", "-c", "gpg.x509.program=/usr/bin/false",
@@ -63,7 +63,7 @@ pub(crate) enum At<'a> {
 
 /// Runs `git` in `dir` and returns its trimmed stdout; a failure is git's own message. Blocking: call it off the async
 /// threads. Never asks for a password or opens an editor, and is stopped after `GIT_TIMEOUT`.
-fn run(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, String> {
+pub(crate) fn run(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, String> {
     run_at(At::Dir(dir), args, path_env)
 }
 
@@ -77,7 +77,7 @@ fn run_within(dir: &Path, args: &[&str], path_env: Option<&str>, limit: Duration
 }
 
 /// What `run` returns, exactly as git wrote it: for lists of file names (`-z`), where a name's own spaces count.
-fn run_raw(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, String> {
+pub(crate) fn run_raw(dir: &Path, args: &[&str], path_env: Option<&str>) -> Result<String, String> {
     run_raw_within(At::Dir(dir), args, path_env, GIT_TIMEOUT)
 }
 

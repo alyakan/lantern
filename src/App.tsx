@@ -10,6 +10,7 @@ import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/rev
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
 import { summarizeRequest } from "./lib/network";
+import { FREE_UP_SPACE_REQUEST } from "./components/StorageTab";
 import { StartScreen } from "./components/StartScreen";
 import { ReviewPrDialog } from "./components/ReviewPrDialog";
 import { TeamWarning } from "./components/TeamWarning";
@@ -2225,6 +2226,11 @@ export default function App() {
                 onSummarizeRequest={
                   state.status === "idle" || state.status === "running"
                     ? (item) => (state.status === "running" ? dispatch({ type: "queue_set", items: [...state.queued, summarizeRequest(item)] }) : sendIn(active, summarizeRequest(item)))
+                    : undefined
+                }
+                onAskStorage={
+                  state.status === "idle" || state.status === "running"
+                    ? () => (state.status === "running" ? dispatch({ type: "queue_set", items: [...state.queued, FREE_UP_SPACE_REQUEST] }) : sendIn(active, FREE_UP_SPACE_REQUEST))
                     : undefined
                 }
                 comments={

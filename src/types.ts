@@ -467,6 +467,55 @@ export interface NetworkView {
   items: NetworkItem[];
 }
 
+export type StorageKind = "worktree" | "repo" | "build_output" | "cache" | "simulator" | "download" | "trash";
+/** How safe it is to delete: blocked items hold unsaved work and can't be deleted at all. */
+export type StorageRisk = "safe" | "review" | "blocked";
+
+/** One thing the Storage scan found that could be cleared. */
+export interface StorageItem {
+  id: string;
+  kind: StorageKind;
+  name: string;
+  path: string;
+  bytes: number;
+  risk: StorageRisk;
+  /** "permanent" is deleted for good; "trash" takes no space back until the Trash is emptied. */
+  removal: "permanent" | "trash" | "worktree" | "simulator_device" | "simulator_runtime";
+  /** What it is, and how it comes back if removed. */
+  note: string;
+  /** Why it isn't safe (review and blocked items). */
+  warning: string | null;
+  /** The scan ticks it to begin with. */
+  ticked: boolean;
+  idle_days: number | null;
+  /** The id of the worktree or project it is inside, which deleting takes along. */
+  within: string | null;
+  /** Claude's reason for suggesting it. */
+  suggestion: string | null;
+}
+
+/** What the Storage tab shows. */
+export interface StorageView {
+  items: StorageItem[];
+  scanning: boolean;
+  progress: string;
+  /** When the last scan finished (ms since the epoch); null before the first. */
+  scanned_at: number | null;
+  free_bytes: number | null;
+  /** Local Time Machine snapshots, which can keep deleted space from showing as free. */
+  snapshots: number;
+  notes: string[];
+  deleting: boolean;
+}
+
+export interface StorageOutcome {
+  id: string;
+  name: string;
+  ok: boolean;
+  freed: number;
+  error: string | null;
+}
+
 export interface NetworkBody {
   encoding: "utf8" | "base64";
   data: string;
