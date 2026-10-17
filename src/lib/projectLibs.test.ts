@@ -46,6 +46,11 @@ describe("importSpecifiers", () => {
     expect(importSpecifiers('const url = "http://example.com/x"; import y from "./y";')).toEqual(["./y"]);
   });
 
+  it("follows `.` and `..` (a folder's index) like any relative specifier", () => {
+    const src = ['import a from ".";', "import b from '..';", 'export * from "../.";'].join("\n");
+    expect(importSpecifiers(src)).toEqual([".", "..", "../."]);
+  });
+
   it("ignores bare specifiers", () => {
     const src = [
       'import React from "react";',
@@ -99,6 +104,11 @@ describe("candidatePaths", () => {
 
   it("normalises . and .. segments", () => {
     expect(candidatePaths("/p/src/deep/a.ts", "../shared/./y").slice(0, 2)).toEqual(["/p/src/shared/y.ts", "/p/src/shared/y.tsx"]);
+  });
+
+  it("resolves `.` and `..` to the folder's index file, not a sibling named like the folder", () => {
+    expect(candidatePaths("/p/src/a.ts", ".")).toEqual(["/p/src/index.ts", "/p/src/index.tsx", "/p/src/index.d.ts", "/p/src/index.js", "/p/src/index.jsx", "/p/src/index.mjs", "/p/src/index.cjs", "/p/src/index.json"]);
+    expect(candidatePaths("/p/src/deep/a.ts", "..").slice(0, 2)).toEqual(["/p/src/index.ts", "/p/src/index.tsx"]);
   });
 
   it("clamps .. at the root", () => {

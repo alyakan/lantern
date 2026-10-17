@@ -15,10 +15,13 @@ export function isMarkdownPath(path: string): boolean {
   return languageFor(path) === "markdown";
 }
 
+// What a line of front matter can be: blank, a comment, a list item, a `key: value`, or a continuation indented under one.
+const FRONT_MATTER_LINE = /^(?:\s*|\s*#.*|\s*-(?:\s.*)?|[^\s:][^:]*:(?:\s.*)?|\s+\S.*)$/;
+
 /** A leading `---` front matter block (a skill's or a doc's metadata) as a yaml code block: left alone it reads as a rule and a heading. */
 export function withFrontMatterAsCode(text: string): string {
   const m = /^---[ \t]*\r?\n([\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/.exec(text);
-  if (!m) return text;
+  if (!m || !(m[1] ?? "").split(/\r?\n/).every((l) => FRONT_MATTER_LINE.test(l))) return text;
   return "```yaml\n" + (m[1] ?? "").replace(/\r?\n$/, "") + "\n```\n" + text.slice(m[0].length);
 }
 
@@ -86,12 +89,29 @@ export function parsePlanStep(text: string): PlanStep | null {
   return has("Change") && (has("File") || has("Verify")) ? { title, fields } : null;
 }
 
-/** The paths in a `File:` value: "a.ts, b.ts", "a.ts and b.ts", or "a.ts (new)". */
+/** The paths in a `File:` value: "a.ts, b.ts", "a.ts and b.ts", or "a.ts (new, 40 lines)"; a path may hold a route group like `app/(auth)/page.tsx`. */
 export function filePaths(value: string): { path: string; note: string }[] {
-  return value
-    .split(/,\s*|\s+and\s+/)
+  // Split at commas and "and" outside parentheses: a note's own comma stays in the note.
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0) {
+      const sep = /^(?:,\s*|\s+and\s+)/.exec(value.slice(i));
+      if (sep) {
+        parts.push(value.slice(start, i));
+        start = i + sep[0].length;
+        i = start - 1;
+      }
+    }
+  }
+  parts.push(value.slice(start));
+  return parts
     .map((part) => {
-      const m = /^`?([^`\s(]+)`?\s*(.*)$/.exec(part.trim());
+      const m = /^`?((?:[^`\s()]|\([^`\s()]*\))+)`?\s*(.*)$/.exec(part.trim());
       return m ? { path: m[1], note: m[2].trim() } : null;
     })
     .filter((p): p is { path: string; note: string } => !!p && !!p.path);
