@@ -434,11 +434,22 @@ export default function App() {
     }
   };
 
+  // How each team was left: the chat that was full size, or "canvas". Going back to a team's Lead finds it that way, and
+  // falls back to the canvas for a chat that has been closed since.
+  const teamView = useRef<Record<string, string>>({});
+  const viewOf = (team: string) => {
+    const left = teamView.current[team];
+    if (left === undefined) return null;
+    return left !== "canvas" && chats.slots[left] && teamMain(chats, left) === team ? left : "canvas";
+  };
   const switchTo = (slot: string) => {
     if (slot === active || !chats.slots[slot]) return;
-    dispatchChats({ type: "activate", slot });
+    const left = chats.slots[slot].orchestrator ? viewOf(slot) : null;
+    const shown = left && left !== "canvas" ? left : slot;
+    dispatchChats({ type: "activate", slot: shown });
+    if (left) setView(left === "canvas" ? "canvas" : "chat");
     leave(active);
-    const folder = chats.slots[slot].folder;
+    const folder = chats.slots[shown].folder;
     if (folder) setLastFolder(folder);
   };
 
@@ -1562,7 +1573,10 @@ export default function App() {
   const nodes = team ? teamNodes(orchestraNodes(chats, (_slot, s) => (mains > 1 && s.folder ? `Lead · ${basename(s.folder)}` : "Lead")), team) : [];
   const inOrchestra = team !== null;
   const attention = needingYou(nodes, chats.slots);
-  useAction("toggle-canvas", () => setView((v) => (v === "canvas" ? "chat" : "canvas")), inOrchestra);
+  useEffect(() => {
+    if (team) teamView.current[team] = view === "chat" ? active : "canvas";
+  }, [team, view, active]);
+  useAction("toggle-canvas",() => setView((v) => (v === "canvas" ? "chat" : "canvas")), inOrchestra);
 
   const lastTurn = [...state.items].reverse().find((it) => it.type === "turn");
   const lastTurnMs = lastTurn?.type === "turn" ? lastTurn.durationMs : null;
@@ -1920,9 +1934,12 @@ export default function App() {
   const inTeam = (team: string) => teamMain(chats, active) === team;
   const sidebarHandlers = {
     onChat: switchTo,
+    // Its canvas, unless the team was left with a chat full size, which it comes back to (a click while in it is the way back to the canvas).
     onTeam: (slot: string) => {
-      switchTo(slot);
-      setView("canvas");
+      const here = inTeam(slot);
+      if (here) focusAgent(slot);
+      else switchTo(slot);
+      if (here || viewOf(slot) === null) setView("canvas");
     },
     // An agent is focused on its team's canvas, leaving the team's Lead where it is.
     onAgent: (slot: string, team: string) => {
