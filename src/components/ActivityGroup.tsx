@@ -28,6 +28,7 @@ export function ActivityGroup({ steps, entries = steps, live = false, verb = "Wo
   const current = runningStep(steps);
   const failed = failedCount(steps);
   const edits = editsIn(steps);
+  const notes = entries.filter((e): e is Extract<Entry, { type: "assistant" }> => e.type === "assistant");
   const narrated = entries.length > steps.length;
   const summary = summarize(steps) || (narrated ? summarize(steps, true) : "");
   const working = live || current !== null;
@@ -59,6 +60,7 @@ export function ActivityGroup({ steps, entries = steps, live = false, verb = "Wo
           )}
         </div>
       )}
+      {notes.length > 0 && <Messages notes={notes} />}
       {edits.length > 0 && <FileChanges edits={edits.map((e) => e.edit)} folder={folder} onOpen={handlers.onOpenFile} />}
       {handlers.testRunFor &&
         steps.map((s) => {
@@ -73,6 +75,29 @@ export function ActivityGroup({ steps, entries = steps, live = false, verb = "Wo
           );
         })}
     </div>
+  );
+}
+
+// What the agent said between its steps, which the next sentence replaces on the line above: all of it as one collapsed line
+// ("3 messages") that expands to each message, like the changed files below it.
+function Messages({ notes }: { notes: Extract<Entry, { type: "assistant" }>[] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button className="activity-line" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="chev" aria-hidden />
+        <span className="activity-text">{`${notes.length} message${notes.length === 1 ? "" : "s"}`}</span>
+      </button>
+      {open && (
+        <div className="file-changes messages" role="list" aria-label="Messages">
+          {notes.map((n) => (
+            <div key={n.id} className="step-note" role="listitem">
+              <Md>{n.text}</Md>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
