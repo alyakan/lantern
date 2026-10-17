@@ -161,8 +161,12 @@ function useDismiss(open: boolean, root: RefObject<HTMLElement | null>, close: (
 const menuKeys = (e: ReactKeyboardEvent<HTMLElement>) => void moveFocus(e, [...e.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]')]);
 
 /** New ▾: a chat or a team in the project on screen, or a review of one of its pull requests. */
-function NewMenu({ canNew, onNewChat, onNewTeam, onNewTeamTemplate, onReviewPr }: Pick<Props, "canNew" | "onNewChat" | "onNewTeam" | "onNewTeamTemplate" | "onReviewPr">) {
+function NewMenu({ canNew, onNewChat, onNewTeam, onNewTeamTemplate, onReviewPr, closing }: Pick<Props, "canNew" | "onNewChat" | "onNewTeam" | "onNewTeamTemplate" | "onReviewPr"> & { closing: boolean }) {
   const [open, setOpen] = useState(false);
+  // The pane closing takes the menu away at once: it would otherwise shrink with the pane, clipped as it goes.
+  useLayoutEffect(() => {
+    if (closing) setOpen(false);
+  }, [closing]);
   const root = useRef<HTMLDivElement>(null);
   useDismiss(open, root, () => setOpen(false), () => root.current?.querySelector<HTMLElement>("[aria-haspopup]"));
   // The sidebar clips what sticks out of it, so the menu stays inside it.
@@ -189,7 +193,7 @@ function NewMenu({ canNew, onNewChat, onNewTeam, onNewTeamTemplate, onReviewPr }
           <span className="chev down" aria-hidden />
         </Away>
       </button>
-      {open && (
+      {open && !closing && (
         <div className="menu sb-menu" role="menu" aria-label="New" ref={menuRef} style={menuStyle} onKeyDown={menuKeys}>
           {item("Chat", "new-session", onNewChat)}
           {item("Team", "work-team", onNewTeam)}
@@ -489,6 +493,11 @@ function BarGroup({ group, color, h, closer }: { group: CompactGroup; color: str
  */
 function Project({ group, color, noted, expanded, phase, onToggle, current, branch, moved, onRelocate, onDismissMoved, h, closer, reorder, notice, onNotice, agentsOpen, onAgents }: { group: CompactGroup; color: string; noted: boolean; expanded: boolean; phase: Phase; onToggle: () => void; current: boolean; branch: string | null; moved: MovedFolder | null; onRelocate: (from: MovedFolder) => void; onDismissMoved: (old: string) => void; h: SidebarHandlers; closer: Closer; reorder: Reorder; notice: string | null; onNotice: (text: string) => void; agentsOpen: Record<string, boolean>; onAgents: (slot: string, open: boolean) => void }) {
   const [menu, setMenu] = useState(false);
+  // The pane closing takes the menu away at once: it would otherwise shrink with the pane, clipped as it goes.
+  const shut = phase === "closing";
+  useLayoutEffect(() => {
+    if (shut) setMenu(false);
+  }, [shut]);
   // The chats that are done: not a working one, a draft, or a team.
   const finished = group.items.flatMap((item) => (item.kind === "chat" && item.state === "done" ? [item.slot] : []));
   return (
@@ -523,7 +532,7 @@ function Project({ group, color, noted, expanded, phase, onToggle, current, bran
             ⋯
           </button>
         </span>
-        {menu && <ProjectMenu group={group} h={h} moves={reorder.moves} finished={finished} onClose={() => setMenu(false)} onClosed={(n) => onNotice(n === 0 ? "No finished chats to close" : `Closed ${n} finished ${n === 1 ? "chat" : "chats"}`)} />}
+        {menu && !shut && <ProjectMenu group={group} h={h} moves={reorder.moves} finished={finished} onClose={() => setMenu(false)} onClosed={(n) => onNotice(n === 0 ? "No finished chats to close" : `Closed ${n} finished ${n === 1 ? "chat" : "chats"}`)} />}
       </div>
       {moved && (
         <Away>
@@ -889,7 +898,7 @@ export function Sidebar(props: Props) {
             {phase && <span className={`sb-side-glyph${phase === "opening" ? " leaving" : ""}`}><SidebarIcon /></span>}
           </button>
           {full ? (
-            <NewMenu {...newMenu} />
+            <NewMenu {...newMenu} closing={phase === "closing"} />
           ) : (
             <button className="icon sb-button" aria-label="New chat" title="New chat" disabled={!canNew} onClick={h.onNewChat}>
               <PlusIcon />

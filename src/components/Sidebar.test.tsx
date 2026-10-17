@@ -848,6 +848,34 @@ describe("the collapsed sidebar", () => {
     }
   });
 
+  it("takes an open menu away at once when the pane closes, instead of shrinking it with the pane", async () => {
+    vi.useFakeTimers();
+    try {
+      bar();
+      await hover();
+      act(() => vi.advanceTimersByTime(300));
+      // A project's ⋯ menu.
+      fireEvent.click(screen.getByRole("button", { name: /^More for network-monitor/ }));
+      expect(screen.getByRole("menu", { name: "network-monitor actions" })).toBeInTheDocument();
+      fireEvent.pointerLeave(panel());
+      expect(panel()).toHaveClass("closing");
+      expect(screen.queryByRole("menu", { name: "network-monitor actions" })).toBeNull();
+      widthEnded();
+      // It doesn't come back when the pane is the bar, nor when the pane opens again.
+      expect(screen.queryByRole("menu")).toBeNull();
+      fireEvent.pointerEnter(panel());
+      act(() => vi.advanceTimersByTime(OPEN_AFTER_MS + 300));
+      expect(screen.queryByRole("menu")).toBeNull();
+      // New ▾, the same way.
+      fireEvent.click(screen.getByRole("button", { name: "New" }));
+      expect(screen.getByRole("menu", { name: "New" })).toBeInTheDocument();
+      fireEvent.pointerLeave(panel());
+      expect(screen.queryByRole("menu", { name: "New" })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("swaps at once when motion is reduced: no closing pane is kept", async () => {
     vi.useFakeTimers();
     const was = window.matchMedia;
