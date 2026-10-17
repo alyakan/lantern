@@ -1172,7 +1172,7 @@ const MOCK_CHECKLISTS = {
 };
 let mockWatches = [{ label: "Checklists", method: "GET", url: "/v1/checklists" }];
 
-// The Storage tab's scan in the browser preview: a few items of each kind, one blocked, one with a suggestion from Claude.
+// The Storage panel's scan in the browser preview: items of every kind (one a hair of the scan, one inside another), one blocked, two with a suggestion from Claude.
 const mockStorageItem = (id: string, kind: string, name: string, gb: number, over: Record<string, unknown> = {}) => ({
   id, kind, name, path: `/Users/you/${name}`, bytes: Math.round(gb * 1e9), risk: "safe", removal: kind === "worktree" ? "worktree" : kind === "repo" ? "trash" : "permanent", note: "Comes back with a build.", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, ...over,
 });
@@ -1184,9 +1184,45 @@ let mockStorageItems = [
   mockStorageItem("c2", "build_output", "acme-api/target", 6.8, { ticked: true, note: "Rust build output: the next `cargo build` rebuilds it." }),
   mockStorageItem("d1", "simulator", "iOS 16.4 simulator runtime", 6.2, { risk: "review", warning: "Last used 50 day(s) ago; downloading it again takes a while.", idle_days: 50 }),
   mockStorageItem("e1", "cache", "Caches/com.apple.dt.Xcode", 4.4, { ticked: true }),
+  mockStorageItem("e2", "cache", "npm/_cacache", 2.1, { suggestion: "Rebuilt by the next install; untouched for 3 weeks" }),
+  mockStorageItem("e3", "cache", "Logs/DiagnosticReports", 0.3, { ticked: true }),
+  mockStorageItem("e4", "cache", "Caches/com.apple.Safari", 0.04),
   mockStorageItem("f1", "trash", "Trash/Old movie.mov", 2.0, { ticked: true }),
+  mockStorageItem("g1", "download", "Downloads/Xcode_17.dmg", 3.1, { removal: "trash", idle_days: 90, note: "Yours: it goes to the Trash." }),
+  mockStorageItem("g2", "download", "Downloads/Screen Recording.mov", 1.2, { removal: "trash", idle_days: 30, note: "Yours: it goes to the Trash." }),
+  mockStorageItem("a3", "worktree", "web-dashboard/wt-charts", 0.9, { within: null, idle_days: 21 }),
+  mockStorageItem("c3", "build_output", "acme-api/wt-retry/target", 2.2, { within: "a1", ticked: true, note: "Inside the worktree above: it goes with it." }),
 ];
 let mockStorageScannedAt: number | null = null;
+// The Memory tab's snapshot in the browser preview: a 16 GB Mac with the usual apps, sizes drifting a little on each read so the bars move.
+let mockMemoryReads = 0;
+const mockMemory = () => {
+  const n = mockMemoryReads++;
+  const GiB = 1024 ** 3;
+  const MiB = 1024 ** 2;
+  const mb = (base: number, amp: number) => Math.round(base + Math.sin(n / 2 + base) * amp) * MiB;
+  const named = [
+    ["Google Chrome", "app", 11, mb(2100, 70)],
+    ["Lantern and its agents", "lantern", 9, mb(1900, 120)],
+    ["Xcode", "app", 14, mb(1650, 20)],
+    ["Slack", "app", 6, mb(780, 15)],
+    ["node", "app", 5, mb(620, 25)],
+    ["Figma", "app", 5, mb(540, 10)],
+    ["Docker Desktop", "app", 4, mb(480, 5)],
+    ["Spotify", "app", 5, mb(390, 8)],
+    ["Notion", "app", 4, mb(350, 6)],
+    ["zsh", "app", 7, mb(60, 2)],
+    ["Other apps", "other", 31, mb(800, 20)],
+  ] as const;
+  const total = 16 * GiB;
+  const used = Math.round(11.4 * GiB);
+  const cached = Math.round(3.1 * GiB);
+  const apps: { name: string; kind: string; processes: number; bytes: number; share: number }[] = named.map(([name, kind, processes, bytes]) => ({ name, kind, processes, bytes, share: bytes / total }));
+  const macos = used - apps.reduce((a, x) => a + x.bytes, 0);
+  apps.push({ name: "macOS", kind: "macos", processes: 380, bytes: macos, share: macos / total });
+  apps.sort((a, b) => (a.kind === "other" ? 1 : b.kind === "other" ? -1 : b.bytes - a.bytes));
+  return { total_bytes: total, used_bytes: used, cached_bytes: cached, free_bytes: total - used - cached, compressed_bytes: Math.round(3.6 * GiB), swap_used_bytes: Math.round(2.3 * GiB), pressure: "normal", pressure_source: "kernel", scaled: false, apps };
+};
 const mockItems = (): NetworkItem[] =>
   mockWatches.length === 0
     ? []
@@ -1693,6 +1729,8 @@ export function installMockBackend() {
           return true;
         case "storage_cancel":
           return undefined;
+        case "memory_snapshot":
+          return mockMemory();
         case "storage_delete": {
           const ids = a.ids as string[];
           const out = ids.map((id) => {

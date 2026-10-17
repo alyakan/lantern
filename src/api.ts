@@ -4,7 +4,7 @@ import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { Role } from "./lib/roles";
 import type { ReviewSetting } from "./lib/reviewChain";
-import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, GhAccess, McpServerSpec, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -287,6 +287,8 @@ export const api = {
   storageCancel: () => invoke<void>("storage_cancel"),
   /** Deletes the items with these ids (from the last scan), each checked again first; the outcome says what each came to. */
   storageDelete: (ids: string[]) => invoke<StorageOutcome[]>("storage_delete", { ids }),
+  /** How the RAM is used and by which apps (read-only: process names, sizes and counts; nothing is stopped). */
+  memorySnapshot: () => invoke<MemorySnapshot>("memory_snapshot"),
   /** The scan moved on, finished, or Claude marked suggestions. */
   onStorageChanged: (cb: () => void): Promise<UnlistenFn> => listen("storage-changed", () => cb()),
   onUiEvent: (cb: (slot: string, event: UiEvent) => void): Promise<UnlistenFn> =>

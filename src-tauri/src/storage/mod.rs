@@ -7,6 +7,7 @@
 //! project is only offered as safe when git says nothing in it is unsaved.
 
 mod clean;
+pub mod memory;
 mod scan;
 
 use serde::Serialize;

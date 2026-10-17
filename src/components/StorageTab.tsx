@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { api } from "../api";
-import { GROUPS, groupOf, idleText, isTicked, outcomeText, selection, sizeText } from "../lib/storage";
+import { GROUPS, groupOf, idleText, isTicked, kindColour, outcomeText, rowWidth, segments, selection, shareText, sizeText, summaryText, type Segment } from "../lib/storage";
 import { relativeTime } from "../lib/time";
 import type { StorageItem, StorageKind, StorageView } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { TabEmpty } from "./TabEmpty";
 
-/** The Storage tab's data: loaded when the app opens and again whenever the backend says the scan moved on. */
+/** The Storage panel's data: loaded when the app opens and again whenever the backend says the scan moved on. */
 export function useStorageView(): StorageView | null {
   const [view, setView] = useState<StorageView | null>(null);
   useEffect(() => {
@@ -23,11 +23,11 @@ export function useStorageView(): StorageView | null {
   return view;
 }
 
-/** What Claude marked: how many suggestions the scan has, for the tab's badge. */
+/** What Claude marked: how many suggestions the scan has, for the title bar button's badge. */
 export const suggestedCount = (view: StorageView | null) => view?.items.filter((i) => i.suggestion !== null).length ?? 0;
 
 /** The message that sends Claude to scan and suggest. */
-export const FREE_UP_SPACE_REQUEST = "Free up disk space: scan this Mac with the storage tools, then mark what is safe to delete (storage_suggest) with a short reason each. I'll review it in the Storage tab and delete from there.";
+export const FREE_UP_SPACE_REQUEST = "Free up disk space: scan this Mac with the storage tools, then mark what is safe to delete (storage_suggest) with a short reason each. I'll review it in the Storage panel (the disk button in the title bar) and delete from there.";
 
 const SHOWN = 40;
 
@@ -46,8 +46,14 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [result, setResult] = useState<ReturnType<typeof outcomeText> | null>(null);
+  // The kind the pointer or keyboard is on in the bar or its legend: it stands out, and the readout names it.
+  const [hot, setHot] = useState<StorageKind | null>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const parts = useMemo(() => segments(view?.items ?? []), [view]);
+  const biggest = useMemo(() => Math.max(0, ...(view?.items ?? []).map((i) => i.bytes)), [view]);
   const items = useMemo(() => view?.items ?? [], [view]);
   const sel = useMemo(() => selection(items, touched), [items, touched]);
+  const total = useMemo(() => GROUPS.reduce((n, g) => n + groupOf(items, g.kind).bytes, 0), [items]);
   const working = deleting || !!view?.deleting;
   // What the confirmation names: ticked items that need a judgement (review risk) or that only Claude's suggestion ticked.
   const look = useMemo(() => {
@@ -56,6 +62,7 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
   }, [items, sel]);
 
   if (!view) return <TabEmpty title="Storage">Looking at the disk…</TabEmpty>;
+  const goTo = (kind: StorageKind) => body.current?.querySelector(`[data-kind="${kind}"]`)?.scrollIntoView?.({ behavior: "smooth", block: "start" });
 
   const set = (ids: string[], on: boolean) => setTouched((t) => new Map([...t, ...ids.map((id) => [id, on] as const)]));
   const scan = () => {
@@ -145,7 +152,8 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
           ))}
         </div>
       )}
-      <div className="storage-body">
+      {parts.length > 0 && <Distribution parts={parts} hot={hot} onHot={setHot} onPick={goTo} />}
+      <div className="storage-body" ref={body}>
         {items.length === 0 && !view.scanning && <div className="tests-note storage-empty">Nothing to clear was found.</div>}
         {GROUPS.map(({ kind, title, hint }) => {
           const g = groupOf(items, kind);
@@ -154,8 +162,9 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
           const rows = all ? g.items : g.items.slice(0, SHOWN);
           const safe = g.items.filter((i) => i.risk === "safe").map((i) => i.id);
           return (
-            <section key={kind} className="storage-group" aria-label={title}>
+            <section key={kind} className={`storage-group${hot === kind ? " hot" : ""}`} aria-label={title} data-kind={kind} style={{ "--kind": kindColour(kind) } as CSSProperties}>
               <header className="storage-group-head">
+                <span className="storage-swatch" aria-hidden />
                 <span className="storage-group-title">{title}</span>
                 <span className="storage-group-size">{sizeText(g.bytes)}</span>
                 <span className="storage-group-hint" title={hint}>
@@ -170,7 +179,7 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
               </header>
               <ul className="storage-list">
                 {rows.map((item) => (
-                  <Row key={item.id} item={item} ticked={isTicked(item, touched)} disabled={working} onTick={(on) => set([item.id], on)} />
+                  <Row key={item.id} item={item} biggest={biggest} ticked={isTicked(item, touched)} disabled={working} onTick={(on) => set([item.id], on)} />
                 ))}
               </ul>
               {g.items.length > SHOWN && (
@@ -184,7 +193,8 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
       </div>
       <div className="storage-actions">
         <span className="storage-selected" aria-live="polite">
-          {sel.ids.length === 0 ? "Nothing ticked" : `${sel.ids.length} ticked · frees up to ${sizeText(sel.bytes - sel.toTrashBytes)}${sel.toTrashBytes > 0 ? `, ${sizeText(sel.toTrashBytes)} more once the Trash is emptied` : ""}`}
+          {summaryText(total, sel)}
+          {sel.ids.length > 0 && ` · ${sel.ids.length} ticked`}
         </span>
         <div className="spacer" />
         <button className="danger" disabled={sel.ids.length === 0 || working || view.scanning} onClick={() => setConfirming(true)}>
@@ -217,7 +227,53 @@ export function StorageTab({ view, onAsk, busy = false }: Props) {
   );
 }
 
-function Row({ item, ticked, disabled, onTick }: { item: StorageItem; ticked: boolean; disabled: boolean; onTick: (on: boolean) => void }) {
+/** The whole scan as one bar split by kind, with its legend: hover or focus a kind to read it, press it to go to its list. */
+function Distribution({ parts, hot, onHot, onPick }: { parts: Segment[]; hot: StorageKind | null; onHot: (kind: StorageKind | null) => void; onPick: (kind: StorageKind) => void }) {
+  const text = (p: Segment) => `${p.title}: ${sizeText(p.bytes)} (${shareText(p.share)})`;
+  const readout = parts.find((p) => p.kind === hot);
+  return (
+    <div className="storage-chart" onPointerLeave={() => onHot(null)}>
+      <div className="storage-stack" role="img" aria-label={`Storage by kind. ${parts.map(text).join(". ")}`}>
+        {parts.map((p) => (
+          <div
+            key={p.kind}
+            className={`storage-seg${hot === p.kind ? " hot" : ""}${hot && hot !== p.kind ? " dim" : ""}`}
+            data-kind={p.kind}
+            style={{ width: `${p.width}%`, "--kind": kindColour(p.kind) } as CSSProperties}
+            title={text(p)}
+            onPointerEnter={() => onHot(p.kind)}
+            onClick={() => onPick(p.kind)}
+          />
+        ))}
+      </div>
+      <div className="storage-readout" aria-hidden>
+        {readout ? text(readout) : "Hover a colour to read it, press it to go to its list"}
+      </div>
+      <ul className="storage-legend" aria-label="Storage kinds">
+        {parts.map((p) => (
+          <li key={p.kind}>
+            <button
+              className={`storage-legend-item${hot && hot !== p.kind ? " dim" : ""}`}
+              style={{ "--kind": kindColour(p.kind) } as CSSProperties}
+              title={`Go to ${p.title}`}
+              onPointerEnter={() => onHot(p.kind)}
+              onFocus={() => onHot(p.kind)}
+              onBlur={() => onHot(null)}
+              onClick={() => onPick(p.kind)}
+            >
+              <span className="storage-swatch" aria-hidden />
+              <span className="storage-legend-name">{p.title}</span>
+              <span className="storage-legend-size">{sizeText(p.bytes)}</span>
+              <span className="storage-legend-share">{shareText(p.share)}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function Row({ item, biggest, ticked, disabled, onTick }: { item: StorageItem; biggest: number; ticked: boolean; disabled: boolean; onTick: (on: boolean) => void }) {
   const blocked = item.risk === "blocked";
   const idle = idleText(item.idle_days);
   return (
@@ -231,6 +287,10 @@ function Row({ item, ticked, disabled, onTick }: { item: StorageItem; ticked: bo
             {item.name}
           </span>
           <span className="storage-size">{sizeText(item.bytes)}</span>
+        </div>
+        {/* Its size against the biggest item of the scan; the number above is its text alternative. */}
+        <div className="storage-rowbar" aria-hidden>
+          <span style={{ width: `${rowWidth(item.bytes, biggest)}%` }} />
         </div>
         <div className="storage-meta">
           {[idle, item.removal === "trash" ? "goes to the Trash" : item.removal === "permanent" ? "deleted for good" : null, item.within ? "inside another item" : null].filter(Boolean).join(" · ")}
