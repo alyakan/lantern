@@ -121,6 +121,9 @@ export function TeamTemplateDialog({ folder, onStart, onClose }: Props) {
             aria-required
             aria-invalid={!!problem && !task.trim()}
             placeholder="For example: add a dark mode toggle to the settings page."
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
             onChange={(e) => setTask(e.target.value)}
             onKeyDown={(e) => {
               if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {

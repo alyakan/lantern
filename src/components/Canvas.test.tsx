@@ -146,6 +146,16 @@ describe("the canvas", () => {
     expect(document.querySelectorAll("path.tether")).toHaveLength(2);
   });
 
+  it("doesn't correct or capitalise what is typed into an agent's box (macOS rewrites words in a box that doesn't say no)", () => {
+    setup(idleTeam(1));
+    for (const label of [/^Lead,/, /Agent Worker 1/]) {
+      const box = within(screen.getByLabelText(label)).getByLabelText(/^Message (this agent|it)/);
+      expect(box).toHaveAttribute("autocorrect", "off");
+      expect(box).toHaveAttribute("autocapitalize", "off");
+      expect(box).toHaveAttribute("spellcheck", "false");
+    }
+  });
+
   it("puts Permissions and Workflow on every window's title bar, and changes them for that window", () => {
     const { acts } = setup(idleTeam(1));
     const lead = screen.getByLabelText(/^Lead,/);

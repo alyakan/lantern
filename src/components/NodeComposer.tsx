@@ -58,7 +58,7 @@ export function NodeComposer({ slot, status, queued }: { slot: string; status: S
         </ul>
       )}
       <div className="node-composer-box">
-        <textarea ref={box} rows={1} value={text} disabled={blocked} placeholder={placeholder} aria-label="Message this agent" onChange={(e) => change(e.target.value)} onKeyDown={onKeyDown} />
+        <textarea ref={box} rows={1} value={text} disabled={blocked} placeholder={placeholder} aria-label="Message this agent" autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => change(e.target.value)} onKeyDown={onKeyDown} />
         {working && (
           <button className="node-send stop" aria-label="Stop" title="Stop this turn" onClick={() => actions.stop(slot)}>
             <HudStopIcon />
