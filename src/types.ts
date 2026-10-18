@@ -546,6 +546,32 @@ export interface MemorySnapshot {
   apps: MemoryApp[];
 }
 
+/** What the menu bar panel shows of the Mac, a few milliseconds to read (no process list). */
+export interface MenuBarStats {
+  ram: { total_bytes: number; used_bytes: number; pressure: "normal" | "warning" | "critical" } | null;
+  disk_free: number | null;
+  disk_total: number | null;
+}
+
+/** What the menu bar panel may ask the main window to do (the backend checks it, then the window does). */
+export type MenuBarAction =
+  | { kind: "open" }
+  | { kind: "chat"; slot: string }
+  | { kind: "new_chat"; folder: string; text: string }
+  | { kind: "storage" }
+  | { kind: "settings" };
+
+/** An open chat (or a team's Lead) as the menu bar panel lists it. */
+export interface MenuBarChat {
+  slot: string;
+  title: string;
+  /** The project's folder name. */
+  project: string;
+  /** As the sidebar's dot says it: working, waiting for you, a draft typed but not sent, or done. */
+  state: "running" | "waiting" | "draft" | "done";
+  team: boolean;
+}
+
 export interface NetworkBody {
   encoding: "utf8" | "base64";
   data: string;

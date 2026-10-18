@@ -1,10 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { Role } from "./lib/roles";
 import type { ReviewSetting } from "./lib/reviewChain";
-import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -289,6 +289,24 @@ export const api = {
   storageDelete: (ids: string[]) => invoke<StorageOutcome[]>("storage_delete", { ids }),
   /** How the RAM is used and by which apps (read-only: process names, sizes and counts; nothing is stopped). */
   memorySnapshot: () => invoke<MemorySnapshot>("memory_snapshot"),
+  /** The menu bar item as the user chose it (mode, readout, alerts): pushed at launch and on every change. */
+  setMenuBar: (config: { mode: "off" | "icon" | "full"; ram: boolean; disk: boolean; alerts: boolean }) => invoke<void>("set_menu_bar", { config }),
+  /** The menu bar panel's numbers: RAM used and pressure, disk free and total (a few milliseconds). */
+  menubarStats: () => invoke<MenuBarStats>("menubar_stats"),
+  /** The panel is as tall as what it shows (logical pixels, kept within bounds by the backend). */
+  menubarFit: (height: number) => invoke<void>("menubar_fit", { height }),
+  menubarHide: () => invoke<void>("menubar_hide"),
+  /** Asks the main window to do something (the backend checks it, brings the window forward and passes it on). Rejects with why. */
+  menubarAct: (action: MenuBarAction) => invoke<void>("menubar_act", { action }),
+  /** The main window: what the menu bar panel asked for. */
+  onMenubarAction: (cb: (action: MenuBarAction) => void): Promise<UnlistenFn> => listen<MenuBarAction>("menubar-action", (e) => cb(e.payload)),
+  /** The panel: it was just opened (refresh, and take the theme as it is now). */
+  onMenubarShown: (cb: () => void): Promise<UnlistenFn> => listen("menubar-shown", () => cb()),
+  /** The main window tells the panel which chats are open; the panel asks for them when it starts. */
+  publishMenubarChats: (chats: MenuBarChat[]) => emit("menubar-chats", chats),
+  onMenubarChats: (cb: (chats: MenuBarChat[]) => void): Promise<UnlistenFn> => listen<MenuBarChat[]>("menubar-chats", (e) => cb(e.payload)),
+  askMenubarChats: () => emit("menubar-need-chats"),
+  onMenubarNeedChats: (cb: () => void): Promise<UnlistenFn> => listen("menubar-need-chats", () => cb()),
   /** The scan moved on, finished, or Claude marked suggestions. */
   onStorageChanged: (cb: () => void): Promise<UnlistenFn> => listen("storage-changed", () => cb()),
   onUiEvent: (cb: (slot: string, event: UiEvent) => void): Promise<UnlistenFn> =>

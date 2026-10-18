@@ -1412,6 +1412,16 @@ export function installMockBackend() {
   if (STRESS) void stressDrive();
   else if (mode === "demo" || mode === "ready" || mode === "history") autoplay(new URLSearchParams(location.search).has("allow"), mode === "ready", mode === "history");
   mockWindows("main");
+  // `?mock&menubar` is the menu bar panel in a browser: a few open chats arrive, as the main window would send them.
+  if (new URLSearchParams(location.search).has("menubar")) {
+    const sample = [
+      { slot: "s1", title: "Retry transient fetch errors", project: "acme-api", state: "waiting", team: false },
+      { slot: "s2", title: "Dark mode for the dashboard", project: "web-dashboard", state: "running", team: false },
+      { slot: "s3", title: "New team", project: "acme-api", state: "running", team: true },
+      { slot: "s4", title: "Why is the build slow?", project: "infra", state: "done", team: false },
+    ];
+    window.setTimeout(() => void emit("menubar-chats", sample), 300);
+  }
   mockIPC(
     (cmd, args) => {
       const a = (args ?? {}) as Record<string, unknown>;
@@ -1771,6 +1781,15 @@ export function installMockBackend() {
           return undefined;
         case "memory_snapshot":
           return mockMemory();
+        case "set_menu_bar":
+        case "menubar_fit":
+        case "menubar_hide":
+          return undefined;
+        case "menubar_stats":
+          // `?lowdisk` shows the amber state, `?critical` the red one.
+          return { ram: { total_bytes: 18_000_000_000, used_bytes: 11_300_000_000, pressure: new URLSearchParams(location.search).has("critical") ? "critical" : "normal" }, disk_free: new URLSearchParams(location.search).has("critical") ? 3_100_000_000 : new URLSearchParams(location.search).has("lowdisk") ? 8_300_000_000 : 82_000_000_000, disk_total: 494_000_000_000 };
+        case "menubar_act":
+          return undefined;
         case "storage_delete": {
           const ids = a.ids as string[];
           const out = ids.map((id) => {

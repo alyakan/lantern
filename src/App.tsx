@@ -3,6 +3,7 @@ import { pushAgentLimit } from "./lib/agentLimit";
 import { pushAutoMergeTests } from "./lib/mergeTests";
 import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
+import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome } from "./api";
@@ -33,7 +34,7 @@ import { withSkillNote } from "./lib/skillNote";
 import { BUILT_IN, CUSTOM_HARNESS, customOf, DEFAULT_HARNESS, findHarness, presetsOf, settingsOf, type Harness } from "./lib/harness";
 import { describeCommands } from "./lib/complete";
 import type { McpIssue } from "./components/CompletionMenu";
-import type { CloseAgreed, CloseCheck, McpServer, MovedFolder, NewRule, NewWorker, OpenPr, RecentFolder, RelocationEntry, SkillEntry, UpdateInfo } from "./types";
+import type { CloseAgreed, CloseCheck, McpServer, MenuBarAction, MovedFolder, NewRule, NewWorker, OpenPr, RecentFolder, RelocationEntry, SkillEntry, UpdateInfo } from "./types";
 import { LAST_FOLDER, OPEN_CHATS, migrateFolderState, withMovedNote, type Migrated } from "./lib/relocate";
 import { BringOldSessionsDialog } from "./components/BringOldSessionsDialog";
 import { ProjectNotesDialog } from "./components/ProjectNotesDialog";
@@ -282,6 +283,8 @@ export default function App() {
     void pushAgentLimit();
     void pushAutoMergeTests();
     void pushRestorePoints();
+    // The menu bar item is built by the backend from the user's choice: it learns it from here.
+    void pushMenuBar();
   }, []);
   // The backend runs a project's setup in a new worktree, and its Run command: it learns both from here, at launch and on every save.
   useEffect(() => {
@@ -1875,6 +1878,37 @@ export default function App() {
   // Projects removed from the recents here (Claude Code keeps their chats; one with a chat open is listed regardless).
   const [hiddenFolders, setHiddenFolders] = usePersistentState<string[]>("sidebar.hidden", []);
   const openByProject = openProjects(chats, { titles, drafts: drafts.current, unread, pinned: pinnedBy });
+  // The menu bar panel (another window) lists the open chats: told when they change, and when the panel asks.
+  const menuBarList = menuBarChats(openByProject);
+  const menuBarKey = JSON.stringify(menuBarList);
+  const menuBarSent = useRef(menuBarList);
+  menuBarSent.current = menuBarList;
+  useEffect(() => {
+    void api.publishMenubarChats(menuBarSent.current).catch(() => {});
+  }, [menuBarKey]);
+  // What the panel asked of this window, which the backend already checked and brought forward: open a chat, start one in a
+  // project the user knows, or open Storage or Settings. The ref is read when it happens, so it sees the chats as they are then.
+  const menuBarAct = useRef<(a: MenuBarAction) => void>(() => {});
+  menuBarAct.current = (a) => {
+    if (a.kind === "chat") switchTo(a.slot);
+    else if (a.kind === "storage") setStorageOpen(true);
+    else if (a.kind === "settings") setSettingsAt("general");
+    else if (a.kind === "new_chat" && validChatText(a.text)) {
+      const openFolders = Object.values(chats.slots).map((s) => s.folder);
+      api.recentFolders().then(
+        (recent) => knownProject(a.folder, recent, openFolders) && startFresh(a.folder, false, false, a.text),
+        () => {},
+      );
+    }
+  };
+  useEffect(() => {
+    const unlistenAct = api.onMenubarAction((a) => menuBarAct.current(a)).catch(() => null);
+    const unlistenNeed = api.onMenubarNeedChats(() => void api.publishMenubarChats(menuBarSent.current).catch(() => {})).catch(() => null);
+    return () => {
+      unlistenAct.then((f) => f?.());
+      unlistenNeed.then((f) => f?.());
+    };
+  }, []);
   // Pull request checks: each project's choice (Off, Tell me, Fix it myself), and the loop that watches the pull request.
   const [prSettings, setPrSettings] = usePersistentState<Record<string, Partial<PrSetting>>>("prChecks.byFolder", {});
   const [prDialog, setPrDialog] = useState<string | null>(null);
