@@ -387,6 +387,32 @@ pub const ADVISOR_SECURITY_PROMPT: &str = "Security checks are your advisor's: b
 /// And the main agent of a team, about its workers' branches.
 pub const ADVISOR_MERGE_PROMPT: &str = "Before you call propose_merge, ask your advisor to check the worker's diff for security problems.";
 
+/// What each subagent a chat with an advisor starts is told, by a SubagentStart hook. The advisor is a server-side tool
+/// every subagent inherits from its parent, with no setting or tool rule that takes it away from just them (denying the
+/// tool would take it from the chat too), and each call sends the subagent's whole conversation to the advisor model.
+/// No apostrophes: it goes inside a single-quoted shell string (see `subagent_advisor_hook`).
+pub const SUBAGENT_NO_ADVISOR_NOTE: &str = "You are a subagent. The advisor tool is reserved for the lead agent, which has its own advisor. Do not call the advisor tool, even if your task or the tool description asks you to; do the work yourself and report back.";
+
+/// The `--settings` hook that tells every subagent not to use the advisor (see SUBAGENT_NO_ADVISOR_NOTE).
+fn subagent_advisor_hook() -> serde_json::Value {
+    let output = serde_json::json!({"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": SUBAGENT_NO_ADVISOR_NOTE}});
+    serde_json::json!({"hooks": {"SubagentStart": [{"hooks": [{"type": "command", "command": format!("printf '%s' '{output}'")}]}]}})
+}
+
+/// Adds `extra`'s top-level settings to the command line's `--settings`, merging into the one already there (Claude Code
+/// takes one `--settings`, so a second would replace it).
+fn add_settings(args: &mut Vec<String>, extra: serde_json::Value) {
+    let existing = args.iter().position(|x| x == "--settings");
+    let mut merged = existing.and_then(|i| args.get(i + 1)).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()).unwrap_or_else(|| serde_json::json!({}));
+    if let (Some(into), Some(from)) = (merged.as_object_mut(), extra.as_object()) {
+        into.extend(from.clone());
+    }
+    match existing {
+        Some(i) => args[i + 1] = merged.to_string(),
+        None => args.extend(["--settings".to_string(), merged.to_string()]),
+    }
+}
+
 /// The tools a read-only worker may not use, as well as not having them (see READ_ONLY_TOOLS).
 pub const EDIT_TOOLS: [&str; 4] = ["Edit", "Write", "MultiEdit", "NotebookEdit"];
 
@@ -418,7 +444,8 @@ pub fn enabled_plugins(home: &std::path::Path, folder: &std::path::Path) -> Vec<
 /// user's plugins (`plugins`, see `enabled_plugins`: their skills, agents and hooks are most of a session's starting
 /// context). The user's CLAUDE.md, permission rules and own hooks still apply. A read-only worker has only the tools that
 /// read (`--tools Read,Grep,Glob`): no shell, so it can't write, delete or commit by any route, whatever the user has
-/// allowed. Any other chat with an advisor is told to have it check risky changes (see ADVISOR_REVIEW_ENV).
+/// allowed. Any other chat with an advisor is told to have it check risky changes (see ADVISOR_REVIEW_ENV), and its
+/// subagents are told not to use it (see SUBAGENT_NO_ADVISOR_NOTE).
 #[allow(clippy::too_many_arguments)]
 pub fn launch_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: Option<&str>, effort: Option<&str>, advisor: Option<&str>, helper: &HelperConfig, plugins: &[String]) -> Vec<String> {
     let mut a = build_args(mode, auto_approve, resume, model, effort, helper);
@@ -441,6 +468,7 @@ pub fn launch_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: 
         }
         role => {
             if advisor.is_some() {
+                add_settings(&mut a, subagent_advisor_hook());
                 if let Some(i) = a.iter().position(|x| x == "--append-system-prompt") {
                     let prompt = &mut a[i + 1];
                     prompt.push_str("\n\n");
@@ -939,6 +967,41 @@ mod tests {
         assert!(value_after(&main, "--append-system-prompt").unwrap().ends_with(&format!("{ADVISOR_SECURITY_PROMPT} {ADVISOR_MERGE_PROMPT}")));
         assert!(!main.iter().any(|x| x == "--strict-mcp-config" || x == "--disallowedTools"));
         assert_eq!(launch_args(Mode::Ask, false, None, None, None, None, &helper(), &[]), build_args(Mode::Ask, false, None, None, None, &helper()));
+    }
+
+    /// The hook's command, run the way Claude Code runs it, and what it printed.
+    fn subagent_hook_output(args: &[String]) -> serde_json::Value {
+        let settings: serde_json::Value = serde_json::from_str(value_after(args, "--settings").unwrap()).unwrap();
+        let command = settings["hooks"]["SubagentStart"][0]["hooks"][0]["command"].as_str().unwrap();
+        let out = std::process::Command::new("sh").args(["-c", command]).output().unwrap();
+        assert!(out.status.success());
+        serde_json::from_slice(&out.stdout).expect("the hook prints JSON")
+    }
+
+    #[test]
+    fn a_chat_with_an_advisor_tells_its_subagents_not_to_use_it() {
+        for helper in [helper(), HelperConfig { role: Role::Main, ..helper() }] {
+            let a = launch_args(Mode::Ask, false, None, None, None, Some("opus"), &helper, &[]);
+            let out = subagent_hook_output(&a);
+            assert_eq!(out["hookSpecificOutput"]["hookEventName"], "SubagentStart");
+            assert_eq!(out["hookSpecificOutput"]["additionalContext"], SUBAGENT_NO_ADVISOR_NOTE);
+            assert_eq!(a.iter().filter(|x| *x == "--settings").count(), 1, "Claude Code takes one --settings: {a:?}");
+        }
+        assert!(!SUBAGENT_NO_ADVISOR_NOTE.contains('\''), "it goes in a single-quoted shell string");
+        // The Lead's own rule that its Agent tool asks first stays alongside it.
+        let main = launch_args(Mode::Ask, false, None, None, None, Some("opus"), &HelperConfig { role: Role::Main, ..helper() }, &[]);
+        let settings: serde_json::Value = serde_json::from_str(value_after(&main, "--settings").unwrap()).unwrap();
+        assert_eq!(settings["permissions"]["ask"], serde_json::json!(INLINE_AGENT_TOOLS));
+        assert!(settings["hooks"]["SubagentStart"].is_array());
+    }
+
+    #[test]
+    fn a_chat_without_an_advisor_and_a_worker_get_no_subagent_hook() {
+        let none = launch_args(Mode::Ask, false, None, None, None, None, &helper(), &[]);
+        assert!(!none.iter().any(|x| x == "--settings"), "{none:?}");
+        let worker = HelperConfig { role: Role::Worker { name: "w".into(), read_only: false }, ..helper() };
+        let w = launch_args(Mode::Ask, false, None, None, None, Some("opus"), &worker, &["p@m".to_string()]);
+        assert!(!value_after(&w, "--settings").unwrap().contains("SubagentStart"));
     }
 
     #[test]
