@@ -218,7 +218,9 @@ describe("keyboard access", () => {
   it("puts focus on the filter when nothing was found", async () => {
     locations.mockResolvedValue([]);
     open();
-    expect(await screen.findByRole("textbox", { name: "Filter folders" })).toHaveFocus();
+    const filter = await screen.findByRole("textbox", { name: "Filter folders" });
+    // The box is there before the search ends: focus moves to it once nothing was found.
+    await waitFor(() => expect(filter).toHaveFocus());
   });
 
   it("Escape closes the dialog, unless a move is running", async () => {

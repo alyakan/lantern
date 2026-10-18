@@ -58,8 +58,9 @@ describe("FullDiff of a file that was created", () => {
     expect(screen.getByTestId("whole")).toBe(node);
     expect(marks).toHaveLength(1);
     const set = marks[0].set;
-    const ranges = set.mock.calls[set.mock.calls.length - 1][0] as { range: { endLineNumber: number }; options: { className: string } }[];
-    expect(ranges[0].range.endLineNumber).toBe(3);
-    expect(ranges[0].options.className).toBe("whole-added");
+    // The marks are moved by an effect that runs after the text on screen has changed, so wait for them too.
+    const latest = () => set.mock.calls[set.mock.calls.length - 1]?.[0] as { range: { endLineNumber: number }; options: { className: string } }[] | undefined;
+    await waitFor(() => expect(latest()?.[0].range.endLineNumber).toBe(3));
+    expect(latest()?.[0].options.className).toBe("whole-added");
   });
 });
