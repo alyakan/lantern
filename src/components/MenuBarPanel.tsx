@@ -13,14 +13,14 @@ const APPS_MS = 8000;
 const FOLDER_KEY = "menubar.folder";
 const SHOWN_CHATS = 5;
 const SHOWN_APPS = 3;
-/** The panel's window has this much room round the card, for the card's shadow. */
-const FRAME = 24;
 
 /** The panel that opens from the menu bar item: the Mac's memory and disk, the open chats, and a box to start a new one. It is
  * its own window, so it takes the theme itself, follows it when it changes, and only asks the main window to do things. */
 export function MenuBarPanel() {
   const settings = useMenuBar();
-  const [open, setOpen] = useState(true);
+  // Closed until the backend says it was shown: a window that has never been shown never loses focus, so starting open would
+  // read the Mac every few seconds for a panel nobody has opened.
+  const [open, setOpen] = useState(false);
   const [stats, setStats] = useState<MenuBarStats | null>(null);
   const [snapshot, setSnapshot] = useState<MemorySnapshot | null>(null);
   const [chats, setChats] = useState<MenuBarChat[]>([]);
@@ -96,11 +96,11 @@ export function MenuBarPanel() {
     };
   }, [open, settings.panel.memory]);
 
-  // The window is as tall as the card.
+  // The window is as tall as what it holds: the frame (the card and the room round it for its shadow).
   useEffect(() => {
     const el = frame.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const fit = () => void api.menubarFit(Math.ceil(el.getBoundingClientRect().height) + FRAME).catch(() => {});
+    const fit = () => void api.menubarFit(Math.ceil(el.getBoundingClientRect().height)).catch(() => {});
     const watch = new ResizeObserver(fit);
     watch.observe(el);
     fit();

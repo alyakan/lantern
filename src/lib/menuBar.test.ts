@@ -4,7 +4,7 @@ import { act, renderHook } from "@testing-library/react";
 const setMenuBarApi = vi.fn(() => Promise.resolve());
 vi.mock("../api", () => ({ api: { setMenuBar: (...a: unknown[]) => (setMenuBarApi as (...x: unknown[]) => Promise<void>)(...a) } }));
 
-import { backendConfig, diskLevel, knownProject, MENU_BAR_DEFAULT, menuBarChats, percent, pressureLevel, pushMenuBar, readMenuBar, setMenuBar, useMenuBar } from "./menuBar";
+import { backendConfig, diskLevel, knownProject, MENU_BAR_DEFAULT, MENU_BAR_MAX_TEXT, menuBarChats, percent, pressureLevel, pushMenuBar, readMenuBar, setMenuBar, useMenuBar, validChatText } from "./menuBar";
 import type { ProjectOpen } from "./sidebar";
 
 beforeEach(() => {
@@ -90,6 +90,12 @@ describe("menu bar settings", () => {
     expect(knownProject("/Users/me/other", recent, ["/Users/me/other", null])).toBe(true);
     expect(knownProject("/etc", recent, ["/Users/me/other", null])).toBe(false);
     expect(knownProject("/Users/me/acme-api/../../../etc", recent, [])).toBe(false);
+  });
+
+  it("sends a new chat's first message only when it is written and not enormous", () => {
+    expect(validChatText("fix the bug")).toBe(true);
+    expect(validChatText("x".repeat(MENU_BAR_MAX_TEXT))).toBe(true);
+    for (const bad of ["", "  \n ", "x".repeat(MENU_BAR_MAX_TEXT + 1), undefined, null, 7, { text: "hi" }]) expect(validChatText(bad)).toBe(false);
   });
 
   it("says how low things are on the same lines as the menu bar item", () => {

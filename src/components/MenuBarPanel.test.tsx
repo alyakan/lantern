@@ -39,7 +39,17 @@ const snapshot = (): MemorySnapshot => ({
 });
 const chat = (slot: string, over: Partial<MenuBarChat> = {}): MenuBarChat => ({ slot, title: `Chat ${slot}`, project: "acme-api", state: "done", team: false, ...over });
 
+/** The panel as the user meets it: its window was just shown, which is what makes it read anything. */
+async function shownPanel() {
+  const view = render(<MenuBarPanel />);
+  await waitFor(() => expect(handlers.shown).not.toBeNull());
+  act(() => handlers.shown!());
+  return view;
+}
+
 beforeEach(() => {
+  handlers.chats = null;
+  handlers.shown = null;
   localStorage.clear();
   document.documentElement.className = "";
   for (const fn of [api.menubarStats, api.memorySnapshot, api.recentFolders, api.menubarAct, api.menubarFit, api.menubarHide, api.askMenubarChats]) fn.mockReset();
@@ -54,7 +64,7 @@ beforeEach(() => {
 
 describe("MenuBarPanel", () => {
   it("shows memory used with its pressure and the biggest apps, and the disk free, from the numbers it reads", async () => {
-    render(<MenuBarPanel />);
+    await shownPanel();
     const memory = await screen.findByRole("region", { name: "Memory" });
     await waitFor(() => expect(within(memory).getByText("63%")).toBeInTheDocument());
     expect(within(memory).getByText("10.0 GB of 16.0 GB used · Normal pressure")).toBeInTheDocument();
@@ -67,19 +77,38 @@ describe("MenuBarPanel", () => {
     expect(within(disk).getByText("83% of 494.0 GB used")).toBeInTheDocument();
   });
 
+  it("reads nothing until it is shown, and stops when it loses focus", async () => {
+    render(<MenuBarPanel />);
+    await waitFor(() => expect(handlers.shown).not.toBeNull());
+    // A panel that was created at launch and never opened must cost nothing.
+    await new Promise((r) => setTimeout(r, 100));
+    expect(api.menubarStats).not.toHaveBeenCalled();
+    expect(api.memorySnapshot).not.toHaveBeenCalled();
+    act(() => handlers.shown!());
+    await waitFor(() => expect(api.menubarStats).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.memorySnapshot).toHaveBeenCalledTimes(1));
+    // Closed again: the timers are cleared, so no more is read.
+    act(() => window.dispatchEvent(new Event("blur")));
+    vi.useFakeTimers();
+    await act(async () => vi.advanceTimersByTime(30_000));
+    vi.useRealTimers();
+    expect(api.menubarStats).toHaveBeenCalledTimes(1);
+  });
+
   it("draws the disk meter amber when little is free and red when almost none is", async () => {
     api.menubarStats.mockResolvedValue(stats({ disk_free: 8_300_000_000 }));
-    const { unmount } = render(<MenuBarPanel />);
+    const { unmount } = await shownPanel();
     const bar = () => within(screen.getByRole("region", { name: "Disk" })).getByRole("progressbar", { name: "Disk used" });
     await waitFor(() => expect(bar()).toHaveClass("warn"));
     unmount();
+    handlers.shown = null;
     api.menubarStats.mockResolvedValue(stats({ disk_free: 3_000_000_000 }));
-    render(<MenuBarPanel />);
+    await shownPanel();
     await waitFor(() => expect(bar()).toHaveClass("critical"));
   });
 
   it("lists the open chats, what needs you first, and opens one on a click", async () => {
-    render(<MenuBarPanel />);
+    await shownPanel();
     await waitFor(() => expect(handlers.chats).not.toBeNull());
     act(() => handlers.chats!([chat("s1", { title: "Done one" }), chat("s2", { title: "Working one", state: "running" }), chat("s3", { title: "Asking one", state: "waiting" }), chat("s4", { title: "A team", team: true, state: "running", project: "web" })]));
     const list = screen.getByRole("list", { name: "Open chats" });
@@ -153,7 +182,7 @@ describe("MenuBarPanel", () => {
 
   it("shows only the sections the user chose", async () => {
     setMenuBar({ panel: { memory: false, chats: false } });
-    render(<MenuBarPanel />);
+    await shownPanel();
     expect(await screen.findByRole("region", { name: "Disk" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "New chat" })).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Memory" })).toBeNull();

@@ -102,6 +102,17 @@ export function knownProject(folder: string, recent: RecentFolder[], openFolders
   return recent.some((f) => f.path === folder) || openFolders.includes(folder);
 }
 
+/** The longest first message the panel may start a chat with (the backend refuses more, and so does the main window). */
+export const MENU_BAR_MAX_TEXT = 20_000;
+
+/**
+ * Whether the main window sends this as a new chat's first message: written, and not enormous. The backend checks it too, but
+ * any window can emit the event the main window listens for, so the window that acts on it checks for itself.
+ */
+export function validChatText(text: unknown): text is string {
+  return typeof text === "string" && text.trim().length > 0 && [...text].length <= MENU_BAR_MAX_TEXT;
+}
+
 /** "62%": a part of a whole, as a whole number. */
 export const percent = (part: number, whole: number): number => (whole > 0 ? Math.min(100, Math.round((part / whole) * 100)) : 0);
 

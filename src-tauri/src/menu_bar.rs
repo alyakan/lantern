@@ -345,10 +345,7 @@ fn ensure_tray(app: &AppHandle) {
         })
         .build(app);
     match built {
-        Ok(_) => {
-            eprintln!("menu bar: the lantern is in the menu bar");
-            *state(app).shown.lock().unwrap_or_else(|e| e.into_inner()) = Some(Level::Ok);
-        }
+        Ok(_) => *state(app).shown.lock().unwrap_or_else(|e| e.into_inner()) = Some(Level::Ok),
         Err(e) => eprintln!("menu bar: couldn't put the lantern in the menu bar: {e}"),
     }
 }

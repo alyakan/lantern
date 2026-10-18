@@ -3,7 +3,7 @@ import { pushAgentLimit } from "./lib/agentLimit";
 import { pushAutoMergeTests } from "./lib/mergeTests";
 import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
-import { knownProject, menuBarChats, pushMenuBar } from "./lib/menuBar";
+import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome } from "./api";
@@ -1893,7 +1893,7 @@ export default function App() {
     if (a.kind === "chat") switchTo(a.slot);
     else if (a.kind === "storage") setStorageOpen(true);
     else if (a.kind === "settings") setSettingsAt("general");
-    else if (a.kind === "new_chat") {
+    else if (a.kind === "new_chat" && validChatText(a.text)) {
       const openFolders = Object.values(chats.slots).map((s) => s.folder);
       api.recentFolders().then(
         (recent) => knownProject(a.folder, recent, openFolders) && startFresh(a.folder, false, false, a.text),
