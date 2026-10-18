@@ -1,0 +1,138 @@
+.bar {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-base);
+  border-radius: var(--cockpit-radius);
+  background: var(--bg-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: rise 220ms var(--cockpit-ease);
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bg-6);
+}
+
+.kind {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.auto {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--bg-6);
+}
+
+.goals {
+  flex-shrink: 0;
+}
+
+.goals :global(.arco-radio-button) {
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--cockpit-radius-sm);
+  border: 1px solid transparent;
+  transition:
+    border-color 200ms var(--cockpit-ease),
+    background 200ms var(--cockpit-ease);
+}
+
+.primary {
+  background: var(--bg-base);
+  border-color: var(--border-base);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--agent-other);
+}
+
+.claude {
+  background: var(--agent-claude);
+}
+
+.codex {
+  background: var(--agent-codex);
+}
+
+.qwen {
+  background: var(--agent-qwen);
+}
+
+.remote {
+  background: var(--agent-remote);
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+.label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 0 6px;
+  border-radius: 999px;
+  color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 40%, transparent);
+}
+
+.reasons {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.selected {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--success);
+}

@@ -1,0 +1,1340 @@
+/* Project board + side chat. Tokens: styles/themes/cockpit-color-scheme.css */
+
+.canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: var(--board-bg);
+}
+
+.canvas :global(.react-flow) {
+  --xy-background-color: transparent;
+  --xy-minimap-background-color: var(--bg-base);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--bg-1) 70%, transparent);
+  --xy-controls-button-background-color: var(--bg-base);
+  --xy-controls-button-background-color-hover: var(--bg-hover);
+  --xy-controls-button-color: var(--text-secondary);
+  --xy-controls-button-border-color: var(--border-light);
+  --xy-selection-background-color: rgba(var(--primary-6), 0.08);
+  --xy-selection-border: 1px solid rgba(var(--primary-6), 0.5);
+}
+
+.canvas :global(.react-flow__controls),
+.canvas :global(.react-flow__minimap) {
+  border: 1px solid var(--border-base);
+  border-radius: var(--cockpit-radius);
+  overflow: hidden;
+  box-shadow: var(--aion-overlay-shadow);
+}
+
+/* React Flow draws its own wrapper around group nodes; keep it invisible */
+.canvas :global(.react-flow__node-frame) {
+  background: transparent;
+  border: none;
+  padding: 0;
+  box-shadow: none;
+}
+
+/* Frame name tab. Below ~70% zoom it grows back to its on-screen size (up to
+   3x), drawn over the rest of the header. */
+.frameTitle {
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% / var(--label-scale));
+  padding: 5px 12px 5px 9px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--frame-color) 18%, var(--bg-base));
+  border: 1px solid color-mix(in srgb, var(--frame-color) 50%, transparent);
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transform: scale(var(--label-scale));
+  transform-origin: 0 0;
+  cursor: grab;
+}
+
+.frameTitleMark {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  background: var(--frame-color);
+}
+
+.frame {
+  --label-scale: clamp(1, calc(0.7 / var(--board-zoom, 1)), 3);
+  /* 1 at normal zoom, 0 once the name tab has grown by a fifth */
+  --detail-opacity: clamp(0, calc((1.2 - var(--label-scale)) * 5), 1);
+  box-sizing: border-box;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--frame-color) 30%, var(--border-base));
+  background: color-mix(in srgb, var(--frame-color) 3%, color-mix(in srgb, var(--bg-base) 55%, transparent));
+  transition: border-color 160ms ease;
+}
+
+.frame:hover,
+.frameSelected {
+  border-color: color-mix(in srgb, var(--frame-color) 70%, transparent);
+}
+
+.frameHeader {
+  padding: 14px 18px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: grab;
+}
+
+.frameSwatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--frame-color);
+  flex-shrink: 0;
+}
+
+/* Zoomed out, the header's small print fades and leaves the name tab and lamps. */
+.frameMeta,
+.frameSummary,
+.frameOperator,
+.frameHeader .chipRow {
+  opacity: var(--detail-opacity);
+}
+
+/* The frame is the project's operator: its lamp, agent and open-full button */
+.frameOperator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 22px;
+  padding: 0 2px 0 8px;
+  border: 1px solid color-mix(in srgb, var(--frame-color) 40%, var(--border-base));
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.frameOperator .openFull {
+  margin: 0;
+}
+
+.frameLampsSep {
+  width: 1px;
+  height: 9px;
+  margin: 0 1px;
+  background: rgba(239, 230, 207, 0.25);
+}
+
+.frameSwatch,
+.frameName {
+  display: none !important;
+}
+
+.frameName {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.frameMeta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--bg-6);
+  white-space: nowrap;
+}
+
+.frameSummary {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Chips */
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 20px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-base);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 17px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--bg-base);
+}
+
+.chipDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--success);
+}
+
+.chipDirty .chipDot {
+  background: var(--warning);
+}
+
+.service_up .chipDot {
+  background: var(--success);
+  box-shadow: 0 0 6px var(--success);
+}
+
+.service_idle .chipDot {
+  background: var(--bg-5);
+}
+
+.service_failed {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+.service_failed .chipDot {
+  background: var(--danger);
+}
+
+.service_unknown .chipDot {
+  background: transparent;
+  border: 1px dashed var(--bg-5);
+}
+
+/* Module card */
+.module {
+  --tone: var(--bg-6);
+  position: relative;
+  box-sizing: border-box;
+  width: 232px;
+  height: 118px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--tone) 32%, var(--border-base));
+  background: var(--bg-base);
+  box-shadow: 0 6px 18px rgba(20, 17, 14, 0.08);
+  cursor: pointer;
+  transition: border-color 160ms ease;
+}
+
+.module::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow:
+    0 0 0 1px var(--tone),
+    0 0 22px color-mix(in srgb, var(--tone) 45%, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.module:hover,
+.moduleSelected {
+  border-color: var(--tone);
+}
+
+.moduleSelected::after {
+  opacity: 0.6;
+}
+
+.moduleRunning::after {
+  animation: module-breathe 2.4s ease-in-out infinite;
+}
+
+.moduleName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.moduleMeta {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--bg-6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chatDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgb(var(--primary-6));
+  flex-shrink: 0;
+}
+
+.handle {
+  opacity: 0;
+}
+
+@keyframes module-breathe {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Board shell: board + resizable side panel */
+.shell {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.sideWrap {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  min-height: 0;
+}
+
+.splitterX {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  z-index: 6;
+  cursor: col-resize;
+}
+
+.splitterY {
+  flex-shrink: 0;
+  height: 8px;
+  margin-bottom: -4px;
+  position: relative;
+  z-index: 2;
+  cursor: row-resize;
+}
+
+.splitterX::after,
+.splitterY::after {
+  content: '';
+  position: absolute;
+  background: rgb(var(--primary-6));
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.splitterX::after {
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+}
+
+.splitterY::after {
+  left: 0;
+  right: 0;
+  top: 3px;
+  height: 2px;
+}
+
+.splitterX:hover::after,
+.splitterY:hover::after,
+.resizing .splitterX::after {
+  opacity: 0.7;
+}
+
+/* While the panel is resized, the chat underneath must not grab the pointer */
+.resizing .sideWrap {
+  pointer-events: none;
+}
+
+.resizing .splitterX {
+  pointer-events: auto;
+}
+
+.leader {
+  display: none;
+}
+
+/* Side chat panel */
+.side {
+  position: relative;
+  width: 100%;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-inline-start: 1px solid var(--border-base);
+  background: var(--bg-base);
+}
+
+.sideHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.sideTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sideSubtitle {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--bg-6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sideBody {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sideEmpty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 18px 16px 16px;
+}
+
+.sideIntro {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.sideHint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--bg-6);
+}
+
+.sideComposer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid var(--border-base);
+  background: var(--bg-1);
+}
+
+.sideComposerBar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  align-self: stretch;
+  min-width: 0;
+}
+
+.sideComposerBar > :first-child:not(:last-child) {
+  margin-right: auto;
+}
+
+.sideComposer :global(.arco-textarea) {
+  background: transparent;
+  border: none;
+  box-shadow: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moduleRunning::after {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+.viewSwitch {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  z-index: 6;
+  transform: translateX(-50%);
+  padding: 3px;
+  border: 1px solid var(--border-base);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-base) 88%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--aion-overlay-shadow);
+}
+
+.viewSwitch :global(.arco-radio-group-type-button) {
+  background: transparent;
+  border-radius: 999px;
+}
+
+.viewSwitch :global(.arco-radio-button) {
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Module details at the top of the side panel */
+.details {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border-light);
+  background: var(--bg-1);
+}
+
+.detailsOpen {
+  display: flex;
+  flex-direction: column;
+}
+
+.detailsToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--bg-6);
+  cursor: pointer;
+  user-select: none;
+}
+
+.detailsToggle:hover {
+  color: var(--text-primary);
+}
+
+.detailsPeek {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.detailsBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detailsSummary {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 6px 10px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.facts dt {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--bg-6);
+  padding-top: 2px;
+}
+
+.facts dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.chipLink {
+  cursor: pointer;
+}
+
+.chipLink .chipDot {
+  background: var(--tone);
+}
+
+.chipLink:hover,
+.chipActive {
+  border-color: rgb(var(--primary-6));
+  color: var(--text-primary);
+}
+
+.fileTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.fileTabs > span {
+  cursor: pointer;
+}
+
+.notes {
+  padding: 10px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--cockpit-radius);
+  background: var(--bg-base);
+  font-size: 12.5px;
+}
+
+/* Open as full chat, on every module card */
+.openFull {
+  flex-shrink: 0;
+  margin: -4px -6px 0 0;
+  color: var(--bg-6) !important;
+}
+
+.openFull:hover {
+  color: rgb(var(--primary-6)) !important;
+}
+
+/* Frame status lamps: HUD only */
+.frameLamps {
+  display: none;
+}
+
+.sun {
+  display: none;
+}
+
+/* While a card is dragged or the board pans, nothing animates */
+.moving :global(.react-flow__edge-path),
+.moving .hudStatus::after {
+  animation-play-state: paused !important;
+}
+
+/* ===== HUD style (docs/cockpit/DESIGN.md "Approved: the Lantern HUD theme") ===== */
+
+:global([data-lantern-style='hud']) .canvas {
+  background: transparent;
+}
+
+/* The space runs under the whole board area, behind the floating side chat too */
+:global([data-lantern-style='hud']) .shell {
+  background-color: var(--hud-space);
+  /* Sparse stars: three offset layers of tiny dots */
+  background-image:
+    radial-gradient(1px 1px at 37px 61px, rgba(239, 230, 207, 0.55), transparent 100%),
+    radial-gradient(0.8px 0.8px at 191px 23px, rgba(239, 230, 207, 0.35), transparent 100%),
+    radial-gradient(1.3px 1.3px at 283px 177px, rgba(239, 230, 207, 0.6), transparent 100%),
+    radial-gradient(0.8px 0.8px at 97px 233px, rgba(239, 230, 207, 0.3), transparent 100%);
+  background-size:
+    320px 290px,
+    410px 350px,
+    530px 470px,
+    260px 300px;
+}
+
+:global([data-lantern-style='hud']) .canvas :global(.react-flow) {
+  --xy-minimap-background-color: #0c0d12;
+  --xy-minimap-mask-background-color: rgba(7, 8, 12, 0.7);
+  --xy-controls-button-background-color: #14161c;
+  --xy-controls-button-background-color-hover: #1e2027;
+  --xy-controls-button-color: #bdb6a3;
+  --xy-controls-button-border-color: #2e3038;
+}
+
+:global([data-lantern-style='hud']) .canvas :global(.react-flow__controls),
+:global([data-lantern-style='hud']) .canvas :global(.react-flow__minimap) {
+  border-color: #2e3038;
+  border-radius: 3px;
+}
+
+:global([data-lantern-style='hud']) .sun {
+  display: block;
+  position: absolute;
+  right: 18%;
+  bottom: -60px;
+  width: 180px;
+  height: 180px;
+  pointer-events: none;
+}
+
+/* Frame: a tinted glass bay in the project's colour, one cut corner, a
+   corner bracket, a header plate with lamps and a name tab above it. */
+:global([data-lantern-style='hud']) .frame {
+  position: relative;
+  border-radius: 0;
+  border: 1px solid color-mix(in srgb, var(--frame-color) 42%, #3c3e46);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--frame-color) 12%, transparent), transparent 220px),
+    rgba(20, 22, 29, 0.78);
+  clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%);
+  box-shadow: inset 0 1px 0 rgba(239, 230, 207, 0.06);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+  animation: hud-frame-in 0.7s 0.2s ease-out backwards;
+}
+
+/* Bracket in the bottom-left corner and the bevel line along the cut */
+:global([data-lantern-style='hud']) .frame::before,
+:global([data-lantern-style='hud']) .frame::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+}
+
+:global([data-lantern-style='hud']) .frame::before {
+  left: 5px;
+  bottom: 5px;
+  width: 16px;
+  height: 16px;
+  border: solid var(--frame-color);
+  border-width: 0 0 2px 2px;
+  opacity: 0.8;
+}
+
+:global([data-lantern-style='hud']) .frame::after {
+  top: 0;
+  right: 0;
+  width: 26px;
+  height: 26px;
+  background: linear-gradient(
+    225deg,
+    transparent 12px,
+    var(--frame-color) 12px,
+    var(--frame-color) 13.5px,
+    transparent 13.5px
+  );
+}
+
+:global([data-lantern-style='hud']) .frame:hover {
+  border-color: color-mix(in srgb, var(--frame-color) 70%, #3c3e46);
+}
+
+:global([data-lantern-style='hud']) .frameSelected {
+  border-color: var(--frame-color);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--frame-color) 60%, transparent),
+    inset 0 0 60px color-mix(in srgb, var(--frame-color) 14%, transparent);
+}
+
+:global([data-lantern-style='hud']) .frameHeader {
+  position: relative;
+  padding: 9px 14px 10px;
+  gap: 5px;
+}
+
+/* The header plate is its own layer so it fades out with the small print when
+   zoomed out, leaving the name tab and lamps floating on the frame. */
+:global([data-lantern-style='hud']) .frameHeader::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-bottom: 1px solid color-mix(in srgb, var(--frame-color) 30%, #2e3038);
+  background: color-mix(in srgb, var(--frame-color) 9%, rgba(239, 230, 207, 0.02));
+  opacity: var(--detail-opacity);
+  pointer-events: none;
+}
+
+:global([data-lantern-style='hud']) .frameMeta {
+  font-family: var(--font-label);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: color-mix(in srgb, var(--frame-color) 55%, #c9c3b2);
+}
+
+:global([data-lantern-style='hud']) .frameSummary {
+  font-size: 13px;
+  color: rgba(239, 230, 207, 0.72);
+}
+
+/* Name tab: a solid plate in the project's colour with a cut corner */
+:global([data-lantern-style='hud']) .frameTitle {
+  margin: -2px 0 0 -4px;
+  padding: 5px 16px 4px 9px;
+  border: none;
+  border-radius: 0;
+  background: linear-gradient(180deg, var(--frame-color), color-mix(in srgb, var(--frame-color) 78%, #000));
+  color: #111;
+  font-family: var(--font-label);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  animation: hud-title-in 0.5s 0.15s ease-out backwards;
+}
+
+:global([data-lantern-style='hud']) .frameTitleMark {
+  width: 8px;
+  height: 8px;
+  border-radius: 0;
+  background: #111;
+  transform: rotate(45deg);
+}
+
+:global([data-lantern-style='hud']) .frameTitleSelected {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    inset 0 -2px 0 #111;
+}
+
+:global([data-lantern-style='hud']) .frameOperator {
+  border-radius: 2px;
+  border-color: color-mix(in srgb, var(--frame-color) 45%, #3a3c44);
+  background: rgba(7, 8, 12, 0.6);
+  font-family: var(--font-label);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: color-mix(in srgb, var(--frame-color) 45%, #d6d0c0);
+  --lamp-edge: #5a5d66;
+  --lamp-off: #33363f;
+}
+
+:global([data-lantern-style='hud']) .frameLamps {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  gap: 5px;
+  margin: -2px 14px 0 auto;
+  padding: 4px 6px;
+  border: 1px solid rgba(239, 230, 207, 0.14);
+  border-radius: 2px;
+  background: rgba(7, 8, 12, 0.78);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+  /* Grows with the name tab, from the top-right, so it reads at any zoom */
+  transform: scale(var(--label-scale));
+  transform-origin: 100% 0;
+  --lamp-edge: #5a5d66;
+  --lamp-off: #33363f;
+}
+
+:global([data-lantern-style='hud']) .frame .chip {
+  border-radius: 3px;
+  border-color: color-mix(in srgb, var(--frame-color) 30%, #3a3c44);
+  background: rgba(10, 11, 15, 0.4);
+  color: #b4afa0;
+  font-family: var(--font-label);
+  letter-spacing: 0.04em;
+}
+
+@keyframes hud-title-in {
+  from {
+    opacity: 0;
+    clip-path: polygon(0 0, 0 0, 0 100%, 0 100%);
+  }
+}
+
+/* Module card: a cream plate with one cut corner, tinted by the module's
+   colour (spine, head band, icon tile). Operators are dark command plates,
+   services carry hazard stripes, tools a dashed spine. */
+.hudCard {
+  --tone: var(--bg-6);
+  width: 232px;
+  height: 118px;
+  padding: 9px 10px 8px 14px;
+  border: none;
+  border-radius: 0;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--tone) 20%, var(--hud-cream)) 0, var(--hud-cream) 46px),
+    var(--hud-cream);
+  color: var(--hud-plate-ink);
+  box-shadow: none;
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 0 100%);
+  transition: transform 0.25s var(--hud-ease-spring);
+  animation: hud-card-in 0.5s cubic-bezier(0.2, 1.4, 0.4, 1) backwards;
+  animation-delay: calc(0.35s + var(--i, 0) * 0.12s);
+}
+
+/* Spine in the module's colour */
+.hudCard::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: var(--tone);
+}
+
+.hudCard::after {
+  display: none;
+}
+
+.hudCard[data-kind='tool']::before {
+  background: repeating-linear-gradient(180deg, var(--tone) 0 7px, transparent 7px 11px);
+}
+
+.hudCard[data-kind='service']::before {
+  width: 7px;
+  background: repeating-linear-gradient(135deg, var(--tone) 0 5px, #111 5px 9px);
+}
+
+.hudCard[data-kind='operator'] {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tone) 26%, #1b1d24) 0, #1b1d24 46px), #1b1d24;
+  color: var(--hud-cream);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--tone) 55%, transparent);
+}
+
+.hudCard[data-kind='operator'] .moduleName {
+  color: var(--hud-cream);
+}
+
+.hudCard[data-kind='operator'] .hudAgent,
+.hudCard[data-kind='operator'] .hudCode {
+  color: color-mix(in srgb, var(--tone) 60%, #b4afa0);
+}
+
+.hudCard[data-kind='operator'] .hudDesc {
+  color: rgba(239, 230, 207, 0.74);
+}
+
+.hudCard[data-kind='operator'] .hudStatus {
+  color: var(--hud-cream);
+  border-top-color: rgba(239, 230, 207, 0.12);
+  --lamp-edge: #3a3c44;
+  --lamp-off: #2a2c33;
+}
+
+.hudCard:hover {
+  transform: translateY(-3px);
+}
+
+.hudCard.moduleSelected {
+  box-shadow:
+    inset 0 0 0 2px var(--hud-signal),
+    inset 0 0 18px color-mix(in srgb, var(--hud-signal) 25%, transparent);
+}
+
+/* Running: a light sweeps along the bottom edge. Needs you: an amber rim. */
+.hudCard[data-status='running'] .hudStatus::after,
+.hudCard[data-status='waiting'] .hudStatus::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  pointer-events: none;
+}
+
+.hudCard[data-status='running'] .hudStatus::after {
+  right: auto;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, var(--lamp-running), transparent);
+  animation: hud-card-sweep 2.2s linear infinite;
+}
+
+.hudCard[data-status='waiting'] .hudStatus::after {
+  background: var(--lamp-waiting);
+  animation: hud-lamp-blink 2s ease-in-out infinite;
+}
+
+.hudCard[data-status='failed'] {
+  box-shadow: inset 0 -3px 0 var(--lamp-failed);
+}
+
+.hudCard .moduleName {
+  color: var(--hud-plate-ink);
+  font-size: 14px;
+  line-height: 1.15;
+}
+
+.hudHead {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.hudAgent {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  font-family: var(--font-label);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hud-plate-muted);
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.hudCode {
+  flex-shrink: 0;
+  font-family: var(--font-label);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--hud-plate-muted);
+  opacity: 0.85;
+}
+
+.hudDesc {
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--hud-plate-soft);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hudStatus {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-top: 5px;
+  border-top: 1px solid var(--hud-plate-rule);
+  font-size: 12px;
+  color: var(--hud-plate-ink);
+  --lamp-edge: #b9ae92;
+  --lamp-off: #cfc4a8;
+}
+
+.hudCard .openFull {
+  color: var(--hud-plate-muted) !important;
+}
+
+.hudCard .openFull:hover {
+  color: var(--hud-signal) !important;
+  background: rgba(17, 17, 17, 0.06) !important;
+}
+
+.hudCard[data-kind='operator'] .openFull:hover {
+  background: rgba(239, 230, 207, 0.08) !important;
+}
+
+@keyframes hud-card-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+/* Links: dashed grey; live = green dotted with a moving pulse */
+.edgeHud :global(.react-flow__edge-path) {
+  stroke: #5a5a60;
+  stroke-dasharray: 4 3;
+}
+
+.edgeLive :global(.react-flow__edge-path) {
+  stroke: var(--lamp-running);
+  stroke-dasharray: 3 5;
+  animation: hud-link-pulse 1s linear infinite;
+}
+
+@keyframes hud-link-pulse {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+
+@keyframes hud-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+}
+
+@keyframes hud-frame-in {
+  from {
+    clip-path: polygon(0 0, 0 0, 0 0, 0 0, 0 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hudCard,
+  .edgeLive :global(.react-flow__edge-path) {
+    animation: none;
+  }
+}
+
+.sideScan,
+.sideBracket {
+  display: none;
+}
+
+/* HUD side chat: a frosted popup floating over the board, cut corners, two
+   orange brackets, a scan-open and staggered rows. */
+:global([data-lantern-style='hud']) .sideWrap {
+  padding: 10px 10px 10px 0;
+  z-index: 5;
+  box-sizing: border-box;
+}
+
+:global([data-lantern-style='hud']) .splitterX {
+  left: -6px;
+}
+
+:global([data-lantern-style='hud']) .viewSwitch {
+  border-radius: 3px;
+  border-color: var(--hud-board-line);
+  background: rgba(16, 18, 24, 0.84);
+}
+
+:global([data-lantern-style='hud']) .viewSwitch :global(.arco-radio-group-type-button),
+:global([data-lantern-style='hud']) .viewSwitch :global(.arco-radio-button) {
+  border-radius: 2px;
+  font-family: var(--font-label);
+  letter-spacing: 0.1em;
+}
+
+:global([data-lantern-style='hud']) .viewSwitch :global(.arco-radio-button:not(.arco-radio-checked)) {
+  color: var(--hud-board-muted);
+}
+
+:global([data-lantern-style='hud']) .side {
+  border: none;
+  background: var(--hud-panel);
+  backdrop-filter: blur(12px);
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
+}
+
+:global([data-lantern-style='hud']) .sideBracket {
+  display: block;
+  position: absolute;
+  z-index: 3;
+  width: 12px;
+  height: 12px;
+  border: solid var(--hud-signal);
+  pointer-events: none;
+}
+
+:global([data-lantern-style='hud']) .sideBracketTop {
+  left: 4px;
+  top: 4px;
+  border-width: 2px 0 0 2px;
+}
+
+:global([data-lantern-style='hud']) .sideBracketBottom {
+  right: 4px;
+  bottom: 4px;
+  border-width: 0 2px 2px 0;
+}
+
+:global([data-lantern-style='hud']) .sideHeader,
+:global([data-lantern-style='hud']) .details {
+  border-color: var(--hud-edge);
+  background: transparent;
+}
+
+:global([data-lantern-style='hud']) .sideTitle {
+  font-weight: 600;
+}
+
+:global([data-lantern-style='hud']) .sideSubtitle,
+:global([data-lantern-style='hud']) .detailsToggle,
+:global([data-lantern-style='hud']) .sideHint,
+:global([data-lantern-style='hud']) .facts dt {
+  font-family: var(--font-label);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+:global([data-lantern-style='hud']) .sideComposer {
+  border-radius: 0;
+  border-color: var(--hud-ink);
+  background: transparent;
+  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%);
+}
+
+:global([data-lantern-style='hud']) .sideComposer :global(.arco-btn-primary),
+:global([data-lantern-style='hud']) .side :global(.send-button-custom) {
+  border-radius: 3px !important;
+  color: #111 !important;
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.25);
+  transition: transform 80ms ease;
+}
+
+:global([data-lantern-style='hud']) .sideComposer :global(.arco-btn-primary:active),
+:global([data-lantern-style='hud']) .side :global(.send-button-custom:active) {
+  transform: translateY(2px);
+  box-shadow: none;
+}
+
+:global([data-lantern-style='hud']) .sideScan {
+  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 4;
+  height: 2px;
+  background: var(--hud-signal);
+  box-shadow: 0 0 10px var(--hud-signal);
+  opacity: 0;
+  pointer-events: none;
+}
+
+:global([data-lantern-style='hud']) .sideOpen {
+  animation: hud-pop 0.55s cubic-bezier(0.2, 1, 0.3, 1) backwards;
+}
+
+:global([data-lantern-style='hud']) .sideOpen .sideScan {
+  animation: hud-scan 0.7s 0.25s ease-in both;
+}
+
+:global([data-lantern-style='hud']) .sideOpen > .sideHeader,
+:global([data-lantern-style='hud']) .sideOpen > .details,
+:global([data-lantern-style='hud']) .sideOpen > .sideBody,
+:global([data-lantern-style='hud']) .sideOpen .sideEmpty > * {
+  animation: hud-row-in 0.3s backwards;
+}
+
+:global([data-lantern-style='hud']) .sideOpen > .details {
+  animation-delay: 0.1s;
+}
+
+:global([data-lantern-style='hud']) .sideOpen > .sideBody {
+  animation-delay: 0.2s;
+}
+
+:global([data-lantern-style='hud']) .sideOpen .sideEmpty > :nth-child(2) {
+  animation-delay: 0.28s;
+}
+
+:global([data-lantern-style='hud']) .sideOpen .sideEmpty > :nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+/* User lines are ink blocks */
+:global([data-lantern-style='hud']) .side :global(.message-item.justify-end .arco-typography),
+:global([data-lantern-style='hud']) .side :global(.message-item.justify-end > div) {
+  border-radius: 3px;
+}
+
+/* Leader line from the selected card to the panel */
+:global([data-lantern-style='hud']) .leader {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 4;
+  pointer-events: none;
+  overflow: visible;
+  transition: opacity 120ms ease;
+}
+
+.moving .leader,
+.resizing .leader {
+  opacity: 0;
+  transition: none;
+}
+
+.leaderPath {
+  fill: none;
+  stroke: var(--hud-signal);
+  stroke-width: 1;
+  stroke-dasharray: 900;
+  stroke-dashoffset: 900;
+  animation: hud-draw 0.5s 0.1s ease-out forwards;
+}
+
+.leaderDot {
+  fill: var(--hud-signal);
+}
+
+@keyframes hud-pop {
+  0% {
+    clip-path: inset(50% 0 50% 0);
+    opacity: 0.4;
+  }
+  40% {
+    clip-path: inset(49.5% 0 49.5% 0);
+    opacity: 1;
+  }
+  100% {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+@keyframes hud-scan {
+  0% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(calc(100vh - 120px));
+    opacity: 0;
+  }
+}
+
+@keyframes hud-row-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+
+@keyframes hud-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}

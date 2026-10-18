@@ -1,5 +1,6 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from "vite";
+import { configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
 // @ts-expect-error type error without @types/node package
 import process from "node:process";
@@ -35,5 +36,7 @@ export default defineConfig(() => ({
     environment: "jsdom",
     globals: true,
     setupFiles: "./src/test-setup.ts",
+    // windows-electron/ is a separate app with its own tests and tooling.
+    exclude: [...configDefaults.exclude, "windows-electron/**"],
   },
 }));

@@ -1,0 +1,277 @@
+{
+  "handoff": {
+    "button": "Continuar en…",
+    "tooltip": "Continúa este chat en otro agente. La transcripción se adjunta como archivo.",
+    "menuTitle": "Continuar en",
+    "started": "Transferido a {{agent}}",
+    "failed": "No se pudo transferir: {{message}}",
+    "recommended": "Recommended for {{kind}}"
+  },
+  "sharedSkills": {
+    "title": "Carpeta de habilidades compartidas",
+    "description": "Cada habilidad en esta carpeta se proporciona a cada agente: Claude Code, Codex y Aion CLI. Añade una carpeta con un SKILL.md para compartir una habilidad.",
+    "count": "{{count}} compartidas: {{names}}",
+    "empty": "Aún no hay habilidades compartidas.",
+    "open": "Abrir carpeta"
+  },
+  "remote": {
+    "menuItem": "Abrir proyecto remoto (SSH)…",
+    "title": "Abrir proyecto remoto por SSH",
+    "description": "Elige una carpeta en otra máquina. Los chats en ella con el agente \"Claude Code · Mac mini\" ejecutan Claude Code en esa máquina. El panel de archivos solo muestra la carpeta local de marcador.",
+    "host": "Host",
+    "user": "Usuario",
+    "key": "Clave privada",
+    "keyPlaceholder": "Opcional, por ejemplo, C:\\Users\\me\\.ssh\\id_ed25519",
+    "folder": "Carpeta remota",
+    "browse": "Examinar",
+    "up": "Subir un nivel",
+    "open": "Abrir proyecto",
+    "cancel": "Cancelar",
+    "opened": "Proyecto remoto listo. Elige el agente \"Claude Code · Mac mini\" para ejecutar Claude allí.",
+    "failed": "No se pudo abrir el proyecto remoto"
+  },
+  "board": {
+    "nav": "Tablero",
+    "title": "Tablero",
+    "pickProject": "Elegir un proyecto",
+    "addModule": "Agregar módulo",
+    "create": "Crear",
+    "agent": "Agente",
+    "moduleName": "Nombre",
+    "moduleNamePlaceholder": "Opcional",
+    "firstMessage": "Primer mensaje",
+    "firstMessagePlaceholder": "Opcional. Si se define, el chat se abre y comienza a trabajar en él.",
+    "linkUnder": "Enlazar debajo de",
+    "noLink": "Sin enlace (raíz nueva)",
+    "projectHint": "Comienza en {{project}}. El agente lee el archivo CLAUDE.md / AGENTS.md de esa carpeta por sí mismo.",
+    "newModuleName": "Nuevo chat de {{agent}}",
+    "moduleAdded": "Se agregó un chat de {{agent}} al tablero",
+    "addFailed": "No se pudo agregar el módulo: {{message}}",
+    "rearrange": "Reorganizar",
+    "rearrangeHint": "Olvidar las posiciones guardadas y dispone las tarjetas como un árbol",
+    "empty": "Aún no hay chats en este proyecto. Agrega un módulo para comenzar.",
+    "noProjects": "Aún no hay chats de proyecto. Inicia un chat en una carpeta y aparecerá aquí.",
+    "status": {
+      "running": "Ejecutando",
+      "waiting": "Necesita tu atención",
+      "idle": "Inactivo"
+    },
+    "edge": {
+      "fork": "Bifurcación",
+      "handoff": "Continuado",
+      "delegate": "Delegado",
+      "module": "Módulo",
+      "mention": "Mención @@"
+    },
+    "chatCount": "{{count}} chats",
+    "liveCount": "{{count}} en vivo"
+  },
+  "projects": {
+    "viewProjects": "Proyectos",
+    "viewChats": "Chats",
+    "moduleCount": "{{count}} módulos",
+    "noModules": "Sin módulos",
+    "gitTooltip": "{{dir}}: {{dirty}} archivos modificados",
+    "servicesUp": "Mac mini {{up}}/{{total}} activos",
+    "servicesTooltip": "servicios launchd en el Mac mini, actualizados cada 30 s",
+    "macOffline": "Mac mini inalcanzable",
+    "contextFiles": "{{count}} archivos de contexto",
+    "hasChat": "Tiene un chat lateral",
+    "service": {
+      "up": "{{label}} está en ejecución (pid {{pid}})",
+      "idle": "{{label}} está cargado, no en ejecución",
+      "failed": "{{label}} terminó por última vez con código {{code}}",
+      "unknown": "{{label}} no está cargado en el Mac mini"
+    },
+    "kind": {
+      "operator": "Operador",
+      "agent": "Agente",
+      "service": "Servicio",
+      "tool": "Herramienta"
+    },
+    "status": {
+      "running": "Running",
+      "waiting": "Needs you",
+      "failed": "Failed",
+      "idle": "Idle"
+    },
+    "servicesShort": "{{up}}/{{total}} up"
+  },
+  "side": {
+    "pcTitle": "PC",
+    "chatTitle": "Chat",
+    "pcIntro": "Tu operador para cada proyecto en esta PC. Pregúntale lo que quieras entre proyectos, o escribe \"continue on the rayak website\" para ir a un módulo.",
+    "moduleIntro": "Este módulo aún no tiene chat. Tu primer mensaje lo iniciará en su carpeta; él mismo lee sus notas.",
+    "projectIntro": "Este proyecto aún no tiene chat de operador. Tu primer mensaje lo iniciará en la carpeta del proyecto.",
+    "continueHint": "Consejo: \"continue on <project> <module>\" cambia a ese módulo.",
+    "placeholder": "Mensaje para {{name}}…",
+    "start": "Enviar",
+    "backToPc": "Volver al chat de la PC",
+    "newChat": "Iniciar un chat nuevo aquí",
+    "openFull": "Abrir como chat completo",
+    "noAgent": "No hay agente disponible para iniciar este chat.",
+    "startFailed": "No se pudo iniciar el chat: {{message}}",
+    "switched": "Cambiado a {{project}} · {{module}}",
+    "continueMessage": "Continúa donde lo dejamos en {{module}}: lee tus notas y el estado actual del código, y luego dime cómo van las cosas y qué sigue.",
+    "openFullButton": "Open as full chat",
+    "resize": "Drag to resize"
+  },
+  "details": {
+    "title": "Sobre este módulo",
+    "kind": "Tipo",
+    "runsOn": "Se ejecuta en",
+    "model": "Modelo",
+    "folder": "Carpeta",
+    "tools": "Herramientas",
+    "services": "Servicios",
+    "links": "Funciona con",
+    "noNotes": "Aún no hay archivo de notas. El agente crea .cockpit/modules/<id>.md mientras trabaja."
+  },
+  "pulse": {
+    "title": "Pulse",
+    "refresh": "Check Claude now (one tiny Haiku reply)",
+    "noReading": "No {{name}} reading yet. Use it once, or press refresh.",
+    "fiveHour": "5-hour",
+    "week": "Week",
+    "resets": "resets {{when}}",
+    "runsOut": "at this pace, runs out {{when}} (in {{in}})",
+    "seen": "read {{ago}} ago",
+    "ollamaOff": "Ollama is off",
+    "onGpu": "on GPU · {{size}}",
+    "idle": "not loaded",
+    "load": "Load",
+    "unload": "Unload",
+    "loadHint": "Load {{model}} onto the GPU now",
+    "unloadHint": "Free the GPU now",
+    "noGpu": "no reading",
+    "gameModeOn": "Game mode is on: local models stay off the GPU",
+    "gameModeOff": "Game mode: free the GPU and keep local models off it",
+    "gameNudge": "A game is using the GPU while Qwen holds it.",
+    "freeGpu": "Free GPU",
+    "gameMode": "Game mode",
+    "usage": "Uso del plan"
+  },
+  "dispatch": {
+    "title": "Dispatch",
+    "looksLike": "Looks like {{kind}}",
+    "pick": "Pick",
+    "use": "Use",
+    "useInstead": "Use instead",
+    "inUse": "Selected",
+    "kind": {
+      "quick": "a quick question",
+      "writing": "writing",
+      "codeSmall": "a small code change",
+      "codeLarge": "a big code change",
+      "research": "research",
+      "personal": "something personal",
+      "ops": "server and pipeline work",
+      "mechanical": "a mechanical edit"
+    },
+    "goal": {
+      "auto": "Auto",
+      "thrifty": "Thrifty",
+      "balanced": "Balanced",
+      "best": "Best",
+      "fast": "Fast"
+    },
+    "goalHint": {
+      "auto": "Let the task decide: best for writing and big changes, thrifty for quick or mechanical ones",
+      "thrifty": "Save tokens: prefer the free local model and plans with room left",
+      "balanced": "Good quality without burning budget",
+      "best": "Maximum quality, whatever it costs",
+      "fast": "Quickest answer"
+    },
+    "reason": {
+      "free": "free, runs on your GPU",
+      "coldStart": "takes ~20 s to load onto the GPU",
+      "ollamaOff": "Ollama isn't running",
+      "gameMode": "Game mode is on",
+      "noWeb": "can't browse the web",
+      "headroom": "{{left}}% of the plan left; this uses about {{cost}}% of a 5-hour window",
+      "nearLimit": "almost at its limit",
+      "private": "stays on this PC",
+      "leavesPc": "sends this to the cloud",
+      "onMac": "runs on the Mac mini",
+      "learned": "you chose it {{count}} times for this",
+      "strong": {
+        "quick": "quick, accurate answers",
+        "writing": "the best writer here",
+        "codeSmall": "strong at focused code fixes",
+        "codeLarge": "best at multi-file changes",
+        "research": "can search and read the web",
+        "personal": "thoughtful on personal topics",
+        "ops": "good at server work",
+        "mechanical": "reliable on mechanical edits"
+      },
+      "weak": {
+        "quick": "may miss nuance",
+        "writing": "flatter prose",
+        "codeSmall": "may need a second pass",
+        "codeLarge": "struggles with large changes",
+        "research": "no web access",
+        "personal": "less careful with nuance",
+        "ops": "doesn't know your servers well",
+        "mechanical": "may need a second pass"
+      },
+      "close": "close in quality"
+    }
+  },
+  "today": {
+    "greeting": {
+      "morning": "Good morning, Nezar",
+      "afternoon": "Good afternoon, Nezar",
+      "evening": "Good evening, Nezar",
+      "night": "Still up, Nezar?"
+    },
+    "needsYou": "Needs you",
+    "allClear": "All clear. Nothing is waiting on you.",
+    "item": {
+      "waiting": "{{name}} is waiting for your answer",
+      "serviceFailed": "{{label}} failed (exit {{code}})",
+      "macUnreachable": "Mac mini is unreachable",
+      "unpushed": "{{name}}: {{count}} commits not pushed",
+      "behind": "{{name}}: {{count}} commits behind",
+      "dirty": "{{name}}: {{count}} changed files"
+    },
+    "life": "Life",
+    "streak": "{{count}}-day streak",
+    "fromYesterday": "From yesterday",
+    "intentionPlaceholder": "Today I want to…",
+    "checkIn": "Evening check-in",
+    "wins": "What went well",
+    "winsPlaceholder": "Even small things count",
+    "drains": "What drained me",
+    "drainsPlaceholder": "People, tasks, habits",
+    "tomorrow": "One thing for tomorrow",
+    "tomorrowPlaceholder": "It shows up here tomorrow morning",
+    "private": "Saved in your Life project. Stays on this PC.",
+    "weeklyReview": "Weekly review",
+    "reviewHint": "A private chat with the local Qwen coach: your week's notes and what you shipped",
+    "reviewGameMode": "Turn off Game mode first: the review runs on the local Qwen",
+    "reviewTitle": "Weekly review {{date}}"
+  },
+  "palette": {
+    "placeholder": "Jump to a project, module, chat or action",
+    "empty": "Nothing matches.",
+    "hint": "↑↓ to move · Enter to open · Esc to close · Ctrl+K anywhere",
+    "newChat": "New chat",
+    "board": "Open the board",
+    "boardChats": "Board: chats view",
+    "scheduled": "Scheduled tasks",
+    "appearance": "Appearance settings",
+    "dark": "Switch to dark",
+    "light": "Switch to light",
+    "styleHud": "Switch to the HUD style",
+    "styleClassic": "Switch to the Classic style",
+    "group": {
+      "action": "Action",
+      "project": "Project",
+      "module": "Module",
+      "chat": "Chat"
+    }
+  },
+  "sidebar": {
+    "noChatsYet": "Aún no hay chats · abrir en el tablero"
+  }
+}

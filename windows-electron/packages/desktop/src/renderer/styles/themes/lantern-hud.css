@@ -1,0 +1,463 @@
+/* Lantern "HUD" style: the approved mock in docs/cockpit/lantern/hud-mock.html.
+   Applies only under [data-lantern-style='hud'] and overrides the Classic
+   tokens from cockpit-color-scheme.css. Night is "ink cream", day is cream
+   panels; the board stays deep space in both. Board, side chat and Pulse
+   parts live in their own CSS modules under the same attribute.
+   Motion here is compositor-only (transform, opacity, clip-path). */
+
+@import '@fontsource/barlow/latin-400.css';
+@import '@fontsource/barlow/latin-500.css';
+@import '@fontsource/barlow/latin-600.css';
+@import '@fontsource/barlow-semi-condensed/latin-500.css';
+@import '@fontsource/barlow-semi-condensed/latin-600.css';
+
+:root[data-lantern-style='hud'] {
+  --cockpit-radius: 3px;
+  --cockpit-radius-sm: 3px;
+  --font-ui: 'Barlow', 'Segoe UI', system-ui, sans-serif;
+  /* Labels and meta lines: condensed uppercase. Code keeps --code-font-family. */
+  --font-mono: 'Barlow Semi Condensed', 'Barlow', 'Segoe UI', sans-serif;
+  --font-label: 'Barlow Semi Condensed', 'Barlow', sans-serif;
+
+  --hud-space: #07080c;
+  --hud-signal: #f07c12;
+  --hud-cream: #efe6cf;
+  --hud-plate-ink: #111111;
+  --hud-plate-muted: #6a6455;
+  --hud-plate-soft: #3f3b33;
+  --hud-plate-rule: #d6ccb2;
+  --hud-board-line: #33343a;
+  --hud-board-dot: #1c1e26;
+  --hud-board-ink: #efe6cf;
+  --hud-board-muted: #8c8a82;
+  --board-bg: var(--hud-space);
+  --board-dot: var(--hud-board-dot);
+  --hud-cut: 14px;
+  --hud-ease-spring: cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+
+/* Night: ink cream */
+:root[data-lantern-style='hud'][data-theme='dark'] {
+  --bg-base: #0c0d12;
+  --bg-1: #08090d;
+  --bg-2: #14161c;
+  --bg-3: #1e2027;
+  --bg-4: #2e3038;
+  --bg-5: #45474f;
+  --bg-6: #7d808b;
+  --bg-8: #a9a699;
+  --bg-9: #d3cbb6;
+  --bg-10: #efe6cf;
+  --bg-hover: #16181f;
+  --bg-active: #1e2027;
+
+  --text-primary: #efe6cf;
+  --color-text-1: #efe6cf;
+  --text-secondary: #bdb6a3;
+  --text-disabled: #55575f;
+
+  --primary: #f07c12;
+  --info: #f07c12;
+  --success: #38d39f;
+  --warning: #ffb627;
+  --danger: #e0433a;
+
+  --border-base: #2e3038;
+  --border-light: #1f2128;
+  --border-special: #2e3038;
+
+  --brand: #f07c12;
+  --brand-light: #3a210a;
+  --brand-hover: #ff9a3d;
+  --aou-1: #16181f;
+  --aou-2: #1e2027;
+  --aou-3: #2a2c33;
+  --aou-4: #3a3c44;
+  --aou-5: #55575f;
+  --aou-6: #a9a699;
+  --aou-7: #c8c0ab;
+  --aou-8: #d8d0bb;
+  --aou-9: #e6ddc6;
+  --aou-10: #efe6cf;
+
+  --message-user-bg: #efe6cf;
+  --message-tips-bg: #14161c;
+  --workspace-btn-bg: #14161c;
+  --thought-gradient: linear-gradient(135deg, #16181f 0%, #14161c 100%);
+  --fill: #14161c;
+  --dialog-fill-0: #14161c;
+  --fill-0: rgba(239, 230, 207, 0.05);
+  --color-guid-agent-bar: #14161c;
+
+  --hud-panel: rgba(16, 18, 24, 0.84);
+  --hud-edge: #2e3038;
+  --hud-ink: #efe6cf;
+  --hud-muted: #7d808b;
+  --hud-off: #2a2c33;
+  --hud-console: linear-gradient(100deg, #15171e 0%, #1b1e26 70%, #22252e 100%);
+  --hud-slab-a: #060709;
+  --hud-slab-b: #1c1f27;
+  --hud-screw: #4a4d57;
+  --hud-key: linear-gradient(180deg, #2a2d36, #1e2027);
+}
+
+/* Day: cream panels, the board stays space */
+:root[data-lantern-style='hud']:not([data-theme='dark']) {
+  --bg-base: #f6efdd;
+  --bg-1: #efe6cf;
+  --bg-2: #e9dfc6;
+  --bg-3: #ddd1b3;
+  --bg-4: #bfb394;
+  --bg-5: #a3977a;
+  --bg-6: #776c55;
+  --bg-8: #4a4436;
+  --bg-9: #2c2a24;
+  --bg-10: #1b1a17;
+  --bg-hover: #e9dfc6;
+  --bg-active: #ddd1b3;
+
+  --text-primary: #1b1a17;
+  --color-text-1: #1b1a17;
+  --text-secondary: #4a4436;
+  --text-disabled: #a3977a;
+
+  --primary: #e0700c;
+  --info: #e0700c;
+  --success: #1f9d6c;
+  --warning: #c98a0c;
+  --danger: #c8372e;
+
+  --border-base: #bfb394;
+  --border-light: #d3c7a8;
+  --border-special: #bfb394;
+
+  --brand: #e0700c;
+  --brand-light: #f8e2c8;
+  --brand-hover: #f08a2c;
+  --aou-1: #efe6cf;
+  --aou-2: #e9dfc6;
+  --aou-3: #ddd1b3;
+  --aou-4: #c9bd9e;
+  --aou-5: #a3977a;
+  --aou-6: #776c55;
+  --aou-7: #5d5443;
+  --aou-8: #4a4436;
+  --aou-9: #2c2a24;
+  --aou-10: #1b1a17;
+
+  --message-user-bg: #1b1a17;
+  --message-tips-bg: #e9dfc6;
+  --workspace-btn-bg: #e9dfc6;
+  --thought-gradient: linear-gradient(90deg, #e9dfc6 0%, #efe6cf 100%);
+  --fill: #e9dfc6;
+  --dialog-fill-0: #f6efdd;
+  --fill-0: #f6efdd;
+  --color-guid-agent-bar: #e9dfc6;
+
+  --hud-panel: rgba(239, 230, 207, 0.92);
+  --hud-edge: #bfb394;
+  --hud-ink: #1b1a17;
+  --hud-muted: #776c55;
+  --hud-off: #d3c7a8;
+  --hud-console: linear-gradient(100deg, #e9dfc6 0%, #efe6cf 70%, #f6efdd 100%);
+  --hud-slab-a: #a3977a;
+  --hud-slab-b: #bfb394;
+  --hud-screw: #a3977a;
+  --hud-key: linear-gradient(180deg, #f6efdd, #e2d7bc);
+}
+
+/* Arco palette: signal orange (rgb triplets) */
+html[data-lantern-style='hud'] body {
+  --primary-1: 254, 241, 228;
+  --primary-2: 252, 222, 194;
+  --primary-3: 249, 196, 150;
+  --primary-4: 246, 166, 99;
+  --primary-5: 243, 143, 56;
+  --primary-6: 224, 112, 12;
+  --primary-7: 191, 92, 8;
+  --primary-8: 153, 72, 5;
+  --primary-9: 115, 53, 3;
+  --primary-10: 77, 35, 1;
+  --link-6: 224, 112, 12;
+  --border-radius-small: 3px;
+  --border-radius-medium: 3px;
+  --border-radius-large: 4px;
+  --aion-overlay-shadow: 0 12px 32px rgba(27, 26, 23, 0.18);
+}
+
+html[data-lantern-style='hud'] body[arco-theme='dark'] {
+  --primary-1: 58, 33, 10;
+  --primary-2: 84, 46, 12;
+  --primary-3: 125, 66, 14;
+  --primary-4: 176, 91, 16;
+  --primary-5: 220, 113, 17;
+  --primary-6: 240, 124, 18;
+  --primary-7: 244, 150, 66;
+  --primary-8: 247, 177, 114;
+  --primary-9: 250, 205, 164;
+  --primary-10: 253, 232, 212;
+  --link-6: 240, 124, 18;
+  --aion-overlay-shadow: 0 14px 40px rgba(0, 0, 0, 0.6);
+}
+
+/* Type: one face, tabular figures, condensed uppercase labels */
+html[data-lantern-style='hud'],
+html[data-lantern-style='hud'] body {
+  font-feature-settings: 'tnum';
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-lantern-style='hud'] .sider-section-title {
+  font-family: var(--font-label);
+  font-size: 10.5px !important;
+  letter-spacing: 0.1em;
+}
+
+html[data-lantern-style='hud'] .arco-tag {
+  border-radius: 3px;
+  font-family: var(--font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+html[data-lantern-style='hud'] .arco-modal {
+  border-radius: 4px;
+}
+
+html[data-lantern-style='hud'] .arco-btn-primary:not(.arco-btn-disabled) {
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.22);
+}
+
+html[data-lantern-style='hud'] .arco-switch {
+  border-radius: 3px;
+}
+
+html[data-lantern-style='hud'] .arco-switch::after,
+html[data-lantern-style='hud'] .arco-switch-dot {
+  border-radius: 2px;
+}
+
+html[data-lantern-style='hud'] ::-webkit-scrollbar-thumb {
+  border-radius: 2px;
+}
+
+/* App shell: the window sits on deep space, the sidebar is a floating console */
+html[data-lantern-style='hud'] .app-shell {
+  background: var(--hud-space);
+}
+
+html[data-lantern-style='hud'] .layout {
+  background: transparent;
+}
+
+html[data-lantern-style='hud'] .layout-sider {
+  margin: 8px 0 8px 8px;
+  height: calc(100% - 16px) !important;
+  background: transparent !important;
+  border: none !important;
+  /* Depth and the faint cream glow onto the board. The children carry the
+     clip-path, so the shadow is drawn here, outside the cut. */
+  filter: drop-shadow(10px 0 18px rgba(0, 0, 0, 0.6)) drop-shadow(0 0 26px rgba(239, 230, 207, 0.07));
+  z-index: 3;
+}
+
+html[data-lantern-style='hud'] .layout-sider > .arco-layout-sider-children {
+  position: relative;
+  background: var(--hud-console);
+  clip-path: polygon(
+    0 0,
+    calc(100% - 18px) 0,
+    100% 18px,
+    100% calc(100% - 60px),
+    calc(100% - 12px) calc(100% - 48px),
+    calc(100% - 12px) 100%,
+    0 100%
+  );
+}
+
+/* Top highlight and the 1 px cream edge line along the cut */
+html[data-lantern-style='hud'] .layout-sider > .arco-layout-sider-children::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent calc(100% - 2px), rgba(239, 230, 207, 0.16) calc(100% - 1px)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 30%);
+}
+
+/* Depth: the console is a slab. A darker copy of its outline sits behind it,
+   offset down-right, as the side face; the face itself gets a bevel (light
+   top-left, dark bottom-right), a faint brushed grain and four screws. */
+html[data-lantern-style='hud'] .layout-sider:not(.chat-layout-right-sider)::before {
+  content: '';
+  position: absolute;
+  inset: 7px -7px -7px 7px;
+  background: linear-gradient(100deg, var(--hud-slab-a), var(--hud-slab-b));
+  clip-path: polygon(
+    0 0,
+    calc(100% - 18px) 0,
+    100% 18px,
+    100% calc(100% - 60px),
+    calc(100% - 12px) calc(100% - 48px),
+    calc(100% - 12px) 100%,
+    0 100%
+  );
+  pointer-events: none;
+}
+
+html[data-lantern-style='hud'] .layout-sider > .arco-layout-sider-children {
+  z-index: 1;
+  background:
+    radial-gradient(circle at 9px 9px, var(--hud-screw) 0 2px, rgba(0, 0, 0, 0.45) 2.5px, transparent 3.2px),
+    radial-gradient(
+      circle at calc(100% - 28px) 9px,
+      var(--hud-screw) 0 2px,
+      rgba(0, 0, 0, 0.45) 2.5px,
+      transparent 3.2px
+    ),
+    radial-gradient(
+      circle at 9px calc(100% - 9px),
+      var(--hud-screw) 0 2px,
+      rgba(0, 0, 0, 0.45) 2.5px,
+      transparent 3.2px
+    ),
+    radial-gradient(
+      circle at calc(100% - 22px) calc(100% - 9px),
+      var(--hud-screw) 0 2px,
+      rgba(0, 0, 0, 0.45) 2.5px,
+      transparent 3.2px
+    ),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 22%, transparent 78%, rgba(0, 0, 0, 0.22)),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.012) 0 1px, transparent 1px 3px), var(--hud-console);
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.09),
+    inset -2px -2px 0 rgba(0, 0, 0, 0.35),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+
+/* Section titles sit in recessed grooves */
+html[data-lantern-style='hud'] .layout-sider:not(.chat-layout-right-sider) .sider-section-label {
+  margin-inline: 6px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.32), rgba(0, 0, 0, 0.14));
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.55),
+    0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* The selected row is a raised key with a signal edge; rows nudge on hover */
+html[data-lantern-style='hud'] .layout-sider:not(.chat-layout-right-sider) .bg-fill-3 {
+  position: relative;
+  background: var(--hud-key) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 2px 0 rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+html[data-lantern-style='hud'] .layout-sider:not(.chat-layout-right-sider) .bg-fill-3::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--hud-signal);
+  box-shadow: 0 0 6px var(--hud-signal);
+}
+
+html[data-lantern-style='hud'] .layout-sider .chat-history__item,
+html[data-lantern-style='hud'] .layout-sider-content .group.h-34px {
+  transition:
+    transform 0.18s var(--hud-ease-spring),
+    background-color 0.15s ease;
+}
+
+html[data-lantern-style='hud'] .layout-sider .chat-history__item:hover,
+html[data-lantern-style='hud'] .layout-sider-content .group.h-34px:hover {
+  transform: translateX(2px);
+}
+
+html[data-lantern-style='hud'] .layout-content {
+  background: transparent;
+}
+
+/* Boot: the console slides in once per window */
+@keyframes hud-console-in {
+  from {
+    transform: translateX(-110%);
+  }
+}
+
+html[data-lantern-style='hud'] .layout-sider {
+  animation: hud-console-in 0.6s cubic-bezier(0.2, 1, 0.3, 1) backwards;
+}
+
+/* Lamps: one shared look for the board, Pulse and the side chat */
+.hud-lamp {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  border: 1.5px solid var(--lamp-edge, var(--hud-edge, var(--border-base)));
+  background: var(--lamp-off, var(--hud-off, var(--bg-3)));
+}
+
+.hud-lamp[data-state='running'] {
+  background: var(--lamp-running);
+  box-shadow: 0 0 7px var(--lamp-running);
+}
+
+.hud-lamp[data-state='waiting'] {
+  background: var(--lamp-waiting);
+  box-shadow: 0 0 7px var(--lamp-waiting);
+  animation: hud-lamp-blink 2s ease-in-out infinite;
+}
+
+.hud-lamp[data-state='failed'] {
+  background: var(--lamp-failed);
+  box-shadow: 0 0 7px var(--lamp-failed);
+}
+
+/* Bulbs flicker on when they first appear (HUD only) */
+[data-lantern-style='hud'] .hud-lamp[data-state='running'],
+[data-lantern-style='hud'] .hud-lamp[data-state='failed'] {
+  animation: hud-lamp-warm 0.9s steps(1, end) backwards;
+  animation-delay: var(--lamp-delay, 0.9s);
+}
+
+@keyframes hud-lamp-warm {
+  0% {
+    opacity: 0.15;
+  }
+  30% {
+    opacity: 1;
+  }
+  35% {
+    opacity: 0.3;
+  }
+  45% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes hud-lamp-blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-lantern-style='hud'] *,
+  html[data-lantern-style='hud'] *::before,
+  html[data-lantern-style='hud'] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

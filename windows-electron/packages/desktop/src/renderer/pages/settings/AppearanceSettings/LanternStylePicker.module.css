@@ -1,0 +1,125 @@
+/* Style cards. The previews are fixed swatches of each style, so they use the
+   style's own palette on purpose rather than the active theme tokens. */
+
+.group {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.radio {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.card {
+  padding: 8px 8px 10px;
+  border: 1px solid var(--border-base);
+  border-radius: var(--cockpit-radius-sm);
+  background: var(--bg-base);
+  cursor: pointer;
+  transition: border-color 140ms ease;
+}
+
+.card:hover {
+  border-color: var(--bg-4);
+}
+
+.checked {
+  border-color: rgb(var(--primary-6));
+  box-shadow: 0 0 0 1px rgb(var(--primary-6));
+}
+
+.preview {
+  position: relative;
+  height: 84px;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.classic {
+  --pv-bg: #18191d;
+  --pv-side: #1f2126;
+  --pv-plate: #26282e;
+  --pv-line: #3a3d44;
+  background: var(--pv-bg);
+  background-image: radial-gradient(#2a2c32 1px, transparent 1px);
+  background-size: 9px 9px;
+}
+
+.hud {
+  --pv-bg: #07080c;
+  --pv-side: #1b1e26;
+  --pv-plate: #efe6cf;
+  --pv-line: transparent;
+  background: var(--pv-bg);
+  background-image: radial-gradient(#1c1e26 1px, transparent 1px);
+  background-size: 9px 9px;
+}
+
+.side {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 26%;
+  background: var(--pv-side);
+}
+
+.hud .side {
+  left: 4px;
+  top: 4px;
+  bottom: 4px;
+  clip-path: polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 0 100%);
+  box-shadow: 0 0 10px rgba(239, 230, 207, 0.08);
+}
+
+.plate {
+  position: absolute;
+  left: 38%;
+  top: 18%;
+  width: 26%;
+  height: 26%;
+  border-radius: 3px;
+  background: var(--pv-plate);
+  border: 1px solid var(--pv-line);
+}
+
+.plateTwo {
+  left: 58%;
+  top: 56%;
+}
+
+.classic .plate {
+  border-top: 2px solid #ff5a1f;
+}
+
+.hud .plate {
+  border-radius: 0;
+  clip-path: polygon(0 0, calc(100% - 5px) 0, 100% 5px, 100% 100%, 0 100%);
+}
+
+.sun {
+  position: absolute;
+  right: 10px;
+  bottom: -18px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: repeating-linear-gradient(135deg, #f07c12 0 5px, #07080c 5px 6.5px);
+}
+
+.name {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.desc {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
