@@ -66,6 +66,10 @@ describe("keeping the Mac awake", () => {
     fireEvent.change(box, { target: { value: "retry the fetch" } });
     fireEvent.keyDown(box, { key: "Enter" });
     await waitFor(() => expect(calledWith(calls, "keep_awake").pop()).toEqual({ working: true, allowed: true }));
+    // The mock's turn goes on after this test and asks for a permission when it gets there, on the one event bus the next
+    // test's app listens to too: a request that arrives in the middle of that test is a second row beside its own, and
+    // answering the first leaves it. Let this turn get to its question (it waits there, saying nothing more) before ending.
+    await waitFor(() => expect(inboxButton()).toHaveAccessibleName("What needs you, 1 waiting"), { timeout: 20_000 });
   });
 });
 

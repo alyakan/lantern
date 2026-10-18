@@ -151,15 +151,15 @@ describe("a second team while another is working", () => {
     const find = () => within(document.querySelector(".composer-meta") as HTMLElement).getByRole("button", { name: chip });
     await waitFor(() => expect(find()).toBeEnabled(), { timeout: LOAD });
     // A click that lands while the app is still re-rendering can leave the menu shut: open it again until the row shows.
-    let item: HTMLElement | undefined;
+    // The row is clicked in the same tick that finds it: waitFor hands control back before it resolves, and a re-render
+    // in that gap replaces the row, so a click after it lands on a button that is no longer on screen.
     await waitFor(
       () => {
         if (find().getAttribute("aria-expanded") !== "true") fireEvent.click(find());
-        item = screen.getByRole("menuitemradio", { name: row });
+        fireEvent.click(screen.getByRole("menuitemradio", { name: row }));
       },
       { timeout: LOAD },
     );
-    fireEvent.click(item!);
   }
   /** A team whose Lead is working on a message, so the next team start has something to ask about. */
   async function busyTeam() {

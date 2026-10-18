@@ -73,14 +73,16 @@ describe("the sidebar in the app", () => {
     expect(names).toContain("acme-api");
     expect(names).toContain("web-dashboard · projects");
     await waitFor(() => expect(new Set(calledWith(calls, "list_sessions").map((a) => a?.folder)).has(OTHER)).toBe(true));
-    // A press on the button again closes it, and Escape does.
-    fireEvent.mouseDown(button);
-    fireEvent.click(button);
+    // A press on the button again closes it, and Escape does. The button is looked up each time: the sidebar can draw it
+    // again while the app settles, and a press on the one that was replaced does nothing.
+    const toggle = () => screen.getByRole("button", { name: "History" });
+    fireEvent.mouseDown(toggle());
+    fireEvent.click(toggle());
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull());
-    fireEvent.click(button);
+    fireEvent.click(toggle());
     await history();
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Chat history" })).toBeNull());
   });
 
   it("leaves an agent's conversation out of the past chats, though it is in the project's folder", async () => {
