@@ -2130,7 +2130,7 @@ export default function App() {
           orchestra={{ view: showCanvas ? "canvas" : "chat", exists: inOrchestra, attention: attention.length, onView: setView }}
           usage={{ rows: () => usageRows(chats, titles), onOpen: switchTo }}
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
-          inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox, paused: guards.pause, onResume: guards.resume }}
+          inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox, paused: guards.pause, onResume: guards.resume, onDismissPause: guards.dismiss }}
           run={topRun ? { command: topRun, running: state.run?.status === "running", onRun: () => doing.run(active) } : undefined}
         />
         <Hud event={hud} onOpenChat={switchTo} />
@@ -2148,7 +2148,7 @@ export default function App() {
           <Sidebar {...sidebarHandlers} {...sidebarProps} mode={sidebarCompact ? "collapsed" : "pinned"} onToggle={() => setSidebarCompact(!sidebarCompact)} />
         )}
         <div className="app-main">
-        {guards.pause && <PlanPaused pause={guards.pause} onResume={guards.resume} />}
+        {guards.pause && <PlanPaused pause={guards.pause} onResume={guards.resume} onDismiss={guards.dismiss} />}
         {state.banner && <BannerView banner={state.banner} onRestart={() => (relaunch.current[active] ? relaunch.current[active]() : restart(active, state.mode))} onDismiss={() => dispatch({ type: "dismiss_banner" })} />}
         <SplitPane
           ratio={splitRatio}

@@ -12,8 +12,9 @@ function setup(items: InboxItem[], paused: PlanPause | null = null) {
   const onGo = vi.fn();
   const onDecide = vi.fn();
   const onResume = vi.fn();
-  render(<Inbox items={items} onGo={onGo} onDecide={onDecide} paused={paused} onResume={onResume} />);
-  return { onGo, onDecide, onResume, toggle: () => screen.getByRole("button", { name: /What needs you/ }) };
+  const onDismissPause = vi.fn();
+  render(<Inbox items={items} onGo={onGo} onDecide={onDecide} paused={paused} onResume={onResume} onDismissPause={onDismissPause} />);
+  return { onGo, onDecide, onResume, onDismissPause, toggle: () => screen.getByRole("button", { name: /What needs you/ }) };
 }
 
 describe("Inbox", () => {
@@ -36,6 +37,14 @@ describe("Inbox", () => {
       expect(within(first).getByRole("button", { name: "Resume the paused agents" })).toHaveFocus();
       fireEvent.click(within(first).getByRole("button", { name: "Resume the paused agents" }));
       expect(onResume).toHaveBeenCalledTimes(1);
+    });
+
+    it("can be dismissed from its row, which doesn't resume anything", () => {
+      const { toggle, onResume, onDismissPause } = setup([], pause());
+      fireEvent.click(toggle());
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss the pause, leaving the agents stopped" }));
+      expect(onDismissPause).toHaveBeenCalledTimes(1);
+      expect(onResume).not.toHaveBeenCalled();
     });
 
     it("is there even when nothing else waits", () => {
