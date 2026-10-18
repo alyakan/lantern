@@ -234,6 +234,50 @@ describe("Settings' Teams section: quiet agents and the plan's limit", () => {
     expect(localStorage.getItem("lantern.pauseAtPercent")).toBe("95");
     expect(select).toHaveValue("95");
   });
+
+  describe("Menu bar", () => {
+    const saved = () => JSON.parse(localStorage.getItem("lantern.menuBar") ?? "{}");
+    const mode = (name: string) => screen.getByRole("radio", { name });
+
+    it("starts as the lantern with its readout, and tells the backend each change", () => {
+      const set = vi.fn(() => Promise.resolve());
+      (api as unknown as { setMenuBar: typeof set }).setMenuBar = set;
+      view();
+      expect(mode("Lantern and readout")).toBeChecked();
+      fireEvent.click(mode("Just the lantern"));
+      expect(mode("Just the lantern")).toBeChecked();
+      expect(saved().mode).toBe("icon");
+      expect(set).toHaveBeenLastCalledWith({ mode: "icon", ram: true, disk: true, alerts: true });
+      fireEvent.click(mode("Off"));
+      expect(set).toHaveBeenLastCalledWith({ mode: "off", ram: true, disk: true, alerts: true });
+    });
+
+    it("chooses what the readout shows and whether the lantern changes colour", () => {
+      const set = vi.fn(() => Promise.resolve());
+      (api as unknown as { setMenuBar: typeof set }).setMenuBar = set;
+      view();
+      fireEvent.click(screen.getByRole("checkbox", { name: "Free disk space" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: "Turn the lantern amber or red when what it shows runs low" }));
+      expect(set).toHaveBeenLastCalledWith({ mode: "full", ram: true, disk: false, alerts: false });
+      expect(screen.getByRole("checkbox", { name: "Memory used" })).toBeChecked();
+    });
+
+    it("chooses what the panel holds, and the backend needn't hear of that", () => {
+      view();
+      const group = screen.getByRole("group", { name: "In the panel" });
+      for (const label of ["Memory", "Open chats"]) fireEvent.click(within(group).getByRole("checkbox", { name: label }));
+      expect(saved().panel).toEqual({ memory: false, disk: true, chats: false, newChat: true });
+    });
+
+    it("greys out the details while it is off", () => {
+      view();
+      fireEvent.click(mode("Off"));
+      for (const name of ["Memory used", "Free disk space", "Turn the lantern amber or red when what it shows runs low"]) expect(screen.getByRole("checkbox", { name })).toBeDisabled();
+      expect(screen.getByRole("group", { name: "In the panel" })).toBeDisabled();
+      fireEvent.click(mode("Just the lantern"));
+      expect(screen.getByRole("checkbox", { name: "Memory used" })).toBeEnabled();
+    });
+  });
 });
 
 describe("useChimeOn", () => {

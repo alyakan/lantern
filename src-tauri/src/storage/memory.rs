@@ -136,6 +136,25 @@ pub fn snapshot() -> Result<Snapshot, String> {
     Ok(Snapshot { total_bytes: total, used_bytes: mem.used, cached_bytes: mem.cached, free_bytes: mem.free, compressed_bytes: mem.compressed, swap_used_bytes: sys.swap_used, pressure, pressure_source, scaled, apps })
 }
 
+/// The Mac's RAM in one glance, for the menu bar: how much is used, of how much, and how hard the Mac is working for room.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+pub struct Light {
+    pub total_bytes: u64,
+    pub used_bytes: u64,
+    pub pressure: Pressure,
+}
+
+/// `snapshot` without the process list: just `vm_stat` and `sysctl`, a few milliseconds, so the menu bar can read it every few
+/// seconds (the `ps` of a full snapshot is for when the user is looking at the apps).
+pub fn light() -> Result<Light, String> {
+    let vm = parse_vm_stat(&run(VM_STAT, &[], false)?)?;
+    let sys = parse_sysctl(&run(SYSCTL, &SYSCTL_KEYS, true)?);
+    let total = sys.memsize.ok_or("sysctl didn't say how much memory this Mac has")?;
+    let mem = sections(total, &vm);
+    let pressure = sys.pressure.unwrap_or_else(|| estimate_pressure(&mem));
+    Ok(Light { total_bytes: total, used_bytes: mem.used, pressure })
+}
+
 /// Runs one of the programs above and returns what it printed. `lenient` keeps the output of a program that exits with an error
 /// (sysctl does when one of its keys is unknown, and still prints the others).
 fn run(program: &str, args: &[&str], lenient: bool) -> Result<String, String> {
@@ -373,6 +392,15 @@ pub fn group(procs: &[Proc], lantern_pid: u32, used: u64, total: u64) -> (Vec<Ap
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The real `vm_stat` and `sysctl` of whatever Mac runs the tests: the glance has sane numbers and needs no process list.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn the_light_reading_is_this_macs_ram_and_adds_up() {
+        let l = light().unwrap();
+        assert!(l.total_bytes >= 1 << 30, "{l:?}");
+        assert!(l.used_bytes > 0 && l.used_bytes <= l.total_bytes, "{l:?}");
+    }
 
     const VM_STAT_OUT: &str = "Mach Virtual Memory Statistics: (page size of 16384 bytes)
 Pages free:                               25817.

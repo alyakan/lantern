@@ -9,6 +9,7 @@ import { PAUSE_OPTIONS, setPauseAtPercent, usePauseAtPercent } from "../lib/plan
 import { QUIET_MINUTES, setQuietMinutes, useQuietMinutes } from "../lib/quietSetting";
 import { setTidyMode, TIDY_MODES, useTidyMode } from "../lib/tidySetting";
 import { setAutoMergeTests, useAutoMergeTests } from "../lib/mergeTests";
+import { setMenuBar, useMenuBar, type MenuBarMode } from "../lib/menuBar";
 import { setRestorePoints, useRestorePoints } from "../lib/restorePointsSetting";
 import { PAUSE_MS, type NotifyPrefs } from "../lib/notifyPrefs";
 import type { TextSize } from "../lib/theme";
@@ -153,6 +154,7 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
   const pauseAt = usePauseAtPercent();
   const autoTests = useAutoMergeTests();
   const restorePoints = useRestorePoints();
+  const menuBar = useMenuBar();
   const paused = notify.pausedUntil > Date.now();
   const set = (patch: Partial<NotifyPrefs>) => onNotify({ ...notify, ...patch });
   return (
@@ -228,6 +230,57 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
             ["large", "Large"],
           ]}
         />
+      </section>
+      <section className="general-section" aria-labelledby="general-menubar">
+        <h3 id="general-menubar" className="general-title">
+          Menu bar
+        </h3>
+        <Choices<MenuBarMode>
+          legend="Show Lantern in the Mac's menu bar"
+          name="menu-bar-mode"
+          value={menuBar.mode}
+          onChange={(mode) => setMenuBar({ mode })}
+          options={[
+            ["off", "Off"],
+            ["icon", "Just the lantern"],
+            ["full", "Lantern and readout"],
+          ]}
+        />
+        <span className="settings-muted">Click the lantern for memory, disk space, your open chats and a box to start a new chat. It lasts while Lantern is open: closing the window quits Lantern as before.</span>
+        <div className="general-indent">
+          <span className="settings-muted">What the readout beside the lantern shows, and what the lantern keeps an eye on:</span>
+          <label className="general-option">
+            <input type="checkbox" checked={menuBar.ram} disabled={menuBar.mode === "off"} onChange={(e) => setMenuBar({ ram: e.target.checked })} />
+            <span>Memory used</span>
+          </label>
+          <label className="general-option">
+            <input type="checkbox" checked={menuBar.disk} disabled={menuBar.mode === "off"} onChange={(e) => setMenuBar({ disk: e.target.checked })} />
+            <span>Free disk space</span>
+          </label>
+          <label className="general-option">
+            <input type="checkbox" checked={menuBar.alerts} disabled={menuBar.mode === "off"} onChange={(e) => setMenuBar({ alerts: e.target.checked })} />
+            <span>Turn the lantern amber or red when what it shows runs low</span>
+          </label>
+          <span className="settings-muted">Amber is under 15 GB free or memory pressure rising; red is under 5 GB or high pressure. It only watches what is ticked above.</span>
+          <fieldset className="general-choices" disabled={menuBar.mode === "off"}>
+            <legend>In the panel</legend>
+            <div className="general-choice-row">
+              {(
+                [
+                  ["memory", "Memory"],
+                  ["disk", "Disk"],
+                  ["chats", "Open chats"],
+                  ["newChat", "New chat box"],
+                ] as const
+              ).map(([key, label]) => (
+                <label key={key} className="general-choice">
+                  <input type="checkbox" checked={menuBar.panel[key]} onChange={(e) => setMenuBar({ panel: { [key]: e.target.checked } })} />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        </div>
       </section>
       <section className="general-section" aria-labelledby="general-agents">
         <h3 id="general-agents" className="general-title">

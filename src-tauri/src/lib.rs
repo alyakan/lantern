@@ -11,6 +11,7 @@ pub mod history;
 pub mod history_search;
 pub mod mcp_config;
 pub mod menu;
+pub mod menu_bar;
 pub mod merge_tests;
 pub mod navigation;
 pub mod network;
@@ -1991,7 +1992,8 @@ fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_window_state::Builder::default().with_state_flags(window_state_flags()).build())
+        // The menu bar panel is placed under the menu bar item each time it opens: a saved position would fight that.
+        .plugin(tauri_plugin_window_state::Builder::default().with_state_flags(window_state_flags()).with_denylist(&[menu_bar::PANEL]).build())
         .plugin(tauri_plugin_opener::init())
         .plugin(navigation::init())
         .plugin(tauri_plugin_dialog::init())
@@ -2030,6 +2032,7 @@ pub fn run() {
             app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into() });
             app.manage(updates::Updates::default());
             app.manage(awake::Awake::default());
+            app.manage(menu_bar::MenuBar::default());
             if updates::checks_enabled() {
                 tauri::async_runtime::spawn(updates::watch(app.handle().clone()));
             }
@@ -2040,6 +2043,13 @@ pub fn run() {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move { menu::refresh_recent(&handle).await });
             Ok(())
+        })
+        // Lantern ends with its main window. The menu bar panel is a window too (hidden), which would otherwise keep the app, its
+        // chats and its agents running with nothing on screen after Quit or the close button.
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                window.app_handle().exit(0);
+            }
         })
         .on_menu_event(|app, event| {
             let id = event.id().0.as_str();
@@ -2087,6 +2097,11 @@ pub fn run() {
             storage_cancel,
             storage_delete,
             memory_snapshot,
+            menu_bar::set_menu_bar,
+            menu_bar::menubar_stats,
+            menu_bar::menubar_fit,
+            menu_bar::menubar_hide,
+            menu_bar::menubar_act,
             orchestra_decline_merge,
             orchestra_merge_tests_info,
             orchestra_run_merge_tests,
