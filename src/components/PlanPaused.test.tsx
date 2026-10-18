@@ -18,7 +18,18 @@ describe("PlanPaused", () => {
     expect(screen.getByRole("status")).toHaveTextContent("1 agent was stopped");
   });
 
-  it("Resume is the one way out", () => {
+  it("has a Dismiss that closes it without resuming, when it is given one", () => {
+    const onResume = vi.fn();
+    const onDismiss = vi.fn();
+    const { rerender } = render(<PlanPaused pause={pause(["w1"])} onResume={onResume} onDismiss={onDismiss} />);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onResume).not.toHaveBeenCalled();
+    rerender(<PlanPaused pause={pause(["w1"])} onResume={onResume} />);
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+  });
+
+  it("Resume is the one way to start the agents again", () => {
     const onResume = vi.fn();
     render(<PlanPaused pause={pause(["w1"])} onResume={onResume} />);
     fireEvent.click(screen.getByRole("button", { name: "Resume" }));

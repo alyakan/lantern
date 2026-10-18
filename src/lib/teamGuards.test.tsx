@@ -110,6 +110,50 @@ describe("the pause at the plan's limit", () => {
   });
 });
 
+describe("the end of a pause", () => {
+  const paused = () => {
+    const act_ = actions();
+    const hook = renderHook(() => useTeamGuards(withStatus(team(), { w1: "running" }), act_));
+    return { act_, ...hook };
+  };
+
+  it("comes by itself when the plan's window resets, and tells no agent to continue", () => {
+    vi.useFakeTimers();
+    const { act_, result } = paused();
+    reading(95);
+    expect(result.current.pause).not.toBeNull();
+    // Not before it: the card is still true.
+    act(() => vi.advanceTimersByTime(71 * 60_000));
+    expect(result.current.pause).not.toBeNull();
+    act(() => vi.advanceTimersByTime(2 * 60_000));
+    expect(result.current.pause).toBeNull();
+    expect(act_.send).not.toHaveBeenCalled();
+    expect(act_.queue).not.toHaveBeenCalled();
+  });
+
+  it("ends at the end of the clock's five-hour block when the plan didn't say when it resets", () => {
+    vi.useFakeTimers();
+    const { result } = paused();
+    act(() => setPlanUsage({ used: 0.96, resetsAt: null }));
+    expect(result.current.pause).toMatchObject({ resetsAt: null });
+    act(() => vi.advanceTimersByTime(5 * 3600_000 + 1000));
+    expect(result.current.pause).toBeNull();
+  });
+
+  it("can be dismissed: the card goes, nothing is resumed, and the agents stay stopped", () => {
+    const { act_, result } = paused();
+    reading(96);
+    expect(result.current.pause).not.toBeNull();
+    act(() => result.current.dismiss());
+    expect(result.current.pause).toBeNull();
+    expect(act_.send).not.toHaveBeenCalled();
+    expect(act_.queue).not.toHaveBeenCalled();
+    // Resume has nothing left to do.
+    act(() => result.current.resume());
+    expect(act_.send).not.toHaveBeenCalled();
+  });
+});
+
 describe("Resume", () => {
   /** A chat that was stopped by the pause: idle, its last turn stopped. */
   const stopped = (s: State): State => ({ ...s, status: "idle", thinking: false, items: [...s.items, { type: "turn", id: "t9", isError: false, stopped: true, result: null, durationMs: 1, denied: [], cost: null, tokens: null } as never] });

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Chats } from "../sessions";
 import { nodeStatus, orchestraNodes } from "./orchestraView";
-import { CONTINUE_MESSAGE, loadPauseMemory, pauseStep, pausedLine, pauseWarning, savePauseMemory, usePauseAtPercent, windowKey, type PlanPause } from "./planPause";
+import { CONTINUE_MESSAGE, loadPauseMemory, pauseEndsAt, pauseStep, pausedLine, pauseWarning, savePauseMemory, usePauseAtPercent, windowKey, type PlanPause } from "./planPause";
 import { usePlanUsage } from "./planUsage";
 import type { State } from "../store";
 
@@ -32,7 +32,9 @@ function stoppedAtRest(s: State): boolean {
 /**
  * What keeps a team from running unwatched: the pause when the plan reaches the user's limit (the setting
  * "Pause a team's work when my plan reaches"). `pause` is set while the teams are paused, and while it is set no queued message or agent's note starts a turn:
- * `resume` tells each agent that was stopped to continue, and nothing else does.
+ * `resume` tells each agent that was stopped to continue, and nothing else does. The pause ends by itself when the plan's
+ * window resets (nothing is told to continue: the agents stay stopped, and can be messaged), and `dismiss` ends it the same way
+ * at once, for a user who doesn't want it on screen.
  */
 export function useTeamGuards(chats: Chats, actions: GuardActions) {
   const plan = usePlanUsage();
@@ -66,6 +68,16 @@ export function useTeamGuards(chats: Chats, actions: GuardActions) {
     act.paused(pausedLine(next));
   }, [plan, pauseAt]);
 
+  // The limit has reset: nothing is held back any more, so the pause card has nothing left to say.
+  const endsAt = pause ? pauseEndsAt(pause) : null;
+  useEffect(() => {
+    if (endsAt === null) return;
+    const timer = setTimeout(() => setPause(null), Math.max(0, endsAt - Date.now()));
+    return () => clearTimeout(timer);
+  }, [endsAt]);
+
+  const dismiss = useCallback(() => setPause(null), []);
+
   const resume = useCallback(() => {
     const { chats: now, actions: act, pause: paused } = latest.current;
     if (!paused) return;
@@ -84,5 +96,5 @@ export function useTeamGuards(chats: Chats, actions: GuardActions) {
     setPause(null);
   }, []);
 
-  return { pause, resume };
+  return { pause, resume, dismiss };
 }

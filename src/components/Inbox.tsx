@@ -16,6 +16,8 @@ export interface InboxProps {
   paused?: PlanPause | null;
   /** Tells each paused agent to continue. */
   onResume?: () => void;
+  /** Closes the pause without telling them to: they stay stopped. */
+  onDismissPause?: () => void;
 }
 
 /** How often the times in the list are redrawn while it is open. */
@@ -49,7 +51,7 @@ function AllowButton({ title, onAllow }: { title: string; onAllow: () => void })
  * and how long it has waited. Go takes you there; a plain permission request can be answered here. Arrow keys move
  * between the rows (Left and Right between a row's buttons), Escape closes it.
  */
-export function Inbox({ items, onGo, onDecide, paused = null, onResume }: InboxProps) {
+export function Inbox({ items, onGo, onDecide, paused = null, onResume, onDismissPause }: InboxProps) {
   const [open, setOpen] = useState(false);
   const { box, button, list, id } = usePopover(open, () => setOpen(false), false);
   const waiting = items.filter((it) => it.needsYou).length + (paused ? 1 : 0);
@@ -127,6 +129,11 @@ export function Inbox({ items, onGo, onDecide, paused = null, onResume }: InboxP
                     <button data-go className="primary" aria-label="Resume the paused agents" onClick={() => onResume?.()}>
                       Resume
                     </button>
+                    {onDismissPause && (
+                      <button aria-label="Dismiss the pause, leaving the agents stopped" title="Close this without restarting the agents: they stay stopped and can be messaged" onClick={onDismissPause}>
+                        Dismiss
+                      </button>
+                    )}
                   </span>
                 </li>
               )}

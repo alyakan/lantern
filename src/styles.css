@@ -877,6 +877,7 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 @media (prefers-reduced-motion: reduce) { .viewer-progress::after { animation: none; left: 0; width: 100%; } }
 .banner { display: flex; align-items: center; gap: 10px; padding: 6px 12px; margin: 0 var(--edge) var(--edge); font-size: calc(12.5px * var(--font-scale)); border: 1px solid var(--line-strong); border-radius: var(--radius-inner); }
 .banner span { flex: 1; }
+.banner span.banner-actions { flex: none; display: inline-flex; gap: 6px; }
 .banner-info { background: var(--info-bg); }
 .banner-error { background: var(--error-bg); }
 .banner-auth { background: var(--auth-bg); }

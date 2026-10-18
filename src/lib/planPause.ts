@@ -45,12 +45,19 @@ export function usePauseAtPercent(): number {
   return n;
 }
 
+const FIVE_HOURS = 5 * 3600_000;
+
 /** A team's work that was paused: when, how full the plan was, when it resets, and the agents that were interrupted. */
 export interface PlanPause {
   percent: number;
   resetsAt: number | null;
   since: number;
   slots: string[];
+}
+
+/** When a pause is over by itself: the plan's window resets (when claude didn't say, at the end of the clock's five-hour block it began in). */
+export function pauseEndsAt(p: Pick<PlanPause, "resetsAt" | "since">): number {
+  return p.resetsAt !== null ? p.resetsAt * 1000 : (Math.floor(p.since / FIVE_HOURS) + 1) * FIVE_HOURS;
 }
 
 /** The windows already dealt with, so each is paused and warned about once: the window's key (see windowKey). */
@@ -60,8 +67,6 @@ export interface PauseMemory {
 }
 
 const MEMORY = "lantern.pauseMemory";
-const FIVE_HOURS = 5 * 3600_000;
-
 /** Which five-hour window a reading belongs to: its reset time (when claude didn't say, the clock's five-hour block). */
 export function windowKey(plan: PlanUsage, now = Date.now()): string {
   return plan.resetsAt !== null ? String(plan.resetsAt) : `block-${Math.floor(now / FIVE_HOURS)}`;
