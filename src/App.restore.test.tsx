@@ -253,10 +253,11 @@ describe("restoring a team at launch", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Canvas" }));
     expect(await screen.findByLabelText(/Agent Login form/)).toBeInTheDocument();
-    // The panel is there beside the canvas (its Changes tab is in the page), shut.
-    expect(screen.getByRole("tab", { name: /^Changes/ })).toBeInTheDocument();
+    // The panel is shut beside the canvas, at once: going to the canvas isn't the user closing it, so it doesn't slide away.
+    expect(screen.queryByRole("tab", { name: /^Changes/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Show side panel" }));
     expect(await screen.findByRole("button", { name: "Hide side panel" })).toBeInTheDocument();
+    expect(await screen.findByRole("tab", { name: /^Changes/ })).toBeInTheDocument();
     // Still the canvas, now with the panel open beside it; and the choice is kept for the next time.
     expect(screen.getByLabelText(/Agent Login form/)).toBeInTheDocument();
     await waitFor(() => expect(JSON.parse(localStorage.getItem("review.canvasPanel") ?? "false")).toBe(true));

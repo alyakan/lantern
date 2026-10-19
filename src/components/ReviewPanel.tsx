@@ -96,6 +96,18 @@ export { migrateTab, type Tab };
 /** Each tab's button, which its panel is labelled by. */
 const tabId = (t: Tab) => `review-${t}-tab`;
 
+// The app keeps its last request of the pane (a search, a mentioned file, a test run) in its own state, and the pane is gone
+// whenever the project shown has it hidden: coming back mounts it again with the old request still there. A request is acted
+// on once, however many times the pane is mounted.
+const acted: Record<string, unknown> = {};
+function useRequest(name: string, key: unknown, act: () => void) {
+  useEffect(() => {
+    if (!key || acted[name] === key) return;
+    acted[name] = key;
+    act();
+  }, [key]);
+}
+
 export function ReviewPanel(props: Props) {
   const [savedTab, setTab] = usePersistentState<string>("review.tab", "changes");
   const count = props.files.length;
@@ -120,30 +132,22 @@ export function ReviewPanel(props: Props) {
   const [reveal, setReveal] = useState<{ path: string; line: number | null; key: number } | null>(null);
   // A mention of a changed file at a line (a review finding): its diff scrolls there.
   const [diffLine, setDiffLine] = useState<{ path: string; line: number; key: number } | null>(null);
-  useEffect(() => {
-    if (!props.focusRun) return;
-    setShownRun(props.focusRun.id);
+  useRequest("run", props.focusRun?.key, () => {
+    setShownRun(props.focusRun!.id);
     setTab("tests");
-  }, [props.focusRun?.key]);
+  });
   // A new run comes to the front, unless an older one was picked on purpose.
   const latest = runs[runs.length - 1]?.id ?? null;
   useEffect(() => setShownRun(null), [latest]);
   const latestRun = runs[runs.length - 1]?.run;
-  useEffect(() => {
-    if (props.searchKey) setTab("files");
-  }, [props.searchKey?.key]);
-  useEffect(() => {
-    if (props.architecture?.openKey) {
-      setTab("plan");
-      setPlanView("map");
-    }
-  }, [props.architecture?.openKey]);
-  useEffect(() => {
-    if (props.changesKey) setTab("changes");
-  }, [props.changesKey]);
-  useEffect(() => {
-    const req = props.openRequest;
-    if (!req) return;
+  useRequest("search", props.searchKey?.key, () => setTab("files"));
+  useRequest("map", props.architecture?.openKey, () => {
+    setTab("plan");
+    setPlanView("map");
+  });
+  useRequest("changes", props.changesKey, () => setTab("changes"));
+  useRequest("open", props.openRequest?.key, () => {
+    const req = props.openRequest!;
     if (props.files.some((f) => f.path === req.path)) {
       props.onSelect(req.path);
       setTab("changes");
@@ -152,7 +156,7 @@ export function ReviewPanel(props: Props) {
       setReveal(req);
       setTab("files");
     }
-  }, [props.openRequest?.key]);
+  });
   const badges: Partial<Record<Tab, TabBadge>> = {};
   if (count > 0) badges.changes = { text: `${count}`, failed: false, attention: false };
   if (latestRun?.outcome === "failed") badges.tests = { text: `${latestRun.failed || "!"}`, failed: true, attention: true };

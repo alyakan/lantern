@@ -13,6 +13,8 @@ interface Props {
   right: ReactNode;
   ratio: number;
   collapsed: boolean;
+  /** What the pane belongs to (a project): when this changes along with `collapsed`, the pane is shown or hidden at once, not slid. */
+  scope?: string;
   onRatio: (ratio: number) => void;
 }
 
@@ -23,7 +25,7 @@ const nextFrame = (fn: () => void) => requestAnimationFrame(() => requestAnimati
 
 // Collapsing slides the review pane out: its outer wrapper animates its width while the pane inside keeps
 // its size, so the diff is clipped rather than squeezed and re-laid-out on every frame.
-export function SplitPane({ left, right, ratio, collapsed, onRatio }: Props) {
+export function SplitPane({ left, right, ratio, collapsed, scope, onRatio }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const side = useRef<HTMLDivElement>(null);
   const leftPane = useRef<HTMLDivElement>(null);
@@ -44,7 +46,17 @@ export function SplitPane({ left, right, ratio, collapsed, onRatio }: Props) {
     return Math.max(MIN_RIGHT, content * (1 - ratio));
   };
 
+  const lastScope = useRef(scope);
   useLayoutEffect(() => {
+    // Switching to a project that has the pane the other way is not the user opening or closing it: no slide, which would
+    // lay the whole review pane out on every frame of it.
+    const switched = lastScope.current !== scope;
+    lastScope.current = scope;
+    if (switched) {
+      if (collapsed) endDrag();
+      setPhase(collapsed ? "closed" : "open");
+      return;
+    }
     // Collapsing mid-drag takes the handle away, which would never hear the release: the drag ends here.
     if (collapsed) endDrag();
     if (collapsed && (phase === "open" || phase === "opening")) {
@@ -63,7 +75,7 @@ export function SplitPane({ left, right, ratio, collapsed, onRatio }: Props) {
       nextFrame(() => setWidth(target));
     }
     // Only a change of `collapsed` starts an animation.
-  }, [collapsed]);
+  }, [collapsed, scope]);
 
   const finish = () => setPhase((p) => (p === "closing" ? "closed" : p === "opening" ? "open" : p));
   const animating = phase === "closing" || phase === "opening";

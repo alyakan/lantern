@@ -2250,6 +2250,7 @@ export default function App() {
         <SplitPane
           ratio={splitRatio}
           collapsed={reviewCollapsed || !state.folder}
+          scope={showCanvas ? "canvas" : (state.folder ?? "")}
           onRatio={setSplitRatio}
           left={
             showCanvas ? (
