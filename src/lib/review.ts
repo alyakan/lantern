@@ -47,16 +47,47 @@ const STOP_CUE = /\s+I'll stop here\.?\s*(?:Say|Reply|Type|Answer)\s+["“]?next
 export const withoutCue = (text: string) => text.replace(CUE, "").replace(STOP_CUE, "").trimEnd();
 
 const SEVERITY: Record<string, Severity> = { blocker: "blocker", "should-fix": "should-fix", "should fix": "should-fix", shouldfix: "should-fix", nit: "nit" };
-const FINDING = /^\s*(?:[-*]\s*)?⚠️?\s*(?:lines?\s+(\d+)(?:\s*[–-]\s*(\d+))?\s*)?(?:\(([^)]+)\))?\s*:?\s*(.*)$/i;
+const FINDING = /^\s*(?:[-*]\s*)?(?:\*\*)?⚠️?\s*(.*)$/i;
+const LINE_REF = /^lines?\s+(\d+)(?:\s*[–-]\s*(\d+))?/i;
+// A severity in brackets, which may be followed by a tag ("(should-fix, convention)"), or the whole header in bold.
+const SEVERITY_IN = /[([]\s*(blocker|should[- ]?fix|nit)\b[^)\]]*[)\]]/i;
+const SEVERITY_ALONE = /^\**\s*(blocker|should[- ]?fix|nit)\s*\**$/i;
+
+/**
+ * A finding's header and text. The header is what comes before the first colon: a line (or several, of which the first
+ * counts), and the severity, which Claude writes as "(nit)", "(should-fix, convention)" or "**nit:**". A line without a
+ * severity or a line reference in front of its first colon is all text.
+ */
+function readFinding(line: string): Omit<Finding, "index"> | null {
+  const m = FINDING.exec(line);
+  if (!m) return null;
+  const rest = m[1];
+  const colon = rest.indexOf(":");
+  const head = colon < 0 ? rest : rest.slice(0, colon);
+  const ref = LINE_REF.exec(head.trim());
+  const rawSeverity = SEVERITY_IN.exec(head)?.[1] ?? SEVERITY_ALONE.exec(head.trim().replace(LINE_REF, "").trim())?.[1] ?? null;
+  const severity = rawSeverity ? (SEVERITY[rawSeverity.toLowerCase()] ?? null) : null;
+  const line1 = ref ? Number(ref[1]) : null;
+  const lineEnd = ref?.[2] ? Number(ref[2]) : null;
+  // No colon, or one that doesn't close a header: the older shape ("⚠ line 7 (blocker) text") still reads, the rest is text.
+  if (colon < 0 || (!severity && !ref)) {
+    const old = /^(?:lines?\s+(\d+)(?:\s*[–-]\s*(\d+))?\s*)?(?:\(([^)]+)\))?\s*:?\s*(.*)$/i.exec(rest);
+    if (!old) return { line: null, lineEnd: null, severity: null, text: rest.trim() };
+    return { line: old[1] ? Number(old[1]) : null, lineEnd: old[2] ? Number(old[2]) : null, severity: SEVERITY[(old[3] ?? "").trim().toLowerCase()] ?? null, text: old[4].trim() };
+  }
+  // The colon of a bold header sits inside the bold ("**nit:** text"): the closing marks belong to it, not to the text.
+  const text = rest.slice(colon + 1).replace(/^\**\s*/, "").trim();
+  return { line: line1, lineEnd, severity, text };
+}
 
 export function findingsOf(section: string): { findings: Finding[]; clean: boolean } {
   const body = section.trim();
   if (/^none\.?$/i.test(body)) return { findings: [], clean: true };
   const findings: Finding[] = [];
   for (const line of body.split("\n")) {
-    const m = /⚠/.test(line) ? FINDING.exec(line) : null;
-    if (m) {
-      findings.push({ index: findings.length, line: m[1] ? Number(m[1]) : null, lineEnd: m[2] ? Number(m[2]) : null, severity: SEVERITY[(m[3] ?? "").trim().toLowerCase()] ?? null, text: m[4].trim() });
+    const read = /⚠/.test(line) ? readFinding(line) : null;
+    if (read) {
+      findings.push({ index: findings.length, ...read });
     } else if (findings.length && line.trim()) {
       // A finding's text can run on over the lines after it.
       findings[findings.length - 1].text += `\n${line.trim()}`;
