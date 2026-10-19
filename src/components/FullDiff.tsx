@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DiffEditor, Editor, type DiffOnMount, type OnMount } from "@monaco-editor/react";
 import { DARK_THEME, LIGHT_THEME } from "../monaco";
 import { api, type ChangeScope } from "../api";
@@ -45,6 +45,11 @@ export default function FullDiff({ path, refreshKey, layout, scope = "session", 
     comments.update((all) => reconcile(all, path, diff.original, diff.current));
   }, [diff, path]);
 
+  // Monaco only folds a diff's unchanged code away when it is first drawn: give a diff editor other text and what it had
+  // folded is shown again, for good. So each file, and each new version of one, gets an editor of its own. (Reading the
+  // same text again is the same version: nothing is redrawn.)
+  const version = useMemo(() => (diff ? `${diff.path}\n${hashOf(diff.original)}:${hashOf(diff.current)}` : ""), [diff]);
+
   if (error) return <div className="empty">{error}</div>;
   if (!diff) return <div className="empty">Loading…</div>;
 
@@ -65,11 +70,18 @@ export default function FullDiff({ path, refreshKey, layout, scope = "session", 
         {whole ? (
           <WholeFile path={path} text={whole.text} kind={whole.kind} language={language} theme={theme} reveal={whole.kind === "added" && current ? reveal : null} comments={note} />
         ) : (
-          <Diff path={path} original={diff.original} modified={diff.current} language={language} theme={theme} layout={layout} reveal={current ? reveal : null} comments={note} />
+          <Diff key={version} path={path} original={diff.original} modified={diff.current} language={language} theme={theme} layout={layout} reveal={current ? reveal : null} comments={note} />
         )}
       </div>
     </>
   );
+}
+
+/** A short fingerprint of some text, to tell two versions of a file apart without keeping them both. */
+function hashOf(text: string): string {
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+  return `${text.length}.${(h >>> 0).toString(36)}`;
 }
 
 type CodeEditor = Parameters<OnMount>[0];
