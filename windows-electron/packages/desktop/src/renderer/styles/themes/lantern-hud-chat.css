@@ -1,0 +1,167 @@
+/* Lantern "HUD" style: the chat window. Quiet sci-fi on top of lantern-hud.css:
+   a signal rail under the header with a slow light sweep, a faint grid behind
+   the messages, replies that slide in with a thin signal edge, and a
+   bracketed composer that lights up and scans once when focused.
+   Only one ambient motion (the rail sweep); the rest plays on entry or focus.
+   Motion is transform and opacity only. */
+
+:root[data-lantern-style='hud'] {
+  --hud-grid: rgba(27, 26, 23, 0.045);
+}
+
+:root[data-lantern-style='hud'][data-theme='dark'] {
+  --hud-grid: rgba(239, 230, 207, 0.028);
+}
+
+/* Header: condensed uppercase title over a signal rail */
+html[data-lantern-style='hud'] .chat-layout-header {
+  border-bottom: 1px solid transparent;
+  border-image: linear-gradient(
+      90deg,
+      var(--hud-signal) 0,
+      color-mix(in srgb, var(--hud-signal) 35%, transparent) 22%,
+      var(--border-base) 55%,
+      transparent 100%
+    )
+    1;
+}
+
+html[data-lantern-style='hud'] .chat-layout-header .text-16px.font-bold {
+  font-family: var(--font-label);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+html[data-lantern-style='hud'] .chat-layout-header::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 140px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #ffd8b0, transparent);
+  pointer-events: none;
+  opacity: 0;
+  animation: hud-rail-sweep 11s 2s ease-in-out infinite;
+}
+
+/* Message area: a faint grid with a warm glow from the top */
+html[data-lantern-style='hud'] .layout-content .chat-surface-container:not([data-testid='board-side-chat'] *) {
+  background-image:
+    radial-gradient(ellipse 70% 40% at 50% 0%, color-mix(in srgb, var(--hud-signal) 5%, transparent), transparent),
+    linear-gradient(var(--hud-grid) 1px, transparent 1px), linear-gradient(90deg, var(--hud-grid) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    48px 48px,
+    48px 48px;
+}
+
+/* Replies and tool runs slide in; replies carry a thin signal edge */
+html[data-lantern-style='hud'] .message-item.text,
+html[data-lantern-style='hud'] .message-item.tool_summary {
+  animation: hud-msg-in 0.35s cubic-bezier(0.2, 1, 0.3, 1) backwards;
+}
+
+html[data-lantern-style='hud'] .message-item.text.justify-start {
+  position: relative;
+}
+
+html[data-lantern-style='hud'] .message-item.text.justify-start::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: linear-gradient(180deg, var(--hud-signal), transparent);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+html[data-lantern-style='hud'] .message-item.justify-end > div {
+  border-radius: 3px;
+}
+
+/* Composer: squared, four signal brackets; focus lights the edge and scans once */
+html[data-lantern-style='hud'] .sendbox-panel {
+  border-radius: 4px !important;
+  background-image:
+    linear-gradient(var(--hud-signal), var(--hud-signal)), linear-gradient(var(--hud-signal), var(--hud-signal)),
+    linear-gradient(var(--hud-signal), var(--hud-signal)), linear-gradient(var(--hud-signal), var(--hud-signal));
+  background-size:
+    14px 2px,
+    2px 14px,
+    14px 2px,
+    2px 14px;
+  background-position:
+    0 0,
+    0 0,
+    100% 100%,
+    100% 100%;
+  background-repeat: no-repeat;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+html[data-lantern-style='hud'] .sendbox-panel:focus-within {
+  border-color: color-mix(in srgb, var(--hud-signal) 55%, var(--border-base)) !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--hud-signal) 22%, transparent),
+    0 0 28px -8px color-mix(in srgb, var(--hud-signal) 45%, transparent);
+}
+
+html[data-lantern-style='hud'] .sendbox-panel::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  width: 30%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--hud-signal), transparent);
+  pointer-events: none;
+  opacity: 0;
+}
+
+html[data-lantern-style='hud'] .sendbox-panel:focus-within::after {
+  animation: hud-composer-scan 0.9s ease-out;
+}
+
+@keyframes hud-rail-sweep {
+  0% {
+    transform: translateX(-140px);
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  45% {
+    transform: translateX(100vw);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(100vw);
+    opacity: 0;
+  }
+}
+
+@keyframes hud-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes hud-composer-scan {
+  0% {
+    transform: translateX(-100%);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(340%);
+    opacity: 0;
+  }
+}

@@ -1,0 +1,174 @@
+.today {
+  width: 100%;
+  margin-top: 18px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  animation: rise 260ms var(--cockpit-ease);
+}
+
+@media (max-width: 760px) {
+  .today {
+    grid-template-columns: 1fr;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+.card {
+  border: 1px solid var(--border-base);
+  border-radius: var(--cockpit-radius);
+  background: var(--bg-2);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bg-6);
+}
+
+.count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0;
+}
+
+.streak {
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-secondary);
+}
+
+.clear {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--success);
+  padding: 6px 0;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.item {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  height: auto !important;
+  padding: 6px 6px !important;
+  text-align: left;
+  color: var(--text-primary) !important;
+  font-size: 13px;
+}
+
+.itemText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chev {
+  color: var(--bg-6);
+}
+
+.sev {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.high {
+  background: var(--danger);
+}
+
+.medium {
+  background: var(--warning);
+}
+
+.low {
+  background: var(--bg-6);
+}
+
+.carried {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.intention :global(.arco-input) {
+  font-size: 14px;
+}
+
+.toggle {
+  align-self: flex-start;
+  display: inline-flex !important;
+  align-items: center;
+  gap: 4px;
+  padding: 0 !important;
+  color: var(--text-secondary) !important;
+  font-size: 12px !important;
+}
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fieldLabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--bg-6);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.private {
+  font-size: 11px;
+  color: var(--bg-6);
+}

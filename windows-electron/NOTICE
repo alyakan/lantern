@@ -1,0 +1,14 @@
+Lantern
+Copyright 2026 Nezar Mansour
+
+Lantern is a fork of AionUi (https://github.com/iOfficeAI/AionUi),
+Copyright 2025 AionUi (aionui.com), licensed under the Apache License, Version 2.0.
+See LICENSE for the full license text. Files that carry an AionUi copyright header
+keep it; changes made for Lantern are described in docs/cockpit/.
+
+Several Lantern features (continue in another agent, shared skills folder, SSH
+remote projects, built-in MCP servers, browser and computer use, the project
+board) were modelled on Poracode. No Poracode code or
+assets are included.
+
+Fonts: Barlow and Barlow Semi Condensed (SIL Open Font License 1.1).

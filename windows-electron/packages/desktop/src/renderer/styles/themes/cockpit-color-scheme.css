@@ -1,0 +1,291 @@
+/* Lantern "Classic" colour scheme: graphite with one signal-orange accent.
+   See docs/cockpit/DESIGN.md. Loaded after default-color-scheme.css and
+   overrides the same semantic tokens, so every UnoCSS class and Arco
+   component follows without per-component changes. The HUD style
+   (lantern-hud.css) overrides these again under [data-lantern-style='hud']. */
+
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+
+:root {
+  --cockpit-radius: 10px;
+  --cockpit-radius-sm: 7px;
+  --cockpit-ease: cubic-bezier(0.2, 0.9, 0.3, 1.15);
+  --font-ui: 'Geist Variable', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: var(--code-font-family, 'Geist Mono Variable', 'Cascadia Code', Consolas, monospace);
+
+  /* Agent identity colours (board cards, dots, edges) */
+  --agent-claude: #c8643b;
+  --agent-codex: #2e5bba;
+  --agent-qwen: #2c8c78;
+  --agent-remote: #3fb27f;
+  --agent-other: #80838b;
+  --status-waiting: #ffb627;
+
+  /* Status lamps, shared by both styles */
+  --lamp-running: #38d39f;
+  --lamp-waiting: #ffb627;
+  --lamp-failed: #e0433a;
+
+  /* Board canvas */
+  --board-bg: var(--bg-1);
+  --board-dot: var(--bg-4);
+}
+
+/* Light: cool paper */
+:root:not([data-theme='dark']) {
+  --bg-base: #ffffff;
+  --bg-1: #f6f6f7;
+  --bg-2: #eeeff1;
+  --bg-3: #e2e3e6;
+  --bg-4: #cdcfd4;
+  --bg-5: #adb0b7;
+  --bg-6: #80838b;
+  --bg-8: #50535b;
+  --bg-9: #2a2c32;
+  --bg-10: #141518;
+  --bg-hover: #f0f1f3;
+  --bg-active: #e6e7ea;
+
+  --text-primary: #18191d;
+  --color-text-1: #18191d;
+  --text-secondary: #50535b;
+  --text-disabled: #adb0b7;
+
+  --primary: #f2541a;
+  --info: #f2541a;
+  --success: #1f9d6c;
+  --warning: #d9901a;
+  --danger: #d6392f;
+
+  --border-base: rgba(24, 25, 29, 0.12);
+  --border-light: rgba(24, 25, 29, 0.07);
+
+  --brand: #f2541a;
+  --brand-light: #fff0e9;
+  --brand-hover: #ff7a48;
+  --aou-1: #f6f6f7;
+  --aou-2: #eceef0;
+  --aou-3: #dcdee2;
+  --aou-4: #c4c7cd;
+  --aou-5: #a3a6ad;
+  --aou-6: #80838b;
+  --aou-7: #62656d;
+  --aou-8: #44474e;
+  --aou-9: #2a2c32;
+  --aou-10: #141518;
+
+  --message-user-bg: #eeeff1;
+  --message-tips-bg: #f6f6f7;
+  --workspace-btn-bg: #eeeff1;
+  --thought-gradient: linear-gradient(90deg, #f6f6f7 0%, #f0f1f3 100%);
+  --fill: #f6f6f7;
+  --dialog-fill-0: #ffffff;
+  --fill-0: #ffffff;
+  --border-special: rgba(24, 25, 29, 0.12);
+  --color-guid-agent-bar: #eeeff1;
+}
+
+/* Dark: graphite */
+:root[data-theme='dark'] {
+  --bg-base: #141518;
+  --bg-1: #18191d;
+  --bg-2: #1f2126;
+  --bg-3: #2a2c32;
+  --bg-4: #3a3d44;
+  --bg-5: #50535b;
+  --bg-6: #878a93;
+  --bg-8: #a6a9b1;
+  --bg-9: #cdcfd4;
+  --bg-10: #eeeff1;
+  --bg-hover: #1d1f23;
+  --bg-active: #25272c;
+
+  --text-primary: #edeef0;
+  --color-text-1: #edeef0;
+  --text-secondary: #c3c6cc;
+  --text-disabled: #5d6068;
+
+  --primary: #ff5a1f;
+  --info: #ff5a1f;
+  --success: #38d39f;
+  --warning: #ffb627;
+  --danger: #ff5b52;
+
+  --border-base: rgba(237, 238, 240, 0.1);
+  --border-light: rgba(237, 238, 240, 0.06);
+
+  --brand: #ff5a1f;
+  --brand-light: #3d1a0e;
+  --brand-hover: #ff7c4d;
+  --aou-1: #1d1f23;
+  --aou-2: #26282d;
+  --aou-3: #32343a;
+  --aou-4: #3f4249;
+  --aou-5: #5d6068;
+  --aou-6: #a6a9b1;
+  --aou-7: #c3c6cc;
+  --aou-8: #d6d8dc;
+  --aou-9: #e4e5e8;
+  --aou-10: #edeef0;
+
+  --message-user-bg: #25272c;
+  --message-tips-bg: #1d1f23;
+  --workspace-btn-bg: #1f2126;
+  --thought-gradient: linear-gradient(135deg, #25272c 0%, #1f2126 100%);
+  --fill: #1f2126;
+  --dialog-fill-0: #1f2126;
+  --fill-0: rgba(237, 238, 240, 0.06);
+  --border-special: rgba(237, 238, 240, 0.14);
+  --color-guid-agent-bar: #1f2126;
+}
+
+/* Arco palette: signal orange instead of arcoblue (rgb triplets, as Arco expects) */
+html body {
+  --primary-1: 255, 240, 233;
+  --primary-2: 255, 218, 203;
+  --primary-3: 255, 188, 163;
+  --primary-4: 255, 152, 117;
+  --primary-5: 255, 118, 72;
+  --primary-6: 242, 84, 26;
+  --primary-7: 214, 67, 16;
+  --primary-8: 173, 50, 10;
+  --primary-9: 132, 35, 6;
+  --primary-10: 92, 22, 3;
+  --link-6: 242, 84, 26;
+
+  --color-bg-1: var(--bg-base);
+  --color-bg-2: var(--bg-base);
+  --color-bg-3: var(--bg-2);
+  --color-bg-4: var(--bg-3);
+  --color-bg-5: var(--bg-2);
+  --color-bg-popup: var(--bg-base);
+  --color-text-2: var(--text-secondary);
+  --color-text-3: var(--bg-6);
+  --color-border: var(--border-base);
+  --color-border-1: var(--border-light);
+  --color-border-2: var(--border-base);
+  --color-border-3: var(--bg-4);
+  --color-fill-1: var(--bg-hover);
+  --color-fill-2: var(--bg-2);
+  --color-fill-3: var(--bg-3);
+  --color-fill-4: var(--bg-4);
+  --aion-overlay-bg: var(--bg-base);
+  --aion-overlay-text: var(--text-primary);
+  --aion-overlay-border: var(--border-base);
+  --aion-overlay-shadow: 0 10px 30px rgba(24, 25, 29, 0.12);
+}
+
+html body[arco-theme='dark'] {
+  --primary-1: 61, 26, 14;
+  --primary-2: 87, 35, 17;
+  --primary-3: 128, 50, 22;
+  --primary-4: 181, 67, 27;
+  --primary-5: 230, 82, 30;
+  --primary-6: 255, 90, 31;
+  --primary-7: 255, 124, 77;
+  --primary-8: 255, 158, 122;
+  --primary-9: 255, 195, 171;
+  --primary-10: 255, 229, 219;
+  --link-6: 255, 110, 60;
+  --aion-overlay-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
+}
+
+/* Type and shape */
+html,
+body {
+  font-family: var(--app-font-family, var(--font-ui));
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'ss01', 'cv11';
+}
+
+html body {
+  --border-radius-small: 6px;
+  --border-radius-medium: 8px;
+  --border-radius-large: 12px;
+}
+
+::selection {
+  background: rgba(var(--primary-6), 0.28);
+}
+
+/* Component polish (Arco + app shell), see docs/cockpit/DESIGN.md */
+.sider-section-title {
+  font-family: var(--font-mono);
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+html body .arco-btn-secondary:not(.arco-btn-disabled):not(.send-button-custom) {
+  background-color: transparent;
+  border: 1px solid var(--border-base);
+  color: var(--text-secondary);
+}
+
+html body .arco-btn-secondary:not(.arco-btn-disabled):not(.send-button-custom):hover {
+  background-color: var(--bg-hover);
+  border-color: var(--bg-4);
+  color: var(--text-primary);
+}
+
+html body .arco-btn-primary:not(.arco-btn-disabled) {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.18) inset,
+    0 4px 14px rgba(var(--primary-6), 0.25);
+}
+
+html body .arco-btn {
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    transform 180ms var(--cockpit-ease);
+}
+
+html body .arco-btn:not(.arco-btn-disabled):active {
+  transform: scale(0.97);
+}
+
+html body .arco-input-inner-wrapper-focus,
+html body .arco-textarea-focus,
+html body .arco-input-focus,
+html body .arco-select-view-focus {
+  border-color: rgba(var(--primary-6), 0.6) !important;
+  box-shadow: 0 0 0 3px rgba(var(--primary-6), 0.14);
+}
+
+html body .arco-modal {
+  border-radius: 14px;
+  border: 1px solid var(--border-base);
+  box-shadow: var(--aion-overlay-shadow);
+}
+
+html body .arco-dropdown-menu,
+html body .arco-select-popup,
+html body .arco-trigger-menu,
+html body .arco-popover-content {
+  border-radius: var(--cockpit-radius);
+  border: 1px solid var(--border-base);
+}
+
+html body .arco-tag {
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+html body .arco-switch-checked {
+  background-color: rgb(var(--primary-6));
+}
+
+html body ::-webkit-scrollbar-thumb {
+  background-color: var(--bg-4);
+  border-radius: 999px;
+}
+
+/* Lantern mark in the sidebar header */
+.lantern-logo {
+  background: #0a0b10;
+}

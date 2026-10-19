@@ -1,0 +1,266 @@
+/* Lantern board. Tokens come from styles/themes/cockpit-color-scheme.css. */
+
+.canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-1);
+}
+
+/* React Flow theming through its own CSS variables, independent of colorMode */
+.canvas :global(.react-flow) {
+  --xy-background-color: transparent;
+  --xy-node-border-radius: var(--cockpit-radius);
+  --xy-edge-label-background-color: var(--bg-base);
+  --xy-edge-label-color: var(--bg-6);
+  --xy-minimap-background-color: var(--bg-base);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--bg-1) 70%, transparent);
+  --xy-minimap-node-background-color: var(--bg-4);
+  --xy-controls-button-background-color: var(--bg-base);
+  --xy-controls-button-background-color-hover: var(--bg-hover);
+  --xy-controls-button-color: var(--text-secondary);
+  --xy-controls-button-border-color: var(--border-light);
+  --xy-selection-background-color: rgba(var(--primary-6), 0.08);
+  --xy-selection-border: 1px solid rgba(var(--primary-6), 0.5);
+}
+
+.canvas :global(.react-flow__controls),
+.canvas :global(.react-flow__minimap) {
+  border: 1px solid var(--border-base);
+  border-radius: var(--cockpit-radius);
+  overflow: hidden;
+  box-shadow: var(--aion-overlay-shadow);
+}
+
+.canvas :global(.react-flow__edge-text) {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.canvas :global(.react-flow__attribution) {
+  background: transparent;
+  opacity: 0.5;
+}
+
+/* Floating toolbar: a pill over the canvas */
+.toolbar {
+  position: absolute;
+  top: 14px;
+  left: 16px;
+  right: 16px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.toolbar > * {
+  pointer-events: auto;
+}
+
+.toolbarGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px 5px 12px;
+  border: 1px solid var(--border-base);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-base) 88%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--aion-overlay-shadow);
+}
+
+.toolbarTitle {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--bg-6);
+}
+
+.counter {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-base);
+}
+
+.counterLive {
+  color: rgb(var(--primary-6));
+  border-color: rgba(var(--primary-6), 0.35);
+}
+
+.legend {
+  position: absolute;
+  left: 16px;
+  bottom: 14px;
+  z-index: 5;
+  display: flex;
+  gap: 12px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-base);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-base) 88%, transparent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--bg-6);
+}
+
+.legendLine {
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  margin-inline-end: 6px;
+  vertical-align: middle;
+  border-top: 2px solid currentColor;
+}
+
+/* Agent console card */
+.node {
+  --tone: var(--agent-other);
+  position: relative;
+  width: 272px;
+  box-sizing: border-box;
+  border-radius: var(--cockpit-radius);
+  border: 1px solid color-mix(in srgb, var(--tone) 38%, var(--border-base));
+  background: var(--bg-base);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.03) inset,
+    0 6px 18px rgba(20, 17, 14, 0.1);
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    transform 220ms var(--cockpit-ease);
+}
+
+/* Running glow: a pseudo-element whose opacity animates (compositor only) */
+.node::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow:
+    0 0 0 1px var(--tone),
+    0 0 22px color-mix(in srgb, var(--tone) 45%, transparent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tone_claude {
+  --tone: var(--agent-claude);
+}
+.tone_codex {
+  --tone: var(--agent-codex);
+}
+.tone_qwen {
+  --tone: var(--agent-qwen);
+}
+.tone_remote {
+  --tone: var(--agent-remote);
+}
+
+.node:hover,
+.nodeSelected {
+  border-color: var(--tone);
+}
+
+.nodeDragging {
+  transform: scale(1.015);
+  cursor: grabbing;
+}
+
+.status_running::after {
+  animation: board-breathe 2.4s ease-in-out infinite;
+}
+
+.nodeHeader {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-light);
+  background: color-mix(in srgb, var(--tone) 7%, transparent);
+  border-radius: var(--cockpit-radius) var(--cockpit-radius) 0 0;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+.agentName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.pill {
+  margin-inline-start: auto;
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border-base);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--bg-6);
+}
+
+.status_running .pill {
+  color: rgb(var(--primary-6));
+  border-color: rgba(var(--primary-6), 0.4);
+  background: rgba(var(--primary-6), 0.08);
+}
+
+.status_waiting .pill {
+  color: var(--status-waiting);
+  border-color: color-mix(in srgb, var(--status-waiting) 45%, transparent);
+  background: color-mix(in srgb, var(--status-waiting) 10%, transparent);
+}
+
+.nodeTitle {
+  padding: 10px 12px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.handle {
+  opacity: 0;
+}
+
+@keyframes board-breathe {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status_running::after {
+    animation: none;
+    opacity: 0.7;
+  }
+}

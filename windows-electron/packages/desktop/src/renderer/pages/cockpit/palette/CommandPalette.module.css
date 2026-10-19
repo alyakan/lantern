@@ -1,0 +1,101 @@
+/* Ctrl+K palette. Tokens: styles/themes/cockpit-color-scheme.css (+ lantern-hud.css) */
+
+.wrap :global(.arco-modal) {
+  top: 12vh;
+}
+
+.palette {
+  width: 620px;
+  max-width: calc(100vw - 32px);
+  padding: 0;
+  overflow: hidden;
+}
+
+.palette :global(.arco-modal-content) {
+  padding: 0;
+}
+
+.input {
+  border: none !important;
+  border-bottom: 1px solid var(--border-base) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 6px 14px;
+}
+
+.list {
+  max-height: 52vh;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: var(--cockpit-radius-sm);
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+.active {
+  background: var(--bg-hover);
+  box-shadow: inset 2px 0 0 rgb(var(--primary-6));
+}
+
+.icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--bg-6);
+}
+
+.active .icon {
+  color: rgb(var(--primary-6));
+}
+
+.title {
+  flex-shrink: 0;
+  max-width: 55%;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.meta {
+  min-width: 0;
+  flex: 1;
+  font-size: 12px;
+  color: var(--bg-6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.group {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--bg-6);
+}
+
+.empty {
+  padding: 18px 10px;
+  font-size: 13px;
+  color: var(--bg-6);
+}
+
+.footer {
+  padding: 8px 14px;
+  border-top: 1px solid var(--border-light);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--bg-6);
+}

@@ -1,0 +1,394 @@
+.strip {
+  margin: 6px 8px 4px;
+  padding: 8px 10px 6px;
+  border: 1px solid var(--border-base);
+  border-radius: var(--cockpit-radius);
+  background: var(--bg-2);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  color: var(--bg-6);
+  height: 16px;
+}
+
+.iconButton {
+  width: 18px !important;
+  height: 18px !important;
+  padding: 0 !important;
+  color: var(--bg-6) !important;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  cursor: default;
+}
+
+.name {
+  color: var(--text-primary);
+  width: 42px;
+  flex-shrink: 0;
+}
+
+.status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--agent-other);
+}
+
+.claude {
+  background: var(--agent-claude);
+}
+
+.codex {
+  background: var(--agent-codex);
+}
+
+.qwen {
+  background: var(--agent-qwen);
+  opacity: 0.45;
+}
+
+.live {
+  opacity: 1;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--agent-qwen) 25%, transparent);
+  animation: breathe 2.4s var(--cockpit-ease) infinite;
+}
+
+@keyframes breathe {
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--agent-qwen) 10%, transparent);
+  }
+}
+
+.meter {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bars {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.meterLabel {
+  color: var(--bg-6);
+  font-size: 9px;
+  margin-left: 3px;
+}
+
+.track {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-3);
+  overflow: hidden;
+}
+
+.fill {
+  display: block;
+  height: 100%;
+  transform-origin: left;
+  transition: transform 400ms var(--cockpit-ease);
+  background: var(--success);
+}
+
+.warn {
+  background: var(--warning);
+}
+
+.hot {
+  background: var(--danger);
+}
+
+.ok {
+  background: var(--success);
+}
+
+.meterValue {
+  width: 46px;
+  flex-shrink: 0;
+  text-align: right;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.action {
+  height: 18px !important;
+  padding: 0 6px !important;
+  font-size: 11px !important;
+  font-family: var(--font-mono);
+  color: var(--primary) !important;
+}
+
+.gpuRow {
+  border-top: 1px solid var(--border-base);
+  padding-top: 5px;
+  margin-top: 1px;
+}
+
+.game {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--bg-6);
+}
+
+.nudge {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--cockpit-radius-sm);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+}
+
+.collapsed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.ring_warn {
+  box-shadow: 0 0 0 2px var(--warning);
+}
+
+.ring_hot {
+  box-shadow: 0 0 0 2px var(--danger);
+}
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  min-width: 220px;
+}
+
+.detailTitle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.detailRow {
+  display: flex;
+  flex-direction: column;
+}
+
+.chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 0 6px;
+  border: 1px solid var(--border-base);
+  border-radius: 999px;
+  font-weight: 400;
+}
+
+.muted {
+  color: var(--bg-6);
+  font-size: 11px;
+}
+
+.warnText {
+  color: var(--warning);
+  font-size: 11px;
+}
+
+/* ===== HUD: needle dials, lamp, segmented GPU bar ===== */
+.hud {
+  margin: 4px 0 0;
+  padding: 10px 0 4px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  gap: 9px;
+  font-family: var(--font-ui);
+}
+
+.hudLabel {
+  font-family: var(--font-label);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--hud-muted);
+}
+
+.hudSep {
+  height: 1px;
+  background: var(--hud-edge);
+}
+
+.hudRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--hud-ink);
+}
+
+.hudValue {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dialGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: default;
+}
+
+.dialPair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.dialRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.gaugeLabel {
+  font-family: var(--font-label);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--hud-muted);
+  white-space: nowrap;
+}
+
+.dial {
+  flex: none;
+  overflow: visible;
+}
+
+.tick {
+  stroke: var(--hud-muted);
+  stroke-width: 1;
+}
+
+.redZone {
+  fill: none;
+  stroke: var(--lamp-failed);
+  stroke-width: 2;
+}
+
+.needle {
+  transform-origin: 24px 24px;
+  transform: rotate(var(--needle));
+  transition: transform 1.2s cubic-bezier(0.3, 1.8, 0.5, 1);
+  animation: hud-needle-swing 1.2s 0.7s cubic-bezier(0.3, 1.8, 0.5, 1) backwards;
+}
+
+.needle line {
+  stroke: var(--hud-signal);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+
+.hub {
+  fill: var(--hud-ink);
+}
+
+.readout {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--hud-ink);
+}
+
+.readout.ok,
+.readout.warn {
+  background: none;
+}
+
+.readout.hot {
+  background: none;
+  color: var(--lamp-failed);
+}
+
+.segments {
+  display: flex;
+  gap: 2px;
+}
+
+.segments i {
+  flex: 1;
+  height: 8px;
+  border-radius: 1px;
+  background: var(--hud-off);
+}
+
+.segments i.segOn,
+.segments i.segHot {
+  animation: hud-seg-on 0.01s backwards;
+  animation-delay: calc(0.7s + var(--seg) * 35ms);
+}
+
+.segments i.segOn {
+  background: var(--hud-ink);
+}
+
+.segments i.segHot {
+  background: var(--hud-signal);
+}
+
+.gameRow {
+  margin-top: 2px;
+}
+
+@keyframes hud-needle-swing {
+  from {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes hud-seg-on {
+  from {
+    background: var(--hud-off);
+  }
+}
