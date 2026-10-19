@@ -735,6 +735,8 @@
 :root[data-theme="posthog"] .plan-card, :root[data-theme="posthog"] .always-menu, :root[data-theme="posthog"] .steps-intro { border: 2px solid var(--ph-ink); box-shadow: var(--ph-drop-s); }
 :root[data-theme="posthog"] .composer-box { border: 2px solid var(--ph-ink); box-shadow: var(--ph-drop-s); background: var(--field); }
 :root[data-theme="posthog"] .composer-box:focus-within { border-color: var(--unread); box-shadow: var(--ph-drop-s); }
+/* The "!" terminal box keeps its near-black screen: the field above would otherwise win on specificity and put the pale green text on white. */
+:root[data-theme="posthog"] .composer-box.terminal { background: var(--term-bg); }
 :root[data-theme="posthog"] .composer-box.working::before { display: none; }
 :root[data-theme="posthog"] .composer-box textarea, :root[data-theme="posthog"] .node-composer textarea { box-shadow: none; }
 :root[data-theme="posthog"] .jump-latest { border: 2px solid var(--ph-ink); background: var(--ph-hit); color: var(--ph-ink); box-shadow: var(--ph-drop-s); -webkit-backdrop-filter: none; backdrop-filter: none; }

@@ -48,6 +48,12 @@ describe("the message boxes", () => {
     expect(focus).not.toMatch(/0 0 0 2px/);
   });
 
+  it("keeps the terminal box's own dark screen under PostHog, whose field background would otherwise win and put pale green text on white", () => {
+    expect(css).toContain(':root[data-theme="posthog"] .composer-box.terminal { background: var(--term-bg); }');
+    // It has to come after the field rule it overrides, and be at least as specific.
+    expect(css.indexOf(':root[data-theme="posthog"] .composer-box.terminal')).toBeGreaterThan(css.indexOf(':root[data-theme="posthog"] .composer-box {'));
+  });
+
   it("gives the lists in what you sent in Step by step the answers' room, not the browser's 40px", () => {
     expect(css.match(/\.user-note-body ul, \.user-note-body ol \{([^}]*)\}/)?.[1] ?? "").toMatch(/padding-left:\s*20px/);
   });
