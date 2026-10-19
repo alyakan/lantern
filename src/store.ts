@@ -270,6 +270,8 @@ export interface State {
   run: RunTask | null;
   /** What an asleep chat is called (it has no messages to take a title from). */
   asleepTitle: string | null;
+  /** How many turns before the first message shown are on disk and not loaded: a long session opens with its last turns. */
+  earlierTurns: number;
 }
 
 export interface BackgroundRun {
@@ -353,6 +355,7 @@ export const initialState: State = {
   setup: null,
   run: null,
   asleepTitle: null,
+  earlierTurns: 0,
 };
 
 const pendingIn = new WeakMap<ChatItem[], boolean>();
@@ -375,7 +378,10 @@ export type Action =
   | { type: "claude_missing"; error: string }
   | { type: "folder_opened"; folder: string }
   | { type: "folder_cleared" }
-  | { type: "history_loaded"; sessionId: string; events: UiEvent[]; movedFrom?: string | null }
+  | { type: "history_loaded"; sessionId: string; events: UiEvent[]; movedFrom?: string | null; earlier?: number }
+  /** The turns before the ones loaded: `expected` is how many were not loaded when they were asked for, `hidden` how many still aren't. */
+  | { type: "earlier_loaded"; sessionId: string; events: UiEvent[]; expected: number; hidden: number }
+  | { type: "earlier_failed"; text: string }
   | { type: "session_ready" }
   /** The chat goes to sleep (see Status): its history is dropped, and `title` is what it is called until it wakes. */
   | { type: "sleep"; folder: string; sessionId: string; title: string }
@@ -502,7 +508,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null, earlierTurns: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -640,7 +646,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       return { ...state, mcpTools: ev.tools };
     // /clear: a new conversation in the same folder. Changed files stay listed; the edits are still on disk.
     case "conversation_reset":
-      return { ...state, items: [], sessionId: null, contextUsed: null, thinking: false, cleared: true, reviewTarget: null };
+      return { ...state, items: [], sessionId: null, contextUsed: null, thinking: false, cleared: true, reviewTarget: null, earlierTurns: 0 };
     case "turn_done": {
       const banner: Banner | null = ev.auth_hint
         ? { kind: "auth", text: "Claude isn't logged in. Run `claude /login` in a terminal, then send your message again.", action: null }
@@ -794,8 +800,19 @@ export function reducer(state: State, action: Action): State {
       // The backend keeps the replayed session's last turn as turn 0; earlier turns' changes aren't known.
       const last = replayed.items.map((it) => it.type).lastIndexOf("user");
       const items = replayed.items.map((it, i): ChatItem => (i === last && it.type === "user" ? { ...it, turn: 0 } : it));
-      return { ...replayed, status: "starting", thinking: false, items: settleRunning(withoutTimes(items)), movedFrom: action.movedFrom ?? null };
+      return { ...replayed, status: "starting", thinking: false, items: settleRunning(withoutTimes(items)), movedFrom: action.movedFrom ?? null, earlierTurns: action.earlier ?? 0 };
     }
+    case "earlier_loaded": {
+      // A page for a chat that has moved on (another session, or loaded further since) is let go.
+      if (state.sessionId !== action.sessionId || state.earlierTurns !== action.expected) return state;
+      // Numbered on their own, apart from the messages the chat has, so no two share an id.
+      const scratch = action.events.reduce(applyEvent, { ...freshSession(state, state.folder), seq: -(action.hidden + 1) * 100_000 });
+      const older = settleRunning(withoutTimes(scratch.items));
+      const runs = scratch.testRuns.filter((r) => !state.testRuns.some((t) => t.id === r.id));
+      return { ...state, items: [...older, ...state.items], testRuns: [...runs, ...state.testRuns], earlierTurns: action.hidden };
+    }
+    case "earlier_failed":
+      return { ...state, banner: { kind: "error", text: action.text, action: null } };
     case "turn_numbered": {
       const at = state.items.map((it) => it.type === "user" && it.turn === undefined).lastIndexOf(true);
       if (at < 0) return state;

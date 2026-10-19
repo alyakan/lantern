@@ -120,6 +120,27 @@ describe("restoring chats at launch", () => {
     expect(JSON.parse(localStorage.getItem("settings.modeBySession") ?? "{}")["9b7e01"]).toBe("auto");
   });
 
+  it("opens a long session at its last turns and shows the earlier ones when asked", async () => {
+    window.history.replaceState({}, "", "/?earlier");
+    try {
+      const calls = await launch();
+      fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+      const more = await screen.findByRole("button", { name: /Show earlier messages/ });
+      expect(more).toHaveTextContent("1 earlier turn");
+      expect(screen.queryByText("Where does fetchJson live?")).toBeNull();
+      fireEvent.click(more);
+      await screen.findByText("Where does fetchJson live?");
+      // Nothing is left to load: the bar goes, and what it asked the backend for was the one turn it was missing.
+      expect(screen.queryByRole("button", { name: /Show earlier messages/ })).toBeNull();
+      const asked = calls.filter(([c]) => c === "earlier_events").map(([, a]) => a);
+      expect(asked).toEqual([{ folder: OTHER, sessionId: "3f1c2a", hidden: 1 }]);
+      // A long chat is still named by what the backend knows of it (a title already made), not left with a prompt from the middle.
+      expect(calls.some(([c, a]) => c === "title_session" && a?.sessionId === "3f1c2a")).toBe(true);
+    } finally {
+      window.history.replaceState({}, "", "/");
+    }
+  });
+
   it("keeps an asleep chat's title and unsent text across a save", async () => {
     localStorage.setItem("session.openChats", JSON.stringify([{ ...lastTime[0], draft: "and the jitter?" }, lastTime[1]]));
     await launch();

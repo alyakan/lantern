@@ -226,10 +226,18 @@ export interface NewWorker {
  */
 export interface OpenedSession {
   events: UiEvent[];
+  /** How many turns before `events` are still on disk, for "Show earlier messages" (absent: none). */
+  earlier?: number;
   moved_from: string | null;
   read_only: string | null;
   /** The CLI the chat runs on, and what it can do. */
   provider?: ProviderInfo;
+}
+
+/** A run of a session's turns read from its transcript, and how many turns come before them. */
+export interface HistoryPage {
+  events: UiEvent[];
+  hidden: number;
 }
 
 export interface FileDiff {

@@ -1769,6 +1769,23 @@ async fn session_events(state: State<'_, AppState>, folder: String, session_id: 
         .map_err(|e| e.to_string())?
 }
 
+/// The turns before the ones a chat has loaded (see history::page): `hidden` is how many turns it doesn't have yet, counted
+/// from the first. Read from the transcript again, so the window keeps no more of a long session than it shows.
+#[tauri::command]
+async fn earlier_events(state: State<'_, AppState>, folder: String, session_id: String, hidden: usize) -> Result<history::Page, String> {
+    if !history::valid_id(&session_id) {
+        return Err("Not a session id.".into());
+    }
+    let root = projects_root()?;
+    let aliases = aliases_for(&state, &folder);
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = history::transcript_path_with_aliases(&root, std::path::Path::new(&folder), &aliases, &session_id)?;
+        Ok(history::page(history::replay(&path).events, Some(hidden), history::PAGE_TURNS))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// A short title for a session: Claude Code's own if it made one, else one Lantern made earlier, else a new one from
 /// `prompt` (its first message). None when none could be made; the chat keeps its first prompt as its name then.
 #[tauri::command]
@@ -1805,7 +1822,9 @@ async fn recent_folders() -> Result<Vec<history::RecentFolder>, String> {
 /// is the CLI the chat runs on, and what that can do.
 #[derive(serde::Serialize)]
 pub struct OpenedSession {
+    /// The last turns only (see history::page); `earlier` is how many come before them.
     events: Vec<ui_event::UiEvent>,
+    earlier: usize,
     moved_from: Option<String>,
     read_only: Option<String>,
     provider: ProviderInfo,
@@ -1858,11 +1877,13 @@ async fn open_session(
     .map_err(|e| e.to_string())??;
     match ready {
         relocate::Ready::ReadOnly { source, reason } => {
-            let events = tauri::async_runtime::spawn_blocking(move || history::replay(&source).events).await.map_err(|e| e.to_string())?;
-            Ok(OpenedSession { events, moved_from: None, read_only: Some(reason), provider })
+            let page = tauri::async_runtime::spawn_blocking(move || history::page(history::replay(&source).events, None, history::PAGE_TURNS)).await.map_err(|e| e.to_string())?;
+            Ok(OpenedSession { events: page.events, earlier: page.hidden, moved_from: None, read_only: Some(reason), provider })
         }
         relocate::Ready::Resumable(path) => {
-            let replayed = tauri::async_runtime::spawn_blocking(move || history::replay(&path)).await.map_err(|e| e.to_string())?;
+            let mut replayed = tauri::async_runtime::spawn_blocking(move || history::replay(&path)).await.map_err(|e| e.to_string())?;
+            // The window gets the last turns; the change tracker below is filled from every edit of the session, shown or not.
+            let page = history::page(std::mem::take(&mut replayed.events), None, history::PAGE_TURNS);
             // Registered before it starts, so its first events are seen, and unregistered if it never does.
             if let Some(w) = worker {
                 state.orchestra.adopt(&slot, &w.parent, &w.name, &cfg.folder, w.branch.as_deref(), w.role.clone()).await?;
@@ -1883,7 +1904,7 @@ async fn open_session(
             s.changes.lock().unwrap().restore(replayed.edits, replayed.edits_before_last_turn);
             // Its messages are numbered afresh from here, so an earlier numbering's restore points can't be asked for.
             s.checkpoints.forget();
-            Ok(OpenedSession { events: replayed.events, moved_from, read_only: None, provider })
+            Ok(OpenedSession { events: page.events, earlier: page.hidden, moved_from, read_only: None, provider })
         }
     }
 }
@@ -2112,6 +2133,7 @@ pub fn run() {
             restart_session,
             apply_harness,
             close_session,
+            earlier_events,
             send_message,
             aside_ask,
             aside_stop,
