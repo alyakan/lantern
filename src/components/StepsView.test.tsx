@@ -304,6 +304,44 @@ describe("StepsView", () => {
     expect(onSend).toHaveBeenCalledWith(expect.stringMatching(/^Write it up/));
   });
 
+  describe("review verdicts that outlive the view", () => {
+    const turn = (id: string): ChatItem => ({ type: "turn", id, isError: false, stopped: false, result: null, durationMs: 1, denied: 0 });
+    const file =
+      "# File 1 of 2 — src/retry.ts (+14 −3)\n\n### What changed\n\n- A retry loop.\n\n### Findings\n\n⚠ line 7 (blocker): network errors aren't retried.\n\n⚠ line 3 (nit): rename `attempts`.\n\n### Notes\n\nChecked the timers.";
+    const base: ChatItem[] = [
+      { type: "user", id: "k1", text: "Review PR 128", turn: 0 },
+      { type: "assistant", id: "ka1", text: "# Frame — Retries (#128)\n\nOne file." },
+      turn("kt1"),
+      { type: "user", id: "k2", text: "Next", turn: 1 },
+      { type: "assistant", id: "ka2", text: file },
+      turn("kt2"),
+    ];
+    const sent = "Next. Agreed: line 7. Rejected: line 3.";
+    const summed: ChatItem[] = [...base, { type: "user", id: "k3", text: sent, turn: 2 }, { type: "assistant", id: "ka3", text: "# Summary — 1 file reviewed\n\nOne thing to fix." }, turn("kt3")];
+    const cells = () => [...current().querySelectorAll(".review-table tbody tr")].map((r) => r.lastElementChild!.textContent);
+
+    it("are in the summary table when the view is drawn afresh (another chat in between, a reopened chat)", () => {
+      // The verdicts went to Claude in the Next that opened the summary: that message is what remembers them.
+      render(<StepsView state={state({ items: summed })} {...handlers("review")} onSend={vi.fn()} />);
+      expect(cells()).toEqual(["Agreed", "Rejected"]);
+    });
+
+    it("show on their file's page too, as read-only marks", () => {
+      render(<StepsView state={state({ items: summed })} {...handlers("review")} onSend={vi.fn()} />);
+      fireEvent.click(screen.getByRole("button", { name: /Previous/ }));
+      expect([...current().querySelectorAll(".finding")].map((f) => f.className)).toEqual(["finding sev-blocker verdict-agree", "finding sev-nit verdict-reject"]);
+    });
+
+    it("that haven't been sent yet are still there when the view is drawn again", () => {
+      const first = render(<StepsView state={state({ items: base })} {...handlers("review")} />);
+      fireEvent.click(current().querySelectorAll(".finding-verdict button")[0]);
+      expect(current().querySelector(".finding")).toHaveClass("verdict-agree");
+      first.unmount();
+      render(<StepsView state={state({ items: base })} {...handlers("review")} />);
+      expect(current().querySelector(".finding")).toHaveClass("verdict-agree");
+    });
+  });
+
   it("moves on from the first file in a chat switched to Review from Build", () => {
     // Claude kept Build's headings: the file pages still count as files, and Next isn't stuck on "First file".
     const items: ChatItem[] = [

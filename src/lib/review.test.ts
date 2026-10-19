@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseBranchOf, reviewTargetOf, isVerdictNext, parseReviewFile, prNumberOf, reviewHints, splitFileTitle, verdictMessage, withoutCue } from "./review";
+import { baseBranchOf, reviewTargetOf, isVerdictNext, parseReviewFile, prNumberOf, reviewHints, splitFileTitle, verdictMessage, verdictsFromNext, withoutCue } from "./review";
 
 // As Claude wrote it for PostHog/posthog-ios#863 (trimmed).
 const clean = `### What changed
@@ -65,6 +65,20 @@ describe("review pages", () => {
     expect(verdictMessage(r.findings, {})).toBe("Next.");
     expect(isVerdictNext("Next. Agreed: line 42.")).toBe(true);
     expect(isVerdictNext("Next, but rename it")).toBe(false);
+  });
+
+  it("reads the verdicts back from the Next that carried them, whatever the view remembers", () => {
+    const r = parseReviewFile("src/retry.ts", withFindings)!;
+    const sent = verdictMessage(r.findings, { 0: "agree", 1: "reject", 2: "agree" });
+    expect(verdictsFromNext(sent, r.findings)).toEqual({ 0: "agree", 1: "reject", 2: "agree" });
+    // A plain Next, or one that isn't about verdicts, carries none.
+    expect(verdictsFromNext("Next", r.findings)).toBeUndefined();
+    expect(verdictsFromNext("Next, but rename it", r.findings)).toBeUndefined();
+    // Findings that share a label take the verdicts in the order they were listed.
+    const twins = [{ index: 0, line: 7, lineEnd: null, severity: null, text: "a" }, { index: 1, line: 7, lineEnd: null, severity: null, text: "b" }];
+    expect(verdictsFromNext("Next. Agreed: line 7, line 7.", twins)).toEqual({ 0: "agree", 1: "agree" });
+    // A label no finding has (the page was rewritten since) is left out.
+    expect(verdictsFromNext("Next. Agreed: line 99. Rejected: line 42.", r.findings)).toEqual({ 0: "reject" });
   });
 
   it("drops a closing cue from any message", () => {

@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { initialState, type ChatItem, type State } from "../store";
 import { StepsView } from "./StepsView";
+import { rememberVerdicts } from "../lib/review";
 import { act } from "@testing-library/react";
 import { ArchitectureTab } from "./ArchitectureTab";
 import { Md } from "./Md";
@@ -35,6 +36,9 @@ const handlers = () => ({ onDecide: () => {}, onOpenFile: () => {}, onNext: vi.f
 const current = () => document.querySelector('.step-page[aria-hidden="false"]')!;
 
 describe("Architecture in Step by step", () => {
+  // Verdicts not yet sent are kept across views (see StepsView); each test starts with none.
+  beforeEach(() => rememberVerdicts("s1", {}));
+
   it("lays a part out in its sections, with the concerns to agree with or reject, and sends the verdicts with Next", () => {
     const h = handlers();
     render(<StepsView state={state(3)} {...h} />);
