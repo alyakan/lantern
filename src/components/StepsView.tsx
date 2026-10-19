@@ -15,7 +15,7 @@ import { mattersToTask } from "../lib/commands";
 import type { BackgroundRun, ChatItem, ToolItem } from "../store";
 import { workingVerb } from "../lib/verbs";
 import { ChatStream, type StreamHandlers } from "./ChatStream";
-import { isVerdictNext, parseReviewFile, splitFileTitle, verdictMessage, withoutCue, type ReviewFile, type Verdict } from "../lib/review";
+import { isVerdictNext, parseReviewFile, recallVerdicts, rememberVerdicts, splitFileTitle, verdictMessage, verdictsFromNext, withoutCue, type ReviewFile, type Verdict } from "../lib/review";
 import { unreadReply } from "../lib/pageNote";
 import { ReviewFileHeader, ReviewFileView, ReviewSummaryTable, type ReviewedFinding } from "./ReviewPages";
 import { ArchitecturePartView } from "./ArchitecturePages";
@@ -211,8 +211,19 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
   // Review: whether a file has come yet, so Next opens the first one or the next.
   const filesSoFar = review && pages.slice(0, at + 1).some((p) => p.heading?.kind === "file");
 
-  // Review verdicts, per page and finding; the page's Next carries them.
-  const [verdicts, setVerdicts] = useState<Record<string, Record<number, Verdict>>>({});
+  // Review verdicts, per page and finding; the page's Next carries them. Kept outside the view while they're unsent
+  // (switching chats or modes draws it again), and once sent they're read back from the Next that carried them.
+  const [unsent, setVerdicts] = useState<Record<string, Record<number, Verdict>>>(() => recallVerdicts(slot));
+  useEffect(() => {
+    rememberVerdicts(slot, unsent);
+  }, [slot, unsent]);
+  const verdictsOfPage = (i: number): Record<number, Verdict> | undefined => {
+    const p = pages[i];
+    const findings = reviewOf(p)?.findings ?? partOf(p)?.concerns;
+    const sent = findings && pages[i + 1] ? verdictsFromNext(pages[i + 1].turns[0].prompt.text, findings) : undefined;
+    return sent ?? unsent[p.key];
+  };
+  const verdicts = Object.fromEntries(pages.map((p, i) => [p.key, verdictsOfPage(i)]));
   const setVerdict = (pageKey: string, index: number, v: Verdict | null) =>
     setVerdicts((all) => {
       const page = { ...all[pageKey] };

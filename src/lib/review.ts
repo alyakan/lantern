@@ -158,3 +158,27 @@ export function verdictMessage(findings: Finding[], verdicts: Record<number, Ver
 
 /** A Next that carries verdicts (it moves on like a plain Next). */
 export const isVerdictNext = (text: string) => /^next\.\s+(agreed|rejected):/i.test(text.trim());
+
+/**
+ * The verdicts a Next carried, read back against the findings of the page it left: the chat is where they are kept once
+ * sent, so they outlive the view that was showing them. Findings with the same label (two on one line) take the labels
+ * in the order they were listed; a label no finding has any more (the page was rewritten) is left out. Undefined when
+ * the message isn't a Next with verdicts.
+ */
+export function verdictsFromNext(text: string, findings: Finding[]): Record<number, Verdict> | undefined {
+  if (!isVerdictNext(text)) return undefined;
+  const out: Record<number, Verdict> = {};
+  for (const [verdict, key] of [["agree", "agreed"], ["reject", "rejected"]] as const) {
+    const list = new RegExp(`${key}:\\s*([^.]+)\\.`, "i").exec(text)?.[1];
+    for (const label of list?.split(",").map((s) => s.trim()) ?? []) {
+      const found = findings.find((f) => where(f) === label && out[f.index] === undefined);
+      if (found) out[found.index] = verdict;
+    }
+  }
+  return out;
+}
+
+/** Verdicts not yet sent, per chat and page, kept while the app runs: switching chats or modes redraws the view. */
+const unsent = new Map<string, Record<string, Record<number, Verdict>>>();
+export const rememberVerdicts = (slot: string, verdicts: Record<string, Record<number, Verdict>>) => unsent.set(slot, verdicts);
+export const recallVerdicts = (slot: string) => unsent.get(slot) ?? {};
