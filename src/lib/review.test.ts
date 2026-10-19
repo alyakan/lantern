@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseBranchOf, reviewTargetOf, isVerdictNext, parseReviewFile, prNumberOf, reviewHints, splitFileTitle, verdictMessage, verdictsFromNext, withoutCue } from "./review";
+import { baseBranchOf, findingsOf, reviewTargetOf, isVerdictNext, parseReviewFile, prNumberOf, reviewHints, splitFileTitle, verdictMessage, verdictsFromNext, withoutCue } from "./review";
 
 // As Claude wrote it for PostHog/posthog-ios#863 (trimmed).
 const clean = `### What changed
@@ -53,6 +53,32 @@ describe("review pages", () => {
       [60, null, "nit"],
     ]);
     expect(r.findings[1].text).toBe("the delay grows without a cap;\na slow upstream stalls the UI for minutes.");
+  });
+
+  it("keeps the severity however Claude writes the finding's header", () => {
+    // Every shape here is one a real review wrote.
+    const read = (line: string) => {
+      const { findings } = findingsOf(line);
+      return findings.map((f) => [f.line, f.lineEnd, f.severity, f.text]);
+    };
+    expect(read("⚠ (should-fix): plain")).toEqual([[null, null, "should-fix", "plain"]]);
+    // A tag after the severity: (should-fix, convention), (nit, test gap).
+    expect(read("⚠ line 17–21 (should-fix, convention): touched test file")).toEqual([[17, 21, "should-fix", "touched test file"]]);
+    expect(read("⚠ line 82–108 (nit, test gap): no edge test")).toEqual([[82, 108, "nit", "no edge test"]]);
+    // More than one range or place before the severity: the first one is the finding's line.
+    expect(read("⚠ line 210–212, 243–250, 262–265 (should-fix, convention): waits replaced asserts")).toEqual([[210, 212, "should-fix", "waits replaced asserts"]]);
+    expect(read("⚠ line 271, 352 (should-fix): builds a display string")).toEqual([[271, null, "should-fix", "builds a display string"]]);
+    expect(read("⚠ line 30 + 38–39 (should-fix): the glob lists merged branches")).toEqual([[30, null, "should-fix", "the glob lists merged branches"]]);
+    expect(read('⚠ line 34–35, the "Run tests" step (should-fix): picks the first iPhone')).toEqual([[34, 35, "should-fix", "picks the first iPhone"]]);
+    // The severity in bold, with or without a line.
+    expect(read("⚠ **should-fix:** a non-Bool `error` still fails")).toEqual([[null, null, "should-fix", "a non-Bool `error` still fails"]]);
+    expect(read("⚠ **nit:** in `Tests`, \"missing when\" and more")).toEqual([[null, null, "nit", "in `Tests`, \"missing when\" and more"]]);
+    expect(read("⚠ line 9 **blocker:** crashes on nil")).toEqual([[9, null, "blocker", "crashes on nil"]]);
+    // The whole marker in bold, with a label after the severity.
+    expect(read("- **⚠ (nit), open/closed:** adding a type edits 9 sites")).toEqual([[null, null, "nit", "adding a type edits 9 sites"]]);
+    // No severity: the text is left whole, colon and all.
+    expect(read("⚠ Note: something odd")).toEqual([[null, null, null, "Note: something odd"]]);
+    expect(read("⚠ line 7 network errors aren't retried.")).toEqual([[7, null, null, "network errors aren't retried."]]);
   });
 
   it("isn't a review file without the sections", () => {
