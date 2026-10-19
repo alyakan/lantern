@@ -74,7 +74,9 @@ describe("the first launch", () => {
   });
 });
 
-describe("the end of a Build", () => {
+// A whole Build, page by page, takes about 35 s here and more than 60 s on a loaded CI runner, and the loop below
+// waits up to 15 s a page: they get a ceiling of their own.
+describe("the end of a Build", { timeout: 180_000 }, () => {
   /** Runs a Build in the mock up to its Done page. */
   async function build(): Promise<Call[]> {
     localStorage.setItem("settings.lastFolder", JSON.stringify(FOLDER));
