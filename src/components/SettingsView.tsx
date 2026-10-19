@@ -11,6 +11,7 @@ import { setTidyMode, TIDY_MODES, useTidyMode } from "../lib/tidySetting";
 import { setAutoMergeTests, useAutoMergeTests } from "../lib/mergeTests";
 import { setMenuBar, useMenuBar, type MenuBarMode } from "../lib/menuBar";
 import { setRestorePoints, useRestorePoints } from "../lib/restorePointsSetting";
+import { SLEEP_MINUTES, setSleepMinutes, useSleepMinutes } from "../lib/idleSleep";
 import { PAUSE_MS, type NotifyPrefs } from "../lib/notifyPrefs";
 import type { TextSize } from "../lib/theme";
 import type { CustomTheme, ThemeId } from "../lib/themes";
@@ -154,6 +155,7 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
   const pauseAt = usePauseAtPercent();
   const autoTests = useAutoMergeTests();
   const restorePoints = useRestorePoints();
+  const sleepAfter = useSleepMinutes();
   const menuBar = useMenuBar();
   const paused = notify.pausedUntil > Date.now();
   const set = (patch: Partial<NotifyPrefs>) => onNotify({ ...notify, ...patch });
@@ -204,6 +206,22 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
           <span>Keep my Mac awake while Claude works</span>
         </label>
         <span className="settings-muted">Stops the Mac from going to sleep on its own while any chat or agent is working, so a long turn finishes while you're away. The screen may still turn off, and closing the lid still sleeps the Mac.</span>
+      </section>
+      <section className="general-section" aria-labelledby="general-memory">
+        <h3 id="general-memory" className="general-title">
+          Memory
+        </h3>
+        <label className="general-option">
+          <span>Put a chat to sleep after it has been idle for</span>
+          <select aria-label="Put a chat to sleep after it has been idle for" value={sleepAfter} onChange={(e) => setSleepMinutes(Number(e.target.value))}>
+            {SLEEP_MINUTES.map((n) => (
+              <option key={n} value={n}>
+                {n === 0 ? "Never" : `${n} minutes`}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span className="settings-muted">Every open chat keeps a Claude process and its messages in memory. A chat you aren't looking at that has been idle this long is put to sleep: its process stops and its messages are let go, and it stays in the sidebar. Opening it brings it back where it was. A chat that is working, waiting for you, running a command or part of a team is never put to sleep.</span>
       </section>
       <section className="general-section" aria-labelledby="general-sound">
         <h3 id="general-sound" className="general-title">

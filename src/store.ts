@@ -126,7 +126,11 @@ export interface ChangedFile {
   deleted?: boolean;
 }
 
-export type Status = "locating" | "setup" | "no_folder" | "starting" | "idle" | "running" | "ended";
+/**
+ * "asleep": a chat that is only a name in the sidebar: no claude process and none of its history in memory. It wakes (is
+ * resumed, history and all) as soon as it is on screen, so it is never shown in this state.
+ */
+export type Status = "locating" | "setup" | "no_folder" | "starting" | "idle" | "running" | "ended" | "asleep";
 
 export interface Banner {
   kind: "error" | "info" | "auth";
@@ -264,6 +268,8 @@ export interface State {
   setup: SetupCard | null;
   /** The project's Run command in this chat, as it was last started. */
   run: RunTask | null;
+  /** What an asleep chat is called (it has no messages to take a title from). */
+  asleepTitle: string | null;
 }
 
 export interface BackgroundRun {
@@ -346,6 +352,7 @@ export const initialState: State = {
   notesApplied: null,
   setup: null,
   run: null,
+  asleepTitle: null,
 };
 
 const pendingIn = new WeakMap<ChatItem[], boolean>();
@@ -370,6 +377,8 @@ export type Action =
   | { type: "folder_cleared" }
   | { type: "history_loaded"; sessionId: string; events: UiEvent[]; movedFrom?: string | null }
   | { type: "session_ready" }
+  /** The chat goes to sleep (see Status): its history is dropped, and `title` is what it is called until it wakes. */
+  | { type: "sleep"; folder: string; sessionId: string; title: string }
   /** The chat started with the project's notes: what it was told (after the chat opened, so the open doesn't clear it). */
   | { type: "notes_applied"; text: string | null }
   /** `auto`: sent by Lantern from agents' notes, not typed by the user. */
@@ -493,7 +502,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -761,6 +770,8 @@ function applyEvent(state: State, ev: UiEvent): State {
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "ui_event": {
+      // Nothing is running behind an asleep chat: whatever arrives late (its process ending) is not its news.
+      if (state.status === "asleep") return state;
       // An event it doesn't know leaves the chat as it is (and isn't counted as Claude doing something).
       const next = applyEvent(state, action.event);
       // A dev server's output and a setup command's progress aren't Claude doing something.
@@ -774,6 +785,8 @@ export function reducer(state: State, action: Action): State {
       return { ...state, claudePath: null, setupError: action.error, status: "setup" };
     case "folder_opened":
       return freshSession(state, action.folder);
+    case "sleep":
+      return { ...freshSession(state, action.folder), sessionId: action.sessionId, status: "asleep", asleepTitle: action.title };
     case "folder_cleared":
       return { ...freshSession(state, null), status: "no_folder" };
     case "history_loaded": {
