@@ -13,7 +13,7 @@ const opts = { titles: {}, drafts: {}, unread: {}, pinned: {} };
 const chats = (slots: Record<string, State>, over: Partial<Chats> = {}): Chats => ({ active: Object.keys(slots)[0], slots, agents: {}, ...over });
 
 describe("openProjects", () => {
-  it("groups open chats by project, and puts the ones that need you first", () => {
+  it("groups open chats by project, and counts the ones that need you without moving them", () => {
     const open = openProjects(
       chats({
         s1: idle({ items: [said("Network tab polish")], status: "running", sessionId: "a" }),
@@ -24,9 +24,10 @@ describe("openProjects", () => {
     );
     expect(Object.keys(open).sort()).toEqual(["/work/lantern", "/work/network-monitor"]);
     const lantern = open["/work/lantern"];
+    // The chat working now is first; the one that needs you keeps its place by activity, with its dot saying so.
     expect(lantern.items.map((i) => [i.title, i.state])).toEqual([
-      ["Fix restore mode", "waiting"],
       ["Network tab polish", "running"],
+      ["Fix restore mode", "waiting"],
     ]);
     expect(lantern.needs).toBe(1);
     expect(lantern.target).toEqual({ slot: "s2", team: null });
@@ -35,9 +36,70 @@ describe("openProjects", () => {
     expect(open["/work/network-monitor"].target).toBeNull();
   });
 
-  it("keeps the order chats were opened in when nothing needs you", () => {
+  it("keeps the order chats were opened in when none of them has done anything yet", () => {
     const open = openProjects(chats({ s1: idle({ items: [said("one")] }), s2: idle({ items: [said("two")] }), s3: idle({ items: [said("three")] }) }), opts);
     expect(open["/work/lantern"].items.map((i) => i.title)).toEqual(["one", "two", "three"]);
+  });
+
+  describe("ordered by recent activity", () => {
+    const titles = (open: ReturnType<typeof openProjects>) => open["/work/lantern"].items.map((i) => i.title);
+    const sentAt = (text: string, at: number) => ({ type: "user" as const, id: `u-${text}`, text, at });
+
+    it("lists the chat that did something last first, whatever order they were opened in", () => {
+      const open = openProjects(
+        chats({
+          old: idle({ items: [said("old")], activityAt: 1_000 }),
+          newest: idle({ items: [said("newest")], activityAt: 3_000 }),
+          middle: idle({ items: [said("middle")], activityAt: 2_000 }),
+        }),
+        opts,
+      );
+      expect(titles(open)).toEqual(["newest", "middle", "old"]);
+    });
+
+    it("moves a chat up when it does something, and a chat that needs you doesn't jump above one that did something later", () => {
+      const waiting = idle({ items: [said("waiting"), asking], activityAt: 1_000 });
+      const later = idle({ items: [said("later")], activityAt: 5_000 });
+      expect(titles(openProjects(chats({ waiting, later }), opts))).toEqual(["later", "waiting"]);
+      expect(titles(openProjects(chats({ waiting: { ...waiting, activityAt: 9_000 }, later }), opts))).toEqual(["waiting", "later"]);
+    });
+
+    it("puts the chats working now first, ordered by when their turn began, so working chats don't swap places as they write", () => {
+      const working = (text: string, began: number, lastLine: number) => idle({ status: "running", items: [sentAt(text, began)], activityAt: lastLine });
+      const idleRecently = idle({ items: [said("idle")], activityAt: 50_000 });
+      const first = openProjects(chats({ idleRecently, a: working("a", 1_000, 60_000), b: working("b", 2_000, 61_000) }), opts);
+      expect(titles(first)).toEqual(["b", "a", "idle"]);
+      // "a" writes another line: still behind "b", which began later.
+      const second = openProjects(chats({ idleRecently, a: working("a", 1_000, 99_000), b: working("b", 2_000, 61_000) }), opts);
+      expect(titles(second)).toEqual(["b", "a", "idle"]);
+    });
+
+    it("ranks a team by its busiest or newest chat, agents included", () => {
+      const open = openProjects(
+        chats(
+          {
+            lead: idle({ items: [said("team")], orchestrator: true, activityAt: 1_000 }),
+            a1: idle({ folder: "/wt/a1", items: [said("go")], activityAt: 8_000 }),
+            plain: idle({ items: [said("plain")], activityAt: 5_000 }),
+          },
+          { agents: { a1: meta("lead", "worker") } },
+        ),
+        opts,
+      );
+      expect(titles(open)).toEqual(["team", "plain"]);
+      const quiet = openProjects(
+        chats(
+          {
+            lead: idle({ items: [said("team")], orchestrator: true, activityAt: 1_000 }),
+            a1: idle({ folder: "/wt/a1", items: [said("go")], activityAt: 2_000 }),
+            plain: idle({ items: [said("plain")], activityAt: 5_000 }),
+          },
+          { agents: { a1: meta("lead", "worker") } },
+        ),
+        opts,
+      );
+      expect(titles(quiet)).toEqual(["plain", "team"]);
+    });
   });
 
   it("nests a team's agents under its Lead, and keeps them off the list on their own", () => {
@@ -79,7 +141,7 @@ describe("openProjects", () => {
     const project = open["/work/lantern"];
     expect(project.needs).toBe(1);
     expect(project.target).toEqual({ slot: "a1", team: "lead" });
-    // The team rises above the plain chat, and its dot says it needs you.
+    // The team is first as the older of two untouched chats, and its dot says it needs you.
     expect(project.items.map((i) => [i.kind, i.state])).toEqual([
       ["team", "waiting"],
       ["chat", "done"],
@@ -92,7 +154,8 @@ describe("openProjects", () => {
       { ...opts, pinned: { "/work/lantern": ["d"] }, drafts: { s5: "" } },
     );
     const items = open["/work/lantern"].items;
-    expect(items.map((i) => i.title)).toEqual(["current", "New team", "done one", "running"]);
+    // The chat working now comes first; the rest keep the order they were opened in, none of them having done anything.
+    expect(items.map((i) => i.title)).toEqual(["running", "current", "New team", "done one"]);
     const byTitle = Object.fromEntries(items.map((i) => [i.title, i]));
     expect(byTitle["done one"]).toMatchObject({ pinned: true, active: false });
     expect(byTitle["current"]).toMatchObject({ active: true, pinned: false });

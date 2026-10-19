@@ -579,7 +579,7 @@ const lostIn = (checks: CloseCheck[]) => lostText({ worktree: true, branch: null
  * on screen is filled with it and has a bar beside it. A team is one square, for its Lead, with the team's combined state.
  *
  * Open (pinned beside the chat, or over it), the same pane lists the open chats and teams under a header for each project
- * (agents nested under their team, a chat that needs you at the top) and nothing else: past chats are in History, which the
+ * (agents nested under their team, the chats working now first and then the most recently active) and nothing else: past chats are in History, which the
  * button under New opens. Chats close from the pane: a × on a row, "Close chat" in the menu of a right click, and "Close
  * finished chats" in a project's ⋯.
  *

@@ -84,6 +84,23 @@ describe("menu bar settings", () => {
     expect(menuBarChats({})).toEqual([]);
   });
 
+  it("lists what needs you first in each project, whatever order the sidebar has them in", () => {
+    const row = { unread: false, background: 0, sessionId: null, active: false, pinned: false };
+    const open = {
+      "/Users/me/acme-api": {
+        items: [
+          { kind: "chat", slot: "s1", title: "Recent", state: "running", ...row },
+          { kind: "chat", slot: "s2", title: "Older, waiting", state: "waiting", ...row },
+          { kind: "chat", slot: "s3", title: "Oldest", state: "done", ...row },
+        ],
+        sessionIds: [],
+        needs: 1,
+        target: null,
+      },
+    } as unknown as Record<string, ProjectOpen>;
+    expect(menuBarChats(open).map((c) => c.title)).toEqual(["Older, waiting", "Recent", "Oldest"]);
+  });
+
   it("starts a chat only in a project the user already works in", () => {
     const recent = [{ path: "/Users/me/acme-api", updated_ms: 1 }];
     expect(knownProject("/Users/me/acme-api", recent, [])).toBe(true);

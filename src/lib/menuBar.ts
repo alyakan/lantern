@@ -91,7 +91,12 @@ export function useMenuBar(): MenuBarSettings {
 
 /** Every open chat and team (its Lead) as the panel lists them: the sidebar's own rows, flattened, with their project's name. */
 export function menuBarChats(open: Record<string, ProjectOpen>): MenuBarChat[] {
-  return Object.entries(open).flatMap(([folder, project]) => project.items.map((i) => ({ slot: i.slot, title: i.title, project: basename(folder), state: i.state, team: i.kind === "team" })));
+  // What needs you comes first here (the sidebar orders by recent activity instead); a stable sort keeps the rest as listed.
+  return Object.entries(open).flatMap(([folder, project]) =>
+    project.items
+      .map((i) => ({ slot: i.slot, title: i.title, project: basename(folder), state: i.state, team: i.kind === "team" }))
+      .sort((a, b) => Number(b.state === "waiting") - Number(a.state === "waiting")),
+  );
 }
 
 /**
