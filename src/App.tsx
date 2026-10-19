@@ -6,7 +6,7 @@ import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
-import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome } from "./api";
+import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome, type WorkView } from "./api";
 import { baseBranchOf, prNumberOf, reviewHints, reviewTargetOf } from "./lib/review";
 import { guidesByFlavour, mapNote, pageNote, withPageNote, type Guides } from "./lib/pageNote";
 import { openFind } from "./lib/editorFind";
@@ -1191,6 +1191,25 @@ export default function App() {
       live = false;
     };
   }, [active, state.folder, state.changedFiles, state.status, turnAsked, turnTo, turnKnown]);
+  // The worktree this chat is working in, when Claude entered one itself: Git and Branch read from it (the backend
+  // decides from the chat's latest edit), and `worktreeKey` makes them read again when it, or the user's choice of the
+  // chat's own folder instead, changes.
+  const [worktree, setWorktree] = useState<{ slot: string; view: WorkView | null } | null>(null);
+  useEffect(() => {
+    if (!state.folder) return setWorktree(null);
+    let live = true;
+    api.workFolder(active).then((view) => live && setWorktree({ slot: active, view }), () => live && setWorktree(null));
+    return () => {
+      live = false;
+    };
+  }, [active, state.folder, state.changedFiles, state.status]);
+  const shownWorktree = worktree?.slot === active ? worktree.view : null;
+  const worktreeKey = shownWorktree ? `${shownWorktree.path}:${shownWorktree.main}` : "";
+  const chooseWorktreeView = (main: boolean) => {
+    if (!shownWorktree) return;
+    const slot = active;
+    api.setViewMain(slot, main).then(() => setWorktree((w) => (w?.slot === slot && w.view ? { slot, view: { ...w.view, main } } : w)), () => {});
+  };
   // "Git": everything uncommitted, whoever changed it (an interrupted command, another editor). Asked for only while
   // it's the filter, since it reads git.
   const [gitFiles, setGitFiles] = useState<{ files: ChangedFile[]; error: string | null } | null>(null);
@@ -1204,7 +1223,7 @@ export default function App() {
     return () => {
       live = false;
     };
-  }, [changeScope, active, state.folder, state.changedFiles, state.status, state.seq]);
+  }, [changeScope, active, state.folder, state.changedFiles, state.status, state.seq, worktreeKey]);
   // "PR #N" while a pull request is reviewed: its files against its base. Picked when the review names its PR.
   // Reviewing with no PR named (a local branch): "Branch", its commits since it left its base. What Claude set with
   // mcp__lantern__review_target comes first, in any flavour; without it, the review's own text says.
@@ -1239,7 +1258,7 @@ export default function App() {
     return () => {
       live = false;
     };
-  }, [scope, active, state.folder, hintKey, reviewBase, state.seq]);
+  }, [scope, active, state.folder, hintKey, reviewBase, state.seq, worktreeKey]);
   const shownBranch = branchFiles?.key.startsWith(`${active}:`) ? branchFiles : null;
   // Keyed by chat and folder as well as the PR number: another chat reviewing the same PR has its own files.
   const prKey = `${active}:${state.folder}:${reviewPr}`;
@@ -2255,6 +2274,7 @@ export default function App() {
                 changesKey={peek?.key ?? (changesAsked || undefined)}
                 scope={scope}
                 onScope={setChangeScope}
+                worktree={shownWorktree ? { name: shownWorktree.name, branch: shownWorktree.branch, main: shownWorktree.main, onToggle: () => chooseWorktreeView(!shownWorktree.main) } : undefined}
                 scopeCounts={{ turn: turnFiles.length, session: state.changedFiles.length, git: gitFiles?.error ? null : (gitFiles?.files.length ?? null), pr: shownPr?.error ? null : (shownPr?.files.length ?? null), branch: shownBranch?.error ? null : (shownBranch?.files.length ?? null) }}
                 gitError={scope === "git" ? (gitFiles?.error ?? null) : scope === "pr" ? (shownPr?.error ?? null) : scope === "branch" ? (shownBranch?.error ?? null) : null}
                 pr={reviewPr}

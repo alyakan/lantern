@@ -9,6 +9,14 @@ import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
 
+/** The worktree a chat works in when Claude entered one itself; `main`: the user chose to read the chat's own folder instead. */
+export interface WorkView {
+  path: string;
+  name: string;
+  branch: string | null;
+  main: boolean;
+}
+
 /** A local branch under review: its commits (newest first) since it left `base`. */
 export interface BranchReview {
   branch: string;
@@ -158,6 +166,10 @@ export const api = {
     invoke<ChangedFile[]>("change_summary", { slot, scope, turn, toTurn, pr, hints, base }),
   /** `base`: the branch the review says it is stacked on; null lets Lantern work it out. */
   branchReview: (slot: string, hints: string[], base: string | null = null) => invoke<BranchReview>("branch_review", { slot, hints, base }),
+  /** The worktree the chat is working in (Claude entered one itself), whose changes Git and Branch show; null when it works in its own folder. */
+  workFolder: (slot: string) => invoke<WorkView | null>("work_folder", { slot }),
+  /** `main`: read Git and Branch from the chat's own folder even while it works in a worktree. */
+  setViewMain: (slot: string, main: boolean) => invoke<void>("set_view_main", { slot, main }),
   /** `message` goes back to Claude: a reason, or the user's note on a reproduce or approval request. */
   /** `updatedInput`: on allow, the tool's input as it should run (AskUserQuestion's, with the user's answers). */
   respondPermission: (slot: string, requestId: string, allow: boolean, message: string | null = null, updatedInput: Record<string, unknown> | null = null) =>

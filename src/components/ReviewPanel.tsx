@@ -41,6 +41,8 @@ interface Props {
   /** Which changes `files` holds: the whole session's, or the last turn's. */
   scope?: ChangeScope;
   onScope?: (scope: ChangeScope) => void;
+  /** Claude entered a worktree itself: Git and Branch read from it (`main`: from the chat's own folder, by the user's choice). */
+  worktree?: { name: string; branch: string | null; main: boolean; onToggle: () => void };
   /** On a Step-by-step page: the turns "turn" means (null: not all known, e.g. an earlier page of a reopened session). */
   stepRange?: { from: number; to: number } | null;
   /** How many files each filter would show (null: not known yet). */
@@ -198,6 +200,17 @@ export function ReviewPanel(props: Props) {
         </div>
         <PaneTabsMenu pinned={pinned} onPinned={setPinned} current={tab} badges={badges} onOpen={setTab} />
         {tab === "changes" && props.onScope && <ScopeMenu {...props} onScope={props.onScope} />}
+        {tab === "changes" && props.worktree && (
+          <button
+            className={`ghost worktree-chip${props.worktree.main ? " off" : ""}`}
+            aria-pressed={!props.worktree.main}
+            aria-label={props.worktree.main ? "Main folder" : `Worktree: ${props.worktree.name}`}
+            title={`${props.worktree.main ? "Showing the chat's own folder" : `This chat is working in the worktree ${props.worktree.name}${props.worktree.branch ? ` (${props.worktree.branch})` : ""}`}. Git and Branch read from ${props.worktree.main ? "the folder" : "it"}; click to read from ${props.worktree.main ? "the worktree" : "the folder"} instead.`}
+            onClick={props.worktree.onToggle}
+          >
+            {props.worktree.main ? "Main folder" : props.worktree.name}
+          </button>
+        )}
         {tab === "changes" && props.onShip && count > 0 && (
           <button className="ghost ship-it" onClick={props.onShip} title="Commit, push and open a pull request: you check each step first">
             Ship it…
