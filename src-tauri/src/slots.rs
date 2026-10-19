@@ -37,6 +37,8 @@ pub struct Slot {
     pub claude_pid: Arc<std::sync::atomic::AtomicU32>,
     /// The folder's state before each of the chat's messages, which "Restore files to here" puts back.
     pub checkpoints: crate::checkpoint::Checkpoints,
+    /// The user chose to look at the chat's own folder even while it works in a worktree (see `view_folder`).
+    pub view_main: std::sync::atomic::AtomicBool,
 }
 
 /// Slot ids come from the UI and end up in a socket path (macOS allows ~104 bytes), so they're short and plain.
@@ -71,7 +73,7 @@ impl Slots {
         let socket = socket_dir.join(format!("lantern-{}-{id}.sock", std::process::id()));
         let claude_pid: Arc<std::sync::atomic::AtomicU32> = Arc::default();
         let bridge = PermissionBridge::start(socket, tagged(id, emit), folder_rules, auth(claude_pid.clone())).map_err(|e| e.to_string())?;
-        let slot = Arc::new(Slot { session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid, checkpoints: Default::default() });
+        let slot = Arc::new(Slot { session: tokio::sync::Mutex::new(None), config: Mutex::new(None), changes: Arc::default(), bridge, file_index: Mutex::new(None), text_search: Default::default(), shells: Arc::default(), claude_pid, checkpoints: Default::default(), view_main: Default::default() });
         slots.insert(id.to_string(), slot.clone());
         Ok(slot)
     }
@@ -128,6 +130,23 @@ impl Slot {
 
     pub fn folder(&self) -> Result<PathBuf, String> {
         self.config.lock().unwrap().as_ref().map(|c| c.folder.clone()).ok_or_else(|| "No folder is open".into())
+    }
+
+    /// The linked worktree the chat is working in, if Claude entered one (see workdir.rs).
+    pub fn work_folder(&self) -> Option<crate::workdir::WorkFolder> {
+        let folder = self.folder().ok()?;
+        let last = self.changes.lock().unwrap().last_edit();
+        crate::workdir::find(&folder, last.as_deref())
+    }
+
+    /// Where the Changes pane reads git from: the worktree the chat works in, unless the user asked for its own folder.
+    pub fn view_folder(&self) -> Result<PathBuf, String> {
+        if !self.view_main.load(std::sync::atomic::Ordering::Relaxed) {
+            if let Some(w) = self.work_folder() {
+                return Ok(PathBuf::from(w.path));
+            }
+        }
+        self.folder()
     }
 }
 

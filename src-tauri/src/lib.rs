@@ -39,6 +39,7 @@ pub mod revert;
 pub mod checkpoint;
 pub mod ui_event;
 pub mod updates;
+pub mod workdir;
 
 use args::{HelperConfig, Mode, Role};
 use changes::FileDiff;
@@ -1331,9 +1332,40 @@ fn stop_shell(state: State<'_, AppState>, slot: String, id: String) -> Result<()
 /// says it is stacked on (see pr::branch for what is used when it doesn't say, or names one that isn't there).
 #[tauri::command]
 async fn branch_review(state: State<'_, AppState>, slot: String, hints: Option<Vec<String>>, base: Option<String>) -> Result<pr::BranchReview, String> {
-    let folder = state.slots.get(&slot)?.folder()?;
+    let s = state.slots.get(&slot)?;
     let hints = hints.unwrap_or_default();
-    tauri::async_runtime::spawn_blocking(move || pr::branch(&folder, &hints, base.as_deref()).map(|(_, review)| review)).await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || pr::branch(&s.view_folder()?, &hints, base.as_deref()).map(|(_, review)| review)).await.map_err(|e| e.to_string())?
+}
+
+/// The worktree the chat is working in (Claude entered one itself), which the Changes pane reads from instead of the
+/// chat's folder, and whether the user chose to look at the folder anyway.
+#[derive(serde::Serialize)]
+struct WorkView {
+    #[serde(flatten)]
+    folder: workdir::WorkFolder,
+    main: bool,
+}
+
+#[tauri::command]
+async fn work_folder(state: State<'_, AppState>, slot: String) -> Result<Option<WorkView>, String> {
+    let s = state.slots.get(&slot)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(folder) = s.work_folder() else {
+            // Out of the worktree: the next one starts on itself, not on the folder an earlier choice kept.
+            s.view_main.store(false, std::sync::atomic::Ordering::Relaxed);
+            return None;
+        };
+        Some(WorkView { folder, main: s.view_main.load(std::sync::atomic::Ordering::Relaxed) })
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Chooses between the worktree and the chat's own folder for the Changes pane.
+#[tauri::command]
+fn set_view_main(state: State<'_, AppState>, slot: String, main: bool) -> Result<(), String> {
+    state.slots.get(&slot)?.view_main.store(main, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
 }
 
 /// Stops one of the chat's background tasks; claude then lists what's left.
@@ -1371,9 +1403,8 @@ async fn get_file_diff(state: State<'_, AppState>, slot: String, path: String, s
         return tauri::async_runtime::spawn_blocking(move || pr::branch(&dir, &[], base.as_deref()).and_then(|(range, _)| pr::file(&range, &path))).await.map_err(|e| e.to_string())?;
     }
     if scope == Some(changes::Scope::Git) {
-        let folder = s.folder()?;
         let read = path.clone();
-        let (original, current) = tauri::async_runtime::spawn_blocking(move || outside::diff_sides(&folder, std::path::Path::new(&read))).await.map_err(|e| e.to_string())??;
+        let (original, current) = tauri::async_runtime::spawn_blocking(move || outside::diff_sides(&s.view_folder()?, std::path::Path::new(&read))).await.map_err(|e| e.to_string())??;
         return Ok(FileDiff { path, created: original.is_none(), deleted: current.is_none(), original: original.unwrap_or_default(), current: current.unwrap_or_default() });
     }
     let diff = s.changes.lock().unwrap().diff(&path, scope.unwrap_or_default(), turn, to_turn);
@@ -1401,14 +1432,12 @@ async fn change_summary(
         return tauri::async_runtime::spawn_blocking(move || pr::summary(&range)).await.map_err(|e| e.to_string())?;
     }
     if scope == Some(changes::Scope::Branch) {
-        let folder = s.folder()?;
         let hints = hints.unwrap_or_default();
-        return tauri::async_runtime::spawn_blocking(move || pr::branch(&folder, &hints, base.as_deref()).and_then(|(range, _)| pr::summary(&range))).await.map_err(|e| e.to_string())?;
+        return tauri::async_runtime::spawn_blocking(move || pr::branch(&s.view_folder()?, &hints, base.as_deref()).and_then(|(range, _)| pr::summary(&range))).await.map_err(|e| e.to_string())?;
     }
     if scope == Some(changes::Scope::Git) {
-        let folder = s.folder()?;
         return tauri::async_runtime::spawn_blocking(move || {
-            let rows = outside::uncommitted(&folder).ok_or("This folder isn't in a git repository.")?;
+            let rows = outside::uncommitted(&s.view_folder()?).ok_or("This folder isn't in a git repository.")?;
             let mut out: Vec<changes::ChangeSummary> = rows.into_iter().map(|(path, created, deleted, added, removed)| changes::ChangeSummary { path, created, deleted, added, removed }).collect();
             out.sort_by(|a, b| a.path.cmp(&b.path));
             Ok(out)
@@ -2126,6 +2155,8 @@ pub fn run() {
             interrupt,
             stop_task,
             branch_review,
+            work_folder,
+            set_view_main,
             set_model,
             recent_folders,
             get_file_diff,

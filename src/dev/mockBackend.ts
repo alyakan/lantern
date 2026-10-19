@@ -1433,6 +1433,10 @@ export function installMockBackend() {
           return new URLSearchParams(location.search).get("login") === "out" ? { logged_in: false, account: null } : { logged_in: true, account: "sam@acme.dev" };
         case "user_name":
           return "Sam Rivera";
+        case "work_folder":
+          return new URLSearchParams(location.search).get("worktree") ? { path: `${FOLDER}/.claude/worktrees/retry-fix`, name: "retry-fix", branch: "worktree-retry-fix", main: false } : null;
+        case "set_view_main":
+          return undefined;
         case "branch_review":
           return {
             branch: "feat/retry-transient",

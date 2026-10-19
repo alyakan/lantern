@@ -12,6 +12,8 @@ pub struct ChangeTracker {
     turns: Vec<HashMap<String, Option<String>>>,
     /// How the folder was when the chat started, to catch files changed outside Claude's edits (a `cp`, a download).
     outside: Option<std::sync::Arc<crate::outside::Baseline>>,
+    /// The file Claude edited last, which says whether the chat is working in a worktree (see workdir.rs).
+    last_edit: Option<String>,
 }
 
 /// Which baseline the Changes pane compares against.
@@ -73,6 +75,7 @@ pub struct FileDiff {
 impl ChangeTracker {
     /// `original` is None when the edit created the file. Only the first call per path counts.
     pub fn record(&mut self, path: &str, original: Option<String>) {
+        self.last_edit = Some(path.to_string());
         if let Some(turn) = self.turns.last_mut() {
             turn.entry(path.to_string()).or_insert_with(|| original.clone());
         }
@@ -82,6 +85,11 @@ impl ChangeTracker {
     pub fn clear(&mut self) {
         self.originals.clear();
         self.turns.clear();
+        self.last_edit = None;
+    }
+
+    pub fn last_edit(&self) -> Option<String> {
+        self.last_edit.clone()
     }
 
     /// From now on, compare the folder with `baseline` too (see `scan`).
@@ -117,6 +125,7 @@ impl ChangeTracker {
     /// The replayed last turn becomes turn 0.
     pub fn restore(&mut self, edits: Vec<(String, Option<String>)>, last_turn_from: usize) {
         self.clear();
+        self.last_edit = edits.last().map(|(path, _)| path.clone());
         let mut last = HashMap::new();
         for (i, (path, original)) in edits.into_iter().enumerate() {
             if i >= last_turn_from {
@@ -262,6 +271,20 @@ mod tests {
         t.record(p, Some("v1".into()));
         t.record(p, Some("v2".into()));
         assert_eq!(t.diff(p, Scope::Session, None, None).unwrap(), FileDiff { path: p.into(), original: "v1".into(), current: "v3".into(), created: false, deleted: false });
+    }
+
+    #[test]
+    fn the_latest_edit_is_remembered_even_when_its_file_was_edited_before() {
+        let mut t = ChangeTracker::default();
+        assert_eq!(t.last_edit(), None);
+        t.record("/p/a.txt", Some("1".into()));
+        t.record("/wt/b.txt", None);
+        t.record("/p/a.txt", Some("2".into()));
+        assert_eq!(t.last_edit().as_deref(), Some("/p/a.txt"));
+        t.restore(vec![("/p/a.txt".into(), None), ("/wt/b.txt".into(), None)], 1);
+        assert_eq!(t.last_edit().as_deref(), Some("/wt/b.txt"));
+        t.clear();
+        assert_eq!(t.last_edit(), None);
     }
 
     #[test]

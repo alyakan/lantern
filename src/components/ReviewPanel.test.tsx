@@ -40,6 +40,23 @@ describe("ReviewPanel's Ship it", () => {
   });
 });
 
+describe("ReviewPanel's worktree chip", () => {
+  it("names the worktree the chat works in and switches to the chat's own folder and back", () => {
+    const onToggle = vi.fn();
+    const worktree = { name: "retry-fix", branch: "worktree-retry-fix", main: false, onToggle };
+    const { rerender } = render(<ReviewPanel {...base} selected={null} follow onScope={() => {}} worktree={worktree} />);
+    fireEvent.click(screen.getByRole("button", { name: "Worktree: retry-fix" }));
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    rerender(<ReviewPanel {...base} selected={null} follow onScope={() => {}} worktree={{ ...worktree, main: true }} />);
+    expect(screen.getByRole("button", { name: "Main folder" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("is absent when the chat works in its own folder", () => {
+    render(<ReviewPanel {...base} selected={null} follow onScope={() => {}} />);
+    expect(screen.queryByRole("button", { name: /Worktree:|Main folder/ })).toBeNull();
+  });
+});
+
 describe("ReviewPanel reverts", () => {
   it("a file's Revert opens a dialog for that file", () => {
     render(<ReviewPanel {...base} scope="session" selected="/p/src/a.ts" follow revert={controls()} />);
