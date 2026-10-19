@@ -1,4 +1,5 @@
 import { chatState, chatTitle, type Chats } from "../sessions";
+import type { State } from "../store";
 import type { RecentFolder } from "../types";
 import { basename } from "./diff";
 import { needingYou, orchestraNodes, teamNodes } from "./orchestraView";
@@ -160,12 +161,32 @@ export function needsYou(open: Record<string, ProjectOpen>): number {
 }
 
 /**
+ * When a chat last did something, for ordering its row. A chat that is working now ranks by when its turn began, so two
+ * chats working at once don't trade places with every line they write; one that isn't, by when it last did anything.
+ * A chat that never has (nothing sent, nothing read back) has no time, and ties keep the order they were opened in.
+ */
+function recencyOf(s: State, state: ChatDot): { live: boolean; at: number } {
+  const sent = [...s.items].reverse().find((it) => it.type === "user" && it.at !== undefined);
+  const sentAt = sent?.type === "user" ? sent.at : undefined;
+  const live = state === "running";
+  return { live, at: (live ? (sentAt ?? s.activityAt) : (s.activityAt ?? sentAt)) ?? 0 };
+}
+
+/** What a team ranks by: working if any of its chats is (by the latest of those), else the latest of them all. */
+function teamRecency(members: { live: boolean; at: number }[]): { live: boolean; at: number } {
+  const live = members.some((m) => m.live);
+  return { live, at: Math.max(0, ...members.filter((m) => m.live === live).map((m) => m.at)) };
+}
+
+/**
  * Every open chat grouped by the project it is in. A team's Lead is one row with its agents under it (an agent is never
  * listed on its own, whatever its worktree's folder is); a chat with no folder yet isn't listed. Within a project the
- * chats that need you come first, the rest keep the order they were opened in.
+ * chats are ordered by recent activity: the ones working now first, then the rest newest first. Needing you changes the
+ * dot and the count, not the place.
  */
 export function openProjects(chats: Chats, opts: { titles: Record<string, string>; drafts: Record<string, string>; unread: Record<string, number>; pinned: Record<string, string[]> }): Record<string, ProjectOpen> {
   const out: Record<string, ProjectOpen> = {};
+  const recency = new Map<string, { live: boolean; at: number }>();
   const pinnedIn = (folder: string | null, id: string | null) => !!folder && !!id && (opts.pinned[folder] ?? []).includes(id);
   const nodes = orchestraNodes(chats, () => "Lead");
   const row = (slot: string, waiting = false): SidebarChat => {
@@ -190,6 +211,7 @@ export function openProjects(chats: Chats, opts: { titles: Record<string, string
     if (s.sessionId) project.sessionIds.push(s.sessionId);
     if (!s.orchestrator) {
       const chat = row(slot);
+      recency.set(slot, recencyOf(s, chat.state));
       project.items.push({ kind: "chat", ...chat });
       if (chat.state === "waiting") {
         project.needs += 1;
@@ -204,6 +226,7 @@ export function openProjects(chats: Chats, opts: { titles: Record<string, string
     for (const a of agents) if (a.sessionId) project.sessionIds.push(a.sessionId);
     const lead = row(slot, needing.has(slot));
     const all = [lead, ...agents];
+    recency.set(slot, teamRecency(all.map((c) => recencyOf(chats.slots[c.slot], c.state))));
     const state: ChatDot = needing.size > 0 ? "waiting" : all.some((c) => c.state === "running") ? "running" : "done";
     project.items.push({ kind: "team", ...lead, title: lead.title === "New chat" ? "New team" : lead.title, state, unread: state !== "waiting" && all.some((c) => c.unread), background: all.reduce((n, c) => n + c.background, 0), active: lead.active, agents });
     if (needing.size > 0) {
@@ -212,8 +235,9 @@ export function openProjects(chats: Chats, opts: { titles: Record<string, string
       project.target ??= { slot: first, team: slot };
     }
   }
-  // What needs you rises to the top of its project (a stable sort keeps the rest in the order they were opened).
-  for (const project of Object.values(out)) project.items.sort((a, b) => Number(b.state === "waiting") - Number(a.state === "waiting"));
+  // Working now first, then newest first; a stable sort keeps chats with the same time in the order they were opened.
+  const rank = (slot: string) => recency.get(slot) ?? { live: false, at: 0 };
+  for (const project of Object.values(out)) project.items.sort((a, b) => Number(rank(b.slot).live) - Number(rank(a.slot).live) || rank(b.slot).at - rank(a.slot).at);
   return out;
 }
 
