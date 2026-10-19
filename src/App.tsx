@@ -3,6 +3,7 @@ import { pushAgentLimit } from "./lib/agentLimit";
 import { pushAutoMergeTests } from "./lib/mergeTests";
 import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
+import { canSleep, sweep, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
@@ -234,6 +235,8 @@ export default function App() {
   const relaunch = useRef<Record<string, () => void>>({});
   // Counts each chat's starts, so one that was cancelled can tell its late answer is stale.
   const startGen = useRef<Record<string, number>>({});
+  // The chats being woken from sleep (see Status): until their history is back they have no messages, but aren't empty chats to close.
+  const waking = useRef(new Set<string>());
   // Whether the right pane is hidden, per project like the mode. The old app-wide setting is the default.
   const [collapsedDefault, setCollapsedDefault] = usePersistentState("review.collapsed", false);
   const [collapsedBy, setCollapsedBy] = usePersistentState<Record<string, boolean>>("review.collapsedByFolder", {});
@@ -413,7 +416,7 @@ export default function App() {
    */
   const leave = (slot: string) => {
     const s = chats.slots[slot];
-    if (!s || s.items.length > 0 || isBusy(s) || drafts.current[slot]?.trim()) return;
+    if (!s || s.items.length > 0 || isBusy(s) || drafts.current[slot]?.trim() || s.status === "asleep" || waking.current.has(slot)) return;
     forget(slot);
   };
 
@@ -462,7 +465,7 @@ export default function App() {
    * is on its way, and a second one would race it.
    */
   const takeSlot = (): string => {
-    if (state.items.length === 0 && !isBusy(state) && state.status !== "starting") return active;
+    if (state.items.length === 0 && !isBusy(state) && state.status !== "starting" && state.status !== "asleep") return active;
     const slot = `s${++slotSeq.current}`;
     dispatchChats({ type: "add", slot });
     dispatchChats({ type: "activate", slot });
@@ -525,7 +528,8 @@ export default function App() {
   useEffect(() => {
     // Not a worker's: its folder is a worktree that's gone with it, and its Permissions are capped by its Lead. Nor a routine's:
     // looking at one must not make the project's next chat start on its Permissions.
-    if (!state.folder || chats.agents[active] || routineSlots.current[active]) return;
+    // Nor an asleep chat's, which has the mode of whichever chat was open when it was made, until it wakes on its own.
+    if (!state.folder || chats.agents[active] || routineSlots.current[active] || state.status === "asleep") return;
     const permissions = permissionsOf(state);
     if (permissionsBy[state.folder] !== permissions) setPermissionsBy({ ...permissionsBy, [state.folder]: permissions });
     // A Team is the chat's own: the project's next chat starts as a chat (or in Step by step, if that is where it was).
@@ -655,6 +659,15 @@ export default function App() {
       });
   };
 
+  // An asleep chat is woken as soon as it is on screen, however it got there (the sidebar, a notification, Restore all…).
+  useEffect(() => {
+    const slot = active;
+    const s = chats.slots[slot];
+    if (s?.status !== "asleep" || !s.folder || !s.sessionId || waking.current.has(slot)) return;
+    waking.current.add(slot);
+    void resumeIn(slot, s.folder, s.sessionId).finally(() => waking.current.delete(slot));
+  }, [active, state.status]);
+
   // An agent's conversation is recorded once it has one, so it can be told from the user's own chats.
   useEffect(() => {
     const ids = Object.keys(chats.agents).flatMap((slot) => chats.slots[slot]?.sessionId ?? []);
@@ -764,8 +777,14 @@ export default function App() {
         // The first goes into the empty chat on screen, if there is one; the rest into chats of their own.
         slot = i === 0 ? takeSlot() : `s${++slotSeq.current}`;
         if (i !== 0) dispatchChats({ type: "add", slot });
-        const ready = restoreInto(slot, c, opened);
-        if (isMain(c) && c.sessionId) opened[c.sessionId] = { slot, ready };
+        // Only the one on screen (and the teams, which come back together) starts now; the rest are asleep in the sidebar, and wake when opened.
+        if (i !== 0 && c !== first && !c.orchestra && c.sessionId) {
+          if (c.draft) drafts.current[slot] = c.draft;
+          to(slot)({ type: "sleep", folder: c.folder, sessionId: c.sessionId, title: c.title });
+        } else {
+          const ready = restoreInto(slot, c, opened);
+          if (isMain(c) && c.sessionId) opened[c.sessionId] = { slot, ready };
+        }
       }
       if (c === first) onScreen = slot;
     });
@@ -1525,6 +1544,31 @@ export default function App() {
   // A chat still open in a folder that has since moved is saved where the folder is now.
   const saveOpen = () => save(toCurrentFolders(withOffered(chatsToSave(chats.slots, active, drafts.current, titles, chats.agents), offer), moves ?? []));
   useEffect(saveOpen, [chats.slots, chats.agents, active, titles, offer, moves]);
+
+  // A chat that has sat idle off screen for the time in Settings goes to sleep: its claude is stopped and its messages are
+  // dropped from memory. It is still in the sidebar, and wakes (resumed, history and all) when opened.
+  const sleepAfter = useSleepMinutes();
+  const idleClock = useRef<Record<string, number>>({});
+  const sleepSweep = () => {
+    const eligible = new Set(Object.entries(chats.slots).flatMap(([slot, s]) => (canSleep(s, { active: slot === active, agent: !!chats.agents[slot], routine: slot in routineSlots.current }) ? [slot] : [])));
+    const { clock, due } = sweep(idleClock.current, eligible, Date.now(), sleepAfter * 60_000);
+    idleClock.current = clock;
+    for (const slot of due) {
+      const s = chats.slots[slot];
+      delete idleClock.current[slot];
+      delete relaunch.current[slot];
+      // Asleep first, so the end of its process (which closing it makes) is not taken for a crash.
+      to(slot)({ type: "sleep", folder: s.folder!, sessionId: s.sessionId!, title: chatTitle(s, titles) });
+      api.closeSession(slot).catch(() => {});
+    }
+  };
+  const sweepNow = useRef(sleepSweep);
+  sweepNow.current = sleepSweep;
+  useEffect(() => sweepNow.current(), [chats.slots, active, sleepAfter]);
+  useEffect(() => {
+    const id = setInterval(() => sweepNow.current(), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const working = anythingWorking(chats);
   useEffect(() => {

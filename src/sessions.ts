@@ -172,7 +172,7 @@ export function firstPrompt(s: State): string | null {
 
 /** What a chat is called in menus: its title once one is made (`titles`, by session id), until then its first prompt. */
 export function chatTitle(s: State, titles: Record<string, string> = {}): string {
-  return (s.sessionId && titles[s.sessionId]) || firstPrompt(s)?.split("\n")[0] || "New chat";
+  return (s.sessionId && titles[s.sessionId]) || firstPrompt(s)?.split("\n")[0] || s.asleepTitle || "New chat";
 }
 
 /**

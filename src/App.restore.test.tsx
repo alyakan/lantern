@@ -62,6 +62,75 @@ describe("restoring chats at launch", () => {
     });
   });
 
+  it("starts only the chat on screen and leaves the others asleep in the sidebar until they are opened", async () => {
+    const calls = await launch();
+    const opened = () => calls.filter(([c]) => c === "open_session").map(([, a]) => a?.sessionId);
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+    await screen.findByText("Should the backoff have jitter so clients don't retry in lockstep?");
+    // The other chat is there to click, with its title, but has no claude and no history yet.
+    const asleep = await screen.findByTitle("Retry transient fetch errors");
+    expect(opened()).toEqual(["3f1c2a"]);
+    fireEvent.click(asleep);
+    await waitFor(() => expect(opened()).toEqual(["3f1c2a", "9b7e01"]));
+    // Asleep or awake, both stay saved, so quitting in between loses nothing.
+    const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
+    expect(saved.map((c) => c.sessionId).sort()).toEqual(["3f1c2a", "9b7e01"]);
+  });
+
+  it("puts a chat that has sat idle off screen to sleep, and wakes it when it is opened again", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"], shouldAdvanceTime: true });
+    try {
+      const calls = await launch();
+      const sent = (cmd: string) => calls.filter(([c]) => c === cmd).map(([, a]) => a);
+      fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+      await screen.findByText("Should the backoff have jitter so clients don't retry in lockstep?");
+      // Opening the other chat leaves the first one off screen and idle: its clock starts.
+      fireEvent.click(await screen.findByTitle("Retry transient fetch errors"));
+      await waitFor(() => expect(sent("open_session")).toHaveLength(2));
+      await screen.findByText("Should the backoff have jitter so clients don't retry in lockstep?");
+      expect(sent("close_session")).toEqual([]);
+      // Ten minutes later (the default) it is put to sleep: its process is closed, and the sidebar still has it.
+      vi.setSystemTime(Date.now() + 11 * 60_000);
+      await vi.advanceTimersByTimeAsync(31_000);
+      await waitFor(() => expect(sent("close_session")).toHaveLength(1));
+      const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
+      const slept = saved.find((c) => c.sessionId === "3f1c2a");
+      expect(slept).toBeDefined();
+      // The mock gives every chat the same first prompt, so two rows can share a title: the one that isn't the open chat is it.
+      const row = screen.getAllByTitle(slept!.title).find((el) => el.getAttribute("aria-current") !== "true");
+      expect(row).toBeDefined();
+      // Opening it brings it back.
+      fireEvent.click(row!);
+      await waitFor(() => expect(sent("open_session")).toHaveLength(3));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("wakes a chat on the mode it was saved in, not the mode of the chat that was open when it was put to sleep", async () => {
+    localStorage.setItem("settings.modeBySession", JSON.stringify({ "9b7e01": "auto", "3f1c2a": "ask" }));
+    const calls = await launch();
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+    await screen.findByText("Should the backoff have jitter so clients don't retry in lockstep?");
+    fireEvent.click(await screen.findByTitle("Retry transient fetch errors"));
+    await waitFor(() => expect(calls.filter(([c]) => c === "open_session")).toHaveLength(2));
+    const woken = calls.filter(([c]) => c === "open_session").map(([, a]) => a as { sessionId: string; settings: { mode: string } });
+    expect(woken.map((a) => [a.sessionId, a.settings.mode])).toEqual([["3f1c2a", "ask"], ["9b7e01", "auto"]]);
+    // Nor was its saved mode written over while it slept.
+    expect(JSON.parse(localStorage.getItem("settings.modeBySession") ?? "{}")["9b7e01"]).toBe("auto");
+  });
+
+  it("keeps an asleep chat's title and unsent text across a save", async () => {
+    localStorage.setItem("session.openChats", JSON.stringify([{ ...lastTime[0], draft: "and the jitter?" }, lastTime[1]]));
+    await launch();
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+    await screen.findByTitle("Retry transient fetch errors");
+    await waitFor(() => {
+      const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
+      expect(saved.find((c) => c.sessionId === "9b7e01")).toMatchObject({ title: "Retry transient fetch errors", draft: "and the jitter?", active: false });
+    });
+  });
+
   it("brings one back on its own, and keeps offering the rest", async () => {
     await launch();
     fireEvent.click(screen.getByRole("button", { name: /Retry transient fetch errors/ }));

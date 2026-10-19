@@ -31,7 +31,8 @@ const KEY = "session.openChats";
 export function chatsToSave(slots: Record<string, State>, active: string, drafts: Record<string, string>, titles: Record<string, string>, agents: Record<string, AgentMeta> = {}): SavedChat[] {
   return Object.entries(slots).flatMap(([slot, s]) => {
     const draft = drafts[slot]?.trim() ? drafts[slot] : "";
-    const sessionId = s.items.length > 0 ? s.sessionId : null;
+    // An asleep chat has no messages in memory, but it has its conversation.
+    const sessionId = s.items.length > 0 || s.status === "asleep" ? s.sessionId : null;
     if (!s.folder || (!sessionId && !draft)) return [];
     const meta = agents[slot];
     const parentSession = meta ? (slots[meta.parent]?.sessionId ?? null) : null;
@@ -53,7 +54,8 @@ export function chatsToSave(slots: Record<string, State>, active: string, drafts
  * one the user never opens would otherwise come back on Ask.
  */
 export function sessionModesToSave(slots: Record<string, State>, saved: Record<string, string>): Record<string, string> | null {
-  const now = Object.values(slots).flatMap((s) => (s.sessionId ? [[s.sessionId, savedModeOf(s)] as const] : []));
+  // Not an asleep chat's: its state is only a name, with the mode of whichever chat was open when it was made, and it wakes on what was saved.
+  const now = Object.values(slots).flatMap((s) => (s.sessionId && s.status !== "asleep" ? [[s.sessionId, savedModeOf(s)] as const] : []));
   if (now.every(([id, mode]) => saved[id] === mode)) return null;
   return { ...saved, ...Object.fromEntries(now) };
 }
