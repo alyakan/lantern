@@ -638,7 +638,7 @@ export default function App() {
         if (startGen.current[slot] !== gen) return false;
         // Not resumed (its copy into this folder failed): the transcript is shown, and Retry copies it again.
         if (opened.read_only) {
-          to(slot)({ type: "history_loaded", sessionId, events: opened.events });
+          to(slot)({ type: "history_loaded", sessionId, events: opened.events, earlier: opened.earlier });
           to(slot)({ type: "failed", text: opened.read_only });
           return false;
         }
@@ -648,7 +648,7 @@ export default function App() {
           startRoles(slot, folder);
           startReview(slot, as.review);
         }
-        to(slot)({ type: "history_loaded", sessionId, events: opened.events, movedFrom: opened.moved_from });
+        to(slot)({ type: "history_loaded", sessionId, events: opened.events, movedFrom: opened.moved_from, earlier: opened.earlier });
         if (notes) to(slot)({ type: "notes_applied", text: notes });
         to(slot)({ type: "session_ready" });
         return true;
@@ -657,6 +657,18 @@ export default function App() {
         if (startGen.current[slot] === gen) to(slot)({ type: "failed", text: errText(e) });
         return false;
       });
+  };
+
+  // "Show earlier messages": the turns before the ones a long session opened with. They come from the transcript each time,
+  // so the window never holds more of the session than is on screen.
+  const loadEarlier = (slot: string): Promise<void> => {
+    const s = chats.slots[slot];
+    if (!s?.sessionId || !s.folder || s.earlierTurns <= 0) return Promise.resolve();
+    const { sessionId, folder, earlierTurns: expected } = s;
+    return api.earlierEvents(folder, sessionId, expected).then(
+      (page) => to(slot)({ type: "earlier_loaded", sessionId, events: page.events, expected, hidden: page.hidden }),
+      (e) => to(slot)({ type: "earlier_failed", text: `Couldn't load the earlier messages: ${errText(e)}` }),
+    );
   };
 
   // An asleep chat is woken as soon as it is on screen, however it got there (the sidebar, a notification, Restore all…).
@@ -2293,7 +2305,7 @@ export default function App() {
                       {stepsView ? (
                         <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} explain={explain} onPickFlavour={pickFlavour} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} />
                       ) : (
-                        <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} restore={restoreEvents} />
+                        <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} restore={restoreEvents} loadEarlier={() => loadEarlier(active)} />
                       )}
                     </FileLinksProvider>
                     </ArchitecturePane.Provider>

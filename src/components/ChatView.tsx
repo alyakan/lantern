@@ -20,7 +20,10 @@ export interface RestoreEvents {
   onUndone: (id: number, text: string) => void;
 }
 
-export function ChatView({ state, resend, restore, ...handlers }: { state: State; resend?: ResendHandlers; restore?: RestoreEvents } & StreamHandlers) {
+/** Loads the turns before the first one shown ("Show earlier messages"); resolves when they are in the chat. */
+export type LoadEarlier = () => Promise<void>;
+
+export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: { state: State; resend?: ResendHandlers; restore?: RestoreEvents; loadEarlier?: LoadEarlier } & StreamHandlers) {
   const scroller = useRef<HTMLDivElement>(null);
   // Back in this chat: where you left it; at the end if you were there (or it's new). Kept as a place in the chat, not
   // pixels, since the same chat shows at other widths (its card on the canvas, the chat itself, a resized pane).
@@ -99,6 +102,24 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
     }
     if (nearBottom.current && el) toEnd(el);
   }, [state.items, state.thinking]);
+  // Older turns put in above what is on screen: the turn that was at the top stays there (the browser doesn't hold the
+  // place by itself when content appears above it).
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
+  const earlierTurns = useRef(state.earlierTurns);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (state.earlierTurns < earlierTurns.current && el && anchor.current) scrollToAnchor(el, anchor.current);
+    earlierTurns.current = state.earlierTurns;
+  }, [state.earlierTurns]);
+  const showEarlier = () => {
+    const el = scroller.current;
+    if (!loadEarlier || !el || loadingEarlier) return;
+    // Where it is now is what is kept, whether or not it was scrolled away from the end.
+    nearBottom.current = false;
+    anchor.current = anchorOf(el);
+    setLoadingEarlier(true);
+    loadEarlier().finally(() => setLoadingEarlier(false));
+  };
   // The chat box grows as you type, which makes this area shorter without scrolling it: stay at the end if you were
   // there, so the box doesn't end up over the last lines. Resized elsewhere (a wider pane, a card made bigger), it keeps
   // the place you were reading, which the same pixels no longer are.
@@ -174,6 +195,12 @@ export function ChatView({ state, resend, restore, ...handlers }: { state: State
         onTouchStart={byHand}
         onTouchMove={byHand}
       >
+        {state.earlierTurns > 0 && loadEarlier && (
+          <button className="earlier-bar" onClick={showEarlier} disabled={loadingEarlier}>
+            {loadingEarlier ? "Loading…" : "Show earlier messages"}
+            <span className="earlier-count">{state.earlierTurns === 1 ? "1 earlier turn" : `${state.earlierTurns} earlier turns`}</span>
+          </button>
+        )}
         {state.items.length === 0 && !state.thinking && <div className="empty">What should Claude work on?</div>}
         <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} resend={resend} restore={restoreRows} {...handlers} />
         {thinkingLine && (

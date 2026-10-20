@@ -1807,7 +1807,16 @@ export function installMockBackend() {
         case "session_events":
           return REPLAY;
         case "open_session":
-          return { events: REPLAY, moved_from: null, read_only: null };
+          // ?earlier opens it as a long session would: its last turns, with one earlier turn still on disk.
+          return { events: REPLAY, earlier: new URLSearchParams(location.search).has("earlier") ? 1 : 0, moved_from: null, read_only: null };
+        case "earlier_events":
+          return {
+            events: [
+              { kind: "user_text", text: "Where does fetchJson live?" },
+              { kind: "assistant_text", parent: null, block_id: "e1", text: "In `src/api/fetchJson.ts`." },
+            ],
+            hidden: 0,
+          };
         case "relocations_list":
           return [];
         case "folders_gone":

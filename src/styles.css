@@ -928,6 +928,12 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 .turn-head::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 14px; background: linear-gradient(var(--sidebar), transparent); pointer-events: none; }
 .turn-head .msg.user { max-height: 30vh; overflow-y: auto; border-radius: 0; padding: 10px 20px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .chat > .turn-section:first-child .turn-head .msg.user { border-top-color: transparent; }
+/* A long session opens with its last turns: this brings the ones before them. */
+.chat > .earlier-bar { flex: none; align-self: center; display: flex; align-items: center; gap: 10px; margin: 12px 0 4px; padding: 6px 14px; border: 1px solid var(--line); border-radius: var(--radius-inner); background: transparent; color: var(--text); font-size: calc(12px * var(--font-scale)); cursor: pointer; }
+.chat > .earlier-bar:hover:not(:disabled) { background: var(--bg-user); }
+.chat > .earlier-bar:disabled { color: var(--muted); cursor: default; }
+.earlier-bar .earlier-count { color: var(--muted-text); }
+.chat > .earlier-bar + .turn-section { margin-top: 0; }
 .msg { font-size: calc(13.5px * var(--font-scale)); line-height: 1.6; }
 .msg.user { display: var(--user-display); gap: 1ch; background: var(--bg-user); border: var(--user-border); border-radius: var(--radius-inner); padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg.user::before { content: var(--user-mark); flex: none; color: var(--accent); }

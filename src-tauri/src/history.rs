@@ -484,6 +484,34 @@ fn iso_ms(s: &str) -> Option<u64> {
     u64::try_from((((days * 24 + h) * 60 + min) * 60 + sec) * 1000 + ms).ok()
 }
 
+/// How many turns a reopened chat starts with, and how many each "Show earlier" brings. A long session replayed whole is
+/// hundreds of megabytes of messages in the window's memory.
+pub const PAGE_TURNS: usize = 25;
+
+/// A run of a replay's events, whole turns of them.
+#[derive(Debug, PartialEq, Serialize)]
+pub struct Page {
+    pub events: Vec<UiEvent>,
+    /// How many turns come before this page: what "Show earlier" still has to load.
+    pub hidden: usize,
+}
+
+/// The last `count` turns of a replay's events (a turn is a message the user sent and all that followed it, up to the
+/// next one), or with `before` (the turns still not loaded, counted from the first) the `count` turns before those.
+pub fn page(mut events: Vec<UiEvent>, before: Option<usize>, count: usize) -> Page {
+    let starts: Vec<usize> = events.iter().enumerate().filter(|(_, e)| matches!(e, UiEvent::UserText { .. })).map(|(i, _)| i).collect();
+    // Turns the session doesn't have (it was cleared and begun again since the count was taken): nothing to bring.
+    if before.is_some_and(|b| b >= starts.len()) {
+        return Page { events: Vec::new(), hidden: 0 };
+    }
+    let end_turn = before.unwrap_or(starts.len());
+    let first = end_turn.saturating_sub(count);
+    // What came before the first message (the session starting) goes with the first page of turns.
+    let from = if first == 0 { 0 } else { starts[first] };
+    let to = if end_turn >= starts.len() { events.len() } else { starts[end_turn] };
+    Page { events: events.drain(from..to).collect(), hidden: first }
+}
+
 /// Rebuilds a session's UI events by feeding its transcript through the live stream parser.
 pub fn replay(path: &Path) -> Replay {
     let mut parser = StreamParser::default();
@@ -553,9 +581,119 @@ mod tests {
         assert_eq!(offstream, 0);
     }
 
+    /// Pages a real transcript back to its first turn: LANTERN_TRANSCRIPT=<…/session.jsonl> cargo test real_paging -- --ignored --nocapture
+    /// Every page must reference only steps it holds (a turn boundary that cut through a subagent's would show here), and the
+    /// pages must add up to the whole replay.
+    #[test]
+    #[ignore]
+    fn real_paging() {
+        let path = std::path::PathBuf::from(std::env::var("LANTERN_TRANSCRIPT").expect("LANTERN_TRANSCRIPT"));
+        let began = std::time::Instant::now();
+        let all = replay(&path).events;
+        println!("replay: {} events in {:?}", all.len(), began.elapsed());
+        let full_bytes = serde_json::to_vec(&all).unwrap().len();
+        let (mut before, mut pages, mut total, mut sizes) = (None, 0, 0, Vec::new());
+        loop {
+            let began = std::time::Instant::now();
+            let p = page(all.clone(), before, PAGE_TURNS);
+            let bytes = serde_json::to_vec(&p.events).unwrap().len();
+            let mut started = std::collections::HashSet::new();
+            let mut referenced = Vec::new();
+            for e in &p.events {
+                let v = serde_json::to_value(e).unwrap();
+                let kind = v["kind"].as_str().unwrap_or_default().to_string();
+                if kind == "tool_started" {
+                    started.insert(v["tool_use_id"].as_str().unwrap_or_default().to_string());
+                } else if kind == "advisor_started" {
+                    started.insert(v["id"].as_str().unwrap_or_default().to_string());
+                } else {
+                    for key in ["tool_use_id", "parent"] {
+                        if let Some(id) = v[key].as_str() {
+                            referenced.push((kind.clone(), id.to_string()));
+                        }
+                    }
+                }
+            }
+            let dangling: Vec<_> = referenced.iter().filter(|(_, id)| !started.contains(id)).collect();
+            println!("page {pages}: {} events, {:.1} MB, hidden after: {}, dangling references: {} ({:?})", p.events.len(), bytes as f64 / 1e6, p.hidden, dangling.len(), began.elapsed());
+            if !dangling.is_empty() {
+                println!("  e.g. {:?}", &dangling[..dangling.len().min(5)]);
+            }
+            total += p.events.len();
+            sizes.push(bytes);
+            pages += 1;
+            if p.hidden == 0 {
+                break;
+            }
+            before = Some(p.hidden);
+        }
+        println!("{pages} pages, {total} of {} events, all {:.1} MB, the first page {:.1} MB", all.len(), full_bytes as f64 / 1e6, sizes[0] as f64 / 1e6);
+        assert_eq!(total, all.len());
+    }
+
     use super::*;
 
     const FOLDER: &str = "/Users/me/src/acme-api";
+
+    /// `turns` turns, each a message from the user and one reply ("u0", "a0", "u1", "a1"…), after a session start.
+    fn turns(n: usize) -> Vec<UiEvent> {
+        let mut events = vec![UiEvent::ContextUsed { tokens: 1 }];
+        for i in 0..n {
+            events.push(UiEvent::UserText { text: format!("u{i}"), at: None });
+            events.push(UiEvent::AssistantText { parent: None, block_id: format!("a{i}"), text: format!("a{i}") });
+        }
+        events
+    }
+
+    fn users(p: &Page) -> Vec<String> {
+        p.events.iter().filter_map(|e| if let UiEvent::UserText { text, .. } = e { Some(text.clone()) } else { None }).collect()
+    }
+
+    #[test]
+    fn the_first_page_is_the_last_turns_whole() {
+        let p = page(turns(60), None, 25);
+        assert_eq!(p.hidden, 35);
+        assert_eq!(users(&p).first().map(String::as_str), Some("u35"));
+        assert_eq!(users(&p).last().map(String::as_str), Some("u59"));
+        // Each turn comes with its reply, and nothing of an earlier one.
+        assert_eq!(p.events.len(), 50);
+        assert!(matches!(p.events.first(), Some(UiEvent::UserText { .. })));
+    }
+
+    #[test]
+    fn a_short_session_is_one_page_with_everything_in_it() {
+        let p = page(turns(3), None, 25);
+        assert_eq!(p.hidden, 0);
+        assert_eq!(p.events.len(), 7);
+        assert!(matches!(p.events.first(), Some(UiEvent::ContextUsed { .. })));
+    }
+
+    #[test]
+    fn earlier_pages_run_back_to_the_start_without_gaps_or_overlap() {
+        let all = turns(60);
+        let last = page(all.clone(), None, 25);
+        let mid = page(all.clone(), Some(last.hidden), 25);
+        assert_eq!((users(&mid).first().map(String::as_str), users(&mid).last().map(String::as_str), mid.hidden), (Some("u10"), Some("u34"), 10));
+        let first = page(all.clone(), Some(mid.hidden), 25);
+        assert_eq!(first.hidden, 0);
+        assert_eq!(users(&first).len(), 10);
+        // The start of the session comes with the first turns.
+        assert!(matches!(first.events.first(), Some(UiEvent::ContextUsed { .. })));
+        assert_eq!(first.events.len() + mid.events.len() + last.events.len(), all.len());
+    }
+
+    #[test]
+    fn a_count_from_another_session_brings_nothing_instead_of_this_ones_last_turns() {
+        assert_eq!(page(turns(3), Some(10), 25), Page { events: Vec::new(), hidden: 0 });
+        assert_eq!(page(turns(3), Some(3), 25), Page { events: Vec::new(), hidden: 0 });
+    }
+
+    #[test]
+    fn a_session_with_no_messages_pages_to_nothing_hidden() {
+        let p = page(vec![UiEvent::ContextUsed { tokens: 1 }], None, 25);
+        assert_eq!((p.hidden, p.events.len()), (0, 1));
+        assert_eq!(page(Vec::new(), Some(3), 25), Page { events: Vec::new(), hidden: 0 });
+    }
 
     fn rec(v: Value) -> String {
         v.to_string()
