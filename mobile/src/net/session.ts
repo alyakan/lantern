@@ -27,6 +27,9 @@ export class ProtocolMismatch extends Error {
 /** The Mac closed the link, or went quiet, during the handshake. */
 export class NoAnswer extends Error {}
 
+/** The Mac hung up on the pairing code: it was used, expired or wrong, which another address of the Mac won't change. */
+export class Refused extends Error {}
+
 function sendMessage(link: Link, channel: Channel, msg: ClientMessage) {
   for (const frame of channel.seal(utf8Encode(JSON.stringify(msg)))) link.send(frame);
 }
@@ -40,6 +43,8 @@ async function nextMessage(link: Link, channel: Channel, waitMs?: number): Promi
     if (plain) return JSON.parse(utf8Decode(plain)) as ServerMessage;
   }
 }
+
+const NOT_TAKEN = "Your Mac didn't take this code. Show a new one on your Mac and try again.";
 
 export interface HandshakeOptions {
   /** Pairing: the QR code's secret. Connecting again: none. */
@@ -57,14 +62,20 @@ export async function comeIn(link: Link, device: Keypair, macKey: Uint8Array, o:
   link.send(hs.write());
   const second = await link.next(STEP_WAIT);
   // A Mac with no code on screen (or one already used) closes right away; one that is asleep says nothing.
-  if (!second) throw new NoAnswer(o.secret ? "Your Mac didn't take this code. Show a new one on your Mac and try again." : "Your Mac didn't answer.");
+  if (!second) {
+    if (o.secret) throw new (link.isClosed ? Refused : NoAnswer)(NOT_TAKEN);
+    throw new NoAnswer("Your Mac didn't answer.");
+  }
   hs.read(second);
   link.send(hs.write());
   const { send, receive } = hs.finish();
   const channel = new Channel(send, receive);
   sendMessage(link, channel, { type: "hello", protocol: PROTOCOL_VERSION, app_version: o.appVersion, device_name: o.deviceName });
   const welcome = await nextMessage(link, channel, STEP_WAIT);
-  if (!welcome || welcome.type !== "welcome") throw new NoAnswer(o.secret ? "Your Mac didn't take this code. Show a new one on your Mac and try again." : "Your Mac didn't let this phone in. Pair it again.");
+  if (!welcome || welcome.type !== "welcome") {
+    if (o.secret) throw new (link.isClosed ? Refused : NoAnswer)(NOT_TAKEN);
+    throw new NoAnswer("Your Mac didn't let this phone in. Pair it again.");
+  }
   if (welcome.protocol !== PROTOCOL_VERSION) throw new ProtocolMismatch(welcome.protocol);
   return { channel, welcome };
 }

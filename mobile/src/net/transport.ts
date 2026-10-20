@@ -10,6 +10,8 @@ export interface Link {
   close(): void;
   /** Resolves once the connection is gone, from either side. */
   readonly closed: Promise<void>;
+  /** Whether it is gone now (what tells a Mac that hung up from one that went quiet). */
+  readonly isClosed: boolean;
 }
 
 export interface Transport {
@@ -55,6 +57,9 @@ export function queueLink(send: (frame: Uint8Array) => void, close: () => void) 
       end();
     },
     closed,
+    get isClosed() {
+      return ended;
+    },
   };
   const push = (frame: Uint8Array) => {
     if (ended) return;

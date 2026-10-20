@@ -290,6 +290,17 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn a_removed_phone_hears_nothing_more_and_the_others_still_do() {
+        let r = rig(2);
+        let gone = r.store.saved().devices[0].clone();
+        r.store.remove_device(&gone.id).unwrap();
+        r.event("a", ask("p1")).await;
+        let sent = r.pushed();
+        assert_eq!(sent.len(), 1);
+        assert_ne!(sent[0].to, gone.push_token.unwrap_or_default());
+    }
+
+    #[tokio::test]
     async fn only_one_push_per_chat_and_kind_until_it_has_been_looked_at() {
         let r = rig(1);
         r.event("a", ask("p1")).await;

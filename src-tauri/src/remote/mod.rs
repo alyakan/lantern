@@ -132,17 +132,33 @@ pub fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
+/// Whether an interface is one a phone on the same Wi-Fi or cable can reach: Ethernet and Wi-Fi (`en0`, `eth0`, `wlan0`),
+/// not the bridges, tunnels and virtual switches that VMs, containers and VPNs add (`bridge100`, `utun3`, `vmnet8`).
+fn is_lan_interface(name: &str) -> bool {
+    ["en", "eth", "wlan", "wlp", "wlo", "enp", "eno"].iter().any(|p| name.strip_prefix(p).is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit())))
+}
+
+/// The addresses to offer, from (interface, address) pairs: private IPv4 on LAN interfaces, the first interface (`en0`, the
+/// Wi-Fi) first.
+fn lan_hosts(ifaces: impl IntoIterator<Item = (String, std::net::Ipv4Addr)>) -> Vec<String> {
+    let mut found: Vec<(String, std::net::Ipv4Addr)> = ifaces.into_iter().filter(|(name, ip)| is_lan_interface(name) && ip.is_private()).collect();
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut out: Vec<String> = Vec::new();
+    for (_, ip) in found {
+        let ip = ip.to_string();
+        if !out.contains(&ip) {
+            out.push(ip);
+        }
+    }
+    out
+}
+
 /// The Mac's addresses on its local networks (IPv4, not loopback): where a phone dials when Bonjour finds nothing.
 pub fn local_addresses() -> Vec<String> {
-    if_addrs::get_if_addrs()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|i| !i.is_loopback())
-        .filter_map(|i| match i.ip() {
-            std::net::IpAddr::V4(v4) if v4.is_private() => Some(v4.to_string()),
-            _ => None,
-        })
-        .collect()
+    lan_hosts(if_addrs::get_if_addrs().unwrap_or_default().into_iter().filter(|i| !i.is_loopback()).filter_map(|i| match i.ip() {
+        std::net::IpAddr::V4(v4) => Some((i.name, v4)),
+        _ => None,
+    }))
 }
 
 impl Remote {
@@ -233,6 +249,68 @@ pub fn for_window(event: &UiEvent) -> bool {
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    /// A `Running` whose tasks never end by themselves, with a way to ask whether each has been stopped.
+    fn running(remote: &Remote) -> (Running, tokio::task::AbortHandle, tokio::task::AbortHandle) {
+        let host = fixture::FixtureHost::new(remote, std::time::Duration::ZERO);
+        let gateway = gateway::Gateway::new(remote.bus.clone(), remote.hub.clone(), remote.store.clone(), host, secure::generate_keypair().unwrap(), remote.epoch);
+        let listener = tokio::spawn(std::future::pending::<()>());
+        let notifier = tokio::spawn(std::future::pending::<()>());
+        let (l, n) = (listener.abort_handle(), notifier.abort_handle());
+        (Running { gateway, listener, bonjour: None, notifier: Some(notifier) }, l, n)
+    }
+
+    async fn stopped(h: &tokio::task::AbortHandle) -> bool {
+        for _ in 0..50 {
+            if h.is_finished() {
+                return true;
+            }
+            tokio::task::yield_now().await;
+        }
+        false
+    }
+
+    #[tokio::test]
+    async fn turning_remote_control_off_stops_the_notifier_with_the_listener() {
+        let remote = Remote::default();
+        let (run, listener, notifier) = running(&remote);
+        remote.set_running(run);
+        assert!(remote.is_running());
+        remote.stop();
+        assert!(!remote.is_running());
+        assert!(stopped(&listener).await, "the listener keeps running");
+        assert!(stopped(&notifier).await, "pushes would go on after Remote control was turned off");
+    }
+
+    #[tokio::test]
+    async fn starting_again_replaces_the_notifier_instead_of_adding_a_second_that_would_push_twice() {
+        let remote = Remote::default();
+        let (first, first_listener, first_notifier) = running(&remote);
+        remote.set_running(first);
+        let (second, second_listener, second_notifier) = running(&remote);
+        remote.set_running(second);
+        assert!(stopped(&first_listener).await && stopped(&first_notifier).await, "the old run's tasks are still going");
+        assert!(!second_listener.is_finished() && !second_notifier.is_finished(), "the new run's tasks were stopped");
+        remote.stop();
+        assert!(stopped(&second_notifier).await);
+    }
+
+    fn nic(name: &str, ip: &str) -> (String, std::net::Ipv4Addr) {
+        (name.to_string(), ip.parse().unwrap())
+    }
+
+    #[test]
+    fn a_phone_is_offered_the_wifi_and_cable_addresses_not_the_bridges_and_tunnels() {
+        let offered = lan_hosts([nic("bridge100", "192.168.139.3"), nic("en0", "192.168.68.107"), nic("utun3", "10.8.0.2"), nic("vmnet8", "172.16.5.1"), nic("en5", "10.0.0.9"), nic("docker0", "172.17.0.1"), nic("awdl0", "169.254.1.1")]);
+        assert_eq!(offered, vec!["192.168.68.107", "10.0.0.9"]);
+    }
+
+    #[test]
+    fn linux_names_count_and_public_or_repeated_addresses_do_not() {
+        let offered = lan_hosts([nic("wlp3s0", "192.168.1.5"), nic("eth0", "192.168.1.5"), nic("enp2s0", "8.8.8.8")]);
+        assert_eq!(offered, vec!["192.168.1.5"]);
+        assert!(lan_hosts([nic("lo", "127.0.0.1"), nic("endpoint", "192.168.1.9")]).is_empty());
+    }
 
     fn user(by: Option<&str>) -> UiEvent {
         UiEvent::UserText { text: "hi".into(), at: None, sent_by: by.map(str::to_string) }

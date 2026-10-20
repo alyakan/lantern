@@ -104,6 +104,12 @@ describe("Settings › Remote control", () => {
     expect(screen.getByText("Show a new code")).toBeTruthy();
   });
 
+  it("says where to look when a phone can't connect: the firewall, which silently ignores a Mac it hasn't allowed", async () => {
+    view = { ...view, enabled: true, listening: true };
+    render(<RemoteControl now={() => 0} />);
+    expect(await screen.findByText(/System Settings › Network › Firewall/)).toBeTruthy();
+  });
+
   it("says so when it's on but nothing is listening", async () => {
     view = { ...view, enabled: true, listening: false };
     render(<RemoteControl now={() => 0} />);

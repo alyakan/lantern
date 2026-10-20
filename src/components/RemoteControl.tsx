@@ -138,6 +138,7 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
                   <button onClick={startPair}>{used ? "Show a new code" : "Show a pairing code"}</button>
                 </>
               )}
+              <span className="settings-muted">If the phone can't connect, check that macOS lets Lantern accept incoming connections (System Settings › Network › Firewall).</span>
             </section>
           )}
           <section className="general-section" aria-labelledby="remote-devices">

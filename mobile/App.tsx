@@ -4,6 +4,7 @@ import Constants from "expo-constants";
 import * as Device from "expo-device";
 import { useFonts } from "expo-font";
 import * as Linking from "expo-linking";
+import * as SplashScreen from "expo-splash-screen";
 import { BricolageGrotesque_700Bold, BricolageGrotesque_800ExtraBold } from "@expo-google-fonts/bricolage-grotesque";
 import { Controller } from "./src/shell/controller";
 import { Root } from "./src/shell/Root";
@@ -12,6 +13,9 @@ import { webSocketTransport } from "./src/net/transport";
 import { registerForPush, slotOfNotification } from "./src/notifications";
 import { onNotificationTap, pushPlatform, quietInForeground } from "./src/platformPush";
 import { secureMacStore } from "./src/storage";
+
+// The splash stays up until the headings' font is in (see below), instead of a blank screen.
+void SplashScreen.preventAutoHideAsync().catch(() => {});
 
 /** The EAS project id Expo's push service needs (app.json, extra.eas.projectId; `eas init` writes it). */
 const projectId: string | undefined = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
@@ -65,7 +69,10 @@ export default function App() {
 
   const clearLink = useCallback(() => setPendingLink(null), []);
   const clearSlot = useCallback(() => setOpenSlot(null), []);
-  // Until the headings' font is in, a blank screen: showing the system font for a moment and then swapping is worse.
+  useEffect(() => {
+    if (fontsReady) void SplashScreen.hideAsync().catch(() => {});
+  }, [fontsReady]);
+  // Until the headings' font is in, the splash: showing the system font for a moment and then swapping is worse.
   if (!fontsReady) return null;
   return <Root controller={controller} pendingLink={pendingLink} onClearLink={clearLink} openSlot={openSlot} onOpened={clearSlot} />;
 }

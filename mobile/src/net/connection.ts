@@ -79,7 +79,8 @@ export class Connection {
   private session: Session | null = null;
   /** Bumped by every start, pair, stop and forget: a try that finds it changed leaves nothing behind. */
   private gen = 0;
-  private looping = false;
+  /** The run (see `gen`) the try-again loop belongs to, while one is going. */
+  private loopGen: number | null = null;
   private tries = 0;
   private wakeUp: (() => void) | null = null;
   private readonly wait: (ms: number) => Promise<void>;
@@ -109,10 +110,22 @@ export class Connection {
     }
   }
 
-  /** Pairs with the Mac a scanned code names, and stays connected. Throws with why it couldn't. */
+  /**
+   * Pairs with the Mac a scanned code names, and stays connected. Throws with why it couldn't, and a phone that was paired
+   * before goes back to its Mac (a code that fails, from a link anyone can send, mustn't take the real Mac away).
+   */
   async pair(offer: PairingOffer): Promise<void> {
     const my = ++this.gen;
     this.hangUp();
+    try {
+      await this.pairWith(offer, my);
+    } catch (e) {
+      if (my === this.gen) void this.start();
+      throw e;
+    }
+  }
+
+  private async pairWith(offer: PairingOffer, my: number): Promise<void> {
     const key = (this.d.newKey ?? generateKeypair)();
     const candidates = await this.candidates(toBase64Url(offer.macKey), offer.hosts, offer.port);
     if (candidates.length === 0) throw new Error("Your Mac isn't on this Wi-Fi.");
@@ -136,8 +149,12 @@ export class Connection {
         if (!tryNext(e)) break;
       }
     }
-    this.d.onState({ kind: "offline", reason: lastError.message, retryInMs: null });
     throw lastError;
+  }
+
+  /** Whether a try-again loop is running for the current run of things (an older one winding down doesn't count). */
+  private get looping() {
+    return this.loopGen !== null && this.loopGen === this.gen;
   }
 
   /** Connects to the paired Mac, and keeps at it until `stop`. Starting again while it is at it does nothing. */
@@ -201,7 +218,7 @@ export class Connection {
   }
 
   private async loop(paired: PairedMac, my: number) {
-    this.looping = true;
+    this.loopGen = my;
     try {
       while (my === this.gen && !this.session) {
         this.d.onState({ kind: "connecting" });
@@ -218,8 +235,11 @@ export class Connection {
         await this.pause(wait);
       }
     } finally {
-      this.looping = false;
-      this.wakeUp = null;
+      // Only the loop of the current run lets go: an older one must not clear a newer one's.
+      if (this.loopGen === my) {
+        this.loopGen = null;
+        this.wakeUp = null;
+      }
     }
   }
 

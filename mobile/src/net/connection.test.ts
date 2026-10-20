@@ -2,7 +2,8 @@ import { connectCase, FakeMac, impostorCase, pairCase, phoneKeys, routeTransport
 import { toBase64Url, type PairingOffer } from "../pairing";
 import { MemoryStore } from "../test/memoryStore";
 import { BACKOFF_MS, Connection, macId, type ConnectionState, type PairedMac } from "./connection";
-import type { Pushed } from "./session";
+import { STEP_WAIT, type Pushed } from "./session";
+import { queueLink, type Transport } from "./transport";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
@@ -195,5 +196,59 @@ describe("what goes wrong around a connection", () => {
     await expect(conn.pair({ ...offer(k), secret: new Uint8Array(32) })).rejects.toThrow("didn't take this code");
     expect(closed).toEqual(["192.168.1.20"]);
     expect(store.mac).toBeNull();
+  });
+
+  it("a Mac that refuses the code ends pairing there: the other addresses aren't dialled and the error says why", async () => {
+    const k = phoneKeys(pairCase);
+    const first = new FakeMac(pairCase);
+    const second = new FakeMac(pairCase, { reachable: [] });
+    const states: ConnectionState[] = [];
+    const conn = new Connection({ ...quiet, onState: (s) => states.push(s), transport: routeTransport({ "10.0.0.9": first, "192.168.1.20": second }), store: new MemoryStore(), newKey: () => k.device, fixedEphemeral: new Uint8Array(32).fill(5) });
+    // The secret is wrong, so the Mac at 10.0.0.9 closes on the first message: the code is spent, whatever 192.168.1.20 says.
+    await expect(conn.pair({ ...offer(k, ["10.0.0.9", "192.168.1.20"]), secret: new Uint8Array(32) })).rejects.toThrow("didn't take this code");
+    expect(first.opened).toHaveLength(1);
+    expect(second.opened).toEqual([]);
+    // Nothing was paired before, so it is back to waiting for a code (the reason reaches the screen as the thrown error).
+    await flush();
+    expect(states.at(-1)).toEqual({ kind: "unpaired" });
+  });
+
+  it("a code that fails doesn't take a paired phone off its own Mac", async () => {
+    const kc = phoneKeys(connectCase);
+    const kp = phoneKeys(pairCase);
+    const mine = new FakeMac(connectCase);
+    const store = new MemoryStore();
+    store.mac = { macKey: toBase64Url(kc.macKey), deviceKey: toBase64Url(kc.device.privateKey), hosts: ["192.168.1.20"], port: 47123, macName: "My Mac" };
+    const states: ConnectionState[] = [];
+    const conn = new Connection({ ...quiet, onState: (s) => states.push(s), transport: routeTransport({ "192.168.1.20": mine, "10.0.0.9": new FakeMac(pairCase) }), store, newKey: () => kp.device, fixedEphemeral: kc.ephemeral });
+    await conn.start();
+    for (let i = 0; i < 10 && !states.some((s) => s.kind === "connected"); i++) await flush();
+    expect(states.at(-1)).toMatchObject({ kind: "connected", host: "192.168.1.20" });
+    // Someone's link names another Mac, and its code doesn't work.
+    await expect(conn.pair({ ...offer(kp, ["10.0.0.9"]), secret: new Uint8Array(32) })).rejects.toThrow("didn't take this code");
+    for (let i = 0; i < 20 && mine.opened.length < 2; i++) await flush();
+    for (let i = 0; i < 10 && states.at(-1)?.kind !== "connected"; i++) await flush();
+    expect(mine.opened).toHaveLength(2);
+    expect(states.at(-1)).toMatchObject({ kind: "connected", host: "192.168.1.20" });
+    expect(store.mac?.macName).toBe("My Mac");
+  });
+
+  it("a Mac that says nothing at one address leaves the next address to be tried", async () => {
+    jest.useFakeTimers();
+    try {
+      const k = phoneKeys(pairCase);
+      const mac = new FakeMac(pairCase);
+      // Accepts the connection and never answers, like a Mac that is asleep behind an address.
+      const transport: Transport = { open: (host, port, wait) => (host === "10.0.0.9" ? Promise.resolve(queueLink(() => {}, () => {}).link) : mac.open(host, port, wait)) };
+      const states: ConnectionState[] = [];
+      const conn = new Connection({ ...quiet, onState: (s) => states.push(s), transport, store: new MemoryStore(), newKey: () => k.device, fixedEphemeral: k.ephemeral });
+      const paired = conn.pair(offer(k, ["10.0.0.9", "192.168.1.20"]));
+      // In steps, so the wait exists by the time the clock gets to it.
+      for (let t = 0; t <= STEP_WAIT + 1000; t += 500) await jest.advanceTimersByTimeAsync(500);
+      await paired;
+      expect(states.at(-1)).toMatchObject({ kind: "connected", host: "192.168.1.20" });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
