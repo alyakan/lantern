@@ -356,3 +356,85 @@ describe("restoring a team at launch", () => {
     expect(JSON.parse(localStorage.getItem("session.agentIds") ?? "[]")).toEqual(expect.arrayContaining(["9b7e01", "aaaa11", "dddd44", "eeee55", "ffff66"]));
   });
 });
+
+describe("restoring several teams at launch", () => {
+  const WORKTREE = "/Users/you/Library/Application Support/lantern/worktrees/acme-api/login-form-w1";
+  const lead = (id: string, active = false): SavedChat => ({ sessionId: id, folder: FOLDER, title: `Lead ${id}`, draft: "", active, orchestra: { role: "main" } });
+  const agent = (id: string, parent: string): SavedChat => ({ sessionId: id, folder: WORKTREE, title: `Agent ${id}`, draft: "", active: false, orchestra: { role: "worker", name: `Agent ${id}`, parentSession: parent, branch: "b", base: "main", isolation: "worktree" } });
+  const plain = (id: string, active = false): SavedChat => ({ sessionId: id, folder: FOLDER, title: `Plain ${id}`, draft: "", active });
+  const saved = (chats: SavedChat[]) => localStorage.setItem("session.openChats", JSON.stringify(chats));
+
+  beforeEach(() => {
+    vi.resetModules();
+    clearMocks();
+    localStorage.clear();
+    localStorage.setItem("settings.lastFolder", JSON.stringify(FOLDER));
+  });
+
+  const opened = (calls: Call[]) => calls.filter(([c]) => c === "open_session").map(([, a]) => String(a?.sessionId));
+  const closed = (calls: Call[]) => calls.filter(([c]) => c === "close_session").length;
+
+  it("starts only the team on screen, with its Lead before its agent, and leaves the other teams asleep", async () => {
+    saved([lead("lead2"), agent("agent2", "lead2"), agent("agent1", "lead1"), lead("lead1", true), plain("plain1")]);
+    const calls = await launch();
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+    await waitFor(() => expect(opened(calls)).toHaveLength(2));
+    await new Promise((r) => setTimeout(r, 500));
+    expect(opened(calls)).toEqual(["lead1", "agent1"]);
+    // The other team and the plain chat are in the sidebar, asleep, and are still saved for the next launch.
+    expect(await screen.findByTitle("Lead lead2")).toBeInTheDocument();
+    expect(screen.getByTitle("Plain plain1")).toBeInTheDocument();
+    await waitFor(() => {
+      const now: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
+      expect(now.map((c) => [c.sessionId, c.orchestra?.role ?? null]).sort()).toEqual([["agent1", "worker"], ["agent2", "worker"], ["lead1", "main"], ["lead2", "main"], ["plain1", null]]);
+    });
+  });
+
+  it("starts only the chat on screen when it is not in a team", async () => {
+    saved([plain("plain1", true), lead("lead1"), agent("agent1", "lead1"), lead("lead2"), agent("agent2", "lead2")]);
+    const calls = await launch();
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+    await waitFor(() => expect(opened(calls)).toEqual(["plain1"]));
+    await new Promise((r) => setTimeout(r, 500));
+    expect(opened(calls)).toEqual(["plain1"]);
+  });
+
+  it("wakes a team as one when its Lead is opened, the Lead first", async () => {
+    saved([lead("lead1", true), agent("agent1", "lead1"), lead("lead2"), agent("agent2", "lead2")]);
+    const calls = await launch();
+    fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+    await waitFor(() => expect(opened(calls)).toHaveLength(2));
+    fireEvent.click(await screen.findByTitle("Lead lead2"));
+    await waitFor(() => expect(opened(calls)).toHaveLength(4));
+    expect(opened(calls)).toEqual(["lead1", "agent1", "lead2", "agent2"]);
+  });
+
+  it("puts a team that has sat idle off screen to sleep as one, and wakes it as one", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"], shouldAdvanceTime: true });
+    try {
+      saved([lead("lead1", true), agent("agent1", "lead1"), lead("lead2"), agent("agent2", "lead2")]);
+      const calls = await launch();
+      fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+      await waitFor(() => expect(opened(calls)).toHaveLength(2));
+      // Opening the other team puts the first off screen, resting: its clock starts.
+      fireEvent.click(await screen.findByTitle("Lead lead2"));
+      await waitFor(() => expect(opened(calls)).toHaveLength(4));
+      expect(closed(calls)).toBe(0);
+      vi.setSystemTime(Date.now() + 11 * 60_000);
+      await vi.advanceTimersByTimeAsync(31_000);
+      // Its Lead and its agent, both, and the team on screen stays as it is.
+      await waitFor(() => expect(closed(calls)).toBe(2));
+      const now: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
+      expect(now.map((c) => [c.sessionId, c.orchestra?.role ?? null]).sort()).toEqual([["agent1", "worker"], ["agent2", "worker"], ["lead1", "main"], ["lead2", "main"]]);
+      // Opening it brings both back.
+      // (The mock names every awake chat the same, so the sleeping team's Lead is the row that isn't the open chat.)
+      const row = (await screen.findAllByTitle("Retry transient fetch errors")).find((el) => el.getAttribute("aria-current") !== "true");
+      expect(row).toBeDefined();
+      fireEvent.click(row!);
+      await waitFor(() => expect(opened(calls)).toHaveLength(6));
+      expect(opened(calls).slice(4)).toEqual(["lead1", "agent1"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

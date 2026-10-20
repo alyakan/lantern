@@ -3,7 +3,7 @@ import { pushAgentLimit } from "./lib/agentLimit";
 import { pushAutoMergeTests } from "./lib/mergeTests";
 import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
-import { canSleep, sweep, useSleepMinutes } from "./lib/idleSleep";
+import { canSleep, membersToSleep, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
@@ -98,7 +98,7 @@ import { usePrChecks } from "./lib/usePrChecks";
 import { SetupScreen } from "./components/SetupScreen";
 import { Welcome } from "./components/Welcome";
 import { RestoreCard } from "./components/RestoreCard";
-import { agentSessionsOf, chatsToSave, currentFolder, loadSaved, restorable, save, screenFirst, sessionModesToSave, toCurrentFolders, withOffered, withoutGone, type SavedChat } from "./lib/restore";
+import { agentSessionsOf, chatsToSave, currentFolder, loadSaved, restorable, save, savedChatOf, screenFirst, startsNow, sessionModesToSave, toCurrentFolders, withOffered, withoutGone, type SavedChat } from "./lib/restore";
 import { SplitPane } from "./components/SplitPane";
 import { TopBar } from "./components/TopBar";
 import { Canvas, newLayout } from "./components/Canvas";
@@ -671,11 +671,27 @@ export default function App() {
     );
   };
 
+  // A team's Lead and agents wake together: the Lead first, so the backend knows it by the time it adopts the agents.
+  const wakeTeam = (lead: string) => {
+    const asleep = teamSlots(chats, lead).filter((slot) => chats.slots[slot].status === "asleep" && chats.slots[slot].asleepSaved && !waking.current.has(slot));
+    const opened: Record<string, { slot: string; ready: Promise<boolean> }> = {};
+    for (const slot of [lead, ...asleep.filter((m) => m !== lead)]) {
+      const saved = asleep.includes(slot) ? chats.slots[slot].asleepSaved : null;
+      if (!saved) continue;
+      waking.current.add(slot);
+      const ready = restoreInto(slot, saved, opened);
+      if (slot === lead && saved.sessionId) opened[saved.sessionId] = { slot, ready };
+      void ready.finally(() => waking.current.delete(slot));
+    }
+  };
+
   // An asleep chat is woken as soon as it is on screen, however it got there (the sidebar, a notification, Restore all…).
   useEffect(() => {
     const slot = active;
     const s = chats.slots[slot];
     if (s?.status !== "asleep" || !s.folder || !s.sessionId || waking.current.has(slot)) return;
+    const lead = teamMain(chats, slot);
+    if (lead && s.asleepSaved?.orchestra) return wakeTeam(lead);
     waking.current.add(slot);
     void resumeIn(slot, s.folder, s.sessionId).finally(() => waking.current.delete(slot));
   }, [active, state.status]);
@@ -776,7 +792,16 @@ export default function App() {
     if (!first || !state.claudePath) return;
     const isMain = (c: SavedChat) => c.orchestra?.role === "main";
     const teamOpen = ({ orchestra: o }: SavedChat) => o?.role !== "worker" || ordered.some((m) => isMain(m) && m.sessionId === o.parentSession) || !!openMainOf(o.parentSession);
-    const inOrder = [...ordered.filter(isMain), ...ordered.filter((c) => !isMain(c) && teamOpen(c))];
+    // The chat on screen, and the team it is in, start now; every other chat and team is asleep in the sidebar until it is opened
+    // (a team sleeps and wakes as one: its Lead and its agents).
+    const leadSlots = Object.entries(chats.slots).flatMap(([slot, s]) => (s.orchestrator && s.sessionId ? [[s.sessionId, slot, s.status] as const] : []));
+    const awakeLeads = new Set(leadSlots.filter(([, , status]) => status !== "asleep").map(([session]) => session));
+    const lazy = (c: SavedChat) => !startsNow(c, first, awakeLeads);
+    // An agent whose Lead is asleep comes back with that team when it wakes, not on its own now.
+    const asleepLeads: Record<string, string> = Object.fromEntries(leadSlots.filter(([, , status]) => status === "asleep").map(([session, slot]) => [session, slot]));
+    const waitsForLead = (c: SavedChat) => c.orchestra?.role === "worker" && c.orchestra.parentSession in asleepLeads && !openAlready(c);
+    // The ones that start now go first (into the empty chat on screen), each Lead before its agents.
+    const inOrder = [...ordered.filter(isMain), ...ordered.filter((c) => !isMain(c) && teamOpen(c))].filter((c) => !waitsForLead(c)).sort((a, b) => Number(lazy(a)) - Number(lazy(b)));
     setOffer([]);
     const opened: Record<string, { slot: string; ready: Promise<boolean> }> = {};
     let onScreen: string | undefined;
@@ -789,10 +814,20 @@ export default function App() {
         // The first goes into the empty chat on screen, if there is one; the rest into chats of their own.
         slot = i === 0 ? takeSlot() : `s${++slotSeq.current}`;
         if (i !== 0) dispatchChats({ type: "add", slot });
-        // Only the one on screen (and the teams, which come back together) starts now; the rest are asleep in the sidebar, and wake when opened.
-        if (i !== 0 && c !== first && !c.orchestra && c.sessionId) {
+        if (i !== 0 && lazy(c) && c.sessionId) {
           if (c.draft) drafts.current[slot] = c.draft;
-          to(slot)({ type: "sleep", folder: c.folder, sessionId: c.sessionId, title: c.title });
+          const o = c.orchestra;
+          if (o?.role === "main") {
+            to(slot)({ type: "orchestrator_set", on: true });
+            if (o.review) to(slot)({ type: "review_set", review: readReview(o.review) });
+            asleepLeads[c.sessionId] = slot;
+          }
+          to(slot)({ type: "sleep", folder: c.folder, sessionId: c.sessionId, title: c.title, saved: { ...c, active: false } });
+          // An agent is part of its team in the sidebar and on the canvas, asleep or not.
+          const lead = o?.role === "worker" ? asleepLeads[o.parentSession] : undefined;
+          if (o?.role === "worker" && lead) {
+            dispatchChats({ type: "adopt", slot, meta: { parent: lead, name: o.name, brief: "", folder: c.folder, branch: o.branch, base: o.base, isolation: o.isolation, ...(o.agentRole ? { role: o.agentRole } : {}), ...(o.hidden ? { hidden: true } : {}) } });
+          }
         } else {
           const ready = restoreInto(slot, c, opened);
           if (isMain(c) && c.sessionId) opened[c.sessionId] = { slot, ready };
@@ -1561,17 +1596,28 @@ export default function App() {
   // dropped from memory. It is still in the sidebar, and wakes (resumed, history and all) when opened.
   const sleepAfter = useSleepMinutes();
   const idleClock = useRef<Record<string, number>>({});
-  const sleepSweep = () => {
-    const eligible = new Set(Object.entries(chats.slots).flatMap(([slot, s]) => (canSleep(s, { active: slot === active, agent: !!chats.agents[slot], routine: slot in routineSlots.current }) ? [slot] : [])));
-    const { clock, due } = sweep(idleClock.current, eligible, Date.now(), sleepAfter * 60_000);
-    idleClock.current = clock;
-    for (const slot of due) {
+  // A team goes to sleep as one, once every member has rested: its Lead's slot stands for it in the clock.
+  const sleepSlots = (slots: string[]) => {
+    // What each one is, saved before any of them is put to sleep (an agent's is its place in the team: its Lead's session).
+    const saved = Object.fromEntries(slots.map((slot) => [slot, savedChatOf(slot, chats.slots, active, drafts.current, titles, chats.agents)]));
+    for (const slot of slots) {
       const s = chats.slots[slot];
       delete idleClock.current[slot];
       delete relaunch.current[slot];
       // Asleep first, so the end of its process (which closing it makes) is not taken for a crash.
-      to(slot)({ type: "sleep", folder: s.folder!, sessionId: s.sessionId!, title: chatTitle(s, titles) });
-      api.closeSession(slot).catch(() => {});
+      to(slot)({ type: "sleep", folder: s.folder!, sessionId: s.sessionId!, title: chatTitle(s, titles), ...(saved[slot] ? { saved: saved[slot]! } : {}) });
+    }
+    // Agents first, then the Lead that knows them.
+    for (const slot of [...slots].reverse()) api.closeSession(slot).catch(() => {});
+  };
+  const sleepSweep = () => {
+    const alone = Object.entries(chats.slots).flatMap(([slot, s]) => (canSleep(s, { active: slot === active, agent: !!chats.agents[slot], routine: slot in routineSlots.current }) ? [slot] : []));
+    const eligible = new Set([...alone, ...teamsAtRest(chats, (slot) => slot in routineSlots.current)]);
+    const { clock, due } = sweep(idleClock.current, eligible, Date.now(), sleepAfter * 60_000);
+    idleClock.current = clock;
+    for (const slot of due) {
+      // A Lead stands for its team: the Lead first in the list, its agents after it.
+      sleepSlots(chats.slots[slot]?.orchestrator && !chats.agents[slot] ? membersToSleep(chats, slot) : [slot]);
     }
   };
   const sweepNow = useRef(sleepSweep);
