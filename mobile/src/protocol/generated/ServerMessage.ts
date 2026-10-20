@@ -5,4 +5,4 @@ import type { RemoteEvent } from "./RemoteEvent";
 /**
  * Lantern's message.
  */
-export type ServerMessage = { "type": "welcome", protocol: number, app_version: string, mac_name: string, } | { "type": "response", id: number, ok: unknown, error: string | null, } | { "type": "event", slot: string, seq: number, event: RemoteEvent, } | { "type": "reset", slot: string, seq: number, events: Array<RemoteEvent>, } | { "type": "chats", chats: Array<RemoteChat>, };
+export type ServerMessage = { "type": "welcome", protocol: number, app_version: string, mac_name: string, } | { "type": "response", id: number, ok: unknown, error: string | null, } | { "type": "event", slot: string, seq: number, event: RemoteEvent, } | { "type": "reset", slot: string, seq: number, page: number, done: boolean, events: Array<RemoteEvent>, } | { "type": "chats", chats: Array<RemoteChat>, };

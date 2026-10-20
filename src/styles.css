@@ -854,6 +854,8 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 .canvas-toggle, .settings-button, .storage-button { position: relative; }
 .storage-button .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn); }
 .settings-button .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
+.phones-connected { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: var(--radius-pill); border: 1px solid var(--line); background: var(--bg-subtle); color: var(--text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
+.phones-dot { width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--add); flex: none; }
 .canvas-toggle .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn); }
 .title-center .dot { position: absolute; top: 4px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
 /* …or one finished there that you haven't opened: blue, like an unread message. */

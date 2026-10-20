@@ -11,6 +11,8 @@ export interface RemoteView {
   enabled: boolean;
   show_titles: boolean;
   devices: RemoteDevice[];
+  /** The ids of the phones connected now. */
+  connected: string[];
   /** The last change holds, but couldn't be saved: why (it won't last past a restart). */
   warning?: string | null;
 }
@@ -20,6 +22,9 @@ export interface PairView {
   svg: string;
   expires_at: number;
 }
+
+/** The names of the phones connected now, as the title bar's chip says them. */
+export const connectedNames = (v: RemoteView): string[] => v.devices.filter((d) => v.connected.includes(d.id)).map((d) => d.name);
 
 /** "4:52": what's left of a pairing code. */
 export function timeLeft(expiresAt: number, now: number): string {

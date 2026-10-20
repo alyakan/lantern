@@ -78,7 +78,7 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         }
         U::TestRun { parent: None, tool_use_id, command, run } => R::TestsRan { tool_use_id: tool_use_id.clone(), command: command.clone(), passed: run.passed, failed: run.failed, skipped: run.skipped },
         U::TurnDone { is_error, result, duration_ms, .. } => R::TurnDone { is_error: *is_error, result: result.clone(), duration_ms: *duration_ms },
-        U::PermissionRequested { request_id, tool_name, input } => R::PermissionRequested { request_id: request_id.clone(), tool_name: tool_name.clone(), input: input.clone() },
+        U::PermissionRequested { request_id, tool_name, input } => R::PermissionRequested { request_id: request_id.clone(), tool_name: tool_name.clone(), input: trimmed(input) },
         U::PermissionWithdrawn { request_id } => R::PermissionWithdrawn { request_id: request_id.clone() },
         U::PermissionResolved { request_id, allow, by } => R::PermissionResolved { request_id: request_id.clone(), allow: *allow, by: by.clone() },
         U::MergeProposed { name, .. } => R::NeedsDesktop { what: format!("{name} wants to merge its branch.") },
@@ -123,6 +123,29 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         | U::Unknown { .. }
         | U::ParseError { .. } => return None,
     })
+}
+
+/// The longest text a prompt's input carries to the phone, per field: a Write's whole file would be megabytes.
+pub const INPUT_TEXT_MAX: usize = 4000;
+/// What ends a text cut to INPUT_TEXT_MAX.
+pub const CUT: &str = "\n… (cut short: the rest is on your Mac)";
+
+/// A prompt's input as the phone is shown it: every long text cut short. (Answering never sends this back: a question's
+/// answers are checked against the input Claude sent, see answers.rs.)
+pub fn trimmed(input: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    match input {
+        Value::String(s) if s.len() > INPUT_TEXT_MAX => {
+            let mut end = INPUT_TEXT_MAX;
+            while !s.is_char_boundary(end) {
+                end -= 1;
+            }
+            Value::String(format!("{}{CUT}", &s[..end]))
+        }
+        Value::Array(items) => Value::Array(items.iter().map(trimmed).collect()),
+        Value::Object(map) => Value::Object(map.iter().map(|(k, v)| (k.clone(), trimmed(v))).collect()),
+        other => other.clone(),
+    }
 }
 
 /// Where a chat stands, as the phone lists it (the hub's ChatStatus).
@@ -253,12 +276,15 @@ pub enum ServerMessage {
         seq: u64,
         event: RemoteEvent,
     },
-    /// The phone was too far behind on chat `slot`: these are its events from the start (the transcript, then what is
-    /// kept), to show in place of what it had. Live events follow from `seq`.
+    /// The chat `slot` from its start (the transcript, then what is kept), to show in place of what the phone had: when it
+    /// first subscribes, or was too far behind. It comes in pages: page 0 starts over, later pages add to it, and `done`
+    /// is the last. Live events follow from `seq`.
     Reset {
         slot: String,
         #[ts(type = "number")]
         seq: u64,
+        page: u32,
+        done: bool,
         events: Vec<RemoteEvent>,
     },
     /// The chat list changed (a chat opened, closed, or moved on).
@@ -306,6 +332,16 @@ mod tests {
         assert_eq!(to_remote(&UiEvent::ContextUsed { tokens: 5 }), None);
         assert_eq!(to_remote(&UiEvent::ShellOutput { id: "s".into(), text: "secret".into() }), None);
         assert_eq!(to_remote(&UiEvent::Unknown { raw: serde_json::json!({}) }), None);
+    }
+
+    #[test]
+    fn a_big_prompt_reaches_the_phone_cut_short_and_a_small_one_whole() {
+        let content = "é".repeat(30_000);
+        let ev = UiEvent::PermissionRequested { request_id: "p".into(), tool_name: "Write".into(), input: serde_json::json!({"file_path": "/p/a.txt", "content": content, "list": ["x"]}) };
+        let Some(RemoteEvent::PermissionRequested { input, .. }) = to_remote(&ev) else { panic!() };
+        let shown = input["content"].as_str().unwrap();
+        assert!(shown.len() <= INPUT_TEXT_MAX + CUT.len() && shown.ends_with(CUT));
+        assert_eq!((input["file_path"].as_str(), &input["list"]), (Some("/p/a.txt"), &serde_json::json!(["x"])));
     }
 
     #[test]

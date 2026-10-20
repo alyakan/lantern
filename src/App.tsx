@@ -6,6 +6,7 @@ import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { agentsAtRest, canSleep, membersToSleep, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
 import { windowChats } from "./lib/remoteChats";
+import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome, type WorkView } from "./api";
@@ -2039,6 +2040,16 @@ export default function App() {
   useEffect(() => {
     void api.publishMenubarChats(menuBarSent.current).catch(() => {});
   }, [menuBarKey]);
+  // The phones connected now (Remote control), for the title bar: asked again whenever one connects or goes.
+  const [phonesOn, setPhonesOn] = useState<string[]>([]);
+  useEffect(() => {
+    const refresh = () => api.remoteSettings().then((v) => setPhonesOn(connectedNames(v)), () => {});
+    refresh();
+    const unlisten = api.onRemoteChanged(refresh).catch(() => null);
+    return () => {
+      unlisten.then((f) => f?.());
+    };
+  }, []);
   // The backend's session hub knows where each chat stands from its events; what only this window knows (the title it
   // shows, which chats are asleep) it is told when that changes.
   const hubList = windowChats(chats, openByProject);
@@ -2326,6 +2337,7 @@ export default function App() {
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
           inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox, paused: guards.pause, onResume: guards.resume, onDismissPause: guards.dismiss }}
           run={topRun ? { command: topRun, running: state.run?.status === "running", onRun: () => doing.run(active) } : undefined}
+          phones={phonesOn.length ? { names: phonesOn, onOpen: () => setSettingsAt("remote") } : undefined}
         />
         <Hud event={hud} onOpenChat={switchTo} />
         <div className="app-body">

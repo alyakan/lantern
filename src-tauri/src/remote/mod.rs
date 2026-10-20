@@ -9,6 +9,8 @@ pub mod keys;
 pub mod pairing;
 pub mod protocol;
 pub mod secure;
+pub mod transport;
+pub mod gateway;
 
 use crate::slots::SlotEvent;
 use crate::ui_event::UiEvent;
@@ -30,13 +32,55 @@ pub const PORT: u16 = 47123;
 pub struct Remote {
     pub bus: Arc<EventBus>,
     pub hub: Arc<SessionHub>,
-    pub store: RemoteStore,
+    pub store: Arc<RemoteStore>,
     keys: Box<dyn KeyStore>,
+    /// The gateway, listener and Bonjour while Remote control is on.
+    running: std::sync::Mutex<Option<Running>>,
 }
 
 impl Default for Remote {
     fn default() -> Self {
         Self::new(RemoteStore::load(None), Box::new(keys::Memory::default()))
+    }
+}
+
+/// Remote control while it is on: the gateway, the listener feeding it, and the Bonjour record (None when Bonjour
+/// couldn't start: a phone then dials the address from its QR code).
+pub struct Running {
+    pub gateway: Arc<gateway::Gateway>,
+    pub listener: tokio::task::JoinHandle<()>,
+    pub bonjour: Option<transport::Bonjour>,
+}
+
+impl Remote {
+    pub fn is_running(&self) -> bool {
+        self.running.lock().unwrap().is_some()
+    }
+
+    pub fn set_running(&self, running: Running) {
+        if let Some(old) = self.running.lock().unwrap().replace(running) {
+            old.gateway.disconnect_all();
+            old.listener.abort();
+        }
+    }
+
+    /// Stops listening and closes every phone's connection.
+    pub fn stop(&self) {
+        if let Some(r) = self.running.lock().unwrap().take() {
+            r.gateway.disconnect_all();
+            r.listener.abort();
+        }
+    }
+
+    /// Closes a device's connections (it was removed).
+    pub fn disconnect(&self, device: &str) {
+        if let Some(r) = self.running.lock().unwrap().as_ref() {
+            r.gateway.disconnect_device(device);
+        }
+    }
+
+    pub fn connected(&self) -> Vec<String> {
+        self.running.lock().unwrap().as_ref().map(|r| r.gateway.connected()).unwrap_or_default()
     }
 }
 
@@ -55,6 +99,8 @@ pub struct RemoteView {
     pub enabled: bool,
     pub show_titles: bool,
     pub devices: Vec<DeviceView>,
+    /// The ids of the devices connected now.
+    pub connected: Vec<String>,
     /// The last change holds, but couldn't be saved: why (it won't last past a restart).
     pub warning: Option<String>,
 }
@@ -88,13 +134,13 @@ impl Remote {
         let (bus, hub) = (Arc::new(EventBus::default()), Arc::new(SessionHub::default()));
         let keeper = hub.clone();
         bus.tap(Arc::new(move |ev: &BusEvent| keeper.record(ev)));
-        Self { bus, hub, store, keys }
+        Self { bus, hub, store: Arc::new(store), keys, running: std::sync::Mutex::new(None) }
     }
 
     pub fn view(&self) -> RemoteView {
         let saved = self.store.saved();
         let devices = saved.devices.into_iter().map(|d| DeviceView { id: d.id, name: d.name, paired_at: d.paired_at, last_seen: d.last_seen }).collect();
-        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, devices, warning: None }
+        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, devices, warning: None, connected: self.connected() }
     }
 
     /// The view after a change, with why it couldn't be saved when it couldn't.

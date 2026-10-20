@@ -34,7 +34,7 @@ const { RemoteControl } = await import("./RemoteControl");
 
 beforeEach(() => {
   calls.length = 0;
-  view = { enabled: false, show_titles: false, devices: [] };
+  view = { enabled: false, show_titles: false, devices: [], connected: [] };
 });
 
 describe("Settings › Remote control", () => {

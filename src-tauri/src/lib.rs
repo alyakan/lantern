@@ -295,6 +295,107 @@ async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: 
     }
 }
 
+/// The app, as the remote gateway needs it (see remote::gateway::Host): what a paired phone may ask, done the way the
+/// window's own commands do it.
+struct RemoteHost {
+    app: AppHandle,
+    mac_name: String,
+}
+
+/// The longest diff a phone is sent.
+const PHONE_DIFF_MAX: usize = 512 << 10;
+
+impl remote::gateway::Host for RemoteHost {
+    fn send(&self, slot: String, text: String, by: String) -> remote::gateway::BoxFut<Result<(), String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            send_user_message(&app, &state, &slot, &text, &by).await.map(|_| ())
+        })
+    }
+
+    fn interrupt(&self, slot: String) -> remote::gateway::BoxFut<Result<(), String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let s = app.state::<AppState>().slots.get(&slot)?;
+            if let Some(x) = s.session.lock().await.as_mut() {
+                x.interrupt().await;
+            }
+            s.bridge.cancel_all();
+            Ok(())
+        })
+    }
+
+    fn pending(&self, slot: &str) -> Vec<permission::bridge::Pending> {
+        self.app.state::<AppState>().slots.get(slot).map(|s| s.bridge.pending()).unwrap_or_default()
+    }
+
+    fn answer(&self, slot: &str, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> Result<(), String> {
+        answer_prompt(&self.app.state::<AppState>(), slot, request_id, allow, message, updated_input, by)
+    }
+
+    fn wake(&self, slot: &str) -> Result<(), String> {
+        request_wake(&self.app, &self.app.state::<AppState>(), slot)
+    }
+
+    fn diff(&self, slot: String, path: String) -> remote::gateway::BoxFut<Result<String, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let s = app.state::<AppState>().slots.get(&slot)?;
+            // Only a file the chat changed: the tracker knows no other.
+            let d = s.changes.lock().unwrap().diff(&path, changes::Scope::Session, None, None)?;
+            let text = similar::TextDiff::from_lines(&d.original, &d.current).unified_diff().header(&path, &path).to_string();
+            Ok(if text.len() > PHONE_DIFF_MAX { format!("{}\n… (cut short: the rest is on your Mac)", &text[..text.floor_char_boundary(PHONE_DIFF_MAX)]) } else { text })
+        })
+    }
+
+    fn history(&self, slot: String) -> remote::gateway::BoxFut<Result<Vec<ui_event::UiEvent>, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let chat = state.remote.hub.chat(&slot).ok_or("That chat isn't open.")?;
+            let (Some(folder), Some(session_id)) = (chat.folder, chat.session_id) else { return Ok(vec![]) };
+            if !history::valid_id(&session_id) {
+                return Ok(vec![]);
+            }
+            let (root, aliases) = (projects_root()?, aliases_for(&state, &folder));
+            tauri::async_runtime::spawn_blocking(move || history::transcript_path_with_aliases(&root, std::path::Path::new(&folder), &aliases, &session_id).map(|p| history::replay(&p).events)).await.map_err(|e| e.to_string())?
+        })
+    }
+
+    fn mac_name(&self) -> String {
+        self.mac_name.clone()
+    }
+
+    fn app_version(&self) -> String {
+        self.app.package_info().version.to_string()
+    }
+}
+
+/// Turns Remote control's listener on: the gateway, the Wi-Fi transport and Bonjour. Nothing if it is already on.
+async fn start_remote(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if state.remote.is_running() {
+        return Ok(());
+    }
+    let handle = app.clone();
+    let (mac, name) = tauri::async_runtime::spawn_blocking(move || (handle.state::<AppState>().remote.mac_key(), mac_name())).await.map_err(|e| e.to_string())?;
+    let mac = mac?;
+    let host = Arc::new(RemoteHost { app: app.clone(), mac_name: name.clone() });
+    let r = &state.remote;
+    let gateway = remote::gateway::Gateway::new(r.bus.clone(), r.hub.clone(), r.store.clone(), host, mac.clone());
+    let notify = app.clone();
+    gateway.on_change(Arc::new(move || {
+        let _ = notify.emit("remote-changed", ());
+    }));
+    let door = gateway.clone();
+    let (listener, port) = remote::transport::serve_lan(remote::PORT, move |link| door.accept(link)).await?;
+    let id: String = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, &mac.public).chars().take(10).collect();
+    let bonjour = remote::transport::Bonjour::advertise(port, &name, &id).ok();
+    state.remote.set_running(remote::Running { gateway, listener, bonjour });
+    Ok(())
+}
+
 /// The app, as the orchestra needs it (see orchestra::Host).
 struct AppHost {
     app: AppHandle,
@@ -1576,8 +1677,18 @@ fn remote_settings(state: State<'_, AppState>) -> remote::RemoteView {
 
 /// The view after a change, with why it couldn't be saved when it couldn't (it holds until Lantern restarts).
 #[tauri::command]
-fn remote_set_enabled(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
-    state.remote.view_after(state.remote.store.set_enabled(on))
+async fn remote_set_enabled(app: AppHandle, state: State<'_, AppState>, on: bool) -> Result<remote::RemoteView, String> {
+    let saved = state.remote.store.set_enabled(on);
+    if on {
+        // Couldn't listen (the port is taken): it is off again, and Settings says why.
+        if let Err(e) = start_remote(&app).await {
+            let _ = state.remote.store.set_enabled(false);
+            return Ok(state.remote.view_after::<()>(Err(e)));
+        }
+    } else {
+        state.remote.stop();
+    }
+    Ok(state.remote.view_after(saved))
 }
 
 #[tauri::command]
@@ -1600,7 +1711,9 @@ fn remote_pair_cancel(state: State<'_, AppState>) {
 /// Forgets a paired device: it can't connect again until it pairs again.
 #[tauri::command]
 fn remote_remove_device(state: State<'_, AppState>, id: String) -> remote::RemoteView {
-    state.remote.view_after(state.remote.store.remove_device(&id))
+    let removed = state.remote.store.remove_device(&id);
+    state.remote.disconnect(&id);
+    state.remote.view_after(removed)
 }
 
 /// The Mac's name as the user set it (Sharing settings), for the phone to show.
@@ -1617,7 +1730,6 @@ fn mac_name() -> String {
 
 /// Asks the window to wake an asleep chat for a paired phone (the window wakes chats: it has what they were restored
 /// with). Refused for a chat that isn't listed, or isn't asleep.
-#[allow(dead_code)] // The gateway calls it (M3).
 fn request_wake(app: &AppHandle, state: &AppState, slot: &str) -> Result<(), String> {
     if !state.remote.wakeable(slot) {
         return Err("That chat isn't asleep.".into());
@@ -2248,6 +2360,13 @@ pub fn run() {
                 following.tick();
             });
             app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), remote: window_remote(app.handle()) });
+            // Remote control left on: it listens again from launch.
+            if app.state::<AppState>().remote.store.saved().enabled {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = start_remote(&handle).await;
+                });
+            }
             app.manage(updates::Updates::default());
             app.manage(awake::Awake::default());
             app.manage(menu_bar::MenuBar::default());

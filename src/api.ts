@@ -338,6 +338,8 @@ export const api = {
   remoteRemoveDevice: (id: string) => invoke<RemoteView>("remote_remove_device", { id }),
   /** Tells the backend's session hub each open chat's title and which are asleep (see lib/remoteChats.ts). */
   remoteWindowChats: (chats: WindowChat[]) => invoke<void>("remote_window_chats", { chats }),
+  /** A phone connected or went: ask remoteSettings who is connected now. */
+  onRemoteChanged: (cb: () => void): Promise<UnlistenFn> => listen("remote-changed", () => cb()),
   /** A paired phone asked for an asleep chat: wake it where it is. */
   onRemoteWake: (cb: (slot: string) => void): Promise<UnlistenFn> => listen<string>("remote-wake", (e) => cb(e.payload)),
   onUiEvent: (cb: (slot: string, event: UiEvent) => void): Promise<UnlistenFn> =>
