@@ -3,7 +3,8 @@ import { initialState, reducer, type State } from "../store";
 import { chatTitle } from "../sessions";
 import type { AgentMeta, Chats } from "../sessions";
 import { chatsToSave, savedChatOf, startsNow, teamOf, type SavedChat } from "./restore";
-import { canSleep, membersToSleep, teamSlots, teamsAtRest } from "./idleSleep";
+import { agentsAtRest, canSleep, membersToSleep, teamSlots, teamsAtRest } from "./idleSleep";
+import { statusLabel } from "./orchestraView";
 
 const chat = (sessionId: string, over: Partial<State> = {}): State => ({
   ...initialState,
@@ -161,5 +162,57 @@ describe("a chat that is waking up", () => {
     const fresh = reducer(chat("old-1"), { type: "folder_opened", folder: "/p" });
     expect(fresh.sessionId).toBeNull();
     expect(chatsToSave({ s1: fresh }, "none", {}, {})).toEqual([]);
+  });
+});
+
+describe("which agents may sleep while their team goes on", () => {
+  const chats = (over: Record<string, Partial<State>> = {}, active = "solo") => world(over, active);
+
+  it("lets an agent that is resting sleep while its Lead is busy, which keeps the team awake", () => {
+    const busy = chats({ lead: { status: "running", thinking: true } });
+    expect(teamsAtRest(busy, notRoutine)).toEqual([]);
+    expect(agentsAtRest(busy, notRoutine)).toEqual(["a1", "a2"]);
+  });
+
+  it("keeps awake an agent that is working, queued, asleep already or on screen", () => {
+    expect(agentsAtRest(chats({ a1: { status: "running", thinking: true } }), notRoutine)).toEqual(["a2"]);
+    expect(agentsAtRest(chats({ a1: { queued: ["next"] } }), notRoutine)).toEqual(["a2"]);
+    expect(agentsAtRest(chats({ a1: { agentAsleep: true } }), notRoutine)).toEqual(["a2"]);
+    expect(agentsAtRest(chats({}, "a1"), notRoutine)).toEqual(["a2"]);
+  });
+
+  it("keeps an agent awake while its own merge card waits for the user, and lets the others sleep", () => {
+    const proposal = { worker: "a1", name: "Login", branch: "b", into: "main", summary: "", commits: 1, files: [], uncommitted: 0, loose: [], status: "open" as const, problem: null, attempts: 0 };
+    expect(agentsAtRest(chats({ lead: { proposals: [proposal] } }), notRoutine)).toEqual(["a2"]);
+  });
+
+  it("leaves every agent awake in a team that checks what its builders make", () => {
+    expect(agentsAtRest(chats({ lead: { review: { on: true } as State["review"] } }), notRoutine)).toEqual([]);
+  });
+
+  it("leaves it to the team when the Lead itself is asleep", () => {
+    expect(agentsAtRest(chats({ lead: { status: "asleep" } }), notRoutine)).toEqual([]);
+  });
+
+  it("shows an agent whose claude was stopped as asleep on its card, and awake again once it is written to", () => {
+    const resting = chat("a-1");
+    const asleep = reducer(resting, { type: "ui_event", event: { kind: "agent_asleep", asleep: true } });
+    expect(asleep.agentAsleep).toBe(true);
+    expect(statusLabel("idle", "worker", false, asleep.agentAsleep)).toBe("Asleep");
+    expect(statusLabel("idle", "worker", false, false)).toBe("Done");
+    // A merge waiting for the user is the more useful thing to say.
+    expect(statusLabel("idle", "worker", true, true)).toBe("Ready to merge");
+    expect(statusLabel("working", "worker", false, true)).toBe("Working");
+    expect(reducer(asleep, { type: "ui_event", event: { kind: "agent_asleep", asleep: false } }).agentAsleep).toBe(false);
+    expect(reducer(asleep, { type: "ui_event", event: { kind: "agent_asleep", asleep: true } })).toBe(asleep);
+  });
+});
+
+describe("an agent's claude starting again", () => {
+  it("clears Asleep, however it was started", () => {
+    const asleep = reducer(chat("a-1"), { type: "ui_event", event: { kind: "agent_asleep", asleep: true } });
+    expect(asleep.agentAsleep).toBe(true);
+    const started = reducer(asleep, { type: "ui_event", event: { kind: "session_started", session_id: "a-1", model: "m", cwd: "/p", permission_mode: "auto", claude_version: "1" } });
+    expect(started.agentAsleep).toBe(false);
   });
 });

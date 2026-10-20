@@ -95,6 +95,8 @@ export type UiEvent =
   | { kind: "review_update"; builder: string; name: string; commit: string; checks: ReviewCheck[]; done: boolean }
   /** On a worker's chat: the main agent sent it this. */
   | { kind: "agent_message"; from: string; text: string }
+  /** On a worker's chat: its claude was stopped to save memory (`asleep`), or started again: a message wakes it. */
+  | { kind: "agent_asleep"; asleep: boolean }
   /** On a worker's chat: its claude was stopped on purpose, or never started (`reason`). */
   | { kind: "agent_stopped"; reason: string | null }
   /** On a worker's chat: it now runs on this mode, because its main agent's was lowered. */

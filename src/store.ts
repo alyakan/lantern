@@ -271,6 +271,8 @@ export interface State {
   run: RunTask | null;
   /** What an asleep chat is called (it has no messages to take a title from). */
   asleepTitle: string | null;
+  /** A team's agent whose claude was stopped to save memory: it is idle, and a message wakes it (see the orchestra's `sleep_agent`). */
+  agentAsleep: boolean;
   /** What an asleep chat is, as it is saved for the next launch: for a team's Lead or agent, the part it had in the team. */
   asleepSaved: SavedChat | null;
   /** How many turns before the first message shown are on disk and not loaded: a long session opens with its last turns. */
@@ -359,6 +361,7 @@ export const initialState: State = {
   run: null,
   asleepTitle: null,
   asleepSaved: null,
+  agentAsleep: false,
   earlierTurns: 0,
 };
 
@@ -512,7 +515,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null, asleepSaved: null, earlierTurns: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null, asleepSaved: null, agentAsleep: false, earlierTurns: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -540,7 +543,8 @@ function lastLine(text: string): string {
 function applyEvent(state: State, ev: UiEvent): State {
   switch (ev.kind) {
     case "session_started":
-      return { ...state, model: ev.model, sessionId: ev.session_id, status: state.status === "starting" ? "idle" : state.status };
+      // A claude that has started is awake, whatever said it was asleep before.
+      return { ...state, model: ev.model, sessionId: ev.session_id, status: state.status === "starting" ? "idle" : state.status, agentAsleep: false };
     case "user_text": {
       const seq = state.seq + 1;
       const sent = readShellContext(ev.text);
@@ -718,6 +722,8 @@ function applyEvent(state: State, ev: UiEvent): State {
       const seq = state.seq + 1;
       return { ...state, seq, stopRequested: false, leadStopped: false, status: state.status === "idle" ? "running" : state.status, thinking: state.status === "idle" || state.thinking, items: [...state.items, { type: "user", id: `u${seq}`, text: ev.text, at: Date.now(), from: ev.from }] };
     }
+    case "agent_asleep":
+      return state.agentAsleep === ev.asleep ? state : { ...state, agentAsleep: ev.asleep };
     // Stopped by the main agent, which is a decision of its own: the user's earlier Stop (if any) must not turn it into a
     // restart (the app restarts a chat that ended after the user pressed Stop).
     case "agent_stopped":

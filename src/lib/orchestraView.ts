@@ -22,8 +22,10 @@ export const STATUS_LABEL: Record<NodeStatus, string> = {
  * What a card or a row says about its agent: "Idle" is "Ready" for the lead (its team is waiting on it) and "Done" for a
  * worker that finished its turn, and a worker whose branch the lead asked the user to merge is "Ready to merge".
  */
-export function statusLabel(status: NodeStatus, role: "main" | "worker", readyToMerge = false): string {
+export function statusLabel(status: NodeStatus, role: "main" | "worker", readyToMerge = false, asleep = false): string {
   if (status !== "idle") return STATUS_LABEL[status];
+  // An agent whose claude was stopped to save memory: done, and it wakes when it is written to.
+  if (asleep && !readyToMerge) return "Asleep";
   return readyToMerge ? "Ready to merge" : role === "main" ? "Ready" : "Done";
 }
 

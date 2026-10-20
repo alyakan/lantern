@@ -3,7 +3,7 @@ import { pushAgentLimit } from "./lib/agentLimit";
 import { pushAutoMergeTests } from "./lib/mergeTests";
 import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
-import { canSleep, membersToSleep, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
+import { agentsAtRest, canSleep, membersToSleep, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
@@ -1612,12 +1612,21 @@ export default function App() {
   };
   const sleepSweep = () => {
     const alone = Object.entries(chats.slots).flatMap(([slot, s]) => (canSleep(s, { active: slot === active, agent: !!chats.agents[slot], routine: slot in routineSlots.current }) ? [slot] : []));
-    const eligible = new Set([...alone, ...teamsAtRest(chats, (slot) => slot in routineSlots.current)]);
+    const routine = (slot: string) => slot in routineSlots.current;
+    // An agent of a team that goes on stands for itself, with its own clock; a team that is all at rest stands for itself, by its Lead.
+    const resting = teamsAtRest(chats, routine);
+    const inRestingTeam = (slot: string) => resting.includes(chats.agents[slot]?.parent ?? "");
+    const agents = agentsAtRest(chats, routine).filter((slot) => !inRestingTeam(slot));
+    const eligible = new Set([...alone, ...resting, ...agents]);
     const { clock, due } = sweep(idleClock.current, eligible, Date.now(), sleepAfter * 60_000);
     idleClock.current = clock;
     for (const slot of due) {
-      // A Lead stands for its team: the Lead first in the list, its agents after it.
-      sleepSlots(chats.slots[slot]?.orchestrator && !chats.agents[slot] ? membersToSleep(chats, slot) : [slot]);
+      // An agent has its claude stopped and stays in its team and on the canvas (the backend says when it has: it refuses when
+      // the agent is in the middle of something). A Lead stands for its team: the Lead first in the list, its agents after it.
+      if (agents.includes(slot)) {
+        delete idleClock.current[slot];
+        api.sleepAgent(slot).catch(() => {});
+      } else sleepSlots(chats.slots[slot]?.orchestrator && !chats.agents[slot] ? membersToSleep(chats, slot) : [slot]);
     }
   };
   const sweepNow = useRef(sleepSweep);
