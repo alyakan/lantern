@@ -72,6 +72,18 @@ describe("which screen is up", () => {
     expect(onClearLink).toHaveBeenCalled();
   });
 
+  it("keeps the pairing screen, and why a pasted code failed, while the connection tries and gives up", async () => {
+    const link = `lantern://pair?v=1&k=${toBase64Url(new Uint8Array(32).fill(1))}&s=${toBase64Url(new Uint8Array(32).fill(2))}&h=10.0.0.4&p=47123&n=Fixture&e=${Date.now() + 60_000}`;
+    // The connection is the real one (nothing in the test answers), so it goes through "connecting" and back like a phone's.
+    await open({ connection: { kind: "unpaired" } });
+    await press("Paste the link instead");
+    await fireEvent.changeText(screen.getByLabelText("Pairing link"), link);
+    await press("Pair");
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    expect(screen.getByText(/no network in tests/)).toBeTruthy();
+    expect(screen.getByLabelText("Pairing link")).toBeTruthy();
+  });
+
   it("drops the confirmation once the link has paired, so Home can show", async () => {
     const link = `lantern://pair?v=1&k=${toBase64Url(new Uint8Array(32).fill(1))}&s=${toBase64Url(new Uint8Array(32).fill(2))}&h=10.0.0.4&p=47123&n=Fixture&e=${Date.now() + 60_000}`;
     const onClearLink = jest.fn();

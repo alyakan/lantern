@@ -21,7 +21,9 @@ void SplashScreen.preventAutoHideAsync().catch(() => {});
 const projectId: string | undefined = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
 
 export default function App() {
-  const [fontsReady] = useFonts({ BricolageGrotesque_700Bold, BricolageGrotesque_800ExtraBold });
+  const [fontsLoaded, fontError] = useFonts({ BricolageGrotesque_700Bold, BricolageGrotesque_800ExtraBold });
+  // A font that failed to load shows the system font instead of keeping the app on its splash for good.
+  const fontsReady = fontsLoaded || fontError !== null;
   const controller = useMemo(
     () =>
       new Controller({

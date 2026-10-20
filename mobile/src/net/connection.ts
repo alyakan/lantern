@@ -129,7 +129,8 @@ export class Connection {
     const key = (this.d.newKey ?? generateKeypair)();
     const candidates = await this.candidates(toBase64Url(offer.macKey), offer.hosts, offer.port);
     if (candidates.length === 0) throw new Error("Your Mac isn't on this Wi-Fi.");
-    this.d.onState({ kind: "connecting" });
+    // No "connecting" state here: the app swaps its screen for a connecting one, and the pairing screen (which says
+    // "Pairing…" itself, and holds the error when this fails) would be unmounted underneath the attempt.
     let lastError: Error = new Error("Couldn't reach your Mac.");
     for (const [host, port] of candidates) {
       try {

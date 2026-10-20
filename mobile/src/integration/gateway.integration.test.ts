@@ -117,6 +117,18 @@ suite("the phone's client against the real gateway", () => {
     return p;
   }
 
+  it("a code that was already used ends pairing at once: the Mac hangs up, and the other addresses aren't waited for", async () => {
+    const first = makePhone(ready);
+    await first.conn.pair(offerOf(ready));
+    const second = makePhone(ready);
+    const started = Date.now();
+    // The Mac's address is found first (Bonjour, here); the QR's other address goes nowhere and would take OPEN_WAIT to give up.
+    await expect(second.conn.pair({ ...offerOf(ready), hosts: ["10.255.255.1"] })).rejects.toThrow("didn't take this code");
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(second.store.mac).toBeNull();
+    first.conn.stop();
+  });
+
   it("pairs with the code, hears the chat list and what waits, and follows a chat from its start", async () => {
     const p = makePhone(ready);
     await p.conn.pair(offerOf(ready));
