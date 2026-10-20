@@ -210,6 +210,19 @@ fn ceiling_of(main: Option<(Mode, bool, ProviderId)>) -> Mode {
     main.map_or(Mode::Ask, |(mode, auto, provider)| args::worker_mode(mode, auto, &capabilities_of(provider)))
 }
 
+/// Whether a restart into `cfg` changes what Claude was told about its Permissions or Workflow (`before`: the mode,
+/// whether it was on Auto, and the role it ran with; None: it never ran). Only Claude's prompt says them.
+fn settings_changed(before: Option<(Mode, bool, Role)>, cfg: &SessionConfig) -> bool {
+    let after = (cfg.mode, args::is_auto(cfg.mode, cfg.auto_approve), cfg.helper.role.clone());
+    cfg.provider == ProviderId::Claude && before.is_some_and(|b| b != after)
+}
+
+/// Whether a message can carry the settings note: not a slash command, which claude reads as one only at the very start
+/// of the message (`/clear` after a switch must still clear). The note waits for the next message instead.
+fn carries_settings_note(text: &str) -> bool {
+    !text.trim_start().starts_with('/')
+}
+
 /// `cfg`'s mode and auto-approve, no freer than `ceiling` allows (None: no ceiling, the chat is no worker). True when that
 /// lowered them.
 fn cap_mode(cfg: &mut SessionConfig, ceiling: Option<Mode>) -> bool {
@@ -248,7 +261,13 @@ async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: 
     if let Ok(helper) = helper_config(&s, cfg.helper.role.clone(), cfg.helper.project_notes.clone()) {
         cfg.helper = helper;
     }
+    // Its claude restarts on Ask: it hears so with its next message, as a chat whose user switched does.
+    let note = args::settings_note(cfg.mode, cfg.auto_approve, &cfg.helper);
+    let claude = cfg.provider == ProviderId::Claude;
     if launch(app, worker, &s, cfg, false).await.is_ok() {
+        if claude {
+            *s.settings_note.lock().unwrap() = Some(note);
+        }
         told_ask(app, worker);
     }
 }
@@ -759,7 +778,13 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
     // A worker asked for more freedom than its main agent allows gets what it allows (the window is told).
     let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
     let (new_mode, new_auto, provider) = (cfg.mode, cfg.auto_approve, cfg.provider);
+    // What it ran with before, to tell Claude when that changed (see args::settings_note).
+    let before = s.config.lock().unwrap().as_ref().map(|c| (c.mode, args::is_auto(c.mode, c.auto_approve), c.helper.role.clone()));
+    let note = settings_changed(before, &cfg).then(|| args::settings_note(cfg.mode, cfg.auto_approve, &cfg.helper));
     launch(&app, &slot, &s, cfg, false).await?;
+    if note.is_some() {
+        *s.settings_note.lock().unwrap() = note;
+    }
     // Registered as the Lead (or taken out of the team registry) once it runs as one; a worker's role never changes here.
     if team.is_some() && !matches!(role, Role::Worker { .. }) {
         enroll(&state, &slot, &s, &role);
@@ -930,7 +955,14 @@ async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str) -> Resu
         }
     }
     s.checkpoints.turn_started();
-    if let Err(e) = claude.send(text).await {
+    // The chat's Permissions or Workflow changed since its last message: Claude hears it with this one (the user's, or its
+    // Lead's for an agent). Put back if the message doesn't go, so the next one carries it.
+    let note = if carries_settings_note(text) { s.settings_note.lock().unwrap().take() } else { None };
+    let noted = note.as_ref().map(|note| format!("{note}\n\n{text}"));
+    if let Err(e) = claude.send(noted.as_deref().unwrap_or(text)).await {
+        if let Some(note) = note {
+            s.settings_note.lock().unwrap().get_or_insert(note);
+        }
         s.checkpoints.turn_ended();
         s.changes.lock().unwrap().cancel_turn(turn);
         return Err(e);
@@ -2345,6 +2377,30 @@ mod tests {
             helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![], project_notes: None },
             path_env: None,
         }
+    }
+
+    #[test]
+    fn claude_is_told_when_a_restart_changes_its_permissions_or_workflow_and_not_otherwise() {
+        let normal = |mode, auto| SessionConfig { helper: HelperConfig { role: Role::Normal, ..config(mode, auto).helper }, ..config(mode, auto) };
+        let was = |mode, auto: bool| Some((mode, args::is_auto(mode, auto), Role::Normal));
+        // Step by step to Chat: the switch the chat that found this bug made.
+        assert!(settings_changed(was(Mode::Steps, true), &normal(Mode::Auto, false)));
+        assert!(settings_changed(was(Mode::Ask, false), &normal(Mode::Auto, false)));
+        assert!(settings_changed(was(Mode::Auto, false), &SessionConfig { helper: HelperConfig { role: Role::Main, ..config(Mode::Auto, false).helper }, ..config(Mode::Auto, false) }));
+        // The same settings again (a new effort, a restart after Stop), or Step by step on Auto put the same way: no note.
+        assert!(!settings_changed(was(Mode::Auto, false), &normal(Mode::Auto, false)));
+        assert!(!settings_changed(was(Mode::Steps, true), &normal(Mode::Steps, true)));
+        // A chat that never ran has nothing to correct, and only Claude's prompt says these settings.
+        assert!(!settings_changed(None, &normal(Mode::Auto, false)));
+        assert!(!settings_changed(was(Mode::Ask, false), &SessionConfig { provider: ProviderId::Fake, ..normal(Mode::Auto, false) }));
+    }
+
+    #[test]
+    fn a_slash_command_goes_without_the_settings_note_so_it_still_runs_as_one() {
+        assert!(!carries_settings_note("/clear"));
+        assert!(!carries_settings_note("  /incremental-dev build it"));
+        assert!(carries_settings_note("build it"));
+        assert!(carries_settings_note("what does /clear do?"));
     }
 
     /// The git tool is answered for a read-only agent and no one else, from the role Lantern started the chat with: the same

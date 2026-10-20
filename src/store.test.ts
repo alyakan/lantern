@@ -228,6 +228,15 @@ describe("reducer", () => {
     expect(s.items[0]).toMatchObject({ type: "user", text: "map it", switchedTo: "architecture" });
   });
 
+  it("a message replayed after a Workflow change shows without the backend's settings note, before a flavour note or alone", () => {
+    // The note repeats the whole new prompt, which mentions other notes and brackets of its own.
+    const settings = "[Lantern: this chat's Permissions or Workflow changed, and Claude was restarted on the same conversation. From here on:\n\nA message that starts with \"[Lantern: this chat switched to <Flavour>…]\" means …\n\n(end of Lantern's note)]";
+    const flavour = "[Lantern: this chat switched to Debug. The user picked it.]";
+    expect(ev(initialState, { kind: "user_text", text: `${settings}\n\n${flavour}\n\nit crashes` }).items[0]).toMatchObject({ type: "user", text: "it crashes", switchedTo: "debug" });
+    expect(ev(initialState, { kind: "user_text", text: `${settings}\n\nbuild it` }).items[0]).toMatchObject({ type: "user", text: "build it" });
+    expect(ev(initialState, { kind: "user_text", text: "[Lantern: something else]\n\nhi" }).items[0]).toMatchObject({ text: "[Lantern: something else]\n\nhi" });
+  });
+
   it("a message replayed from a Learn (or explaining) chat is Build with Explain as you go on, and keeps it when sent", () => {
     const old = ev(initialState, { kind: "user_text", text: "[Lantern: this chat switched to Learn. The user picked it. How Learn works:\n\nLearn: …\n\n(end of Lantern's note)]\n\nteach me" });
     expect(old.items[0]).toMatchObject({ type: "user", text: "teach me", switchedTo: "build", explained: true });

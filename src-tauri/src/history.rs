@@ -137,11 +137,19 @@ pub(crate) fn prompt_text(r: &Value) -> Option<String> {
 
 /// The notes Lantern puts in front of a message it sends (a revert's, a moved folder's): each is a block, then a blank line,
 /// then what the user typed. They aren't part of the prompt, so a replayed chat doesn't show them.
+/// The settings note (see args::settings_note) has blank lines of its own, so it runs to its end mark.
 fn without_lantern_note(text: &str) -> &str {
     let mut rest = text;
-    while rest.starts_with("[Lantern note:") {
-        match rest.split_once("\n\n") {
-            Some((_, after)) => rest = after,
+    loop {
+        let after = if rest.starts_with(crate::args::SETTINGS_NOTE_START) {
+            rest.split_once(crate::args::NOTE_END).map(|(_, after)| after.trim_start())
+        } else if rest.starts_with("[Lantern note:") {
+            rest.split_once("\n\n").map(|(_, after)| after)
+        } else {
+            None
+        };
+        match after {
+            Some(after) => rest = after,
             None => break,
         }
     }
@@ -1030,6 +1038,10 @@ mod tests {
         assert_eq!(typed("[Lantern note: only a note]"), Some("[Lantern note: only a note]".into()));
         // The moved note and a revert note can both come first.
         assert_eq!(typed("[Lantern note: this project moved from /a to /b.]\n\n[Lantern note: since your last message.]\n- /p/a.ts: put back.\n\nwhy?"), Some("why?".into()));
+        // A Workflow switch's note repeats the whole prompt, blank lines and all: the title is still what was typed.
+        let settings = crate::args::settings_note(crate::args::Mode::Steps, false, &crate::args::HelperConfig { exe: "/x".into(), socket: "/s".into(), role: crate::args::Role::Normal, providers: vec![], project_notes: None });
+        assert_eq!(typed(&format!("{settings}\n\nbuild the login page")), Some("build the login page".into()));
+        assert_eq!(typed(&format!("{settings}\n\n[Lantern note: since your last message.]\n\nwhy?")), Some("why?".into()));
     }
 
     /// A transcript whose first records name `cwd`, with a typed prompt when `prompt` is Some (else only a meta record).

@@ -87,6 +87,13 @@ export const withFlavourNote = (flavour: Flavour, text: string, options?: NoteOp
 const NOTE_WITH_GUIDE = new RegExp(`^\\[Lantern: this chat switched to (${FLAVOUR_WORDS})\\b(${EXPLAINING})?[^\\]]*? How [\\s\\S]*?\\(end of Lantern's note\\)\\]\\s*`);
 const NOTE = new RegExp(`^\\[Lantern: this chat switched to (?:Step-by-step )?(${FLAVOUR_WORDS})\\b(${EXPLAINING})?[^\\]]*\\]\\s*`);
 
+// The note the backend puts before the first message after a chat's Permissions or Workflow changed, with the new
+// instructions in it (see args::settings_note): it runs to its end mark.
+const SETTINGS_NOTE = /^\[Lantern: this chat's Permissions or Workflow changed[\s\S]*?\(end of Lantern's note\)\]\s*/;
+
+/** A message without the settings note before it (a replayed one has it: the backend adds it as the message goes). */
+export const readSettingsNote = (text: string): string => text.replace(SETTINGS_NOTE, "");
+
 /** A prompt as you wrote it, and the flavour a note Lantern put before it picked (with whether Explain as you go is on). */
 export function readFlavourNote(text: string): { text: string; flavour: Flavour | null; explain: boolean } {
   const m = NOTE_WITH_GUIDE.exec(text) ?? NOTE.exec(text);
