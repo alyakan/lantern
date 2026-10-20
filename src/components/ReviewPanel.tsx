@@ -69,7 +69,7 @@ interface Props {
    * The Plan tab's map, once a Step-by-step chat has an Architecture Overview: its map, the boxes the page on screen covers, each
    * page's name, how to open one, and `openKey`, changed to bring the tab up.
    */
-  architecture?: { map: ArchitectureMap; current: string[]; pageNames: Record<string, string>; onOpenPage: (page: string) => void; openKey: number; box?: { id: string; key: number } | null };
+  architecture?: { map: ArchitectureMap; current: string[]; pageNames: Record<string, string>; onOpenPage: (page: string) => void; openKey: number; box?: { id: string; key: number } | null; onUpdate?: () => void };
   /** The Network tab's Summarize: asks Claude in this chat about one request (absent: no chat to ask). */
   onSummarizeRequest?: (item: NetworkItem) => void;
   /** Claude is in the middle of a turn in this chat. */
@@ -340,7 +340,7 @@ function PlanTab({ summary, architecture, view, onView, revert }: Props & { view
         </div>
       )}
       {showMap && architecture ? (
-        <ArchitectureTab map={architecture.map} current={architecture.current} pageNames={architecture.pageNames} onOpenPage={architecture.onOpenPage} box={architecture.box} />
+        <ArchitectureTab map={architecture.map} current={architecture.current} pageNames={architecture.pageNames} onOpenPage={architecture.onOpenPage} box={architecture.box} onUpdate={architecture.onUpdate} />
       ) : (
         summary && <SummaryTab slot={summary.slot} summary={summary.data} changed={summary.changed} running={summary.running} onOpenPage={summary.onOpenPage} doc={summary.doc} revert={revert} />
       )}

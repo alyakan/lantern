@@ -1,7 +1,7 @@
 import type { ChatItem } from "../store";
 import type { Mode } from "../types";
 import { EXPLAINING, flavourWord, FLAVOUR_WORDS } from "./flavourWord";
-import { isApproval, parseHeading, startedChoice } from "./steps";
+import { isApproval, parseHeading, startedChoice, UPDATE_MAP } from "./steps";
 import { STEPS_AUTO } from "./workflow";
 
 /**
@@ -106,6 +106,8 @@ export function flavourState(items: ChatItem[], start: Flavour | null = null, st
   let explain = startExplain;
   let suggested: { flavour: Flavour; explain: boolean } | null = null;
   let pages: Flavour | null = null;
+  // An Overview asked for with Update the map is the map brought up to date, in whatever flavour the chat was in.
+  let mapUpdate = false;
   for (const it of items) {
     if (it.type === "assistant") {
       const h = parseHeading(it.text);
@@ -114,10 +116,11 @@ export function flavourState(items: ChatItem[], start: Flavour | null = null, st
       const kind = h?.kind;
       // A Summary closes a Review and a Design map alike: it belongs to whichever the pages before it were.
       if (kind === "file" || (kind === "summary" && pages !== "architecture")) pages = "review";
-      else if (kind === "overview" || kind === "part") pages = "architecture";
+      else if ((kind === "overview" && !mapUpdate) || kind === "part") pages = "architecture";
       else if (kind === "evidence" || kind === "fix") pages = "debug";
       else if (kind === "plan" || kind === "plan-complete" || kind === "step") pages = "build";
     } else if (it.type === "user" && !it.auto) {
+      mapUpdate = it.text.trim() === UPDATE_MAP;
       const started = it.switchedTo ? { flavour: it.switchedTo, explain: !!it.explained } : (startedChoice(it.text) ?? (suggested && isApproval(it.text) ? suggested : null));
       if (started) {
         current = started.flavour;

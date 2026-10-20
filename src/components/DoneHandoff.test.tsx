@@ -6,7 +6,8 @@ const exportText = vi.fn((_name: string, _text: string) => Promise.resolve<strin
 vi.mock("../api", () => ({ api: { changeSummary: () => Promise.resolve([]), exportText: (name: string, text: string) => exportText(name, text) } }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ revealItemInDir: () => Promise.resolve() }));
 
-import { DoneHandoff, type Handoff } from "./DoneHandoff";
+import { DoneHandoff, REVIEW_BUILD, type Handoff } from "./DoneHandoff";
+import { UPDATE_MAP } from "../lib/steps";
 
 const summary: StepsSummary = { headline: "1 of 1 steps built", rows: [] } as unknown as StepsSummary;
 const handoff = (extra: Partial<Handoff> = {}): Handoff => ({
@@ -24,7 +25,7 @@ const handoff = (extra: Partial<Handoff> = {}): Handoff => ({
 describe("the Done page's hand-off", () => {
   it("shows the next actions as buttons", () => {
     render(<DoneHandoff handoff={handoff()} onSend={() => {}} />);
-    expect(screen.getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Review the changes (2)", "Ship it…", "Export the plan", "Start something new"]);
+    expect(screen.getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Review the changes (2)", "Ship it…", "Review this branch", "Update the map", "Export the plan", "Start something new"]);
   });
 
   it("opens the side panel on the changes with Review the changes, and starts a new chat with Start something new", () => {
@@ -50,6 +51,19 @@ describe("the Done page's hand-off", () => {
     expect(screen.getByRole("button", { name: "Ship it…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: /^Review the changes/ })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Start something new" })).toBeEnabled();
+  });
+
+  it("starts a Review of the branch, or brings the map up to date, and leaves both off while Claude is busy", () => {
+    const onSend = vi.fn();
+    const view = render(<DoneHandoff handoff={handoff()} onSend={onSend} />);
+    fireEvent.click(screen.getByRole("button", { name: "Review this branch" }));
+    expect(onSend).toHaveBeenLastCalledWith(REVIEW_BUILD, "review");
+    fireEvent.click(screen.getByRole("button", { name: "Update the map" }));
+    expect(onSend).toHaveBeenLastCalledWith(UPDATE_MAP);
+    view.unmount();
+    render(<DoneHandoff handoff={handoff()} />);
+    expect(screen.getByRole("button", { name: "Review this branch" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Update the map" })).toBeDisabled();
   });
 
   it("exports the plan, as the Summary tab does", async () => {

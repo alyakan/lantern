@@ -1,5 +1,6 @@
 import { useFileLinks } from "../lib/fileLinks";
 import type { Finding, ReviewFile, Severity, Verdict } from "../lib/review";
+import type { Flavour } from "../lib/flavour";
 import { DocIcon, HudCheckIcon } from "./icons";
 import { Md } from "./Md";
 
@@ -125,7 +126,8 @@ export interface ReviewedFinding {
 
 /** The summary page's table: every finding across the files, with its severity and your verdict. */
 // The actions send a message, so they wait while Claude works: a message sent then would skip the composer's queue.
-export function ReviewSummaryTable({ rows, onAction, busy = false, architecture = false }: { rows: ReviewedFinding[]; onAction: (text: string) => void; busy?: boolean; architecture?: boolean }) {
+// Start Build and Fix them switch the chat to Build with the message they send.
+export function ReviewSummaryTable({ rows, onAction, busy = false, architecture = false }: { rows: ReviewedFinding[]; onAction: (text: string, switchTo?: Flavour) => void; busy?: boolean; architecture?: boolean }) {
   const counts = (s: Severity) => rows.filter((r) => r.finding.severity === s).length;
   const agreed = rows.filter((r) => r.verdict === "agree").length;
   return (
@@ -170,7 +172,7 @@ export function ReviewSummaryTable({ rows, onAction, busy = false, architecture 
       <div className="review-actions">
         {architecture ? (
           <>
-            <button className="primary" disabled={busy} onClick={() => onAction("Start Build.")}>
+            <button className="primary" disabled={busy} onClick={() => onAction("Start Build.", "build")}>
               Start Build
             </button>
             <button disabled={busy} onClick={() => onAction("Write it up: put the architecture, the decisions and the accepted concerns in a local markdown file.")}>
@@ -182,7 +184,7 @@ export function ReviewSummaryTable({ rows, onAction, busy = false, architecture 
             <button className="primary" disabled={busy} onClick={() => onAction("Write it up: put the accepted findings in a local file, grouped by file.")}>
               Write it up
             </button>
-            <button disabled={busy} onClick={() => onAction("Fix them: hand the accepted findings to incremental-dev as the plan.")}>
+            <button disabled={busy} onClick={() => onAction("Fix them: hand the accepted findings to incremental-dev as the plan.", "build")}>
               Fix them
             </button>
           </>

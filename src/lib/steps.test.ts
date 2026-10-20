@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatItem } from "../store";
-import { andNext, isApproval, isQuestion, movesOn, pageLabel, pagesOf, pageTitle, parseHeading, promptText, startedChoice, startedFlavour, stayedIn } from "./steps";
+import { andNext, COMMIT_NEXT, continueText, continuedIn, isApproval, isQuestion, movesOn, SKIP_COMMIT_NEXT, pageLabel, pagesOf, pageTitle, parseHeading, promptText, startedChoice, startedFlavour, stayedIn } from "./steps";
 
 describe("parseHeading", () => {
   it("reads each kind of heading the prompt asks for", () => {
@@ -212,6 +212,17 @@ describe("questions about a step", () => {
     // The change request is the version shown; the answer never was.
     expect(pages[0].main).toBe(2);
     expect(pages[0].turns[1].items).toEqual([{ type: "assistant", id: "a2", text: "## The Twelve-Factor App\nIt's a short manifesto." }]);
+  });
+});
+
+describe("the answers that move on without being a plain Next", () => {
+  it("counts a Step page's commit answers and a flavour continued from the badge as moving on, not as questions", () => {
+    for (const text of [COMMIT_NEXT, SKIP_COMMIT_NEXT, continueText("Review"), continueText("Build", true)]) {
+      expect(movesOn(text)).toBe(true);
+      expect(isQuestion(text)).toBe(false);
+    }
+    expect(continuedIn("Continue in Design.")).toBe(true);
+    expect(continuedIn("Continue in the auth flow")).toBe(false);
   });
 });
 

@@ -9,7 +9,7 @@ describe("ReviewSummaryTable", () => {
     const onAction = vi.fn();
     render(<ReviewSummaryTable rows={rows} onAction={onAction} />);
     fireEvent.click(screen.getByRole("button", { name: "Fix them" }));
-    expect(onAction).toHaveBeenLastCalledWith(expect.stringMatching(/^Fix them:/));
+    expect(onAction).toHaveBeenLastCalledWith(expect.stringMatching(/^Fix them:/), "build");
     fireEvent.click(screen.getByRole("button", { name: "Write it up" }));
     expect(onAction).toHaveBeenLastCalledWith(expect.stringMatching(/^Write it up:/));
   });
