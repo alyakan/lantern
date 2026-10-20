@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { hasPendingPrompt, type State } from "../store";
+import type { Chats } from "../sessions";
 
 /**
  * How many minutes a chat you aren't looking at may sit idle before it goes to sleep (Settings > General): its claude
@@ -48,8 +49,11 @@ export function useSleepMinutes(): number {
  * background), has a conversation to come back to, and isn't one of the chats that stay awake: the one on screen, a team's
  * Lead or agent, a routine's.
  */
-export function canSleep(s: State, own: { active: boolean; agent: boolean; routine: boolean }): boolean {
-  if (own.active || own.agent || own.routine || s.orchestrator) return false;
+export function canSleep(s: State, own: { active: boolean; agent: boolean; routine: boolean; team?: boolean }): boolean {
+  // A team's Lead or agent sleeps only with its whole team (`team`: it is being asked as one of its members).
+  if (own.active || own.routine || (!own.team && (own.agent || s.orchestrator))) return false;
+  // A merge card still open would be gone when its Lead wakes: it is the user's to answer first.
+  if (s.proposals.some((p) => p.status === "open")) return false;
   if (s.status !== "idle" || s.thinking || !s.folder || !s.sessionId || s.items.length === 0) return false;
   if (s.queued.length > 0 || s.wakes.length > 0 || s.backgroundTasks.length > 0 || s.setup || hasPendingPrompt(s.items)) return false;
   // A command the user started from the box, or the project's Run command: asleep, its process would be stopped.
@@ -67,4 +71,24 @@ export function sweep(clock: Record<string, number>, eligible: ReadonlySet<strin
   const next: Record<string, number> = {};
   for (const slot of eligible) next[slot] = clock[slot] ?? now;
   return { clock: next, due: afterMs > 0 ? Object.keys(next).filter((slot) => now - next[slot] >= afterMs) : [] };
+}
+
+/** The members of the team `lead` is the Lead of: the Lead, then the agents it started. */
+export function teamSlots(chats: Chats, lead: string): string[] {
+  return [lead, ...Object.entries(chats.agents).flatMap(([slot, meta]) => (meta.parent === lead && chats.slots[slot] ? [slot] : []))];
+}
+
+/** The members a team goes to sleep with: an agent its Lead stopped has no process to free and isn't brought back, so it stays as it is. */
+export function membersToSleep(chats: Chats, lead: string): string[] {
+  return teamSlots(chats, lead).filter((slot) => !(slot !== lead && chats.slots[slot].status === "ended" && chats.slots[slot].leadStopped));
+}
+
+/**
+ * The Leads whose whole team may go to sleep now: every member is resting, and none of them is the chat on screen. */
+export function teamsAtRest(chats: Chats, routine: (slot: string) => boolean): string[] {
+  return Object.entries(chats.slots).flatMap(([lead, state]) => {
+    if (!state.orchestrator || chats.agents[lead]) return [];
+    const resting = membersToSleep(chats, lead).every((slot) => canSleep(chats.slots[slot], { active: slot === chats.active, agent: !!chats.agents[slot], routine: routine(slot), team: true }));
+    return resting ? [lead] : [];
+  });
 }

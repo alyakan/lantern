@@ -221,7 +221,7 @@ function GeneralPage({ keepAwake, onKeepAwake, notify, onNotify, theme, onTheme,
             ))}
           </select>
         </label>
-        <span className="settings-muted">Every open chat keeps a Claude process and its messages in memory. A chat you aren't looking at that has been idle this long is put to sleep: its process stops and its messages are let go, and it stays in the sidebar. Opening it brings it back where it was. A chat that is working, waiting for you, running a command or part of a team is never put to sleep.</span>
+        <span className="settings-muted">Every open chat keeps a Claude process and its messages in memory. A chat you aren't looking at that has been idle this long is put to sleep: its process stops and its messages are let go, and it stays in the sidebar. Opening it brings it back where it was. A chat that is working, waiting for you or running a command is never put to sleep. A team sleeps and wakes as one (its Lead and its agents), once every one of them is resting and none is the chat you're looking at; a merge card still waiting for you keeps it awake.</span>
       </section>
       <section className="general-section" aria-labelledby="general-sound">
         <h3 id="general-sound" className="general-title">

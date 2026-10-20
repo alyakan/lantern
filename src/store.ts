@@ -9,6 +9,7 @@ import { localUrlIn } from "./lib/localUrl";
 import { readSkillNote } from "./lib/skillNote";
 import { NO_REVIEW, type ReviewInfo, type ReviewSetting } from "./lib/reviewChain";
 import type { Subagents } from "./lib/workflow";
+import type { SavedChat } from "./lib/restore";
 
 export interface EditInfo {
   path: string;
@@ -270,6 +271,8 @@ export interface State {
   run: RunTask | null;
   /** What an asleep chat is called (it has no messages to take a title from). */
   asleepTitle: string | null;
+  /** What an asleep chat is, as it is saved for the next launch: for a team's Lead or agent, the part it had in the team. */
+  asleepSaved: SavedChat | null;
   /** How many turns before the first message shown are on disk and not loaded: a long session opens with its last turns. */
   earlierTurns: number;
 }
@@ -355,6 +358,7 @@ export const initialState: State = {
   setup: null,
   run: null,
   asleepTitle: null,
+  asleepSaved: null,
   earlierTurns: 0,
 };
 
@@ -384,7 +388,7 @@ export type Action =
   | { type: "earlier_failed"; text: string }
   | { type: "session_ready" }
   /** The chat goes to sleep (see Status): its history is dropped, and `title` is what it is called until it wakes. */
-  | { type: "sleep"; folder: string; sessionId: string; title: string }
+  | { type: "sleep"; folder: string; sessionId: string; title: string; saved?: SavedChat }
   /** The chat started with the project's notes: what it was told (after the chat opened, so the open doesn't clear it). */
   | { type: "notes_applied"; text: string | null }
   /** `auto`: sent by Lantern from agents' notes, not typed by the user. */
@@ -508,7 +512,7 @@ function withoutTimes(items: ChatItem[]): ChatItem[] {
 
 // An empty conversation for `folder`, as after opening it.
 function freshSession(state: State, folder: string | null): State {
-  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null, earlierTurns: 0 };
+  return { ...state, folder, sessionId: null, contextUsed: null, queued: [], status: "starting", flavourPick: null, explainPick: false, flavourStart: null, explainStart: false, items: [], changedFiles: [], testRuns: [], editCount: 0, selectedFile: null, lastEdited: null, follow: true, banner: null, model: null, thinking: false, backgroundTasks: [], backgroundRuns: {}, modelUsage: [], sessionCost: null, sessionTokens: 0, lastEndedTask: null, stopRequested: false, leadStopped: false, cleared: false, revertUndo: null, restoreUndo: null, revertNotes: [], movedFrom: null, notesApplied: null, setup: null, run: null, wakes: [], autoStreak: 0, proposals: [], reviews: [], reviewTarget: null, costBase: 0, costSeen: 0, tokenBase: 0, asleepTitle: null, asleepSaved: null, earlierTurns: 0 };
 }
 
 // Claude replying with no prompt from here (a background task ended and it reports back) is a turn like any other,
@@ -792,7 +796,7 @@ export function reducer(state: State, action: Action): State {
     case "folder_opened":
       return freshSession(state, action.folder);
     case "sleep":
-      return { ...freshSession(state, action.folder), sessionId: action.sessionId, status: "asleep", asleepTitle: action.title };
+      return { ...freshSession(state, action.folder), sessionId: action.sessionId, status: "asleep", asleepTitle: action.title, asleepSaved: action.saved ?? null };
     case "folder_cleared":
       return { ...freshSession(state, null), status: "no_folder" };
     case "history_loaded": {

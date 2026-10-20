@@ -27,25 +27,35 @@ export interface SavedChat {
 
 const KEY = "session.openChats";
 
+/**
+ * One open chat as it is saved for the next launch, or null when it isn't worth bringing back: it has no conversation and
+ * nothing typed, or it is an agent that can't come back inside its team.
+ */
+export function savedChatOf(slot: string, slots: Record<string, State>, active: string, drafts: Record<string, string>, titles: Record<string, string>, agents: Record<string, AgentMeta> = {}): SavedChat | null {
+  const s = slots[slot];
+  if (!s) return null;
+  const draft = drafts[slot]?.trim() ? drafts[slot] : "";
+  // An asleep chat is saved as it was when it went to sleep (a team member keeps its part in the team).
+  if (s.status === "asleep" && s.asleepSaved) return { ...s.asleepSaved, draft, active: slot === active };
+  // An asleep chat has no messages in memory, but it has its conversation.
+  const sessionId = s.items.length > 0 || s.status === "asleep" ? s.sessionId : null;
+  if (!s.folder || (!sessionId && !draft)) return null;
+  const meta = agents[slot];
+  const parentSession = meta ? (slots[meta.parent]?.sessionId ?? null) : null;
+  // An agent only comes back inside its team: one the Lead stopped, or whose Lead has no conversation to come back to,
+  // is left out (saved as it was, it would return as an ordinary chat).
+  if (meta && (!parentSession || s.leadStopped)) return null;
+  const orchestra: SavedTeamRole | undefined = s.orchestrator
+    ? { role: "main", ...(s.review.on ? { review: s.review } : {}) }
+    : meta && parentSession
+      ? { role: "worker", name: meta.name, parentSession, branch: meta.branch, base: meta.base, isolation: meta.isolation, ...(meta.role ? { agentRole: meta.role } : {}), ...(meta.hidden ? { hidden: true } : {}), ...(s.model ? { model: s.model } : {}) }
+      : undefined;
+  return { sessionId, folder: s.folder, title: meta?.name ?? chatTitle(s, titles), draft, active: slot === active, ...(orchestra ? { orchestra } : {}) };
+}
+
 /** The open chats worth bringing back: those with a conversation or with text typed in their box. */
 export function chatsToSave(slots: Record<string, State>, active: string, drafts: Record<string, string>, titles: Record<string, string>, agents: Record<string, AgentMeta> = {}): SavedChat[] {
-  return Object.entries(slots).flatMap(([slot, s]) => {
-    const draft = drafts[slot]?.trim() ? drafts[slot] : "";
-    // An asleep chat has no messages in memory, but it has its conversation.
-    const sessionId = s.items.length > 0 || s.status === "asleep" ? s.sessionId : null;
-    if (!s.folder || (!sessionId && !draft)) return [];
-    const meta = agents[slot];
-    const parentSession = meta ? (slots[meta.parent]?.sessionId ?? null) : null;
-    // An agent only comes back inside its team: one the Lead stopped, or whose Lead has no conversation to come back to,
-    // is left out (saved as it was, it would return as an ordinary chat).
-    if (meta && (!parentSession || s.leadStopped)) return [];
-    const orchestra: SavedTeamRole | undefined = s.orchestrator
-      ? { role: "main", ...(s.review.on ? { review: s.review } : {}) }
-      : meta && parentSession
-        ? { role: "worker", name: meta.name, parentSession, branch: meta.branch, base: meta.base, isolation: meta.isolation, ...(meta.role ? { agentRole: meta.role } : {}), ...(meta.hidden ? { hidden: true } : {}), ...(s.model ? { model: s.model } : {}) }
-        : undefined;
-    return [{ sessionId, folder: s.folder, title: meta?.name ?? chatTitle(s, titles), draft, active: slot === active, ...(orchestra ? { orchestra } : {}) }];
-  });
+  return Object.keys(slots).flatMap((slot) => savedChatOf(slot, slots, active, drafts, titles, agents) ?? []);
 }
 
 /**
@@ -98,6 +108,24 @@ export function restorable(chats: SavedChat[], agentSessions: ReadonlySet<string
 /** `chats` without the workers whose folders (a worktree removed after its merge) are gone. */
 export function withoutGone(chats: SavedChat[], gone: ReadonlySet<string>): SavedChat[] {
   return chats.filter((c) => c.orchestra?.role !== "worker" || !gone.has(c.folder));
+}
+
+/** The session a saved chat is in a team by: a Lead's own, or its Lead's for an agent (null: not in a team). */
+export function teamOf(c: SavedChat): string | null {
+  return c.orchestra?.role === "main" ? c.sessionId : c.orchestra?.role === "worker" ? c.orchestra.parentSession : null;
+}
+
+/**
+ * Whether Restore all starts `c` now, rather than leaving it asleep in the sidebar until it is opened: the chat that was on
+ * screen, and the team it was in (a team sleeps and wakes as one). An agent whose Lead is already open (`openLeads`: the
+ * sessions of Leads that are awake) comes back under it now: asleep it would be an ordinary chat. A chat with no
+ * conversation yet (typed in, never sent) has nothing to put to sleep.
+ */
+export function startsNow(c: SavedChat, first: SavedChat, openLeads: ReadonlySet<string>): boolean {
+  if (c === first || !c.sessionId) return true;
+  if (c.orchestra?.role === "worker" && openLeads.has(c.orchestra.parentSession)) return true;
+  const team = teamOf(c);
+  return team !== null && team === teamOf(first);
 }
 
 /** The one that was on screen first, then the rest as they were. */
