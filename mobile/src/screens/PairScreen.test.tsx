@@ -94,7 +94,7 @@ describe("a pairing link that arrived by itself", () => {
   it("names the Mac and where it points, and pairs only when confirmed", async () => {
     const { controller, pair } = rig();
     const onCancel = jest.fn();
-    await renderWith(<ConfirmLink link={link} onCancel={onCancel} />, {}, controller);
+    await renderWith(<ConfirmLink link={link} onCancel={onCancel} onDone={jest.fn()} />, {}, controller);
     expect(screen.getByText("Pair with Aly's Mac?")).toBeTruthy();
     expect(screen.getByText(/points to 192\.168\.1\.20/)).toBeTruthy();
     expect(pair).not.toHaveBeenCalled();
@@ -106,12 +106,22 @@ describe("a pairing link that arrived by itself", () => {
 
   it("says why a link can't be used, and why pairing failed", async () => {
     const { controller, pair } = rig();
-    const bad = await renderWith(<ConfirmLink link="https://example.com" onCancel={jest.fn()} />, {}, controller);
+    const bad = await renderWith(<ConfirmLink link="https://example.com" onCancel={jest.fn()} onDone={jest.fn()} />, {}, controller);
     expect(screen.getByText("That isn't a Lantern pairing code.")).toBeTruthy();
     await bad.unmount();
     pair.mockResolvedValue("Your Mac didn't take this code. Show a new one on your Mac and try again.");
-    await renderWith(<ConfirmLink link={link} onCancel={jest.fn()} />, {}, controller);
+    const onDone = jest.fn();
+    await renderWith(<ConfirmLink link={link} onCancel={jest.fn()} onDone={onDone} />, {}, controller);
     await fireEvent.press(screen.getByRole("button", { name: "Pair" }));
     await waitFor(() => expect(screen.getByText(/didn't take this code/)).toBeTruthy());
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it("is done once paired: the link is spent, so the confirmation must not stay up to be pressed again", async () => {
+    const { controller } = rig();
+    const onDone = jest.fn();
+    await renderWith(<ConfirmLink link={link} onCancel={jest.fn()} onDone={onDone} />, {}, controller);
+    await fireEvent.press(screen.getByRole("button", { name: "Pair" }));
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
   });
 });

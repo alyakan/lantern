@@ -1,0 +1,12 @@
+# Denies the command Claude asked to run; the card goes and one fewer thing waits.
+# Starts from a phone already paired with the scripted Mac (run pair.yaml first, with the same fixture_gateway running).
+appId: io.github.alyakan.lantern.mobile
+---
+- launchApp
+- assertVisible: "2 things"
+- tapOn: "Review"
+- assertVisible: "git push origin release/0.1.53"
+- tapOn: "Deny"
+- assertVisible: "Denied\\."
+- tapOn: "Done"
+- assertVisible: "1 thing"

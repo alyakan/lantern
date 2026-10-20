@@ -85,7 +85,7 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + 6, paddingHorizontal: 16, paddingBottom: 10 }}>
         <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={8} style={[{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }, shadow.float, { shadowOpacity: 0.08 }]}>
-          <Txt variant="heading">‹</Txt>
+          <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
         </Pressable>
         <View style={{ flex: 1 }}>
           <Txt variant="heading" numberOfLines={1} accessibilityRole="header">

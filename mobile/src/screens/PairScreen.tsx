@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { ActivityIndicator, TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
+import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useController } from "../shell/hooks";
 import { Button, Txt } from "../ui/components";
@@ -49,6 +50,7 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.night }}>
+      <StatusBar style="light" />
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingTop: insets.top }}>
         {camera ? (
           <CameraView style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} facing="back" barcodeScannerSettings={{ barcodeTypes: ["qr"] }} onBarcodeScanned={scanned} />
@@ -114,7 +116,7 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
 }
 
 /** A pairing link that arrived by itself (tapped somewhere): it names a Mac, and nothing pairs until it is confirmed. */
-export function ConfirmLink({ link, onCancel }: { link: string; onCancel: () => void }) {
+export function ConfirmLink({ link, onCancel, onDone }: { link: string; onCancel: () => void; onDone: () => void }) {
   const controller = useController();
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
@@ -147,7 +149,9 @@ export function ConfirmLink({ link, onCancel }: { link: string; onCancel: () => 
               setBusy(true);
               const problem = await controller.pair(link);
               setBusy(false);
+              // Paired: the link is spent, and the confirmation going away is what lets the app show Home.
               if (problem) setError(problem);
+              else onDone();
             }}
           />
           <Button label="Cancel" kind="ghost" onPress={onCancel} />

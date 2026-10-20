@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, TextInput, View } from "react-native";
+import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useController, useSyncState } from "../shell/hooks";
 import { Button, Tag, Txt } from "../ui/components";
@@ -105,6 +106,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   if (!asked) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.night, padding: space.xl, paddingTop: insets.top + 60, gap: 16 }}>
+        <StatusBar style="light" />
         <Txt variant="title" tone="white">
           This was answered already
         </Txt>
@@ -143,6 +145,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.night, paddingTop: insets.top + 56, paddingBottom: Math.max(insets.bottom, 20), paddingHorizontal: 22 }}>
+      <StatusBar style="light" />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: 16 }}>
         <Tag>{view.tag}</Tag>
         <Txt variant="title" tone="white" accessibilityRole="header">

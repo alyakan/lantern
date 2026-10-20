@@ -1,0 +1,22 @@
+# Pairs a fresh install with the scripted Mac and lands on Home.
+#
+#   cd src-tauri && cargo run --example fixture_gateway     # then type `pair` on its stdin for a link
+#   maestro test -e LINK='lantern://pair?…' mobile/.maestro/pair.yaml
+#
+# The link works once, for five minutes: get a new one for each flow.
+appId: io.github.alyakan.lantern.mobile
+---
+- launchApp:
+    clearState: true
+- openLink: ${LINK}
+# iOS asks "Open in Lantern?" first; Android doesn't.
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - tapOn: "Open"
+- assertVisible: "Pair with Fixture Mac?"
+- tapOn: "Pair"
+- assertVisible: "2 things"
+- assertVisible: "waiting on you"
+- assertVisible: "Push the release branch"

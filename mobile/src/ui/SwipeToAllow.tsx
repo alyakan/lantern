@@ -63,9 +63,7 @@ export function SwipeToAllow({ onAllow, label = "Swipe to allow" }: { onAllow: (
         {...pan.panHandlers}
         style={{ position: "absolute", left: INSET, top: INSET, width: KNOB, height: KNOB, borderRadius: KNOB / 2, backgroundColor: colors.go, alignItems: "center", justifyContent: "center", transform: [{ translateX: x }] }}
       >
-        <Txt variant="heading" tone="white">
-          ›
-        </Txt>
+        <View accessibilityElementsHidden style={{ width: 14, height: 14, marginLeft: -4, borderTopWidth: 3, borderRightWidth: 3, borderColor: "#fff", borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
       </Animated.View>
     </View>
   );

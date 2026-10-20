@@ -91,7 +91,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     await controller.unpair();
   };
 
-  if (pendingLink) return <ConfirmLink link={pendingLink} onCancel={() => onClearLink?.()} />;
+  if (pendingLink) return <ConfirmLink link={pendingLink} onCancel={() => onClearLink?.()} onDone={() => onClearLink?.()} />;
   if (connection.kind === "unpaired") return <PairScreen />;
   if (connection.kind === "connecting" || (connection.kind === "offline" && chats.length === 0)) {
     return <OfflineScreen state={connection} onRetry={() => controller.resume()} onUnpair={unpair} />;

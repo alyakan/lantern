@@ -1,0 +1,13 @@
+# Approves the command with the swipe: the one gesture the unit tests can't drive.
+# Starts from a phone already paired with the scripted Mac (run pair.yaml first, with the same fixture_gateway running).
+appId: io.github.alyakan.lantern.mobile
+---
+- launchApp
+- tapOn: "Review"
+- assertVisible: "Swipe to allow"
+- swipe:
+    from:
+      text: "Swipe to allow"
+    direction: RIGHT
+    duration: 400
+- assertVisible: "Allowed\\."
