@@ -1169,12 +1169,13 @@ export default function App() {
     }
     dispatch({ type: "flavour_picked", flavour: pick, explain: explainNext });
   };
-  // The badge on a Step-by-step chat that's under way switches at once, while Claude is idle: "Continue in Review." goes
-  // with the note, and Claude starts the flavour from where the work is. Busy, it waits for your next message.
+  // The badge on a Step-by-step chat that's under way switches to another flavour at once, while Claude is idle: "Continue
+  // in Review." goes with the note, and Claude starts the flavour from where the work is. Busy, or only turning Explain as
+  // you go on or off (which shouldn't start the flavour over), it waits for your next message.
   const pickFlavourNow = (next: Flavour, wantExplain?: boolean) => {
     const inChat = inConversation(state);
     const explainNext = canExplain(next) && (wantExplain ?? explain);
-    if (state.mode !== "steps" || state.status !== "idle" || !state.items.length || (next === inChat.flavour && explainNext === inChat.explain)) return pickFlavour(next, wantExplain);
+    if (state.mode !== "steps" || state.status !== "idle" || !state.items.length || next === inChat.flavour) return pickFlavour(next, wantExplain);
     if (state.flavourPick) dispatch({ type: "flavour_picked", flavour: null, explain: false });
     sendIn(active, continueText(FLAVOUR_LABEL[next], explainNext), undefined, false, { flavour: next, explain: explainNext });
   };

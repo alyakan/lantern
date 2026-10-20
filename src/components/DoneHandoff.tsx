@@ -7,7 +7,7 @@ import type { Flavour } from "../lib/flavour";
 import { UPDATE_MAP } from "../lib/steps";
 
 /** What Review this branch sends, switching the chat to Review. */
-export const REVIEW_BUILD = "Review what this Build changed: this branch against its base, a file per page.";
+export const REVIEW_BUILD = "Review what this Build changed: this branch against its base, and any changes not committed yet, a file per page.";
 
 /** What the Done page hands off to: the side panel, the plan's export, and a fresh chat. */
 export interface Handoff {

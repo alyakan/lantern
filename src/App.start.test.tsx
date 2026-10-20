@@ -104,6 +104,22 @@ describe("switching flavour partway through", () => {
     expect(text.trimEnd().endsWith("Continue in Review.")).toBe(true);
     await settle();
   });
+
+  it("leaves turning Explain as you go on or off for your next message, so the flavour doesn't start over", async () => {
+    const calls = await launch();
+    fireEvent.click(await screen.findByRole("button", { name: /^Build/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Workflow: Step by step · Build" })).toBeEnabled());
+    const box = screen.getByRole("textbox", { name: "Message to Claude" });
+    fireEvent.change(box, { target: { value: "add slugify" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await settle();
+    const sent = calls.filter(([c]) => c === "send_message").length;
+    fireEvent.click(screen.getByRole("button", { name: /^Build/, expanded: false }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /Explain as you go/ }));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(calls.filter(([c]) => c === "send_message").length).toBe(sent);
+    expect(screen.getByRole("button", { name: /^Build/, expanded: false })).toHaveTextContent("explaining");
+  });
 });
 
 describe("Review a PR", () => {

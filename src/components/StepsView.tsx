@@ -10,7 +10,7 @@ import { recallScroll, rememberScroll } from "../lib/scrollMemory";
 import { messageTime } from "../lib/time";
 import { initials, useUserName } from "../lib/userName";
 import type { State } from "../store";
-import { COMMIT_NEXT, continuedIn, isApproval, isCommitAnswer, movesOn, pageLabel, pagesOf, pageTitle, promptText, SKIP_COMMIT_NEXT, startedChoice, startedFlavour, startText, stayedIn, stayText, type StepPage, type StepTurn } from "../lib/steps";
+import { COMMIT_NEXT, continuedIn, isApproval, isCommitAnswer, movesOn, pageLabel, pagesOf, pageTitle, promptText, SKIP_COMMIT_NEXT, startedChoice, UPDATE_MAP, startedFlavour, startText, stayedIn, stayText, type StepPage, type StepTurn } from "../lib/steps";
 import { mattersToTask } from "../lib/commands";
 import type { BackgroundRun, ChatItem, ToolItem } from "../store";
 import { workingVerb } from "../lib/verbs";
@@ -210,8 +210,10 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
   const teach = explain;
   // Review: whether a file has come yet, so Next opens the first one or the next.
   const filesSoFar = review && pages.slice(0, at + 1).some((p) => p.heading?.kind === "file");
-  // A Build step's Next also answers whether to commit it, so Claude doesn't ask on a page of its own.
-  const buildStep = heading?.kind === "step" && !review && !arch && flavour !== "debug";
+  // A Build step's Next also answers whether to commit it, so Claude doesn't ask on a page of its own. A map brought up to
+  // date in the middle of a step answers for the step before it.
+  const mapUpdate = heading?.kind === "overview" && page.turns[0].prompt.text.trim() === UPDATE_MAP;
+  const buildStep = (mapUpdate ? pages[at - 1]?.heading : heading)?.kind === "step" && !review && !arch && flavour !== "debug";
 
   // Review verdicts, per page and finding; the page's Next carries them. Kept outside the view while they're unsent
   // (switching chats or modes draws it again), and once sent they're read back from the Next that carried them.
