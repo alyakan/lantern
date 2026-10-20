@@ -110,32 +110,77 @@ pub async fn connect_lan(addr: &str) -> Result<Link, String> {
     Ok(pump(ws, addr.to_string()))
 }
 
-/// Says on the Wi-Fi that Lantern takes phones at `port`: Bonjour's `_lantern._tcp`. `id`: a short, stable name for this
-/// Mac (from its key), which the phone matches against the one it paired with.
+/// Says on the Wi-Fi that Lantern takes phones at `port`: Bonjour's `_lantern._tcp`, registered with macOS's own
+/// mDNSResponder (a second responder of our own next to it isn't heard by the system's browsing). `id`: a short, stable
+/// name for this Mac (from its key), which the phone matches against the one it paired with. Dropping it unregisters.
 pub struct Bonjour {
-    daemon: mdns_sd::ServiceDaemon,
-    fullname: String,
+    sd_ref: dns_sd::DNSServiceRef,
 }
 
-pub const SERVICE_TYPE: &str = "_lantern._tcp.local.";
+// The registration is only ever handed to DNSServiceRefDeallocate, once, from Drop.
+unsafe impl Send for Bonjour {}
+
+pub const SERVICE_TYPE: &str = "_lantern._tcp";
+
+mod dns_sd {
+    use std::ffi::{c_char, c_void};
+
+    pub type DNSServiceRef = *mut c_void;
+
+    // In libSystem (dns_sd.h), which every macOS program links.
+    extern "C" {
+        #[allow(clippy::too_many_arguments)]
+        pub fn DNSServiceRegister(
+            sd_ref: *mut DNSServiceRef,
+            flags: u32,
+            interface_index: u32,
+            name: *const c_char,
+            regtype: *const c_char,
+            domain: *const c_char,
+            host: *const c_char,
+            port: u16,
+            txt_len: u16,
+            txt_record: *const c_void,
+            callback: *const c_void,
+            context: *mut c_void,
+        ) -> i32;
+        pub fn DNSServiceRefDeallocate(sd_ref: DNSServiceRef);
+    }
+}
+
+/// A TXT record: each `key=value` with its length before it.
+fn txt_record(pairs: &[(&str, &str)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (k, v) in pairs {
+        let entry = format!("{k}={v}");
+        let bytes = &entry.as_bytes()[..entry.len().min(255)];
+        out.push(bytes.len() as u8);
+        out.extend_from_slice(bytes);
+    }
+    out
+}
 
 impl Bonjour {
     pub fn advertise(port: u16, mac_name: &str, id: &str) -> Result<Self, String> {
-        let daemon = mdns_sd::ServiceDaemon::new().map_err(|e| e.to_string())?;
-        let host = format!("lantern-{id}.local.");
         let instance: String = mac_name.chars().filter(|c| !c.is_control() && *c != '.').take(60).collect();
-        let props = [("v", "1"), ("id", id)];
-        let info = mdns_sd::ServiceInfo::new(SERVICE_TYPE, &instance, &host, "", port, &props[..]).map_err(|e| e.to_string())?.enable_addr_auto();
-        let fullname = info.get_fullname().to_string();
-        daemon.register(info).map_err(|e| e.to_string())?;
-        Ok(Self { daemon, fullname })
+        let name = std::ffi::CString::new(instance).map_err(|e| e.to_string())?;
+        let regtype = std::ffi::CString::new(SERVICE_TYPE).map_err(|e| e.to_string())?;
+        let txt = txt_record(&[("v", "1"), ("id", id)]);
+        let mut sd_ref: dns_sd::DNSServiceRef = std::ptr::null_mut();
+        // SAFETY: every pointer is valid for the call; no callback is given, so nothing is called back later; the
+        // registration lives until Drop deallocates it.
+        let err = unsafe { dns_sd::DNSServiceRegister(&mut sd_ref, 0, 0, name.as_ptr(), regtype.as_ptr(), std::ptr::null(), std::ptr::null(), port.to_be(), txt.len() as u16, txt.as_ptr().cast(), std::ptr::null(), std::ptr::null_mut()) };
+        if err != 0 || sd_ref.is_null() {
+            return Err(format!("Bonjour wouldn't take Lantern's record (error {err})."));
+        }
+        Ok(Self { sd_ref })
     }
 }
 
 impl Drop for Bonjour {
     fn drop(&mut self) {
-        let _ = self.daemon.unregister(&self.fullname);
-        let _ = self.daemon.shutdown();
+        // SAFETY: sd_ref came from a successful DNSServiceRegister and is deallocated only here.
+        unsafe { dns_sd::DNSServiceRefDeallocate(self.sd_ref) };
     }
 }
 
@@ -199,6 +244,17 @@ mod tests {
         let link = tokio::time::timeout(std::time::Duration::from_secs(1), got_rx.recv()).await.expect("let in within a second");
         assert!(link.is_some() && started.elapsed() < std::time::Duration::from_secs(1));
         task.abort();
+    }
+
+    #[test]
+    fn a_txt_record_is_length_prefixed_pairs() {
+        assert_eq!(txt_record(&[("v", "1"), ("id", "ab")]), b"\x03v=1\x05id=ab".to_vec());
+    }
+
+    #[test]
+    fn bonjour_takes_lanterns_record_and_lets_it_go() {
+        let b = Bonjour::advertise(47999, "Lantern test", "test-id").expect("mDNSResponder registers it");
+        drop(b);
     }
 
     #[tokio::test]
