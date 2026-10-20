@@ -1791,6 +1791,8 @@ export function installMockBackend() {
           return mockMemory();
         case "set_menu_bar":
         case "menubar_fit":
+        case "remote_window_chats":
+          return undefined;
         case "menubar_hide":
           return undefined;
         case "menubar_stats":

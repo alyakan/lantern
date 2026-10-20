@@ -29,6 +29,7 @@ pub mod slots;
 pub mod offstream;
 pub mod outside;
 pub mod relocate;
+pub mod remote;
 pub mod roles;
 pub mod storage;
 pub mod stream_parser;
@@ -78,6 +79,8 @@ pub struct AppState {
     setups: setup::SetupStore,
     /// "Keep restore points before each message" (Settings → General; the window sends it). On until the user turns it off.
     restore_points: std::sync::atomic::AtomicBool,
+    /// Where every chat's events leave from, and what is kept of them for a client joining late (see remote/).
+    remote: remote::Remote,
 }
 
 /// Where a test makes folders that must not be in the system temp dir (which recent folders leave out): the target dir
@@ -160,11 +163,29 @@ async fn login_path(state: &AppState) -> Option<String> {
     tauri::async_runtime::spawn_blocking(move || cell.get_or_init(cli_locator::login_shell_path).clone()).await.ok().flatten()
 }
 
-/// Sends a chat's events to the UI, and lets the orchestra see them too (a worker finishing a turn wakes its main agent).
+/// The bus and hub, with the window tapped in: it is sent every chat event as `ui-event` (see remote::for_window).
+fn window_remote(app: &AppHandle) -> remote::Remote {
+    let remote = remote::Remote::default();
+    let app = app.clone();
+    remote.tap_window(move |ev| {
+        let _ = app.emit("ui-event", &ev);
+    });
+    remote
+}
+
+/// Sends an event of chat `slot` out through the bus: to the window, the hub and any paired phone.
+fn publish(app: &AppHandle, slot: &str, event: ui_event::UiEvent) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.remote.publish(slot, event);
+    }
+}
+
+/// Sends a chat's events out (see `publish`), and lets the orchestra see them too (a worker finishing a turn wakes its
+/// main agent).
 fn emitter(app: &AppHandle) -> impl Fn(SlotEvent) + Send + Sync + Clone + 'static {
     let app = app.clone();
     move |ev| {
-        let _ = app.emit("ui-event", &ev);
+        publish(&app, &ev.slot, ev.event.clone());
         if let Some(state) = app.try_state::<AppState>() {
             // Its claude is gone: the pid it had could be given to some other process, which must not pass for it.
             if matches!(ev.event, ui_event::UiEvent::SessionEnded { .. }) {
@@ -241,7 +262,7 @@ fn worker_ceiling(state: &AppState, slot: &str) -> Option<Mode> {
 
 /// Tells the window a worker runs on Ask: its mode was lowered under it.
 fn told_ask(app: &AppHandle, slot: &str) {
-    let _ = app.emit("ui-event", SlotEvent { slot: slot.to_string(), event: ui_event::UiEvent::AgentMode { mode: "ask".into() } });
+    publish(app, slot, ui_event::UiEvent::AgentMode { mode: "ask".into() });
 }
 
 /// How the worker `worker` runs once its main agent's mode allows no more than `ceiling`: lowered (its claude restarted on
@@ -279,7 +300,7 @@ struct AppHost {
 
 impl orchestra::Host for AppHost {
     fn emit(&self, slot: &str, event: ui_event::UiEvent) {
-        let _ = self.app.emit("ui-event", SlotEvent { slot: slot.to_string(), event });
+        publish(&self.app, slot, event);
     }
 
     fn main_folder(&self, main: &str) -> Result<std::path::PathBuf, String> {
@@ -582,6 +603,9 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, 
     slot.claude_pid.store(started.pid(), std::sync::atomic::Ordering::SeqCst);
     started.initialize().await;
     *session = Some(started);
+    if let Some(state) = app.try_state::<AppState>() {
+        state.remote.hub.opened(id, &cfg.folder.display().to_string());
+    }
     *slot.config.lock().unwrap() = Some(cfg);
     Ok(())
 }
@@ -828,6 +852,7 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
 async fn close_session(state: State<'_, AppState>, slot: String) -> Result<(), String> {
     state.orchestra.forget(&slot);
     state.asides.stop_slot(&slot).await;
+    state.remote.hub.closed(&slot);
     if let Some(s) = state.slots.remove(&slot) {
         s.shut_down().await;
     }
@@ -903,12 +928,20 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 #[tauri::command]
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
 async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
-    let s = state.slots.get(&slot)?;
+    send_user_message(&app, &state, &slot, &text, remote::SENT_BY_DESKTOP).await
+}
+
+/// Sends what the user typed (in the window, or on a paired phone: `sent_by`) to chat `slot`. Every client is told of it
+/// first, so it comes before Claude's answer; the window, which shows its own messages already, isn't.
+async fn send_user_message(app: &AppHandle, state: &AppState, slot: &str, text: &str, sent_by: &str) -> Result<usize, String> {
+    let s = state.slots.get(slot)?;
     // An agent that was put to sleep to save memory wakes for the user's message too.
-    state.orchestra.wake_agent(&slot).await?;
-    let turn = send_text(&app, &slot, &s, &text).await?;
+    state.orchestra.wake_agent(slot).await?;
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as u64);
+    state.remote.publish(slot, ui_event::UiEvent::UserText { text: text.to_string(), at, sent_by: Some(sent_by.to_string()) });
+    let turn = send_text(app, slot, &s, text).await?;
     // Said to a worker by the user themselves: its main agent hears of it with its next wake-up.
-    state.orchestra.note_user_message(&slot, &text);
+    state.orchestra.note_user_message(slot, text);
     Ok(turn)
 }
 
@@ -1524,10 +1557,33 @@ async fn change_summary(
 
 #[tauri::command]
 fn respond_permission(state: State<'_, AppState>, slot: String, request_id: String, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>) -> Result<(), String> {
-    if state.slots.get(&slot)?.bridge.respond(&request_id, allow, message, updated_input) {
+    answer_prompt(&state, &slot, &request_id, allow, message, updated_input, remote::SENT_BY_DESKTOP)
+}
+
+/// What the window knows of its open chats, for the session hub: the titles it shows, and which are asleep.
+#[tauri::command]
+fn remote_window_chats(state: State<'_, AppState>, chats: Vec<remote::WindowChat>) {
+    state.remote.window_chats(&chats);
+}
+
+/// Asks the window to wake an asleep chat for a paired phone (the window wakes chats: it has what they were restored
+/// with). Refused for a chat that isn't listed, or isn't asleep.
+#[allow(dead_code)] // The gateway calls it (M3).
+fn request_wake(app: &AppHandle, state: &AppState, slot: &str) -> Result<(), String> {
+    if !state.remote.wakeable(slot) {
+        return Err("That chat isn't asleep.".into());
+    }
+    app.emit("remote-wake", slot).map_err(|e| e.to_string())
+}
+
+/// Answers a prompt of chat `slot` for whoever answered it (`by`: the window, or a paired phone). The first answer
+/// counts: every client is told it was answered, and a later answer is refused.
+fn answer_prompt(state: &AppState, slot: &str, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> Result<(), String> {
+    if state.slots.get(slot)?.bridge.respond(request_id, allow, message, updated_input) {
+        state.remote.publish(slot, ui_event::UiEvent::PermissionResolved { request_id: request_id.to_string(), allow, by: by.to_string() });
         Ok(())
     } else {
-        Err("That permission request is no longer pending.".into())
+        Err("That permission request is no longer pending: it was answered already, or Claude stopped asking.".into())
     }
 }
 
@@ -2142,7 +2198,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into() });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), remote: window_remote(app.handle()) });
             app.manage(updates::Updates::default());
             app.manage(awake::Awake::default());
             app.manage(menu_bar::MenuBar::default());
@@ -2188,6 +2244,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             locate_claude,
+            remote_window_chats,
             claude_login,
             sidebar_menu,
             keep_awake,

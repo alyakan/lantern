@@ -3,6 +3,7 @@ import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { Role } from "./lib/roles";
+import type { WindowChat } from "./lib/remoteChats";
 import type { ReviewSetting } from "./lib/reviewChain";
 import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
@@ -325,6 +326,10 @@ export const api = {
   onMenubarNeedChats: (cb: () => void): Promise<UnlistenFn> => listen("menubar-need-chats", () => cb()),
   /** The scan moved on, finished, or Claude marked suggestions. */
   onStorageChanged: (cb: () => void): Promise<UnlistenFn> => listen("storage-changed", () => cb()),
+  /** Tells the backend's session hub each open chat's title and which are asleep (see lib/remoteChats.ts). */
+  remoteWindowChats: (chats: WindowChat[]) => invoke<void>("remote_window_chats", { chats }),
+  /** A paired phone asked for an asleep chat: wake it where it is. */
+  onRemoteWake: (cb: (slot: string) => void): Promise<UnlistenFn> => listen<string>("remote-wake", (e) => cb(e.payload)),
   onUiEvent: (cb: (slot: string, event: UiEvent) => void): Promise<UnlistenFn> =>
     listen<{ slot: string; event: UiEvent }>("ui-event", (e) => cb(e.payload.slot, e.payload.event)),
 };

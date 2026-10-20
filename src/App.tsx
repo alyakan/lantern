@@ -5,6 +5,7 @@ import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { agentsAtRest, canSleep, membersToSleep, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
+import { windowChats } from "./lib/remoteChats";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome, type WorkView } from "./api";
@@ -685,16 +686,27 @@ export default function App() {
     }
   };
 
-  // An asleep chat is woken as soon as it is on screen, however it got there (the sidebar, a notification, Restore all…).
-  useEffect(() => {
-    const slot = active;
+  // Wakes an asleep chat (with its team, when it has one); nothing for one that is awake or already waking.
+  const wakeChat = (slot: string) => {
     const s = chats.slots[slot];
     if (s?.status !== "asleep" || !s.folder || !s.sessionId || waking.current.has(slot)) return;
     const lead = teamMain(chats, slot);
     if (lead && s.asleepSaved?.orchestra) return wakeTeam(lead);
     waking.current.add(slot);
     void resumeIn(slot, s.folder, s.sessionId).finally(() => waking.current.delete(slot));
-  }, [active, state.status]);
+  };
+  // An asleep chat is woken as soon as it is on screen, however it got there (the sidebar, a notification, Restore all…).
+  useEffect(() => wakeChat(active), [active, state.status]);
+  // A paired phone asked for a chat that is asleep (the backend checked it is one of these): it wakes where it is, without
+  // taking the screen. The ref is read when it happens, so it sees the chats as they are then.
+  const wakeRef = useRef(wakeChat);
+  wakeRef.current = wakeChat;
+  useEffect(() => {
+    const unlisten = api.onRemoteWake((slot) => wakeRef.current(slot)).catch(() => null);
+    return () => {
+      unlisten.then((f) => f?.());
+    };
+  }, []);
 
   // An agent's conversation is recorded once it has one, so it can be told from the user's own chats.
   useEffect(() => {
@@ -2027,6 +2039,13 @@ export default function App() {
   useEffect(() => {
     void api.publishMenubarChats(menuBarSent.current).catch(() => {});
   }, [menuBarKey]);
+  // The backend's session hub knows where each chat stands from its events; what only this window knows (the title it
+  // shows, which chats are asleep) it is told when that changes.
+  const hubList = windowChats(chats, openByProject);
+  const hubKey = JSON.stringify(hubList);
+  useEffect(() => {
+    void api.remoteWindowChats(hubList).catch(() => {});
+  }, [hubKey]);
   // What the panel asked of this window, which the backend already checked and brought forward: open a chat, start one in a
   // project the user knows, or open Storage or Settings. The ref is read when it happens, so it sees the chats as they are then.
   const menuBarAct = useRef<(a: MenuBarAction) => void>(() => {});

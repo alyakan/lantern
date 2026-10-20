@@ -529,7 +529,7 @@ pub fn replay(path: &Path) -> Replay {
             continue;
         }
         if let Some(text) = prompt_text(&r) {
-            events.push(UiEvent::UserText { text, at: r["timestamp"].as_str().and_then(iso_ms) });
+            events.push(UiEvent::UserText { text, at: r["timestamp"].as_str().and_then(iso_ms), sent_by: None });
             continue;
         }
         let line = match r["type"].as_str() {
@@ -647,7 +647,7 @@ mod tests {
     fn turns(n: usize) -> Vec<UiEvent> {
         let mut events = vec![UiEvent::ContextUsed { tokens: 1 }];
         for i in 0..n {
-            events.push(UiEvent::UserText { text: format!("u{i}"), at: None });
+            events.push(UiEvent::UserText { text: format!("u{i}"), at: None, sent_by: None });
             events.push(UiEvent::AssistantText { parent: None, block_id: format!("a{i}"), text: format!("a{i}") });
         }
         events
@@ -921,7 +921,7 @@ mod tests {
         let r = replay(&path);
         let kinds: Vec<String> = r.events.iter().map(|e| serde_json::to_value(e).unwrap()["kind"].as_str().unwrap().to_string()).collect();
         assert_eq!(kinds, vec!["user_text", "assistant_text", "tool_started", "edit_applied", "tool_finished", "assistant_text", "user_text"]);
-        assert_eq!(r.events[0], UiEvent::UserText { text: "Add retries to fetchJson\nfor transient errors".into(), at: None });
+        assert_eq!(r.events[0], UiEvent::UserText { text: "Add retries to fetchJson\nfor transient errors".into(), at: None, sent_by: None });
         let blocks: Vec<&str> = r.events.iter().filter_map(|e| match e {
             UiEvent::AssistantText { block_id, .. } => Some(block_id.as_str()),
             _ => None,

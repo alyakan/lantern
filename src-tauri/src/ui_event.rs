@@ -66,12 +66,15 @@ pub struct BackgroundTask {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum UiEvent {
     SessionStarted { session_id: String, model: String, cwd: String, permission_mode: String, claude_version: String },
-    /// Something the user typed, and when (ms since the epoch, from the transcript). Live turns add these locally;
-    /// only history replay emits them.
+    /// Something the user typed, and when (ms since the epoch). History replay emits these; so does every message sent
+    /// live, with `sent_by`: who sent it ("desktop", or a paired phone's id). The window adds its own messages itself, so
+    /// it isn't sent the ones that say "desktop" (see remote::SENT_BY_DESKTOP).
     UserText {
         text: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         at: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sent_by: Option<String>,
     },
     Thinking { parent: Option<String> },
     TextDelta { parent: Option<String>, block_id: String, text: String },
@@ -144,6 +147,9 @@ pub enum UiEvent {
     PermissionRequested { request_id: String, tool_name: String, input: Value },
     /// A prompt that can no longer be answered: the helper asking for it went away.
     PermissionWithdrawn { request_id: String },
+    /// A prompt was answered, and by whom ("desktop", or a paired phone's id): every other client's card for it closes.
+    /// The first answer is the one that counts; a later one is refused.
+    PermissionResolved { request_id: String, allow: bool, by: String },
     /// A request a rule allowed, with no card: the chat notes it in place of one. `scope` and `rule` say which rule.
     PermissionAutoAllowed { request_id: String, tool_name: String, input: Value, scope: Scope, rule: Rule },
     SessionEnded { code: Option<i32>, stderr_tail: String },

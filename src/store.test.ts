@@ -228,6 +228,24 @@ describe("reducer", () => {
     expect(s.items[0]).toMatchObject({ type: "user", text: "map it", switchedTo: "architecture" });
   });
 
+  it("a message sent from a paired phone shows in the chat, and Claude is working on it", () => {
+    const s = ev({ ...initialState, status: "idle" }, { kind: "user_text", text: "ship it", at: 5, sent_by: "phone-1" });
+    expect(s.items[0]).toMatchObject({ type: "user", text: "ship it", at: 5 });
+    expect(s).toMatchObject({ status: "running", thinking: true });
+    // A replayed message (no sender) doesn't start anything.
+    expect(ev({ ...initialState, status: "idle" }, { kind: "user_text", text: "old" }).status).toBe("idle");
+  });
+
+  it("a prompt answered on a phone first closes its card here with that answer, and one answered here stays as it was", () => {
+    let s = ev(initialState, { kind: "permission_requested", request_id: "p1", tool_name: "Bash", input: {} });
+    s = ev(s, { kind: "permission_resolved", request_id: "p1", allow: false, by: "phone-1" });
+    expect(s.items[0]).toMatchObject({ type: "permission", id: "p1", decision: "denied" });
+    s = ev(s, { kind: "permission_requested", request_id: "p2", tool_name: "Bash", input: {} });
+    s = reducer(s, { type: "permission_decided", id: "p2", allow: true });
+    s = ev(s, { kind: "permission_resolved", request_id: "p2", allow: true, by: "desktop" });
+    expect(s.items[1]).toMatchObject({ id: "p2", decision: "allowed" });
+  });
+
   it("a message replayed after a Workflow change shows without the backend's settings note, before a flavour note or alone", () => {
     // The note repeats the whole new prompt, which mentions other notes and brackets of its own.
     const settings = "[Lantern: this chat's Permissions or Workflow changed, and Claude was restarted on the same conversation. From here on:\n\nA message that starts with \"[Lantern: this chat switched to <Flavour>…]\" means …\n\n(end of Lantern's note)]";
