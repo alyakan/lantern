@@ -1,8 +1,8 @@
 import type { ReactElement } from "react";
 import { render } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { Controller } from "../app/controller";
-import { ControllerContext } from "../app/hooks";
+import { Controller } from "../shell/controller";
+import { ControllerContext } from "../shell/hooks";
 import type { ConnectionState } from "../net/connection";
 import type { Transport } from "../net/transport";
 import type { RemoteChat } from "../protocol/generated/RemoteChat";

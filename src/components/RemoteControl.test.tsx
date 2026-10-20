@@ -25,7 +25,7 @@ vi.mock("../api", () => ({
     remotePair: () => {
       if (!view.enabled) return Promise.reject("Turn on Remote control first.");
       view = { ...view, pairing: true };
-      return Promise.resolve({ svg: "<svg/>", expires_at: 300_000 });
+      return Promise.resolve({ svg: "<svg/>", link: "lantern://pair?v=1&test", expires_at: 300_000 });
     },
     remotePairCancel: () => {
       calls.push({ cmd: "cancel" });
@@ -70,6 +70,26 @@ describe("Settings › Remote control", () => {
     calls.length = 0;
     unmount();
     expect(calls).toContainEqual({ cmd: "cancel" });
+  });
+
+  it("copies the pairing link, and says so", async () => {
+    const written: string[] = [];
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: (t: string) => (written.push(t), Promise.resolve()) }, configurable: true });
+    view = { ...view, enabled: true, listening: true };
+    render(<RemoteControl now={() => 0} />);
+    fireEvent.click(await screen.findByText("Show a pairing code"));
+    fireEvent.click(await screen.findByText("Copy the link"));
+    await screen.findByText("Copied");
+    expect(written).toEqual(["lantern://pair?v=1&test"]);
+  });
+
+  it("says when the link couldn't be copied", async () => {
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: () => Promise.reject("not allowed") }, configurable: true });
+    view = { ...view, enabled: true, listening: true };
+    render(<RemoteControl now={() => 0} />);
+    fireEvent.click(await screen.findByText("Show a pairing code"));
+    fireEvent.click(await screen.findByText("Copy the link"));
+    expect((await screen.findByRole("alert")).textContent).toContain("Couldn't copy the link: not allowed");
   });
 
   it("takes a code away once it was used, and offers a new one", async () => {

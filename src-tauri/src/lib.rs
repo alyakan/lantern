@@ -412,7 +412,13 @@ async fn start_remote(app: &AppHandle) -> Result<(), String> {
     let (listener, port) = remote::transport::serve_lan(remote::PORT, move |link| door.accept(link)).await?;
     let id: String = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, &mac.public).chars().take(10).collect();
     let bonjour = remote::transport::Bonjour::advertise(port, &name, &id).ok();
-    state.remote.set_running(remote::Running { gateway, listener, bonjour });
+    // Pushes to phones that aren't looking at a chat when it needs them or finishes (see remote/notifier.rs).
+    let watching = gateway.clone();
+    let notifier = remote::notifier::Notifier::new(r.store.clone(), r.hub.clone(), Arc::new(remote::notifier::ExpoPush::new()?), Arc::new(move |slot| watching.watched(slot)));
+    let opened = notifier.clone();
+    gateway.on_open(Arc::new(move |slot| opened.opened(slot)));
+    let task = tokio::spawn(notifier.run(r.bus.clone()));
+    state.remote.set_running(remote::Running { gateway, listener, bonjour, notifier: Some(task) });
     Ok(())
 }
 

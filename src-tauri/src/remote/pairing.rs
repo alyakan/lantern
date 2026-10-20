@@ -170,6 +170,11 @@ impl RemoteStore {
         }
         self.change(|s| s.devices.iter_mut().filter(|d| d.id == id).for_each(|d| d.push_token = Some(token.to_string())))
     }
+
+    /// Forgets a device's push token (Expo says the phone no longer has the app); the device stays paired.
+    pub fn clear_push_token(&self, id: &str) -> Result<(), String> {
+        self.change(|s| s.devices.iter_mut().filter(|d| d.id == id).for_each(|d| d.push_token = None))
+    }
 }
 
 /// Written beside the file and renamed over it, readable by the user only.

@@ -54,6 +54,8 @@ struct Conn {
 
 /// Called whenever a phone connects or goes (the window shows who is connected).
 pub type OnChange = Arc<dyn Fn() + Send + Sync>;
+/// Called with the chat when a phone opens it.
+pub type OnOpen = Arc<dyn Fn(&str) + Send + Sync>;
 
 pub struct Gateway {
     bus: Arc<EventBus>,
@@ -70,6 +72,9 @@ pub struct Gateway {
     epoch: u64,
     /// Remote control was turned off: nothing more gets in, not even a phone in the middle of its handshake.
     shut: std::sync::atomic::AtomicBool,
+    /// How many phones follow each chat now (a chat nobody follows is one a push may be about).
+    watchers: Mutex<HashMap<String, u32>>,
+    on_open: Mutex<Option<OnOpen>>,
 }
 
 /// Why a connection ended before it was in (for tests and logs; the phone just sees it close).
@@ -98,7 +103,33 @@ impl Gateway {
             on_change: Mutex::new(None),
             epoch,
             shut: Default::default(),
+            watchers: Mutex::default(),
+            on_open: Mutex::new(None),
         })
+    }
+
+    /// Whether a phone follows the chat right now.
+    pub fn watched(&self, slot: &str) -> bool {
+        self.watchers.lock().unwrap().get(slot).is_some_and(|n| *n > 0)
+    }
+
+    /// What to do when a phone opens a chat (the notifier forgets what it pushed about it).
+    pub fn on_open(&self, f: OnOpen) {
+        *self.on_open.lock().unwrap() = Some(f);
+    }
+
+    fn watch(&self, slot: &str) {
+        *self.watchers.lock().unwrap().entry(slot.to_string()).or_insert(0) += 1;
+    }
+
+    fn unwatch(&self, slot: &str) {
+        let mut w = self.watchers.lock().unwrap();
+        if let Some(n) = w.get_mut(slot) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                w.remove(slot);
+            }
+        }
     }
 
     fn is_shut(&self) -> bool {
@@ -270,7 +301,33 @@ struct Session<'a> {
     last_chats: Vec<RemoteChat>,
 }
 
+impl Drop for Session<'_> {
+    /// The phone is gone: it follows nothing now.
+    fn drop(&mut self) {
+        for slot in self.subscribed.keys() {
+            self.gw.unwatch(slot);
+        }
+    }
+}
+
 impl Session<'_> {
+    /// The phone follows `slot` from event `last` on; it has opened the chat (what was pushed about it has been seen).
+    fn follow(&mut self, slot: &str, last: u64) {
+        if self.subscribed.insert(slot.to_string(), last).is_none() {
+            self.gw.watch(slot);
+        }
+        let open = self.gw.on_open.lock().unwrap().clone();
+        if let Some(open) = open {
+            open(slot);
+        }
+    }
+
+    fn unfollow(&mut self, slot: &str) {
+        if self.subscribed.remove(slot).is_some() {
+            self.gw.unwatch(slot);
+        }
+    }
+
     async fn run(&mut self, link: &mut Link, channel: &mut Channel, killed: &mut watch::Receiver<bool>) -> Result<(), String> {
         let mut events = self.gw.bus.subscribe();
         let mut tick = tokio::time::interval(Duration::from_secs(1));
@@ -348,7 +405,7 @@ impl Session<'_> {
         for (page, (events, done)) in pages(events).into_iter().enumerate() {
             send_message_waiting(link, channel, &ServerMessage::Reset { slot: slot.to_string(), seq, page: page as u32, done, hidden, events }).await?;
         }
-        self.subscribed.insert(slot.to_string(), seq);
+        self.follow(slot, seq);
         Ok(())
     }
 
@@ -374,7 +431,7 @@ impl Session<'_> {
                                 send_message(link, channel, &ServerMessage::Event { slot: slot.clone(), seq: e.seq, event })?;
                             }
                         }
-                        self.subscribed.insert(slot, last);
+                        self.follow(&slot, last);
                     }
                     _ => self.reset(link, channel, &slot).await?,
                 }
@@ -386,7 +443,7 @@ impl Session<'_> {
                 Ok(json(&protocol::EarlierPage { events: page.events.iter().filter_map(protocol::to_remote).collect(), hidden: page.hidden as u32 }))
             }
             Request::Unsubscribe { slot } => {
-                self.subscribed.remove(&slot);
+                self.unfollow(&slot);
                 Ok(serde_json::Value::Null)
             }
             Request::Send { slot, text, client_id } => {
@@ -900,7 +957,7 @@ pub(crate) mod tests {
         let remote = crate::remote::Remote::default();
         let door = r.gw.clone();
         let (listener, port) = crate::remote::transport::serve_lan(0, move |link| door.accept(link)).await.unwrap();
-        remote.set_running(crate::remote::Running { gateway: r.gw.clone(), listener, bonjour: None });
+        remote.set_running(crate::remote::Running { gateway: r.gw.clone(), listener, bonjour: None, notifier: None });
         let (_, mut p) = paired(&r).await;
         assert!(remote.is_running());
         remote.stop();
@@ -966,6 +1023,33 @@ pub(crate) mod tests {
         assert!(err.is_none());
         let page: protocol::EarlierPage = serde_json::from_value(ok.unwrap()).unwrap();
         assert_eq!(page.events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_chat_a_phone_follows_is_watched_until_it_unfollows_or_goes_and_opening_it_is_told() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        let opened: Arc<Mutex<Vec<String>>> = Arc::default();
+        let o = opened.clone();
+        r.gw.on_open(Arc::new(move |slot| o.lock().unwrap().push(slot.to_string())));
+        let (_, mut p) = paired(&r).await;
+        assert!(!r.gw.watched("a"));
+        p.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
+        assert!(r.gw.watched("a"));
+        assert_eq!(*opened.lock().unwrap(), vec!["a".to_string()]);
+        // A second phone following it too: it is watched until both let go.
+        let (_, mut q) = paired(&r).await;
+        q.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
+        p.ask(Request::Unsubscribe { slot: "a".into() }).await;
+        assert!(r.gw.watched("a"), "the other phone still follows it");
+        drop(q);
+        let started = std::time::Instant::now();
+        while r.gw.watched("a") && started.elapsed() < Duration::from_secs(2) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!r.gw.watched("a"), "a phone that goes follows nothing");
+        p.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
+        assert_eq!(opened.lock().unwrap().len(), 3, "opening again is told again");
     }
 
     fn said(text: &str, at: Option<u64>) -> RemoteEvent {

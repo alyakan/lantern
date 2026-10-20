@@ -1,4 +1,4 @@
-import type { Controller } from "../app/controller";
+import type { Controller } from "../shell/controller";
 import type { Request } from "../protocol/generated/Request";
 import type { Session } from "../net/session";
 

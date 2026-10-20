@@ -7,6 +7,7 @@ pub mod bus;
 pub mod fixture;
 pub mod hub;
 pub mod keys;
+pub mod notifier;
 pub mod pairing;
 pub mod protocol;
 pub mod secure;
@@ -55,6 +56,8 @@ pub struct Running {
     pub gateway: Arc<gateway::Gateway>,
     pub listener: tokio::task::JoinHandle<()>,
     pub bonjour: Option<transport::Bonjour>,
+    /// The task that pushes to phones that aren't looking (see notifier.rs).
+    pub notifier: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Remote {
@@ -66,6 +69,7 @@ impl Remote {
         if let Some(old) = self.running.lock().unwrap().replace(running) {
             old.gateway.disconnect_all();
             old.listener.abort();
+            old.notifier.iter().for_each(|n| n.abort());
         }
     }
 
@@ -74,6 +78,7 @@ impl Remote {
         if let Some(r) = self.running.lock().unwrap().take() {
             r.gateway.disconnect_all();
             r.listener.abort();
+            r.notifier.iter().for_each(|n| n.abort());
         }
     }
 
@@ -118,6 +123,8 @@ pub struct RemoteView {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PairView {
     pub svg: String,
+    /// The same code as text, to copy for a phone whose camera can't read the screen (it works once, like the QR code).
+    pub link: String,
     pub expires_at: u64,
 }
 
@@ -172,7 +179,7 @@ impl Remote {
         let key = self.mac_key()?;
         let offer = self.store.start_offer(now)?;
         let link = pairing::pairing_link(&key.public, &offer, hosts, PORT, mac_name);
-        Ok(PairView { svg: pairing::qr_svg(&link)?, expires_at: offer.expires_at })
+        Ok(PairView { svg: pairing::qr_svg(&link)?, link, expires_at: offer.expires_at })
     }
 
     /// Adds the window: it is sent every event as `ui-event` (see `for_window`).
@@ -269,6 +276,7 @@ mod tests {
         remote.store.set_enabled(true).unwrap();
         let first = remote.pair(&["192.168.1.2".into()], "Mac", 1000).unwrap();
         assert!(first.svg.contains("<svg"));
+        assert!(first.link.starts_with("lantern://pair?v=1&k=") && first.link.contains("&h=192.168.1.2&"));
         assert_eq!(first.expires_at, 1000 + pairing::OFFER_TTL_MS);
         assert_eq!(remote.mac_key().unwrap(), remote.mac_key().unwrap());
         assert!(remote.store.offer_open(1001));

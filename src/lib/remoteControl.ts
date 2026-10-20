@@ -24,6 +24,8 @@ export interface RemoteView {
 /** The QR code a phone pairs with, and when it stops working (ms since the epoch). */
 export interface PairView {
   svg: string;
+  /** The same code as text, for a phone that can't read the screen with its camera. */
+  link: string;
   expires_at: number;
 }
 

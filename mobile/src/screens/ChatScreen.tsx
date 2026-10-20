@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useConnectionState, useController, useDeviceId, useSyncState } from "../app/hooks";
+import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
 import { Button, Txt } from "../ui/components";
 import { colors, shadow, space } from "../ui/theme";

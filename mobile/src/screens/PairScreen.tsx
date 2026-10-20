@@ -3,7 +3,7 @@ import { ActivityIndicator, TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useController } from "../app/hooks";
+import { useController } from "../shell/hooks";
 import { Button, Txt } from "../ui/components";
 import { colors, space } from "../ui/theme";
 

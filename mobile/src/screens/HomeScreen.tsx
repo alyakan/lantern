@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Platform, Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useConnectionState, useController, useSyncState } from "../app/hooks";
+import { useConnectionState, useController, useSyncState } from "../shell/hooks";
 import { Button, Tag, Tile, Txt } from "../ui/components";
 import { colors, radius, shadow, space } from "../ui/theme";
 import { cards, headline, rows, tileColors, type Card, type Row } from "../view/home";

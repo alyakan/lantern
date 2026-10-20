@@ -68,6 +68,17 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
       },
       (e) => setError(errText(e)),
     );
+  const [copied, setCopied] = useState(false);
+  const copyLink = () => {
+    if (!pair) return;
+    navigator.clipboard.writeText(pair.link).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      },
+      (e) => setError(`Couldn't copy the link: ${errText(e)}`),
+    );
+  };
   const cancelPair = () => {
     setPair(null);
     void api.remotePairCancel().catch(() => {});
@@ -114,7 +125,11 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
                   <img className="remote-qr" alt="Pairing code" src={`data:image/svg+xml;utf8,${encodeURIComponent(pair.svg)}`} />
                   <div>
                     <p>Open Lantern on your phone and scan this code. It works once, and stops working in {timeLeft(pair.expires_at, tick)}.</p>
-                    <button onClick={cancelPair}>Stop pairing</button>
+                    <div className="remote-pair-actions">
+                      <button onClick={copyLink}>{copied ? "Copied" : "Copy the link"}</button>
+                      <button onClick={cancelPair}>Stop pairing</button>
+                    </div>
+                    <p className="settings-muted">The link is the same code as text, for a phone that can't scan the screen: paste it in Lantern on the phone.</p>
                   </div>
                 </div>
               ) : (
