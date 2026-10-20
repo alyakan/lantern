@@ -471,6 +471,20 @@ describe("ReviewPanel's pinned tabs", () => {
     localStorage.clear();
   });
 
+  it("a request the pane already acted on doesn't act again when the pane is shown again (another project's pane was open in between)", () => {
+    localStorage.clear();
+    const search = { mode: "files" as const, key: 9001 };
+    const first = render(<ReviewPanel {...base} selected={null} follow searchKey={search} />);
+    // A request made as the pane opens is acted on.
+    expect(selected()).toBe("Files");
+    fireEvent.click(screen.getByRole("tab", { name: /^Changes/ }));
+    first.unmount();
+    // The pane comes back (the app still holds the old request): the tab the user left stays.
+    render(<ReviewPanel {...base} selected={null} follow searchKey={search} />);
+    expect(selected()).toMatch(/^Changes/);
+    localStorage.clear();
+  });
+
   it("the ⋯ carries a red count for a failed test run in a tab that isn't pinned, and the menu row shows it too", () => {
     localStorage.clear();
     const { rerender } = render(<ReviewPanel {...base} selected={null} follow />);

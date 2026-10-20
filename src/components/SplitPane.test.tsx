@@ -24,6 +24,21 @@ describe("SplitPane", () => {
     vi.useRealTimers();
   });
 
+  it("shows and hides the pane at once, with no slide, when what it belongs to changes with it", () => {
+    vi.useFakeTimers();
+    const props = { left: <div>chat</div>, right: <div>review</div>, ratio: 0.5, onRatio: () => {} };
+    const { container, rerender } = render(<SplitPane {...props} scope="a" collapsed />);
+    rerender(<SplitPane {...props} scope="b" collapsed={false} />);
+    expect(screen.getByText("review")).toBeInTheDocument();
+    expect(container.querySelector(".split-side")).not.toHaveClass("animating");
+    rerender(<SplitPane {...props} scope="a" collapsed />);
+    expect(screen.queryByText("review")).toBeNull();
+    // The same project's own toggle still slides.
+    rerender(<SplitPane {...props} scope="a" collapsed={false} />);
+    expect(container.querySelector(".split-side")).toHaveClass("animating");
+    vi.useRealTimers();
+  });
+
   it("moves the panes while dragging and tells the app the ratio once, on release", () => {
     // jsdom has no PointerEvent, so pointer events would arrive without clientX.
     if (!("PointerEvent" in window)) (window as unknown as { PointerEvent: typeof MouseEvent }).PointerEvent = class extends MouseEvent {};
