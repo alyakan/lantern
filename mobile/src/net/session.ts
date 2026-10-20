@@ -77,6 +77,7 @@ export class Session {
   private nextId = 1;
   private answers = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   readonly done: Promise<void>;
+  private closed = false;
 
   constructor(
     private readonly link: Link,
@@ -89,6 +90,8 @@ export class Session {
 
   /** Asks the Mac; resolves to its answer, rejects with its error (in words for the user). */
   ask<T = unknown>(request: Request): Promise<T> {
+    // A connection that is gone answers at once, not after the wait for an answer that can't come.
+    if (this.closed) return Promise.reject(new Error("The connection to your Mac closed."));
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -129,6 +132,7 @@ export class Session {
     } catch {
       // A frame that didn't open: the channel is closed, and so is the link.
     } finally {
+      this.closed = true;
       this.link.close();
       for (const [, w] of this.answers) {
         clearTimeout(w.timer);

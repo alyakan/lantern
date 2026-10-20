@@ -1,0 +1,167 @@
+import { useEffect, useRef, useState } from "react";
+import { Animated, Platform, Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useConnectionState, useController, useSyncState } from "../app/hooks";
+import { Button, Tag, Tile, Txt } from "../ui/components";
+import { colors, radius, shadow, space } from "../ui/theme";
+import { cards, headline, rows, tileColors, type Card, type Row } from "../view/home";
+
+export interface HomeProps {
+  onOpenChat: (slot: string) => void;
+  /** Opens the full-screen decision for one prompt. */
+  onReview: (slot: string, requestId: string) => void;
+  /** The Mac's own sheet (its name, unpairing). */
+  onOpenMac: () => void;
+  /** Android's "Message a chat". */
+  onCompose: () => void;
+}
+
+/** A thin bar that slides while a chat is working. */
+function Working() {
+  const x = useRef(new Animated.Value(-1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(Animated.timing(x, { toValue: 2.5, duration: 1400, useNativeDriver: true }));
+    loop.start();
+    return () => loop.stop();
+  }, [x]);
+  return (
+    <View accessibilityLabel="Working" style={{ width: 54, height: 4, borderRadius: 2, backgroundColor: colors.rule, overflow: "hidden" }}>
+      <Animated.View style={{ width: "40%", height: "100%", backgroundColor: colors.cobalt, borderRadius: 2, transform: [{ translateX: Animated.multiply(x, 22) }] }} />
+    </View>
+  );
+}
+
+function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomeProps["onOpenChat"]; onReview: HomeProps["onReview"] }) {
+  const front = list[0];
+  const behind = Math.min(2, list.length - 1);
+  return (
+    <View style={{ marginHorizontal: space.lg, paddingBottom: 14 }}>
+      {behind >= 2 && <View style={{ position: "absolute", left: 14, right: 14, top: 14, bottom: -8, backgroundColor: colors.card, borderRadius: radius.card, opacity: 0.6 }} />}
+      {behind >= 1 && <View style={{ position: "absolute", left: 7, right: 7, top: 7, bottom: -2, backgroundColor: colors.card, borderRadius: radius.card, opacity: 0.85 }} />}
+      <View style={[{ backgroundColor: colors.card, borderRadius: radius.card, padding: 18, gap: 4 }, shadow.card]}>
+        <Tag>{front.view.tag}</Tag>
+        <Txt variant="heading" style={{ marginTop: 8 }}>
+          {front.view.title}
+        </Txt>
+        <Txt variant="small" tone="ink2">
+          {front.from}
+        </Txt>
+        {front.view.detail && (
+          <View style={{ backgroundColor: colors.paper, borderRadius: radius.inner, padding: 10, marginTop: 8 }}>
+            <Txt variant="mono" numberOfLines={3}>
+              {front.view.detail}
+            </Txt>
+          </View>
+        )}
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+          <Button label="Open chat" kind="ghost" style={{ flex: 1 }} onPress={() => onOpenChat(front.waiting.slot)} />
+          <Button label="Review" style={{ flex: 1 }} onPress={() => onReview(front.waiting.slot, front.waiting.request_id)} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function ChatRow({ row, onPress }: { row: Row; onPress: () => void }) {
+  const [bg, fg] = tileColors(row.title);
+  const status = row.status === "needs_you" ? ", needs you" : row.status === "working" ? ", working" : row.status === "asleep" ? ", asleep" : row.status === "ended" ? ", stopped" : "";
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={`${row.title}${row.project ? `, ${row.project}` : ""}${status}`} onPress={onPress} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: space.xl, paddingVertical: 9, minHeight: 56, opacity: pressed ? 0.7 : row.status === "asleep" ? 0.7 : 1 })}>
+      <Tile letter={row.initial} bg={bg} fg={fg} />
+      <View style={{ flex: 1 }}>
+        <Txt variant="body" numberOfLines={1} style={{ fontWeight: "600" }}>
+          {row.title}
+        </Txt>
+        {!!row.project && (
+          <Txt variant="small" tone="ink2" numberOfLines={1}>
+            {row.project}
+          </Txt>
+        )}
+      </View>
+      {row.status === "working" ? (
+        <Working />
+      ) : (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          {row.status === "needs_you" && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.hi }} />}
+          <Txt variant="tiny" tone="ink3">
+            {row.note}
+          </Txt>
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
+/** Home: what waits on you, as a headline and a stack, then your chats. */
+export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose }: HomeProps) {
+  const controller = useController();
+  const { chats, waiting } = useSyncState();
+  const connection = useConnectionState();
+  const insets = useSafeAreaInsets();
+  const [now, setNow] = useState(Date.now());
+  const [refreshing, setRefreshing] = useState(false);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const stack = cards(waiting, chats);
+  const head = headline(stack.length);
+  const list = rows(chats, now);
+  const macName = connection.kind === "connected" ? connection.welcome.mac_name : null;
+
+  const refresh = async () => {
+    setRefreshing(true);
+    controller.resume();
+    await controller.sync.refreshWaiting();
+    setRefreshing(false);
+  };
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.paper }}>
+      <ScrollView contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 96 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: space.xl }}>
+          <Pressable accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected` : "Your Mac"} onPress={onOpenMac} hitSlop={10} style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 32 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: macName ? colors.go : colors.ink3 }} />
+            <Txt variant="small" tone="ink2">
+              {macName ?? "Your Mac"}
+            </Txt>
+          </Pressable>
+        </View>
+        <View accessibilityRole="header" style={{ paddingHorizontal: space.xl, paddingTop: 14, paddingBottom: 16 }}>
+          <Txt variant="headline">{head.big}</Txt>
+          <Txt variant="headline" tone="ink3">
+            {head.small}
+          </Txt>
+        </View>
+
+        {stack.length > 0 && <Deck list={stack} onOpenChat={onOpenChat} onReview={onReview} />}
+        {stack.length > 1 && (
+          <Txt variant="small" tone="ink2" style={{ paddingHorizontal: space.xl, paddingTop: 2 }}>
+            {stack.length - 1} more after this one
+          </Txt>
+        )}
+
+        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: space.xl, paddingTop: 22, paddingBottom: 6 }}>
+          <Txt variant="small" style={{ fontWeight: "700" }}>
+            All chats
+          </Txt>
+        </View>
+        {list.length === 0 ? (
+          <Txt variant="body" tone="ink2" style={{ paddingHorizontal: space.xl, paddingTop: 8 }}>
+            No chats are open on your Mac. Start one in Lantern and it shows up here.
+          </Txt>
+        ) : (
+          list.map((r) => <ChatRow key={r.slot} row={r} onPress={() => onOpenChat(r.slot)} />)
+        )}
+      </ScrollView>
+      {Platform.OS === "android" && list.length > 0 && (
+        <Pressable accessibilityRole="button" accessibilityLabel="Message a chat" onPress={onCompose} style={[{ position: "absolute", right: 18, bottom: insets.bottom + 18, backgroundColor: colors.ink, borderRadius: 18, paddingHorizontal: 18, minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8 }, shadow.float]}>
+          <Txt variant="body" tone="white" style={{ fontWeight: "700" }}>
+            + Message a chat
+          </Txt>
+        </Pressable>
+      )}
+    </View>
+  );
+}

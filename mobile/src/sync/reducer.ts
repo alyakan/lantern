@@ -36,6 +36,8 @@ export interface ChatView {
   thinking: boolean;
   /** A Reset in progress: pages after the first add to it. */
   resetting: boolean;
+  /** How many events a catch-up covered when this phone had followed the chat before (0: none, or the first time). */
+  caughtUp: number;
 }
 
 export interface State {
@@ -48,7 +50,7 @@ export interface State {
 
 export const initialState: State = { chats: [], waiting: [], views: {}, epoch: null };
 
-export const emptyView: ChatView = { items: [], seq: 0, hidden: 0, thinking: false, resetting: false };
+export const emptyView: ChatView = { items: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0 };
 
 export type Action =
   | { type: "welcome"; epoch: number }
@@ -191,7 +193,9 @@ export function reducer(state: State, action: Action): State {
           // Page 0 starts the chat over, keeping only messages this phone sent that the Mac hasn't echoed yet.
           const base: ChatView = msg.page === 0 ? { ...emptyView, items: view.items.filter((it) => it.kind === "user" && it.sending) } : view;
           const next = applyAll(base, msg.events);
-          return { ...state, views: { ...state.views, [msg.slot]: { ...next, seq: msg.seq, hidden: msg.hidden, resetting: !msg.done } } };
+          // A chat this phone already followed, started over because it was away too long: say how much it missed.
+          const caughtUp = msg.page === 0 ? (view.seq > 0 && msg.seq > view.seq ? msg.seq - view.seq : 0) : view.caughtUp;
+          return { ...state, views: { ...state.views, [msg.slot]: { ...next, seq: msg.seq, hidden: msg.hidden, resetting: !msg.done, caughtUp } } };
         }
       }
     }

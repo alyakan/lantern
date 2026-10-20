@@ -44,7 +44,8 @@ export class Sync {
     return () => this.listeners.delete(listener);
   };
 
-  private dispatch(action: Action) {
+  /** Queues an action for the next frame (what the Mac pushes, the user's sends and the screens' tests all come through here). */
+  apply(action: Action) {
     this.queue.push(action);
     if (this.scheduled) return;
     this.scheduled = true;
@@ -66,13 +67,22 @@ export class Sync {
       const statuses = (cs: State["chats"]) => cs.map((c) => `${c.slot}:${c.status}`).join(",");
       if (statuses(msg.chats) !== statuses(this.state.chats)) void this.refreshWaiting();
     }
-    this.dispatch({ type: "pushed", msg });
+    this.apply({ type: "pushed", msg });
   };
+
+  /** Forgets everything (the phone was unpaired): the next Mac starts from nothing. */
+  reset() {
+    this.queue = [];
+    this.session = null;
+    this.followed.clear();
+    this.state = initialState;
+    for (const l of this.listeners) l();
+  }
 
   /** A connection came up (Connection's onSession): follow the same chats from where they were. */
   onSession = (session: Session) => {
     this.session = session;
-    this.dispatch({ type: "welcome", epoch: session.welcome.epoch });
+    this.apply({ type: "welcome", epoch: session.welcome.epoch });
     this.flush();
     for (const slot of this.followed) void this.subscribeTo(slot);
     void this.refreshWaiting();
@@ -92,7 +102,7 @@ export class Sync {
   async refreshWaiting() {
     try {
       const list = await this.ask<Waiting[]>({ op: "list_waiting" });
-      if (Array.isArray(list)) this.dispatch({ type: "waiting", list });
+      if (Array.isArray(list)) this.apply({ type: "waiting", list });
     } catch {
       // Not connected: it is asked again when a connection comes up.
     }
@@ -113,11 +123,11 @@ export class Sync {
   /** Sends a message: it shows at once, and says why if it didn't go. */
   async send(slot: string, text: string) {
     const clientId = this.newId();
-    this.dispatch({ type: "sending", slot, clientId, text, at: this.now() });
+    this.apply({ type: "sending", slot, clientId, text, at: this.now() });
     try {
       await this.ask({ op: "send", slot, text, client_id: clientId });
     } catch (e) {
-      this.dispatch({ type: "send_failed", slot, clientId, error: (e as Error).message });
+      this.apply({ type: "send_failed", slot, clientId, error: (e as Error).message });
     }
   }
 
@@ -146,7 +156,7 @@ export class Sync {
     const hidden = this.state.views[slot]?.hidden ?? 0;
     if (hidden === 0) return;
     const page = await this.ask<EarlierPage>({ op: "earlier", slot, hidden });
-    this.dispatch({ type: "earlier", slot, events: page.events, hidden: page.hidden });
+    this.apply({ type: "earlier", slot, events: page.events, hidden: page.hidden });
   }
 
   registerPushToken(token: string) {

@@ -1,20 +1,71 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppState } from "react-native";
+import Constants from "expo-constants";
+import * as Device from "expo-device";
+import { useFonts } from "expo-font";
+import * as Linking from "expo-linking";
+import { BricolageGrotesque_700Bold, BricolageGrotesque_800ExtraBold } from "@expo-google-fonts/bricolage-grotesque";
+import { Controller } from "./src/app/controller";
+import { Root } from "./src/app/Root";
+import { zeroconfDiscovery } from "./src/net/discovery";
+import { webSocketTransport } from "./src/net/transport";
+import { registerForPush, slotOfNotification } from "./src/notifications";
+import { onNotificationTap, pushPlatform, quietInForeground } from "./src/platformPush";
+import { secureMacStore } from "./src/storage";
+
+/** The EAS project id Expo's push service needs (app.json, extra.eas.projectId; `eas init` writes it). */
+const projectId: string | undefined = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
 
 export default function App() {
-  return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+  const [fontsReady] = useFonts({ BricolageGrotesque_700Bold, BricolageGrotesque_800ExtraBold });
+  const controller = useMemo(
+    () =>
+      new Controller({
+        transport: webSocketTransport,
+        store: secureMacStore,
+        discovery: zeroconfDiscovery(),
+        deviceName: Device.deviceName ?? Device.modelName ?? "Phone",
+        appVersion: Constants.expoConfig?.version ?? "0",
+      }),
+    [],
   );
-}
+  const [pendingLink, setPendingLink] = useState<string | null>(null);
+  const [openSlot, setOpenSlot] = useState<string | null>(null);
+  const registered = useRef(false);
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+  useEffect(() => {
+    void controller.start();
+    const sub = AppState.addEventListener("change", (s) => s === "active" && controller.resume());
+    return () => sub.remove();
+  }, [controller]);
+
+  // A pairing link tapped outside the app, or the one the app was opened with: confirmed before it pairs.
+  useEffect(() => {
+    const take = (url: string | null) => url && /^lantern:\/\/pair/i.test(url) && setPendingLink(url);
+    void Linking.getInitialURL().then(take);
+    const sub = Linking.addEventListener("url", (e) => take(e.url));
+    return () => sub.remove();
+  }, []);
+
+  // Notifications: registered once a Mac is connected, and a tap opens its chat.
+  useEffect(() => {
+    quietInForeground();
+    return onNotificationTap((data) => setOpenSlot(slotOfNotification(data)));
+  }, []);
+  useEffect(() => {
+    const check = () => {
+      if (registered.current || controller.getConnection().kind !== "connected") return;
+      registered.current = true;
+      void registerForPush(pushPlatform, projectId, (token) => controller.sync.registerPushToken(token));
+    };
+    check();
+    const stop = controller.subscribeConnection(check);
+    return () => void stop();
+  }, [controller]);
+
+  const clearLink = useCallback(() => setPendingLink(null), []);
+  const clearSlot = useCallback(() => setOpenSlot(null), []);
+  // Until the headings' font is in, a blank screen: showing the system font for a moment and then swapping is worse.
+  if (!fontsReady) return null;
+  return <Root controller={controller} pendingLink={pendingLink} onClearLink={clearLink} openSlot={openSlot} onOpened={clearSlot} />;
+}

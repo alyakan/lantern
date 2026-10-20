@@ -64,6 +64,16 @@ describe("a chat, built from its events", () => {
     expect(page1.views.a.resetting).toBe(false);
   });
 
+  it("says how many events a catch-up covered, only for a chat that was followed before", () => {
+    const first = run([reset("a", 20, [{ kind: "user_text", text: "hi", at: 1, sent_by: null }])]);
+    expect(first.views.a.caughtUp).toBe(0);
+    const again = run([reset("a", 35, [{ kind: "user_text", text: "hi", at: 1, sent_by: null }])], first);
+    expect(again.views.a.caughtUp).toBe(15);
+    // Later pages of the same catch-up keep the count; a catch-up that covers nothing resets it.
+    expect(run([reset("a", 35, [], 1, true)], again).views.a.caughtUp).toBe(15);
+    expect(run([reset("a", 35, [])], again).views.a.caughtUp).toBe(0);
+  });
+
   it("earlier turns go before what is shown, once", () => {
     const s = run([reset("a", 5, [{ kind: "user_text", text: "recent", at: 9, sent_by: null }], 0, true, 3)]);
     const more = reducer(s, { type: "earlier", slot: "a", hidden: 0, events: [{ kind: "user_text", text: "first", at: 1, sent_by: null }] });
