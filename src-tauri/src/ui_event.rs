@@ -181,6 +181,9 @@ pub enum UiEvent {
     AgentMessage { from: String, text: String },
     /// On a worker's slot: its claude was stopped on purpose (or never started: `reason` says why).
     AgentStopped { reason: Option<String> },
+    /// On a worker's slot: its claude was stopped to save memory (`asleep`), or started again (not): the conversation is kept,
+    /// and a message from its Lead or the user wakes it.
+    AgentAsleep { asleep: bool },
     /// On a worker's slot: it reported on a builder's work and Lantern closed it: its checkout is removed, its report stays.
     AgentTidied,
     /// On the main agent's slot: where the review and test of a builder's latest work stands (see orchestra/review.rs).

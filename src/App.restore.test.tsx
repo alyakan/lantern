@@ -409,6 +409,34 @@ describe("restoring several teams at launch", () => {
     expect(opened(calls)).toEqual(["lead1", "agent1", "lead2", "agent2"]);
   });
 
+  it("stops an idle agent of a team that goes on, and leaves its Lead and the team as they are", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"], shouldAdvanceTime: true });
+    try {
+      saved([lead("lead1", true), agent("agent1", "lead1")]);
+      const calls = await launch();
+      fireEvent.click(screen.getByRole("button", { name: /^Restore( all)?$/ }));
+      await waitFor(() => expect(opened(calls)).toHaveLength(2));
+      await screen.findByRole("button", { name: "Canvas" });
+      const slept = () => calls.filter(([c]) => c === "orchestra_sleep_agent");
+      expect(slept()).toEqual([]);
+      vi.setSystemTime(Date.now() + 11 * 60_000);
+      await vi.advanceTimersByTimeAsync(31_000);
+      // Its agent only: the Lead is the chat on screen, so the team stays, and nothing is closed or forgotten.
+      await waitFor(() => expect(slept()).toHaveLength(1));
+      expect(closed(calls)).toBe(0);
+      // The agent's card on the canvas says so, and it is still saved with its team.
+      fireEvent.click(screen.getByRole("button", { name: "Canvas" }));
+      expect((await screen.findAllByText("Asleep")).length).toBeGreaterThan(0);
+      const now: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
+      expect(now.map((c) => [c.sessionId, c.orchestra?.role ?? null]).sort()).toEqual([["agent1", "worker"], ["lead1", "main"]]);
+      // Asking again later doesn't ask the backend over and over.
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(slept()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("puts a team that has sat idle off screen to sleep as one, and wakes it as one", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"], shouldAdvanceTime: true });
     try {

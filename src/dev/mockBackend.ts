@@ -1558,6 +1558,10 @@ export function installMockBackend() {
           return a.worker === "w3" ? { worktree: false, branch: null, uncommitted: 0, unmerged_commits: 0 } : { worktree: true, branch: `lantern/${String(a.worker)}`, uncommitted: 2, unmerged_commits: 1 };
         case "orchestra_close_worker":
           return null;
+        // The backend stops an idle agent's claude and says so on its chat.
+        case "orchestra_sleep_agent":
+          void emit("ui-event", { slot: String(a.slot), event: { kind: "agent_asleep", asleep: true } });
+          return null;
         case "orchestra_set_roles":
           return null;
         case "orchestra_set_review":

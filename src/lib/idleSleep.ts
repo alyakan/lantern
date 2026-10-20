@@ -78,6 +78,22 @@ export function teamSlots(chats: Chats, lead: string): string[] {
   return [lead, ...Object.entries(chats.agents).flatMap(([slot, meta]) => (meta.parent === lead && chats.slots[slot] ? [slot] : []))];
 }
 
+/**
+ * The agents that may have their claude stopped now while their team goes on: idle and resting like any member of a sleeping team,
+ * with their Lead awake (a sleeping team goes as a whole) and no merge card of theirs waiting for the user. A team that checks what
+ * its builders make (a reviewer and a tester are started after a build) keeps its agents awake: which of them a chain is
+ * waiting on is the backend's to know, and it refuses what is in one.
+ */
+export function agentsAtRest(chats: Chats, routine: (slot: string) => boolean): string[] {
+  return Object.entries(chats.agents).flatMap(([slot, meta]) => {
+    const s = chats.slots[slot];
+    const lead = chats.slots[meta.parent];
+    if (!s || !lead || !lead.orchestrator || lead.status === "asleep" || lead.review.on || s.agentAsleep) return [];
+    if (lead.proposals.some((p) => p.worker === slot && p.status === "open")) return [];
+    return canSleep(s, { active: slot === chats.active, agent: true, routine: routine(slot), team: true }) ? [slot] : [];
+  });
+}
+
 /** The members a team goes to sleep with: an agent its Lead stopped has no process to free and isn't brought back, so it stays as it is. */
 export function membersToSleep(chats: Chats, lead: string): string[] {
   return teamSlots(chats, lead).filter((slot) => !(slot !== lead && chats.slots[slot].status === "ended" && chats.slots[slot].leadStopped));

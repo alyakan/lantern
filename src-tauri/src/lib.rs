@@ -377,6 +377,28 @@ impl orchestra::Host for AppHost {
         })
     }
 
+    fn restart<'a>(&'a self, slot: &'a str) -> orchestra::Fut<'a, Result<(), String>> {
+        Box::pin(async move {
+            let state = self.app.state::<AppState>();
+            let s = state.slots.get(slot)?;
+            let mut cfg = s.config.lock().unwrap().clone().ok_or("No folder is open")?;
+            // What `stop` left, or (a claude that had to be killed leaves nothing) what the agent said it was: the conversation to
+            // carry on. A chat with none has nothing to wake to.
+            cfg.resume = cfg.resume.or_else(|| state.orchestra.session_of(slot));
+            if cfg.resume.is_none() {
+                return Err("It has no conversation to carry on.".into());
+            }
+            cfg.path_env = login_path(&state).await;
+            // No freer than its main agent is now.
+            let lowered = cap_mode(&mut cfg, worker_ceiling(&state, slot));
+            launch(&self.app, slot, &s, cfg, false).await?;
+            if lowered {
+                told_ask(&self.app, slot);
+            }
+            Ok(())
+        })
+    }
+
     fn transcript(&self, folder: &std::path::Path, session_id: &str) -> Result<Vec<ui_event::UiEvent>, String> {
         let path = history::transcript_path(&projects_root()?, folder, session_id)?;
         Ok(history::replay(&path).events)
@@ -857,6 +879,8 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
 async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
     let s = state.slots.get(&slot)?;
+    // An agent that was put to sleep to save memory wakes for the user's message too.
+    state.orchestra.wake_agent(&slot).await?;
     let turn = send_text(&app, &slot, &s, &text).await?;
     // Said to a worker by the user themselves: its main agent hears of it with its next wake-up.
     state.orchestra.note_user_message(&slot, &text);
@@ -924,6 +948,13 @@ async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str) -> Resu
 #[tauri::command]
 async fn orchestra_approve_merge(state: State<'_, AppState>, worker: String) -> Result<(), String> {
     state.orchestra.approve_merge(&worker).await
+}
+
+/// Puts an idle agent to sleep to save memory (the window decides when: see Settings > General > Memory). Refused for an agent
+/// that is not resting, which the window ignores.
+#[tauri::command]
+async fn orchestra_sleep_agent(state: State<'_, AppState>, slot: String) -> Result<(), String> {
+    state.orchestra.sleep_agent(&slot).await
 }
 
 #[tauri::command]
@@ -2133,6 +2164,7 @@ pub fn run() {
             restart_session,
             apply_harness,
             close_session,
+            orchestra_sleep_agent,
             earlier_events,
             send_message,
             aside_ask,

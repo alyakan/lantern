@@ -125,6 +125,8 @@ export const api = {
   /** Tells a Lead's team the project's own roles (the built-in ones need no telling), so the Lead may ask for one by id. */
   setRoles: (main: string, roles: Role[]) => invoke<void>("orchestra_set_roles", { main, roles }),
   /** A team's "Review and test what an agent builds" setting, on its Lead (see src-tauri/src/orchestra/review.rs). */
+  /** Puts an idle agent to sleep to save memory (its claude stops; a message wakes it). Refused while it is in the middle of something. */
+  sleepAgent: (slot: string) => invoke<void>("orchestra_sleep_agent", { slot }),
   setReview: (main: string, setting: ReviewSetting) => invoke<void>("orchestra_set_review", { main, setting }),
   /** Runs a command the user typed after "!" in the chat's folder; its output comes as shell_output, then shell_done. */
   runShell: (slot: string, id: string, command: string) => invoke<void>("run_shell", { slot, id, command }),

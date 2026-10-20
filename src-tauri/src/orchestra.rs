@@ -149,6 +149,8 @@ pub trait Host: Send + Sync + 'static {
     fn send_to<'a>(&'a self, slot: &'a str, text: String) -> Fut<'a, Result<(), String>>;
     /// Stops a chat's claude and keeps the chat.
     fn stop<'a>(&'a self, slot: &'a str) -> Fut<'a, ()>;
+    /// Starts a chat's claude again on the conversation it had when `stop` ended it.
+    fn restart<'a>(&'a self, slot: &'a str) -> Fut<'a, Result<(), String>>;
     /// A session's conversation, read from Claude Code's transcript for it. Blocking.
     fn transcript(&self, folder: &Path, session_id: &str) -> Result<Vec<UiEvent>, String>;
 }
@@ -160,6 +162,8 @@ pub enum Status {
     Waiting,
     /// Finished its turn; can be given more.
     Idle,
+    /// Finished its turn long ago, and its claude was stopped to save memory (the conversation is kept): a message wakes it.
+    Asleep,
     /// Its claude exited on its own.
     Ended,
     /// Stopped on purpose.
@@ -172,6 +176,7 @@ impl Status {
             Status::Working => "working",
             Status::Waiting => "waiting on the user",
             Status::Idle => "idle (finished its turn)",
+            Status::Asleep => "asleep (finished its turn; its process is stopped to save memory, and a message wakes it)",
             Status::Ended => "ended unexpectedly",
             Status::Stopped => "stopped",
         }
@@ -182,7 +187,7 @@ impl Status {
     /// Not changing its worktree: it finished its turn, or it isn't running at all (stopped, or ended), so what is in
     /// its branch now is what a merge takes.
     fn settled(self) -> bool {
-        matches!(self, Status::Idle | Status::Stopped | Status::Ended)
+        matches!(self, Status::Idle | Status::Asleep | Status::Stopped | Status::Ended)
     }
 }
 
@@ -330,6 +335,8 @@ pub struct Orchestra {
     wait_notice: Duration,
     /// The user's setting: a proposed merge's tests run by themselves.
     auto_tests: AtomicBool,
+    /// One agent goes to sleep or wakes at a time, so a message can't wake an agent that is still being put to sleep.
+    asleep: tokio::sync::Mutex<()>,
 }
 
 fn clip(s: &str, max: usize) -> String {
@@ -468,12 +475,12 @@ pub fn condense(events: &[UiEvent]) -> Vec<String> {
 
 impl Orchestra {
     pub fn new(host: Arc<dyn Host>) -> Arc<Self> {
-        Arc::new(Self { host, inner: Mutex::default(), wait_notice: WAIT_NOTICE, auto_tests: AtomicBool::new(false) })
+        Arc::new(Self { host, inner: Mutex::default(), wait_notice: WAIT_NOTICE, auto_tests: AtomicBool::new(false), asleep: Default::default() })
     }
 
     #[cfg(test)]
     fn with_wait_notice(host: Arc<dyn Host>, wait_notice: Duration) -> Arc<Self> {
-        Arc::new(Self { host, inner: Mutex::default(), wait_notice, auto_tests: AtomicBool::new(false) })
+        Arc::new(Self { host, inner: Mutex::default(), wait_notice, auto_tests: AtomicBool::new(false), asleep: Default::default() })
     }
 
     /// `slot` is a main agent: its workers report to it.
@@ -1107,6 +1114,64 @@ impl Orchestra {
         Ok(out)
     }
 
+    /// Stops an idle agent's claude to save memory, keeping it in the team and its conversation: the Lead still sees it
+    /// (`list_agents`, `read_agent`) and a message wakes it. Refused for an agent that is working, waiting, starting, being
+    /// checked, in a chain or merging, which would lose what it is in the middle of.
+    pub async fn sleep_agent(self: &Arc<Self>, slot: &str) -> Result<(), String> {
+        let _one = self.asleep.lock().await;
+        {
+            let inner = self.inner.lock().unwrap();
+            let w = inner.workers.get(slot).ok_or(GONE)?;
+            if w.status != Status::Idle {
+                return Err(format!("It is {}.", w.status.label()));
+            }
+            if w.pending.is_some() || w.check.is_some() || w.merge == Merge::Merging || w.tests.running.is_some() || review::in_flight(&inner.chains, slot) {
+                return Err("It is in the middle of something (a setup, a check, a merge or its tests).".into());
+            }
+        }
+        self.host.stop(slot).await;
+        let slept = {
+            let mut inner = self.inner.lock().unwrap();
+            // Only if nothing changed it while its claude was stopping.
+            inner.workers.get_mut(slot).filter(|w| w.status == Status::Idle).map(|w| w.status = Status::Asleep).is_some()
+        };
+        if slept {
+            self.host.emit(slot, UiEvent::AgentAsleep { asleep: true });
+        }
+        Ok(())
+    }
+
+    /// Wakes an agent that is asleep: its claude is started again on its conversation, and it is idle, as it was. Nothing
+    /// for an agent that isn't asleep.
+    pub async fn wake_agent(self: &Arc<Self>, slot: &str) -> Result<(), String> {
+        // Most messages are to chats that were never asleep, and don't wait behind another agent's wake.
+        if !self.is_asleep(slot) {
+            return Ok(());
+        }
+        let _one = self.asleep.lock().await;
+        // Woken by someone else while this waited for its turn.
+        if !self.is_asleep(slot) {
+            return Ok(());
+        }
+        self.host.restart(slot).await?;
+        if let Some(w) = self.inner.lock().unwrap().workers.get_mut(slot).filter(|w| w.status == Status::Asleep) {
+            w.status = Status::Idle;
+        }
+        // Said whether or not its new claude had already told us it started: the window must not keep saying it sleeps.
+        self.host.emit(slot, UiEvent::AgentAsleep { asleep: false });
+        Ok(())
+    }
+
+    fn is_asleep(&self, slot: &str) -> bool {
+        self.inner.lock().unwrap().workers.get(slot).is_some_and(|w| w.status == Status::Asleep)
+    }
+
+    /// The conversation a worker's claude had, as it said when it started: what waking it carries on from when the app's own
+    /// record of it is missing (a claude that had to be killed doesn't leave one).
+    pub fn session_of(&self, slot: &str) -> Option<String> {
+        self.inner.lock().unwrap().workers.get(slot).and_then(|w| w.session_id.clone())
+    }
+
     async fn message(self: &Arc<Self>, main: &str, args: &Value) -> Result<String, String> {
         let id = self.owned(main, args)?;
         let text = Self::text_arg(args, "text")?.to_string();
@@ -1124,6 +1189,8 @@ impl Orchestra {
         if !status.live() {
             return Err(format!("Agent {id} (\"{name}\") has {}, so it can't take messages.{}", status.label(), if status.live() { "" } else { " Only the user can restart it; or spawn_agent a new agent with the remaining task." }));
         }
+        // An agent that is asleep is woken first: its claude starts again on its conversation, then it gets the message.
+        self.wake_agent(&id).await.map_err(|e| format!("Agent {id} (\"{name}\") was asleep and couldn't be woken: {e}"))?;
         self.host.send_to(&id, format!("[From the lead] {text}")).await?;
         self.host.emit(&id, UiEvent::AgentMessage { from: "main agent".into(), text });
         {
@@ -1548,12 +1615,15 @@ impl Orchestra {
         let (id, name, main) = (slot.to_string(), w.name.clone(), w.parent.clone());
         let mut wake: Option<String> = None;
         let mut after = review::After::Nothing;
+        let mut woke = false;
         match ev {
             UiEvent::SessionStarted { session_id, .. } => {
                 w.session_id = Some(session_id.clone());
+                // Started again by whatever path (a message, a restart for a new mode, the Lead's mode being lowered).
+                woke = w.status == Status::Asleep;
                 // A new claude for a worker that had stopped or ended (restarted from its window): it is part of the team again,
                 // can be written to, and its turns are told to the main agent.
-                if matches!(w.status, Status::Ended | Status::Stopped) {
+                if matches!(w.status, Status::Ended | Status::Stopped | Status::Asleep) {
                     w.status = Status::Idle;
                 }
             }
@@ -1611,6 +1681,9 @@ impl Orchestra {
             _ => {}
         }
         drop(guard);
+        if woke {
+            self.host.emit(slot, UiEvent::AgentAsleep { asleep: false });
+        }
         if let Some(text) = wake {
             self.wake(&main, text);
         }
@@ -1774,6 +1847,8 @@ mod tests {
         spawned: Mutex<Vec<SpawnRequest>>,
         sent: Mutex<Vec<(String, String)>>,
         stopped: Mutex<Vec<String>>,
+        restarted: Mutex<Vec<String>>,
+        restart_fails: Mutex<Option<String>>,
         spawn_fails: Mutex<Option<String>>,
         transcript: Mutex<Vec<UiEvent>>,
         /// The mode the main agent runs in (the default is Ask, as in Mode's first variant).
@@ -1841,6 +1916,15 @@ mod tests {
         }
         fn stop<'a>(&'a self, slot: &'a str) -> Fut<'a, ()> {
             Box::pin(async move { self.stopped.lock().unwrap().push(slot.to_string()) })
+        }
+        fn restart<'a>(&'a self, slot: &'a str) -> Fut<'a, Result<(), String>> {
+            Box::pin(async move {
+                if let Some(e) = self.restart_fails.lock().unwrap().clone() {
+                    return Err(e);
+                }
+                self.restarted.lock().unwrap().push(slot.to_string());
+                Ok(())
+            })
         }
         fn transcript(&self, _: &Path, _: &str) -> Result<Vec<UiEvent>, String> {
             Ok(self.transcript.lock().unwrap().clone())
@@ -2276,6 +2360,123 @@ mod tests {
         call(&o, "stop_agent", json!({"id": "w1"})).await.unwrap();
         let err = call(&o, "message_agent", json!({"id": "w1", "text": "hello?"})).await.unwrap_err();
         assert!(err.contains("stopped") && err.contains("Only the user can restart it; or spawn_agent a new agent with the remaining task."), "{err}");
+    }
+
+    #[tokio::test]
+    async fn an_idle_agent_can_sleep_and_the_lead_still_sees_it() {
+        let (host, o, _r, _w) = setup();
+        spawn(&o, "login").await;
+        o.observe("w1", &UiEvent::SessionStarted { session_id: "sess".into(), model: "m".into(), cwd: "/".into(), permission_mode: "auto".into(), claude_version: "1".into() });
+        o.observe("w1", &done("first pass"));
+        o.sleep_agent("w1").await.unwrap();
+        assert_eq!(host.stopped.lock().unwrap().clone(), vec!["w1".to_string()]);
+        assert!(host.events_for("w1").iter().any(|e| matches!(e, UiEvent::AgentAsleep { asleep: true })));
+        // Still in the team: listed, readable, and counted as settled for a merge, but not running.
+        let list = call(&o, "list_agents", json!({})).await.unwrap();
+        assert!(list.contains("w1") && list.contains("asleep"), "{list}");
+        assert!(call(&o, "read_agent", json!({"id": "w1"})).await.is_ok());
+        assert!(o.inner.lock().unwrap().workers.get("w1").unwrap().status.settled());
+    }
+
+    #[tokio::test]
+    async fn only_an_idle_agent_may_sleep() {
+        let (host, o, _r, _w) = setup();
+        spawn(&o, "login").await;
+        // Still working on its brief.
+        assert!(o.sleep_agent("w1").await.unwrap_err().contains("working"));
+        assert!(o.sleep_agent("w9").await.is_err());
+        o.observe("w1", &done("first pass"));
+        // In the middle of a merge or its tests: not now.
+        o.inner.lock().unwrap().workers.get_mut("w1").unwrap().merge = Merge::Merging;
+        assert!(o.sleep_agent("w1").await.unwrap_err().contains("middle of something"));
+        o.inner.lock().unwrap().workers.get_mut("w1").unwrap().merge = Merge::None;
+        o.inner.lock().unwrap().workers.get_mut("w1").unwrap().check = Some(1);
+        assert!(o.sleep_agent("w1").await.is_err());
+        assert!(host.stopped.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_message_wakes_a_sleeping_agent_before_it_is_sent() {
+        let (host, o, _r, _w) = setup();
+        spawn(&o, "login").await;
+        o.observe("w1", &done("first pass"));
+        o.sleep_agent("w1").await.unwrap();
+        let reply = call(&o, "message_agent", json!({"id": "w1", "text": "also add a test"})).await.unwrap();
+        assert!(reply.contains("Sent to w1"), "{reply}");
+        assert_eq!(host.restarted.lock().unwrap().clone(), vec!["w1".to_string()]);
+        assert_eq!(host.sent.lock().unwrap().clone(), vec![("w1".to_string(), "[From the lead] also add a test".to_string())]);
+        assert!(host.events_for("w1").iter().any(|e| matches!(e, UiEvent::AgentAsleep { asleep: false })));
+        assert!(call(&o, "list_agents", json!({})).await.unwrap().contains("— working"));
+    }
+
+    #[tokio::test]
+    async fn an_agent_that_cant_be_woken_tells_the_lead_and_is_not_sent_the_message() {
+        let (host, o, _r, _w) = setup();
+        spawn(&o, "login").await;
+        o.observe("w1", &done("first pass"));
+        o.sleep_agent("w1").await.unwrap();
+        *host.restart_fails.lock().unwrap() = Some("no conversation to resume".into());
+        let err = call(&o, "message_agent", json!({"id": "w1", "text": "hello?"})).await.unwrap_err();
+        assert!(err.contains("asleep") && err.contains("no conversation to resume"), "{err}");
+        assert!(host.sent.lock().unwrap().is_empty());
+        // Still asleep, so it can be tried again.
+        assert!(call(&o, "list_agents", json!({})).await.unwrap().contains("asleep"));
+    }
+
+    #[tokio::test]
+    async fn the_user_writing_to_a_sleeping_agent_wakes_it_and_a_stop_ends_it() {
+        let (host, o, _r, _w) = setup();
+        spawn(&o, "login").await;
+        o.observe("w1", &done("first pass"));
+        o.sleep_agent("w1").await.unwrap();
+        o.wake_agent("w1").await.unwrap();
+        assert_eq!(host.restarted.lock().unwrap().len(), 1);
+        // Awake agents are left alone.
+        o.wake_agent("w1").await.unwrap();
+        assert_eq!(host.restarted.lock().unwrap().len(), 1);
+        o.sleep_agent("w1").await.unwrap();
+        let reply = call(&o, "stop_agent", json!({"id": "w1"})).await.unwrap();
+        assert!(reply.contains("Stopped w1"), "{reply}");
+        assert!(call(&o, "list_agents", json!({})).await.unwrap().contains("stopped"));
+    }
+
+    #[tokio::test]
+    async fn a_new_claude_for_a_sleeping_agent_makes_it_part_of_the_team_again() {
+        let (_h, o, _r, _w) = setup();
+        spawn(&o, "login").await;
+        o.observe("w1", &done("first pass"));
+        o.sleep_agent("w1").await.unwrap();
+        o.observe("w1", &UiEvent::SessionStarted { session_id: "sess".into(), model: "m".into(), cwd: "/".into(), permission_mode: "auto".into(), claude_version: "1".into() });
+        assert!(call(&o, "list_agents", json!({})).await.unwrap().contains("idle"));
+    }
+
+    #[tokio::test]
+    async fn a_message_to_a_chat_that_never_slept_does_not_wait_behind_another_agents_wake() {
+        let (_h, o, _r, _w) = setup();
+        spawn(&o, "login").await;
+        // Another agent is being put to sleep or woken: the one at a time is taken.
+        let held = o.asleep.lock().await;
+        let quick = tokio::time::timeout(Duration::from_millis(200), o.wake_agent("s5")).await;
+        assert!(matches!(quick, Ok(Ok(()))), "a chat that isn't asleep waited: {quick:?}");
+        let quick = tokio::time::timeout(Duration::from_millis(200), o.wake_agent("w1")).await;
+        assert!(matches!(quick, Ok(Ok(()))), "an agent that isn't asleep waited: {quick:?}");
+        drop(held);
+    }
+
+    #[tokio::test]
+    async fn the_window_is_told_an_agent_is_awake_however_its_claude_came_back() {
+        let (host, o, _r, _w) = setup();
+        spawn(&o, "login").await;
+        o.observe("w1", &UiEvent::SessionStarted { session_id: "sess".into(), model: "m".into(), cwd: "/".into(), permission_mode: "auto".into(), claude_version: "1".into() });
+        o.observe("w1", &done("first pass"));
+        o.sleep_agent("w1").await.unwrap();
+        let last = |host: &FakeHost| host.events_for("w1").into_iter().rev().find_map(|e| if let UiEvent::AgentAsleep { asleep } = e { Some(asleep) } else { None });
+        assert_eq!(last(&host), Some(true));
+        // Restarted by something other than a message (a new mode): its claude says it started.
+        o.observe("w1", &UiEvent::SessionStarted { session_id: "sess".into(), model: "m".into(), cwd: "/".into(), permission_mode: "auto".into(), claude_version: "1".into() });
+        assert_eq!(last(&host), Some(false));
+        assert_eq!(o.session_of("w1").as_deref(), Some("sess"));
+        assert_eq!(o.session_of("w9"), None);
     }
 
     #[tokio::test]

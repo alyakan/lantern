@@ -180,7 +180,7 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, agentRole,
   // on it turns amber and says what to do, since the agent may be stuck.
   const quiet = useQuiet(state?.activityAt ?? null, status === "working", useQuietAfter());
   const stuck = !!quiet?.stuck;
-  const label = stuck ? `Quiet ${quiet.span}` : state?.setup ? (state.setup.status === "failed" ? "Setup stopped" : "Setting up") : statusLabel(status, role, ready);
+  const label = stuck ? `Quiet ${quiet.span}` : state?.setup ? (state.setup.status === "failed" ? "Setup stopped" : "Setting up") : statusLabel(status, role, ready, state?.agentAsleep);
   // The project's Run command (saved in its setup), for a card whose agent has started.
   const setups = useContext(ProjectSetupContext);
   const runCommand = runCommandOf(setups, role === "main" ? state?.folder : owner?.folder);
@@ -354,7 +354,7 @@ function Team({ nodes, onGoTo, onCloseStopped }: { nodes: OrchestraNode[]; onGoT
               if (!s) return null;
               const status = nodeStatus(s);
               const quiet = n.slot in quietMs;
-              const label = quiet ? `Quiet ${shortSpan(quietMs[n.slot])}` : statusLabel(status, n.role, ready.has(n.slot));
+              const label = quiet ? `Quiet ${shortSpan(quietMs[n.slot])}` : statusLabel(status, n.role, ready.has(n.slot), s.agentAsleep);
               const spent = usage(totalCost(s), totalTokens(s));
               return (
                 <li key={n.slot}>
