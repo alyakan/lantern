@@ -1,7 +1,7 @@
 import type { RevertOutcome } from "./api";
 import type { Hunk, ModelCost, ModelOption, Mode, Rule, RuleScope, SlashCommand, UiEvent, TestRun } from "./types";
 import { countChanges } from "./lib/diff";
-import { readFlavourNote, type Flavour } from "./lib/flavour";
+import { readFlavourNote, readSettingsNote, type Flavour } from "./lib/flavour";
 import { readPageNote } from "./lib/pageNote";
 import { restoreNoteId, revertSummary, undoOf, undoSummary, type RevertNote, type RevertUndo } from "./lib/revert";
 import { KEEP_CHARS, readShellContext, takesShellContext } from "./lib/shell";
@@ -547,7 +547,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       return { ...state, model: ev.model, sessionId: ev.session_id, status: state.status === "starting" ? "idle" : state.status, agentAsleep: false };
     case "user_text": {
       const seq = state.seq + 1;
-      const sent = readShellContext(ev.text);
+      const sent = readShellContext(readSettingsNote(ev.text));
       const read = readFlavourNote(readPageNote(sent.text));
       const { flavour, explain } = read;
       const text = readSkillNote(read.text);
