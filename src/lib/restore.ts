@@ -35,8 +35,9 @@ export function savedChatOf(slot: string, slots: Record<string, State>, active: 
   const s = slots[slot];
   if (!s) return null;
   const draft = drafts[slot]?.trim() ? drafts[slot] : "";
-  // An asleep chat is saved as it was when it went to sleep (a team member keeps its part in the team).
-  if (s.status === "asleep" && s.asleepSaved) return { ...s.asleepSaved, draft, active: slot === active };
+  // A chat with no messages in memory that went to sleep is saved as it was then (a team member keeps its part in the team):
+  // asleep, waking (its history is on its way), or one that failed to wake.
+  if (s.asleepSaved && s.items.length === 0 && s.sessionId) return { ...s.asleepSaved, draft, active: slot === active };
   // An asleep chat has no messages in memory, but it has its conversation.
   const sessionId = s.items.length > 0 || s.status === "asleep" ? s.sessionId : null;
   if (!s.folder || (!sessionId && !draft)) return null;

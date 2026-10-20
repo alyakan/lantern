@@ -793,8 +793,12 @@ export function reducer(state: State, action: Action): State {
       return { ...state, claudePath: action.path, setupError: null, status: state.folder ? state.status : "no_folder" };
     case "claude_missing":
       return { ...state, claudePath: null, setupError: action.error, status: "setup" };
-    case "folder_opened":
-      return freshSession(state, action.folder);
+    case "folder_opened": {
+      const fresh = freshSession(state, action.folder);
+      // A chat waking from sleep is still that conversation until its history arrives: it stays saved for the next launch, found
+      // by its session, and called what it was called (not "New chat" for the moment it takes to load).
+      return state.status === "asleep" ? { ...fresh, sessionId: state.sessionId, asleepTitle: state.asleepTitle, asleepSaved: state.asleepSaved } : fresh;
+    }
     case "sleep":
       return { ...freshSession(state, action.folder), sessionId: action.sessionId, status: "asleep", asleepTitle: action.title, asleepSaved: action.saved ?? null };
     case "folder_cleared":

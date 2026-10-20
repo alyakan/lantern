@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { initialState, reducer, type State } from "../store";
+import { chatTitle } from "../sessions";
 import type { AgentMeta, Chats } from "../sessions";
 import { chatsToSave, savedChatOf, startsNow, teamOf, type SavedChat } from "./restore";
 import { canSleep, membersToSleep, teamSlots, teamsAtRest } from "./idleSleep";
@@ -94,10 +95,11 @@ describe("a team that is asleep", () => {
     expect(saved).toMatchObject({ draft: "half a sentence", active: true, sessionId: "solo-1" });
   });
 
-  it("forgets what it was saved as once it wakes", () => {
+  it("forgets what it was saved as once its history is back", () => {
     const sleeper = slept(chat("s-1"));
     expect(sleeper.asleepSaved).not.toBeNull();
-    expect(reducer(sleeper, { type: "folder_opened", folder: "/p" }).asleepSaved).toBeNull();
+    const woken = reducer(reducer(sleeper, { type: "folder_opened", folder: "/p" }), { type: "history_loaded", sessionId: "s-1", events: [{ kind: "user_text", text: "go" }] });
+    expect(woken.asleepSaved).toBeNull();
   });
 });
 
@@ -134,5 +136,30 @@ describe("what Restore all starts now", () => {
 
   it("knows which team a saved chat is in", () => {
     expect([plain("P1"), lead("L1"), agent("A1", "L1")].map(teamOf)).toEqual([null, "L1", "L1"]);
+  });
+});
+
+describe("a chat that is waking up", () => {
+  const asleep = reducer(chat("w-1"), { type: "sleep", folder: "/p", sessionId: "w-1", title: "Fix the login redirect", saved: { sessionId: "w-1", folder: "/p", title: "Fix the login redirect", draft: "", active: false } });
+
+  it("is still saved, found by its session and called what it was called while its history loads", () => {
+    const waking = reducer(asleep, { type: "folder_opened", folder: "/p" });
+    expect(waking.status).toBe("starting");
+    expect(waking.sessionId).toBe("w-1");
+    expect(chatTitle(waking)).toBe("Fix the login redirect");
+    expect(chatsToSave({ s1: waking }, "none", {}, {})).toEqual([{ sessionId: "w-1", folder: "/p", title: "Fix the login redirect", draft: "", active: false }]);
+  });
+
+  it("is an ordinary chat once its history is in", () => {
+    const woken = reducer(reducer(asleep, { type: "folder_opened", folder: "/p" }), { type: "history_loaded", sessionId: "w-1", events: [{ kind: "user_text", text: "fix the login redirect" }] });
+    expect(woken.asleepSaved).toBeNull();
+    expect(woken.asleepTitle).toBeNull();
+    expect(woken.items).toHaveLength(1);
+  });
+
+  it("does not make a new chat in the same slot look like the one before it", () => {
+    const fresh = reducer(chat("old-1"), { type: "folder_opened", folder: "/p" });
+    expect(fresh.sessionId).toBeNull();
+    expect(chatsToSave({ s1: fresh }, "none", {}, {})).toEqual([]);
   });
 });
