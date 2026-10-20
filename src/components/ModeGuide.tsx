@@ -88,7 +88,7 @@ export const GUIDE: Record<GuideKey, About> = {
       "Builds one step per page, saying what changed and how it checked it",
       "Follows your incremental-dev skill if you have one",
     ],
-    you: ["Next approves the page, and Claude goes on to the next step", "Send & next (⌘Enter) sends a change and approves the step in one go"],
+    you: ["Next approves the page, and Claude goes on to the next step; on a built step, Commit & next commits it first", "Send & next (⌘Enter) sends a change and approves the step in one go, committing a built step once the change is in"],
     goodFor: "Adding or changing something you want to steer.",
     example: "Add retries with backoff to fetchJson",
   },

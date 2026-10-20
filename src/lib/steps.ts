@@ -172,8 +172,17 @@ const headingKey = (h: Heading | null) => (h ? `${h.kind}:${h.n ?? (h.kind === "
 /** Added to a message sent with ⌘Enter on a Step-by-step page: do this, and count the step as approved. */
 export const NEXT_SUFFIX = "Once that's done, this step is approved: go on to the next step.";
 export const andNext = (text: string) => `${text.trim()}\n\n${NEXT_SUFFIX}`;
+/**
+ * A Build step's two buttons: approve it and say whether to commit it, in one answer. Claude's own "Commit step N?"
+ * would otherwise be a page of its own after every Next (STEPS_PROMPT tells it the buttons answer it).
+ */
+export const COMMIT_NEXT = "Next. Commit this step first.";
+export const SKIP_COMMIT_NEXT = "Next. Don't commit this step.";
+export const isCommitAnswer = (text: string) => text.trim() === COMMIT_NEXT || text.trim() === SKIP_COMMIT_NEXT;
+/** Asks for the map again from any flavour: one new Overview, then back to the flavour the chat is in (see STEPS_PROMPT). */
+export const UPDATE_MAP = "Update the architecture map.";
 /** A prompt that moves on to the next step: an approval, a flavour started, or a message sent with ⌘Enter. */
-export const movesOn = (text: string) => isApproval(text) || isVerdictNext(text) || startedFlavour(text) !== null || stayedIn(text) || text.trimEnd().endsWith(NEXT_SUFFIX);
+export const movesOn = (text: string) => isApproval(text) || isCommitAnswer(text) || isVerdictNext(text) || startedFlavour(text) !== null || stayedIn(text) || continuedIn(text) || text.trimEnd().endsWith(NEXT_SUFFIX);
 
 /** The answers to a switch page: start a flavour, or stay in the one you're in. */
 export const startText = (label: string, explain = false) => `Start ${label}${explain ? ", explaining as you go" : ""}.`;
@@ -190,6 +199,9 @@ export function startedChoice(text: string): { flavour: Flavour; explain: boolea
   const { flavour, explain } = flavourWord(m[1]);
   return { flavour, explain: explain || !!m[2] };
 }
+/** What a flavour picked from the badge mid-chat sends at once, with the note that switches it: "Continue in Review." */
+export const continueText = (label: string, explain = false) => `Continue in ${label}${explain ? ", explaining as you go" : ""}.`;
+export const continuedIn = (text: string) => new RegExp(`^continue in\\s+(${FLAVOUR_WORDS})\\b(${EXPLAINING})?[.!]*$`, "i").test(text.trim());
 /** A "Stay in Build." answer: carry on as before. */
 export const stayedIn = (text: string) => new RegExp(`^stay in\\s+(${FLAVOUR_WORDS})\\b(${EXPLAINING})?[.!]*$`, "i").test(text.trim());
 /** What to show of a prompt: without the ⌘Enter suffix. */

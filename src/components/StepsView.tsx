@@ -10,7 +10,7 @@ import { recallScroll, rememberScroll } from "../lib/scrollMemory";
 import { messageTime } from "../lib/time";
 import { initials, useUserName } from "../lib/userName";
 import type { State } from "../store";
-import { isApproval, movesOn, pageLabel, pagesOf, pageTitle, promptText, startedChoice, startedFlavour, startText, stayedIn, stayText, type StepPage, type StepTurn } from "../lib/steps";
+import { COMMIT_NEXT, continuedIn, isApproval, isCommitAnswer, movesOn, pageLabel, pagesOf, pageTitle, promptText, SKIP_COMMIT_NEXT, startedChoice, UPDATE_MAP, startedFlavour, startText, stayedIn, stayText, type StepPage, type StepTurn } from "../lib/steps";
 import { mattersToTask } from "../lib/commands";
 import type { BackgroundRun, ChatItem, ToolItem } from "../store";
 import { workingVerb } from "../lib/verbs";
@@ -27,7 +27,7 @@ import { DoneHandoff, type Handoff } from "./DoneHandoff";
 export const UPDATE_STEP = "Update the step with this: write the whole step again under its heading, in the same format as before, with what we just discussed worked in and everything else kept.";
 
 /** A plain move-on prompt: "Next", a Next carrying review verdicts, an answer to a suggestion; nothing to show as "You asked". */
-const justMovesOn = (text: string) => isApproval(text) || isVerdictNext(text) || startedFlavour(text) !== null || stayedIn(text);
+const justMovesOn = (text: string) => isApproval(text) || isCommitAnswer(text) || isVerdictNext(text) || startedFlavour(text) !== null || stayedIn(text) || continuedIn(text);
 
 /** A Review file page's parts, if its message has the skill's sections. */
 function reviewOf(page: StepPage): ReviewFile | null {
@@ -50,7 +50,7 @@ interface Props extends StreamHandlers {
   /** Approve the page on screen and move on: sends "Next", or the message given (a Next with review verdicts). */
   onNext: (message?: string) => void;
   /** Sends a message as if typed (the review summary's actions). */
-  onSend?: (text: string) => void;
+  onSend?: (text: string, switchTo?: Flavour) => void;
   /** The flavour Step by step is in (one picked and not yet sent included); null before one is chosen. */
   flavour: Flavour | null;
   /** Explain as you go is on (Build and Debug). */
@@ -210,6 +210,10 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
   const teach = explain;
   // Review: whether a file has come yet, so Next opens the first one or the next.
   const filesSoFar = review && pages.slice(0, at + 1).some((p) => p.heading?.kind === "file");
+  // A Build step's Next also answers whether to commit it, so Claude doesn't ask on a page of its own. A map brought up to
+  // date in the middle of a step answers for the step before it.
+  const mapUpdate = heading?.kind === "overview" && page.turns[0].prompt.text.trim() === UPDATE_MAP;
+  const buildStep = (mapUpdate ? pages[at - 1]?.heading : heading)?.kind === "step" && !review && !arch && flavour !== "debug";
 
   // Review verdicts, per page and finding; the page's Next carries them. Kept outside the view while they're unsent
   // (switching chats or modes draws it again), and once sent they're read back from the Next that carried them.
@@ -376,8 +380,13 @@ export function StepsView({ state, flavour, explain = false, onNext, onSend, onP
                 {answeredCount} of {concernCount} concern{concernCount === 1 ? "" : "s"} answered
               </span>
             )}
-            <button className="primary" disabled={waiting || heading?.kind === "done" || heading?.kind === "summary"} title={review ? "Send your verdicts and go on to the next file" : arch ? (heading?.kind === "frame" ? "Go on to the Overview" : heading?.kind === "overview" ? "Go on to the first part" : heading?.kind === "part" && heading.n === heading.total ? "Send your verdicts and go on to the Summary" : "Send your verdicts and go on to the next part") : heading?.kind === "plan-complete" ? "Lock the plan: Claude builds exactly these steps, and asks before changing them" : heading?.kind === "plan-update" ? "Approve this change to the locked plan" : "Approve this page and go on to the next"} onClick={next}>
-              {heading?.kind === "done" || heading?.kind === "summary" ? "Done" : heading?.kind === "plan-complete" ? "Lock plan →" : heading?.kind === "plan-update" ? "Approve update →" : review ? (heading?.kind === "file" && heading.n === heading.total ? "Summary →" : filesSoFar ? "Next file →" : "First file →") : arch ? (heading?.kind === "frame" ? "Overview →" : heading?.kind === "overview" ? "First part →" : heading?.kind === "part" && heading.n === heading.total ? "Summary →" : "Next part →") : flavour === "debug" ? "Next →" : "Next step →"}
+            {buildStep && (
+              <button className="ghost" disabled={waiting} title="Approve this step without committing it, and go on to the next" onClick={() => onNext(SKIP_COMMIT_NEXT)}>
+                Next, no commit
+              </button>
+            )}
+            <button className="primary" disabled={waiting || heading?.kind === "done" || heading?.kind === "summary"} title={review ? "Send your verdicts and go on to the next file" : arch ? (heading?.kind === "frame" ? "Go on to the Overview" : heading?.kind === "overview" ? "Go on to the first part" : heading?.kind === "part" && heading.n === heading.total ? "Send your verdicts and go on to the Summary" : "Send your verdicts and go on to the next part") : heading?.kind === "plan-complete" ? "Lock the plan: Claude builds exactly these steps, and asks before changing them" : heading?.kind === "plan-update" ? "Approve this change to the locked plan" : buildStep ? "Approve this step, commit its files, and go on to the next" : "Approve this page and go on to the next"} onClick={buildStep ? () => onNext(COMMIT_NEXT) : next}>
+              {heading?.kind === "done" || heading?.kind === "summary" ? "Done" : heading?.kind === "plan-complete" ? "Lock plan →" : heading?.kind === "plan-update" ? "Approve update →" : review ? (heading?.kind === "file" && heading.n === heading.total ? "Summary →" : filesSoFar ? "Next file →" : "First file →") : arch ? (heading?.kind === "frame" ? "Overview →" : heading?.kind === "overview" ? "First part →" : heading?.kind === "part" && heading.n === heading.total ? "Summary →" : "Next part →") : flavour === "debug" ? "Next →" : buildStep ? "Commit & next →" : "Next step →"}
             </button>
             </>
           )
@@ -409,10 +418,10 @@ interface PageProps extends StreamHandlers {
   verdicts?: Record<number, Verdict>;
   onVerdict?: (index: number, v: Verdict | null) => void;
   /** Review's summary page: every finding with its verdict, and the actions after the review. */
-  summary?: { rows: ReviewedFinding[]; onAction: (text: string) => void; busy: boolean; architecture?: boolean } | null;
+  summary?: { rows: ReviewedFinding[]; onAction: (text: string, switchTo?: Flavour) => void; busy: boolean; architecture?: boolean } | null;
   /** The Done page: where the work goes from here, and how to message Claude (only on the newest page, when idle). */
   handoff?: Handoff;
-  onHandoffSend?: (text: string) => void;
+  onHandoffSend?: (text: string, switchTo?: Flavour) => void;
   folder: string | null;
   /** Which turn holds Claude's latest version of the step, whichever one the page shows. */
   latest: number;

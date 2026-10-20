@@ -212,7 +212,9 @@ describe("bringing the sessions", () => {
 describe("keyboard access", () => {
   it("puts focus on the action once the places are in", async () => {
     open();
-    expect(await screen.findByRole("button", { name: "Bring 12 chats here" })).toHaveFocus();
+    const action = await screen.findByRole("button", { name: "Bring 12 chats here" });
+    // The button is there a moment before focus moves to it.
+    await waitFor(() => expect(action).toHaveFocus());
   });
 
   it("puts focus on the filter when nothing was found", async () => {

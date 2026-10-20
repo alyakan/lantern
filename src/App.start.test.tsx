@@ -86,6 +86,42 @@ describe("the start screen", () => {
   });
 });
 
+describe("switching flavour partway through", () => {
+  it("sends the switch at once from the badge when Claude is idle, with the note", async () => {
+    const calls = await launch();
+    fireEvent.click(await screen.findByRole("button", { name: /^Design/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Workflow: Step by step · Design" })).toBeEnabled());
+    const box = screen.getByRole("textbox", { name: "Message to Claude" });
+    fireEvent.change(box, { target: { value: "map the auth flow" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await settle();
+    const sent = calls.filter(([c]) => c === "send_message").length;
+    fireEvent.click(screen.getByRole("button", { name: /^Design/, expanded: false }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^Review/ }));
+    await waitFor(() => expect(calls.filter(([c]) => c === "send_message").length).toBe(sent + 1));
+    const text = String(last(calls, "send_message")?.text);
+    expect(text).toContain("this chat switched to Review");
+    expect(text.trimEnd().endsWith("Continue in Review.")).toBe(true);
+    await settle();
+  });
+
+  it("leaves turning Explain as you go on or off for your next message, so the flavour doesn't start over", async () => {
+    const calls = await launch();
+    fireEvent.click(await screen.findByRole("button", { name: /^Build/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Workflow: Step by step · Build" })).toBeEnabled());
+    const box = screen.getByRole("textbox", { name: "Message to Claude" });
+    fireEvent.change(box, { target: { value: "add slugify" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await settle();
+    const sent = calls.filter(([c]) => c === "send_message").length;
+    fireEvent.click(screen.getByRole("button", { name: /^Build/, expanded: false }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /Explain as you go/ }));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(calls.filter(([c]) => c === "send_message").length).toBe(sent);
+    expect(screen.getByRole("button", { name: /^Build/, expanded: false })).toHaveTextContent("explaining");
+  });
+});
+
 describe("Review a PR", () => {
   it("lists the open pull requests and starts Step by step Review on the one chosen", async () => {
     const calls = await launch();

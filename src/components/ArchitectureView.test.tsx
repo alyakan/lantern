@@ -126,7 +126,7 @@ describe("Architecture in Step by step", () => {
     expect(current().querySelector(".review-table")).toHaveTextContent("Gateway");
     expect(current().querySelector(".review-table")).toHaveTextContent("no timeout");
     fireEvent.click(screen.getByRole("button", { name: "Start Build" }));
-    expect(h.onSend).toHaveBeenCalledWith("Start Build.");
+    expect(h.onSend).toHaveBeenCalledWith("Start Build.", "build");
   });
 });
 
@@ -145,6 +145,16 @@ describe("the Map tab", () => {
     fireEvent.keyDown(box(/^Gateway/), { key: "ArrowRight" });
     // The room has no size here, so any box is "off screen": the view moved to bring the next one in.
     expect(world.style.transform).not.toBe(before);
+  });
+
+  it("asks Claude to bring the map up to date with Update map, which waits while Claude is busy", () => {
+    const onUpdate = vi.fn();
+    const view = render(<ArchitectureTab map={map} current={[]} pageNames={names} onOpenPage={() => {}} onUpdate={onUpdate} />);
+    fireEvent.click(screen.getByRole("button", { name: "Update map" }));
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    view.unmount();
+    render(<ArchitectureTab map={map} current={[]} pageNames={names} onOpenPage={() => {}} />);
+    expect(screen.getByRole("button", { name: "Update map" })).toBeDisabled();
   });
 
   it("eases the zoom and Fit buttons like the canvas does, and leaves a gesture to follow the pointer", () => {

@@ -67,11 +67,11 @@ import { isInstalling, useUpdateState } from "./lib/updates";
 import { BannerView } from "./components/BannerView";
 import { ChatView } from "./components/ChatView";
 import { StepsView } from "./components/StepsView";
-import { andNext, pageLabel, pagesOf, pageTitle } from "./lib/steps";
+import { andNext, continueText, pageLabel, pagesOf, pageTitle, UPDATE_MAP } from "./lib/steps";
 import { architectureMap, coversOf } from "./lib/architecture";
 import { ArchitecturePane } from "./lib/architecturePane";
 import { summarize } from "./lib/stepsSummary";
-import { canExplain, flavourState, savedMode, withFlavourNote, type Flavour } from "./lib/flavour";
+import { canExplain, FLAVOUR_LABEL, flavourState, savedMode, withFlavourNote, type Flavour } from "./lib/flavour";
 import { NO_REVIEW, readReview, reviewFor, type ReviewSetting } from "./lib/reviewChain";
 import { launchOf, migrateModeSettings, permissionsOf, PERMISSIONS_LABEL, WORKFLOW_LABEL, workflowOf, savedModeOf, type Permissions, type Subagents, type Workflow } from "./lib/workflow";
 import { FileLinksProvider } from "./lib/fileLinks";
@@ -916,10 +916,11 @@ export default function App() {
   // A flavour picked since the chat's last message goes with this one, in a note telling Claude.
   // `draft`: the box's text as sent, with its paste placeholders (kept on the message so Edit can bring them back).
   // `auto`: sent by Lantern from agents' notes, not typed by the user.
+  // `switchTo`: a flavour this message switches to itself (a page's button, the badge mid-chat), over any pick.
   const mapNoted = useRef<Record<string, string>>({});
-  const sendIn = (slot: string, text: string, draft?: string, auto = false) => {
-    const pick = chats.slots[slot]?.flavourPick ?? null;
-    const explain = pick !== null && canExplain(pick) && !!chats.slots[slot]?.explainPick;
+  const sendIn = (slot: string, text: string, draft?: string, auto = false, switchTo?: { flavour: Flavour; explain: boolean }) => {
+    const pick = switchTo?.flavour ?? chats.slots[slot]?.flavourPick ?? null;
+    const explain = pick !== null && canExplain(pick) && (switchTo ? switchTo.explain : !!chats.slots[slot]?.explainPick);
     const chat = chats.slots[slot];
     // Claude's last reply looked like a page Lantern couldn't read: it hears so with this message, and the headings.
     const unread = chat && chat.mode === "steps" && !pick ? pageNote(chat.items, chatFlavour(chat), guides) : null;
@@ -1167,6 +1168,16 @@ export default function App() {
       });
     }
     dispatch({ type: "flavour_picked", flavour: pick, explain: explainNext });
+  };
+  // The badge on a Step-by-step chat that's under way switches to another flavour at once, while Claude is idle: "Continue
+  // in Review." goes with the note, and Claude starts the flavour from where the work is. Busy, or only turning Explain as
+  // you go on or off (which shouldn't start the flavour over), it waits for your next message.
+  const pickFlavourNow = (next: Flavour, wantExplain?: boolean) => {
+    const inChat = inConversation(state);
+    const explainNext = canExplain(next) && (wantExplain ?? explain);
+    if (state.mode !== "steps" || state.status !== "idle" || !state.items.length || next === inChat.flavour) return pickFlavour(next, wantExplain);
+    if (state.flavourPick) dispatch({ type: "flavour_picked", flavour: null, explain: false });
+    sendIn(active, continueText(FLAVOUR_LABEL[next], explainNext), undefined, false, { flavour: next, explain: explainNext });
   };
 
   /**
@@ -2358,7 +2369,7 @@ export default function App() {
                     <ArchitecturePane.Provider value={state.folder ? openArchitecture : null}>
                     <FileLinksProvider key={active} slot={active} folder={state.folder} epoch={state.seq} onOpen={openMention}>
                       {stepsView ? (
-                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text) => sendIn(active, text)} flavour={flavour} explain={explain} onPickFlavour={pickFlavour} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} />
+                        <StepsView key={`steps-${active}`} state={state} {...streamHandlers} onNext={(message) => sendIn(active, message ?? "Next")} onSend={(text, switchTo) => sendIn(active, text, undefined, false, switchTo ? { flavour: switchTo, explain: false } : undefined)} flavour={flavour} explain={explain} onPickFlavour={pickFlavourNow} onPage={setPageRange} onShown={(page) => setShownPage({ slot: active, page })} onReviewFile={setReviewFile} jump={pageJump?.slot === active ? pageJump : null} handoff={handoff} />
                       ) : (
                         <ChatView key={`chat-${active}`} state={state} {...streamHandlers} resend={resendHandlers} restore={restoreEvents} loadEarlier={() => loadEarlier(active)} />
                       )}
@@ -2375,7 +2386,7 @@ export default function App() {
           right={
             <ErrorBoundary name="review pane">
               <ReviewPanel
-                architecture={archMap ? { map: archMap, current: shownCovers, pageNames: archPageNames, onOpenPage: openPageIn(active), openKey: archOpenKey, box: archBox } : undefined}
+                architecture={archMap ? { map: archMap, current: shownCovers, pageNames: archPageNames, onOpenPage: openPageIn(active), openKey: archOpenKey, box: archBox, onUpdate: state.status === "idle" ? () => sendIn(active, UPDATE_MAP) : undefined } : undefined}
                 summary={stepsSummary ? { slot: active, data: stepsSummary, changed: state.changedFiles, running: state.status === "running", onOpenPage: openPageIn(active), doc: { pages: stepPages ?? [], title: chatTitle(state, titles), folder: state.folder } } : undefined}
                 folder={state.folder}
                 ready={state.status !== "starting"}

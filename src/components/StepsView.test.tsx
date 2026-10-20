@@ -3,6 +3,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { initialState, type ChatItem, type State } from "../store";
 import type { Flavour } from "../lib/flavour";
 import { StepsView, UPDATE_STEP } from "./StepsView";
+import { COMMIT_NEXT, SKIP_COMMIT_NEXT, UPDATE_MAP } from "../lib/steps";
 
 vi.mock("../api", () => ({ api: { userName: () => Promise.resolve("Ada Lovelace"), changeSummary: () => Promise.resolve([]), exportText: () => Promise.resolve(null) } }));
 
@@ -96,6 +97,51 @@ describe("StepsView", () => {
     fireEvent.keyDown(window, { key: "ArrowRight" });
     fireEvent.click(screen.getByRole("button", { name: "Next step →" }));
     expect(h.onNext).toHaveBeenCalled();
+  });
+
+  it("answers the commit question with a Step page's Next: Commit & next, or Next without committing", () => {
+    const step: ChatItem[] = [...items, { type: "user", id: "u3", text: "Next", turn: 2 }, { type: "assistant", id: "a3", text: "# Step 1 of 1 — Add the function\n\n1. utils.js:3 adds it." }, { type: "turn", id: "t3", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 }];
+    const h = handlers();
+    render(<StepsView state={state({ items: step })} {...h} />);
+    expect(screen.queryByRole("button", { name: "Next step →" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Commit & next →" }));
+    expect(h.onNext).toHaveBeenLastCalledWith(COMMIT_NEXT);
+    fireEvent.click(screen.getByRole("button", { name: "Next, no commit" }));
+    expect(h.onNext).toHaveBeenLastCalledWith(SKIP_COMMIT_NEXT);
+  });
+
+  it("keeps the commit choice for the step on a map brought up to date in the middle of it", () => {
+    const step: ChatItem[] = [
+      ...items,
+      { type: "user", id: "u3", text: "Next", turn: 2 },
+      { type: "assistant", id: "a3", text: "# Step 1 of 2 — Add the function\n\n1. utils.js:3 adds it." },
+      { type: "turn", id: "t3", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
+      { type: "user", id: "u4", text: UPDATE_MAP, turn: 3 },
+      { type: "assistant", id: "a4", text: '# Overview — Slugify\n\n```architecture\n{"layers": [], "nodes": [{"id": "u", "label": "Utils", "status": "done"}], "edges": []}\n```' },
+      { type: "turn", id: "t4", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
+    ];
+    const h = handlers();
+    render(<StepsView state={state({ items: step })} {...h} />);
+    expect(current().querySelector(".step-eyebrow")).toHaveTextContent("Overview");
+    fireEvent.click(screen.getByRole("button", { name: "Commit & next →" }));
+    expect(h.onNext).toHaveBeenLastCalledWith(COMMIT_NEXT);
+    expect(screen.getByRole("button", { name: "Next, no commit" })).toBeInTheDocument();
+  });
+
+  it("puts the page after a commit answer on its own, without showing the answer as a question", () => {
+    const step: ChatItem[] = [
+      ...items,
+      { type: "user", id: "u3", text: "Next", turn: 2 },
+      { type: "assistant", id: "a3", text: "# Step 1 of 2 — Add the function\n\n1. utils.js:3 adds it." },
+      { type: "turn", id: "t3", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
+      { type: "user", id: "u4", text: COMMIT_NEXT, turn: 3 },
+      { type: "assistant", id: "a4", text: "# Step 2 of 2 — Export it\n\n1. index.js:1 exports it." },
+      { type: "turn", id: "t4", isError: false, stopped: false, result: null, durationMs: 1, denied: 0 },
+    ];
+    render(<StepsView state={state({ items: step })} {...handlers()} />);
+    expect(screen.getByText("Page 4 of 4")).toBeInTheDocument();
+    expect(current().querySelector(".step-eyebrow")).toHaveTextContent("Step 2 of 2");
+    expect(current().querySelector(".step-asked")).toBeNull();
   });
 
   it("offers to lock the plan on the Plan complete page, and to approve a change on a Plan update page", () => {

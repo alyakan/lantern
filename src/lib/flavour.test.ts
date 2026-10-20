@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChatItem } from "../store";
 import { canExplain, flavourName, flavourNote, flavourOf, flavourState, readFlavourNote, savedMode, withFlavourNote } from "./flavour";
+import { UPDATE_MAP } from "./steps";
 
 const u = (id: string, text: string, extra: Partial<Extract<ChatItem, { type: "user" }>> = {}): ChatItem => ({ type: "user", id, text, ...extra });
 const a = (id: string, text: string): ChatItem => ({ type: "assistant", id, text });
@@ -45,6 +46,20 @@ describe("Design", () => {
     expect(flavourOf(parts)).toBe("architecture");
     // A Summary after files stays a review's.
     expect(flavourOf([u("u1", "review"), a("a1", "# File 1 of 1 — a.ts (+1 −0)"), u("u2", "Next"), a("a2", "# Summary — done")])).toBe("review");
+  });
+});
+
+describe("a map brought up to date", () => {
+  it("leaves a Build that Claude's pages tell as a Build, though its Overview is Design's heading", () => {
+    const chat: ChatItem[] = [
+      { type: "user", id: "u1", text: "Add slugify" },
+      { type: "assistant", id: "a1", text: "# Step 1 of 2 — Add it" },
+      { type: "user", id: "u2", text: UPDATE_MAP },
+      { type: "assistant", id: "a2", text: "# Overview — Slugify\n\n```architecture\n{}\n```" },
+    ];
+    expect(flavourOf(chat)).toBe("build");
+    // An Overview of its own is still a Design.
+    expect(flavourOf([...chat.slice(0, 2), { type: "user", id: "u2", text: "Map it" }, chat[3]])).toBe("architecture");
   });
 });
 

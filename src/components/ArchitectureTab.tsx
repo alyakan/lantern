@@ -308,6 +308,8 @@ interface TabProps {
   onOpenPage: (pageKey: string) => void;
   /** Drawn in the larger view: no button for it. */
   large?: boolean;
+  /** Ask Claude to bring the map up to date, from any flavour (missing while it's busy). */
+  onUpdate?: () => void;
 }
 
 /** What the map's legend lists: only what it uses. */
@@ -359,7 +361,7 @@ function MapLightbox({ onClose, children }: { onClose: () => void; children: Rea
 }
 
 /** The right pane's Architecture tab: the latest Overview's map, filling the pane, on a surface you can move around. */
-export function ArchitectureTab({ map, box, current, pageNames, onOpenPage, large = false }: TabProps) {
+export function ArchitectureTab({ map, box, current, pageNames, onOpenPage, large = false, onUpdate }: TabProps) {
   const body = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState({ w: 0, h: 0 });
   // A map with layers has one way to be laid out (its bands, top to bottom), with as many boxes to a row as shows it
@@ -416,6 +418,11 @@ export function ArchitectureTab({ map, box, current, pageNames, onOpenPage, larg
         <span className="arch-tab-title" title={map.title}>
           {map.title || "Architecture"}
         </span>
+        {!large && (
+          <button className="arch-update" disabled={!onUpdate} title={onUpdate ? "Ask Claude to bring the map up to date with the work so far, then carry on" : "Wait for Claude to finish"} onClick={onUpdate}>
+            Update map
+          </button>
+        )}
         {layout && !large && (
           <button className="arch-expand" aria-label="Open the map larger" title="Open the map larger" onClick={() => setBig(true)}>
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

@@ -107,7 +107,7 @@ describe("the end of a Build", { timeout: 180_000 }, () => {
   it("hands off to the changes, Ship it, the plan's export and a new chat", async () => {
     const calls = await build();
     const handoff = screen.getByRole("region", { name: "What next" });
-    expect(within(handoff).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Review the changes (1)", "Ship it…", "Export the plan", "Start something new"]);
+    expect(within(handoff).getAllByRole("button").map((b) => b.textContent?.trim())).toEqual(["Review the changes (1)", "Ship it…", "Review this branch", "Update the map", "Export the plan", "Start something new"]);
     // Named stages: all the earlier ones done, Done lit.
     expect(screen.getByRole("navigation", { name: "Progress" }).querySelector('[aria-current="step"]')).toHaveTextContent("Done");
     expect(screen.getByRole("button", { name: "Show side panel" })).toBeInTheDocument();

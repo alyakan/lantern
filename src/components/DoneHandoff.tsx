@@ -3,6 +3,11 @@ import type { StepsSummary } from "../lib/stepsSummary";
 import { exportFileName } from "../lib/planExport";
 import { SummaryExport } from "./SummaryExport";
 import { useStepFiles, type ExportDoc } from "./SummaryTab";
+import type { Flavour } from "../lib/flavour";
+import { UPDATE_MAP } from "../lib/steps";
+
+/** What Review this branch sends, switching the chat to Review. */
+export const REVIEW_BUILD = "Review what this Build changed: this branch against its base, and any changes not committed yet, a file per page.";
 
 /** What the Done page hands off to: the side panel, the plan's export, and a fresh chat. */
 export interface Handoff {
@@ -22,9 +27,10 @@ export interface Handoff {
 
 /**
  * The end of a Build: what to do with the work. Ship it opens a dialog that sends Claude one message once the user has
- * confirmed it; `onSend` is missing while Claude is busy or the page isn't the newest, which leaves Ship it off.
+ * confirmed it; Review this branch starts a Review of it, and Update the map brings the architecture map up to date.
+ * `onSend` is missing while Claude is busy or the page isn't the newest, which leaves those off.
  */
-export function DoneHandoff({ handoff, onSend }: { handoff: Handoff; onSend?: (text: string) => void }) {
+export function DoneHandoff({ handoff, onSend }: { handoff: Handoff; onSend?: (text: string, switchTo?: Flavour) => void }) {
   const count = handoff.changed.length;
   return (
     <section className="handoff" aria-label="What next">
@@ -35,6 +41,12 @@ export function DoneHandoff({ handoff, onSend }: { handoff: Handoff; onSend?: (t
         </button>
         <button disabled={!onSend} title={onSend ? "Commit, push and open a pull request: you check each step first" : "Wait for Claude to finish"} onClick={handoff.onShip}>
           Ship it…
+        </button>
+        <button disabled={!onSend} title={onSend ? "Review this Build's changes a file per page, in Review" : "Wait for Claude to finish"} onClick={() => onSend?.(REVIEW_BUILD, "review")}>
+          Review this branch
+        </button>
+        <button disabled={!onSend} title={onSend ? "Bring the architecture map up to date with what was built, then carry on here" : "Wait for Claude to finish"} onClick={() => onSend?.(UPDATE_MAP)}>
+          Update the map
         </button>
         {handoff.summary && <PlanExport handoff={handoff} summary={handoff.summary} />}
         <button onClick={handoff.onStartNew} title="Start a new chat in this project">

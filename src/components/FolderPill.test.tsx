@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { FolderPill } from "./FolderPill";
 
 const recent = [
@@ -35,7 +35,8 @@ describe("FolderPill", () => {
     const pill = screen.getByRole("button", { name: /acme-api/ });
     fireEvent.click(pill);
     const current = await screen.findByRole("menuitem", { name: /acme-api.*Current/ });
-    expect(current).toHaveFocus();
+    // The row is there a moment before focus moves to it, once the list is in.
+    await waitFor(() => expect(current).toHaveFocus());
     fireEvent.keyDown(current, { key: "ArrowDown" });
     expect(screen.getByRole("menuitem", { name: /web/ })).toHaveFocus();
     fireEvent.keyDown(screen.getByRole("menuitem", { name: /web/ }), { key: "End" });
