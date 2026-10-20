@@ -163,9 +163,11 @@ async fn login_path(state: &AppState) -> Option<String> {
     tauri::async_runtime::spawn_blocking(move || cell.get_or_init(cli_locator::login_shell_path).clone()).await.ok().flatten()
 }
 
-/// The bus and hub, with the window tapped in: it is sent every chat event as `ui-event` (see remote::for_window).
+/// The bus and hub, with the window tapped in (it is sent every chat event as `ui-event`, see remote::for_window), and
+/// Remote control's settings and devices from app data, with the Mac's key in the Keychain.
 fn window_remote(app: &AppHandle) -> remote::Remote {
-    let remote = remote::Remote::default();
+    let store = remote::pairing::RemoteStore::load(app.path().app_data_dir().ok().map(|d| d.join("remote.json")));
+    let remote = remote::Remote::new(store, Box::new(remote::keys::Keychain));
     let app = app.clone();
     remote.tap_window(move |ev| {
         let _ = app.emit("ui-event", &ev);
@@ -1566,6 +1568,55 @@ fn remote_window_chats(state: State<'_, AppState>, chats: Vec<remote::WindowChat
     state.remote.window_chats(&chats);
 }
 
+/// Settings › Remote control: whether it is on, and the paired devices.
+#[tauri::command]
+fn remote_settings(state: State<'_, AppState>) -> remote::RemoteView {
+    state.remote.view()
+}
+
+#[tauri::command]
+fn remote_set_enabled(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
+    state.remote.store.set_enabled(on);
+    state.remote.view()
+}
+
+#[tauri::command]
+fn remote_set_show_titles(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
+    state.remote.store.set_show_titles(on);
+    state.remote.view()
+}
+
+/// A QR code for pairing a phone, good for five minutes and one try.
+#[tauri::command]
+async fn remote_pair(state: State<'_, AppState>) -> Result<remote::PairView, String> {
+    let (hosts, name) = tauri::async_runtime::spawn_blocking(|| (remote::local_addresses(), mac_name())).await.map_err(|e| e.to_string())?;
+    state.remote.pair(&hosts, &name, remote::now_ms())
+}
+
+#[tauri::command]
+fn remote_pair_cancel(state: State<'_, AppState>) {
+    state.remote.store.cancel_offer();
+}
+
+/// Forgets a paired device: it can't connect again until it pairs again.
+#[tauri::command]
+fn remote_remove_device(state: State<'_, AppState>, id: String) -> remote::RemoteView {
+    state.remote.store.remove_device(&id);
+    state.remote.view()
+}
+
+/// The Mac's name as the user set it (Sharing settings), for the phone to show.
+fn mac_name() -> String {
+    std::process::Command::new("/usr/sbin/scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Mac".into())
+}
+
 /// Asks the window to wake an asleep chat for a paired phone (the window wakes chats: it has what they were restored
 /// with). Refused for a chat that isn't listed, or isn't asleep.
 #[allow(dead_code)] // The gateway calls it (M3).
@@ -2245,6 +2296,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             locate_claude,
             remote_window_chats,
+            remote_settings,
+            remote_set_enabled,
+            remote_set_show_titles,
+            remote_pair,
+            remote_pair_cancel,
+            remote_remove_device,
             claude_login,
             sidebar_menu,
             keep_awake,

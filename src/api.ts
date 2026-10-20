@@ -4,6 +4,7 @@ import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { Role } from "./lib/roles";
 import type { WindowChat } from "./lib/remoteChats";
+import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
 import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
@@ -326,6 +327,15 @@ export const api = {
   onMenubarNeedChats: (cb: () => void): Promise<UnlistenFn> => listen("menubar-need-chats", () => cb()),
   /** The scan moved on, finished, or Claude marked suggestions. */
   onStorageChanged: (cb: () => void): Promise<UnlistenFn> => listen("storage-changed", () => cb()),
+  /** Settings › Remote control: whether it is on, and the paired phones. */
+  remoteSettings: () => invoke<RemoteView>("remote_settings"),
+  remoteSetEnabled: (on: boolean) => invoke<RemoteView>("remote_set_enabled", { on }),
+  remoteSetShowTitles: (on: boolean) => invoke<RemoteView>("remote_set_show_titles", { on }),
+  /** A QR code a phone pairs with: one try, for five minutes. Rejects while Remote control is off. */
+  remotePair: () => invoke<PairView>("remote_pair"),
+  remotePairCancel: () => invoke<void>("remote_pair_cancel"),
+  /** Forgets a paired phone: it can't connect again until it pairs again. */
+  remoteRemoveDevice: (id: string) => invoke<RemoteView>("remote_remove_device", { id }),
   /** Tells the backend's session hub each open chat's title and which are asleep (see lib/remoteChats.ts). */
   remoteWindowChats: (chats: WindowChat[]) => invoke<void>("remote_window_chats", { chats }),
   /** A paired phone asked for an asleep chat: wake it where it is. */

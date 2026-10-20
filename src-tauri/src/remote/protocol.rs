@@ -1,0 +1,333 @@
+//! What Lantern and a paired phone say to each other, once their channel is open (see secure.rs). The phone is never
+//! sent Lantern's own events (`UiEvent`): it gets `RemoteEvent`, chosen and trimmed here, so the desktop's internals can
+//! change without breaking an app already on someone's phone. The TypeScript side is generated from these types
+//! (`cargo test export_bindings`, into mobile/src/protocol/generated).
+
+use crate::ui_event::UiEvent;
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+/// Bumped when a message changes in a way an older phone can't read. The phone refuses a Mac with another version and
+/// asks for the newer app (or the newer Lantern) instead of breaking.
+pub const PROTOCOL_VERSION: u32 = 1;
+
+/// Where the generated TypeScript goes, from ts-rs's export folder (src-tauri/bindings): each type below says it again.
+#[cfg(test)]
+const BINDINGS: &str = "../../mobile/src/protocol/generated/";
+
+/// An event of a chat, as the phone sees it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub enum RemoteEvent {
+    /// What the user said, without the notes Lantern put before it; `sent_by`: "desktop", a phone's id, or none (history).
+    UserText {
+        text: String,
+        #[ts(type = "number | null")]
+        at: Option<u64>,
+        sent_by: Option<String>,
+    },
+    /// Claude is thinking (the main thread; a subagent's thinking isn't sent).
+    Thinking,
+    TextDelta { block_id: String, text: String },
+    AssistantText { block_id: String, text: String },
+    ToolStarted { tool_use_id: String, name: String, summary: String },
+    /// The step ended; its output isn't sent (the phone shows steps as a line each).
+    ToolFinished { tool_use_id: String, is_error: bool },
+    /// A file the step changed, as counts: its diff is a request of its own.
+    FileEdited { tool_use_id: String, path: String, created: bool, added: u32, removed: u32 },
+    TestsRan { tool_use_id: String, command: String, passed: u32, failed: u32, skipped: u32 },
+    TurnDone {
+        is_error: bool,
+        result: Option<String>,
+        #[ts(type = "number | null")]
+        duration_ms: Option<u64>,
+    },
+    /// Something waits for the user's answer: Allow or Deny, an approval, or a question (AskUserQuestion's input).
+    PermissionRequested {
+        request_id: String,
+        tool_name: String,
+        #[ts(type = "unknown")]
+        input: serde_json::Value,
+    },
+    PermissionWithdrawn { request_id: String },
+    PermissionResolved { request_id: String, allow: bool, by: String },
+    /// Something only the desktop can answer: a merge proposal, a failed setup.
+    NeedsDesktop { what: String },
+    SessionStarted { session_id: String },
+    SessionEnded { code: Option<i32> },
+    Asleep { asleep: bool },
+    ConversationReset,
+}
+
+/// The phone's events for one of Lantern's, or none: subagents' insides, Lantern's bookkeeping and anything a phone
+/// doesn't show stay on the Mac. Every event is named here, so a new one is a compile error until it is decided.
+pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
+    use RemoteEvent as R;
+    use UiEvent as U;
+    Some(match event {
+        U::UserText { text, at, sent_by } => R::UserText { text: super::hub::without_notes(text).to_string(), at: *at, sent_by: sent_by.clone() },
+        U::Thinking { parent: None } => R::Thinking,
+        U::TextDelta { parent: None, block_id, text } => R::TextDelta { block_id: block_id.clone(), text: text.clone() },
+        U::AssistantText { parent: None, block_id, text } => R::AssistantText { block_id: block_id.clone(), text: text.clone() },
+        U::ToolStarted { parent: None, tool_use_id, name, summary } => R::ToolStarted { tool_use_id: tool_use_id.clone(), name: name.clone(), summary: summary.clone() },
+        U::ToolFinished { parent: None, tool_use_id, is_error, .. } => R::ToolFinished { tool_use_id: tool_use_id.clone(), is_error: *is_error },
+        U::EditApplied { parent: None, tool_use_id, path, created, hunks, .. } => {
+            let count = |mark: char| hunks.iter().flat_map(|h| &h.lines).filter(|l| l.starts_with(mark)).count() as u32;
+            R::FileEdited { tool_use_id: tool_use_id.clone(), path: path.clone(), created: *created, added: count('+'), removed: count('-') }
+        }
+        U::TestRun { parent: None, tool_use_id, command, run } => R::TestsRan { tool_use_id: tool_use_id.clone(), command: command.clone(), passed: run.passed, failed: run.failed, skipped: run.skipped },
+        U::TurnDone { is_error, result, duration_ms, .. } => R::TurnDone { is_error: *is_error, result: result.clone(), duration_ms: *duration_ms },
+        U::PermissionRequested { request_id, tool_name, input } => R::PermissionRequested { request_id: request_id.clone(), tool_name: tool_name.clone(), input: input.clone() },
+        U::PermissionWithdrawn { request_id } => R::PermissionWithdrawn { request_id: request_id.clone() },
+        U::PermissionResolved { request_id, allow, by } => R::PermissionResolved { request_id: request_id.clone(), allow: *allow, by: by.clone() },
+        U::MergeProposed { name, .. } => R::NeedsDesktop { what: format!("{name} wants to merge its branch.") },
+        U::AgentSetup { phase, .. } if phase == "failed" => R::NeedsDesktop { what: "An agent's setup failed.".into() },
+        U::SessionStarted { session_id, .. } => R::SessionStarted { session_id: session_id.clone() },
+        U::SessionEnded { code, .. } => R::SessionEnded { code: *code },
+        U::AgentAsleep { asleep } => R::Asleep { asleep: *asleep },
+        U::ConversationReset => R::ConversationReset,
+        // A subagent's insides: the phone shows the step that started it, not what it does.
+        U::Thinking { parent: Some(_) } | U::TextDelta { parent: Some(_), .. } | U::AssistantText { parent: Some(_), .. } | U::ToolStarted { parent: Some(_), .. } | U::ToolFinished { parent: Some(_), .. } | U::EditApplied { parent: Some(_), .. } | U::TestRun { parent: Some(_), .. } => return None,
+        // Lantern's own bookkeeping, and what only the desktop's panes show.
+        U::AgentSetup { .. }
+        | U::Retrying { .. }
+        | U::ContextUsed { .. }
+        | U::BackgroundTasks { .. }
+        | U::TaskStarted { .. }
+        | U::TaskEnded { .. }
+        | U::Commands { .. }
+        | U::AgentModel { .. }
+        | U::AgentStarted { .. }
+        | U::AgentProgress { .. }
+        | U::AdvisorStarted { .. }
+        | U::AdvisorDone { .. }
+        | U::Offstream { .. }
+        | U::ModelUsage { .. }
+        | U::McpTools { .. }
+        | U::Models { .. }
+        | U::PermissionAutoAllowed { .. }
+        | U::ShellOutput { .. }
+        | U::ShellDone { .. }
+        | U::ShellSecret { .. }
+        | U::AgentSpawned { .. }
+        | U::AgentWake { .. }
+        | U::AgentMessage { .. }
+        | U::AgentStopped { .. }
+        | U::AgentTidied
+        | U::ReviewUpdate { .. }
+        | U::AgentMode { .. }
+        | U::MergeResolved { .. }
+        | U::ReviewTarget { .. }
+        | U::PlanUsage { .. }
+        | U::Unknown { .. }
+        | U::ParseError { .. } => return None,
+    })
+}
+
+/// Where a chat stands, as the phone lists it (the hub's ChatStatus).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub enum ChatStatus {
+    NeedsYou,
+    Working,
+    Idle,
+    Asleep,
+    Ended,
+}
+
+impl From<super::hub::ChatStatus> for ChatStatus {
+    fn from(s: super::hub::ChatStatus) -> Self {
+        use super::hub::ChatStatus as H;
+        match s {
+            H::NeedsYou => Self::NeedsYou,
+            H::Working => Self::Working,
+            H::Idle => Self::Idle,
+            H::Asleep => Self::Asleep,
+            H::Ended => Self::Ended,
+        }
+    }
+}
+
+/// One chat in the phone's list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteChat {
+    pub slot: String,
+    pub title: Option<String>,
+    /// The project's folder name (not its whole path).
+    pub project: Option<String>,
+    pub status: ChatStatus,
+    #[ts(type = "number")]
+    pub last_seq: u64,
+    #[ts(type = "number")]
+    pub active_at: u64,
+}
+
+impl From<super::hub::ChatInfo> for RemoteChat {
+    fn from(c: super::hub::ChatInfo) -> Self {
+        let project = c.folder.as_deref().and_then(|f| std::path::Path::new(f).file_name()).map(|n| n.to_string_lossy().into_owned());
+        Self { slot: c.slot, title: c.title, project, status: c.status.into(), last_seq: c.last_seq, active_at: c.active_at }
+    }
+}
+
+/// A prompt waiting on the user, in any chat (the home screen's stack, oldest first).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct Waiting {
+    pub slot: String,
+    pub chat_title: Option<String>,
+    pub request_id: String,
+    pub tool_name: String,
+    #[ts(type = "unknown")]
+    pub input: serde_json::Value,
+    #[ts(type = "number")]
+    pub at: u64,
+}
+
+/// What a phone may ask. Nothing else is accepted: no commands, no files, no settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "op", rename_all = "snake_case")]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub enum Request {
+    ListChats,
+    ListWaiting,
+    /// Events of the chat after number `after` from now on (0: from what is kept).
+    Subscribe {
+        slot: String,
+        #[ts(type = "number")]
+        after: u64,
+    },
+    Unsubscribe { slot: String },
+    /// `client_id`: the phone's own id for the message, so it can match the hub's copy to the one it shows.
+    Send { slot: String, text: String, client_id: String },
+    Interrupt { slot: String },
+    Answer {
+        slot: String,
+        request_id: String,
+        allow: bool,
+        message: Option<String>,
+        #[ts(type = "unknown")]
+        updated_input: Option<serde_json::Value>,
+    },
+    Wake { slot: String },
+    /// One file's diff from the chat's start, as unified-diff text.
+    Diff { slot: String, path: String },
+    /// The token Expo's push service delivers this phone's notifications with.
+    PushToken { token: String },
+}
+
+/// A phone's message.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub enum ClientMessage {
+    /// `device_name`: the name the phone goes by on the Mac's device list (its first pairing sets it).
+    Hello { protocol: u32, app_version: String, device_name: String },
+    Request {
+        #[ts(type = "number")]
+        id: u64,
+        request: Request,
+    },
+}
+
+/// Lantern's message.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub enum ServerMessage {
+    /// The answer to Hello. `protocol` differs from the phone's: it stops and says which side to update.
+    Welcome { protocol: u32, app_version: String, mac_name: String },
+    /// The answer to request `id`: `ok` with its result, or `error` with why (for the user).
+    Response {
+        #[ts(type = "number")]
+        id: u64,
+        #[ts(type = "unknown")]
+        ok: Option<serde_json::Value>,
+        error: Option<String>,
+    },
+    Event {
+        slot: String,
+        #[ts(type = "number")]
+        seq: u64,
+        event: RemoteEvent,
+    },
+    /// The phone was too far behind on chat `slot`: these are its events from the start (the transcript, then what is
+    /// kept), to show in place of what it had. Live events follow from `seq`.
+    Reset {
+        slot: String,
+        #[ts(type = "number")]
+        seq: u64,
+        events: Vec<RemoteEvent>,
+    },
+    /// The chat list changed (a chat opened, closed, or moved on).
+    Chats { chats: Vec<RemoteChat> },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui_event::Hunk;
+
+    #[test]
+    fn export_bindings_are_where_the_phone_reads_them() {
+        assert!(BINDINGS.ends_with("mobile/src/protocol/generated/"));
+    }
+
+    #[test]
+    fn the_phone_sees_the_main_thread_and_not_a_subagents_insides() {
+        let main = UiEvent::TextDelta { parent: None, block_id: "b".into(), text: "hi".into() };
+        assert_eq!(to_remote(&main), Some(RemoteEvent::TextDelta { block_id: "b".into(), text: "hi".into() }));
+        let sub = UiEvent::TextDelta { parent: Some("t".into()), block_id: "b".into(), text: "hi".into() };
+        assert_eq!(to_remote(&sub), None);
+        assert_eq!(to_remote(&UiEvent::Thinking { parent: Some("t".into()) }), None);
+    }
+
+    #[test]
+    fn an_edit_is_sent_as_counts_and_a_steps_output_not_at_all() {
+        let edit = UiEvent::EditApplied {
+            parent: None,
+            tool_use_id: "t1".into(),
+            path: "/p/a.rs".into(),
+            created: false,
+            hunks: vec![Hunk { old_start: 1, old_lines: 2, new_start: 1, new_lines: 3, lines: vec![" a".into(), "-b".into(), "+c".into(), "+d".into()] }],
+            original: Some("secret".into()),
+        };
+        assert_eq!(to_remote(&edit), Some(RemoteEvent::FileEdited { tool_use_id: "t1".into(), path: "/p/a.rs".into(), created: false, added: 2, removed: 1 }));
+        let done = UiEvent::ToolFinished { parent: None, tool_use_id: "t1".into(), is_error: false, output: "a lot of output".into() };
+        assert!(!serde_json::to_string(&to_remote(&done).unwrap()).unwrap().contains("output"));
+    }
+
+    #[test]
+    fn what_only_the_desktop_can_answer_is_said_so_and_lanterns_bookkeeping_stays_home() {
+        let merge = UiEvent::MergeProposed { worker: "w".into(), name: "Builder".into(), branch: "b".into(), into: "main".into(), summary: "s".into(), commits: 1, files: vec![], uncommitted: 0, loose: vec![] };
+        assert_eq!(to_remote(&merge), Some(RemoteEvent::NeedsDesktop { what: "Builder wants to merge its branch.".into() }));
+        assert_eq!(to_remote(&UiEvent::ContextUsed { tokens: 5 }), None);
+        assert_eq!(to_remote(&UiEvent::ShellOutput { id: "s".into(), text: "secret".into() }), None);
+        assert_eq!(to_remote(&UiEvent::Unknown { raw: serde_json::json!({}) }), None);
+    }
+
+    #[test]
+    fn a_message_reaches_the_phone_without_lanterns_notes() {
+        let sent = UiEvent::UserText { text: "[Lantern: this chat switched to Debug. The user picked it.]\n\nit crashes".into(), at: Some(3), sent_by: Some("desktop".into()) };
+        assert_eq!(to_remote(&sent), Some(RemoteEvent::UserText { text: "it crashes".into(), at: Some(3), sent_by: Some("desktop".into()) }));
+    }
+
+    #[test]
+    fn messages_read_as_the_generated_typescript_expects() {
+        let req: ClientMessage = serde_json::from_str(r#"{"type":"request","id":7,"request":{"op":"subscribe","slot":"a","after":12}}"#).unwrap();
+        assert_eq!(req, ClientMessage::Request { id: 7, request: Request::Subscribe { slot: "a".into(), after: 12 } });
+        let ev = ServerMessage::Event { slot: "a".into(), seq: 3, event: RemoteEvent::Thinking };
+        assert_eq!(serde_json::to_value(&ev).unwrap(), serde_json::json!({"type": "event", "slot": "a", "seq": 3, "event": {"kind": "thinking"}}));
+        // Anything else a phone sends is refused as it's read.
+        assert!(serde_json::from_str::<ClientMessage>(r#"{"type":"request","id":1,"request":{"op":"run_shell","command":"rm -rf /"}}"#).is_err());
+    }
+
+    #[test]
+    fn a_chat_is_listed_by_its_projects_name_not_its_path() {
+        let info = crate::remote::hub::ChatInfo { slot: "a".into(), title: Some("t".into()), folder: Some("/Users/me/dev/lantern".into()), session_id: Some("s".into()), status: crate::remote::hub::ChatStatus::NeedsYou, last_seq: 4, active_at: 9 };
+        let chat = RemoteChat::from(info);
+        assert_eq!((chat.project.as_deref(), chat.status), (Some("lantern"), ChatStatus::NeedsYou));
+    }
+}
