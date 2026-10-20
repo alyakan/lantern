@@ -8,17 +8,26 @@ const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STA
 const SERVICE: &str = "Lantern Remote control";
 const ACCOUNT: &str = "mac-key";
 
-/// Where the key is kept: the Keychain in the app, memory in tests.
+/// Where the key is kept: the Keychain in the app, memory in tests. `get` is Ok(None) only when there is no key yet;
+/// any other failure (a locked Keychain, a prompt the user turned down) is an error, so the key is never replaced
+/// because it couldn't be read: every paired phone would stop trusting this Mac.
 pub trait KeyStore: Send + Sync {
-    fn get(&self) -> Option<Vec<u8>>;
+    fn get(&self) -> Result<Option<Vec<u8>>, String>;
     fn set(&self, value: &[u8]) -> Result<(), String>;
 }
 
 pub struct Keychain;
 
+/// The Keychain's "no such item".
+const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+
 impl KeyStore for Keychain {
-    fn get(&self) -> Option<Vec<u8>> {
-        security_framework::passwords::get_generic_password(SERVICE, ACCOUNT).ok()
+    fn get(&self) -> Result<Option<Vec<u8>>, String> {
+        match security_framework::passwords::get_generic_password(SERVICE, ACCOUNT) {
+            Ok(v) => Ok(Some(v)),
+            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
+            Err(e) => Err(format!("Couldn't read the remote control key from the Keychain: {e}")),
+        }
     }
 
     fn set(&self, value: &[u8]) -> Result<(), String> {
@@ -26,9 +35,9 @@ impl KeyStore for Keychain {
     }
 }
 
-/// The Mac's key: the one kept, or a new one (kept from now on).
+/// The Mac's key: the one kept, or a new one when there is none yet (or what is kept isn't a key at all).
 pub fn mac_key(store: &dyn KeyStore) -> Result<Keypair, String> {
-    if let Some(k) = store.get().and_then(|v| decode(&v)) {
+    if let Some(k) = store.get()?.and_then(|v| decode(&v)) {
         return Ok(k);
     }
     let k = generate_keypair()?;
@@ -48,8 +57,8 @@ fn decode(value: &[u8]) -> Option<Keypair> {
 pub struct Memory(pub std::sync::Mutex<Option<Vec<u8>>>);
 
 impl KeyStore for Memory {
-    fn get(&self) -> Option<Vec<u8>> {
-        self.0.lock().unwrap().clone()
+    fn get(&self) -> Result<Option<Vec<u8>>, String> {
+        Ok(self.0.lock().unwrap().clone())
     }
     fn set(&self, value: &[u8]) -> Result<(), String> {
         *self.0.lock().unwrap() = Some(value.to_vec());
@@ -74,6 +83,26 @@ mod tests {
         let store = Memory(Mutex::new(Some(b"not a key".to_vec())));
         let k = mac_key(&store).unwrap();
         assert_eq!((k.private.len(), k.public.len()), (32, 32));
-        assert_eq!(decode(&store.get().unwrap()), Some(k));
+        assert_eq!(decode(&store.get().unwrap().unwrap()), Some(k));
+    }
+
+    /// A Keychain that can't be read right now (locked, or the user said no to its prompt).
+    struct Locked(Mutex<bool>);
+
+    impl KeyStore for Locked {
+        fn get(&self) -> Result<Option<Vec<u8>>, String> {
+            Err("locked".into())
+        }
+        fn set(&self, _: &[u8]) -> Result<(), String> {
+            *self.0.lock().unwrap() = true;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_key_that_cant_be_read_is_never_replaced() {
+        let store = Locked(Mutex::new(false));
+        assert!(mac_key(&store).is_err());
+        assert!(!*store.0.lock().unwrap(), "no new key was written over the old one");
     }
 }

@@ -33,7 +33,7 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
     p.then(
       (v) => {
         setView(v);
-        setError(null);
+        setError(v.warning ?? null);
       },
       (e) => setError(errText(e)),
     );

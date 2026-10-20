@@ -1574,23 +1574,22 @@ fn remote_settings(state: State<'_, AppState>) -> remote::RemoteView {
     state.remote.view()
 }
 
+/// The view after a change, with why it couldn't be saved when it couldn't (it holds until Lantern restarts).
 #[tauri::command]
 fn remote_set_enabled(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
-    state.remote.store.set_enabled(on);
-    state.remote.view()
+    state.remote.view_after(state.remote.store.set_enabled(on))
 }
 
 #[tauri::command]
 fn remote_set_show_titles(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
-    state.remote.store.set_show_titles(on);
-    state.remote.view()
+    state.remote.view_after(state.remote.store.set_show_titles(on))
 }
 
-/// A QR code for pairing a phone, good for five minutes and one try.
+/// A QR code for pairing a phone, good for five minutes and one try. Off the main thread: the Mac's key comes from the
+/// Keychain, which may ask the user first.
 #[tauri::command]
-async fn remote_pair(state: State<'_, AppState>) -> Result<remote::PairView, String> {
-    let (hosts, name) = tauri::async_runtime::spawn_blocking(|| (remote::local_addresses(), mac_name())).await.map_err(|e| e.to_string())?;
-    state.remote.pair(&hosts, &name, remote::now_ms())
+async fn remote_pair(app: AppHandle) -> Result<remote::PairView, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().remote.pair(&remote::local_addresses(), &mac_name(), remote::now_ms())).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1601,8 +1600,7 @@ fn remote_pair_cancel(state: State<'_, AppState>) {
 /// Forgets a paired device: it can't connect again until it pairs again.
 #[tauri::command]
 fn remote_remove_device(state: State<'_, AppState>, id: String) -> remote::RemoteView {
-    state.remote.store.remove_device(&id);
-    state.remote.view()
+    state.remote.view_after(state.remote.store.remove_device(&id))
 }
 
 /// The Mac's name as the user set it (Sharing settings), for the phone to show.

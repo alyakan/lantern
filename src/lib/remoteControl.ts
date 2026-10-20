@@ -11,6 +11,8 @@ export interface RemoteView {
   enabled: boolean;
   show_titles: boolean;
   devices: RemoteDevice[];
+  /** The last change holds, but couldn't be saved: why (it won't last past a restart). */
+  warning?: string | null;
 }
 
 /** The QR code a phone pairs with, and when it stops working (ms since the epoch). */

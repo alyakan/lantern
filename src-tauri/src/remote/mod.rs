@@ -2,6 +2,7 @@
 //! joining late needs, and what lets a paired phone in: pairing, the secure channel and the protocol (see
 //! docs/MOBILE.md).
 
+pub mod answers;
 pub mod bus;
 pub mod hub;
 pub mod keys;
@@ -54,6 +55,8 @@ pub struct RemoteView {
     pub enabled: bool,
     pub show_titles: bool,
     pub devices: Vec<DeviceView>,
+    /// The last change holds, but couldn't be saved: why (it won't last past a restart).
+    pub warning: Option<String>,
 }
 
 /// The QR code a phone pairs with, and when it stops working.
@@ -91,7 +94,12 @@ impl Remote {
     pub fn view(&self) -> RemoteView {
         let saved = self.store.saved();
         let devices = saved.devices.into_iter().map(|d| DeviceView { id: d.id, name: d.name, paired_at: d.paired_at, last_seen: d.last_seen }).collect();
-        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, devices }
+        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, devices, warning: None }
+    }
+
+    /// The view after a change, with why it couldn't be saved when it couldn't.
+    pub fn view_after<T>(&self, changed: Result<T, String>) -> RemoteView {
+        RemoteView { warning: changed.err(), ..self.view() }
     }
 
     /// The Mac's Noise key (made and kept the first time it is needed).
@@ -201,7 +209,7 @@ mod tests {
     fn a_qr_code_is_offered_only_while_remote_control_is_on_and_the_macs_key_stays_the_same() {
         let remote = Remote::default();
         assert!(remote.pair(&[], "Mac", 0).is_err());
-        remote.store.set_enabled(true);
+        remote.store.set_enabled(true).unwrap();
         let first = remote.pair(&["192.168.1.2".into()], "Mac", 1000).unwrap();
         assert!(first.svg.contains("<svg"));
         assert_eq!(first.expires_at, 1000 + pairing::OFFER_TTL_MS);
@@ -212,7 +220,7 @@ mod tests {
     #[test]
     fn settings_list_devices_without_their_keys_or_push_tokens() {
         let remote = Remote::default();
-        let d = remote.store.add_device(&[5u8; 32], "Pixel", 3);
+        let d = remote.store.add_device(&[5u8; 32], "Pixel", 3).unwrap();
         remote.store.set_push_token(&d.id, "ExponentPushToken[x]").unwrap();
         let shown = serde_json::to_string(&remote.view()).unwrap();
         assert!(shown.contains("Pixel") && !shown.contains(&d.key) && !shown.contains("ExponentPushToken"));

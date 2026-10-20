@@ -38,9 +38,11 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
       # The phone app's protocol types are generated from the Rust ones (the test above writes them): a change to either
-      # that wasn't regenerated and committed fails here.
+      # that wasn't regenerated and committed fails here, a new type's file included.
       - name: Phone protocol types match the Rust ones
-        run: git diff --exit-code -- mobile/src/protocol/generated
+        run: |
+          git status --porcelain -- mobile/src/protocol/generated
+          test -z "$(git status --porcelain -- mobile/src/protocol/generated)"
 
       # Clean today; a new warning in the crate fails the check.
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings

@@ -8,8 +8,8 @@
 
 use snow::{Builder, HandshakeState, TransportState};
 
-pub const PAIR_PATTERN: &str = "Noise_XXpsk3_25519_ChaChaPoly_BLAKE2s";
-pub const CONNECT_PATTERN: &str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";
+pub const PAIR_PATTERN: &str = "Noise_XXpsk3_25519_ChaChaPoly_SHA256";
+pub const CONNECT_PATTERN: &str = "Noise_XX_25519_ChaChaPoly_SHA256";
 /// Bound into every handshake: a handshake for anything else (another protocol, another version) fails.
 pub const PROLOGUE: &[u8] = b"lantern-remote/1";
 /// The longest Noise message, and what fits in one of ours after the tag and the frame's flag.
@@ -98,23 +98,36 @@ impl Handshake {
     /// The finished handshake's channel, and the other side's key.
     pub fn finish(self) -> Result<(Vec<u8>, Channel), String> {
         let remote = self.remote_key().ok_or("The secure channel failed: the other side sent no key.")?;
-        Ok((remote, Channel { t: self.hs.into_transport_mode().map_err(err)?, partial: Vec::new() }))
+        Ok((remote, Channel { t: self.hs.into_transport_mode().map_err(err)?, partial: Vec::new(), broken: false }))
     }
 }
 
 /// An open channel: messages in and out, each split into frames that fit a Noise message. Every frame is encrypted with
-/// a flag inside it (more to come, or the last), so frames can't be cut, joined or reordered unnoticed.
+/// a flag inside it (more to come, or the last), so frames can't be cut, joined or reordered unnoticed. After its first
+/// error it refuses everything: the connection it was on has to go.
 pub struct Channel {
     t: TransportState,
     partial: Vec<u8>,
+    broken: bool,
 }
 
+const BROKEN: &str = "The secure channel failed earlier and is closed.";
+
 impl Channel {
-    /// The frames that carry `plain`, to send in order.
+    /// The frames that carry `plain`, to send in order. A message too big to send is refused without breaking the channel.
     pub fn seal(&mut self, plain: &[u8]) -> Result<Vec<Vec<u8>>, String> {
+        if self.broken {
+            return Err(BROKEN.into());
+        }
         if plain.len() > MAX_MESSAGE {
             return Err("That message is too big to send.".into());
         }
+        let sealed = self.seal_chunks(plain);
+        self.broken = sealed.is_err();
+        sealed
+    }
+
+    fn seal_chunks(&mut self, plain: &[u8]) -> Result<Vec<Vec<u8>>, String> {
         let chunks: Vec<&[u8]> = if plain.is_empty() { vec![&[]] } else { plain.chunks(CHUNK).collect() };
         let last = chunks.len() - 1;
         chunks
@@ -135,6 +148,18 @@ impl Channel {
     /// Reads a frame: the whole message once its last frame is in, None before. An error ends the channel: the frame was
     /// tampered with, came out of order, or the message grew past MAX_MESSAGE.
     pub fn open(&mut self, frame: &[u8]) -> Result<Option<Vec<u8>>, String> {
+        if self.broken {
+            return Err(BROKEN.into());
+        }
+        let opened = self.open_frame(frame);
+        self.broken = opened.is_err();
+        opened
+    }
+
+    fn open_frame(&mut self, frame: &[u8]) -> Result<Option<Vec<u8>>, String> {
+        if frame.len() > NOISE_MAX {
+            return Err(err("a frame bigger than a Noise message"));
+        }
         let mut out = vec![0u8; frame.len()];
         let n = self.t.read_message(frame, &mut out).map_err(err)?;
         let Some((&flag, data)) = out[..n].split_first() else { return Err(err("an empty frame")) };
@@ -238,6 +263,19 @@ mod tests {
         assert!(b.open(&once).is_ok());
         assert!(b.open(&once).is_err(), "replayed");
         let _ = first;
+    }
+
+    #[test]
+    fn after_a_bad_frame_the_channel_refuses_even_good_ones() {
+        let (mac, phone, secret) = pair();
+        let ((_, mut a), (_, mut b)) = shake(Handshake::pair_initiator(&phone, &secret).unwrap(), Handshake::pair_responder(&mac, &secret).unwrap()).unwrap();
+        let good = a.seal(b"one").unwrap().remove(0);
+        let mut bad = good.clone();
+        bad[0] ^= 1;
+        assert!(b.open(&bad).is_err());
+        assert!(b.open(&good).is_err(), "the frame that would have read now fails too");
+        assert!(b.seal(b"x").is_err());
+        assert!(b.open(&vec![0u8; NOISE_MAX + 1]).is_err());
     }
 
     #[test]

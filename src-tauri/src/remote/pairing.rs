@@ -80,25 +80,27 @@ impl RemoteStore {
         self.saved.lock().unwrap().clone()
     }
 
-    fn change<T>(&self, f: impl FnOnce(&mut Saved) -> T) -> T {
+    /// Changes what is saved. The change holds in memory either way (so turning Remote control off or removing a phone
+    /// takes effect now); the error says it couldn't be saved, so it would come back after a restart.
+    fn change<T>(&self, f: impl FnOnce(&mut Saved) -> T) -> Result<T, String> {
         let mut saved = self.saved.lock().unwrap();
         let out = f(&mut saved);
-        if let Some(path) = &self.path {
-            write_private(path, &saved);
+        match &self.path {
+            Some(path) => write_private(path, &saved).map(|()| out).map_err(|e| format!("Done for now, but Lantern couldn't save it, so it won't last past a restart: {e}")),
+            None => Ok(out),
         }
-        out
     }
 
-    pub fn set_enabled(&self, on: bool) {
-        self.change(|s| s.enabled = on);
+    pub fn set_enabled(&self, on: bool) -> Result<(), String> {
         // Turning it off ends any pairing in progress.
         if !on {
             self.cancel_offer();
         }
+        self.change(|s| s.enabled = on)
     }
 
-    pub fn set_show_titles(&self, on: bool) {
-        self.change(|s| s.show_titles = on);
+    pub fn set_show_titles(&self, on: bool) -> Result<(), String> {
+        self.change(|s| s.show_titles = on)
     }
 
     /// A new offer, in place of any other (an old QR code stops working).
@@ -124,7 +126,7 @@ impl RemoteStore {
     }
 
     /// Remembers a phone that just paired; the same key pairing again is the same device, renamed.
-    pub fn add_device(&self, key: &[u8], name: &str, now: u64) -> Device {
+    pub fn add_device(&self, key: &[u8], name: &str, now: u64) -> Result<Device, String> {
         let key = B64.encode(key);
         let name: String = name.trim().chars().take(60).collect();
         let name = if name.is_empty() { "Phone".to_string() } else { name };
@@ -146,7 +148,8 @@ impl RemoteStore {
         self.saved.lock().unwrap().devices.iter().find(|d| d.key == key).cloned()
     }
 
-    pub fn remove_device(&self, id: &str) -> bool {
+    /// Whether a device was removed (it is from memory either way; the error says it couldn't be saved).
+    pub fn remove_device(&self, id: &str) -> Result<bool, String> {
         self.change(|s| {
             let before = s.devices.len();
             s.devices.retain(|d| d.id != id);
@@ -154,8 +157,9 @@ impl RemoteStore {
         })
     }
 
+    /// When a device last connected: only shown in Settings, so a save that fails is no matter.
     pub fn seen(&self, id: &str, now: u64) {
-        self.change(|s| s.devices.iter_mut().filter(|d| d.id == id).for_each(|d| d.last_seen = Some(now)));
+        let _ = self.change(|s| s.devices.iter_mut().filter(|d| d.id == id).for_each(|d| d.last_seen = Some(now)));
     }
 
     /// Expo push tokens look like `ExponentPushToken[…]`; anything else is refused.
@@ -164,25 +168,22 @@ impl RemoteStore {
         if !ok {
             return Err("That isn't a push token.".into());
         }
-        self.change(|s| s.devices.iter_mut().filter(|d| d.id == id).for_each(|d| d.push_token = Some(token.to_string())));
-        Ok(())
+        self.change(|s| s.devices.iter_mut().filter(|d| d.id == id).for_each(|d| d.push_token = Some(token.to_string())))
     }
 }
 
 /// Written beside the file and renamed over it, readable by the user only.
-fn write_private(path: &std::path::Path, saved: &Saved) {
+fn write_private(path: &std::path::Path, saved: &Saved) -> Result<(), String> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
     if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let tmp = path.with_extension("json.tmp");
-    let Ok(json) = serde_json::to_vec_pretty(saved) else { return };
+    let json = serde_json::to_vec_pretty(saved).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(&tmp);
-    let written = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp).and_then(|mut f| f.write_all(&json));
-    if written.is_ok() {
-        let _ = std::fs::rename(&tmp, path);
-    }
+    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp).and_then(|mut f| f.write_all(&json)).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -198,18 +199,33 @@ mod tests {
     fn remote_control_starts_off_and_its_settings_and_devices_are_kept() {
         let (s, dir) = store();
         assert_eq!(s.saved(), Saved::default());
-        s.set_enabled(true);
-        s.set_show_titles(true);
-        let d = s.add_device(&[1u8; 32], "Aly's iPhone", 10);
+        s.set_enabled(true).unwrap();
+        s.set_show_titles(true).unwrap();
+        let d = s.add_device(&[1u8; 32], "Aly's iPhone", 10).unwrap();
         let again = RemoteStore::load(Some(dir.path().join("remote.json")));
         assert_eq!(again.saved(), Saved { enabled: true, show_titles: true, devices: vec![d] });
+    }
+
+    #[test]
+    fn a_change_that_cant_be_saved_still_holds_now_and_says_it_wont_last() {
+        let dir = tempfile::tempdir().unwrap();
+        // A file where the folder should be: nothing can be written under it.
+        std::fs::write(dir.path().join("blocked"), "").unwrap();
+        let s = RemoteStore::load(Some(dir.path().join("blocked").join("remote.json")));
+        assert!(s.add_device(&[6u8; 32], "Pixel", 1).is_err());
+        let id = s.saved().devices[0].id.clone();
+        assert!(s.set_enabled(true).is_err());
+        assert!(s.remove_device(&id).unwrap_err().contains("won't last past a restart"));
+        assert!(s.device_by_key(&[6u8; 32]).is_none(), "removed from memory even so");
+        assert!(s.set_enabled(false).is_err());
+        assert!(!s.saved().enabled, "and turned off even so");
     }
 
     #[test]
     fn the_saved_file_is_readable_by_the_user_only() {
         use std::os::unix::fs::PermissionsExt;
         let (s, dir) = store();
-        s.set_enabled(true);
+        s.set_enabled(true).unwrap();
         let mode = std::fs::metadata(dir.path().join("remote.json")).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
     }
@@ -229,29 +245,29 @@ mod tests {
         assert_ne!(old.secret, new.secret);
         assert_eq!(s.take_offer(1), Some(new.secret));
         s.start_offer(0).unwrap();
-        s.set_enabled(false);
+        s.set_enabled(false).unwrap();
         assert!(s.take_offer(1).is_none(), "turning remote control off ends the offer");
     }
 
     #[test]
     fn only_a_paired_key_is_known_and_removing_it_forgets_it() {
         let (s, _d) = store();
-        let d = s.add_device(&[2u8; 32], "Pixel", 5);
+        let d = s.add_device(&[2u8; 32], "Pixel", 5).unwrap();
         assert_eq!(s.device_by_key(&[2u8; 32]).unwrap().id, d.id);
         assert!(s.device_by_key(&[3u8; 32]).is_none());
         // Pairing the same key again renames it rather than adding another.
-        s.add_device(&[2u8; 32], "  Pixel 10  ", 6);
+        s.add_device(&[2u8; 32], "  Pixel 10  ", 6).unwrap();
         assert_eq!(s.saved().devices.len(), 1);
         assert_eq!(s.saved().devices[0].name, "Pixel 10");
-        assert!(s.remove_device(&d.id));
+        assert!(s.remove_device(&d.id).unwrap());
         assert!(s.device_by_key(&[2u8; 32]).is_none());
-        assert!(!s.remove_device(&d.id));
+        assert!(!s.remove_device(&d.id).unwrap());
     }
 
     #[test]
     fn a_push_token_must_look_like_expos() {
         let (s, _d) = store();
-        let d = s.add_device(&[4u8; 32], "", 1);
+        let d = s.add_device(&[4u8; 32], "", 1).unwrap();
         assert_eq!(d.name, "Phone");
         assert!(s.set_push_token(&d.id, "ExponentPushToken[abc123]").is_ok());
         assert!(s.set_push_token(&d.id, "https://evil.example/hook").is_err());

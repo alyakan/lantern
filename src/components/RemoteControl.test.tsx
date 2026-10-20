@@ -82,6 +82,19 @@ describe("Settings › Remote control", () => {
     expect(screen.getByText("No phones yet.")).toBeTruthy();
   });
 
+  it("says so when a change holds but couldn't be saved", async () => {
+    view.devices = [{ id: "phone-1", name: "Pixel", paired_at: 0, last_seen: null }];
+    render(<RemoteControl now={() => 0} />);
+    await screen.findByText("Pixel");
+    const removed = { ...view, devices: [], warning: "Done for now, but Lantern couldn't save it, so it won't last past a restart: disk full" };
+    view = removed;
+    const { api } = await import("../api");
+    vi.spyOn(api, "remoteRemoveDevice").mockResolvedValueOnce(removed);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove Pixel" })));
+    expect(screen.getByRole("alert").textContent).toContain("won't last past a restart");
+    expect(screen.getByText("No phones yet.")).toBeTruthy();
+  });
+
   it("chat titles in notifications are off until turned on", async () => {
     render(<RemoteControl now={() => 0} />);
     const titles = await screen.findByRole("checkbox", { name: "Show chat titles in notifications" });
