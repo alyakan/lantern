@@ -294,7 +294,9 @@ mod tests {
         let fixed = |n: u8| (1..=32u8).map(|i| i.wrapping_mul(n).wrapping_add(n)).collect::<Vec<u8>>();
         let (mac_s, phone_s, mac_e, phone_e, psk) = (fixed(3), fixed(5), fixed(7), fixed(11), [9u8; 32]);
         let mut cases = Vec::new();
-        for pair in [true, false] {
+        // The third case is an impostor: a Mac with a key of its own, which the phone (pinned to the real Mac's) must refuse.
+        for (pair, impostor) in [(true, false), (false, false), (true, true)] {
+            let (mac_s, mac_e) = if impostor { (fixed(13), fixed(17)) } else { (mac_s.clone(), mac_e.clone()) };
             let pattern = if pair { PAIR_PATTERN } else { CONNECT_PATTERN };
             let build = |private: &[u8], e: &[u8]| -> Builder<'static> {
                 let b = Builder::new(pattern.parse().unwrap()).prologue(PROLOGUE).local_private_key(Box::leak(private.to_vec().into_boxed_slice())).fixed_ephemeral_key_for_testing_only(Box::leak(e.to_vec().into_boxed_slice()));
@@ -313,6 +315,7 @@ mod tests {
             let down = to_phone.seal(b"hello phone").unwrap();
             cases.push(serde_json::json!({
                 "pattern": pattern,
+                "impostor": impostor,
                 "prologue": hex(PROLOGUE),
                 "psk": if pair { hex(&psk) } else { String::new() },
                 "phone_static": hex(&phone_s),

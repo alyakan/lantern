@@ -5,7 +5,7 @@ use super::secure::{generate_keypair, Keypair};
 use base64::Engine;
 
 const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
-const SERVICE: &str = "Lantern Remote control";
+pub const SERVICE: &str = "Lantern Remote control";
 const ACCOUNT: &str = "mac-key";
 
 /// Where the key is kept: the Keychain in the app, memory in tests. `get` is Ok(None) only when there is no key yet;
@@ -16,14 +16,17 @@ pub trait KeyStore: Send + Sync {
     fn set(&self, value: &[u8]) -> Result<(), String>;
 }
 
-pub struct Keychain;
+/// The login Keychain, under `service` (a dev run uses a service of its own, see LANTERN_REMOTE_FILE).
+pub struct Keychain {
+    pub service: &'static str,
+}
 
 /// The Keychain's "no such item".
 const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
 
 impl KeyStore for Keychain {
     fn get(&self) -> Result<Option<Vec<u8>>, String> {
-        match security_framework::passwords::get_generic_password(SERVICE, ACCOUNT) {
+        match security_framework::passwords::get_generic_password(self.service, ACCOUNT) {
             Ok(v) => Ok(Some(v)),
             Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
             Err(e) => Err(format!("Couldn't read the remote control key from the Keychain: {e}")),
@@ -31,7 +34,7 @@ impl KeyStore for Keychain {
     }
 
     fn set(&self, value: &[u8]) -> Result<(), String> {
-        security_framework::passwords::set_generic_password(SERVICE, ACCOUNT, value).map_err(|e| format!("Couldn't save the remote control key in the Keychain: {e}"))
+        security_framework::passwords::set_generic_password(self.service, ACCOUNT, value).map_err(|e| format!("Couldn't save the remote control key in the Keychain: {e}"))
     }
 }
 

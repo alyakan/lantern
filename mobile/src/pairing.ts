@@ -1,8 +1,12 @@
 /**
  * The link in the QR code a Mac shows for pairing (the Mac's pairing::pairing_link):
  * lantern://pair?v=1&k=<Mac's key>&s=<one-time secret>&h=<addresses>&p=<port>&n=<Mac's name>&e=<expires, ms>
- * Keys are URL-safe base64 without padding.
+ * Keys are URL-safe base64 without padding. Parsed by hand: React Native's URL has been partial (no searchParams) and the
+ * format is fixed.
  */
+import { fromBase64Url } from "./platform/utf8";
+
+export { fromBase64Url, toBase64Url } from "./platform/utf8";
 
 export interface PairingOffer {
   macKey: Uint8Array;
@@ -14,38 +18,39 @@ export interface PairingOffer {
   expiresAt: number;
 }
 
-const B64URL = /^[A-Za-z0-9_-]+$/;
-
-export function fromBase64Url(s: string): Uint8Array {
-  if (!B64URL.test(s)) throw new Error("Not base64.");
-  const std = s.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (s.length % 4)) % 4);
-  const bin = atob(std);
-  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
-}
-
-export function toBase64Url(b: Uint8Array): string {
-  return btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
 /** An IPv4 address on a private network: the only kind the phone dials from a code. */
 const privateIPv4 = (h: string) => {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
   if (!m) return false;
-  const [a, b] = [Number(m[1]), Number(m[2])];
   if (m.slice(1).some((x) => Number(x) > 255)) return false;
+  const [a, b] = [Number(m[1]), Number(m[2])];
   return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
 };
 
+const NOT_OURS = { error: "That isn't a Lantern pairing code." };
+
+function query(link: string): Map<string, string> | null {
+  const m = /^lantern:\/\/pair\/?\?(.*)$/i.exec(link.trim());
+  if (!m) return null;
+  const q = new Map<string, string>();
+  for (const part of m[1].split("&")) {
+    const eq = part.indexOf("=");
+    if (eq < 0) continue;
+    try {
+      const key = decodeURIComponent(part.slice(0, eq));
+      // The first of a repeated key counts, as a person reading the code would take it.
+      if (!q.has(key)) q.set(key, decodeURIComponent(part.slice(eq + 1)));
+    } catch {
+      return null;
+    }
+  }
+  return q;
+}
+
 /** The offer a scanned code carries, or why it isn't one (another app's code, a damaged one, one that expired). */
 export function readPairingLink(link: string, now: number): PairingOffer | { error: string } {
-  let url: URL;
-  try {
-    url = new URL(link.trim());
-  } catch {
-    return { error: "That isn't a Lantern pairing code." };
-  }
-  if (url.protocol !== "lantern:" || (url.hostname !== "pair" && url.pathname.replace(/^\/+/, "") !== "pair")) return { error: "That isn't a Lantern pairing code." };
-  const q = url.searchParams;
+  const q = query(link);
+  if (!q) return NOT_OURS;
   if (q.get("v") !== "1") return { error: "That code is from a newer Lantern. Update this app." };
   try {
     const macKey = fromBase64Url(q.get("k") ?? "");

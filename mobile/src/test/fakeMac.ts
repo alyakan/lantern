@@ -9,14 +9,17 @@ import type { Request } from "../protocol/generated/Request";
 import type { ServerMessage } from "../protocol/generated/ServerMessage";
 import { Channel } from "../noise/channel";
 import { Handshake, keypairFrom, type Keypair } from "../noise/noise";
+import { utf8Decode, utf8Encode } from "../platform/utf8";
 import { queueLink, type Link, type Transport } from "../net/transport";
 
 const bytes = (hex: string) => Uint8Array.from(hex.match(/../g) ?? [], (b) => parseInt(b, 16));
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 
 export type Case = (typeof vectors)[number];
-export const pairCase = vectors.find((v) => v.psk)!;
-export const connectCase = vectors.find((v) => !v.psk)!;
+export const pairCase = vectors.find((v) => v.psk && !v.impostor)!;
+export const connectCase = vectors.find((v) => !v.psk && !v.impostor)!;
+/** A Mac with a key of its own that completes a pairing handshake: what a phone pinned to the real Mac must refuse. */
+export const impostorCase = vectors.find((v) => v.impostor)!;
 
 /** What the phone needs to replay a case: its key and ephemeral, and the Mac's key and the code's secret. */
 export const phoneKeys = (c: Case) => ({ device: keypairFrom(bytes(c.phone_static)) as Keypair, ephemeral: bytes(c.phone_ephemeral), macKey: keypairFrom(bytes(c.mac_static)).publicKey, secret: c.psk ? bytes(c.psk) : null });
@@ -42,6 +45,17 @@ export interface FakeMacOptions {
   answer?: (req: Request) => unknown;
 }
 
+/** A transport that sends each address to its own fake Mac (an address with none is unreachable). */
+export function routeTransport(byHost: Record<string, FakeMac>): Transport {
+  return {
+    open: (host, port, waitMs) => {
+      const mac = byHost[host];
+      if (!mac) return Promise.reject(new Error(`Couldn't reach ${host}.`));
+      return mac.open(host, port, waitMs);
+    },
+  };
+}
+
 export class FakeMac implements Transport {
   /** Every request the phone made, in order. */
   readonly requests: Request[] = [];
@@ -54,7 +68,7 @@ export class FakeMac implements Transport {
     private readonly o: FakeMacOptions = {},
   ) {}
 
-  async open(host: string, port: number): Promise<Link> {
+  async open(host: string, port: number, _waitMs?: number): Promise<Link> {
     this.opened.push(`${host}:${port}`);
     if (this.o.reachable && !this.o.reachable.includes(host)) throw new Error(`Couldn't reach ${host}.`);
     const conn: { link: ReturnType<typeof queueLink>; channel: Channel | null } = { link: null!, channel: null };
@@ -75,7 +89,7 @@ export class FakeMac implements Transport {
         }
         const plain = conn.channel!.open(frame);
         if (!plain) return;
-        const msg = JSON.parse(new TextDecoder().decode(plain)) as ClientMessage;
+        const msg = JSON.parse(utf8Decode(plain)) as ClientMessage;
         if (msg.type === "hello") {
           this.hellos.push(msg);
           this.sendOn(conn, { type: "welcome", protocol: this.o.protocol ?? 1, app_version: "test", mac_name: this.o.macName ?? "Test Mac", epoch: this.o.epoch ?? 7 });
@@ -98,7 +112,7 @@ export class FakeMac implements Transport {
   }
 
   private sendOn(conn: { link: ReturnType<typeof queueLink>; channel: Channel | null }, msg: ServerMessage) {
-    for (const f of conn.channel!.seal(new TextEncoder().encode(JSON.stringify(msg)))) queueMicrotask(() => conn.link.push(f));
+    for (const f of conn.channel!.seal(utf8Encode(JSON.stringify(msg)))) queueMicrotask(() => conn.link.push(f));
   }
 
   /** Sends a message to the phone on the newest connection. */

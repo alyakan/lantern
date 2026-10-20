@@ -166,8 +166,12 @@ async fn login_path(state: &AppState) -> Option<String> {
 /// The bus and hub, with the window tapped in (it is sent every chat event as `ui-event`, see remote::for_window), and
 /// Remote control's settings and devices from app data, with the Mac's key in the Keychain.
 fn window_remote(app: &AppHandle) -> remote::Remote {
-    let store = remote::pairing::RemoteStore::load(app.path().app_data_dir().ok().map(|d| d.join("remote.json")));
-    let remote = remote::Remote::new(store, Box::new(remote::keys::Keychain));
+    // LANTERN_REMOTE_FILE: a dev run keeps its Remote control settings, paired phones and Mac key apart from the real
+    // app's, so trying things out never touches them.
+    let dev_file = std::env::var_os("LANTERN_REMOTE_FILE").map(std::path::PathBuf::from);
+    let store = remote::pairing::RemoteStore::load(dev_file.clone().or_else(|| app.path().app_data_dir().ok().map(|d| d.join("remote.json"))));
+    let keychain = remote::keys::Keychain { service: if dev_file.is_some() { "Lantern Remote control (dev)" } else { remote::keys::SERVICE } };
+    let remote = remote::Remote::new(store, Box::new(keychain));
     let app = app.clone();
     remote.tap_window(move |ev| {
         let _ = app.emit("ui-event", &ev);

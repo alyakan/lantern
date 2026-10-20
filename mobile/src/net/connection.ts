@@ -5,8 +5,9 @@
  */
 import { generateKeypair, keypairFrom, type Keypair } from "../noise/noise";
 import { fromBase64Url, toBase64Url, type PairingOffer } from "../pairing";
-import { comeIn, ProtocolMismatch, Session, type Pushed, type Welcome } from "./session";
-import type { Transport } from "./transport";
+import { MacKeyMismatch } from "../noise/noise";
+import { comeIn, NoAnswer, ProtocolMismatch, Session, type Pushed, type Welcome } from "./session";
+import type { Link, Transport } from "./transport";
 
 /** The Mac this phone is paired with, as kept (its own key in the Keychain or Keystore, see storage). */
 export interface PairedMac {
@@ -66,10 +67,21 @@ export const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 const OPEN_WAIT = 3000;
 const FIND_WAIT = 1500;
 
+/** Nothing answered at an address (or it answered too slowly). */
+export class Unreachable extends Error {}
+
+/** Whether the next address may be tried after this failure: this address wasn't the Mac, or didn't answer. */
+const tryNext = (e: unknown) => e instanceof Unreachable || e instanceof NoAnswer || e instanceof MacKeyMismatch;
+
+type Opened = { session: Session; host: string };
+
 export class Connection {
   private session: Session | null = null;
-  private stopped = false;
+  /** Bumped by every start, pair, stop and forget: a try that finds it changed leaves nothing behind. */
+  private gen = 0;
+  private looping = false;
   private tries = 0;
+  private wakeUp: (() => void) | null = null;
   private readonly wait: (ms: number) => Promise<void>;
 
   constructor(private readonly d: ConnectionDeps) {
@@ -80,9 +92,27 @@ export class Connection {
     return this.session;
   }
 
+  /** Opens a link to one address and comes in over it; the link is closed when that fails. */
+  private async open(host: string, port: number, device: Keypair, macKey: Uint8Array, secret?: Uint8Array) {
+    let link: Link;
+    try {
+      link = await this.d.transport.open(host, port, OPEN_WAIT);
+    } catch (e) {
+      throw new Unreachable((e as Error).message);
+    }
+    try {
+      const { channel, welcome } = await comeIn(link, device, macKey, { secret, deviceName: this.d.deviceName, appVersion: this.d.appVersion, fixedEphemeral: this.d.fixedEphemeral });
+      return { link, channel, welcome };
+    } catch (e) {
+      link.close();
+      throw e;
+    }
+  }
+
   /** Pairs with the Mac a scanned code names, and stays connected. Throws with why it couldn't. */
   async pair(offer: PairingOffer): Promise<void> {
-    this.stopped = false;
+    const my = ++this.gen;
+    this.hangUp();
     const key = (this.d.newKey ?? generateKeypair)();
     const candidates = await this.candidates(toBase64Url(offer.macKey), offer.hosts, offer.port);
     if (candidates.length === 0) throw new Error("Your Mac isn't on this Wi-Fi.");
@@ -90,33 +120,46 @@ export class Connection {
     let lastError: Error = new Error("Couldn't reach your Mac.");
     for (const [host, port] of candidates) {
       try {
-        const link = await this.d.transport.open(host, port, OPEN_WAIT);
-        const { channel, welcome } = await comeIn(link, key, offer.macKey, { secret: offer.secret, deviceName: this.d.deviceName, appVersion: this.d.appVersion, fixedEphemeral: this.d.fixedEphemeral });
+        const { link, channel, welcome } = await this.open(host, port, key, offer.macKey, offer.secret);
+        const session = new Session(link, channel, welcome, this.d.onPushed);
+        if (my !== this.gen) {
+          session.close();
+          throw new Error("Pairing was cancelled.");
+        }
         await this.d.store.save({ macKey: toBase64Url(offer.macKey), deviceKey: toBase64Url(key.privateKey), hosts: offer.hosts, port: offer.port, macName: welcome.mac_name || offer.macName });
-        this.up(new Session(link, channel, welcome, this.d.onPushed), host);
+        this.up({ session, host });
         return;
       } catch (e) {
         lastError = e as Error;
-        // A code is used up by one try: another address won't take it either.
-        if (!(e instanceof Error && /didn't answer|Couldn't reach/.test(e.message))) break;
+        // Only a failure that says this address wasn't the Mac goes on to the next: anything else (the code was taken and
+        // failed, the Mac speaks another protocol) would use up the code or won't change.
+        if (!tryNext(e)) break;
       }
     }
     this.d.onState({ kind: "offline", reason: lastError.message, retryInMs: null });
     throw lastError;
   }
 
-  /** Connects to the paired Mac, and keeps at it until `stop`. */
+  /** Connects to the paired Mac, and keeps at it until `stop`. Starting again while it is at it does nothing. */
   async start(): Promise<void> {
-    this.stopped = false;
+    if (this.looping || this.session) return;
+    const my = ++this.gen;
     const paired = await this.d.store.load();
+    if (my !== this.gen) return;
     if (!paired) return this.d.onState({ kind: "unpaired" });
-    void this.loop(paired);
+    void this.loop(paired, my);
+  }
+
+  /** The app came back to the foreground: a phone's connections don't survive being away, so try again now. */
+  resume() {
+    if (this.session) return;
+    if (this.looping) this.wakeUp?.();
+    else void this.start();
   }
 
   stop() {
-    this.stopped = true;
-    this.session?.close();
-    this.session = null;
+    this.gen++;
+    this.hangUp();
   }
 
   /** Forgets the Mac (the user unpaired, or the Mac removed this phone). */
@@ -126,17 +169,22 @@ export class Connection {
     this.d.onState({ kind: "unpaired" });
   }
 
-  private up(session: Session, host: string) {
+  private hangUp() {
+    this.session?.close();
+    this.session = null;
+  }
+
+  private up({ session, host }: Opened) {
+    this.hangUp();
     this.session = session;
     this.tries = 0;
     this.d.onState({ kind: "connected", welcome: session.welcome, host });
     this.d.onSession?.(session);
-    void session.done.then(async () => {
+    const my = this.gen;
+    void session.done.then(() => {
       if (this.session !== session) return;
       this.session = null;
-      if (this.stopped) return;
-      const paired = await this.d.store.load();
-      if (paired) void this.loop(paired);
+      if (my === this.gen) void this.start();
     });
   }
 
@@ -147,39 +195,48 @@ export class Connection {
     return all.filter(([h, p], i) => all.findIndex(([h2, p2]) => h2 === h && p2 === p) === i);
   }
 
-  private async loop(paired: PairedMac) {
-    while (!this.stopped && !this.session) {
-      this.d.onState({ kind: "connecting" });
-      const reason = await this.attempt(paired);
-      if (reason === null || this.stopped) return;
-      if (reason instanceof ProtocolMismatch) return this.d.onState({ kind: "offline", reason: reason.message, retryInMs: null });
-      const pause = BACKOFF_MS[Math.min(this.tries, BACKOFF_MS.length - 1)];
-      this.tries += 1;
-      this.d.onState({ kind: "offline", reason: reason.message, retryInMs: pause });
-      await this.wait(pause);
+  /** Waits `ms`, or less when the app comes back to the foreground. */
+  private pause(ms: number) {
+    return Promise.race([this.wait(ms), new Promise<void>((r) => (this.wakeUp = r))]);
+  }
+
+  private async loop(paired: PairedMac, my: number) {
+    this.looping = true;
+    try {
+      while (my === this.gen && !this.session) {
+        this.d.onState({ kind: "connecting" });
+        const tried = await this.attempt(paired);
+        if (my !== this.gen) {
+          if (!(tried instanceof Error)) tried.session.close();
+          return;
+        }
+        if (!(tried instanceof Error)) return this.up(tried);
+        if (tried instanceof ProtocolMismatch) return this.d.onState({ kind: "offline", reason: tried.message, retryInMs: null });
+        const wait = BACKOFF_MS[Math.min(this.tries, BACKOFF_MS.length - 1)];
+        this.tries += 1;
+        this.d.onState({ kind: "offline", reason: tried.message, retryInMs: wait });
+        await this.pause(wait);
+      }
+    } finally {
+      this.looping = false;
+      this.wakeUp = null;
     }
   }
 
-  /** One try at every place the Mac may be: null once in, else why not. */
-  private async attempt(paired: PairedMac): Promise<Error | null> {
+  /** One try at every place the Mac may be: a session once in, else why not. */
+  private async attempt(paired: PairedMac): Promise<Opened | Error> {
     const candidates = await this.candidates(paired.macKey, paired.hosts, paired.port);
     if (candidates.length === 0) return new Error(`Can't find ${paired.macName}. Check that it's awake and on the same Wi-Fi.`);
     // Nothing answered at all: said in words, not as a transport's error.
     let last: Error = new Error(`Can't reach ${paired.macName}. Check that it's awake, on the same Wi-Fi as this phone, and that Remote control is on in Lantern.`);
     for (const [host, port] of candidates) {
-      let link;
       try {
-        link = await this.d.transport.open(host, port, OPEN_WAIT);
-      } catch {
-        continue;
-      }
-      try {
-        const { channel, welcome } = await comeIn(link, keypairFrom(fromBase64Url(paired.deviceKey)), fromBase64Url(paired.macKey), { deviceName: this.d.deviceName, appVersion: this.d.appVersion, fixedEphemeral: this.d.fixedEphemeral });
-        this.up(new Session(link, channel, welcome, this.d.onPushed), host);
-        return null;
+        const { link, channel, welcome } = await this.open(host, port, keypairFrom(fromBase64Url(paired.deviceKey)), fromBase64Url(paired.macKey));
+        return { session: new Session(link, channel, welcome, this.d.onPushed), host };
       } catch (e) {
         if (e instanceof ProtocolMismatch) return e;
-        last = e as Error;
+        if (e instanceof MacKeyMismatch) last = new Error(`Something at ${host} answered as another Mac, so this phone didn't talk to it.`);
+        else if (!(e instanceof Unreachable)) last = e as Error;
       }
     }
     return last;

@@ -22,7 +22,8 @@ function replay(c: Case) {
 
 describe("the phone's Noise against the Mac's (snow), byte for byte", () => {
   it("has both handshakes recorded", () => {
-    expect(vectors.map((c) => c.pattern).sort()).toEqual([CONNECT_PATTERN, PAIR_PATTERN].sort());
+    expect(vectors.filter((c) => !c.impostor).map((c) => c.pattern).sort()).toEqual([CONNECT_PATTERN, PAIR_PATTERN].sort());
+    expect(vectors.filter((c) => c.impostor)).toHaveLength(1);
   });
 
   for (const c of vectors) {

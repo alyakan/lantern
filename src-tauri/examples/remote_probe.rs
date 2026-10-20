@@ -5,6 +5,9 @@
 //!
 //! Its key is kept in /tmp/lantern-probe.key. Seeding turns Remote control on in that file; Lantern must be closed while
 //! it is written, since Lantern reads the file when it starts.
+//!
+//! Never seed the real app's remote.json: run the dev build with LANTERN_REMOTE_FILE=/tmp/lantern-dev-remote.json (its
+//! Mac key then has a Keychain entry of its own too) and seed that file.
 
 use base64::Engine;
 use lantern_lib::remote::protocol::{ClientMessage, Request, ServerMessage, PROTOCOL_VERSION};

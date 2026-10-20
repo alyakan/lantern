@@ -72,7 +72,8 @@ export const webSocketTransport: Transport = {
       const ws = new WebSocket(`ws://${host}:${port}/`);
       ws.binaryType = "arraybuffer";
       const { link, push, end } = queueLink(
-        (frame) => ws.send(frame),
+        // Exactly the frame's bytes: a view onto a bigger buffer may be sent whole by some engines.
+        (frame) => ws.send(frame.buffer.slice(frame.byteOffset, frame.byteOffset + frame.byteLength) as ArrayBuffer),
         () => ws.close(),
       );
       const timer = setTimeout(() => {

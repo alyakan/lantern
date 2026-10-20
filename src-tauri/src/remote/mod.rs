@@ -4,6 +4,7 @@
 
 pub mod answers;
 pub mod bus;
+pub mod fixture;
 pub mod hub;
 pub mod keys;
 pub mod pairing;

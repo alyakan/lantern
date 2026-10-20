@@ -78,6 +78,19 @@ describe("a chat, built from its events", () => {
   });
 });
 
+describe("turns", () => {
+  it("a turn's end applied twice is one end, and each turn has its own", () => {
+    const first: RemoteEvent[] = [{ kind: "user_text", text: "one", at: 1, sent_by: null }, { kind: "turn_done", is_error: false, result: "a", duration_ms: 1 }];
+    const second: RemoteEvent[] = [{ kind: "user_text", text: "two", at: 2, sent_by: null }, { kind: "turn_done", is_error: false, result: "b", duration_ms: 1 }];
+    let s = run([...first, ...first, ...second, ...second].map((e, i) => ({ type: "pushed", msg: { type: "event", slot: "a", seq: i + 1, event: e } }) as Action));
+    expect(items(s).filter((it) => it.kind === "turn")).toHaveLength(2);
+    // A catch-up of the same turns on top changes nothing either.
+    s = run([reset("a", 20, [...first, ...second])], s);
+    expect(items(s).filter((it) => it.kind === "turn")).toHaveLength(2);
+    expect(items(s).filter((it) => it.kind === "user")).toHaveLength(2);
+  });
+});
+
 describe("a message sent from this phone", () => {
   it("shows at once, and the Mac's copy takes its place", () => {
     let s = reducer(initialState, { type: "sending", slot: "a", clientId: "m-1", text: "ship it", at: 5 });

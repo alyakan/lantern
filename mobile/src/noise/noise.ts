@@ -11,11 +11,20 @@ import { x25519 } from "@noble/curves/ed25519.js";
 import { chacha20poly1305 } from "@noble/ciphers/chacha.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { hmac } from "@noble/hashes/hmac.js";
+import { randomBytes } from "../platform/random";
+import { utf8Encode } from "../platform/utf8";
 
 export const PAIR_PATTERN = "Noise_XXpsk3_25519_ChaChaPoly_SHA256";
 export const CONNECT_PATTERN = "Noise_XX_25519_ChaChaPoly_SHA256";
 /** Bound into every handshake: one for anything else (another protocol, another version) fails. */
-export const PROLOGUE = new TextEncoder().encode("lantern-remote/1");
+export const PROLOGUE = utf8Encode("lantern-remote/1");
+
+/** The Mac's key isn't the one this phone pinned when it paired. */
+export class MacKeyMismatch extends Error {
+  constructor() {
+    super("This isn't the Mac you paired with.");
+  }
+}
 /** What the phone sends before its handshake (secure.rs's PAIR and CONNECT). */
 export const PAIR = 0x50;
 export const CONNECT = 0x43;
@@ -34,7 +43,7 @@ export function keypairFrom(privateKey: Uint8Array): Keypair {
 }
 
 export function generateKeypair(): Keypair {
-  return keypairFrom(x25519.utils.randomSecretKey());
+  return keypairFrom(randomBytes(32));
 }
 
 const concat = (...parts: Uint8Array[]) => {
@@ -60,7 +69,8 @@ function hkdf(ck: Uint8Array, ikm: Uint8Array, n: 2 | 3): Uint8Array[] {
 
 /** ChaCha20-Poly1305 with Noise's nonce: 4 zero bytes, then the counter, little-endian. */
 export class CipherState {
-  private n = 0n;
+  /** Messages so far: a plain number (it can't get near 2^53), written as two 32-bit halves since BigInt DataView methods are patchy. */
+  private n = 0;
   constructor(private k: Uint8Array | null = null) {}
 
   hasKey() {
@@ -69,14 +79,16 @@ export class CipherState {
 
   private nonce() {
     const out = new Uint8Array(12);
-    new DataView(out.buffer).setBigUint64(4, this.n, true);
+    const view = new DataView(out.buffer);
+    view.setUint32(4, this.n >>> 0, true);
+    view.setUint32(8, Math.floor(this.n / 0x100000000), true);
     return out;
   }
 
   encrypt(ad: Uint8Array, plain: Uint8Array): Uint8Array {
     if (!this.k) return plain;
     const out = chacha20poly1305(this.k, this.nonce(), ad).encrypt(plain);
-    this.n += 1n;
+    this.n += 1;
     return out;
   }
 
@@ -84,7 +96,7 @@ export class CipherState {
   decrypt(ad: Uint8Array, cipher: Uint8Array): Uint8Array {
     if (!this.k) return cipher;
     const out = chacha20poly1305(this.k, this.nonce(), ad).decrypt(cipher);
-    this.n += 1n;
+    this.n += 1;
     return out;
   }
 }
@@ -115,7 +127,7 @@ export class Handshake {
     private readonly fixedEphemeral: Uint8Array | null,
     prologue: Uint8Array = PROLOGUE,
   ) {
-    const name = new TextEncoder().encode(psk ? PAIR_PATTERN : CONNECT_PATTERN);
+    const name = utf8Encode(psk ? PAIR_PATTERN : CONNECT_PATTERN);
     this.h = name.length <= 32 ? concat(name, new Uint8Array(32 - name.length)) : sha256(name);
     this.ck = this.h;
     this.mixHash(prologue);
@@ -219,7 +231,7 @@ export class Handshake {
         this.mixKey(this.dh(this.e!.privateKey, this.re!));
       } else if (t === "s") {
         this.rs = this.decryptAndHash(take(DH_LEN + (this.cipher.hasKey() ? TAG_LEN : 0)));
-        if (!equalBytes(this.rs, this.pinned)) throw new Error("This isn't the Mac you paired with.");
+        if (!equalBytes(this.rs, this.pinned)) throw new MacKeyMismatch();
       } else if (t === "es") {
         this.mixKey(this.dh(this.e!.privateKey, this.rs!));
       }

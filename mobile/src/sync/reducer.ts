@@ -80,7 +80,6 @@ function onStep(items: Item[], id: string, f: (s: Extract<Item, { kind: "step" }
   return updateById(base, "step", id, f);
 }
 
-let turnCounter = 0;
 
 /** One event, applied to a chat's view. */
 export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
@@ -119,12 +118,12 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
       };
     case "tests_ran":
       return { ...view, items: onStep(items, event.tool_use_id, (s) => ({ ...s, tests: { passed: event.passed, failed: event.failed, skipped: event.skipped } })) };
-    case "turn_done":
-      return {
-        ...view,
-        thinking: false,
-        items: [...items.map((it) => (it.kind === "assistant" && it.streaming ? { ...it, streaming: false } : it)), { kind: "turn", id: `turn-${++turnCounter}`, isError: event.is_error, result: event.result, durationMs: event.duration_ms }],
-      };
+    case "turn_done": {
+      // A turn is named for the message that began it, so the same end applied twice is one end.
+      const began = [...items].reverse().find((it) => it.kind === "user");
+      const done: Item = { kind: "turn", id: `turn-${began?.id ?? "start"}`, isError: event.is_error, result: event.result, durationMs: event.duration_ms };
+      return { ...view, thinking: false, items: upsert(items.map((it) => (it.kind === "assistant" && it.streaming ? { ...it, streaming: false } : it)), done) };
+    }
     case "permission_requested":
       return { ...view, items: upsert(items, { kind: "prompt", id: event.request_id, toolName: event.tool_name, input: event.input, state: "open", by: null }, (old) => old) };
     case "permission_withdrawn":

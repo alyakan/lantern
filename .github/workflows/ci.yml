@@ -47,6 +47,17 @@ jobs:
       # Clean today; a new warning in the crate fails the check.
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
+      # The phone app's real client (Noise, WebSocket, connection, sync) against the real gateway, which the example runs
+      # behind three scripted chats: pairing, following, answering, reconnecting, nothing recorded or faked.
+      - run: cargo build --manifest-path src-tauri/Cargo.toml --example fixture_gateway
+      - run: npm ci
+        working-directory: mobile
+      - name: Phone app against the real gateway
+        run: npm test
+        working-directory: mobile
+        env:
+          LANTERN_FIXTURE_GATEWAY: ${{ github.workspace }}/src-tauri/target/debug/examples/fixture_gateway
+
   # The phone app (mobile/): its tests (Noise against the Mac's transcripts and the published vectors, the sync, the
   # connection) and its types.
   mobile:

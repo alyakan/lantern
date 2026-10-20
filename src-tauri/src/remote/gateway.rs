@@ -336,11 +336,13 @@ impl Session<'_> {
         let page = self.gw.host.history(slot.to_string(), None).await.unwrap_or(crate::history::Page { events: vec![], hidden: 0 });
         let hidden = page.hidden as u32;
         let mut events: Vec<RemoteEvent> = page.events.iter().filter_map(protocol::to_remote).collect();
-        // A turn still going isn't all in the transcript yet: what the hub has of it since its message comes after.
-        if self.gw.hub.chat(slot).is_some_and(|c| c.status == super::hub::ChatStatus::Working) {
+        // A turn still going isn't all in the transcript yet: what the hub has of it since its message comes after. A turn
+        // waiting on a prompt is still going.
+        if self.gw.hub.chat(slot).is_some_and(|c| matches!(c.status, super::hub::ChatStatus::Working | super::hub::ChatStatus::NeedsYou)) {
             if let Some(Since::Events(kept) | Since::TooOld { kept }) = self.gw.hub.since(slot, 0) {
                 let start = kept.iter().rposition(|e| matches!(e.event, UiEvent::UserText { .. })).unwrap_or(0);
-                events.extend(kept[start..].iter().filter(|e| e.seq <= seq).filter_map(|e| protocol::to_remote(&e.event)));
+                let live: Vec<RemoteEvent> = kept[start..].iter().filter(|e| e.seq <= seq).filter_map(|e| protocol::to_remote(&e.event)).collect();
+                events = merge_current_turn(events, live);
             }
         }
         for (page, (events, done)) in pages(events).into_iter().enumerate() {
@@ -439,6 +441,21 @@ impl Session<'_> {
         all.sort_by_key(|w| w.at);
         all
     }
+}
+
+/// The transcript's events with the hub's of the turn still going after them. The transcript may already hold that turn's
+/// start (claude writes the message as it takes it), and it holds it from a different source than the hub's copy, so
+/// the transcript is cut at that message and the hub's turn replaces what follows it: the same message, written no earlier
+/// than the hub's copy (an earlier turn with the same words, like "Next", is not this one).
+fn merge_current_turn(mut history: Vec<RemoteEvent>, live: Vec<RemoteEvent>) -> Vec<RemoteEvent> {
+    if let Some(RemoteEvent::UserText { text, at: Some(sent), .. }) = live.first() {
+        let begun = history.iter().rposition(|e| matches!(e, RemoteEvent::UserText { text: t, at: Some(at), .. } if t == text && *at + 500 >= *sent));
+        if let Some(i) = begun {
+            history.truncate(i);
+        }
+    }
+    history.extend(live);
+    history
 }
 
 /// Events in pages of about PAGE_BYTES, each with whether it is the last (an empty chat is one empty page).
@@ -949,6 +966,39 @@ pub(crate) mod tests {
         assert!(err.is_none());
         let page: protocol::EarlierPage = serde_json::from_value(ok.unwrap()).unwrap();
         assert_eq!(page.events.len(), 1);
+    }
+
+    fn said(text: &str, at: Option<u64>) -> RemoteEvent {
+        RemoteEvent::UserText { text: text.into(), at, sent_by: None }
+    }
+
+    #[test]
+    fn a_catch_up_in_the_middle_of_a_turn_shows_its_message_once() {
+        let reply = |t: &str| RemoteEvent::AssistantText { block_id: t.into(), text: t.into() };
+        // The transcript already has the turn's message (a moment after the hub's copy) and part of its reply.
+        let history = vec![said("earlier", Some(100)), reply("old"), said("go", Some(2_001)), reply("partial")];
+        let live = vec![said("go", Some(2_000)), RemoteEvent::Thinking, reply("so far")];
+        let merged = merge_current_turn(history, live.clone());
+        assert_eq!(merged.iter().filter(|e| matches!(e, RemoteEvent::UserText { text, .. } if text == "go")).count(), 1);
+        assert_eq!(merged, vec![said("earlier", Some(100)), reply("old"), said("go", Some(2_000)), RemoteEvent::Thinking, reply("so far")]);
+        // The transcript doesn't have the message yet: nothing is cut.
+        let behind = merge_current_turn(vec![said("earlier", Some(100)), reply("old")], live.clone());
+        assert_eq!(behind.len(), 5);
+    }
+
+    #[test]
+    fn an_earlier_turn_with_the_same_words_is_not_taken_for_the_current_one() {
+        // "Next" answered the last page a minute ago and answers this one now.
+        let history = vec![said("Next", Some(1_000)), RemoteEvent::Thinking];
+        let live = vec![said("Next", Some(61_000)), RemoteEvent::Thinking];
+        let merged = merge_current_turn(history, live);
+        assert_eq!(merged.iter().filter(|e| matches!(e, RemoteEvent::UserText { .. })).count(), 2);
+    }
+
+    #[test]
+    fn a_live_turn_that_lost_its_start_is_added_as_it_is() {
+        let merged = merge_current_turn(vec![said("x", Some(1))], vec![RemoteEvent::Thinking]);
+        assert_eq!(merged, vec![said("x", Some(1)), RemoteEvent::Thinking]);
     }
 
     #[test]

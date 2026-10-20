@@ -7,6 +7,7 @@ import type { Request } from "../protocol/generated/Request";
 import type { ServerMessage } from "../protocol/generated/ServerMessage";
 import { Channel } from "../noise/channel";
 import { CONNECT, Handshake, PAIR, type Keypair } from "../noise/noise";
+import { utf8Decode, utf8Encode } from "../platform/utf8";
 import type { Link } from "./transport";
 
 export const PROTOCOL_VERSION = 1;
@@ -23,11 +24,11 @@ export class ProtocolMismatch extends Error {
   }
 }
 
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
+/** The Mac closed the link, or went quiet, during the handshake. */
+export class NoAnswer extends Error {}
 
 function sendMessage(link: Link, channel: Channel, msg: ClientMessage) {
-  for (const frame of channel.seal(encoder.encode(JSON.stringify(msg)))) link.send(frame);
+  for (const frame of channel.seal(utf8Encode(JSON.stringify(msg)))) link.send(frame);
 }
 
 /** The Mac's next whole message (null: the link closed or went quiet for `waitMs`). */
@@ -36,7 +37,7 @@ async function nextMessage(link: Link, channel: Channel, waitMs?: number): Promi
     const frame = await link.next(waitMs);
     if (!frame) return null;
     const plain = channel.open(frame);
-    if (plain) return JSON.parse(decoder.decode(plain)) as ServerMessage;
+    if (plain) return JSON.parse(utf8Decode(plain)) as ServerMessage;
   }
 }
 
@@ -55,14 +56,15 @@ export async function comeIn(link: Link, device: Keypair, macKey: Uint8Array, o:
   link.send(Uint8Array.of(o.secret ? PAIR : CONNECT));
   link.send(hs.write());
   const second = await link.next(STEP_WAIT);
-  if (!second) throw new Error("Your Mac didn't answer.");
+  // A Mac with no code on screen (or one already used) closes right away; one that is asleep says nothing.
+  if (!second) throw new NoAnswer(o.secret ? "Your Mac didn't take this code. Show a new one on your Mac and try again." : "Your Mac didn't answer.");
   hs.read(second);
   link.send(hs.write());
   const { send, receive } = hs.finish();
   const channel = new Channel(send, receive);
   sendMessage(link, channel, { type: "hello", protocol: PROTOCOL_VERSION, app_version: o.appVersion, device_name: o.deviceName });
   const welcome = await nextMessage(link, channel, STEP_WAIT);
-  if (!welcome || welcome.type !== "welcome") throw new Error(o.secret ? "Your Mac didn't take this code. Show a new one and try again." : "Your Mac didn't let this phone in. Pair it again.");
+  if (!welcome || welcome.type !== "welcome") throw new NoAnswer(o.secret ? "Your Mac didn't take this code. Show a new one on your Mac and try again." : "Your Mac didn't let this phone in. Pair it again.");
   if (welcome.protocol !== PROTOCOL_VERSION) throw new ProtocolMismatch(welcome.protocol);
   return { channel, welcome };
 }

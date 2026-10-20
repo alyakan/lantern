@@ -1,5 +1,6 @@
 [
   {
+    "impostor": false,
     "mac_ephemeral": "0e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7",
     "mac_static": "06090c0f1215181b1e2124272a2d303336393c3f4245484b4e5154575a5d6063",
     "mac_to_phone": {
@@ -26,6 +27,7 @@
     "psk": "0909090909090909090909090909090909090909090909090909090909090909"
   },
   {
+    "impostor": false,
     "mac_ephemeral": "0e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7",
     "mac_static": "06090c0f1215181b1e2124272a2d303336393c3f4245484b4e5154575a5d6063",
     "mac_to_phone": {
@@ -50,5 +52,32 @@
     },
     "prologue": "6c616e7465726e2d72656d6f74652f31",
     "psk": ""
+  },
+  {
+    "impostor": true,
+    "mac_ephemeral": "2233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f2031",
+    "mac_static": "1a2734414e5b6875828f9ca9b6c3d0ddeaf704111e2b3845525f6c798693a0ad",
+    "mac_to_phone": {
+      "frames": [
+        "c78ac9e3f60dfecbfb3d5879d63125453dab725082bf874fb89cac80"
+      ],
+      "plain": "hello phone"
+    },
+    "messages": [
+      "04cfedb665fad685c22e72e6fd6654182971c4a14f12a4717166b41d8737a30ad9bc94488e9c258830b3e05e176e2e85",
+      "73b951dacaae145661f87c21ef9fc0ff0be5701400459853a9f62e0630e4353dcd7a96bb6d6eafc2a685f359bb853971936733586c16bb551bd01dd52bd7d6111c26b51696d6db7ed46a15226470bbe04a75de589f18c6d7b55f5b0bc2ec9697",
+      "2f271dca14d3acafe08a8e7c42155fe5834a4497255393f105b3a8ee64c9b91e689394c638f671a42f7159e00e5832a38e738a1fd52df9165aea98dde9380bd8"
+    ],
+    "pattern": "Noise_XXpsk3_25519_ChaChaPoly_SHA256",
+    "phone_ephemeral": "16212c37424d58636e79848f9aa5b0bbc6d1dce7f2fd08131e29343f4a55606b",
+    "phone_static": "0a0f14191e23282d32373c41464b50555a5f64696e73787d82878c91969ba0a5",
+    "phone_to_mac": {
+      "frames": [
+        "4f3266a7e8b124c5bd04b9e31f8e53f78e8beb7fb061768d6064"
+      ],
+      "plain": "hello mac"
+    },
+    "prologue": "6c616e7465726e2d72656d6f74652f31",
+    "psk": "0909090909090909090909090909090909090909090909090909090909090909"
   }
 ]
