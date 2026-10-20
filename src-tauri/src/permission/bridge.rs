@@ -306,9 +306,9 @@ impl PermissionBridge {
         all
     }
 
-    /// Denies every pending request (used when the session restarts or stops).
-    pub fn cancel_all(&self) {
-        self.pending.lock().unwrap().clear();
+    /// Denies every pending request (used when the session restarts or stops); returns the ids it dropped.
+    pub fn cancel_all(&self) -> Vec<String> {
+        self.pending.lock().unwrap().drain().map(|(id, _)| id).collect()
     }
 
     /// The chat is in this folder from now on: its folder rules apply.
@@ -499,6 +499,16 @@ mod tests {
             assert_eq!(won.len(), 1, "exactly one answer is taken");
             assert_eq!(helper.await.unwrap().allow, won[0], "and it is the one the helper gets");
         }
+    }
+
+    #[tokio::test]
+    async fn cancelling_says_which_prompts_it_dropped_so_clients_can_be_told() {
+        let (bridge, mut rx, _dir) = setup();
+        let helper = ask_in_background(&bridge);
+        let id = next_request_id(&mut rx).await;
+        assert_eq!(bridge.cancel_all(), vec![id]);
+        assert!(bridge.cancel_all().is_empty());
+        let _ = helper.await;
     }
 
     #[tokio::test]

@@ -4,12 +4,17 @@ import { lastSeen, timeLeft, type RemoteView } from "../lib/remoteControl";
 
 const calls: { cmd: string; args?: unknown }[] = [];
 let view: RemoteView;
+let changed: () => void = () => {};
 vi.mock("../api", () => ({
   api: {
     remoteSettings: () => Promise.resolve(view),
+    onRemoteChanged: (cb: () => void) => {
+      changed = cb;
+      return Promise.resolve(() => {});
+    },
     remoteSetEnabled: (on: boolean) => {
       calls.push({ cmd: "enabled", args: on });
-      view = { ...view, enabled: on };
+      view = { ...view, enabled: on, listening: on };
       return Promise.resolve(view);
     },
     remoteSetShowTitles: (on: boolean) => {
@@ -17,7 +22,11 @@ vi.mock("../api", () => ({
       view = { ...view, show_titles: on };
       return Promise.resolve(view);
     },
-    remotePair: () => (view.enabled ? Promise.resolve({ svg: "<svg/>", expires_at: 300_000 }) : Promise.reject("Turn on Remote control first.")),
+    remotePair: () => {
+      if (!view.enabled) return Promise.reject("Turn on Remote control first.");
+      view = { ...view, pairing: true };
+      return Promise.resolve({ svg: "<svg/>", expires_at: 300_000 });
+    },
     remotePairCancel: () => {
       calls.push({ cmd: "cancel" });
       return Promise.resolve();
@@ -34,7 +43,7 @@ const { RemoteControl } = await import("./RemoteControl");
 
 beforeEach(() => {
   calls.length = 0;
-  view = { enabled: false, show_titles: false, devices: [], connected: [] };
+  view = { enabled: false, show_titles: false, devices: [], connected: [], listening: false, pairing: false };
 });
 
 describe("Settings › Remote control", () => {
@@ -49,7 +58,7 @@ describe("Settings › Remote control", () => {
   });
 
   it("shows a pairing code as an image with its time left, and stopping or leaving ends it", async () => {
-    view.enabled = true;
+    view = { ...view, enabled: true, listening: true };
     const { unmount } = render(<RemoteControl now={() => 8_000} />);
     fireEvent.click(await screen.findByText("Show a pairing code"));
     const img = await screen.findByRole("img", { name: "Pairing code" });
@@ -63,8 +72,26 @@ describe("Settings › Remote control", () => {
     expect(calls).toContainEqual({ cmd: "cancel" });
   });
 
+  it("takes a code away once it was used, and offers a new one", async () => {
+    view = { ...view, enabled: true, listening: true };
+    render(<RemoteControl now={() => 0} />);
+    fireEvent.click(await screen.findByText("Show a pairing code"));
+    await screen.findByRole("img", { name: "Pairing code" });
+    view = { ...view, pairing: false };
+    await act(async () => changed());
+    expect(screen.queryByRole("img", { name: "Pairing code" })).toBeNull();
+    expect(screen.getByText(/That code was used/)).toBeTruthy();
+    expect(screen.getByText("Show a new code")).toBeTruthy();
+  });
+
+  it("says so when it's on but nothing is listening", async () => {
+    view = { ...view, enabled: true, listening: false };
+    render(<RemoteControl now={() => 0} />);
+    expect((await screen.findByRole("status")).textContent).toContain("isn't listening");
+  });
+
   it("turning it off takes the code away", async () => {
-    view.enabled = true;
+    view = { ...view, enabled: true, listening: true };
     render(<RemoteControl now={() => 0} />);
     fireEvent.click(await screen.findByText("Show a pairing code"));
     await screen.findByRole("img", { name: "Pairing code" });

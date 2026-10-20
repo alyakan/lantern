@@ -13,6 +13,10 @@ export interface RemoteView {
   devices: RemoteDevice[];
   /** The ids of the phones connected now. */
   connected: string[];
+  /** Something is listening for phones (it can be on and not listening: the port was taken). */
+  listening: boolean;
+  /** A pairing code is on offer and unused. */
+  pairing: boolean;
   /** The last change holds, but couldn't be saved: why (it won't last past a restart). */
   warning?: string | null;
 }

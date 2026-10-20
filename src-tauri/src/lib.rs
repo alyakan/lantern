@@ -317,11 +317,7 @@ impl remote::gateway::Host for RemoteHost {
     fn interrupt(&self, slot: String) -> remote::gateway::BoxFut<Result<(), String>> {
         let app = self.app.clone();
         Box::pin(async move {
-            let s = app.state::<AppState>().slots.get(&slot)?;
-            if let Some(x) = s.session.lock().await.as_mut() {
-                x.interrupt().await;
-            }
-            s.bridge.cancel_all();
+            stop_turn(&app, &slot).await;
             Ok(())
         })
     }
@@ -349,17 +345,23 @@ impl remote::gateway::Host for RemoteHost {
         })
     }
 
-    fn history(&self, slot: String) -> remote::gateway::BoxFut<Result<Vec<ui_event::UiEvent>, String>> {
+    fn history(&self, slot: String, before: Option<usize>) -> remote::gateway::BoxFut<Result<history::Page, String>> {
         let app = self.app.clone();
         Box::pin(async move {
             let state = app.state::<AppState>();
             let chat = state.remote.hub.chat(&slot).ok_or("That chat isn't open.")?;
-            let (Some(folder), Some(session_id)) = (chat.folder, chat.session_id) else { return Ok(vec![]) };
+            let none = history::Page { events: vec![], hidden: 0 };
+            let (Some(folder), Some(session_id)) = (chat.folder, chat.session_id) else { return Ok(none) };
             if !history::valid_id(&session_id) {
-                return Ok(vec![]);
+                return Ok(none);
             }
             let (root, aliases) = (projects_root()?, aliases_for(&state, &folder));
-            tauri::async_runtime::spawn_blocking(move || history::transcript_path_with_aliases(&root, std::path::Path::new(&folder), &aliases, &session_id).map(|p| history::replay(&p).events)).await.map_err(|e| e.to_string())?
+            tauri::async_runtime::spawn_blocking(move || {
+                let path = history::transcript_path_with_aliases(&root, std::path::Path::new(&folder), &aliases, &session_id)?;
+                Ok(history::page(history::replay(&path).events, before, history::PAGE_TURNS))
+            })
+            .await
+            .map_err(|e| e.to_string())?
         })
     }
 
@@ -372,9 +374,23 @@ impl remote::gateway::Host for RemoteHost {
     }
 }
 
+/// Stops what chat `slot`'s claude is doing (Stop in the window, or a phone's): the prompts it was waiting on can't be
+/// answered any more, and every client is told so.
+async fn stop_turn(app: &AppHandle, slot: &str) {
+    let state = app.state::<AppState>();
+    let Ok(s) = state.slots.get(slot) else { return };
+    if let Some(x) = s.session.lock().await.as_mut() {
+        x.interrupt().await;
+    }
+    for request_id in s.bridge.cancel_all() {
+        state.remote.publish(slot, ui_event::UiEvent::PermissionWithdrawn { request_id });
+    }
+}
+
 /// Turns Remote control's listener on: the gateway, the Wi-Fi transport and Bonjour. Nothing if it is already on.
 async fn start_remote(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
+    let _one_at_a_time = state.remote.lifecycle.lock().await;
     if state.remote.is_running() {
         return Ok(());
     }
@@ -383,7 +399,7 @@ async fn start_remote(app: &AppHandle) -> Result<(), String> {
     let mac = mac?;
     let host = Arc::new(RemoteHost { app: app.clone(), mac_name: name.clone() });
     let r = &state.remote;
-    let gateway = remote::gateway::Gateway::new(r.bus.clone(), r.hub.clone(), r.store.clone(), host, mac.clone());
+    let gateway = remote::gateway::Gateway::new(r.bus.clone(), r.hub.clone(), r.store.clone(), host, mac.clone(), r.epoch);
     let notify = app.clone();
     gateway.on_change(Arc::new(move || {
         let _ = notify.emit("remote-changed", ());
@@ -1576,12 +1592,8 @@ async fn stop_task(state: State<'_, AppState>, slot: String, task_id: String) ->
 }
 
 #[tauri::command]
-async fn interrupt(state: State<'_, AppState>, slot: String) -> Result<(), String> {
-    let Ok(s) = state.slots.get(&slot) else { return Ok(()) };
-    if let Some(x) = s.session.lock().await.as_mut() {
-        x.interrupt().await;
-    }
-    s.bridge.cancel_all();
+async fn interrupt(app: AppHandle, slot: String) -> Result<(), String> {
+    stop_turn(&app, &slot).await;
     Ok(())
 }
 
@@ -1680,12 +1692,15 @@ fn remote_settings(state: State<'_, AppState>) -> remote::RemoteView {
 async fn remote_set_enabled(app: AppHandle, state: State<'_, AppState>, on: bool) -> Result<remote::RemoteView, String> {
     let saved = state.remote.store.set_enabled(on);
     if on {
-        // Couldn't listen (the port is taken): it is off again, and Settings says why.
+        // Couldn't listen (the port is taken, the Keychain said no): it is off again, unless another start got it going.
         if let Err(e) = start_remote(&app).await {
-            let _ = state.remote.store.set_enabled(false);
+            if !state.remote.is_running() {
+                let _ = state.remote.store.set_enabled(false);
+            }
             return Ok(state.remote.view_after::<()>(Err(e)));
         }
     } else {
+        let _one_at_a_time = state.remote.lifecycle.lock().await;
         state.remote.stop();
     }
     Ok(state.remote.view_after(saved))

@@ -173,6 +173,14 @@ impl From<super::hub::ChatStatus> for ChatStatus {
     }
 }
 
+/// Earlier turns of a chat (the answer to Request::Earlier): `hidden` is how many still come before them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct EarlierPage {
+    pub events: Vec<RemoteEvent>,
+    pub hidden: u32,
+}
+
 /// One chat in the phone's list.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../mobile/src/protocol/generated/")]
@@ -217,22 +225,29 @@ pub enum Request {
     ListChats,
     ListWaiting,
     /// Events of the chat after number `after` from now on (0: from what is kept).
+    /// `epoch`: the one Welcome gave when the phone got event `after`. Numbers start again each time Lantern starts, so
+    /// from another epoch (or a number Lantern hasn't reached) the phone gets a Reset instead.
     Subscribe {
         slot: String,
         #[ts(type = "number")]
         after: u64,
+        #[ts(type = "number")]
+        epoch: u64,
     },
+    /// The turns before the `hidden` ones a Reset left out (counted from the first), a page at a time.
+    Earlier { slot: String, hidden: u32 },
     Unsubscribe { slot: String },
     /// `client_id`: the phone's own id for the message, so it can match the hub's copy to the one it shows.
     Send { slot: String, text: String, client_id: String },
     Interrupt { slot: String },
+    /// `answers`: a question's answers (AskUserQuestion), by question. A phone never sends a tool's input: Lantern adds
+    /// the answers to the input Claude sent (see answers.rs).
     Answer {
         slot: String,
         request_id: String,
         allow: bool,
         message: Option<String>,
-        #[ts(type = "unknown")]
-        updated_input: Option<serde_json::Value>,
+        answers: Option<std::collections::BTreeMap<String, String>>,
     },
     Wake { slot: String },
     /// One file's diff from the chat's start, as unified-diff text.
@@ -261,7 +276,14 @@ pub enum ClientMessage {
 #[ts(export, export_to = "../../mobile/src/protocol/generated/")]
 pub enum ServerMessage {
     /// The answer to Hello. `protocol` differs from the phone's: it stops and says which side to update.
-    Welcome { protocol: u32, app_version: String, mac_name: String },
+    /// `epoch`: this run of Lantern's (see Request::Subscribe).
+    Welcome {
+        protocol: u32,
+        app_version: String,
+        mac_name: String,
+        #[ts(type = "number")]
+        epoch: u64,
+    },
     /// The answer to request `id`: `ok` with its result, or `error` with why (for the user).
     Response {
         #[ts(type = "number")]
@@ -279,12 +301,14 @@ pub enum ServerMessage {
     /// The chat `slot` from its start (the transcript, then what is kept), to show in place of what the phone had: when it
     /// first subscribes, or was too far behind. It comes in pages: page 0 starts over, later pages add to it, and `done`
     /// is the last. Live events follow from `seq`.
+    /// `hidden`: how many earlier turns it leaves out (the last ones come first; Request::Earlier brings the rest).
     Reset {
         slot: String,
         #[ts(type = "number")]
         seq: u64,
         page: u32,
         done: bool,
+        hidden: u32,
         events: Vec<RemoteEvent>,
     },
     /// The chat list changed (a chat opened, closed, or moved on).
@@ -352,8 +376,8 @@ mod tests {
 
     #[test]
     fn messages_read_as_the_generated_typescript_expects() {
-        let req: ClientMessage = serde_json::from_str(r#"{"type":"request","id":7,"request":{"op":"subscribe","slot":"a","after":12}}"#).unwrap();
-        assert_eq!(req, ClientMessage::Request { id: 7, request: Request::Subscribe { slot: "a".into(), after: 12 } });
+        let req: ClientMessage = serde_json::from_str(r#"{"type":"request","id":7,"request":{"op":"subscribe","slot":"a","after":12,"epoch":5}}"#).unwrap();
+        assert_eq!(req, ClientMessage::Request { id: 7, request: Request::Subscribe { slot: "a".into(), after: 12, epoch: 5 } });
         let ev = ServerMessage::Event { slot: "a".into(), seq: 3, event: RemoteEvent::Thinking };
         assert_eq!(serde_json::to_value(&ev).unwrap(), serde_json::json!({"type": "event", "slot": "a", "seq": 3, "event": {"kind": "thinking"}}));
         // Anything else a phone sends is refused as it's read.

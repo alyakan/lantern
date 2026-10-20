@@ -13,8 +13,25 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
   const [pair, setPair] = useState<PairView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(now());
+  // A code that was used (a phone paired, or someone tried it) is gone from the backend: it goes from the screen too.
+  const [used, setUsed] = useState(false);
   useEffect(() => {
-    api.remoteSettings().then(setView, (e) => setError(errText(e)));
+    const refresh = () =>
+      api.remoteSettings().then(
+        (v) => {
+          setView(v);
+          setPair((p) => {
+            if (p && !v.pairing) setUsed(true);
+            return v.pairing ? p : null;
+          });
+        },
+        (e) => setError(errText(e)),
+      );
+    refresh();
+    const unlisten = api.onRemoteChanged(refresh).catch(() => null);
+    return () => {
+      unlisten.then((f) => f?.());
+    };
   }, []);
   // The code's countdown; it goes when it runs out.
   useEffect(() => {
@@ -45,6 +62,7 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
     api.remotePair().then(
       (p) => {
         setPair(p);
+        setUsed(false);
         setTick(now());
         setError(null);
       },
@@ -80,6 +98,11 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
               <span>Let paired phones control Lantern</span>
             </label>
             <span className="settings-muted">While this is off, nothing on this Mac listens for phones.</span>
+            {view.enabled && !view.listening && (
+              <p className="settings-error" role="status">
+                It's on, but Lantern isn't listening for phones right now. Turn it off and on again; if that doesn't help, another app may be using its port.
+              </p>
+            )}
           </section>
           {view.enabled && (
             <section className="general-section remote-pair" aria-labelledby="remote-pair">
@@ -95,7 +118,10 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
                   </div>
                 </div>
               ) : (
-                <button onClick={startPair}>Show a pairing code</button>
+                <>
+                  {used && <p className="settings-muted">That code was used. Show a new one to pair another phone.</p>}
+                  <button onClick={startPair}>{used ? "Show a new code" : "Show a pairing code"}</button>
+                </>
               )}
             </section>
           )}

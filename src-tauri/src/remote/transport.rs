@@ -15,6 +15,10 @@ pub const MAX_FRAME: usize = 65535;
 /// catches up when it connects again).
 pub const OUTBOX: usize = 256;
 
+/// How many connections may be in their WebSocket upgrade at once, and for how long each.
+pub const UPGRADES: usize = 16;
+pub const UPGRADE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// One connection: frames from the phone, and where frames for it go. Dropping `to_peer` closes it.
 pub struct Link {
     pub to_peer: mpsc::Sender<Vec<u8>>,
@@ -75,17 +79,25 @@ where
 pub async fn serve_lan(port: u16, on_link: impl Fn(Link) + Send + Sync + 'static) -> Result<(tokio::task::JoinHandle<()>, u16), String> {
     let listener = TcpListener::bind(("0.0.0.0", port)).await.map_err(|e| format!("Couldn't listen for phones on port {port}: {e}"))?;
     let bound = listener.local_addr().map_err(|e| e.to_string())?.port();
+    let on_link = std::sync::Arc::new(on_link);
+    // Each connection's WebSocket upgrade runs on its own, at most UPGRADES at once: one that never finishes can't hold
+    // up the next phone.
+    let upgrades = std::sync::Arc::new(tokio::sync::Semaphore::new(UPGRADES));
     let task = tokio::spawn(async move {
         loop {
             let Ok((tcp, addr)) = listener.accept().await else {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 continue;
             };
-            let _ = tcp.set_nodelay(true);
-            match tokio::time::timeout(std::time::Duration::from_secs(10), tokio_tungstenite::accept_async_with_config(tcp, Some(ws_config()))).await {
-                Ok(Ok(ws)) => on_link(pump(ws, addr.to_string())),
-                _ => continue,
-            }
+            let Ok(permit) = upgrades.clone().try_acquire_owned() else { continue };
+            let on_link = on_link.clone();
+            tokio::spawn(async move {
+                let _ = tcp.set_nodelay(true);
+                if let Ok(Ok(ws)) = tokio::time::timeout(UPGRADE_WAIT, tokio_tungstenite::accept_async_with_config(tcp, Some(ws_config()))).await {
+                    on_link(pump(ws, addr.to_string()));
+                }
+                drop(permit);
+            });
         }
     });
     Ok((task, bound))
@@ -169,6 +181,23 @@ mod tests {
         assert!(tokio::time::timeout(std::time::Duration::from_secs(5), hostile.from_peer.recv()).await.unwrap().is_none(), "closed without a frame");
         drop(phone);
         assert!(mac.from_peer.recv().await.is_none());
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn a_connection_that_never_upgrades_doesnt_hold_up_the_next_phone() {
+        let (got_tx, mut got_rx) = mpsc::unbounded_channel();
+        let (task, port) = serve_lan(0, move |link| {
+            let _ = got_tx.send(link);
+        })
+        .await
+        .unwrap();
+        // Opens a connection and says nothing.
+        let _idle = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let started = std::time::Instant::now();
+        let _phone = connect_lan(&format!("127.0.0.1:{port}")).await.unwrap();
+        let link = tokio::time::timeout(std::time::Duration::from_secs(1), got_rx.recv()).await.expect("let in within a second");
+        assert!(link.is_some() && started.elapsed() < std::time::Duration::from_secs(1));
         task.abort();
     }
 

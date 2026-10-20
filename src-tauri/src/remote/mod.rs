@@ -34,6 +34,10 @@ pub struct Remote {
     pub hub: Arc<SessionHub>,
     pub store: Arc<RemoteStore>,
     keys: Box<dyn KeyStore>,
+    /// This run of Lantern's, random: event numbers start again each launch, so a phone tells them apart by it.
+    pub epoch: u64,
+    /// Held while Remote control starts or stops, so two can't race (a double click, the start at launch).
+    pub lifecycle: tokio::sync::Mutex<()>,
     /// The gateway, listener and Bonjour while Remote control is on.
     running: std::sync::Mutex<Option<Running>>,
 }
@@ -101,6 +105,10 @@ pub struct RemoteView {
     pub devices: Vec<DeviceView>,
     /// The ids of the devices connected now.
     pub connected: Vec<String>,
+    /// Something is listening for phones (Remote control can be on in the settings and still not be: the port was taken).
+    pub listening: bool,
+    /// A pairing code is on offer and unused.
+    pub pairing: bool,
     /// The last change holds, but couldn't be saved: why (it won't last past a restart).
     pub warning: Option<String>,
 }
@@ -134,13 +142,15 @@ impl Remote {
         let (bus, hub) = (Arc::new(EventBus::default()), Arc::new(SessionHub::default()));
         let keeper = hub.clone();
         bus.tap(Arc::new(move |ev: &BusEvent| keeper.record(ev)));
-        Self { bus, hub, store: Arc::new(store), keys, running: std::sync::Mutex::new(None) }
+        let mut e = [0u8; 8];
+        let _ = getrandom::fill(&mut e);
+        Self { bus, hub, store: Arc::new(store), keys, running: std::sync::Mutex::new(None), epoch: u64::from_le_bytes(e) & ((1 << 53) - 1), lifecycle: tokio::sync::Mutex::new(()) }
     }
 
     pub fn view(&self) -> RemoteView {
         let saved = self.store.saved();
         let devices = saved.devices.into_iter().map(|d| DeviceView { id: d.id, name: d.name, paired_at: d.paired_at, last_seen: d.last_seen }).collect();
-        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, devices, warning: None, connected: self.connected() }
+        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, devices, warning: None, connected: self.connected(), listening: self.is_running(), pairing: self.store.offer_open(now_ms()) }
     }
 
     /// The view after a change, with why it couldn't be saved when it couldn't.

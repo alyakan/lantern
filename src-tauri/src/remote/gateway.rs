@@ -40,8 +40,9 @@ pub trait Host: Send + Sync + 'static {
     fn wake(&self, slot: &str) -> Result<(), String>;
     /// A file the chat changed, as a unified diff from the chat's start; any other file is refused.
     fn diff(&self, slot: String, path: String) -> BoxFut<Result<String, String>>;
-    /// The chat's events from its transcript (what a phone catching up from the start is shown).
-    fn history(&self, slot: String) -> BoxFut<Result<Vec<UiEvent>, String>>;
+    /// A page of the chat's transcript: its last turns (`before` None), or the turns before the `before` it hasn't
+    /// shown yet (see history::page).
+    fn history(&self, slot: String, before: Option<usize>) -> BoxFut<Result<crate::history::Page, String>>;
     fn mac_name(&self) -> String;
     fn app_version(&self) -> String;
 }
@@ -65,6 +66,10 @@ pub struct Gateway {
     next: AtomicU64,
     now: fn() -> u64,
     on_change: Mutex<Option<OnChange>>,
+    /// This run of Lantern's (see Request::Subscribe): event numbers from another one mean nothing here.
+    epoch: u64,
+    /// Remote control was turned off: nothing more gets in, not even a phone in the middle of its handshake.
+    shut: std::sync::atomic::AtomicBool,
 }
 
 /// Why a connection ended before it was in (for tests and logs; the phone just sees it close).
@@ -79,8 +84,25 @@ pub enum Refused {
 }
 
 impl Gateway {
-    pub fn new(bus: Arc<EventBus>, hub: Arc<SessionHub>, store: Arc<RemoteStore>, host: Arc<dyn Host>, mac: Keypair) -> Arc<Self> {
-        Arc::new(Self { bus, hub, store, host, mac, conns: Mutex::default(), handshakes: Arc::new(Semaphore::new(HANDSHAKES_AT_ONCE)), next: AtomicU64::new(1), now: super::now_ms, on_change: Mutex::new(None) })
+    pub fn new(bus: Arc<EventBus>, hub: Arc<SessionHub>, store: Arc<RemoteStore>, host: Arc<dyn Host>, mac: Keypair, epoch: u64) -> Arc<Self> {
+        Arc::new(Self {
+            bus,
+            hub,
+            store,
+            host,
+            mac,
+            conns: Mutex::default(),
+            handshakes: Arc::new(Semaphore::new(HANDSHAKES_AT_ONCE)),
+            next: AtomicU64::new(1),
+            now: super::now_ms,
+            on_change: Mutex::new(None),
+            epoch,
+            shut: Default::default(),
+        })
+    }
+
+    fn is_shut(&self) -> bool {
+        self.shut.load(Ordering::SeqCst)
     }
 
     pub fn on_change(&self, f: OnChange) {
@@ -96,6 +118,9 @@ impl Gateway {
 
     /// Takes a phone's connection: it is let in, or closed.
     pub fn accept(self: &Arc<Self>, link: Link) {
+        if self.is_shut() {
+            return;
+        }
         let me = self.clone();
         tokio::spawn(async move {
             let _ = me.serve(link).await;
@@ -117,8 +142,9 @@ impl Gateway {
         }
     }
 
-    /// Closes every connection (Remote control was turned off).
+    /// Closes every connection, and lets nothing in from now on (Remote control was turned off).
     pub fn disconnect_all(&self) {
+        self.shut.store(true, Ordering::SeqCst);
         for c in self.conns.lock().unwrap().values() {
             let _ = c.kill.send(true);
         }
@@ -131,8 +157,8 @@ impl Gateway {
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let (kill, mut killed) = watch::channel(false);
         self.conns.lock().unwrap().insert(id, Conn { device: device.clone(), kill });
-        // Removed in the meantime (between its key being checked and now): it doesn't stay.
-        if self.store.saved().devices.iter().all(|d| d.id != device) {
+        // Removed in the meantime (between its key being checked and now), or Remote control turned off: it doesn't stay.
+        if self.is_shut() || self.store.saved().devices.iter().all(|d| d.id != device) {
             self.conns.lock().unwrap().remove(&id);
             return Err(Refused::NotPaired);
         }
@@ -161,7 +187,10 @@ impl Gateway {
         let first = recv(link).await.ok_or(Refused::Protocol("closed".into()))?;
         let mut hs = if pairing {
             // Used up by this attempt whether it works or not: a code can be tried once.
-            let secret = self.store.take_offer((self.now)()).ok_or(Refused::NoCode)?;
+            let secret = self.store.take_offer((self.now)()).ok_or(Refused::NoCode);
+            // The code on screen is used up (Settings takes it away).
+            self.changed();
+            let secret = secret?;
             Handshake::pair_responder(&self.mac, &secret)
         } else {
             Handshake::connect_responder(&self.mac)
@@ -178,7 +207,7 @@ impl Gateway {
         }
         let hello = recv_message(link, &mut channel).await.ok_or(Refused::Protocol("no hello".into()))?;
         let ClientMessage::Hello { protocol: theirs, device_name, .. } = hello else { return Err(Refused::Protocol("no hello".into())) };
-        let welcome = ServerMessage::Welcome { protocol: PROTOCOL_VERSION, app_version: self.host.app_version(), mac_name: self.host.mac_name() };
+        let welcome = ServerMessage::Welcome { protocol: PROTOCOL_VERSION, app_version: self.host.app_version(), mac_name: self.host.mac_name(), epoch: self.epoch };
         send_message(link, &mut channel, &welcome).map_err(Refused::Protocol)?;
         // Told which version this Mac speaks, so the phone can say what to update; it isn't paired or let in.
         if theirs != PROTOCOL_VERSION {
@@ -218,6 +247,16 @@ fn send_message(link: &Link, channel: &mut Channel, msg: &ServerMessage) -> Resu
     let json = serde_json::to_vec(msg).map_err(|e| e.to_string())?;
     for frame in channel.seal(&json)? {
         link.to_peer.try_send(frame).map_err(|_| "The phone is too slow; it was disconnected.".to_string())?;
+    }
+    Ok(())
+}
+
+/// Seals a message and sends its frames, waiting for the phone to take them: for a catch-up, which may be bigger than
+/// what a phone's outbox holds at once (a live event goes with `send_message`, which doesn't wait).
+async fn send_message_waiting(link: &Link, channel: &mut Channel, msg: &ServerMessage) -> Result<(), String> {
+    let json = serde_json::to_vec(msg).map_err(|e| e.to_string())?;
+    for frame in channel.seal(&json)? {
+        tokio::time::timeout(HANDSHAKE_WAIT, link.to_peer.send(frame)).await.map_err(|_| "The phone stopped reading.".to_string())?.map_err(|_| "The phone went.".to_string())?;
     }
     Ok(())
 }
@@ -290,10 +329,13 @@ impl Session<'_> {
         Ok(())
     }
 
-    /// The chat from its start, in pages: the transcript, then the current turn as far as the hub has it.
+    /// The chat's last turns, in pages: the transcript's, then the current turn as far as the hub has it. Earlier turns
+    /// come when the phone asks (Request::Earlier).
     async fn reset(&mut self, link: &Link, channel: &mut Channel, slot: &str) -> Result<(), String> {
         let seq = self.gw.bus.last_seq(slot);
-        let mut events: Vec<RemoteEvent> = self.gw.host.history(slot.to_string()).await.unwrap_or_default().iter().filter_map(protocol::to_remote).collect();
+        let page = self.gw.host.history(slot.to_string(), None).await.unwrap_or(crate::history::Page { events: vec![], hidden: 0 });
+        let hidden = page.hidden as u32;
+        let mut events: Vec<RemoteEvent> = page.events.iter().filter_map(protocol::to_remote).collect();
         // A turn still going isn't all in the transcript yet: what the hub has of it since its message comes after.
         if self.gw.hub.chat(slot).is_some_and(|c| c.status == super::hub::ChatStatus::Working) {
             if let Some(Since::Events(kept) | Since::TooOld { kept }) = self.gw.hub.since(slot, 0) {
@@ -302,7 +344,7 @@ impl Session<'_> {
             }
         }
         for (page, (events, done)) in pages(events).into_iter().enumerate() {
-            send_message(link, channel, &ServerMessage::Reset { slot: slot.to_string(), seq, page: page as u32, done, events })?;
+            send_message_waiting(link, channel, &ServerMessage::Reset { slot: slot.to_string(), seq, page: page as u32, done, hidden, events }).await?;
         }
         self.subscribed.insert(slot.to_string(), seq);
         Ok(())
@@ -318,10 +360,12 @@ impl Session<'_> {
         match request {
             Request::ListChats => Ok(json(&self.gw.hub.chats().into_iter().map(RemoteChat::from).collect::<Vec<_>>())),
             Request::ListWaiting => Ok(json(&self.waiting())),
-            Request::Subscribe { slot, after } => {
+            Request::Subscribe { slot, after, epoch } => {
                 self.chat_known(&slot)?;
+                // A number from another run of Lantern, or one it hasn't reached: the phone starts the chat over.
+                let comparable = epoch == self.gw.epoch && after <= self.gw.bus.last_seq(&slot);
                 match self.gw.hub.since(&slot, after) {
-                    Some(Since::Events(events)) if after > 0 => {
+                    Some(Since::Events(events)) if after > 0 && comparable => {
                         let last = events.last().map_or(after, |e| e.seq);
                         for e in &events {
                             if let Some(event) = protocol::to_remote(&e.event) {
@@ -333,6 +377,11 @@ impl Session<'_> {
                     _ => self.reset(link, channel, &slot).await?,
                 }
                 Ok(serde_json::Value::Null)
+            }
+            Request::Earlier { slot, hidden } => {
+                self.chat_known(&slot)?;
+                let page = host.history(slot, Some(hidden as usize)).await?;
+                Ok(json(&protocol::EarlierPage { events: page.events.iter().filter_map(protocol::to_remote).collect(), hidden: page.hidden as u32 }))
             }
             Request::Unsubscribe { slot } => {
                 self.subscribed.remove(&slot);
@@ -352,11 +401,15 @@ impl Session<'_> {
                 self.chat_known(&slot)?;
                 host.interrupt(slot).await.map(|()| serde_json::Value::Null)
             }
-            Request::Answer { slot, request_id, allow, message, updated_input } => {
+            Request::Answer { slot, request_id, allow, message, answers } => {
                 self.chat_known(&slot)?;
                 let asked = host.pending(&slot).into_iter().find(|p| p.request_id == request_id).ok_or("That was answered already, or Claude stopped asking.")?;
-                // On deny there is nothing to run, so nothing it carries matters.
-                let updated = if allow { answers::checked(&asked.tool_name, &asked.input, updated_input)? } else { None };
+                // On deny there is nothing to run, so no answers matter. Otherwise the tool runs with Claude's own input,
+                // a question's with the answers added (see answers.rs).
+                let updated = match answers {
+                    Some(a) if allow => Some(answers::with_answers(&asked.tool_name, &asked.input, &a)?),
+                    _ => None,
+                };
                 let message = message.map(|m| m.chars().take(10_000).collect());
                 host.answer(&slot, &request_id, allow, message, updated, &self.device).map(|()| serde_json::Value::Null)
             }
@@ -460,9 +513,9 @@ pub(crate) mod tests {
         fn diff(&self, _: String, path: String) -> BoxFut<Result<String, String>> {
             Box::pin(async move { if path == "/p/a.rs" { Ok("--- a\n+++ b\n".into()) } else { Err("not changed".into()) } })
         }
-        fn history(&self, _: String) -> BoxFut<Result<Vec<UiEvent>, String>> {
+        fn history(&self, _: String, _: Option<usize>) -> BoxFut<Result<crate::history::Page, String>> {
             let h = self.history.lock().unwrap().clone();
-            Box::pin(async move { Ok(h) })
+            Box::pin(async move { Ok(crate::history::Page { events: h, hidden: 0 }) })
         }
         fn mac_name(&self) -> String {
             "Test Mac".into()
@@ -480,13 +533,16 @@ pub(crate) mod tests {
         pub host: Arc<FakeHost>,
     }
 
+    /// This run's epoch in the tests.
+    pub const EPOCH: u64 = 7;
+
     pub fn rig() -> Rig {
         let remote = crate::remote::Remote::default();
         let (bus, hub, store) = (remote.bus.clone(), remote.hub.clone(), remote.store.clone());
         store.set_enabled(true).unwrap();
         let host = Arc::new(FakeHost::default());
         let mac = generate_keypair().unwrap();
-        let gw = Gateway::new(bus.clone(), hub.clone(), store.clone(), host.clone(), mac);
+        let gw = Gateway::new(bus.clone(), hub.clone(), store.clone(), host.clone(), mac, EPOCH);
         Rig { gw, bus, hub, store, host }
     }
 
@@ -650,7 +706,7 @@ pub(crate) mod tests {
         r.hub.opened("a", "/p/lantern");
         *r.host.history.lock().unwrap() = vec![user("earlier")];
         let (key, mut p) = paired(&r).await;
-        let (ok, err, before) = p.ask(Request::Subscribe { slot: "a".into(), after: 0 }).await;
+        let (ok, err, before) = p.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
         assert_eq!((ok, err), (None, None), "done: no result, no error");
         assert!(before.iter().any(|m| matches!(m, ServerMessage::Reset { slot, done: true, events, .. } if slot == "a" && events.len() == 1)));
         r.bus.publish("a", UiEvent::AssistantText { parent: None, block_id: "b".into(), text: "now".into() });
@@ -667,7 +723,7 @@ pub(crate) mod tests {
         r.bus.publish("a", user("x"));
         r.bus.publish("a", UiEvent::ContextUsed { tokens: 1 });
         let mut p = phone(&r.gw, &key, None, PROTOCOL_VERSION).await.unwrap();
-        let (_, _, before) = p.ask(Request::Subscribe { slot: "a".into(), after: 1 }).await;
+        let (_, _, before) = p.ask(Request::Subscribe { slot: "a".into(), after: 1, epoch: EPOCH }).await;
         let caught: Vec<u64> = before.iter().filter_map(|m| if let ServerMessage::Event { seq, .. } = m { Some(*seq) } else { None }).collect();
         assert_eq!(caught, vec![2], "only what it missed, and only what a phone is sent");
     }
@@ -703,15 +759,15 @@ pub(crate) mod tests {
             Pending { request_id: "q1".into(), tool_name: answers::QUESTION_TOOL.into(), input: json!({"questions": [{"question": "Which?"}]}), at: 2 },
         ];
         let (_, mut p) = paired(&r).await;
-        let (_, err, _) = p.ask(Request::Answer { slot: "a".into(), request_id: "p1".into(), allow: true, message: None, updated_input: Some(json!({"command": "rm -rf ~"})) }).await;
-        assert!(err.unwrap().contains("only fill in"), "a phone can't swap the command it approves");
+        let (_, err, _) = p.ask(Request::Answer { slot: "a".into(), request_id: "p1".into(), allow: true, message: None, answers: Some([("command".to_string(), "rm -rf ~".to_string())].into()) }).await;
+        assert!(err.unwrap().contains("Only a question"), "a phone can't give a command answers, or change what runs");
         assert!(r.host.answered.lock().unwrap().is_empty());
-        let (_, err, _) = p.ask(Request::Answer { slot: "a".into(), request_id: "p1".into(), allow: true, message: None, updated_input: None }).await;
+        let (_, err, _) = p.ask(Request::Answer { slot: "a".into(), request_id: "p1".into(), allow: true, message: None, answers: None }).await;
         assert!(err.is_none());
-        let (_, err, _) = p.ask(Request::Answer { slot: "a".into(), request_id: "p1".into(), allow: false, message: None, updated_input: None }).await;
+        let (_, err, _) = p.ask(Request::Answer { slot: "a".into(), request_id: "p1".into(), allow: false, message: None, answers: None }).await;
         assert!(err.unwrap().contains("answered already"));
         let answers = json!({"questions": [{"question": "Which?"}], "answers": {"Which?": "Dark"}});
-        let (_, err, _) = p.ask(Request::Answer { slot: "a".into(), request_id: "q1".into(), allow: true, message: None, updated_input: Some(answers.clone()) }).await;
+        let (_, err, _) = p.ask(Request::Answer { slot: "a".into(), request_id: "q1".into(), allow: true, message: None, answers: Some([("Which?".to_string(), "Dark".to_string())].into()) }).await;
         assert!(err.is_none());
         let answered = r.host.answered.lock().unwrap();
         assert_eq!(answered.len(), 2);
@@ -782,7 +838,7 @@ pub(crate) mod tests {
         let (listener, port) = crate::remote::transport::serve_lan(0, move |link| door.accept(link)).await.unwrap();
         let link = crate::remote::transport::connect_lan(&format!("127.0.0.1:{port}")).await.unwrap();
         let mut p = phone_over(link, &generate_keypair().unwrap(), offer_secret(&r.store)).await.unwrap();
-        p.ask(Request::Subscribe { slot: "a".into(), after: 0 }).await;
+        p.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
         *r.host.pending.lock().unwrap() = vec![Pending { request_id: "p1".into(), tool_name: "Bash".into(), input: json!({"command": "npm test"}), at: 1 }];
         r.bus.publish("a", UiEvent::PermissionRequested { request_id: "p1".into(), tool_name: "Bash".into(), input: json!({"command": "npm test"}) });
         loop {
@@ -791,7 +847,7 @@ pub(crate) mod tests {
                 break;
             }
         }
-        let (_, err, _) = p.ask(Request::Answer { slot: "a".into(), request_id: "p1".into(), allow: true, message: None, updated_input: None }).await;
+        let (_, err, _) = p.ask(Request::Answer { slot: "a".into(), request_id: "p1".into(), allow: true, message: None, answers: None }).await;
         assert!(err.is_none());
         assert_eq!(r.host.answered.lock().unwrap()[0].0, "p1");
         listener.abort();
@@ -802,7 +858,7 @@ pub(crate) mod tests {
         let r = rig();
         r.hub.opened("a", "/p");
         let (key, mut p) = paired(&r).await;
-        p.ask(Request::Subscribe { slot: "a".into(), after: 0 }).await;
+        p.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
         // It stops reading while far more than its outbox holds goes out, and the gateway gets to all of it.
         for i in 0..crate::remote::transport::OUTBOX * 2 {
             r.bus.publish("a", UiEvent::AssistantText { parent: None, block_id: format!("b{i}"), text: "x".into() });
@@ -816,7 +872,7 @@ pub(crate) mod tests {
         }
         assert!(seen < (crate::remote::transport::OUTBOX * 2) as u64, "it was dropped before it had everything");
         let mut p = phone(&r.gw, &key, None, PROTOCOL_VERSION).await.unwrap();
-        let (_, _, before) = p.ask(Request::Subscribe { slot: "a".into(), after: seen }).await;
+        let (_, _, before) = p.ask(Request::Subscribe { slot: "a".into(), after: seen, epoch: EPOCH }).await;
         let last = before.iter().filter_map(|m| if let ServerMessage::Event { seq, .. } = m { Some(*seq) } else { None }).max();
         assert_eq!(last, Some((crate::remote::transport::OUTBOX * 2) as u64), "and has everything after coming back");
     }
@@ -835,6 +891,64 @@ pub(crate) mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(tokio::net::TcpStream::connect(("127.0.0.1", port)).await.is_err(), "the port is closed");
         assert!(!remote.is_running());
+    }
+
+    #[tokio::test]
+    async fn turning_remote_control_off_mid_handshake_keeps_that_phone_out() {
+        let r = rig();
+        let key = generate_keypair().unwrap();
+        let secret = offer_secret(&r.store);
+        let (mut mine, theirs) = link_pair();
+        r.gw.accept(theirs);
+        mine.to_peer.send(vec![secure::PAIR]).await.unwrap();
+        let mut hs = Handshake::pair_initiator(&key, &secret).unwrap();
+        mine.to_peer.send(hs.write().unwrap()).await.unwrap();
+        hs.read(&mine.from_peer.recv().await.unwrap()).unwrap();
+        // Turned off now, with the phone halfway in.
+        r.gw.disconnect_all();
+        mine.to_peer.send(hs.write().unwrap()).await.unwrap();
+        let (_, channel) = hs.finish().unwrap();
+        let mut p = Phone { link: mine, channel, next: 0 };
+        p.send(&ClientMessage::Hello { protocol: PROTOCOL_VERSION, app_version: "1".into(), device_name: "Late".into() });
+        assert!(matches!(p.next().await, Some(ServerMessage::Welcome { .. })));
+        assert!(p.next().await.is_none(), "closed instead of let in");
+        assert!(r.gw.connected().is_empty());
+        let (mut another, theirs) = link_pair();
+        r.gw.accept(theirs);
+        assert!(another.from_peer.recv().await.is_none(), "and nothing new is taken");
+    }
+
+    #[tokio::test]
+    async fn numbers_from_before_lantern_restarted_start_the_chat_over_and_live_events_still_come() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        r.bus.publish("a", user("hi"));
+        let (_, mut p) = paired(&r).await;
+        for (after, epoch, why) in [(500, EPOCH, "a number Lantern hasn't reached"), (1, EPOCH + 1, "another run's number")] {
+            let (_, _, before) = p.ask(Request::Subscribe { slot: "a".into(), after, epoch }).await;
+            assert!(before.iter().any(|m| matches!(m, ServerMessage::Reset { .. })), "{why}: a reset");
+        }
+        r.bus.publish("a", UiEvent::Thinking { parent: None });
+        loop {
+            if let Some(ServerMessage::Event { seq, event: RemoteEvent::Thinking, .. }) = p.next().await {
+                assert_eq!(seq, 2);
+                break;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_reset_says_how_many_earlier_turns_it_left_out_and_they_come_when_asked() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        *r.host.history.lock().unwrap() = vec![user("last turn")];
+        let (_, mut p) = paired(&r).await;
+        let (_, _, before) = p.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
+        assert!(before.iter().any(|m| matches!(m, ServerMessage::Reset { hidden: 0, .. })));
+        let (ok, err, _) = p.ask(Request::Earlier { slot: "a".into(), hidden: 3 }).await;
+        assert!(err.is_none());
+        let page: protocol::EarlierPage = serde_json::from_value(ok.unwrap()).unwrap();
+        assert_eq!(page.events.len(), 1);
     }
 
     #[test]

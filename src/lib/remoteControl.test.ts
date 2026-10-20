@@ -11,6 +11,8 @@ describe("who is connected", () => {
       { id: "b", name: "Pixel", paired_at: 0, last_seen: 0 },
     ],
     connected: ["b"],
+    listening: true,
+    pairing: false,
   };
 
   it("names the paired phones that are connected now", () => {
