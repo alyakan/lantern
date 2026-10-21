@@ -243,6 +243,15 @@ impl SessionHub {
         log.session_id = session_id.or(log.session_id.take());
     }
 
+    /// The window knows which session a chat is. Claude only names its session once it has a message to answer, so a chat
+    /// resumed from History has none here until then, and without it its transcript can't be found for a phone. Claude's own
+    /// word (the session's start) stands once it has come: this only fills a gap.
+    pub fn session(&self, slot: &str, session_id: &str) {
+        if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
+            log.session_id.get_or_insert_with(|| session_id.to_string());
+        }
+    }
+
     /// The window's title for the chat (it beats the first prompt).
     pub fn titled(&self, slot: &str, title: &str) {
         if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
@@ -361,6 +370,22 @@ mod tests {
         assert_eq!(hub.chat("a").unwrap().status, ChatStatus::Idle);
         hub.closed("a");
         assert!(hub.chat("a").is_none());
+    }
+
+    #[test]
+    fn the_window_fills_a_chats_missing_session_but_never_replaces_claudes_own_or_lists_a_chat() {
+        let hub = hub();
+        hub.session("ghost", "aaaa-1111");
+        assert!(hub.chat("ghost").is_none(), "a session for a chat the hub doesn't list doesn't list it");
+        hub.opened("a", "/p");
+        assert_eq!(hub.chat("a").unwrap().session_id, None);
+        hub.session("a", "aaaa-1111");
+        assert_eq!(hub.chat("a").unwrap().session_id.as_deref(), Some("aaaa-1111"));
+        hub.session("a", "bbbb-2222");
+        assert_eq!(hub.chat("a").unwrap().session_id.as_deref(), Some("aaaa-1111"), "the first one stands");
+        // Claude's own start replaces it: that is the session now.
+        feed(&hub, "a", vec![UiEvent::SessionStarted { session_id: "cccc-3333".into(), model: "m".into(), cwd: "/p".into(), permission_mode: "auto".into(), claude_version: "1".into() }]);
+        assert_eq!(hub.chat("a").unwrap().session_id.as_deref(), Some("cccc-3333"));
     }
 
     #[test]

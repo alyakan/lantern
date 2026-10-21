@@ -308,6 +308,11 @@ impl Remote {
                 self.hub.asleep(&c.slot, &c.folder, Some(c.title.clone()), c.session_id.clone());
             } else {
                 self.hub.titled(&c.slot, &c.title);
+                // An awake chat the window resumed from History: claude names its session only with its first message, so
+                // without this the chat's transcript can't be found for a phone until then.
+                if let Some(id) = c.session_id.as_deref().filter(|id| crate::history::valid_id(id)) {
+                    self.hub.session(&c.slot, id);
+                }
             }
         }
     }
@@ -484,6 +489,36 @@ mod tests {
         // A title for a chat the hub doesn't list doesn't list it.
         remote.window_chats(&[chat("c", false)]);
         assert!(remote.hub.chat("c").is_none());
+    }
+
+    #[test]
+    fn an_awake_chat_resumed_from_history_gets_its_session_from_the_window_so_its_transcript_can_be_found() {
+        let remote = Remote::default();
+        // The chat is listed (its claude starts) but hasn't said anything: claude names its session only with its first message.
+        remote.hub.opened("a", "/p");
+        assert_eq!(remote.hub.chat("a").unwrap().session_id, None);
+        let chat = |id: Option<&str>| WindowChat { slot: "a".into(), folder: "/p".into(), title: "Old chat".into(), asleep: false, session_id: id.map(String::from) };
+        remote.window_chats(&[chat(Some("0a1b2c3d-1111-2222-3333-444455556666"))]);
+        let a = remote.hub.chat("a").unwrap();
+        assert_eq!((a.status, a.session_id.as_deref()), (hub::ChatStatus::Idle, Some("0a1b2c3d-1111-2222-3333-444455556666")), "it is still awake, and now has its session");
+        // The window not knowing (a new chat) takes nothing away.
+        remote.window_chats(&[chat(None)]);
+        assert_eq!(remote.hub.chat("a").unwrap().session_id.as_deref(), Some("0a1b2c3d-1111-2222-3333-444455556666"));
+    }
+
+    #[test]
+    fn the_window_only_fills_a_gap_in_the_session_and_never_with_a_name_that_is_not_one() {
+        let remote = Remote::default();
+        remote.hub.opened("a", "/p");
+        let chat = |id: &str| WindowChat { slot: "a".into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: Some(id.into()) };
+        // Not a session id (a path, or something with slashes in it): ignored.
+        remote.window_chats(&[chat("../../etc/passwd")]);
+        assert_eq!(remote.hub.chat("a").unwrap().session_id, None);
+        // Claude's own word stands once it has come.
+        let started = crate::ui_event::UiEvent::SessionStarted { session_id: "aaaa-1111".into(), model: String::new(), cwd: "/p".into(), permission_mode: String::new(), claude_version: String::new() };
+        remote.hub.record(&bus::BusEvent { slot: "a".into(), seq: 1, event: started });
+        remote.window_chats(&[chat("bbbb-2222")]);
+        assert_eq!(remote.hub.chat("a").unwrap().session_id.as_deref(), Some("aaaa-1111"));
     }
 
     #[test]
