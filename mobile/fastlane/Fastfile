@@ -24,6 +24,13 @@ def refuse_preview_build!
   if ENV["EXPO_PUBLIC_FAKE_TIPS"] == "1"
     UI.user_error!("EXPO_PUBLIC_FAKE_TIPS=1 is set: that is for previews, and would put made-up tips in a release. Unset it.")
   end
+  # Expo's bundler also reads mobile/.env* files into EXPO_PUBLIC_ variables, so the switch can hide in one of those.
+  Dir.glob(File.join(mobile_dir, ".env*")).each do |file|
+    next unless File.file?(file)
+    if File.read(file).match?(/^\s*(export\s+)?EXPO_PUBLIC_FAKE_TIPS\s*=\s*["']?1/)
+      UI.user_error!("#{File.basename(file)} sets EXPO_PUBLIC_FAKE_TIPS=1: that is for previews, and would put made-up tips in a release. Remove it.")
+    end
+  end
 end
 
 def need(name)
@@ -130,6 +137,8 @@ platform :android do
       project_dir: File.join(mobile_dir, "android"),
       task: "bundle",
       build_type: "Release",
+      # The command line carries the keystore's passwords: it is not printed (or kept in fastlane's logs).
+      print_command: false,
       properties: {
         "android.injected.signing.store.file" => keystore,
         "android.injected.signing.store.password" => need("ANDROID_KEYSTORE_PASSWORD"),

@@ -188,6 +188,17 @@ describe("becoming a regular", () => {
     expect(manage).toHaveBeenCalledTimes(1);
   });
 
+  it("has a way to restore a pledge bought on this account, which asks the store and finds it", async () => {
+    let running = false;
+    const restore = jest.fn(async () => void (running = true));
+    await open({ restore, isPledger: async () => running });
+    await waitFor(() => screen.getByRole("button", { name: "Restore purchases" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Restore purchases" }));
+    await waitFor(() => expect(screen.getByText(/You're a regular here: Ember glows for you/)).toBeTruthy());
+    expect(restore).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Restore purchases" })).toBeNull();
+  });
+
   it("has no regulars' section when the store has no pledges", async () => {
     await open({ pledges: async () => [] });
     await waitFor(() => screen.getByRole("button", { name: "Small Coffee, $0.99" }));

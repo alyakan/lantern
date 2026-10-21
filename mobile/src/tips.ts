@@ -46,6 +46,8 @@ export interface TipPlatform {
   isPledger: () => Promise<boolean>;
   /** Opens the store's own page to change or cancel a pledge. */
   manage: () => Promise<void>;
+  /** Asks the store to bring back what this account has bought (a pledge on a new phone). */
+  restore: () => Promise<void>;
   /** Calls `changed` when a purchase finishes with nobody waiting on it (an approval that came late, a renewal); returns how to stop. */
   watch?: (changed: () => void) => () => void;
 }
@@ -79,6 +81,9 @@ export interface TipState {
 }
 
 const FAILED = "That didn't go through. Nothing was charged. Try again in a bit?";
+/** What a purchase that got no answer from the store is rejected with (platformTips.ts), and what the person is told. */
+export const STORE_TIMEOUT = "store-timeout";
+const WAITED = "The store is taking a long time to answer. If a payment did go through, it is counted the next time you open Lantern.";
 const UNAVAILABLE = "Tips aren't available right now. Check your connection and try again.";
 
 /** A store's name for a product without the app's name it is sometimes given in brackets ("Small Coffee (Lantern)"). */
@@ -171,8 +176,8 @@ export class TipJar {
       if (result === "thanked") this.set({ phase: "thanked", thanksFor, awaitingApproval: false, ...onThanks(this.now()) });
       else if (result === "pending") this.set({ phase: "ready", awaitingApproval: true });
       else this.set({ phase: "ready" });
-    } catch {
-      this.set({ phase: "failed", error: FAILED });
+    } catch (e) {
+      this.set({ phase: "failed", error: (e as Error)?.message === STORE_TIMEOUT ? WAITED : FAILED });
     }
   }
 
@@ -198,6 +203,12 @@ export class TipJar {
       },
       "pledge",
     );
+  }
+
+  /** Brings back a pledge bought on this account (Apple wants a way to, in an app that sells one): the store is asked, then looked at again. */
+  async restore(): Promise<void> {
+    await this.platform.restore().catch(() => {});
+    await this.refreshPledger();
   }
 
   /** Opens the store's page to change or cancel a pledge; the answer is looked at again when the person is back. */
@@ -240,6 +251,7 @@ export function demoPlatform(): TipPlatform {
     manage: async () => {
       pledger = false;
     },
+    restore: async () => {},
   };
 }
 
@@ -251,6 +263,7 @@ export const noPlatform: TipPlatform = {
   subscribe: async () => "cancelled",
   isPledger: async () => false,
   manage: async () => {},
+  restore: async () => {},
 };
 
 /** A memory that keeps nothing. */

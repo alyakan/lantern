@@ -196,6 +196,11 @@ function Content({ close, bottom, thanked, onThanksSeen }: { close: () => void; 
                           Privacy Policy
                         </Txt>
                       </Txt>
+                      <PressScale accessibilityRole="button" accessibilityLabel="Restore purchases" accessibilityHint="Brings back a pledge you made on this account" disabled={busy} onPress={() => void jar.restore()} hitSlop={10} haptic="select" scaleTo={0.94} style={{ alignSelf: "flex-start" }}>
+                        <Txt variant="small" style={{ fontWeight: "700", color: EMBER }}>
+                          Restore purchases
+                        </Txt>
+                      </PressScale>
                     </>
                   )}
                 </View>

@@ -1,4 +1,4 @@
-import { cleanName, demoPlatform, noMemory, noPlatform, PLEDGE_IDS, sameMonth, TIP_IDS, TipJar, type Pledge, type Tip, type TipMemory, type TipPlatform } from "./tips";
+import { cleanName, demoPlatform, noMemory, noPlatform, PLEDGE_IDS, sameMonth, STORE_TIMEOUT, TIP_IDS, TipJar, type Pledge, type Tip, type TipMemory, type TipPlatform } from "./tips";
 
 const TIPS: Tip[] = [
   { id: TIP_IDS[0], name: "Small Coffee", price: "$0.99" },
@@ -220,6 +220,38 @@ describe("the tip jar", () => {
     expect(seen[0]).toBe("loading");
     expect(seen).toContain("ready");
     expect(seen).not.toContain("thanked");
+  });
+});
+
+describe("a store that does not answer", () => {
+  it("says so in its own words, not that nothing was charged: a payment may still have gone through", async () => {
+    const jar = jarOf(fakeStore({ buy: () => Promise.reject(new Error(STORE_TIMEOUT)) }).platform);
+    await jar.load();
+    await jar.tip(TIP_IDS[0]);
+    expect(jar.getState().phase).toBe("failed");
+    expect(jar.getState().error).toMatch(/taking a long time to answer/);
+    expect(jar.getState().error).not.toMatch(/Nothing was charged/);
+    const pledge = jarOf(fakeStore({ subscribe: () => Promise.reject(new Error(STORE_TIMEOUT)) }).platform);
+    await pledge.load();
+    await pledge.pledge(PLEDGE_IDS[0]);
+    expect(pledge.getState().error).toMatch(/taking a long time to answer/);
+  });
+});
+
+describe("restoring a pledge", () => {
+  it("asks the store to bring it back, then looks at whether one is running", async () => {
+    let running = false;
+    const restore = jest.fn(async () => void (running = true));
+    const jar = jarOf(fakeStore({ restore, isPledger: async () => running }).platform);
+    await jar.restore();
+    expect(restore).toHaveBeenCalledTimes(1);
+    expect(jar.getState().pledger).toBe(true);
+  });
+
+  it("is not stopped by a store that can't restore", async () => {
+    const jar = jarOf(fakeStore({ restore: () => Promise.reject(new Error("no")), isPledger: async () => false }).platform);
+    await expect(jar.restore()).resolves.toBeUndefined();
+    expect(jar.getState().pledger).toBe(false);
   });
 });
 

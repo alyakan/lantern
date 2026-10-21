@@ -5,9 +5,9 @@
  * never replays it, telling whoever is watching so the pledge can be looked at again.
  */
 import { Platform } from "react-native";
-import { deepLinkToSubscriptions, ErrorCode, fetchProducts, finishTransaction, getActiveSubscriptions, initConnection, purchaseErrorListener, purchaseUpdatedListener, requestPurchase, showManageSubscriptionsIOS, type Purchase } from "expo-iap";
+import { deepLinkToSubscriptions, ErrorCode, fetchProducts, finishTransaction, getActiveSubscriptions, initConnection, purchaseErrorListener, purchaseUpdatedListener, requestPurchase, restorePurchases, showManageSubscriptionsIOS, type Purchase } from "expo-iap";
 import * as SecureStore from "expo-secure-store";
-import { cleanName, PLEDGE_IDS, TIP_IDS, type Outcome, type Pledge, type Tip, type TipMemory, type TipPlatform } from "./tips";
+import { cleanName, PLEDGE_IDS, STORE_TIMEOUT, TIP_IDS, type Outcome, type Pledge, type Tip, type TipMemory, type TipPlatform } from "./tips";
 
 const PACKAGE = "com.alyakan.lantern";
 
@@ -65,13 +65,21 @@ export function startTipListener() {
 
 type Bought = { id: string; title: string; displayName?: string | null; displayPrice: string; price?: number | null; subscriptionOffers?: { offerTokenAndroid?: string | null }[] | null };
 
+/** How long to wait for the store to say how a purchase went (the person may take a while at the payment sheet). */
+export const PURCHASE_WAIT_MS = 180_000;
+
 function purchase(id: string, request: Parameters<typeof requestPurchase>[0]) {
   return new Promise<Outcome>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const finish = (fn: () => void) => {
+      if (timer) clearTimeout(timer);
       waiting = null;
       fn();
     };
     waiting = { id, done: (o) => finish(() => resolve(o)), fail: (e) => finish(() => reject(e)) };
+    // If neither the listener nor the error listener ever fires, the screen would wait for ever. A purchase that does finish
+    // later is still finished by the listener (and a pledge noticed), only no longer thanked.
+    timer = setTimeout(() => waiting?.id === id && waiting.fail(new Error(STORE_TIMEOUT)), PURCHASE_WAIT_MS);
     requestPurchase(request).catch((e: Error) => waiting?.id === id && waiting.fail(e));
   });
 }
@@ -120,6 +128,11 @@ export const iapPlatform: TipPlatform = {
     return (active ?? []).some((s) => s.isActive);
   },
 
+  async restore() {
+    await connect();
+    await restorePurchases();
+  },
+
   async manage() {
     await connect();
     if (Platform.OS === "ios") await showManageSubscriptionsIOS();
@@ -136,18 +149,20 @@ export const iapPlatform: TipPlatform = {
 
 const KEY = "lantern.last-tip";
 const PLEDGER = "lantern.pledger";
+/** Kept as the pairing key is: on this device only, never in a backup or synced to another. */
+const OPTIONS: SecureStore.SecureStoreOptions = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
 
 /** What is kept: they are not secrets, and the keychain is already how this app keeps what it keeps. */
 export const secureTipMemory: TipMemory = {
   async load() {
-    const raw = await SecureStore.getItemAsync(KEY);
+    const raw = await SecureStore.getItemAsync(KEY, OPTIONS);
     const at = raw ? Number(raw) : NaN;
     return Number.isFinite(at) && at > 0 ? at : null;
   },
-  save: (at) => SecureStore.setItemAsync(KEY, String(at)),
+  save: (at) => SecureStore.setItemAsync(KEY, String(at), OPTIONS),
   async loadPledger() {
-    const raw = await SecureStore.getItemAsync(PLEDGER);
+    const raw = await SecureStore.getItemAsync(PLEDGER, OPTIONS);
     return raw === "1" ? true : raw === "0" ? false : null;
   },
-  savePledger: (on) => SecureStore.setItemAsync(PLEDGER, on ? "1" : "0"),
+  savePledger: (on) => SecureStore.setItemAsync(PLEDGER, on ? "1" : "0", OPTIONS),
 };

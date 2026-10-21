@@ -11,6 +11,7 @@ const mockStore = {
   updated: [] as Listener<Record<string, unknown>>[],
   errored: [] as Listener<{ code: string; message: string }>[],
   requestFails: null as Error | null,
+  restored: 0,
   active: [] as { isActive: boolean }[],
   activeFails: false,
   managed: [] as unknown[],
@@ -40,6 +41,7 @@ jest.mock("expo-iap", () => ({
     if (mockStore.activeFails) throw new Error("no answer");
     return mockStore.active;
   }),
+  restorePurchases: jest.fn(async () => void (mockStore.restored += 1)),
   showManageSubscriptionsIOS: jest.fn(async () => void mockStore.managed.push("ios")),
   deepLinkToSubscriptions: jest.fn(async (o: unknown) => void mockStore.managed.push(o)),
   purchaseErrorListener: jest.fn((l: Listener<{ code: string; message: string }>) => {
@@ -49,13 +51,13 @@ jest.mock("expo-iap", () => ({
 }));
 jest.mock("expo-secure-store", () => {
   const data = new Map<string, string>();
-  return { getItemAsync: jest.fn(async (k: string) => data.get(k) ?? null), setItemAsync: jest.fn(async (k: string, v: string) => void data.set(k, v)) };
+  return { WHEN_UNLOCKED_THIS_DEVICE_ONLY: "WHEN_UNLOCKED_THIS_DEVICE_ONLY", getItemAsync: jest.fn(async (k: string) => data.get(k) ?? null), setItemAsync: jest.fn(async (k: string, v: string) => void data.set(k, v)) };
 });
 
 import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";
-import { iapPlatform, secureTipMemory, startTipListener } from "./platformTips";
-import { PLEDGE_IDS, TIP_IDS } from "./tips";
+import { iapPlatform, PURCHASE_WAIT_MS, secureTipMemory, startTipListener } from "./platformTips";
+import { PLEDGE_IDS, STORE_TIMEOUT, TIP_IDS } from "./tips";
 
 const purchase = (productId: string, state = "purchased") => ({ productId, purchaseState: state, id: `t-${productId}` });
 const play = (e: Record<string, unknown>) => mockStore.updated.forEach((l) => l(e));
@@ -276,12 +278,67 @@ describe("the real store's pledges", () => {
   });
 });
 
+describe("a purchase the store never answers", () => {
+  it("gives up after a while with its own reason, instead of waiting for ever, and still finishes the purchase if it does come", async () => {
+    jest.useFakeTimers();
+    try {
+      const bought = iapPlatform.buy(TIP_IDS[0]);
+      const failed = expect(bought).rejects.toThrow(STORE_TIMEOUT);
+      await jest.advanceTimersByTimeAsync(PURCHASE_WAIT_MS + 100);
+      await failed;
+      // Then it arrives after all: it is finished (the store would replay it otherwise), with nobody to thank for it.
+      const late = purchase(TIP_IDS[0]);
+      play(late);
+      await jest.advanceTimersByTimeAsync(10);
+      expect(mockStore.finished.at(-1)).toEqual({ purchase: late, isConsumable: true });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("does not give up on a purchase that was answered in time", async () => {
+    jest.useFakeTimers();
+    try {
+      const bought = iapPlatform.buy(TIP_IDS[1]);
+      await jest.advanceTimersByTimeAsync(5000);
+      play(purchase(TIP_IDS[1]));
+      await expect(bought).resolves.toBe("thanked");
+      await jest.advanceTimersByTimeAsync(PURCHASE_WAIT_MS * 2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe("restoring purchases", () => {
+  it("asks the store to bring back what the account bought", async () => {
+    const before = mockStore.restored;
+    await iapPlatform.restore();
+    expect(mockStore.restored).toBe(before + 1);
+  });
+});
+
 describe("the memory of the last tip", () => {
   it("keeps the day, and reads it back", async () => {
     expect(await secureTipMemory.load()).toBeNull();
     await secureTipMemory.save(1_700_000_000_000);
     expect(await secureTipMemory.load()).toBe(1_700_000_000_000);
-    expect(SecureStore.setItemAsync).toHaveBeenCalledWith("lantern.last-tip", "1700000000000");
+    expect(SecureStore.setItemAsync).toHaveBeenCalledWith("lantern.last-tip", "1700000000000", { keychainAccessible: "WHEN_UNLOCKED_THIS_DEVICE_ONLY" });
+  });
+
+  it("is kept on this device only, as the pairing key is: never in a backup, never synced", async () => {
+    await secureTipMemory.save(1_700_000_000_000);
+    await secureTipMemory.savePledger(true);
+    await secureTipMemory.load();
+    await secureTipMemory.loadPledger();
+    const options = { keychainAccessible: "WHEN_UNLOCKED_THIS_DEVICE_ONLY" };
+    for (const call of [...(SecureStore.getItemAsync as jest.Mock).mock.calls, ...(SecureStore.setItemAsync as jest.Mock).mock.calls]) {
+      if (String(call[0]).startsWith("lantern.")) expect(call.at(-1)).toEqual(options);
+    }
+    expect((SecureStore.setItemAsync as jest.Mock).mock.calls.filter((c) => String(c[0]).startsWith("lantern.")).length).toBeGreaterThan(1);
+    // Put back to what is not a value, for the tests after this one.
+    await SecureStore.setItemAsync("lantern.last-tip", "x");
+    await SecureStore.setItemAsync("lantern.pledger", "x");
   });
 
   it("keeps whether a pledge was running, and reads nothing from what it never kept", async () => {
