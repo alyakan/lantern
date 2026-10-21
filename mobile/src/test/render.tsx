@@ -36,7 +36,7 @@ export interface Seed {
   tips?: TipJar;
 }
 
-export const connected: ConnectionState = { kind: "connected", host: "192.168.1.20", welcome: { type: "welcome", protocol: 1, app_version: "0.1.53", mac_name: "Aly's MacBook Pro", epoch: 1 } };
+export const connected: ConnectionState = { kind: "connected", host: "192.168.1.20", welcome: { type: "welcome", protocol: 1, app_version: "0.1.53", mac_name: "Aly's MacBook Pro", epoch: 1, hosts: ["192.168.1.20"] } };
 
 export function seed(controller: Controller, s: Seed) {
   controller.setConnection(s.connection ?? connected);

@@ -342,6 +342,10 @@ pub enum ServerMessage {
         mac_name: String,
         #[ts(type = "number")]
         epoch: u64,
+        /// The addresses the Mac can be reached at now, local ones first then Tailscale's: the phone keeps them in place
+        /// of what the QR code said, so a Mac whose address changed (or that joined Tailscale) is still found.
+        #[serde(default)]
+        hosts: Vec<String>,
     },
     /// The answer to request `id`: `ok` with its result, or `error` with why (for the user).
     Response {

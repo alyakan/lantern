@@ -1,6 +1,6 @@
 # Lantern on your phone
 
-A paired phone (iOS or Android, one React Native app in `mobile/`) sees the chats you have open, answers Claude's cards, sends messages, stops a turn and wakes a sleeping chat. Over the same Wi-Fi only for now; a relay or tailnet can be added later as another transport, because pairing, authentication and encryption sit above the transport.
+A paired phone (iOS or Android, one React Native app in `mobile/`) sees the chats you have open, answers Claude's cards, sends messages, stops a turn and wakes a sleeping chat. On the same Wi-Fi, or from anywhere over Tailscale (see "From anywhere" below); a hosted relay could be added later as another transport, because pairing, authentication and encryption sit above the transport.
 
 ## Where things live
 
@@ -24,6 +24,16 @@ The phone never sends tool input. To answer an `AskUserQuestion` it sends only t
 ## Pairing
 
 Settings > Remote control > turn it on > Show a pairing code. The code is a QR (and a link you can copy) holding the Mac's public key, its addresses and a one-time secret that works once, for five minutes. The phone checks the Mac's key before it sends the third handshake message.
+
+## From anywhere (Tailscale)
+
+Lantern runs no server for this. The Mac already listens on every address, so with Tailscale on the Mac and the phone (same account) the phone reaches the Mac's `100.x` tailnet address from any network, and everything above the transport (pairing, the Noise channel, the allowlisted requests) is the same as on Wi-Fi. What Lantern adds:
+
+- **The Mac offers its tailnet address.** `remote/mod.rs` adds addresses in 100.64.0.0/10 on a `utun*` or `tailscale*` interface after the local ones (the interface check keeps out a carrier's or hotspot's shared address in the same range, and another VPN's). The pairing link carries them, and Settings › Remote control › Away from home shows them, or says Tailscale isn't on.
+- **The Welcome carries the Mac's current addresses** (`ServerMessage::Welcome.hosts`), and the phone keeps them in place of what it saved, so a phone paired before Tailscale was on learns the tailnet address the next time it connects, and a Mac whose address changed is still found. An older Mac sends none and the phone keeps what it had. The save only happens if the kept Mac is still the one that connected (a Mac forgotten meanwhile isn't brought back).
+- **The phone doesn't wait on addresses that can't answer from where it is.** Local addresses get 1.5 s (on their own network they answer in milliseconds), a tailnet address 6 s (a cold tunnel can take a few seconds), and the address that worked last goes first, so away from home it goes straight to Tailscale after the first connection.
+- **Keep this Mac awake** (Settings, off by default) holds an idle-sleep assertion (`caffeinate -i`, `Remote::awake`, apart from the hold that lasts while Claude works) for as long as Remote control is on. A sleeping Mac can't be reached and a phone can't wake it (wake-on-LAN doesn't cross the internet), so the phone says it may be asleep and retries. The screen may still sleep and closing the lid still sleeps the Mac.
+- Pairing still needs the QR code, scanned at the Mac. The Tailscale ACLs and the macOS Firewall (below) apply as usual: a tailnet connection arrives on the `utun` interface and is subject to the same per-app allow list.
 
 ## Running it
 
@@ -52,7 +62,7 @@ On the iOS simulator, against `fixture_gateway` (the real Rust gateway behind sc
 
 ## Not built yet
 
-- A relay or tailnet transport (the adapter is there, the transport isn't).
+- A hosted relay (Tailscale covers "from anywhere" for now; nothing has run over a real tailnet yet, only the address handling is tested).
 - A Live Activity for a running turn.
 - A real-device pass: camera scanning, the Bonjour permission prompt, push delivery and the swipe-to-allow drag are verified only by tests and the simulator.
 

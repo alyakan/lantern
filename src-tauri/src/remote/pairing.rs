@@ -60,6 +60,9 @@ pub struct Saved {
     /// Notifications name the chat (off: they only say a chat needs you, or finished).
     #[serde(default)]
     pub show_titles: bool,
+    /// The Mac isn't let to sleep from idling while Remote control is on, so a phone away from home can still reach it.
+    #[serde(default)]
+    pub keep_awake: bool,
     #[serde(default)]
     pub devices: Vec<Device>,
 }
@@ -101,6 +104,10 @@ impl RemoteStore {
 
     pub fn set_show_titles(&self, on: bool) -> Result<(), String> {
         self.change(|s| s.show_titles = on)
+    }
+
+    pub fn set_keep_awake(&self, on: bool) -> Result<(), String> {
+        self.change(|s| s.keep_awake = on)
     }
 
     /// A new offer, in place of any other (an old QR code stops working).
@@ -206,9 +213,19 @@ mod tests {
         assert_eq!(s.saved(), Saved::default());
         s.set_enabled(true).unwrap();
         s.set_show_titles(true).unwrap();
+        s.set_keep_awake(true).unwrap();
         let d = s.add_device(&[1u8; 32], "Aly's iPhone", 10).unwrap();
         let again = RemoteStore::load(Some(dir.path().join("remote.json")));
-        assert_eq!(again.saved(), Saved { enabled: true, show_titles: true, devices: vec![d] });
+        assert_eq!(again.saved(), Saved { enabled: true, show_titles: true, keep_awake: true, devices: vec![d] });
+    }
+
+    #[test]
+    fn keeping_the_mac_awake_is_off_until_asked_for_and_an_older_file_without_it_still_loads() {
+        let (s, dir) = store();
+        assert!(!s.saved().keep_awake);
+        std::fs::write(dir.path().join("remote.json"), r#"{"enabled":true,"show_titles":false,"devices":[]}"#).unwrap();
+        let old = RemoteStore::load(Some(dir.path().join("remote.json")));
+        assert!(old.saved().enabled && !old.saved().keep_awake);
     }
 
     #[test]

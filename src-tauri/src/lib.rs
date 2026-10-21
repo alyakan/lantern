@@ -404,6 +404,10 @@ impl remote::gateway::Host for RemoteHost {
     fn app_version(&self) -> String {
         self.app.package_info().version.to_string()
     }
+
+    fn hosts(&self) -> Vec<String> {
+        remote::local_addresses()
+    }
 }
 
 /// Stops what chat `slot`'s claude is doing (Stop in the window, or a phone's): the prompts it was waiting on can't be
@@ -1749,6 +1753,12 @@ fn remote_set_show_titles(state: State<'_, AppState>, on: bool) -> remote::Remot
     state.remote.view_after(state.remote.store.set_show_titles(on))
 }
 
+/// Holds the Mac awake while Remote control is on, so a phone away from home can still reach it.
+#[tauri::command]
+fn remote_set_keep_awake(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
+    state.remote.view_after(state.remote.set_keep_awake(on))
+}
+
 /// A QR code for pairing a phone, good for five minutes and one try. Off the main thread: the Mac's key comes from the
 /// Keychain, which may ask the user first.
 #[tauri::command]
@@ -2518,6 +2528,7 @@ pub fn run() {
             remote_settings,
             remote_set_enabled,
             remote_set_show_titles,
+            remote_set_keep_awake,
             remote_pair,
             remote_pair_cancel,
             remote_remove_device,
@@ -2648,6 +2659,7 @@ pub fn run() {
                 // A setup still running in a worktree ends with Lantern.
                 setup::stop_all();
                 if let Some(state) = app.try_state::<AppState>() {
+                    state.remote.awake.stop();
                     tauri::async_runtime::block_on(state.asides.stop_all());
                     tauri::async_runtime::block_on(slots::shut_down_all(state.slots.drain()));
                 }

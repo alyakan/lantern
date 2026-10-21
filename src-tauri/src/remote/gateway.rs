@@ -75,6 +75,10 @@ pub trait Host: Send + Sync + 'static {
     fn history(&self, slot: String, before: Option<usize>) -> BoxFut<Result<crate::history::Page, String>>;
     fn mac_name(&self) -> String;
     fn app_version(&self) -> String;
+    /// The addresses this Mac can be reached at now (a phone keeps them for next time, see ServerMessage::Welcome).
+    fn hosts(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 struct Conn {
@@ -312,7 +316,7 @@ impl Gateway {
         }
         let hello = recv_message(link, &mut channel).await.ok_or(Refused::Protocol("no hello".into()))?;
         let ClientMessage::Hello { protocol: theirs, device_name, .. } = hello else { return Err(Refused::Protocol("no hello".into())) };
-        let welcome = ServerMessage::Welcome { protocol: PROTOCOL_VERSION, app_version: self.host.app_version(), mac_name: self.host.mac_name(), epoch: self.epoch };
+        let welcome = ServerMessage::Welcome { protocol: PROTOCOL_VERSION, app_version: self.host.app_version(), mac_name: self.host.mac_name(), epoch: self.epoch, hosts: self.host.hosts() };
         send_message(link, &mut channel, &welcome).map_err(Refused::Protocol)?;
         // Told which version this Mac speaks, so the phone can say what to update; it isn't paired or let in.
         if theirs != PROTOCOL_VERSION {
@@ -754,6 +758,9 @@ pub(crate) mod tests {
         fn app_version(&self) -> String {
             "0.0.0".into()
         }
+        fn hosts(&self) -> Vec<String> {
+            vec!["192.168.1.5".into(), "100.64.0.7".into()]
+        }
     }
 
     pub struct Rig {
@@ -782,6 +789,8 @@ pub(crate) mod tests {
         pub link: Link,
         pub channel: Channel,
         next: u64,
+        /// The addresses its Welcome gave.
+        pub hosts: Vec<String>,
     }
 
     impl Phone {
@@ -834,10 +843,13 @@ pub(crate) mod tests {
         hs.read(&second)?;
         mine.to_peer.send(hs.write()?).await.map_err(|e| e.to_string())?;
         let (_, channel) = hs.finish()?;
-        let mut p = Phone { link: mine, channel, next: 0 };
+        let mut p = Phone { link: mine, channel, next: 0, hosts: Vec::new() };
         p.send(&ClientMessage::Hello { protocol, app_version: "1.0".into(), device_name: "Test phone".into() });
         match p.next().await {
-            Some(ServerMessage::Welcome { .. }) => Ok(p),
+            Some(ServerMessage::Welcome { hosts, .. }) => {
+                p.hosts = hosts;
+                Ok(p)
+            }
             other => Err(format!("no welcome: {other:?}")),
         }
     }
@@ -866,6 +878,16 @@ pub(crate) mod tests {
         assert_eq!(r.gw.connected(), vec![devices[0].id.clone()]);
         drop(p);
         assert!(phone(&r.gw, &key, None, PROTOCOL_VERSION).await.is_ok(), "connecting again needs no code");
+    }
+
+    #[tokio::test]
+    async fn the_welcome_gives_the_addresses_the_mac_can_be_reached_at_to_a_new_phone_and_one_coming_back() {
+        let r = rig();
+        let (key, p) = paired(&r).await;
+        assert_eq!(p.hosts, vec!["192.168.1.5", "100.64.0.7"], "a phone that has just paired learns the Tailscale address too");
+        drop(p);
+        let again = phone(&r.gw, &key, None, PROTOCOL_VERSION).await.unwrap();
+        assert_eq!(again.hosts, vec!["192.168.1.5", "100.64.0.7"], "and so does one paired before Tailscale was on");
     }
 
     #[tokio::test]
@@ -1254,7 +1276,7 @@ pub(crate) mod tests {
         hs.read(&mine.from_peer.recv().await.ok_or("closed")?)?;
         mine.to_peer.send(hs.write()?).await.map_err(|e| e.to_string())?;
         let (_, channel) = hs.finish()?;
-        let mut p = Phone { link: mine, channel, next: 0 };
+        let mut p = Phone { link: mine, channel, next: 0, hosts: Vec::new() };
         p.send(&ClientMessage::Hello { protocol: PROTOCOL_VERSION, app_version: "1.0".into(), device_name: "Wi-Fi phone".into() });
         matches!(p.next().await, Some(ServerMessage::Welcome { .. })).then_some(p).ok_or("no welcome".into())
     }
@@ -1337,7 +1359,7 @@ pub(crate) mod tests {
         r.gw.disconnect_all();
         mine.to_peer.send(hs.write().unwrap()).await.unwrap();
         let (_, channel) = hs.finish().unwrap();
-        let mut p = Phone { link: mine, channel, next: 0 };
+        let mut p = Phone { link: mine, channel, next: 0, hosts: Vec::new() };
         p.send(&ClientMessage::Hello { protocol: PROTOCOL_VERSION, app_version: "1".into(), device_name: "Late".into() });
         assert!(matches!(p.next().await, Some(ServerMessage::Welcome { .. })));
         assert!(p.next().await.is_none(), "closed instead of let in");

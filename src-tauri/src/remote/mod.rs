@@ -47,6 +47,9 @@ pub struct Remote {
     claude: std::sync::Mutex<Option<String>>,
     /// Chats a phone asked the window to start, waiting for the window to say which slot it made (see `expect_new_chat`).
     new_chats: std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<Result<String, String>>>>,
+    /// Keeps the Mac from sleeping from idling while Remote control is on and the user asked for that. Its own hold,
+    /// apart from the one that lasts while Claude works (awake.rs), so neither lets go of the other's.
+    pub awake: crate::awake::Awake,
 }
 
 /// What the window is asked when a phone starts a chat. The gateway has checked the folder and the text; the window
@@ -115,6 +118,7 @@ impl Remote {
             old.listener.abort();
             old.notifier.iter().for_each(|n| n.abort());
         }
+        self.sync_awake();
     }
 
     /// Stops listening and closes every phone's connection.
@@ -124,6 +128,13 @@ impl Remote {
             r.listener.abort();
             r.notifier.iter().for_each(|n| n.abort());
         }
+        self.sync_awake();
+    }
+
+    /// Holds the Mac awake exactly while something is listening for phones and the setting is on. Called after anything
+    /// that changes either; a hold that died on its own is started again.
+    pub fn sync_awake(&self) {
+        self.awake.update(self.is_running(), self.store.saved().keep_awake);
     }
 
     /// Closes a device's connections (it was removed).
@@ -152,6 +163,9 @@ pub struct DeviceView {
 pub struct RemoteView {
     pub enabled: bool,
     pub show_titles: bool,
+    pub keep_awake: bool,
+    /// The Mac's Tailscale addresses (none when Tailscale isn't on): what lets a phone reach it away from home.
+    pub tailnet: Vec<String>,
     pub devices: Vec<DeviceView>,
     /// The ids of the devices connected now.
     pub connected: Vec<String>,
@@ -182,13 +196,22 @@ fn is_lan_interface(name: &str) -> bool {
     ["en", "eth", "wlan", "wlp", "wlo", "enp", "eno"].iter().any(|p| name.strip_prefix(p).is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit())))
 }
 
-/// The addresses to offer, from (interface, address) pairs: private IPv4 on LAN interfaces, the first interface (`en0`, the
-/// Wi-Fi) first.
-fn lan_hosts(ifaces: impl IntoIterator<Item = (String, std::net::Ipv4Addr)>) -> Vec<String> {
-    let mut found: Vec<(String, std::net::Ipv4Addr)> = ifaces.into_iter().filter(|(name, ip)| is_lan_interface(name) && ip.is_private()).collect();
-    found.sort_by(|a, b| a.0.cmp(&b.0));
+/// Whether an interface is Tailscale's (`utun4` on a Mac, `tailscale0` on Linux).
+fn is_tailnet_interface(name: &str) -> bool {
+    name.starts_with("utun") || name.starts_with("tailscale")
+}
+
+/// Tailscale gives every device an address in 100.64.0.0/10 (the range carriers' shared addresses use too, so the interface
+/// is checked as well: a Wi-Fi hotspot's shared address isn't one the phone could reach from outside).
+pub fn is_tailnet_address(ip: std::net::Ipv4Addr) -> bool {
+    let [a, b, ..] = ip.octets();
+    a == 100 && (64..128).contains(&b)
+}
+
+/// The Mac's Tailscale addresses, from (interface, address) pairs.
+fn tailnet_hosts(ifaces: &[(String, std::net::Ipv4Addr)]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for (_, ip) in found {
+    for (_, ip) in ifaces.iter().filter(|(name, ip)| is_tailnet_interface(name) && is_tailnet_address(*ip)) {
         let ip = ip.to_string();
         if !out.contains(&ip) {
             out.push(ip);
@@ -197,12 +220,42 @@ fn lan_hosts(ifaces: impl IntoIterator<Item = (String, std::net::Ipv4Addr)>) -> 
     out
 }
 
-/// The Mac's addresses on its local networks (IPv4, not loopback): where a phone dials when Bonjour finds nothing.
+/// The addresses to offer, from (interface, address) pairs: private IPv4 on LAN interfaces, the first interface (`en0`, the
+/// Wi-Fi) first, then the Mac's Tailscale addresses, which reach it from anywhere.
+fn offered_hosts(ifaces: &[(String, std::net::Ipv4Addr)]) -> Vec<String> {
+    let mut lan: Vec<&(String, std::net::Ipv4Addr)> = ifaces.iter().filter(|(name, ip)| is_lan_interface(name) && ip.is_private()).collect();
+    lan.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut out: Vec<String> = Vec::new();
+    for ip in lan.into_iter().map(|(_, ip)| ip.to_string()).chain(tailnet_hosts(ifaces)) {
+        if !out.contains(&ip) {
+            out.push(ip);
+        }
+    }
+    out
+}
+
+/// The Mac's IPv4 addresses that aren't loopback, with their interface.
+fn interface_addresses() -> Vec<(String, std::net::Ipv4Addr)> {
+    if_addrs::get_if_addrs()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| !i.is_loopback())
+        .filter_map(|i| match i.ip() {
+            std::net::IpAddr::V4(v4) => Some((i.name, v4)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The Mac's addresses a phone may dial: those on its local networks (where a phone dials when Bonjour finds nothing),
+/// then its Tailscale ones (from anywhere).
 pub fn local_addresses() -> Vec<String> {
-    lan_hosts(if_addrs::get_if_addrs().unwrap_or_default().into_iter().filter(|i| !i.is_loopback()).filter_map(|i| match i.ip() {
-        std::net::IpAddr::V4(v4) => Some((i.name, v4)),
-        _ => None,
-    }))
+    offered_hosts(&interface_addresses())
+}
+
+/// The Mac's Tailscale addresses: empty when Tailscale isn't on.
+pub fn tailnet_addresses() -> Vec<String> {
+    tailnet_hosts(&interface_addresses())
 }
 
 impl Remote {
@@ -212,13 +265,20 @@ impl Remote {
         bus.tap(Arc::new(move |ev: &BusEvent| keeper.record(ev)));
         let mut e = [0u8; 8];
         let _ = getrandom::fill(&mut e);
-        Self { bus, hub, store: Arc::new(store), keys, running: std::sync::Mutex::new(None), epoch: u64::from_le_bytes(e) & ((1 << 53) - 1), lifecycle: tokio::sync::Mutex::new(()), claude: Default::default(), new_chats: Default::default() }
+        Self { bus, hub, store: Arc::new(store), keys, running: std::sync::Mutex::new(None), epoch: u64::from_le_bytes(e) & ((1 << 53) - 1), lifecycle: tokio::sync::Mutex::new(()), claude: Default::default(), new_chats: Default::default(), awake: Default::default() }
+    }
+
+    /// The setting for holding the Mac awake, applied now.
+    pub fn set_keep_awake(&self, on: bool) -> Result<(), String> {
+        let saved = self.store.set_keep_awake(on);
+        self.sync_awake();
+        saved
     }
 
     pub fn view(&self) -> RemoteView {
         let saved = self.store.saved();
         let devices = saved.devices.into_iter().map(|d| DeviceView { id: d.id, name: d.name, paired_at: d.paired_at, last_seen: d.last_seen }).collect();
-        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, devices, warning: None, connected: self.connected(), listening: self.is_running(), pairing: self.store.offer_open(now_ms()) }
+        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, keep_awake: saved.keep_awake, tailnet: tailnet_addresses(), devices, warning: None, connected: self.connected(), listening: self.is_running(), pairing: self.store.offer_open(now_ms()) }
     }
 
     /// The view after a change, with why it couldn't be saved when it couldn't.
@@ -445,15 +505,79 @@ mod tests {
 
     #[test]
     fn a_phone_is_offered_the_wifi_and_cable_addresses_not_the_bridges_and_tunnels() {
-        let offered = lan_hosts([nic("bridge100", "192.168.139.3"), nic("en0", "192.168.68.107"), nic("utun3", "10.8.0.2"), nic("vmnet8", "172.16.5.1"), nic("en5", "10.0.0.9"), nic("docker0", "172.17.0.1"), nic("awdl0", "169.254.1.1")]);
+        let offered = offered_hosts(&[nic("bridge100", "192.168.139.3"), nic("en0", "192.168.68.107"), nic("utun3", "10.8.0.2"), nic("vmnet8", "172.16.5.1"), nic("en5", "10.0.0.9"), nic("docker0", "172.17.0.1"), nic("awdl0", "169.254.1.1")]);
         assert_eq!(offered, vec!["192.168.68.107", "10.0.0.9"]);
     }
 
     #[test]
     fn linux_names_count_and_public_or_repeated_addresses_do_not() {
-        let offered = lan_hosts([nic("wlp3s0", "192.168.1.5"), nic("eth0", "192.168.1.5"), nic("enp2s0", "8.8.8.8")]);
+        let offered = offered_hosts(&[nic("wlp3s0", "192.168.1.5"), nic("eth0", "192.168.1.5"), nic("enp2s0", "8.8.8.8")]);
         assert_eq!(offered, vec!["192.168.1.5"]);
-        assert!(lan_hosts([nic("lo", "127.0.0.1"), nic("endpoint", "192.168.1.9")]).is_empty());
+        assert!(offered_hosts(&[nic("lo", "127.0.0.1"), nic("endpoint", "192.168.1.9")]).is_empty());
+    }
+
+    #[test]
+    fn the_tailscale_address_is_offered_after_the_local_ones_so_a_phone_away_from_home_can_dial_it() {
+        let offered = offered_hosts(&[nic("utun4", "100.101.102.103"), nic("en0", "192.168.68.107"), nic("utun3", "10.8.0.2")]);
+        assert_eq!(offered, vec!["192.168.68.107", "100.101.102.103"], "local first, the other VPN's address left out");
+        assert_eq!(tailnet_hosts(&[nic("utun4", "100.101.102.103"), nic("tailscale0", "100.64.0.9")]), vec!["100.101.102.103", "100.64.0.9"]);
+        assert_eq!(offered_hosts(&[nic("utun4", "100.101.102.103"), nic("utun5", "100.101.102.103")]), vec!["100.101.102.103"], "once");
+    }
+
+    #[test]
+    fn only_tailscales_range_on_a_tunnel_counts_not_a_hotspots_shared_address_or_a_public_one() {
+        assert!(is_tailnet_address("100.64.0.1".parse().unwrap()) && is_tailnet_address("100.127.255.254".parse().unwrap()));
+        assert!(!is_tailnet_address("100.63.255.255".parse().unwrap()) && !is_tailnet_address("100.128.0.1".parse().unwrap()) && !is_tailnet_address("10.0.0.1".parse().unwrap()));
+        // A carrier's shared address on the Wi-Fi isn't the tailnet's, even in the same range.
+        assert!(tailnet_hosts(&[nic("en0", "100.72.1.1")]).is_empty());
+        assert!(tailnet_hosts(&[nic("utun2", "10.8.0.2"), nic("utun3", "8.8.8.8")]).is_empty());
+    }
+
+    /// A `Remote` whose keep-awake hold is a fake that counts how often one was started, not a `caffeinate`.
+    fn remote_with_fake_hold() -> (Remote, Arc<std::sync::atomic::AtomicUsize>) {
+        use crate::awake::{Awake, Hold};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Fake;
+        impl Hold for Fake {
+            fn alive(&mut self) -> bool {
+                true
+            }
+        }
+        let started = Arc::new(AtomicUsize::new(0));
+        let counted = started.clone();
+        let awake = Awake::new(Box::new(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+            Some(Box::new(Fake) as Box<dyn Hold>)
+        }));
+        (Remote { awake, ..Remote::default() }, started)
+    }
+
+    #[tokio::test]
+    async fn keeping_the_mac_awake_holds_exactly_while_remote_control_is_on_and_the_setting_is() {
+        use std::sync::atomic::Ordering;
+        let (remote, started) = remote_with_fake_hold();
+        remote.set_keep_awake(true).unwrap();
+        assert!(!remote.awake.holding(), "nothing is listening yet, so there's nothing to stay awake for");
+        assert_eq!(started.load(Ordering::SeqCst), 0);
+        let (run, ..) = running(&remote);
+        remote.set_running(run);
+        assert!(remote.awake.holding(), "listening for phones with the setting on");
+        remote.set_keep_awake(false).unwrap();
+        assert!(!remote.awake.holding(), "the setting turned off lets the Mac sleep");
+        remote.set_keep_awake(true).unwrap();
+        assert!(remote.awake.holding());
+        remote.stop();
+        assert!(!remote.awake.holding(), "Remote control turned off lets the Mac sleep");
+        assert_eq!(started.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn without_the_setting_listening_for_phones_doesnt_hold_the_mac_awake() {
+        let (remote, started) = remote_with_fake_hold();
+        let (run, ..) = running(&remote);
+        remote.set_running(run);
+        assert!(!remote.awake.holding(), "the Mac sleeps on its usual schedule unless asked to stay awake");
+        assert_eq!(started.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     fn user(by: Option<&str>) -> UiEvent {

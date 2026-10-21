@@ -64,8 +64,19 @@ export interface ConnectionDeps {
 
 /** The pauses between tries after the link drops. */
 export const BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
-const OPEN_WAIT = 3000;
+/** How long a local address gets to answer: on its own network it takes milliseconds, and from anywhere else it never does. */
+const OPEN_WAIT = 1500;
+/** A Tailscale address gets longer: from cold its tunnel may take a few seconds to find a way through to the Mac. */
+const TAILNET_WAIT = 6000;
 const FIND_WAIT = 1500;
+
+/** Tailscale's addresses (100.64.0.0/10): the ones that reach the Mac from anywhere, not only on its own network. */
+export function isTailnetHost(host: string): boolean {
+  const m = /^100\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(host);
+  return m !== null && Number(m[1]) >= 64 && Number(m[1]) <= 127;
+}
+
+const openWait = (host: string) => (isTailnetHost(host) ? TAILNET_WAIT : OPEN_WAIT);
 
 /** Nothing answered at an address (or it answered too slowly). */
 export class Unreachable extends Error {}
@@ -82,6 +93,8 @@ export class Connection {
   /** The run (see `gen`) the try-again loop belongs to, while one is going. */
   private loopGen: number | null = null;
   private tries = 0;
+  /** The address the last connection came up on (see `candidates`). */
+  private lastHost: string | null = null;
   private wakeUp: (() => void) | null = null;
   private readonly wait: (ms: number) => Promise<void>;
 
@@ -97,7 +110,7 @@ export class Connection {
   private async open(host: string, port: number, device: Keypair, macKey: Uint8Array, secret?: Uint8Array) {
     let link: Link;
     try {
-      link = await this.d.transport.open(host, port, OPEN_WAIT);
+      link = await this.d.transport.open(host, port, openWait(host));
     } catch (e) {
       throw new Unreachable((e as Error).message);
     }
@@ -128,7 +141,7 @@ export class Connection {
   private async pairWith(offer: PairingOffer, my: number): Promise<void> {
     const key = (this.d.newKey ?? generateKeypair)();
     const candidates = await this.candidates(toBase64Url(offer.macKey), offer.hosts, offer.port);
-    if (candidates.length === 0) throw new Error("Your Mac isn't on this Wi-Fi.");
+    if (candidates.length === 0) throw new Error("The code has no address for your Mac. Show a new one on your Mac, and check that Remote control is on.");
     // No "connecting" state here: the app swaps its screen for a connecting one, and the pairing screen (which says
     // "Pairing…" itself, and holds the error when this fails) would be unmounted underneath the attempt.
     let lastError: Error = new Error("Couldn't reach your Mac.");
@@ -140,7 +153,9 @@ export class Connection {
           session.close();
           throw new Error("Pairing was cancelled.");
         }
-        await this.d.store.save({ macKey: toBase64Url(offer.macKey), deviceKey: toBase64Url(key.privateKey), hosts: offer.hosts, port: offer.port, macName: welcome.mac_name || offer.macName });
+        // The Mac's own list of where it can be reached now, when it gives one (an older Mac doesn't), over the code's.
+        const hosts = welcome.hosts?.length ? welcome.hosts : offer.hosts;
+        await this.d.store.save({ macKey: toBase64Url(offer.macKey), deviceKey: toBase64Url(key.privateKey), hosts, port: offer.port, macName: welcome.mac_name || offer.macName });
         this.up({ session, host });
         return;
       } catch (e) {
@@ -194,6 +209,7 @@ export class Connection {
 
   private up({ session, host }: Opened) {
     this.hangUp();
+    this.lastHost = host;
     this.session = session;
     this.tries = 0;
     this.d.onState({ kind: "connected", welcome: session.welcome, host });
@@ -210,7 +226,11 @@ export class Connection {
     const found = await (this.d.discovery ?? noDiscovery).find(FIND_WAIT).catch(() => []);
     const mine = found.filter((f) => f.id === macId(macKey)).map((f): [string, number] => [f.host, f.port]);
     const all = [...mine, ...hosts.map((h): [string, number] => [h, port])];
-    return all.filter(([h, p], i) => all.findIndex(([h2, p2]) => h2 === h && p2 === p) === i);
+    const unique = all.filter(([h, p], i) => all.findIndex(([h2, p2]) => h2 === h && p2 === p) === i);
+    // The address that worked last time goes first: away from home that is Tailscale's, and the local ones that can't
+    // answer there don't each take their wait before it.
+    const last = unique.findIndex(([h]) => h === this.lastHost);
+    return last > 0 ? [unique[last], ...unique.slice(0, last), ...unique.slice(last + 1)] : unique;
   }
 
   /** Waits `ms`, or less when the app comes back to the foreground. */
@@ -228,7 +248,12 @@ export class Connection {
           if (!(tried instanceof Error)) tried.session.close();
           return;
         }
-        if (!(tried instanceof Error)) return this.up(tried);
+        if (!(tried instanceof Error)) {
+          this.up(tried);
+          // After `up`, which is where a run that was stopped or forgotten meanwhile has been ruled out above.
+          void this.keepHosts(paired, tried.session.welcome.hosts);
+          return;
+        }
         if (tried instanceof ProtocolMismatch) return this.d.onState({ kind: "offline", reason: tried.message, retryInMs: null });
         const wait = BACKOFF_MS[Math.min(this.tries, BACKOFF_MS.length - 1)];
         this.tries += 1;
@@ -244,12 +269,28 @@ export class Connection {
     }
   }
 
+  /**
+   * Keeps the addresses the Mac says it has now in place of the ones saved, so a Mac whose address changed, or that joined
+   * Tailscale after this phone paired, is still found. A Mac that gives none (an older one) leaves them be, and a save that
+   * fails costs only the update: the connection is already open.
+   */
+  private async keepHosts(paired: PairedMac, hosts: string[] | undefined) {
+    if (!hosts?.length || (hosts.length === paired.hosts.length && hosts.every((h, i) => h === paired.hosts[i]))) return;
+    try {
+      // Only if this is still the Mac that is kept: one forgotten or paired again meanwhile must not come back.
+      const kept = await this.d.store.load();
+      if (kept?.macKey === paired.macKey) await this.d.store.save({ ...kept, hosts });
+    } catch {
+      // The next connection will hear them again.
+    }
+  }
+
   /** One try at every place the Mac may be: a session once in, else why not. */
   private async attempt(paired: PairedMac): Promise<Opened | Error> {
     const candidates = await this.candidates(paired.macKey, paired.hosts, paired.port);
-    if (candidates.length === 0) return new Error(`Can't find ${paired.macName}. Check that it's awake and on the same Wi-Fi.`);
+    if (candidates.length === 0) return new Error(`Can't find ${paired.macName}. Check that it's awake, and that Tailscale is on if you're away from home.`);
     // Nothing answered at all: said in words, not as a transport's error.
-    let last: Error = new Error(`Can't reach ${paired.macName}. Check that it's awake, on the same Wi-Fi as this phone, and that Remote control is on in Lantern.`);
+    let last: Error = new Error(`Can't reach ${paired.macName}. It may be asleep or offline. Away from home, check that Tailscale is on here and on the Mac, and that Remote control is on in Lantern.`);
     for (const [host, port] of candidates) {
       try {
         const { link, channel, welcome } = await this.open(host, port, keypairFrom(fromBase64Url(paired.deviceKey)), fromBase64Url(paired.macKey));

@@ -1,7 +1,7 @@
 import { connectCase, FakeMac, impostorCase, pairCase, phoneKeys, routeTransport } from "../test/fakeMac";
 import { toBase64Url, type PairingOffer } from "../pairing";
 import { MemoryStore } from "../test/memoryStore";
-import { BACKOFF_MS, Connection, macId, type ConnectionState, type PairedMac } from "./connection";
+import { BACKOFF_MS, Connection, isTailnetHost, macId, type ConnectionState, type PairedMac } from "./connection";
 import { STEP_WAIT, type Pushed } from "./session";
 import { queueLink, type Transport } from "./transport";
 
@@ -75,9 +75,36 @@ describe("pairing", () => {
     expect(r.store.mac).toBeNull();
   });
 
-  it("with nowhere to dial, says the Mac isn't on this Wi-Fi", async () => {
+  it("with nowhere to dial, says the code has no address, not that the Mac is on another Wi-Fi", async () => {
     const r = rig();
-    await expect(r.conn.pair(offer(r.k, []))).rejects.toThrow("isn't on this Wi-Fi");
+    await expect(r.conn.pair(offer(r.k, []))).rejects.toThrow("no address for your Mac");
+  });
+
+  it("keeps the addresses the Mac says it has now, Tailscale's too, in place of the code's", async () => {
+    const r = rig(pairCase, { hosts: ["192.168.1.20", "100.101.102.103"] });
+    await r.conn.pair(offer(r.k, ["192.168.1.20"]));
+    expect(r.store.mac?.hosts).toEqual(["192.168.1.20", "100.101.102.103"]);
+  });
+
+  it("keeps the code's addresses when an older Mac gives none", async () => {
+    const r = rig();
+    await r.conn.pair(offer(r.k, ["192.168.1.20", "10.0.0.5"]));
+    expect(r.store.mac?.hosts).toEqual(["192.168.1.20", "10.0.0.5"]);
+  });
+
+  it("gives a Tailscale address longer to answer than a local one, which on any other network never will", async () => {
+    const r = rig(pairCase, { reachable: ["100.101.102.103"] });
+    await r.conn.pair(offer(r.k, ["192.168.1.20", "100.101.102.103"]));
+    expect(r.mac.opened).toEqual(["192.168.1.20:47123", "100.101.102.103:47123"]);
+    expect(r.mac.openWaits[0]).toBeLessThan(r.mac.openWaits[1]!);
+    expect(r.mac.openWaits).toEqual([1500, 6000]);
+  });
+});
+
+describe("Tailscale addresses", () => {
+  it("are the ones in 100.64.0.0/10 and no others", () => {
+    for (const h of ["100.64.0.1", "100.101.102.103", "100.127.255.254"]) expect(isTailnetHost(h)).toBe(true);
+    for (const h of ["100.63.255.255", "100.128.0.1", "10.100.64.1", "192.168.1.20", "mac.local", "100.64.0", "100.100.100.100.1"]) expect(isTailnetHost(h)).toBe(false);
   });
 });
 
@@ -102,6 +129,43 @@ describe("staying connected", () => {
     for (let i = 0; i < 10; i++) await flush();
     expect(r.states.at(-1)).toMatchObject({ kind: "connected" });
     expect(sessions).toHaveLength(2);
+  });
+
+  it("a phone paired before the Mac was on Tailscale picks the address up when it connects", async () => {
+    const r = rig(connectCase, { hosts: ["192.168.1.20", "100.101.102.103"] });
+    r.store.mac = paired(r.k);
+    await r.conn.start();
+    for (let i = 0; i < 8; i++) await flush();
+    expect(r.store.mac?.hosts).toEqual(["192.168.1.20", "100.101.102.103"]);
+    expect(r.store.mac?.macName).toBe("Test Mac");
+  });
+
+  it("an older Mac that gives no addresses leaves the saved ones alone", async () => {
+    const r = rig(connectCase);
+    r.store.mac = paired(r.k);
+    await r.conn.start();
+    for (let i = 0; i < 8; i++) await flush();
+    expect(r.store.mac?.hosts).toEqual(["192.168.1.20"]);
+  });
+
+  it("a Mac forgotten while it was connecting isn't saved again with its new addresses", async () => {
+    const r = rig(connectCase, { hosts: ["192.168.1.20", "100.101.102.103"] });
+    r.store.mac = paired(r.k);
+    await r.conn.start();
+    await r.conn.forget();
+    for (let i = 0; i < 8; i++) await flush();
+    expect(r.store.mac).toBeNull();
+  });
+
+  it("after a drop it tries first the address that worked, so away from home it doesn't wait on the local ones", async () => {
+    const r = rig(connectCase, { reachable: ["100.101.102.103"], hosts: ["192.168.1.20", "100.101.102.103"] });
+    r.store.mac = { ...paired(r.k), hosts: ["192.168.1.20", "100.101.102.103"] };
+    await r.conn.start();
+    for (let i = 0; i < 8; i++) await flush();
+    expect(r.mac.opened).toEqual(["192.168.1.20:47123", "100.101.102.103:47123"]);
+    r.mac.dropAll();
+    for (let i = 0; i < 12; i++) await flush();
+    expect(r.mac.opened.slice(2)).toEqual(["100.101.102.103:47123"]);
   });
 
   it("waits longer each time the Mac can't be reached, up to 30 seconds", async () => {

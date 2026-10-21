@@ -5,4 +5,9 @@ import type { RemoteEvent } from "./RemoteEvent";
 /**
  * Lantern's message.
  */
-export type ServerMessage = { "type": "welcome", protocol: number, app_version: string, mac_name: string, epoch: number, } | { "type": "response", id: number, ok: unknown, error: string | null, } | { "type": "event", slot: string, seq: number, event: RemoteEvent, } | { "type": "reset", slot: string, seq: number, page: number, done: boolean, hidden: number, events: Array<RemoteEvent>, } | { "type": "chats", chats: Array<RemoteChat>, };
+export type ServerMessage = { "type": "welcome", protocol: number, app_version: string, mac_name: string, epoch: number, 
+/**
+ * The addresses the Mac can be reached at now, local ones first then Tailscale's: the phone keeps them in place
+ * of what the QR code said, so a Mac whose address changed (or that joined Tailscale) is still found.
+ */
+hosts: Array<string>, } | { "type": "response", id: number, ok: unknown, error: string | null, } | { "type": "event", slot: string, seq: number, event: RemoteEvent, } | { "type": "reset", slot: string, seq: number, page: number, done: boolean, hidden: number, events: Array<RemoteEvent>, } | { "type": "chats", chats: Array<RemoteChat>, };

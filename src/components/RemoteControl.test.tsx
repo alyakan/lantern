@@ -22,6 +22,11 @@ vi.mock("../api", () => ({
       view = { ...view, show_titles: on };
       return Promise.resolve(view);
     },
+    remoteSetKeepAwake: (on: boolean) => {
+      calls.push({ cmd: "awake", args: on });
+      view = { ...view, keep_awake: on };
+      return Promise.resolve(view);
+    },
     remotePair: () => {
       if (!view.enabled) return Promise.reject("Turn on Remote control first.");
       view = { ...view, pairing: true };
@@ -43,7 +48,7 @@ const { RemoteControl } = await import("./RemoteControl");
 
 beforeEach(() => {
   calls.length = 0;
-  view = { enabled: false, show_titles: false, devices: [], connected: [], listening: false, pairing: false };
+  view = { enabled: false, show_titles: false, keep_awake: false, tailnet: [], devices: [], connected: [], listening: false, pairing: false };
 });
 
 describe("Settings › Remote control", () => {
@@ -146,6 +151,29 @@ describe("Settings › Remote control", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove Pixel" })));
     expect(screen.getByRole("alert").textContent).toContain("won't last past a restart");
     expect(screen.getByText("No phones yet.")).toBeTruthy();
+  });
+
+  it("says the Mac's Tailscale address when Tailscale is on, and how to get it when it isn't", async () => {
+    view = { ...view, enabled: true, listening: true, tailnet: ["100.101.102.103"] };
+    const { unmount } = render(<RemoteControl now={() => 0} />);
+    expect((await screen.findByText(/Tailscale is on/)).textContent).toContain("100.101.102.103");
+    unmount();
+    view = { ...view, tailnet: [] };
+    render(<RemoteControl now={() => 0} />);
+    expect(await screen.findByText(/Tailscale isn't on this Mac/)).toBeTruthy();
+  });
+
+  it("offers keeping the Mac awake only while Remote control is on, and it starts off", async () => {
+    const { unmount } = render(<RemoteControl now={() => 0} />);
+    await screen.findByRole("checkbox", { name: "Let paired phones control Lantern" });
+    expect(screen.queryByRole("checkbox", { name: "Keep this Mac awake while Remote control is on" })).toBeNull();
+    unmount();
+    view = { ...view, enabled: true, listening: true };
+    render(<RemoteControl now={() => 0} />);
+    const awake = await screen.findByRole("checkbox", { name: "Keep this Mac awake while Remote control is on" });
+    expect(awake).not.toBeChecked();
+    fireEvent.click(awake);
+    await waitFor(() => expect(calls).toContainEqual({ cmd: "awake", args: true }));
   });
 
   it("chat titles in notifications are off until turned on", async () => {
