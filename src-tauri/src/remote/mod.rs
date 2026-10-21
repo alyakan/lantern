@@ -42,6 +42,35 @@ pub struct Remote {
     pub lifecycle: tokio::sync::Mutex<()>,
     /// The gateway, listener and Bonjour while Remote control is on.
     running: std::sync::Mutex<Option<Running>>,
+    /// Chats a phone asked the window to start, waiting for the window to say which slot it made (see `expect_new_chat`).
+    new_chats: std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<Result<String, String>>>>,
+}
+
+/// What the window is asked when a phone starts a chat. The gateway has checked the folder and the text; the window
+/// checks them again, and starts the chat on `permissions` (always "ask") without switching what it shows.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct NewChatRequest {
+    /// Single-use: the window answers with it (`Remote::new_chat_done`).
+    pub id: String,
+    pub folder: String,
+    pub text: String,
+    pub permissions: &'static str,
+}
+
+/// The projects a phone may start a chat in, as (folder, name): the folders the user has used Claude in lately and those
+/// with a chat open now, each once, the most recent first, at most `LIMIT`.
+pub fn known_projects(recent: &[String], open: &[String]) -> Vec<(String, String)> {
+    const LIMIT: usize = 12;
+    let mut seen: Vec<&String> = Vec::new();
+    for f in recent.iter().chain(open) {
+        if f.starts_with('/') && !f.contains('\0') && !seen.contains(&f) {
+            seen.push(f);
+        }
+    }
+    seen.into_iter()
+        .take(LIMIT)
+        .map(|f| (f.clone(), std::path::Path::new(f).file_name().map_or_else(|| f.clone(), |n| n.to_string_lossy().into_owned())))
+        .collect()
 }
 
 impl Default for Remote {
@@ -168,7 +197,7 @@ impl Remote {
         bus.tap(Arc::new(move |ev: &BusEvent| keeper.record(ev)));
         let mut e = [0u8; 8];
         let _ = getrandom::fill(&mut e);
-        Self { bus, hub, store: Arc::new(store), keys, running: std::sync::Mutex::new(None), epoch: u64::from_le_bytes(e) & ((1 << 53) - 1), lifecycle: tokio::sync::Mutex::new(()) }
+        Self { bus, hub, store: Arc::new(store), keys, running: std::sync::Mutex::new(None), epoch: u64::from_le_bytes(e) & ((1 << 53) - 1), lifecycle: tokio::sync::Mutex::new(()), new_chats: Default::default() }
     }
 
     pub fn view(&self) -> RemoteView {
@@ -223,6 +252,27 @@ pub struct WindowChat {
 }
 
 impl Remote {
+    /// A phone is starting a chat: an id for the window to answer with, and what that answer will be. Used once.
+    pub fn expect_new_chat(&self) -> (String, tokio::sync::oneshot::Receiver<Result<String, String>>) {
+        let mut raw = [0u8; 12];
+        let _ = getrandom::fill(&mut raw);
+        let id: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.new_chats.lock().unwrap().insert(id.clone(), tx);
+        (id, rx)
+    }
+
+    /// The window's answer to a started chat: the slot it made, or why not. False for an id nobody waits for (unknown,
+    /// already answered, or given up on), which does nothing.
+    pub fn new_chat_done(&self, id: &str, result: Result<String, String>) -> bool {
+        self.new_chats.lock().unwrap().remove(id).is_some_and(|tx| tx.send(result).is_ok())
+    }
+
+    /// Stops waiting for the window's answer (it took too long).
+    pub fn forget_new_chat(&self, id: &str) {
+        self.new_chats.lock().unwrap().remove(id);
+    }
+
     /// Takes in what the window knows of its open chats: the titles it shows, and which are asleep.
     pub fn window_chats(&self, chats: &[WindowChat]) {
         for c in chats {
@@ -293,6 +343,39 @@ mod tests {
         assert!(!second_listener.is_finished() && !second_notifier.is_finished(), "the new run's tasks were stopped");
         remote.stop();
         assert!(stopped(&second_notifier).await);
+    }
+
+    #[test]
+    fn the_projects_to_start_a_chat_in_are_the_recent_ones_and_those_open_each_once_and_named_by_folder() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let out = known_projects(&s(&["/Users/me/app", "/Users/me/site"]), &s(&["/Users/me/site", "/Users/me/lib", "relative/dir", "/bad\0dir"]));
+        assert_eq!(out, vec![("/Users/me/app".to_string(), "app".to_string()), ("/Users/me/site".into(), "site".into()), ("/Users/me/lib".into(), "lib".into())]);
+        let many: Vec<String> = (0..30).map(|i| format!("/p/{i}")).collect();
+        assert_eq!(known_projects(&many, &[]).len(), 12);
+        assert!(known_projects(&[], &[]).is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_windows_answer_to_a_started_chat_reaches_the_one_waiting_once() {
+        let remote = Remote::default();
+        let (id, rx) = remote.expect_new_chat();
+        assert_eq!(id.len(), 24);
+        assert!(remote.new_chat_done(&id, Ok("s7".into())));
+        assert_eq!(rx.await.unwrap(), Ok("s7".to_string()));
+        assert!(!remote.new_chat_done(&id, Ok("s8".into())), "an id is used once");
+        assert!(!remote.new_chat_done("nobody", Ok("s9".into())), "an id nobody waits for does nothing");
+        let (a, _) = remote.expect_new_chat();
+        let (b, _) = remote.expect_new_chat();
+        assert_ne!(a, b);
+    }
+
+    #[tokio::test]
+    async fn an_answer_that_comes_after_giving_up_does_nothing() {
+        let remote = Remote::default();
+        let (id, rx) = remote.expect_new_chat();
+        remote.forget_new_chat(&id);
+        assert!(!remote.new_chat_done(&id, Ok("s7".into())));
+        assert!(rx.await.is_err(), "the waiter hears nothing");
     }
 
     fn nic(name: &str, ip: &str) -> (String, std::net::Ipv4Addr) {

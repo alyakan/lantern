@@ -5,6 +5,8 @@
  */
 import type { Request } from "../protocol/generated/Request";
 import type { EarlierPage } from "../protocol/generated/EarlierPage";
+import type { RemoteProject } from "../protocol/generated/RemoteProject";
+import type { StartedChat } from "../protocol/generated/StartedChat";
 import type { Waiting } from "../protocol/generated/Waiting";
 import type { Pushed, Session } from "../net/session";
 import { initialState, reducer, type Action, type State } from "./reducer";
@@ -148,6 +150,17 @@ export class Sync {
 
   wake(slot: string) {
     return this.ask({ op: "wake", slot });
+  }
+
+  /** The projects a chat may be started in from this phone (those the user already works in on the Mac). */
+  projects() {
+    return this.ask<RemoteProject[]>({ op: "projects" });
+  }
+
+  /** Starts a chat in a project with a first message: the new chat's slot, once it is open on the Mac (on Ask). */
+  async newChat(project: string, text: string): Promise<string> {
+    const started = await this.ask<StartedChat>({ op: "new_chat", project, text });
+    return started.slot;
   }
 
   diff(slot: string, path: string) {

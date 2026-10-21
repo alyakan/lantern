@@ -30,6 +30,24 @@ pub const HANDSHAKES_AT_ONCE: usize = 4;
 pub const TEXT_MAX: usize = 100_000;
 /// About how big a page of a Reset is, in bytes of JSON.
 const PAGE_BYTES: usize = 512 << 10;
+/// The longest first message a phone may start a chat with (the menu bar panel's limit, in characters).
+pub const NEW_CHAT_TEXT_MAX: usize = 20_000;
+/// How many chats one phone may start, in how long: a stuck or hostile phone can't fill the Mac with them.
+pub const NEW_CHATS_PER_WINDOW: usize = 5;
+pub const NEW_CHAT_WINDOW_MS: u64 = 10 * 60 * 1000;
+
+/// Whether a phone's request to start a chat is well formed (whether the project is one is for the gateway to decide).
+fn check_new_chat(project: &str, text: &str) -> Result<(), String> {
+    if !project.starts_with('/') || project.len() > 4096 || project.contains('\0') {
+        Err("That isn't a project folder.".into())
+    } else if text.trim().is_empty() {
+        Err("Write what the chat should start with.".into())
+    } else if text.chars().count() > NEW_CHAT_TEXT_MAX {
+        Err("That message is too long.".into())
+    } else {
+        Ok(())
+    }
+}
 
 /// What the gateway asks of the app. `by` is who asked: the phone's device id (with its message id for a send).
 pub trait Host: Send + Sync + 'static {
@@ -38,6 +56,11 @@ pub trait Host: Send + Sync + 'static {
     fn pending(&self, slot: &str) -> Vec<Pending>;
     fn answer(&self, slot: &str, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> Result<(), String>;
     fn wake(&self, slot: &str) -> Result<(), String>;
+    /// The projects a chat may be started in from a phone, as (folder, name): those the user already works in.
+    fn projects(&self) -> BoxFut<Vec<(String, String)>>;
+    /// Starts a chat in `folder` (the gateway has checked it is one of `projects`) with `text` as its first message, on
+    /// Ask, without changing what the window shows; the new chat's slot once it is open.
+    fn new_chat(&self, folder: String, text: String, by: String) -> BoxFut<Result<String, String>>;
     /// A file the chat changed, as a unified diff from the chat's start; any other file is refused.
     fn diff(&self, slot: String, path: String) -> BoxFut<Result<String, String>>;
     /// A page of the chat's transcript: its last turns (`before` None), or the turns before the `before` it hasn't
@@ -75,6 +98,8 @@ pub struct Gateway {
     /// How many phones follow each chat now (a chat nobody follows is one a push may be about).
     watchers: Mutex<HashMap<String, u32>>,
     on_open: Mutex<Option<OnOpen>>,
+    /// When each phone started its latest chats (ms), for the limit on how fast it may.
+    started: Mutex<HashMap<String, Vec<u64>>>,
 }
 
 /// Why a connection ended before it was in (for tests and logs; the phone just sees it close).
@@ -105,7 +130,24 @@ impl Gateway {
             shut: Default::default(),
             watchers: Mutex::default(),
             on_open: Mutex::new(None),
+            started: Mutex::default(),
         })
+    }
+
+    /// Counts a chat started by `device`, or refuses it: too many lately.
+    fn allow_new_chat(&self, device: &str) -> Result<(), String> {
+        self.allow_new_chat_at(device, (self.now)())
+    }
+
+    fn allow_new_chat_at(&self, device: &str, now: u64) -> Result<(), String> {
+        let mut started = self.started.lock().unwrap();
+        let recent = started.entry(device.to_string()).or_default();
+        recent.retain(|t| now.saturating_sub(*t) < NEW_CHAT_WINDOW_MS);
+        if recent.len() >= NEW_CHATS_PER_WINDOW {
+            return Err("This phone has started a lot of chats just now. Try again in a few minutes.".into());
+        }
+        recent.push(now);
+        Ok(())
     }
 
     /// Whether a phone follows the chat right now.
@@ -476,6 +518,16 @@ impl Session<'_> {
                 self.chat_known(&slot)?;
                 host.wake(&slot).map(|()| serde_json::Value::Null)
             }
+            Request::Projects => Ok(json(&host.projects().await.into_iter().map(|(id, name)| protocol::RemoteProject { id, name }).collect::<Vec<_>>())),
+            Request::NewChat { project, text } => {
+                check_new_chat(&project, &text)?;
+                // The phone names a folder; whether it is one of the user's projects is decided here, by exact match.
+                if !host.projects().await.iter().any(|(folder, _)| *folder == project) {
+                    return Err("That isn't one of your projects.".into());
+                }
+                self.gw.allow_new_chat(&self.device)?;
+                host.new_chat(project, text, self.device.clone()).await.map(|slot| json(&protocol::StartedChat { slot }))
+            }
             Request::Diff { slot, path } => {
                 self.chat_known(&slot)?;
                 host.diff(slot, path).await.map(serde_json::Value::String)
@@ -562,6 +614,9 @@ pub(crate) mod tests {
         pub pending: Mutex<Vec<Pending>>,
         pub woken: Mutex<Vec<String>>,
         pub history: Mutex<Vec<UiEvent>>,
+        /// The projects it offers for starting a chat in, and the chats it was asked to start (folder, text, by).
+        pub projects: Mutex<Vec<(String, String)>>,
+        pub started: Mutex<Vec<(String, String, String)>>,
     }
 
     impl Host for FakeHost {
@@ -583,6 +638,14 @@ pub(crate) mod tests {
         fn wake(&self, slot: &str) -> Result<(), String> {
             self.woken.lock().unwrap().push(slot.into());
             Ok(())
+        }
+        fn projects(&self) -> BoxFut<Vec<(String, String)>> {
+            let p = self.projects.lock().unwrap().clone();
+            Box::pin(async move { p })
+        }
+        fn new_chat(&self, folder: String, text: String, by: String) -> BoxFut<Result<String, String>> {
+            self.started.lock().unwrap().push((folder, text, by));
+            Box::pin(async { Ok("s9".to_string()) })
         }
         fn diff(&self, _: String, path: String) -> BoxFut<Result<String, String>> {
             Box::pin(async move { if path == "/p/a.rs" { Ok("--- a\n+++ b\n".into()) } else { Err("not changed".into()) } })
@@ -874,6 +937,70 @@ pub(crate) mod tests {
         assert_eq!(p.ask(Request::Diff { slot: "z".into(), path: "/p/a.rs".into() }).await.0, Some(json!("--- a\n+++ b\n")));
         assert!(p.ask(Request::Diff { slot: "z".into(), path: "/etc/passwd".into() }).await.1.is_some());
         assert!(p.ask(Request::Wake { slot: "unknown".into() }).await.1.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_phone_lists_the_projects_and_starts_a_chat_in_one_of_them() {
+        let r = rig();
+        *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into()), ("/Users/me/site".into(), "site".into())];
+        let (_, mut p) = paired(&r).await;
+        let device = r.store.saved().devices[0].id.clone();
+        assert_eq!(p.ask(Request::Projects).await.0, Some(json!([{"id": "/Users/me/app", "name": "app"}, {"id": "/Users/me/site", "name": "site"}])));
+        let (ok, err, _) = p.ask(Request::NewChat { project: "/Users/me/app".into(), text: "Fix the login bug".into() }).await;
+        assert_eq!((ok, err), (Some(json!({"slot": "s9"})), None));
+        let started = r.host.started.lock().unwrap();
+        assert_eq!(started.len(), 1);
+        assert_eq!((started[0].0.as_str(), started[0].1.as_str()), ("/Users/me/app", "Fix the login bug"));
+        assert_eq!(started[0].2, device, "the chat records which phone started it");
+    }
+
+    #[tokio::test]
+    async fn a_chat_is_not_started_in_a_folder_the_user_doesnt_work_in_or_from_nothing_or_from_too_much() {
+        let r = rig();
+        *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
+        let (_, mut p) = paired(&r).await;
+        let ask = |project: &str, text: &str| Request::NewChat { project: project.into(), text: text.into() };
+        for (project, text, why) in [
+            ("/etc", "hi", "isn't one of your projects"),
+            ("/Users/me/app/../../..", "hi", "isn't one of your projects"),
+            ("/Users/me/app/", "hi", "isn't one of your projects"),
+            ("app", "hi", "isn't a project folder"),
+            ("/Users/me/a\0pp", "hi", "isn't a project folder"),
+            ("/Users/me/app", "  \n ", "Write what the chat should start with"),
+        ] {
+            let (ok, err, _) = p.ask(ask(project, text)).await;
+            assert!(ok.is_none() && err.as_deref().is_some_and(|e| e.contains(why)), "{project:?} {text:?}: {err:?}");
+        }
+        let (ok, err, _) = p.ask(ask("/Users/me/app", &"x".repeat(NEW_CHAT_TEXT_MAX + 1))).await;
+        assert!(ok.is_none() && err.is_some_and(|e| e.contains("too long")));
+        assert!(r.host.started.lock().unwrap().is_empty(), "nothing reached the app");
+        // The longest allowed is allowed, counted in characters and not bytes.
+        assert!(p.ask(ask("/Users/me/app", &"é".repeat(NEW_CHAT_TEXT_MAX))).await.1.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_phone_may_only_start_so_many_chats_in_a_while() {
+        let r = rig();
+        *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
+        let (_, mut p) = paired(&r).await;
+        for i in 0..NEW_CHATS_PER_WINDOW {
+            assert!(p.ask(Request::NewChat { project: "/Users/me/app".into(), text: format!("chat {i}") }).await.1.is_none());
+        }
+        let (ok, err, _) = p.ask(Request::NewChat { project: "/Users/me/app".into(), text: "one more".into() }).await;
+        assert!(ok.is_none() && err.is_some_and(|e| e.contains("a lot of chats")));
+        assert_eq!(r.host.started.lock().unwrap().len(), NEW_CHATS_PER_WINDOW);
+    }
+
+    #[tokio::test]
+    async fn the_limit_on_new_chats_is_per_phone_and_lifts_with_time() {
+        let r = rig();
+        let at = |t: u64| NEW_CHAT_WINDOW_MS * 10 + t;
+        for i in 0..NEW_CHATS_PER_WINDOW as u64 {
+            assert!(r.gw.allow_new_chat_at("phone-a", at(i)).is_ok());
+        }
+        assert!(r.gw.allow_new_chat_at("phone-a", at(10)).is_err());
+        assert!(r.gw.allow_new_chat_at("phone-b", at(10)).is_ok(), "another phone has its own count");
+        assert!(r.gw.allow_new_chat_at("phone-a", at(NEW_CHAT_WINDOW_MS + 5)).is_ok(), "the earliest ones have aged out");
     }
 
     #[tokio::test]

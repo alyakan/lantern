@@ -338,6 +338,24 @@ impl remote::gateway::Host for RemoteHost {
         request_wake(&self.app, &self.app.state::<AppState>(), slot)
     }
 
+    fn projects(&self) -> remote::gateway::BoxFut<Vec<(String, String)>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            // The folders used in Claude lately, and those with a chat open: nothing else is a project to a phone.
+            let open: Vec<String> = app.state::<AppState>().remote.hub.chats().into_iter().filter_map(|c| c.folder).collect();
+            let recent = match projects_root() {
+                Ok(root) => tauri::async_runtime::spawn_blocking(move || history::recent_folders(&root, 8)).await.unwrap_or_default(),
+                Err(_) => Vec::new(),
+            };
+            remote::known_projects(&recent.into_iter().map(|r| r.path).collect::<Vec<_>>(), &open)
+        })
+    }
+
+    fn new_chat(&self, folder: String, text: String, _by: String) -> remote::gateway::BoxFut<Result<String, String>> {
+        let app = self.app.clone();
+        Box::pin(async move { request_new_chat(&app, folder, text).await })
+    }
+
     fn diff(&self, slot: String, path: String) -> remote::gateway::BoxFut<Result<String, String>> {
         let app = self.app.clone();
         Box::pin(async move {
@@ -1762,6 +1780,48 @@ fn request_wake(app: &AppHandle, state: &AppState, slot: &str) -> Result<(), Str
     app.emit("remote-wake", slot).map_err(|e| e.to_string())
 }
 
+/// How long the window has to open the chat a phone asked for, and then to list it where the phone can follow it.
+const NEW_CHAT_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+const NEW_CHAT_LISTED_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Asks the window to start a chat for a paired phone, and says which slot it made once the chat is listed where the phone
+/// can follow it. The window does it (it owns chats and what they start with), on Ask, without switching what it shows.
+async fn request_new_chat(app: &AppHandle, folder: String, text: String) -> Result<String, String> {
+    let state = app.state::<AppState>();
+    let (id, answer) = state.remote.expect_new_chat();
+    let request = remote::NewChatRequest { id: id.clone(), folder, text, permissions: "ask" };
+    if let Err(e) = app.emit("remote-new-chat", &request) {
+        state.remote.forget_new_chat(&id);
+        return Err(e.to_string());
+    }
+    let slot = match tokio::time::timeout(NEW_CHAT_WAIT, answer).await {
+        Ok(Ok(result)) => result?,
+        _ => {
+            state.remote.forget_new_chat(&id);
+            return Err("Lantern didn't start that chat. Is it open on your Mac?".into());
+        }
+    };
+    // The window has made the chat; the phone may only follow it once the hub lists it.
+    let listed = tokio::time::timeout(NEW_CHAT_LISTED_WAIT, async {
+        while state.remote.hub.chat(&slot).is_none() {
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        }
+    })
+    .await;
+    listed.map(|()| slot).map_err(|_| "The chat started, but it isn't listed yet. Look for it in a moment.".to_string())
+}
+
+/// The window's answer to `remote-new-chat`: the slot of the chat it started, or why it didn't.
+#[tauri::command]
+fn remote_new_chat_done(state: State<'_, AppState>, id: String, slot: Option<String>, error: Option<String>) {
+    let result = match (slot, error) {
+        (Some(slot), None) if slots::valid_slot(&slot) => Ok(slot),
+        (_, Some(e)) => Err(e.chars().take(300).collect()),
+        _ => Err("Lantern didn't start that chat.".to_string()),
+    };
+    state.remote.new_chat_done(&id, result);
+}
+
 /// Answers a prompt of chat `slot` for whoever answered it (`by`: the window, or a paired phone). The first answer
 /// counts: every client is told it was answered, and a later answer is refused.
 fn answer_prompt(state: &AppState, slot: &str, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> Result<(), String> {
@@ -2444,6 +2504,7 @@ pub fn run() {
             remote_pair,
             remote_pair_cancel,
             remote_remove_device,
+            remote_new_chat_done,
             claude_login,
             sidebar_menu,
             keep_awake,

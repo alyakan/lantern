@@ -203,6 +203,23 @@ impl From<super::hub::ChatInfo> for RemoteChat {
     }
 }
 
+/// A project a phone may start a chat in: one the user already works in on this Mac (a chat open there, or a recent one).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteProject {
+    /// What the phone sends back to start a chat there: the project's folder. The Mac decides whether it is one.
+    pub id: String,
+    /// The folder's name, for showing.
+    pub name: String,
+}
+
+/// The chat a phone started, once it is open on the Mac.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct StartedChat {
+    pub slot: String,
+}
+
 /// A prompt waiting on the user, in any chat (the home screen's stack, oldest first).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../mobile/src/protocol/generated/")]
@@ -250,6 +267,11 @@ pub enum Request {
         answers: Option<std::collections::BTreeMap<String, String>>,
     },
     Wake { slot: String },
+    /// The projects a chat may be started in from the phone.
+    Projects,
+    /// Starts a chat in `project` (one of Projects' ids) with `text` as its first message. It starts on Ask, whatever the
+    /// project's Permissions were, and without switching what the Mac's window shows.
+    NewChat { project: String, text: String },
     /// One file's diff from the chat's start, as unified-diff text.
     Diff { slot: String, path: String },
     /// The token Expo's push service delivers this phone's notifications with.

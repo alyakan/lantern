@@ -3,9 +3,16 @@ import { fireEvent, screen } from "@testing-library/react-native";
 import { chat, renderWith, waiting } from "../test/render";
 import { HomeScreen } from "./HomeScreen";
 
-const handlers = () => ({ onOpenChat: jest.fn(), onReview: jest.fn(), onOpenMac: jest.fn(), onCompose: jest.fn() });
+const handlers = () => ({ onOpenChat: jest.fn(), onReview: jest.fn(), onOpenMac: jest.fn(), onCompose: jest.fn(), onNewChat: jest.fn() });
 
 describe("Home", () => {
+  it("has a way to start a chat, with nothing written yet", async () => {
+    const h = handlers();
+    await renderWith(<HomeScreen {...h} />, { chats: [chat()] });
+    await fireEvent.press(screen.getByRole("button", { name: "New chat" }));
+    expect(h.onNewChat).toHaveBeenCalledWith();
+  });
+
   it("leads with how many things wait on you, and the oldest as a card to review", async () => {
     const h = handlers();
     await renderWith(<HomeScreen {...h} />, { chats: [chat()], waiting: [waiting({ request_id: "late", at: 9, input: { command: "npm publish" } }), waiting({ request_id: "early", at: 2 })] });

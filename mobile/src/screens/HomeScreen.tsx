@@ -15,6 +15,8 @@ export interface HomeProps {
   onOpenMac: () => void;
   /** Android's "Message a chat". */
   onCompose: () => void;
+  /** Starts a chat in a project, with a first message the user writes (or a suggestion's draft). */
+  onNewChat: (draft?: { text: string; project?: string }) => void;
 }
 
 /** A thin bar that slides while a chat is working. */
@@ -98,7 +100,7 @@ function ChatRow({ row, index, onPress }: { row: Row; index: number; onPress: ()
 }
 
 /** Home: what waits on you, as a headline and a stack, then your chats. */
-export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose }: HomeProps) {
+export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat }: HomeProps) {
   const controller = useController();
   const { chats, waiting } = useSyncState();
   const connection = useConnectionState();
@@ -147,10 +149,15 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose }: HomeP
           </Txt>
         )}
 
-        <View style={{ flexDirection: "row", justifyContent: "space-between", paddingHorizontal: space.xl, paddingTop: 22, paddingBottom: 6 }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: space.xl, paddingTop: 22, paddingBottom: 6 }}>
           <Txt variant="small" style={{ fontWeight: "700" }}>
             All chats
           </Txt>
+          <PressScale accessibilityRole="button" accessibilityLabel="New chat" onPress={() => onNewChat()} hitSlop={8} scaleTo={0.92} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule }}>
+            <Txt variant="small" style={{ fontWeight: "700" }}>
+              + New chat
+            </Txt>
+          </PressScale>
         </View>
         {list.length === 0 ? (
           <Txt variant="body" tone="ink2" style={{ paddingHorizontal: space.xl, paddingTop: 8 }}>

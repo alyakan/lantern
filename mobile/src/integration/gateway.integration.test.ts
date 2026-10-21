@@ -117,6 +117,25 @@ suite("the phone's client against the real gateway", () => {
     return p;
   }
 
+  it("lists the projects, starts a chat in one of them that then shows up and answers, and refuses a folder that isn't one", async () => {
+    const p = await paired();
+    expect(await p.sync.projects()).toEqual([
+      { id: "/Users/you/dev/lantern", name: "lantern" },
+      { id: "/Users/you/dev/website", name: "website" },
+    ]);
+    await expect(p.sync.newChat("/etc", "hello")).rejects.toThrow("isn't one of your projects");
+    await expect(p.sync.newChat("/Users/you/dev/lantern", "   ")).rejects.toThrow("Write what the chat should start with");
+    const slot = await p.sync.newChat("/Users/you/dev/website", "Fix the footer links\nand the copyright year");
+    expect(slot).toBe("new1");
+    // It is open on the Mac by the time the phone is told, and listed with a title made from its first line.
+    await until("the new chat in the list", () => p.state().chats.some((c) => c.slot === slot));
+    expect(p.state().chats.find((c) => c.slot === slot)).toMatchObject({ title: "Fix the footer links", project: "website" });
+    p.sync.follow(slot);
+    await until("what it started with", () => (p.state().views[slot]?.items ?? []).some((i) => i.kind === "user" && i.text.startsWith("Fix the footer links")));
+    await until("Claude's answer", () => (p.state().views[slot]?.items ?? []).some((i) => i.kind === "assistant" && !i.streaming));
+    p.conn.stop();
+  });
+
   it("a code that was already used ends pairing at once: the Mac hangs up, and the other addresses aren't waited for", async () => {
     const first = makePhone(ready);
     await first.conn.pair(offerOf(ready));

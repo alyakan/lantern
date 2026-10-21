@@ -7,12 +7,14 @@
 
 use super::bus::EventBus;
 use super::gateway::{BoxFut, Host};
+use super::hub::{SessionHub, Since};
 
 use super::{now_ms, Remote, WindowChat};
 use crate::history::{self, Page};
 use crate::permission::bridge::Pending;
 use crate::ui_event::{Hunk, UiEvent};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -25,10 +27,26 @@ pub const QUESTION_PROMPT: &str = "perm-fixture-question";
 
 pub struct FixtureHost {
     bus: Arc<EventBus>,
+    hub: Arc<SessionHub>,
     pending: Mutex<HashMap<String, Vec<Pending>>>,
     history: HashMap<String, Vec<UiEvent>>,
     /// How long Claude's scripted answers take between steps.
     pace: Duration,
+    /// How many chats a phone has started here (they are "new1", "new2"…).
+    started: AtomicUsize,
+}
+
+/// The projects the fixture offers to start a chat in.
+pub const PROJECTS: [(&str, &str); 2] = [("/Users/you/dev/lantern", "lantern"), ("/Users/you/dev/website", "website")];
+
+/// A chat's title from the first thing said in it: its first line, cut short.
+fn title_of(text: &str) -> String {
+    let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("New chat").trim();
+    if line.chars().count() > 40 {
+        format!("{}…", line.chars().take(39).collect::<String>().trim_end())
+    } else {
+        line.to_string()
+    }
 }
 
 fn user(text: &str, at: u64) -> UiEvent {
@@ -81,7 +99,7 @@ impl FixtureHost {
         history.insert(NETWORK.into(), (0..30).flat_map(|i| [user(&format!("Question {i}"), 10_000 + i), said(&format!("n{i}"), &format!("Answer {i}")), done("ok")]).collect());
         history.insert(DESIGN.into(), vec![user("Draft the gateway's design.", 2_000), said("d1", "Starting with the session hub.")]);
 
-        let host = Arc::new(Self { bus: bus.clone(), pending: Mutex::default(), history, pace });
+        let host = Arc::new(Self { bus: bus.clone(), hub: hub.clone(), pending: Mutex::default(), history, pace, started: AtomicUsize::new(0) });
 
         hub.opened(RELEASE, "/Users/you/dev/lantern");
         hub.opened(DESIGN, "/Users/you/dev/lantern");
@@ -162,6 +180,19 @@ impl Host for FixtureHost {
         Ok(())
     }
 
+    fn projects(&self) -> BoxFut<Vec<(String, String)>> {
+        Box::pin(async { PROJECTS.iter().map(|(f, n)| (f.to_string(), n.to_string())).collect() })
+    }
+
+    fn new_chat(&self, folder: String, text: String, by: String) -> BoxFut<Result<String, String>> {
+        let slot = format!("new{}", self.started.fetch_add(1, Ordering::SeqCst) + 1);
+        self.hub.opened(&slot, &folder);
+        self.hub.titled(&slot, &title_of(&text));
+        self.bus.publish(&slot, UiEvent::UserText { text: text.clone(), at: Some(now_ms()), sent_by: Some(by) });
+        self.reply(&slot, text);
+        Box::pin(async move { Ok(slot) })
+    }
+
     fn diff(&self, _slot: String, path: String) -> BoxFut<Result<String, String>> {
         Box::pin(async move {
             if path == "/Users/you/dev/lantern/package.json" {
@@ -173,7 +204,14 @@ impl Host for FixtureHost {
     }
 
     fn history(&self, slot: String, before: Option<usize>) -> BoxFut<Result<Page, String>> {
-        let events = self.history.get(&slot).cloned().unwrap_or_default();
+        let mut events = self.history.get(&slot).cloned().unwrap_or_default();
+        if events.is_empty() {
+            // A chat a phone started has no transcript file here: what the hub kept of it is its transcript, without the
+            // streamed pieces (the finished text is there).
+            if let Some(Since::Events(kept) | Since::TooOld { kept }) = self.hub.since(&slot, 0) {
+                events = kept.into_iter().map(|e| e.event).filter(|e| !matches!(e, UiEvent::TextDelta { .. } | UiEvent::Thinking { .. })).collect();
+            }
+        }
         Box::pin(async move { Ok(history::page(events, before, history::PAGE_TURNS)) })
     }
 
@@ -188,8 +226,17 @@ impl Host for FixtureHost {
 
 #[cfg(test)]
 mod tests {
-    use super::in_words;
+    use super::{in_words, title_of};
     use serde_json::json;
+
+    #[test]
+    fn a_new_chat_is_titled_by_the_first_line_of_what_it_started_with() {
+        assert_eq!(title_of("Fix the login bug"), "Fix the login bug");
+        assert_eq!(title_of("\n\n  Fix it  \nand more"), "Fix it");
+        assert_eq!(title_of("   "), "New chat");
+        let long = title_of(&"word ".repeat(30));
+        assert!(long.ends_with('…') && long.chars().count() <= 40, "{long}");
+    }
 
     #[test]
     fn what_claude_says_once_answered_is_a_sentence_not_the_answers_json() {

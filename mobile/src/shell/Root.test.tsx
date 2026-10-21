@@ -11,10 +11,10 @@ jest.mock("expo-clipboard", () => ({ getStringAsync: jest.fn(async () => "") }))
 
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 30))));
 
-async function open(s: Parameters<typeof seed>[1], props: Partial<RootProps> = {}) {
+async function open(s: Parameters<typeof seed>[1], props: Partial<RootProps> = {}, answers: Parameters<typeof attachSession>[1] = {}) {
   const { controller } = makeController();
   seed(controller, s);
-  const session = attachSession(controller, { list_waiting: s.waiting ?? [] });
+  const session = attachSession(controller, { list_waiting: s.waiting ?? [], ...answers });
   const view = await render(<Root controller={controller} {...props} />);
   await settle();
   return { controller, view, ...session };
@@ -91,6 +91,32 @@ describe("which screen is up", () => {
     jest.spyOn(controller, "pair").mockResolvedValue(null);
     await press("Pair");
     await waitFor(() => expect(onClearLink).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("starting a chat from Home", () => {
+  const answers = { projects: [{ id: "/Users/me/lantern", name: "lantern" }], new_chat: { slot: "s9" } };
+
+  it("opens the sheet, starts the chat on the Mac, and goes into it", async () => {
+    const { lastOf } = await open({ chats: [chat()] }, {}, answers);
+    await press("New chat");
+    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
+    await fireEvent.changeText(screen.getByLabelText("What to start with"), "Fix the login bug");
+    await press("Start the chat");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Back" })).toBeTruthy());
+    expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/lantern", text: "Fix the login bug" });
+    // The sheet is gone, and it is the new chat that is open (its events are followed).
+    expect(screen.queryByText("Start the chat")).toBeNull();
+    expect(lastOf("subscribe")).toMatchObject({ slot: "s9" });
+  });
+
+  it("closes the sheet with the system's back button before it leaves anything else", async () => {
+    await open({ chats: [chat()] }, {}, answers);
+    await press("New chat");
+    await waitFor(() => screen.getByRole("button", { name: "Start the chat" }));
+    await act(async () => void backHandlers[backHandlers.length - 1]({ nativeEvent: {} } as never));
+    expect(screen.queryByRole("button", { name: "Start the chat" })).toBeNull();
+    expect(screen.getByText("Nothing")).toBeTruthy();
   });
 });
 

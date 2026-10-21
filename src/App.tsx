@@ -5,7 +5,7 @@ import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { agentsAtRest, canSleep, membersToSleep, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
-import { windowChats } from "./lib/remoteChats";
+import { checkRemoteNewChat, windowChats, type RemoteNewChat } from "./lib/remoteChats";
 import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
@@ -484,22 +484,24 @@ export default function App() {
    * `team`: the chat is the Lead of a team, which can start agents, on the project's last Permissions (the agents never exceed them).
    * `first`: a team from a template: the Lead's first instruction, which names its members and their roles.
    * `routine`: a routine's chat, on the routine's own Permissions (never the project's) and the standard preset; it doesn't become the project to reopen.
+   * `remote`: a chat a paired phone started: always on Ask (nobody is at the Mac to approve anything else), whatever the project's
+   * Permissions are, and it doesn't become the project to reopen either.
    */
-  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting) => {
+  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote = false) => {
     const { claudePath } = state;
     if (!claudePath) return;
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
     reopened.current = true;
     // A team's Lead runs on the project's last Permissions, which its agents never exceed; Team is not remembered as the
     // project's Workflow (see the effect below).
-    const { mode, autoApprove } = routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team);
+    const { mode, autoApprove } = remote ? launchOf("ask", "chat") : routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team);
     const orchestrator = team;
     const h = routine ? BUILT_IN[0] : findHarness(presets, harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode, autoApprove });
     to(slot)({ type: "orchestrator_set", on: orchestrator });
-    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first, routine, review);
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first, routine, review, remote);
     // The notes the chat starts with: what is saved now, which a later change doesn't reach.
     const notes = notesOf(notesBy, folder);
     to(slot)({ type: "notes_applied", text: notes || null });
@@ -513,7 +515,7 @@ export default function App() {
           startRoles(slot, folder);
           startReview(slot, review);
         }
-        if (!routine) setLastFolder(folder);
+        if (!routine && !remote) setLastFolder(folder);
         to(slot)({ type: "session_ready" });
         // A team from a template: the Lead's first instruction names its members and their roles.
         if (first) doingRef.current.send(slot, first);
@@ -704,6 +706,32 @@ export default function App() {
   wakeRef.current = wakeChat;
   useEffect(() => {
     const unlisten = api.onRemoteWake((slot) => wakeRef.current(slot)).catch(() => null);
+    return () => {
+      unlisten.then((f) => f?.());
+    };
+  }, []);
+  // A paired phone asked to start a chat in a project (the backend checked it too). It starts on Ask, beside what is on screen:
+  // this window doesn't switch to it, and neither the project's Permissions nor the folder to reopen change. The backend is
+  // answered with the slot it made, or why not. The ref is read when it happens, so it sees the chats as they are then.
+  const newChatRef = useRef<(r: RemoteNewChat) => void>(() => {});
+  newChatRef.current = (r) => {
+    const fail = (why: string) => void api.remoteNewChatDone(r.id, null, why).catch(() => {});
+    api.recentFolders().then(
+      (recent) => {
+        const openFolders = Object.values(chats.slots).map((s) => s.folder);
+        const why = checkRemoteNewChat(r, knownProject(r.folder, recent, openFolders), validChatText(r.text));
+        if (why) return fail(why);
+        if (!state.claudePath) return fail("Claude isn't set up on your Mac yet.");
+        const slot = `s${++slotSeq.current}`;
+        dispatchChats({ type: "add", slot });
+        startIn(slot, r.folder, false, false, r.text, undefined, undefined, true);
+        void api.remoteNewChatDone(r.id, slot, null).catch(() => {});
+      },
+      () => fail("Lantern couldn't look up your projects."),
+    );
+  };
+  useEffect(() => {
+    const unlisten = api.onRemoteNewChat((r) => newChatRef.current(r)).catch(() => null);
     return () => {
       unlisten.then((f) => f?.());
     };

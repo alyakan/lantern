@@ -1800,6 +1800,7 @@ export function installMockBackend() {
           throw "Remote control needs the app.";
         case "remote_pair_cancel":
         case "remote_window_chats":
+        case "remote_new_chat_done":
           return undefined;
         case "menubar_hide":
           return undefined;
