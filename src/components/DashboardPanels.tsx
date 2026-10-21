@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { api } from "../api";
 import { commandLine, formatDuration, formatElapsed, initialState, isScalar, isTable, matching, plain, rowTsv, runStatus, summarizeInputs, tableColumns, tableTsv, toValues, type FormPanel as FormSpec, type FormState } from "../lib/dashboard";
 import { relativeTime } from "../lib/time";
@@ -24,6 +24,8 @@ interface FormProps {
   reload?: number;
   /** Changes whenever the tab read the dashboards again. */
   stamp?: number;
+  /** The form's name is already said (by its tab), so it is not written again above the fields. */
+  bare?: boolean;
 }
 
 /** Where a field's options come from when a command loads them. */
@@ -126,7 +128,7 @@ function useOptions(field: DashboardField, source: OptionsSource, deps: Dependen
   return { state: waiting ? { status: "waiting", on: deps.waitingOn ?? "" } : state, load };
 }
 
-export function FormPanel({ folder, file, form, running, reload = 0, stamp = 0 }: FormProps) {
+export function FormPanel({ folder, file, form, running, reload = 0, stamp = 0, bare = false }: FormProps) {
   // A form whose fields changed in the file starts over rather than inheriting controls that no longer match.
   const key = `${folder}\n${file}\n${form.id}\n${form.fields.map((f) => `${f.id}:${f.type}`).join(",")}`;
   const [state, setState] = useState<FormState>(() => kept.get(key) ?? initialState(form.fields));
@@ -166,10 +168,28 @@ export function FormPanel({ folder, file, form, running, reload = 0, stamp = 0 }
       (e) => setError(String(e)),
     );
   };
+  // The command the button would run for what is filled in now, from the same code that runs it: nothing is hidden behind Run.
+  const [line, setLine] = useState<string | null>(null);
+  const valuesKey = JSON.stringify(values);
+  useEffect(() => {
+    let live = true;
+    const t = window.setTimeout(() => {
+      api.dashboardPreview(folder, file, form.id, values).then(
+        (p) => live && setLine(commandLine(p.args)),
+        () => live && setLine(null),
+      );
+    }, 250);
+    return () => {
+      live = false;
+      window.clearTimeout(t);
+    };
+    // `values` is read through its text: a new object every render must not restart the wait.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folder, file, form.id, valuesKey]);
   const name = form.title ?? form.id;
   return (
     <section className="dash-panel dash-form" aria-label={name}>
-      <h3 className="dash-title">{name}</h3>
+      {!bare && <h3 className="dash-title">{name}</h3>}
       <form
         className="dash-fields"
         onSubmit={(e) => {
@@ -181,14 +201,17 @@ export function FormPanel({ folder, file, form, running, reload = 0, stamp = 0 }
           <Field key={f.id} id={`${key}-${f.id}`} field={f} fields={form.fields} values={values} source={{ folder, file, form: form.id, reload, stamp }} value={state[f.id]} disabled={busy} onChange={(v) => change({ ...state, [f.id]: v })} />
         ))}
         <div className="dash-actions">
-          <button type="submit" className="primary" disabled={busy}>
-            {busy ? `Running…${elapsed ? ` ${elapsed}` : ""}` : "Run"}
-          </button>
+          <code className="dash-preview" aria-label="Will run" title={line ?? undefined}>
+            {line ?? "Fill in the form to see the command."}
+          </code>
           {busy && (
             <button type="button" className="ghost" onClick={() => void api.dashboardStop(folder, file, form.id)}>
               Stop
             </button>
           )}
+          <button type="submit" className="primary" disabled={busy}>
+            {busy ? `Running…${elapsed ? ` ${elapsed}` : ""}` : "Run"}
+          </button>
         </div>
       </form>
       {error && (
@@ -221,6 +244,7 @@ export function FormPanel({ folder, file, form, running, reload = 0, stamp = 0 }
 function Field({ id, field, fields, values, source, value, disabled, onChange }: { id: string; field: DashboardField; fields: DashboardField[]; values: DashboardValues; source: OptionsSource; value: string | boolean | string[] | undefined; disabled: boolean; onChange: (v: string | boolean | string[]) => void }) {
   const label = field.label ?? field.id;
   const text = typeof value === "string" ? value : "";
+  const legend = useId();
   const { state: loaded, load } = useOptions(field, source, dependenciesOf(field, fields, values));
   const [query, setQuery] = useState("");
   const options = loaded.status === "ready" ? loaded.options : [];
@@ -260,7 +284,7 @@ function Field({ id, field, fields, values, source, value, disabled, onChange }:
   if (field.type === "toggle") {
     return (
       <label className="dash-field dash-half dash-toggle">
-        <input type="checkbox" checked={value === true} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+        <input type="checkbox" role="switch" className="dash-switch" checked={value === true} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
         <span>{label}</span>
       </label>
     );
@@ -310,6 +334,38 @@ function Field({ id, field, fields, values, source, value, disabled, onChange }:
           ))}
         </div>
         {options.length > 0 && shown.length === 0 && <span className="tests-note">No option matches “{query}”.</span>}
+        {note}
+      </fieldset>
+    );
+  }
+  // A short list is a row of options to tap (one press to choose, one more to clear); a long one stays a menu.
+  if (field.type === "select" && loaded.status === "ready" && options.length > 0 && options.length <= 12 && options.every((o) => o.length <= 18)) {
+    const stale = field.optionsFrom && text !== "" && !options.includes(text) ? text : null;
+    return (
+      <fieldset className="dash-field dash-wide dash-multi" role="radiogroup" aria-labelledby={legend}>
+        <legend className="dash-legend" id={legend}>
+          <span className="dash-legend-name">
+            {label}
+            {field.required && <span className="dash-required"> *</span>}
+          </span>
+          {meta}
+        </legend>
+        <div className="dash-chips">
+          {options.map((o) => (
+            <label key={o} className="dash-chip" title={o}>
+              <input type="radio" name={id} value={o} checked={text === o} disabled={disabled} onChange={() => onChange(o)} onClick={() => text === o && onChange("")} />
+              <span>{o}</span>
+            </label>
+          ))}
+          {stale && (
+            <label className="dash-chip dash-stale">
+              <input type="radio" name={id} value={stale} checked disabled={disabled} onChange={() => {}} onClick={() => onChange("")} />
+              <span>
+                {stale} <em>not in the list</em>
+              </span>
+            </label>
+          )}
+        </div>
         {note}
       </fieldset>
     );
@@ -379,7 +435,7 @@ export function ResultPanel({ folder, file, formId, title, runs, running }: { fo
     <section ref={section} className="dash-panel dash-result" aria-label={title ?? "Result"}>
       <h3 className="dash-title">{title ?? "Result"}</h3>
       {running && <div className="tests-note">Running…</div>}
-      {!latest && !running && <div className="tests-note">Nothing has run yet. The result of the last run shows here.</div>}
+      {!latest && !running && <div className="tests-note dash-empty">Nothing has run yet. The result of the last run shows here.</div>}
       {latest && run === undefined && <div className="tests-note">Loading…</div>}
       {latest && run === null && <div className="tests-note">That run is gone.</div>}
       {run && <RunView run={run} />}
@@ -570,7 +626,7 @@ export function HistoryPanel({ folder, file, formId, title, runs }: { folder: st
           </button>
         )}
       </div>
-      {mine.length === 0 && <div className="tests-note">No runs yet.</div>}
+      {mine.length === 0 && <div className="tests-note dash-empty">No runs yet.</div>}
       <ul className="dash-runs">
         {mine.map((r) => {
           const status = runStatus(r);

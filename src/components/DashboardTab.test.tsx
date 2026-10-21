@@ -40,7 +40,11 @@ function load(list: Dashboard[], st: DashboardState, runs: DashboardRun[] = []) 
   vi.mocked(api.dashboardsState).mockResolvedValue({ ...st, runs: st.runs.length ? st.runs : runs.map(summary) });
   vi.mocked(api.dashboardRunDetail).mockImplementation(async (_f, id) => runs.find((r) => r.id === id) ?? null);
 }
-const staging = async (value: string) => fireEvent.change(await screen.findByLabelText(/Staging/), { target: { value } });
+const staging = async (value: string) => fireEvent.click(await screen.findByRole("radio", { name: value }));
+const lastPreview = () => {
+  const calls = vi.mocked(api.dashboardPreview).mock.calls;
+  return calls[calls.length - 1][3];
+};
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -108,7 +112,7 @@ describe("DashboardTab", () => {
   it("fills the form from the defaults, asks what the button would run, and runs only after the confirm", async () => {
     load([dash()], state());
     render(<DashboardTab folder="/p" refreshKey={0} />);
-    fireEvent.change(await screen.findByLabelText(/Staging/), { target: { value: "7" } });
+    await staging("7");
     // The addons are what the script printed, a moment after the form opened.
     fireEvent.click(await screen.findByLabelText("sso"));
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
@@ -163,7 +167,7 @@ describe("DashboardTab", () => {
     load([dash()], state({ running: [{ file: "staging.json", form: "org" }] }));
     render(<DashboardTab folder="/p" refreshKey={0} />);
     expect(await screen.findByRole("button", { name: "Running…" })).toBeDisabled();
-    expect(screen.getByLabelText(/Staging/)).toBeDisabled();
+    for (const radio of screen.getAllByRole("radio")) expect(radio).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(api.dashboardStop).toHaveBeenCalledWith("/p", "staging.json", "org");
   });
@@ -253,7 +257,7 @@ describe("DashboardTab", () => {
     expect(api.dashboardOptions).toHaveBeenCalledTimes(1);
     expect(api.dashboardOptions).toHaveBeenCalledWith("/dep1", "staging.json", "org", "addons", { staging: "7" });
     expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
-    expect(within(screen.getByLabelText(/Staging/)).getAllByRole("option").map((o) => o.textContent)).toEqual(["Choose…", "1", "2", "3", "7", "9"]);
+    expect(within(screen.getByLabelText(/Staging/)).getAllByRole("radio").map((o) => o.getAttribute("value"))).toEqual(["1", "2", "3", "7", "9"]);
   });
 
   it("says no options are loaded yet for this staging, and Load options runs the command for it", async () => {
@@ -330,7 +334,7 @@ describe("DashboardTab", () => {
     fireEvent.click(screen.getByLabelText("sso"));
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
     await waitFor(() => expect(api.dashboardPreview).toHaveBeenCalled());
-    expect(vi.mocked(api.dashboardPreview).mock.calls[0][3]).toMatchObject({ addons: ["sso"] });
+    expect(lastPreview()).toMatchObject({ addons: ["sso"] });
   });
 
   it("picks up a list that was loaded elsewhere when the backend says something changed", async () => {
@@ -420,7 +424,8 @@ describe("DashboardTab", () => {
     // A staging nobody has loaded a list for has none; none chosen is nothing to show.
     await staging("2");
     expect(await screen.findByText(/No options loaded yet for this choice/)).toBeInTheDocument();
-    await staging("");
+    // Pressing the chosen one again clears it.
+    await staging("2");
     expect(await screen.findByText("Choose Staging first.")).toBeInTheDocument();
     expect(screen.queryByLabelText("sso")).toBeNull();
   });
@@ -470,6 +475,38 @@ describe("DashboardTab", () => {
     expect(api.dashboardLoadOptions).toHaveBeenCalledWith("/dep6", "staging.json", "org", "addons", { staging: "7" });
   });
 
+  it("shows the command the button would run, as filled in now, beside Run", async () => {
+    load([dash()], state());
+    render(<DashboardTab folder="/preview" refreshKey={0} />);
+    await screen.findByLabelText("Will run");
+    await waitFor(() => expect(screen.getByLabelText("Will run")).toHaveTextContent('python3 lumi_staging.py "--name=QA org"'));
+    // A form that can't run yet (a required field empty) says so instead of showing a command.
+    vi.mocked(api.dashboardPreview).mockRejectedValue("Staging is required.");
+    await staging("7");
+    await waitFor(() => expect(screen.getByLabelText("Will run")).toHaveTextContent("Fill in the form to see the command."));
+  });
+
+  it("offers a short list as options to tap: one press chooses, another press on the chosen one clears it", async () => {
+    load([dash()], state());
+    render(<DashboardTab folder="/tap" refreshKey={0} />);
+    expect(await screen.findByRole("radiogroup", { name: /Staging/ })).toBeInTheDocument();
+    await staging("7");
+    expect(screen.getByRole("radio", { name: "7" })).toBeChecked();
+    await staging("9");
+    expect(screen.getByRole("radio", { name: "7" })).not.toBeChecked();
+    await staging("9");
+    expect(screen.getByRole("radio", { name: "9" })).not.toBeChecked();
+  });
+
+  it("shows a toggle as a switch", async () => {
+    load([dash()], state());
+    render(<DashboardTab folder="/switch" refreshKey={0} />);
+    const trial = await screen.findByRole("switch", { name: "Trial" });
+    expect(trial).not.toBeChecked();
+    fireEvent.click(trial);
+    expect(trial).toBeChecked();
+  });
+
   it("lays short fields out two to a row and everything else across the whole row", async () => {
     load([dash()], state());
     render(<DashboardTab folder="/layout" refreshKey={0} />);
@@ -515,7 +552,7 @@ describe("DashboardTab", () => {
     fireEvent.click(screen.getByLabelText("testo_sensors"));
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
     await waitFor(() => expect(api.dashboardPreview).toHaveBeenCalled());
-    expect(vi.mocked(api.dashboardPreview).mock.calls[0][3]).toMatchObject({ addons: ["sso", "testo_sensors"] });
+    expect(lastPreview()).toMatchObject({ addons: ["sso", "testo_sensors"] });
   });
 
   it("has no search box for a short list", async () => {
@@ -586,6 +623,52 @@ describe("DashboardTab", () => {
     act(() => changed?.());
     await screen.findByRole("table", { name: "users" });
     await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1));
+  });
+
+  describe("a dashboard with several functions", () => {
+    const second: DashboardSpec["panels"][number] = {
+      type: "form",
+      id: "users",
+      title: "Add users",
+      fields: [{ id: "count", type: "number", label: "How many", required: false, default: 3 }],
+      action: { command: ["python3", "lumi_staging.py", "users", "--count", "{count}"], output: "json" },
+    };
+    const many = (): Dashboard => dash({ spec: { ...spec, panels: [...spec.panels, second, { type: "result", of: "users" }, { type: "history", id: "uruns", title: "Users added", of: "users" }] } });
+
+    it("shows a tab for each, and only the chosen one's form, result and history", async () => {
+      load([many()], state());
+      render(<DashboardTab folder="/tabs1" refreshKey={0} />);
+      const tabs = await screen.findAllByRole("tab");
+      expect(tabs.map((t) => t.textContent)).toEqual(["Create org", "Add users"]);
+      expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByLabelText(/Org name/)).toBeInTheDocument();
+      expect(screen.queryByLabelText(/How many/)).toBeNull();
+      fireEvent.click(tabs[1]);
+      expect(screen.getByLabelText(/How many/)).toBeInTheDocument();
+      expect(screen.queryByLabelText(/Org name/)).toBeNull();
+      expect(screen.getByRole("region", { name: "Users added" })).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Past runs" })).toBeNull();
+      // The tab already says the form's name, so it is not written again above the fields.
+      expect(screen.queryByRole("heading", { name: "Add users" })).toBeNull();
+    });
+
+    it("has no tabs for one function, and keeps the form's own heading", async () => {
+      load([dash()], state());
+      render(<DashboardTab folder="/tabs2" refreshKey={0} />);
+      expect(await screen.findByRole("heading", { name: "Create org" })).toBeInTheDocument();
+      expect(screen.queryByRole("tablist")).toBeNull();
+    });
+
+    it("comes back to the tab it was left on, and marks a tab whose form is running", async () => {
+      load([many()], state({ running: [{ file: "staging.json", form: "users" }] }));
+      const first = render(<DashboardTab folder="/tabs3" refreshKey={0} />);
+      fireEvent.click((await screen.findAllByRole("tab"))[1]);
+      expect(within(screen.getAllByRole("tab")[1]).getByRole("img", { name: "running" })).toBeInTheDocument();
+      expect(within(screen.getAllByRole("tab")[0]).queryByRole("img", { name: "running" })).toBeNull();
+      first.unmount();
+      render(<DashboardTab folder="/tabs3" refreshKey={0} />);
+      expect(await screen.findByLabelText(/How many/)).toBeInTheDocument();
+    });
   });
 
   it("picks between several dashboards, by their titles", async () => {

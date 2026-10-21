@@ -114,3 +114,24 @@ export function matching(options: string[], query: string): string[] {
   const q = query.trim().toLowerCase();
   return q === "" ? options : options.filter((o) => o.toLowerCase().includes(q));
 }
+
+/** One thing a dashboard does: a form, with the result and the history that belong to it. */
+export interface DashboardFunction {
+  id: string;
+  title: string;
+  panels: DashboardPanel[];
+}
+
+/** A spec's panels grouped by the form they belong to, in the order the forms come (each is a tab when there are several). */
+export function functionsOf(panels: DashboardPanel[]): DashboardFunction[] {
+  const groups: DashboardFunction[] = [];
+  for (const p of panels) if (p.type === "form") groups.push({ id: p.id, title: p.title ?? p.id, panels: [p] });
+  for (const p of panels) {
+    if (p.type === "form") continue;
+    // A result or history of a form the file doesn't have (the checker refuses it) is still shown, with the first function.
+    let group = groups.find((g) => g.id === p.of) ?? groups[0];
+    if (!group) groups.push((group = { id: "", title: "Dashboard", panels: [] }));
+    group.panels.push(p);
+  }
+  return groups;
+}

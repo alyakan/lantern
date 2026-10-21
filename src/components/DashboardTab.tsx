@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { commandLine } from "../lib/dashboard";
+import { commandLine, functionsOf } from "../lib/dashboard";
 import type { Dashboard, DashboardCommand, DashboardState } from "../types";
 import { FormPanel, HistoryPanel, ResultPanel } from "./DashboardPanels";
 import { TabEmpty } from "./TabEmpty";
@@ -55,34 +55,34 @@ export function DashboardTab({ folder, refreshKey }: { folder: string; refreshKe
   const title = (d: Dashboard) => d.spec?.title ?? d.file;
   return (
     <>
-      <div className="review-bar dash-bar">
-        {data.list.length > 1 ? (
-          <select className="dash-pick" aria-label="Dashboard" value={current.file} onChange={(e) => setPicked(e.target.value)}>
-            {data.list.map((d) => (
-              <option key={d.file} value={d.file}>
-                {title(d)}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span className="dash-bar-title">{title(current)}</span>
-        )}
-        <span className="dash-bar-file">{current.file}</span>
-        <div className="spacer" />
+      <div className="dash-head">
+        <div className="dash-head-text">
+          {data.list.length > 1 ? (
+            <select className="dash-pick" aria-label="Dashboard" value={current.file} onChange={(e) => setPicked(e.target.value)}>
+              {data.list.map((d) => (
+                <option key={d.file} value={d.file}>
+                  {title(d)}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="dash-head-title">{title(current)}</span>
+          )}
+          <span className="dash-bar-file">{current.file}</span>
+        </div>
         <button
-          className="ghost"
+          className="ghost dash-reload"
+          aria-label="Reload"
           onClick={() => {
             setReloads((n) => n + 1);
             reload();
           }}
           title="Read the dashboard files again, and ask for the options a command loads again"
         >
-          Reload
+          ↻
         </button>
       </div>
-      <div className="dash-body">
-        <Shown key={`${folder}\n${current.file}`} folder={folder} dashboard={current} state={data.state} reloads={reloads} stamp={data.stamp} />
-      </div>
+      <Shown key={`${folder}\n${current.file}`} folder={folder} dashboard={current} state={data.state} reloads={reloads} stamp={data.stamp} />
     </>
   );
 }
@@ -96,19 +96,48 @@ function DashboardEmpty() {
   );
 }
 
-/** One dashboard: what is wrong with its file, or the trust card, or its panels. */
+/** Which function (tab) each dashboard was left on, kept while the tab is away. */
+const chosen = new Map<string, string>();
+
+/** One dashboard: what is wrong with its file, or the trust card, or its functions (a tab each when there are several). */
 function Shown({ folder, dashboard, state, reloads, stamp }: { folder: string; dashboard: Dashboard; state: DashboardState; reloads: number; stamp: number }) {
-  if (!dashboard.spec) return <Problems dashboard={dashboard} />;
-  if (!state.trusted.includes(dashboard.hash)) return <TrustCard key={dashboard.hash} folder={folder} dashboard={dashboard} />;
+  const key = `${folder}\n${dashboard.file}`;
+  const [pickedId, setPickedId] = useState(() => chosen.get(key));
+  if (!dashboard.spec) return <div className="dash-body"><Problems dashboard={dashboard} /></div>;
+  if (!state.trusted.includes(dashboard.hash)) return <div className="dash-body"><TrustCard key={dashboard.hash} folder={folder} dashboard={dashboard} /></div>;
   const file = dashboard.file;
   const isRunning = (form: string) => state.running.some((r) => r.file === file && r.form === form);
+  const functions = functionsOf(dashboard.spec.panels);
+  const current = functions.find((f) => f.id === pickedId) ?? functions[0];
+  const tabbed = functions.length > 1;
   return (
     <>
-      {dashboard.spec.panels.map((p, i) => {
-        if (p.type === "form") return <FormPanel key={`${i}-${p.id}`} folder={folder} file={file} form={p} running={isRunning(p.id)} reload={reloads} stamp={stamp} />;
-        if (p.type === "result") return <ResultPanel key={i} folder={folder} file={file} formId={p.of} title={p.title} runs={state.runs} running={isRunning(p.of)} />;
-        return <HistoryPanel key={i} folder={folder} file={file} formId={p.of} title={p.title} runs={state.runs} />;
-      })}
+      {tabbed && (
+        <div className="dash-tabs" role="tablist" aria-label="Functions">
+          {functions.map((f) => (
+            <button
+              key={f.id}
+              role="tab"
+              aria-selected={f === current}
+              className="ghost dash-tab"
+              onClick={() => {
+                chosen.set(key, f.id);
+                setPickedId(f.id);
+              }}
+            >
+              {f.title}
+              {isRunning(f.id) && <span className="dash-tab-running" role="img" aria-label="running" />}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="dash-body" role={tabbed ? "tabpanel" : undefined} aria-label={tabbed ? current.title : undefined}>
+        {current?.panels.map((p, i) => {
+          if (p.type === "form") return <FormPanel key={`${i}-${p.id}`} folder={folder} file={file} form={p} bare={tabbed} running={isRunning(p.id)} reload={reloads} stamp={stamp} />;
+          if (p.type === "result") return <ResultPanel key={i} folder={folder} file={file} formId={p.of} title={p.title} runs={state.runs} running={isRunning(p.of)} />;
+          return <HistoryPanel key={i} folder={folder} file={file} formId={p.of} title={p.title} runs={state.runs} />;
+        })}
+      </div>
     </>
   );
 }

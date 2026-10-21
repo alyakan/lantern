@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import spec from "../../src-tauri/tests/fixtures/dashboard.spec.json";
-import type { DashboardAction, DashboardField, DashboardSpec } from "../types";
-import { commandLine, formatDuration, formatElapsed, initialState, isScalar, isTable, matching, plain, rowTsv, runStatus, summarizeInputs, tableColumns, tableTsv, toValues } from "./dashboard";
+import type { DashboardAction, DashboardField, DashboardPanel, DashboardSpec } from "../types";
+import { commandLine, formatDuration, functionsOf, formatElapsed, initialState, isScalar, isTable, matching, plain, rowTsv, runStatus, summarizeInputs, tableColumns, tableTsv, toValues } from "./dashboard";
 
 // dashboard.spec.json is what Rust's checker makes of dashboard.input.json (a Rust test fails when it's stale). These tests
 // hold the TypeScript types to the same file: a key added on one side and not the other fails here, either as a type error
@@ -128,5 +128,23 @@ describe("reading and copying a result", () => {
     expect(matching(options, "  ")).toBe(options);
     expect(matching(options, " TRANS ")).toEqual(["form_translations", "manual_form_translations"]);
     expect(matching(options, "zzz")).toEqual([]);
+  });
+});
+
+describe("functionsOf", () => {
+  const form = (id: string, title?: string): DashboardPanel => ({ type: "form", id, title, fields: [], action: { command: ["x"] } as DashboardAction });
+
+  it("groups each form with its own result and history, in the order the forms come", () => {
+    const panels: DashboardPanel[] = [form("a", "Create"), { type: "result", of: "a" }, form("b"), { type: "history", of: "b" }, { type: "history", of: "a" }];
+    expect(functionsOf(panels).map((f) => [f.id, f.title, f.panels.map((p) => p.type)])).toEqual([
+      ["a", "Create", ["form", "result", "history"]],
+      ["b", "b", ["form", "history"]],
+    ]);
+  });
+
+  it("is one function for a dashboard with one form, and keeps a result of an unknown form with the first", () => {
+    expect(functionsOf([form("a"), { type: "result", of: "gone" }]).map((f) => f.panels.length)).toEqual([2]);
+    expect(functionsOf([{ type: "result", of: "gone" }]).map((f) => f.panels.length)).toEqual([1]);
+    expect(functionsOf([])).toEqual([]);
   });
 });
