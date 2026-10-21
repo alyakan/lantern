@@ -349,6 +349,9 @@ pub fn build_args(mode: Mode, auto_approve: bool, resume: Option<&str>, model: O
     allowed.extend(crate::network::TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
     // The storage tools scan and mark suggestions inside Lantern (read-only on disk): only the Storage tab's Delete deletes.
     allowed.extend(crate::storage::TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
+    // The dashboard tools read and show, except dashboard_run, which asks the user with a card of its own every time (the helper
+    // does, before the app runs anything): it is allowed here so the CLI doesn't ask twice, not so that it runs without a yes.
+    allowed.extend(crate::dashboard_tools::TOOLS.iter().map(|t| format!("mcp__lantern__{t}")));
     // The approval card is the user's own say on one named action; Lantern runs nothing and remembers nothing.
     allowed.push(format!("mcp__lantern__{}", crate::permission::helper::APPROVAL_TOOL));
     if helper.role == Role::Main {
@@ -628,7 +631,7 @@ mod tests {
     }
 
     /// Every chat's network tools, allowed without asking (see network.rs).
-    const NETWORK_TOOLS: &str = "mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__request_approval";
+    const NETWORK_TOOLS: &str = "mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__dashboard_spec,mcp__lantern__dashboard_result,mcp__lantern__dashboard_run,mcp__lantern__request_approval";
 
     fn value_after<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
         args.iter().position(|a| a == flag).map(|i| args[i + 1].as_str())
@@ -665,7 +668,7 @@ mod tests {
             lantern_prompt(Mode::Steps, true, &Role::Main)
         ));
         expected.push("--allowedTools".into());
-        expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__request_approval,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
+        expected.push("mcp__lantern__reproduce,mcp__lantern__steps_guide,mcp__lantern__review_target,mcp__lantern__network_requests,mcp__lantern__network_request,mcp__lantern__network_watch,mcp__lantern__network_unwatch,mcp__lantern__network_watches,mcp__lantern__network_summarize,mcp__lantern__storage_scan,mcp__lantern__storage_results,mcp__lantern__storage_suggest,mcp__lantern__dashboard_spec,mcp__lantern__dashboard_result,mcp__lantern__dashboard_run,mcp__lantern__request_approval,mcp__lantern__spawn_agent,mcp__lantern__list_agents,mcp__lantern__read_agent,mcp__lantern__message_agent,mcp__lantern__stop_agent,mcp__lantern__propose_merge".into());
         expected.extend(strs(&["--resume", "sess-9", "--model", "opus", "--effort", "high", "--advisor", "fable"]));
         let mut got = build_args(Mode::Steps, true, Some("sess-9"), Some("opus"), Some("high"), &main);
         got.extend(harness_args(Some("fable")));

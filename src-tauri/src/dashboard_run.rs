@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 /// The most output kept from a run, for each of stdout and stderr: the end of it, which is where errors and results are.
@@ -138,6 +138,11 @@ fn render(field: &dashboard::Field, value: &Value) -> Result<String, String> {
             }
             if text.contains('\0') {
                 return Err("can't contain a null character.".into());
+            }
+            // Text the user is shown to confirm a run (and the approval card Claude's runs ask) can't carry marks that
+            // reorder or hide what follows them.
+            if text.chars().any(crate::permission::helper::hides_text) {
+                return Err("can't contain hidden or reordering characters.".into());
             }
             Ok(text.to_string())
         }
@@ -271,6 +276,35 @@ pub struct Runner {
     timeout: Duration,
     on_change: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     counter: Mutex<u64>,
+    /// Runs Claude proposed that the user has been shown and may approve, by ticket (see `prepare`).
+    tickets: Mutex<HashMap<String, Ticket>>,
+    ticket_life: Duration,
+}
+
+/// A run Claude proposed: exactly what the user is asked to approve, for as long as the approval is good.
+struct Ticket {
+    folder: String,
+    file: String,
+    /// The dashboard file as it was when the command was worked out.
+    hash: String,
+    form: String,
+    values: Values,
+    expires: Instant,
+}
+
+/// How long the user has to answer an approval card before the run it was for is forgotten.
+const TICKET_LIFE: Duration = Duration::from_secs(10 * 60);
+/// The most runs waiting for an approval at once.
+const MAX_TICKETS: usize = 20;
+
+/// What the user is asked to approve for a run Claude proposed, and the one-use ticket that runs exactly that.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Prepared {
+    pub ticket: String,
+    /// One line for the approval card's title.
+    pub action: String,
+    /// The card's text: what it does, the command with the values in, where.
+    pub details: String,
 }
 
 fn now_ms() -> u64 {
@@ -280,7 +314,7 @@ fn now_ms() -> u64 {
 impl Runner {
     pub fn load(path: Option<PathBuf>) -> Self {
         let data = path.as_deref().map(read_store).unwrap_or_default();
-        Self { path, data: Mutex::new(data), running: Mutex::default(), timeout: RUN_TIMEOUT, on_change: Mutex::default(), counter: Mutex::default() }
+        Self { path, data: Mutex::new(data), running: Mutex::default(), timeout: RUN_TIMEOUT, on_change: Mutex::default(), counter: Mutex::default(), tickets: Mutex::default(), ticket_life: TICKET_LIFE }
     }
 
     pub fn set_on_change(&self, f: impl Fn() + Send + Sync + 'static) {
@@ -406,14 +440,75 @@ impl Runner {
         true
     }
 
+    // MARK: - A run Claude proposes
+
+    /// Works out what a run Claude proposed would do, for the user to approve: refused (with what Claude should tell the user)
+    /// unless the dashboard is one the user trusted and the values are good. The ticket it returns runs exactly this, once,
+    /// if the file is unchanged and the approval comes in time (`run_ticket`).
+    pub fn prepare(&self, folder: &str, root: &Path, file: &str, form_id: &str, values: Values, path_env: Option<&str>) -> Result<Prepared, String> {
+        let found = dashboard::load(root).into_iter().find(|d| d.file == file).ok_or_else(|| format!("This folder has no dashboard file called {file:?}. dashboard_spec lists them."))?;
+        if found.spec.is_none() {
+            return Err(format!("{file} has problems, so it can't run. dashboard_spec lists them."));
+        }
+        if !self.is_trusted(folder, &found.hash) {
+            return Err("The user hasn't trusted this version of the dashboard yet, and only they can: ask them to open the Dashboard tab, read its commands and press Trust. Nothing ran.".into());
+        }
+        let form = found.form(form_id).ok_or_else(|| format!("{file} has no form called {form_id:?}."))?;
+        let Preview { args, confirm } = preview(form, &values)?;
+        find_program(&args[0], root, path_env)?;
+        let title = form.title.as_deref().unwrap_or(&form.id);
+        let action = format!("Run “{}” from {}", clip(title, 50), clip(file, 40));
+        let mut details = confirm.map(|c| format!("{c}\n\n")).unwrap_or_default();
+        details.push_str(&format!("Command:\n{}\n\nFolder: {folder}\n\nLantern checks the dashboard file, not the files the command runs.", display_line(&args)));
+        let ticket = self.mint();
+        let mut tickets = self.tickets.lock().unwrap();
+        tickets.retain(|_, t| t.expires > Instant::now());
+        if tickets.len() >= MAX_TICKETS {
+            return Err("Too many runs are waiting for the user's approval. Wait for them to answer the cards they have.".into());
+        }
+        tickets.insert(ticket.clone(), Ticket { folder: folder.to_string(), file: file.to_string(), hash: found.hash, form: form_id.to_string(), values, expires: Instant::now() + self.ticket_life });
+        Ok(Prepared { ticket, action, details })
+    }
+
+    /// Runs what `prepare` described, after the user approved it. A ticket works once, in the folder it was made for, and only
+    /// while the dashboard file is the one whose command the user read.
+    pub async fn run_ticket(self: &Arc<Self>, folder: &str, root: &Path, ticket: &str, path_env: Option<String>) -> Result<Run, String> {
+        const GONE: &str = "That approval was already used or has expired, so nothing ran.";
+        let t = self.tickets.lock().unwrap().remove(ticket).ok_or(GONE)?;
+        if t.expires <= Instant::now() || t.folder != folder {
+            return Err(GONE.into());
+        }
+        self.run_pinned(folder, root, &t.file, &t.form, t.values, path_env, Some(&t.hash)).await
+    }
+
+    /// A ticket nobody can guess: the process's random hash keys, mixed with the time and a count.
+    fn mint(&self) -> String {
+        use std::hash::{BuildHasher, Hasher};
+        let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+        let mut n = self.counter.lock().unwrap();
+        *n += 1;
+        hasher.write_u64(*n);
+        hasher.write_u128(SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+        format!("{:016x}", hasher.finish())
+    }
+
     // MARK: - Running
 
     /// Runs a form of the folder's dashboard `file` with `values`, and returns the run (also kept in the history). The file
     /// is read again here, and only a spec whose hash the user trusted runs.
     pub async fn run(self: &Arc<Self>, folder: &str, root: &Path, file: &str, form_id: &str, values: Values, path_env: Option<String>) -> Result<Run, String> {
+        self.run_pinned(folder, root, file, form_id, values, path_env, None).await
+    }
+
+    /// `run`, but only if the file still is the `expect_hash` one (a run the user approved reading its command).
+    #[allow(clippy::too_many_arguments)]
+    async fn run_pinned(self: &Arc<Self>, folder: &str, root: &Path, file: &str, form_id: &str, values: Values, path_env: Option<String>, expect_hash: Option<&str>) -> Result<Run, String> {
         let dashboard = dashboard::load(root).into_iter().find(|d| d.file == file).ok_or("That dashboard is gone.")?;
         if dashboard.spec.is_none() {
             return Err("That dashboard has problems, so it doesn't run.".into());
+        }
+        if expect_hash.is_some_and(|h| h != dashboard.hash) {
+            return Err("The dashboard file changed after the user approved this run, so nothing ran.".into());
         }
         if !self.is_trusted(folder, &dashboard.hash) {
             return Err("You haven't trusted this version of the dashboard, so it doesn't run.".into());
@@ -503,6 +598,30 @@ impl Runner {
         self.record(folder, run.clone());
         Ok(run)
     }
+}
+
+/// How a run went, in words for Claude: "exit code 0", "failed with exit code 3", "stopped by the user", "timed out".
+pub fn status_of(exit_code: Option<i32>, stopped: bool, timed_out: bool) -> String {
+    match (timed_out, stopped, exit_code) {
+        (true, _, _) => "it timed out and was stopped".to_string(),
+        (_, true, _) => "it was stopped by the user".to_string(),
+        (_, _, Some(0)) => "exit code 0, so it worked".to_string(),
+        (_, _, Some(code)) => format!("it failed with exit code {code}"),
+        (_, _, None) => "it ended without an exit code".to_string(),
+    }
+}
+
+/// `text` cut to `max` characters, with an ellipsis when it was longer.
+fn clip(text: &str, max: usize) -> String {
+    if text.chars().count() <= max { text.to_string() } else { format!("{}…", text.chars().take(max - 1).collect::<String>()) }
+}
+
+/// A command as one line to read, an argument with a space, a quote or such in it quoted.
+pub fn display_line(args: &[String]) -> String {
+    args.iter()
+        .map(|a| if a.is_empty() || a.chars().any(|c| !(c.is_ascii_alphanumeric() || "@%+=:,./~{}-_".contains(c))) { format!("{a:?}") } else { a.clone() })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Cuts `text` down to its last `max` bytes (from a character boundary); true when something was dropped.
@@ -761,6 +880,111 @@ mod tests {
         // A dashboard with problems has nothing to list.
         let broken = dashboard::Dashboard { spec: None, ..found.clone() };
         assert!(commands(&broken, s.folder.path(), None).is_empty());
+    }
+
+    // MARK: A run Claude proposes
+
+    fn proposal(s: &Setup, values: Value) -> Result<Prepared, String> {
+        s.runner.prepare("k", s.folder.path(), "d.json", "f", values_of(values), None)
+    }
+
+    fn values_of(v: Value) -> Values {
+        values(v)
+    }
+
+    #[test]
+    fn a_proposed_run_is_refused_unless_the_user_trusted_the_dashboard_and_the_values_are_good() {
+        let s = setup(&spec(fields(), sh(json!(["--who={who}"]))));
+        let untrusted = proposal(&s, json!({ "who": "a" })).unwrap_err();
+        assert!(untrusted.contains("hasn't trusted") && untrusted.contains("only they can"), "{untrusted}");
+        trust(&s);
+        assert!(proposal(&s, json!({})).unwrap_err().contains("required"));
+        assert!(proposal(&s, json!({ "who": "z" })).unwrap_err().contains("must be one of"));
+        assert!(s.runner.prepare("k", s.folder.path(), "nope.json", "f", Values::new(), None).unwrap_err().contains("no dashboard file called"));
+        assert!(s.runner.prepare("k", s.folder.path(), "d.json", "zz", Values::new(), None).unwrap_err().contains("no form called"));
+        assert!(proposal(&s, json!({ "who": "a", "note": "a\u{202e}b" })).unwrap_err().contains("hidden or reordering"));
+        // Another folder's trust doesn't count here.
+        assert!(s.runner.prepare("other", s.folder.path(), "d.json", "f", values_of(json!({ "who": "a" })), None).unwrap_err().contains("hasn't trusted"));
+        let missing = setup(&spec(json!([]), json!(["no-such-program-here"])));
+        missing.runner.trust("k", missing.folder.path(), "d.json", &hash_of(&missing)).unwrap();
+        assert!(missing.runner.prepare("k", missing.folder.path(), "d.json", "f", Values::new(), None).unwrap_err().contains("isn't on the PATH"));
+        // Nothing waits for an approval after any refusal.
+        assert!(s.runner.tickets.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_card_says_what_runs_with_the_values_in_and_where() {
+        let s = setup(&spec(fields(), sh(json!(["--who={who}", "--note={note}"]))));
+        trust(&s);
+        let p = proposal(&s, json!({ "who": "b", "note": "two words" })).unwrap();
+        assert_eq!(p.action, "Run “f” from d.json");
+        assert!(p.details.starts_with("Do it for 2\n\nCommand:\n/bin/sh -c "), "{}", p.details);
+        assert!(p.details.contains(r#""--note=two words""#) && p.details.contains("--who=b"), "{}", p.details);
+        assert!(p.details.contains("Folder: k") && p.details.contains("not the files the command runs"), "{}", p.details);
+        // The card's own limits (one line, plain text) are the helper's to enforce; this is within them.
+        assert!(p.action.chars().count() <= 120 && p.details.chars().count() <= 2000);
+        assert_eq!(p.ticket.len(), 16);
+    }
+
+    #[tokio::test]
+    async fn an_approved_ticket_runs_exactly_once() {
+        let s = setup(&spec(fields(), sh(json!(["--who={who}"]))));
+        trust(&s);
+        let p = proposal(&s, json!({ "who": "a" })).unwrap();
+        let run = s.runner.run_ticket("k", s.folder.path(), &p.ticket, None).await.unwrap();
+        assert_eq!(run.exit_code, Some(0));
+        assert_eq!(run.args.last().unwrap(), "--who=a");
+        assert_eq!(s.runner.state("k").runs.len(), 1);
+        let again = s.runner.run_ticket("k", s.folder.path(), &p.ticket, None).await.unwrap_err();
+        assert!(again.contains("already used or has expired"), "{again}");
+        assert!(s.runner.run_ticket("k", s.folder.path(), "not-a-ticket", None).await.is_err());
+        assert_eq!(s.runner.state("k").runs.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_ticket_does_not_run_after_the_file_changed_expired_or_in_another_folder() {
+        let s = setup(&spec(fields(), sh(json!(["--who={who}"]))));
+        trust(&s);
+        // The file is edited between the user reading the command and the run (and the new version is trusted too).
+        let p = proposal(&s, json!({ "who": "a" })).unwrap();
+        std::fs::write(s.folder.path().join(".lantern/dashboards/d.json"), spec(fields(), sh(json!(["--who={who}", "--extra"])))).unwrap();
+        trust(&s);
+        let err = s.runner.run_ticket("k", s.folder.path(), &p.ticket, None).await.unwrap_err();
+        assert!(err.contains("changed after the user approved"), "{err}");
+        assert!(s.runner.state("k").runs.is_empty());
+        // Too late.
+        let mut slow = Runner::load(None);
+        slow.ticket_life = Duration::from_millis(0);
+        let slow = Arc::new(slow);
+        slow.trust("k", s.folder.path(), "d.json", &hash_of(&s)).unwrap();
+        let p = slow.prepare("k", s.folder.path(), "d.json", "f", values_of(json!({ "who": "a" })), None).unwrap();
+        assert!(slow.run_ticket("k", s.folder.path(), &p.ticket, None).await.unwrap_err().contains("expired"));
+        // Another folder's approval.
+        let p = proposal(&s, json!({ "who": "a" })).unwrap();
+        assert!(s.runner.run_ticket("other", s.folder.path(), &p.ticket, None).await.unwrap_err().contains("expired"));
+    }
+
+    #[test]
+    fn only_so_many_runs_wait_for_an_approval_and_old_ones_are_forgotten() {
+        let s = setup(&spec(fields(), sh(json!(["--who={who}"]))));
+        trust(&s);
+        for _ in 0..MAX_TICKETS {
+            proposal(&s, json!({ "who": "a" })).unwrap();
+        }
+        assert!(proposal(&s, json!({ "who": "a" })).unwrap_err().contains("Too many runs"));
+        for t in s.runner.tickets.lock().unwrap().values_mut() {
+            t.expires = Instant::now();
+        }
+        assert!(proposal(&s, json!({ "who": "a" })).is_ok());
+        assert_eq!(s.runner.tickets.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_command_is_shown_as_one_line_with_what_needs_it_quoted() {
+        let args: Vec<String> = ["python3", "~/x.py", "--name=QA org", "", "a\"b", "{n}", "tab\there"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(display_line(&args), r#"python3 ~/x.py "--name=QA org" "" "a\"b" {n} "tab\there""#);
+        assert_eq!(clip("abcdef", 4), "abc…");
+        assert_eq!(clip("abc", 4), "abc");
     }
 
     #[test]

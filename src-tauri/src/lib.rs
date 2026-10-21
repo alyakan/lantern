@@ -16,6 +16,7 @@ pub mod merge_tests;
 pub mod navigation;
 pub mod dashboard;
 pub mod dashboard_run;
+pub mod dashboard_tools;
 pub mod network;
 pub mod orchestra;
 pub mod permission;
@@ -435,11 +436,22 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
     // So are the storage_* tools (see storage/mod.rs): they share the bridge call, and are told apart by name.
     let storage = state.storage.clone();
     let login = state.login_path.clone();
+    // And the dashboard_* tools (see dashboard_tools.rs): a run is asked of the user by the helper before it gets here.
+    let dashboards = state.dashboards.clone();
     slot.bridge.set_network(Arc::new(move |folder, tool, input| {
         let monitor = monitor.clone();
         let storage = storage.clone();
         let login = login.clone();
+        let dashboards = dashboards.clone();
         Box::pin(async move {
+            if dashboard_tools::OPS.contains(&tool.as_str()) {
+                let path_env = tauri::async_runtime::spawn_blocking(move || login.get_or_init(cli_locator::login_shell_path).clone()).await.unwrap_or_default();
+                let (allow, text) = match dashboard_tools::call(&dashboards, folder, &tool, &input, path_env).await {
+                    Ok(text) => (true, text),
+                    Err(text) => (false, text),
+                };
+                return permission::protocol::BridgeResponse { allow, message: Some(text), updated_input: None, failed: false };
+            }
             let result = tauri::async_runtime::spawn_blocking(move || {
                 if storage::TOOLS.contains(&tool.as_str()) {
                     storage.call(&tool, &input, login.get_or_init(cli_locator::login_shell_path).clone())
