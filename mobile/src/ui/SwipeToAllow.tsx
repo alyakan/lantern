@@ -19,7 +19,7 @@ const sizes = (compact: boolean) => {
  * holding it; with `onDone` that circle is a button (the one that takes you back). A screen reader gets an "Allow"
  * action instead of the drag (a deliberate double tap).
  */
-export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLabel = "Allowed", compact = false, progress }: { onAllow: () => void; /** Once allowed, the circle can be pressed: this is what it does. */ onDone?: () => void; label?: string; doneLabel?: string; /** A smaller bar, for sitting inside a card. */ compact?: boolean; /** The knob's position, for a test to move it (a drag can't be made in one). */ progress?: Animated.Value }) {
+export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLabel = "Allowed", compact = false, progress, onDrag }: { onAllow: () => void; /** Told when a drag of the knob starts and ends (a screen holds still while it is going). */ onDrag?: (dragging: boolean) => void; /** Once allowed, the circle can be pressed: this is what it does. */ onDone?: () => void; label?: string; doneLabel?: string; /** A smaller bar, for sitting inside a card. */ compact?: boolean; /** The knob's position, for a test to move it (a drag can't be made in one). */ progress?: Animated.Value }) {
   const { KNOB, INSET, BAR } = sizes(compact);
   const [width, setWidth] = useState(0);
   const [completed, setCompleted] = useState(false);
@@ -32,6 +32,8 @@ export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLa
   const max = Math.max(0, width - KNOB - INSET * 2);
   const maxRef = useRef(max);
   maxRef.current = max;
+  const dragRef = useRef(onDrag);
+  dragRef.current = onDrag;
 
   const allow = () => {
     if (done.current) return;
@@ -54,15 +56,22 @@ export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLa
     PanResponder.create({
       // Only a drag starts it: a touch that doesn't move is never an allow.
       onMoveShouldSetPanResponder: (_, g) => !done.current && Math.abs(g.dx) > 6 && Math.abs(g.dx) > Math.abs(g.dy),
-      onPanResponderGrant: () => buzz("select"),
+      onPanResponderGrant: () => {
+        buzz("select");
+        dragRef.current?.(true);
+      },
       // Once it has the drag, a list it sits in (a chat) doesn't take it away.
       onPanResponderTerminationRequest: () => false,
       onPanResponderMove: (_, g) => x.setValue(Math.min(maxRef.current, Math.max(0, g.dx))),
       onPanResponderRelease: (_, g) => {
+        dragRef.current?.(false);
         if (allows(g.dx, maxRef.current)) allow();
         else Animated.spring(x, { toValue: 0, useNativeDriver: false }).start();
       },
-      onPanResponderTerminate: () => !done.current && Animated.spring(x, { toValue: 0, useNativeDriver: false }).start(),
+      onPanResponderTerminate: () => {
+        dragRef.current?.(false);
+        if (!done.current) Animated.spring(x, { toValue: 0, useNativeDriver: false }).start();
+      },
     }),
   ).current;
 
@@ -84,7 +93,7 @@ export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLa
           style={{ alignSelf: "flex-end", height: BAR, width: completed ? shrink.interpolate({ inputRange: [0, 1], outputRange: [Math.max(BAR, width), BAR] }) : "100%", borderRadius: 999, backgroundColor: compact ? colors.ink : colors.nightRaised, overflow: "hidden" }}
         >
           {/* Everything is held to the right edge, so the bar closes in on the knob and the rest is clipped. */}
-          <View style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: width || "100%", justifyContent: "center", alignItems: "center" }}>
+          <View style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: width || "100%", justifyContent: "center", alignItems: "center", paddingLeft: compact ? KNOB + INSET * 2 : 0 }}>
             {/* The bar fills green behind the knob as it is dragged, all of it by the end. */}
             <Animated.View
               testID="swipe-fill"
@@ -92,7 +101,7 @@ export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLa
               style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: x.interpolate({ inputRange: [0, Math.max(1, max)], outputRange: [BAR, Math.max(BAR, width)] }), borderRadius: 999, backgroundColor: colors.go, opacity: x.interpolate({ inputRange: [0, 8], outputRange: [0, 1], extrapolate: "clamp" }) }}
             />
             <Animated.View style={{ opacity: x.interpolate({ inputRange: [0, Math.max(1, max * 0.55)], outputRange: [1, 0], extrapolate: "clamp" }) }}>
-              <Txt variant="body" tone="night" style={{ fontWeight: "600" }}>
+              <Txt variant={compact ? "small" : "body"} tone="night" numberOfLines={1} style={{ fontWeight: "600" }}>
                 {label}
               </Txt>
             </Animated.View>

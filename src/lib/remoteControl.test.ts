@@ -6,6 +6,7 @@ describe("who is connected", () => {
   const view: RemoteView = {
     enabled: true,
     show_titles: false,
+    allow_phone_auto: false,
     devices: [
       { id: "a", name: "Aly's iPhone", paired_at: 0, last_seen: 0 },
       { id: "b", name: "Pixel", paired_at: 0, last_seen: 0 },

@@ -3,10 +3,10 @@ import type { Pushed, Session } from "../net/session";
 import { Sync, SUGGESTIONS_KEPT_MS } from "./sync";
 
 /** A session that records what it was asked and answers from a table. */
-function fakeSession(epoch: number, answers: Partial<Record<Request["op"], unknown>> = {}, fail: Partial<Record<Request["op"], string>> = {}) {
+function fakeSession(epoch: number, answers: Partial<Record<Request["op"], unknown>> = {}, fail: Partial<Record<Request["op"], string>> = {}, features: string[] = []) {
   const asked: Request[] = [];
   const session = {
-    welcome: { type: "welcome", protocol: 1, app_version: "t", mac_name: "Mac", epoch },
+    welcome: { type: "welcome", protocol: 1, app_version: "t", mac_name: "Mac", epoch, features },
     ask: async (r: Request) => {
       asked.push(r);
       if (fail[r.op]) throw new Error(fail[r.op]);
@@ -87,7 +87,7 @@ describe("the phone's sync", () => {
     frame();
     expect(sync.getState().waiting).toEqual(waiting);
     const before = s.asked.filter((r) => r.op === "list_waiting").length;
-    sync.onPushed({ type: "chats", chats: [{ slot: "a", title: null, project: null, status: "needs_you", last_seq: 1, active_at: 1 }] });
+    sync.onPushed({ type: "chats", chats: [{ slot: "a", title: null, project: null, status: "needs_you", last_seq: 1, active_at: 1, permissions: null, preset: null }] });
     await sync.answer("a", "p1", true, { "Which?": "Dark" });
     await settle();
     expect(s.asked).toContainEqual({ op: "answer", slot: "a", request_id: "p1", allow: true, message: null, answers: { "Which?": "Dark" } });
@@ -213,5 +213,47 @@ describe("the phone's sync", () => {
     expect(s.asked).toContainEqual({ op: "earlier", slot: "a", hidden: 2 });
     expect(sync.getState().views.a.items[0]).toMatchObject({ text: "first" });
     expect(sync.getState().views.a.hidden).toBe(0);
+  });
+});
+
+describe("what a phone may choose for a chat", () => {
+  it("asks a Mac that has Controls, and checks and keeps only what it makes sense of", async () => {
+    const { sync } = rig();
+    const { session, asked } = fakeSession(1, { controls: { allow_auto: true, presets: [{ id: "a", name: "A", summary: "x" }, { id: 5, name: "bad" }, { id: "b", name: "B" }] } }, {}, ["controls"]);
+    sync.onSession(session);
+    expect(sync.hasControls).toBe(true);
+    expect(await sync.controls()).toEqual({ allow_auto: true, presets: [{ id: "a", name: "A", summary: "x" }, { id: "b", name: "B", summary: "" }] });
+    expect(asked).toContainEqual({ op: "controls" });
+  });
+
+  it("never asks a Mac that can't say: it would end the connection at a request it doesn't know", async () => {
+    const { sync } = rig();
+    const { session, asked } = fakeSession(1);
+    sync.onSession(session);
+    expect(sync.hasControls).toBe(false);
+    expect(await sync.controls()).toBeNull();
+    expect(asked.some((r) => r.op === "controls")).toBe(false);
+  });
+
+  it("refuses an answer that isn't what it asked for", async () => {
+    const { sync } = rig();
+    sync.onSession(fakeSession(1, { controls: { allow_auto: "yes", presets: [] } }, {}, ["controls"]).session);
+    await expect(sync.controls()).rejects.toThrow("didn't come through");
+  });
+
+  it("sends the mode or preset it is asked to switch to, and a new chat's choice", async () => {
+    const { sync } = rig();
+    const { session, asked } = fakeSession(1, { new_chat: { slot: "s9" } }, {}, ["controls"]);
+    sync.onSession(session);
+    await sync.setPermissions("a", "auto");
+    await sync.setPreset("a", "max");
+    await sync.newChat("/p", "hi", { permissions: "auto", preset: "max" });
+    await sync.newChat("/p", "hi");
+    expect(asked.filter((r) => r.op !== "list_waiting")).toEqual([
+      { op: "set_permissions", slot: "a", permissions: "auto" },
+      { op: "set_preset", slot: "a", preset: "max" },
+      { op: "new_chat", project: "/p", text: "hi", permissions: "auto", preset: "max" },
+      { op: "new_chat", project: "/p", text: "hi", permissions: null, preset: null },
+    ]);
   });
 });

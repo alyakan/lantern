@@ -1,23 +1,15 @@
 import { useEffect, useRef } from "react";
-import { Animated, Easing, View } from "react-native";
+import { Animated, Easing, Switch, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectionState } from "../net/connection";
+import { useAppLock, useLockState } from "../shell/lockContext";
 import { EMBER, useAccent } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
+import { DarkLantern } from "../ui/lanterns";
 import { skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { colors, radius, space } from "../ui/theme";
-
-/** A lantern gone dark: the empty state's picture, drawn from a few boxes. */
-function DarkLantern() {
-  return (
-    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ alignItems: "center", marginBottom: 22 }}>
-      <View style={{ width: 16, height: 10, borderWidth: 2, borderBottomWidth: 0, borderColor: colors.ink3, borderTopLeftRadius: 8, borderTopRightRadius: 8 }} />
-      <View style={{ width: 44, height: 64, borderWidth: 2, borderColor: colors.ink3, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderBottomLeftRadius: 12, borderBottomRightRadius: 12 }} />
-    </View>
-  );
-}
 
 /** A lantern being lit: its glow swells and settles, over and over, while the phone finds the Mac. */
 function LitLantern() {
@@ -76,6 +68,36 @@ export function OfflineScreen({ state, onRetry, onUnpair }: { state: ConnectionS
   );
 }
 
+/** The lock's switch: Face ID (or the phone's passcode) before Lantern shows anything. It asks first, to turn it on or off. */
+function LockRow() {
+  const lock = useAppLock();
+  const { enabled, available, authenticating, method, problem } = useLockState();
+  return (
+    <View style={{ marginTop: 10, gap: 4 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <Txt variant="body" style={{ fontWeight: "700", flex: 1 }}>
+          Lock with {method}
+        </Txt>
+        <Switch
+          accessibilityLabel={`Lock with ${method}`}
+          value={enabled}
+          disabled={authenticating || (!available && !enabled)}
+          onValueChange={(on) => void (on ? lock.enable() : lock.disable())}
+          trackColor={{ true: colors.go, false: colors.rule }}
+        />
+      </View>
+      <Txt variant="small" tone="ink2">
+        {available || enabled ? `Asks for ${method} when you come back to Lantern after half a minute away. Your phone's passcode works too.` : "Set a passcode on this phone to use this."}
+      </Txt>
+      {problem && (
+        <Txt variant="small" tone="stop" accessibilityRole="alert">
+          {problem}
+        </Txt>
+      )}
+    </View>
+  );
+}
+
 /** The Mac, as a sheet: its name, where the connection stands, and unpairing this phone. */
 export function MacSheet({ state, onClose, onUnpair, onSupport }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the optional tips. */ onSupport?: () => void }) {
   const insets = useSafeAreaInsets();
@@ -96,6 +118,7 @@ export function MacSheet({ state, onClose, onUnpair, onSupport }: { state: Conne
           <Txt variant="small" tone="ink2" style={{ marginTop: 6 }}>
             Unpairing forgets this Mac on this phone. To stop it for good, also remove this phone in Lantern's Settings, under Remote control.
           </Txt>
+          <LockRow />
           {onSupport && <Button label="Support development" kind="ghost" onPress={onSupport} style={{ marginTop: 6 }} />}
           <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ marginTop: onSupport ? 0 : 6 }} />
           <Button label="Close" onPress={close} />

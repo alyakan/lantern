@@ -22,6 +22,11 @@ vi.mock("../api", () => ({
       view = { ...view, show_titles: on };
       return Promise.resolve(view);
     },
+    remoteSetAllowAuto: (on: boolean) => {
+      calls.push({ cmd: "auto", args: on });
+      view = { ...view, allow_phone_auto: on };
+      return Promise.resolve(view);
+    },
     remotePair: () => {
       if (!view.enabled) return Promise.reject("Turn on Remote control first.");
       view = { ...view, pairing: true };
@@ -43,7 +48,7 @@ const { RemoteControl } = await import("./RemoteControl");
 
 beforeEach(() => {
   calls.length = 0;
-  view = { enabled: false, show_titles: false, devices: [], connected: [], listening: false, pairing: false };
+  view = { enabled: false, show_titles: false, allow_phone_auto: false, devices: [], connected: [], listening: false, pairing: false };
 });
 
 describe("Settings › Remote control", () => {
@@ -146,6 +151,15 @@ describe("Settings › Remote control", () => {
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove Pixel" })));
     expect(screen.getByRole("alert").textContent).toContain("won't last past a restart");
     expect(screen.getByText("No phones yet.")).toBeTruthy();
+  });
+
+  it("Auto from a phone is off until turned on, and says that chats already on Auto stay there when it is turned off", async () => {
+    render(<RemoteControl now={() => 0} />);
+    const auto = await screen.findByRole("checkbox", { name: "Let paired phones use Auto" });
+    expect(auto).not.toBeChecked();
+    expect(screen.getByText(/Turning it off doesn't change chats already on Auto/)).toBeTruthy();
+    fireEvent.click(auto);
+    await waitFor(() => expect(calls).toContainEqual({ cmd: "auto", args: true }));
   });
 
   it("chat titles in notifications are off until turned on", async () => {

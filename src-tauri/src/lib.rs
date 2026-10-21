@@ -351,9 +351,17 @@ impl remote::gateway::Host for RemoteHost {
         })
     }
 
-    fn new_chat(&self, folder: String, text: String, _by: String) -> remote::gateway::BoxFut<Result<String, String>> {
+    fn new_chat(&self, folder: String, text: String, _by: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>) -> remote::gateway::BoxFut<Result<String, String>> {
         let app = self.app.clone();
-        Box::pin(async move { request_new_chat(&app, folder, text).await })
+        Box::pin(async move { request_new_chat(&app, folder, text, permissions, preset).await })
+    }
+
+    fn set_permissions(&self, slot: &str, permissions: remote::protocol::RemotePermissions) -> Result<(), String> {
+        self.app.emit("remote-set-permissions", remote::SetPermissionsRequest { slot: slot.to_string(), permissions: permissions.as_str() }).map_err(|e| e.to_string())
+    }
+
+    fn set_preset(&self, slot: &str, preset: &str) -> Result<(), String> {
+        self.app.emit("remote-set-preset", remote::SetPresetRequest { slot: slot.to_string(), preset: preset.to_string() }).map_err(|e| e.to_string())
     }
 
     fn suggest_reply(&self, prompt: String) -> remote::gateway::BoxFut<Result<String, String>> {
@@ -437,7 +445,7 @@ async fn start_remote(app: &AppHandle) -> Result<(), String> {
         let _ = notify.emit("remote-changed", ());
     }));
     let door = gateway.clone();
-    let (listener, port) = remote::transport::serve_lan(remote::PORT, move |link| door.accept(link)).await?;
+    let (listener, port) = remote::transport::serve_lan(remote::port(), move |link| door.accept(link)).await?;
     let id: String = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, &mac.public).chars().take(10).collect();
     let bonjour = remote::transport::Bonjour::advertise(port, &name, &id).ok();
     // Pushes to phones that aren't looking at a chat when it needs them or finishes (see remote/notifier.rs).
@@ -1713,6 +1721,12 @@ fn respond_permission(state: State<'_, AppState>, slot: String, request_id: Stri
     answer_prompt(&state, &slot, &request_id, allow, message, updated_input, remote::SENT_BY_DESKTOP)
 }
 
+/// What the window offers a phone to choose between: its presets (Settings › Models), by id, name and a line on what each does.
+#[tauri::command]
+fn remote_window_controls(state: State<'_, AppState>, presets: Vec<remote::protocol::RemotePreset>) {
+    state.remote.hub.set_presets(presets);
+}
+
 /// What the window knows of its open chats, for the session hub: the titles it shows, and which are asleep.
 #[tauri::command]
 fn remote_window_chats(state: State<'_, AppState>, chats: Vec<remote::WindowChat>) {
@@ -1747,6 +1761,12 @@ async fn remote_set_enabled(app: AppHandle, state: State<'_, AppState>, on: bool
 #[tauri::command]
 fn remote_set_show_titles(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
     state.remote.view_after(state.remote.store.set_show_titles(on))
+}
+
+/// Whether paired phones may use Auto (start a chat on it, or put a chat on it). Off by default.
+#[tauri::command]
+fn remote_set_allow_auto(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
+    state.remote.view_after(state.remote.store.set_allow_phone_auto(on))
 }
 
 /// A QR code for pairing a phone, good for five minutes and one try. Off the main thread: the Mac's key comes from the
@@ -1796,10 +1816,10 @@ const NEW_CHAT_LISTED_WAIT: std::time::Duration = std::time::Duration::from_secs
 
 /// Asks the window to start a chat for a paired phone, and says which slot it made once the chat is listed where the phone
 /// can follow it. The window does it (it owns chats and what they start with), on Ask, without switching what it shows.
-async fn request_new_chat(app: &AppHandle, folder: String, text: String) -> Result<String, String> {
+async fn request_new_chat(app: &AppHandle, folder: String, text: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>) -> Result<String, String> {
     let state = app.state::<AppState>();
     let (id, answer) = state.remote.expect_new_chat();
-    let request = remote::NewChatRequest { id: id.clone(), folder, text, permissions: "ask" };
+    let request = remote::NewChatRequest { id: id.clone(), folder, text, permissions: permissions.as_str(), preset };
     if let Err(e) = app.emit("remote-new-chat", &request) {
         state.remote.forget_new_chat(&id);
         return Err(e.to_string());
@@ -2515,9 +2535,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             locate_claude,
             remote_window_chats,
+            remote_window_controls,
             remote_settings,
             remote_set_enabled,
             remote_set_show_titles,
+            remote_set_allow_auto,
             remote_pair,
             remote_pair_cancel,
             remote_remove_device,

@@ -14,7 +14,7 @@ import { MemoryStore } from "./memoryStore";
 
 export const NOW = 1_000_000_000;
 
-export const chat = (over: Partial<RemoteChat> = {}): RemoteChat => ({ slot: "a", title: "Release 0.1.53", project: "lantern", status: "idle", last_seq: 1, active_at: NOW - 60_000, ...over });
+export const chat = (over: Partial<RemoteChat> = {}): RemoteChat => ({ slot: "a", title: "Release 0.1.53", project: "lantern", status: "idle", last_seq: 1, active_at: NOW - 60_000, permissions: null, preset: null, ...over });
 
 export const waiting = (over: Partial<Waiting> = {}): Waiting => ({ slot: "a", chat_title: null, request_id: "p1", tool_name: "Bash", input: { command: "git push origin release/0.1.53", description: "Push the release branch" }, at: 1, ...over });
 
@@ -36,7 +36,10 @@ export interface Seed {
   tips?: TipJar;
 }
 
-export const connected: ConnectionState = { kind: "connected", host: "192.168.1.20", welcome: { type: "welcome", protocol: 1, app_version: "0.1.53", mac_name: "Aly's MacBook Pro", epoch: 1 } };
+/** Connected to a Mac that has Controls (Welcome's features), as an up-to-date Lantern is. */
+export const connectedWithControls: ConnectionState = { kind: "connected", host: "192.168.1.20", welcome: { type: "welcome", protocol: 1, app_version: "0.1.54", mac_name: "Aly's MacBook Pro", epoch: 1, features: ["controls"] } };
+
+export const connected: ConnectionState = { kind: "connected", host: "192.168.1.20", welcome: { type: "welcome", protocol: 1, app_version: "0.1.53", mac_name: "Aly's MacBook Pro", epoch: 1, features: [] } };
 
 export function seed(controller: Controller, s: Seed) {
   controller.setConnection(s.connection ?? connected);

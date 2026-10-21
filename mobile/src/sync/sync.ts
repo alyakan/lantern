@@ -4,7 +4,9 @@
  * comes up, and the user's sends and answers go to the Mac. React reads it with useSyncExternalStore.
  */
 import type { Request } from "../protocol/generated/Request";
+import type { Controls } from "../protocol/generated/Controls";
 import type { EarlierPage } from "../protocol/generated/EarlierPage";
+import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { StartedChat } from "../protocol/generated/StartedChat";
 import type { Suggestions } from "../protocol/generated/Suggestions";
@@ -185,10 +187,39 @@ export class Sync {
     return value;
   }
 
-  /** Starts a chat in a project with a first message: the new chat's slot, once it is open on the Mac (on Ask). */
-  async newChat(project: string, text: string): Promise<string> {
-    const started = await this.ask<StartedChat>({ op: "new_chat", project, text });
+  /**
+   * Starts a chat in a project with a first message: the new chat's slot, once it is open on the Mac. It is on Ask unless
+   * `permissions` is Auto (which the Mac allows only if its Settings let phones), with `preset` (one of controls()' ids) or
+   * else the project's own.
+   */
+  async newChat(project: string, text: string, choice: { permissions?: RemotePermissions; preset?: string } = {}): Promise<string> {
+    // Only what was chosen is sent: a Mac that is older doesn't know the fields, and a chat on Ask asks for nothing more.
+    const started = await this.ask<StartedChat>({ op: "new_chat", project, text, permissions: choice.permissions ?? null, preset: choice.preset ?? null });
     return started.slot;
+  }
+
+  /** Whether this Mac can be asked what a phone may choose (Welcome lists "controls"); an older Mac ends the connection at a request it doesn't know. */
+  get hasControls(): boolean {
+    return this.session?.welcome.features?.includes("controls") === true;
+  }
+
+  /** What may be chosen for a chat: whether Auto is allowed, and the presets. Null for a Mac that can't say. */
+  async controls(): Promise<Controls | null> {
+    if (!this.hasControls) return null;
+    const c = await this.ask<Controls>({ op: "controls" });
+    // Whatever the Mac sends is checked before it is shown.
+    if (!c || typeof c.allow_auto !== "boolean" || !Array.isArray(c.presets)) throw new Error("What you can choose didn't come through.");
+    return { allow_auto: c.allow_auto, presets: c.presets.filter((p) => p && typeof p.id === "string" && typeof p.name === "string").map((p) => ({ id: p.id, name: p.name, summary: typeof p.summary === "string" ? p.summary : "" })) };
+  }
+
+  /** Puts a chat on Ask or Auto; rejects with why not (Auto is off on the Mac, Claude is busy…). */
+  setPermissions(slot: string, permissions: RemotePermissions) {
+    return this.ask({ op: "set_permissions", slot, permissions });
+  }
+
+  /** Puts a chat on one of controls()' presets; rejects with why not. */
+  setPreset(slot: string, preset: string) {
+    return this.ask({ op: "set_preset", slot, preset });
   }
 
   diff(slot: string, path: string) {

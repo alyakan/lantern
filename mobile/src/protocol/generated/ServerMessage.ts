@@ -5,4 +5,9 @@ import type { RemoteEvent } from "./RemoteEvent";
 /**
  * Lantern's message.
  */
-export type ServerMessage = { "type": "welcome", protocol: number, app_version: string, mac_name: string, epoch: number, } | { "type": "response", id: number, ok: unknown, error: string | null, } | { "type": "event", slot: string, seq: number, event: RemoteEvent, } | { "type": "reset", slot: string, seq: number, page: number, done: boolean, hidden: number, events: Array<RemoteEvent>, } | { "type": "chats", chats: Array<RemoteChat>, };
+export type ServerMessage = { "type": "welcome", protocol: number, app_version: string, mac_name: string, epoch: number, 
+/**
+ * What this Mac can do beyond protocol 1, by name ("controls": Request::Controls and what goes with it). A Mac that
+ * is older says nothing, and a phone doesn't ask it for what it hasn't got.
+ */
+features: Array<string>, } | { "type": "response", id: number, ok: unknown, error: string | null, } | { "type": "event", slot: string, seq: number, event: RemoteEvent, } | { "type": "reset", slot: string, seq: number, page: number, done: boolean, hidden: number, events: Array<RemoteEvent>, } | { "type": "chats", chats: Array<RemoteChat>, };
