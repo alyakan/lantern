@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState, type ReactNode } from "react";
-import { BackHandler, Modal, Pressable, ScrollView, View } from "react-native";
+import { BackHandler, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { ChatScreen } from "../screens/ChatScreen";
@@ -11,6 +11,7 @@ import { ConfirmLink, PairScreen } from "../screens/PairScreen";
 import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
 import { Button, Txt } from "../ui/components";
 import { FadeSlideIn } from "../ui/motion";
+import { Sheet } from "../ui/Sheet";
 import { colors, radius, space } from "../ui/theme";
 import { rows } from "../view/home";
 import type { Controller } from "./controller";
@@ -32,31 +33,32 @@ function ChatPicker({ onPick, onClose }: { onPick: (slot: string) => void; onClo
   const { chats } = useSyncState();
   const insets = useSafeAreaInsets();
   return (
-    <Modal animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable accessibilityLabel="Close" style={{ flex: 1, backgroundColor: "#00000066" }} onPress={onClose} />
-      <View style={{ maxHeight: "70%", backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, paddingBottom: insets.bottom + space.lg }}>
-        <Txt variant="heading" style={{ padding: space.xl, paddingBottom: space.sm }}>
-          Message which chat?
-        </Txt>
-        <ScrollView>
-          {rows(chats, Date.now()).map((r) => (
-            <Pressable key={r.slot} accessibilityRole="button" accessibilityLabel={r.title} onPress={() => onPick(r.slot)} style={{ paddingHorizontal: space.xl, paddingVertical: 12, minHeight: 52, justifyContent: "center" }}>
-              <Txt variant="body" style={{ fontWeight: "600" }}>
-                {r.title}
-              </Txt>
-              {!!r.project && (
-                <Txt variant="small" tone="ink2">
-                  {r.project}
+    <Sheet onClose={onClose}>
+      {(close) => (
+        <View style={{ maxHeight: "70%", backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, paddingBottom: insets.bottom + space.lg }}>
+          <Txt variant="heading" style={{ padding: space.xl, paddingBottom: space.sm }}>
+            Message which chat?
+          </Txt>
+          <ScrollView>
+            {rows(chats, Date.now()).map((r) => (
+              <Pressable key={r.slot} accessibilityRole="button" accessibilityLabel={r.title} onPress={() => onPick(r.slot)} style={{ paddingHorizontal: space.xl, paddingVertical: 12, minHeight: 52, justifyContent: "center" }}>
+                <Txt variant="body" style={{ fontWeight: "600" }}>
+                  {r.title}
                 </Txt>
-              )}
-            </Pressable>
-          ))}
-        </ScrollView>
-        <View style={{ paddingHorizontal: space.xl, paddingTop: space.sm }}>
-          <Button label="Cancel" kind="ghost" onPress={onClose} />
+                {!!r.project && (
+                  <Txt variant="small" tone="ink2">
+                    {r.project}
+                  </Txt>
+                )}
+              </Pressable>
+            ))}
+          </ScrollView>
+          <View style={{ paddingHorizontal: space.xl, paddingTop: space.sm }}>
+            <Button label="Cancel" kind="ghost" onPress={close} />
+          </View>
         </View>
-      </View>
-    </Modal>
+      )}
+    </Sheet>
   );
 }
 

@@ -1,7 +1,8 @@
-import { ActivityIndicator, Modal, Pressable, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectionState } from "../net/connection";
 import { Button, Txt } from "../ui/components";
+import { Sheet } from "../ui/Sheet";
 import { colors, radius, space } from "../ui/theme";
 
 /** A lantern gone dark: the empty state's picture, drawn from a few boxes. */
@@ -49,24 +50,25 @@ export function MacSheet({ state, onClose, onUnpair }: { state: ConnectionState;
   const insets = useSafeAreaInsets();
   const where = state.kind === "connected" ? `Connected through ${state.host}` : state.kind === "offline" ? "Not connected" : state.kind === "connecting" ? "Connecting…" : "Not paired";
   return (
-    <Modal animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable accessibilityLabel="Close" style={{ flex: 1, backgroundColor: "#00000066" }} onPress={onClose} />
-      <View style={{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 8 }}>
-        <Txt variant="heading">{state.kind === "connected" ? state.welcome.mac_name : "Your Mac"}</Txt>
-        <Txt variant="body" tone="ink2">
-          {where}
-        </Txt>
-        {state.kind === "connected" && (
-          <Txt variant="small" tone="ink3">
-            Lantern {state.welcome.app_version}
+    <Sheet onClose={onClose}>
+      {(close) => (
+        <View style={{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: insets.bottom + space.xl, gap: 8 }}>
+          <Txt variant="heading">{state.kind === "connected" ? state.welcome.mac_name : "Your Mac"}</Txt>
+          <Txt variant="body" tone="ink2">
+            {where}
           </Txt>
-        )}
-        <Txt variant="small" tone="ink2" style={{ marginTop: 6 }}>
-          Unpairing forgets this Mac on this phone. To stop it for good, also remove this phone in Lantern's Settings, under Remote control.
-        </Txt>
-        <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ marginTop: 6 }} />
-        <Button label="Close" onPress={onClose} />
-      </View>
-    </Modal>
+          {state.kind === "connected" && (
+            <Txt variant="small" tone="ink3">
+              Lantern {state.welcome.app_version}
+            </Txt>
+          )}
+          <Txt variant="small" tone="ink2" style={{ marginTop: 6 }}>
+            Unpairing forgets this Mac on this phone. To stop it for good, also remove this phone in Lantern's Settings, under Remote control.
+          </Txt>
+          <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ marginTop: 6 }} />
+          <Button label="Close" onPress={close} />
+        </View>
+      )}
+    </Sheet>
   );
 }

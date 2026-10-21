@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, TextInput, View } from "react-native";
+import { ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import { useController } from "../shell/hooks";
 import { Button, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale } from "../ui/motion";
+import { Sheet } from "../ui/Sheet";
 import { colors, radius, shadow, space } from "../ui/theme";
 
 /** What the sheet starts from: a suggestion's draft, the project it names, or the chat it carries on. */
@@ -81,9 +82,8 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
   };
 
   return (
-    <Modal animationType="slide" transparent onRequestClose={onClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1, justifyContent: "flex-end" }}>
-        <Pressable accessibilityLabel="Close" onPress={onClose} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "#00000066" }} />
+    <Sheet onClose={onClose}>
+      {(close) => (
         <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 12, maxHeight: "88%" }, shadow.float]}>
           <Txt variant="title" accessibilityRole="header">
             {continueChat ? "Carry on" : "New chat"}
@@ -137,9 +137,9 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
             </Txt>
           )}
           <Button label={continueChat ? "Send" : busy ? "Starting…" : "Start the chat"} disabled={!ready} onPress={() => void start()} />
-          <Button label="Cancel" kind="ghost" disabled={busy} onPress={onClose} />
+          <Button label="Cancel" kind="ghost" disabled={busy} onPress={close} />
         </View>
-      </KeyboardAvoidingView>
-    </Modal>
+      )}
+    </Sheet>
   );
 }
