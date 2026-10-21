@@ -307,6 +307,24 @@ describe("DashboardTab", () => {
     expect(api.dashboardLoadOptions).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a chosen value that the loaded list doesn't have visible, so it can be unticked", async () => {
+    load([dash()], state());
+    // The form's default is "approvals"; the list the command printed doesn't have it.
+    vi.mocked(api.dashboardOptions).mockResolvedValue({ options: ["sso", "testo_sensors"], loaded_at: Date.now() });
+    // Its own folder name: what a form remembers is kept per folder, so it can't be what an earlier test left.
+    render(<DashboardTab folder="/stale" refreshKey={0} />);
+    const stale = await screen.findByLabelText(/approvals/);
+    expect(stale).toBeChecked();
+    expect(screen.getByText("not in the list")).toBeInTheDocument();
+    fireEvent.click(stale);
+    expect(screen.queryByLabelText(/approvals/)).toBeNull();
+    // Run now sends what is left.
+    fireEvent.click(screen.getByLabelText("sso"));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await waitFor(() => expect(api.dashboardPreview).toHaveBeenCalled());
+    expect(vi.mocked(api.dashboardPreview).mock.calls[0][3]).toMatchObject({ addons: ["sso"] });
+  });
+
   it("picks up a list that was loaded elsewhere when the backend says something changed", async () => {
     load([dash()], state());
     vi.mocked(api.dashboardOptions).mockResolvedValue(null);

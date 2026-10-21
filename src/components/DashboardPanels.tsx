@@ -219,6 +219,19 @@ function Field({ id, field, source, value, disabled, onChange }: { id: string; f
             <span>{o}</span>
           </label>
         ))}
+        {/* A choice the loaded list doesn't have (a default, or one made before the list changed) stays visible, so it can be unticked. */}
+        {loaded.status === "ready" &&
+          field.optionsFrom &&
+          chosen
+            .filter((c) => !options.includes(c))
+            .map((o) => (
+              <label key={o} className="dash-option dash-stale">
+                <input type="checkbox" checked disabled={disabled} onChange={() => onChange(chosen.filter((c) => c !== o))} />
+                <span>
+                  {o} <em>not in the list</em>
+                </span>
+              </label>
+            ))}
         {note}
       </fieldset>
     );
@@ -238,6 +251,8 @@ function Field({ id, field, source, value, disabled, onChange }: { id: string; f
                 {o}
               </option>
             ))}
+            {/* The chosen one, if the loaded list doesn't have it: shown as it is, so it can be seen and changed. */}
+            {loaded.status === "ready" && field.optionsFrom && text !== "" && !options.includes(text) && <option value={text}>{text} (not in the list)</option>}
           </select>
           {note}
         </>

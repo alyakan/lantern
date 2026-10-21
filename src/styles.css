@@ -1724,6 +1724,7 @@ button.network-row.current { background: var(--bg-active); color: var(--text); }
 .dash-multi > legend { width: 100%; }
 .dash-option { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
 .dash-required { color: var(--del); }
+.dash-stale em { font-style: normal; color: var(--warn); }
 .dash-options-error { width: 100%; font-size: calc(11.5px * var(--font-scale)); color: var(--del); overflow-wrap: anywhere; }
 .dash-options-error button.ghost { height: 18px; padding: 0 6px; font-size: calc(11px * var(--font-scale)); color: var(--text-2); }
 .dash-actions { display: flex; align-items: center; gap: 6px; margin-top: 2px; }

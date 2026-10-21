@@ -406,7 +406,8 @@ fn check_range(issues: &mut Issues, path: &str, object: &Map<String, Value>, kin
 #[allow(clippy::too_many_arguments)]
 fn check_default(issues: &mut Issues, path: &str, raw: Option<&Value>, kind: Kind, options: &[String], dynamic: bool, min: Option<f64>, max: Option<f64>) -> Option<Value> {
     let raw = raw?;
-    // A command's options aren't known while the file is read, so a default of theirs is checked when the form loads them.
+    // A command's options aren't known while the file is read, so such a default isn't checked here: the form shows one the loaded
+    // list doesn't have as "not in the list" (to untick or change), and a run refuses it.
     let ok = match (kind, raw) {
         (Kind::Text, Value::String(s)) => s.chars().count() <= MAX_ARG || fail(issues, path, format!("longer than {MAX_ARG} characters")),
         (Kind::Number, Value::Number(n)) => match n.as_f64() {
