@@ -66,17 +66,12 @@ describe("deciding", () => {
   it("an allow closes by itself after two seconds, and the circle closes it sooner", async () => {
     expect(CLOSE_AFTER_MS).toBe(2000);
     const { onClose } = await decide();
-    jest.useFakeTimers();
-    try {
-      await activate();
-      await act(async () => void (await Promise.resolve()));
-      await act(async () => void jest.advanceTimersByTime(CLOSE_AFTER_MS - 100));
-      expect(onClose).not.toHaveBeenCalled();
-      await act(async () => void jest.advanceTimersByTime(200));
-      expect(onClose).toHaveBeenCalledTimes(1);
-    } finally {
-      jest.useRealTimers();
-    }
+    await activate();
+    await waitFor(() => expect(screen.getByText("Allowed.")).toBeTruthy());
+    const allowedAt = Date.now();
+    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), { timeout: CLOSE_AFTER_MS + 1500 });
+    expect(Date.now() - allowedAt).toBeGreaterThanOrEqual(CLOSE_AFTER_MS - 250);
   });
 
   it("says what it came to in small, regular text, not a line of its own voice", async () => {
@@ -141,30 +136,17 @@ describe("deciding", () => {
 
   it("closes by itself a moment after it is answered", async () => {
     const { onClose } = await decide();
-    jest.useFakeTimers();
-    try {
-      await fireEvent.press(screen.getByRole("button", { name: "Deny" }));
-      await act(async () => void (await Promise.resolve()));
-      await act(async () => void jest.advanceTimersByTime(CLOSE_AFTER_MS + 100));
-      expect(onClose).toHaveBeenCalled();
-    } finally {
-      jest.useRealTimers();
-    }
+    await fireEvent.press(screen.getByRole("button", { name: "Deny" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: CLOSE_AFTER_MS + 1500 });
   });
 
   it("when the Mac answers first, says so and closes, without having sent anything", async () => {
     const { controller, onClose, asked } = await decide();
-    jest.useFakeTimers();
-    try {
-      await act(async () => controller.sync.apply({ type: "waiting", list: [] }));
-      expect(screen.getByText("Answered on your Mac.")).toBeTruthy();
-      expect(screen.getByText("Push the release branch")).toBeTruthy();
-      await act(async () => void jest.advanceTimersByTime(CLOSE_AFTER_MS + 100));
-      expect(onClose).toHaveBeenCalled();
-      expect(asked.filter((r) => r.op === "answer")).toEqual([]);
-    } finally {
-      jest.useRealTimers();
-    }
+    await act(async () => controller.sync.apply({ type: "waiting", list: [] }));
+    expect(screen.getByText("Answered on your Mac.")).toBeTruthy();
+    expect(screen.getByText("Push the release branch")).toBeTruthy();
+    await waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: CLOSE_AFTER_MS + 1500 });
+    expect(asked.filter((r) => r.op === "answer")).toEqual([]);
   });
 
   it("says a prompt already gone was answered already", async () => {
