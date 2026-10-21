@@ -1,3 +1,4 @@
+import { StyleSheet } from "react-native";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
 import { chat, makeController, renderWith, waiting } from "../test/render";
@@ -63,18 +64,39 @@ describe("deciding", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("an allow waits to be tapped: it doesn't close by itself", async () => {
+  it("an allow closes by itself after two seconds, and the circle closes it sooner", async () => {
+    expect(CLOSE_AFTER_MS).toBe(2000);
     const { onClose } = await decide();
     jest.useFakeTimers();
     try {
-      await act(async () => activate());
+      await activate();
       await act(async () => void (await Promise.resolve()));
-      await act(async () => void jest.advanceTimersByTime(CLOSE_AFTER_MS * 3));
-      expect(screen.getByText("Allowed.")).toBeTruthy();
+      await act(async () => void jest.advanceTimersByTime(CLOSE_AFTER_MS - 100));
       expect(onClose).not.toHaveBeenCalled();
+      await act(async () => void jest.advanceTimersByTime(200));
+      expect(onClose).toHaveBeenCalledTimes(1);
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it("says what it came to in small, regular text, not a line of its own voice", async () => {
+    await decide();
+    await act(async () => activate());
+    await waitFor(() => expect(screen.getByText("Allowed.")).toBeTruthy());
+    const style = StyleSheet.flatten(screen.getByText("Allowed.").props.style);
+    expect(style).toMatchObject({ fontSize: 13 });
+    expect(style.fontWeight).toBeUndefined();
+  });
+
+  it("keeps the circle where the bar was: Deny's place is held, unseen, not given up", async () => {
+    await decide();
+    await act(async () => activate());
+    await waitFor(() => expect(screen.getByText("Allowed.")).toBeTruthy());
+    // Not there to a reader or a finger…
+    expect(screen.queryByRole("button", { name: "Deny" })).toBeNull();
+    // …but still taking its room under the circle.
+    expect(screen.getByText("Deny", { includeHiddenElements: true })).toBeTruthy();
   });
 
   it("the circle can't be tapped away before the answer has gone", async () => {

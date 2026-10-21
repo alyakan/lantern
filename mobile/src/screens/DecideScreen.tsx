@@ -17,11 +17,10 @@ export interface DecideProps {
   onClose: () => void;
 }
 
-/** How long "Answered on your Mac" stays before the screen closes by itself. */
-export const CLOSE_AFTER_MS = 2500;
+/** How long what it came to ("Allowed", "Answered on your Mac") stays before the screen closes by itself. */
+export const CLOSE_AFTER_MS = 2000;
 
-/** `tap`: it closes when the person taps (an allow, by the circle), not by itself. */
-type Outcome = { kind: "none" } | { kind: "sending" } | { kind: "done"; allowed: boolean; tap: boolean } | { kind: "elsewhere" } | { kind: "failed"; why: string };
+type Outcome = { kind: "none" } | { kind: "sending" } | { kind: "done"; allowed: boolean } | { kind: "elsewhere" } | { kind: "failed"; why: string };
 
 /** What the answers to a prompt's questions come to, one string per question (a multi-select joined with commas). */
 export function answersFrom(qs: Question[], picks: Record<string, string[]>, typed: Record<string, string>): Record<string, string> | null {
@@ -131,10 +130,9 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   }, [gone, outcome.kind]);
   useEffect(() => {
     if (outcome.kind !== "elsewhere" && outcome.kind !== "done") return;
-    if (outcome.kind === "done" && outcome.tap) return;
     const t = setTimeout(onClose, CLOSE_AFTER_MS);
     return () => clearTimeout(t);
-  }, [outcome, onClose]);
+  }, [outcome.kind, onClose]);
 
   if (!asked) {
     return (
@@ -162,7 +160,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
     setOutcome({ kind: "sending" });
     try {
       await controller.sync.answer(slot, requestId, allow, withAnswers);
-      setOutcome({ kind: "done", allowed: allow, tap: allow && !withAnswers });
+      setOutcome({ kind: "done", allowed: allow });
       // The swipe buzzes for itself; the rest say what it came to.
       if (!allow) buzz("warning");
       else if (withAnswers) buzz("success");
@@ -224,13 +222,13 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
         </Txt>
       )}
       {outcome.kind === "elsewhere" && (
-        <Txt variant="body" tone="white" style={{ marginBottom: 12 }} accessibilityRole="alert">
+        <Txt variant="small" tone="night" style={{ marginBottom: 12 }} accessibilityRole="alert">
           Answered on your Mac.
         </Txt>
       )}
       {outcome.kind === "done" && (
         <FadeSlideIn from={8}>
-          <Txt variant="body" tone="white" style={{ marginBottom: 12 }} accessibilityRole="alert">
+          <Txt variant="small" tone="night" style={{ marginBottom: 12 }} accessibilityRole="alert">
             {outcome.allowed ? (view.kind === "question" ? "Answer sent." : "Allowed.") : view.kind === "question" ? "Declined." : "Denied."}
           </Txt>
         </FadeSlideIn>
@@ -252,8 +250,12 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
         )
       ) : outcome.kind === "done" && outcome.allowed && view.kind !== "question" ? (
         <View style={{ gap: 12 }}>
-          {/* The same bar, now closed in to a circle with the check: it is the way back to the chat. */}
+          {/* The same bar, now closed in to a circle with the check: it closes this by itself, and a tap on it does so at once. */}
           <SwipeToAllow key="first" label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => {}} onDone={onClose} />
+          {/* Deny's place is kept, unseen, so the circle stays where the bar was and isn't pushed down. */}
+          <View pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ opacity: 0 }}>
+            <Button label={approval ? "Don't approve" : "Deny"} kind="night-stop" disabled onPress={() => {}} style={{ backgroundColor: "transparent" }} />
+          </View>
         </View>
       ) : (
         <Button label="Done" kind="night-ghost" onPress={onClose} />
