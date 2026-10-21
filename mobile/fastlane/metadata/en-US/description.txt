@@ -1,0 +1,23 @@
+Your AI coding agents keep working while you step away. Lantern is the remote control for them: see what each one is doing, and approve, answer or steer it from your phone.
+
+Lantern needs Lantern for Mac, the free, open-source app where your agents run, on the same Wi-Fi. The phone talks to your Mac directly, encrypted. There is no account, no server in between, and no tracking.
+
+WHAT WAITS ON YOU
+Home leads with what needs a decision: the command an agent wants to run, the file it wants to change, the question it is asking. Everything else waits quietly below.
+
+APPROVE WITH A SWIPE
+Swipe to allow, tap to deny. Open the full screen to read the whole command first. Answer an agent's questions by picking an option or writing your own.
+
+STAY IN THE CONVERSATION
+Read a chat as it happens, with code, tables and lists shown properly. Send a message, stop a turn, wake a sleeping chat, or start a new chat in one of your projects (it always starts on Ask, so nothing runs without your say-so).
+
+NOTHING TO DO? GET AN IDEA
+When nothing is waiting, Lantern suggests what to pick up next, from your recent chats.
+
+PRIVATE BY DESIGN
+No account. No analytics. No ads. Conversations are shown while the app is open and are not stored on the phone. The pairing key stays in your phone's secure storage.
+
+FREE, WITH AN OPTIONAL TIP
+Everything is free. If Lantern helps you, you can leave a tip under Support development.
+
+Lantern is an independent project and is not affiliated with or endorsed by Anthropic.
