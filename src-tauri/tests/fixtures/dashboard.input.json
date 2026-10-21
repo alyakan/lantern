@@ -1,0 +1,25 @@
+{
+  "title": "Staging data",
+  "panels": [
+    {
+      "type": "form",
+      "id": "org",
+      "title": "Create org",
+      "fields": [
+        { "id": "staging", "type": "select", "label": "Staging", "options": ["1", "2", "3", "7", "9"], "required": true },
+        { "id": "users", "type": "number", "label": "Users", "default": 2, "min": 1, "max": 50 },
+        { "id": "admins", "type": "number", "label": "Admins", "default": 1, "min": 0 },
+        { "id": "addons", "type": "multiselect", "label": "Addons on", "optionsFrom": { "command": ["python3", "~/tools/lumi_staging.py", "addons", "--staging", "{staging}", "--json"], "dependsOn": ["staging"] }, "default": ["approvals"] },
+        { "id": "name", "type": "text", "label": "Org name", "default": "QA org" },
+        { "id": "trial", "type": "toggle", "label": "Trial", "default": false }
+      ],
+      "action": {
+        "command": ["python3", "lumi_staging.py", "create", "--json", "--staging", "{staging}", "--users", "{users}", "--admins", "{admins}", "--enable", "{addons}", "--name={name}", "--trial={trial}"],
+        "confirm": "Creates a real org on staging {staging}",
+        "output": "json"
+      }
+    },
+    { "type": "result", "of": "org" },
+    { "type": "history", "id": "runs", "title": "Past runs", "of": "org" }
+  ]
+}

@@ -6,6 +6,7 @@ import { parseLocation } from "../lib/testRuns";
 import { TestsTab } from "./TestsTab";
 import { NetworkEmpty, NetworkTab, useNetworkView } from "./NetworkTab";
 import { ChecksTab, hasChecks } from "./ChecksTab";
+import { DashboardTab } from "./DashboardTab";
 import { totals } from "../lib/prChecks";
 import type { PrView } from "../lib/usePrChecks";
 import type { NetworkItem } from "../types";
@@ -291,6 +292,11 @@ export function ReviewPanel(props: Props) {
           {hasNetwork && props.folder ? <NetworkTab folder={props.folder} view={network} onSummarize={props.onSummarizeRequest ?? null} busy={props.chatBusy} /> : <NetworkEmpty link={network?.link ?? null} />}
         </div>
       )}
+      {tab === "dashboard" && (
+        <div className="tab-body" role="tabpanel" aria-labelledby={tabId("dashboard")}>
+          {props.folder ? <DashboardTab folder={props.folder} refreshKey={props.refreshKey} /> : <TabEmpty title="Dashboard">Open a folder to see its dashboards.</TabEmpty>}
+        </div>
+      )}
       {/* Kept mounted while hidden so the tree keeps its expanded folders across tab switches. */}
       <div className="tab-body" role="tabpanel" aria-labelledby={tabId("files")} hidden={tab !== "files"}>
         <FilesTab
@@ -318,6 +324,7 @@ const TAB_TITLE: Record<Tab, string | undefined> = {
   tests: undefined,
   checks: "How the checks of this branch's pull request stand",
   network: "Requests matching this folder's watches, from Network Monitor",
+  dashboard: "This folder's dashboards: forms whose buttons run commands, with their results and history",
 };
 
 /**

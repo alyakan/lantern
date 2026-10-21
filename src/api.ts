@@ -4,7 +4,7 @@ import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { Role } from "./lib/roles";
 import type { ReviewSetting } from "./lib/reviewChain";
-import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardOptionsList, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -287,6 +287,30 @@ export const api = {
   onMenuAction: (cb: (id: string) => void): Promise<UnlistenFn> => listen<string>("menu-action", (e) => cb(e.payload)),
   /** A folder in File ▸ Open Recent was chosen. */
   onOpenRecent: (cb: (path: string) => void): Promise<UnlistenFn> => listen<string>("open-recent", (e) => cb(e.payload)),
+  /** The folder's dashboards (`.lantern/dashboards/*.json`), each checked: a spec to render, or the issues in the file. */
+  dashboardsList: (folder: string) => invoke<Dashboard[]>("dashboards_list", { folder }),
+  /** Which of the folder's dashboards are trusted, what is running, and the history of runs. */
+  dashboardsState: (folder: string) => invoke<DashboardState>("dashboards_state", { folder }),
+  /** Trusts a dashboard as the user saw it (the hash they were shown); rejects if the file changed since. */
+  dashboardTrust: (folder: string, file: string, hash: string) => invoke<void>("dashboard_trust", { folder, file, hash }),
+  /** Each form's command in a dashboard, `~` expanded and its program found: what the user reads before trusting it. */
+  dashboardCommands: (folder: string, file: string) => invoke<DashboardCommand[]>("dashboard_commands", { folder, file }),
+  /** The list a select's options command printed the last time it ran for this dashboard file and these chosen values of what it depends on (null if never). Runs nothing. */
+  dashboardOptions: (folder: string, file: string, form: string, field: string, values: DashboardValues) => invoke<DashboardOptionsList | null>("dashboard_options", { folder, file, form, field, values }),
+  /** Runs a select's options command now and keeps its list (rejects with why it couldn't). Only from a click: Trust, Reload, Retry, Load options. */
+  dashboardLoadOptions: (folder: string, file: string, form: string, field: string, values: DashboardValues) => invoke<DashboardOptionsList>("dashboard_load_options", { folder, file, form, field, values }),
+  /** What pressing a form's button would run, with the values in (rejects with why when a value is wrong). */
+  dashboardPreview: (folder: string, file: string, form: string, values: DashboardValues) => invoke<DashboardPreview>("dashboard_preview", { folder, file, form, values }),
+  /** Runs a form of a trusted dashboard; resolves when it ends, with the run (also in the history). Rejects with why it didn't start. */
+  dashboardRun: (folder: string, file: string, form: string, values: DashboardValues) => invoke<DashboardRun>("dashboard_run", { folder, file, form, values }),
+  /** One kept run with its output (null when it has been deleted). */
+  dashboardRunDetail: (folder: string, id: string) => invoke<DashboardRun | null>("dashboard_run_detail", { folder, id }),
+  /** Stops a running form's command and what it started; false when it wasn't running. */
+  dashboardStop: (folder: string, file: string, form: string) => invoke<boolean>("dashboard_stop", { folder, file, form }),
+  dashboardDeleteRun: (folder: string, id: string) => invoke<boolean>("dashboard_delete_run", { folder, id }),
+  dashboardClearRuns: (folder: string, file: string, form: string) => invoke<void>("dashboard_clear_runs", { folder, file, form }),
+  /** A dashboard was trusted, started, stopped or finished a run, or a run was deleted. */
+  onDashboardsChanged: (cb: () => void): Promise<UnlistenFn> => listen("dashboards-changed", () => cb()),
   /** The folder's Network tab: its watches, the requests that matched them (and summaries), and Network Monitor's state. */
   networkState: (folder: string) => invoke<NetworkView>("network_state", { folder }),
   /** One request's headers and bodies (rejects with why, e.g. Network Monitor no longer has it). */

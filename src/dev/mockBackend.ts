@@ -2,8 +2,9 @@
 // It answers the app's Tauri commands and plays a scripted Claude turn. Never imported in production builds.
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
-import type { McpServer, NetworkDetail, NetworkItem, NetworkTx, NetworkView, SkillEntry, UiEvent } from "../types";
+import type { DashboardRun, McpServer, NetworkDetail, NetworkItem, NetworkTx, NetworkView, SkillEntry, UiEvent } from "../types";
 import { version as APP_VERSION } from "../../package.json";
+import dashboardSpec from "../../src-tauri/tests/fixtures/dashboard.spec.json";
 import { TESTO_MAP } from "../lib/testoMap";
 import { DENSE_MAP, DENSE_PARTS } from "../lib/denseMap";
 import type { ReviewCheck } from "../lib/reviewChain";
@@ -1207,6 +1208,69 @@ const MOCK_CHECKLISTS = {
 };
 let mockWatches = [{ label: "Checklists", method: "GET", url: "/v1/checklists" }];
 
+// The Dashboard tab: which mock dashboards are trusted, the runs kept, and whether the form is running.
+let dashTrusted: string[] = [];
+let dashRuns: DashboardRun[] = [];
+let dashRunning: string | null = null;
+// The shared spec has one function; the preview adds two more so the tabs can be seen.
+const STAGINGS = ["1", "2", "3", "7", "9"];
+const dashboardPreviewSpec = {
+  ...dashboardSpec,
+  panels: [
+    ...dashboardSpec.panels,
+    {
+      type: "form",
+      id: "addons",
+      title: "Change addons",
+      fields: [
+        { id: "staging", type: "select", label: "Staging", required: true, options: STAGINGS },
+        { id: "org", type: "number", label: "Org id", required: true },
+        { id: "enable", type: "multiselect", label: "Turn on", required: false, options: ["approvals", "sso", "trainings", "webhooks"] },
+        { id: "disable", type: "multiselect", label: "Turn off", required: false, options: ["approvals", "sso", "trainings", "webhooks"] },
+      ],
+      action: { command: ["python3", "lumi_staging.py", "addons-set", "--staging", "{staging}", "--org", "{org}", "--enable", "{enable}", "--disable", "{disable}"], confirm: "Changes the addons of org {org} on staging {staging}", output: "json" },
+    },
+    { type: "result", of: "addons" },
+    { type: "history", id: "addons-runs", title: "Past runs", of: "addons" },
+    {
+      type: "form",
+      id: "users",
+      title: "Add users",
+      fields: [
+        { id: "staging", type: "select", label: "Staging", required: true, options: STAGINGS },
+        { id: "org", type: "number", label: "Org id", required: true },
+        { id: "count", type: "number", label: "How many", required: false, default: 3, min: 1, max: 20 },
+        { id: "admin", type: "toggle", label: "Make them admins", required: false, default: false },
+      ],
+      action: { command: ["python3", "lumi_staging.py", "users", "--staging", "{staging}", "--org", "{org}", "--count", "{count}"], output: "json" },
+    },
+    { type: "result", of: "users" },
+    { type: "history", id: "users-runs", title: "Past runs", of: "users" },
+  ],
+};
+// The kept addon lists, by the staging they were loaded for (testo_sensors exists on staging 7 only).
+let dashOptions: Record<string, { options: string[]; loaded_at: number }> = {};
+const addonsOf = (staging: string) => ["approvals", "public_api", "sso", "form_translations", "manual_form_translations", "ai_image_description", "trainings", "webhooks", "word_report_template", "global_sections", ...(staging === "7" ? ["testo_sensors"] : []), "all_integrations"];
+const dashSummary = ({ id, file, form, started_at, duration_ms, exit_code, stopped, timed_out, inputs }: DashboardRun) => ({ id, file, form, started_at, duration_ms, exit_code, stopped, timed_out, inputs });
+function mockDashboardRun(values: Record<string, unknown>, form = "org"): DashboardRun {
+  const staging = String(values.staging ?? "");
+  const users = Number(values.users ?? 2);
+  const logins = Array.from({ length: users }, (_, i) => ({ email: `qa+${Date.now() % 100000}-${i + 1}@example.com`, password: "Sup3r-secret", role: i === 0 ? "admin" : "user" }));
+  const output =
+    form === "addons"
+      ? { org: { id: values.org, staging }, turned_on: values.enable ?? [], turned_off: values.disable ?? [] }
+      : form === "users"
+        ? { users: logins.slice(0, Number(values.count ?? 3)).map((l) => ({ ...l, role: values.admin ? "admin" : "user" })) }
+        : { org: { id: 41872, name: String(values.name ?? ""), staging }, addons: values.addons ?? [], users: logins };
+  const args =
+    form === "addons"
+      ? ["python3", "/Users/you/staging-tools/lumi_staging.py", "addons-set", "--staging", staging, "--org", String(values.org ?? "")]
+      : form === "users"
+        ? ["python3", "/Users/you/staging-tools/lumi_staging.py", "users", "--staging", staging, "--org", String(values.org ?? ""), "--count", String(values.count ?? 3)]
+        : ["python3", "/Users/you/staging-tools/lumi_staging.py", "create", "--json", "--staging", staging, "--users", String(users), "--admins", String(values.admins ?? 1), "--enable", ([] as string[]).concat((values.addons ?? []) as string[]).join(","), `--name=${String(values.name ?? "")}`];
+  return { id: `${Date.now()}-${dashRuns.length + 1}`, file: "staging.json", form, started_at: Date.now(), duration_ms: 1840, exit_code: 0, stopped: false, timed_out: false, inputs: values as DashboardRun["inputs"], args, stdout: `creating org on staging ${staging}\n${JSON.stringify(output)}\n`, stderr: "", truncated: false, output };
+}
+
 // The Storage panel's scan in the browser preview: items of every kind (one a hair of the scan, one inside another), one blocked, two with a suggestion from Claude.
 const mockStorageItem = (id: string, kind: string, name: string, gb: number, over: Record<string, unknown> = {}) => ({
   id, kind, name, path: `/Users/you/${name}`, bytes: Math.round(gb * 1e9), risk: "safe", removal: kind === "worktree" ? "worktree" : kind === "repo" ? "trash" : "permanent", note: "Comes back with a build.", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, ...over,
@@ -1767,6 +1831,69 @@ export function installMockBackend() {
           if (session) session.title = String(a.title);
           return undefined;
         }
+        case "dashboards_list":
+          // The same spec the Rust tests check, plus one file that doesn't check out.
+          return [
+            { file: "staging.json", hash: "mock-staging", spec: dashboardPreviewSpec, issues: [] },
+            { file: "broken.json", hash: "mock-broken", spec: null, issues: [{ path: "panels[0].action.command[2]", message: "must be a string (the command is a list of strings, not a shell line)" }] },
+          ];
+        case "dashboards_state":
+          return { trusted: dashTrusted, running: dashRunning ? [{ file: "staging.json", form: dashRunning }] : [], runs: dashRuns.map(dashSummary) };
+        case "dashboard_trust":
+          if (a.hash === "mock-staging") dashTrusted = [...dashTrusted, "mock-staging"];
+          void emit("dashboards-changed");
+          return undefined;
+        case "dashboard_commands":
+          return [
+            { form: "org", title: "Create org", kind: "action", command: ["python3", "/Users/you/staging-tools/lumi_staging.py", "create", "--json", "--staging", "{staging}", "--users", "{users}", "--enable", "{addons}", "--name={name}"], program: "/opt/homebrew/bin/python3", error: null },
+            { form: "org", title: "Create org", kind: "options", field: "addons", depends_on: ["staging"], command: ["python3", "/Users/you/staging-tools/lumi_staging.py", "addons", "--staging", "{staging}", "--json"], program: "/opt/homebrew/bin/python3", error: null },
+          ];
+        case "dashboard_options":
+          // What was kept the last time the command ran for this staging; this never runs it.
+          return dashOptions[String((a.values as Record<string, unknown>)?.staging ?? "")] ?? null;
+        case "dashboard_load_options": {
+          const staging = String((a.values as Record<string, unknown>)?.staging ?? "");
+          if (!staging) return Promise.reject("Choose Staging first.");
+          // `?optionsfail` shows the field's error state; otherwise the staging's own list, after a moment.
+          if (new URLSearchParams(location.search).has("optionsfail")) return Promise.reject("lumi_staging.py failed: no internal login for staging " + staging);
+          return new Promise((resolve) =>
+            setTimeout(() => {
+              dashOptions = { ...dashOptions, [staging]: { options: addonsOf(staging), loaded_at: Date.now() } };
+              void emit("dashboards-changed");
+              resolve(dashOptions[staging]);
+            }, 400),
+          );
+        }
+        case "dashboard_preview": {
+          const values = a.values as Record<string, unknown>;
+          if (!values.staging) return Promise.reject("Staging is required.");
+          return { args: mockDashboardRun(values, String(a.form)).args, confirm: a.form === "users" ? null : `Changes real data on staging ${values.staging}` };
+        }
+        case "dashboard_run": {
+          dashRunning = String(a.form);
+          void emit("dashboards-changed");
+          return new Promise((resolve) =>
+            setTimeout(() => {
+              const run = mockDashboardRun(a.values as Record<string, unknown>, String(a.form));
+              dashRuns = [run, ...dashRuns];
+              dashRunning = null;
+              void emit("dashboards-changed");
+              resolve(run);
+            }, 900),
+          );
+        }
+        case "dashboard_run_detail":
+          return dashRuns.find((r) => r.id === a.id) ?? null;
+        case "dashboard_stop":
+          return false;
+        case "dashboard_delete_run":
+          dashRuns = dashRuns.filter((r) => r.id !== a.id);
+          void emit("dashboards-changed");
+          return true;
+        case "dashboard_clear_runs":
+          dashRuns = [];
+          void emit("dashboards-changed");
+          return undefined;
         case "network_state":
           return mockNetwork();
         case "network_response":
