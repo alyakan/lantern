@@ -1,7 +1,7 @@
 import { connectCase, FakeMac, impostorCase, pairCase, phoneKeys, routeTransport } from "../test/fakeMac";
 import { toBase64Url, type PairingOffer } from "../pairing";
 import { MemoryStore } from "../test/memoryStore";
-import { BACKOFF_MS, Connection, isTailnetHost, macId, type ConnectionState, type PairedMac } from "./connection";
+import { BACKOFF_MS, Connection, isTailnetHost, macId, savedHosts, type ConnectionState, type PairedMac } from "./connection";
 import { STEP_WAIT, type Pushed } from "./session";
 import { queueLink, type Transport } from "./transport";
 
@@ -86,6 +86,12 @@ describe("pairing", () => {
     expect(r.store.mac?.hosts).toEqual(["192.168.1.20", "100.101.102.103"]);
   });
 
+  it("keeps the address it paired over first even when the Mac doesn't list it, as an Android emulator's 10.0.2.2 isn't", async () => {
+    const r = rig(pairCase, { hosts: ["192.168.1.20", "100.101.102.103"], reachable: ["10.0.2.2"] });
+    await r.conn.pair(offer(r.k, ["10.0.2.2"]));
+    expect(r.store.mac?.hosts).toEqual(["10.0.2.2", "192.168.1.20", "100.101.102.103"]);
+  });
+
   it("keeps the code's addresses when an older Mac gives none", async () => {
     const r = rig();
     await r.conn.pair(offer(r.k, ["192.168.1.20", "10.0.0.5"]));
@@ -98,6 +104,22 @@ describe("pairing", () => {
     expect(r.mac.opened).toEqual(["192.168.1.20:47123", "100.101.102.103:47123"]);
     expect(r.mac.openWaits[0]).toBeLessThan(r.mac.openWaits[1]!);
     expect(r.mac.openWaits).toEqual([1500, 6000]);
+  });
+});
+
+describe("the addresses kept for the Mac", () => {
+  it("are the one that worked, then the Mac's list, each once", () => {
+    expect(savedHosts("100.1.2.3", ["192.168.1.20", "100.1.2.3"], ["10.0.0.5"])).toEqual(["100.1.2.3", "192.168.1.20"]);
+    expect(savedHosts("100.1.2.3", undefined, ["192.168.1.20", "100.1.2.3"])).toEqual(["100.1.2.3", "192.168.1.20"]);
+    expect(savedHosts("100.1.2.3", [], ["10.0.0.5"])).toEqual(["100.1.2.3", "10.0.0.5"]);
+  });
+
+  it("take only plain addresses and names from the Mac, and no more than eight", () => {
+    const odd = ["ws://evil.example/x", "a b", "mac.local/..", "", 5, null, "192.168.1.20", "x".repeat(300)];
+    expect(savedHosts("100.1.2.3", odd, [])).toEqual(["100.1.2.3", "192.168.1.20"]);
+    const many = Array.from({ length: 20 }, (_, i) => `10.0.0.${i}`);
+    expect(savedHosts("100.1.2.3", many, [])).toHaveLength(8);
+    expect(savedHosts("100.1.2.3", many, [])[0]).toBe("100.1.2.3");
   });
 });
 
@@ -136,8 +158,25 @@ describe("staying connected", () => {
     r.store.mac = paired(r.k);
     await r.conn.start();
     for (let i = 0; i < 8; i++) await flush();
+    // The address that worked goes first, then the Mac's list.
     expect(r.store.mac?.hosts).toEqual(["192.168.1.20", "100.101.102.103"]);
     expect(r.store.mac?.macName).toBe("Test Mac");
+  });
+
+  it("a phone started again, with the app killed meanwhile, dials first the address that worked, so away from home it goes to Tailscale at once", async () => {
+    const first = rig(connectCase, { reachable: ["100.101.102.103"], hosts: ["192.168.1.20", "100.101.102.103"] });
+    first.store.mac = { ...paired(first.k), hosts: ["192.168.1.20", "100.101.102.103"] };
+    await first.conn.start();
+    for (let i = 0; i < 8; i++) await flush();
+    expect(first.store.mac?.hosts).toEqual(["100.101.102.103", "192.168.1.20"]);
+    first.conn.stop();
+    // A new Connection, as after the app was killed: nothing but the saved Mac to go on.
+    const mac = new FakeMac(connectCase, { reachable: ["100.101.102.103"], hosts: ["192.168.1.20", "100.101.102.103"] });
+    const again = new Connection({ deviceName: "Test phone", appVersion: "1.0", onPushed: () => {}, onState: () => {}, transport: mac, store: first.store, newKey: () => first.k.device, fixedEphemeral: first.k.ephemeral });
+    await again.start();
+    for (let i = 0; i < 8; i++) await flush();
+    expect(mac.opened).toEqual(["100.101.102.103:47123"]);
+    again.stop();
   });
 
   it("an older Mac that gives no addresses leaves the saved ones alone", async () => {

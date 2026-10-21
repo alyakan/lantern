@@ -438,6 +438,8 @@ async fn start_remote(app: &AppHandle) -> Result<(), String> {
     let gateway = remote::gateway::Gateway::new(r.bus.clone(), r.hub.clone(), r.store.clone(), host, mac.clone(), r.epoch);
     let notify = app.clone();
     gateway.on_change(Arc::new(move || {
+        // A phone came or went: also the moment to start the keep-awake hold again if its `caffeinate` was killed.
+        notify.state::<AppState>().remote.sync_awake();
         let _ = notify.emit("remote-changed", ());
     }));
     let door = gateway.clone();

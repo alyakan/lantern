@@ -78,6 +78,22 @@ export function isTailnetHost(host: string): boolean {
 
 const openWait = (host: string) => (isTailnetHost(host) ? TAILNET_WAIT : OPEN_WAIT);
 
+/** The most addresses kept for the Mac: a longer list would only be longer to walk through on every try. */
+const MAX_HOSTS = 8;
+
+/** A host the Mac told the phone to keep: an address or a name, nothing a URL could be made odd by. */
+const plainHost = (h: unknown): h is string => typeof h === "string" && /^[A-Za-z0-9.-]{1,253}$/.test(h);
+
+/**
+ * The addresses to keep for the Mac: the one that just worked first (it may be one the Mac doesn't list, such as the
+ * 10.0.2.2 an Android emulator reaches it at), then the Mac's own list when it gave one (an older Mac doesn't), else those
+ * kept already. The first is what the next cold start dials first, so away from home it goes straight to Tailscale.
+ */
+export function savedHosts(worked: string, told: unknown, before: string[]): string[] {
+  const list = Array.isArray(told) ? told.filter(plainHost) : [];
+  return [worked, ...(list.length ? list : before).filter((h) => h !== worked)].slice(0, MAX_HOSTS);
+}
+
 /** Nothing answered at an address (or it answered too slowly). */
 export class Unreachable extends Error {}
 
@@ -153,8 +169,7 @@ export class Connection {
           session.close();
           throw new Error("Pairing was cancelled.");
         }
-        // The Mac's own list of where it can be reached now, when it gives one (an older Mac doesn't), over the code's.
-        const hosts = welcome.hosts?.length ? welcome.hosts : offer.hosts;
+        const hosts = savedHosts(host, welcome.hosts, offer.hosts);
         await this.d.store.save({ macKey: toBase64Url(offer.macKey), deviceKey: toBase64Url(key.privateKey), hosts, port: offer.port, macName: welcome.mac_name || offer.macName });
         this.up({ session, host });
         return;
@@ -251,7 +266,7 @@ export class Connection {
         if (!(tried instanceof Error)) {
           this.up(tried);
           // After `up`, which is where a run that was stopped or forgotten meanwhile has been ruled out above.
-          void this.keepHosts(paired, tried.session.welcome.hosts);
+          void this.keepHosts(paired, tried.host, tried.session.welcome.hosts);
           return;
         }
         if (tried instanceof ProtocolMismatch) return this.d.onState({ kind: "offline", reason: tried.message, retryInMs: null });
@@ -270,12 +285,13 @@ export class Connection {
   }
 
   /**
-   * Keeps the addresses the Mac says it has now in place of the ones saved, so a Mac whose address changed, or that joined
-   * Tailscale after this phone paired, is still found. A Mac that gives none (an older one) leaves them be, and a save that
-   * fails costs only the update: the connection is already open.
+   * Keeps the address that worked first and the addresses the Mac says it has now after it (see `savedHosts`), so a Mac
+   * whose address changed, or that joined Tailscale after this phone paired, is still found. A save that fails costs only
+   * the update: the connection is already open.
    */
-  private async keepHosts(paired: PairedMac, hosts: string[] | undefined) {
-    if (!hosts?.length || (hosts.length === paired.hosts.length && hosts.every((h, i) => h === paired.hosts[i]))) return;
+  private async keepHosts(paired: PairedMac, worked: string, told: string[] | undefined) {
+    const hosts = savedHosts(worked, told, paired.hosts);
+    if (hosts.length === paired.hosts.length && hosts.every((h, i) => h === paired.hosts[i])) return;
     try {
       // Only if this is still the Mac that is kept: one forgotten or paired again meanwhile must not come back.
       const kept = await this.d.store.load();
