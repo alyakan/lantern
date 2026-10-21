@@ -445,7 +445,7 @@ async fn start_remote(app: &AppHandle) -> Result<(), String> {
         let _ = notify.emit("remote-changed", ());
     }));
     let door = gateway.clone();
-    let (listener, port) = remote::transport::serve_lan(remote::PORT, move |link| door.accept(link)).await?;
+    let (listener, port) = remote::transport::serve_lan(remote::port(), move |link| door.accept(link)).await?;
     let id: String = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, &mac.public).chars().take(10).collect();
     let bonjour = remote::transport::Bonjour::advertise(port, &name, &id).ok();
     // Pushes to phones that aren't looking at a chat when it needs them or finishes (see remote/notifier.rs).
