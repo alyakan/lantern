@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
-import { makeController, renderWith } from "../test/render";
+import { connectedWithControls, makeController, renderWith } from "../test/render";
 import { NewChatSheet } from "./NewChatSheet";
 
 const projects = [
@@ -49,7 +49,7 @@ describe("starting a chat from the phone", () => {
     await write("Fix the login bug");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
     await waitFor(() => expect(onStarted).toHaveBeenCalledWith("s9"));
-    expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/lantern", text: "Fix the login bug" });
+    expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/lantern", text: "Fix the login bug", permissions: null, preset: null });
   });
 
   it("starts in the project that was picked, with the text trimmed", async () => {
@@ -141,5 +141,53 @@ describe("starting a chat from the phone", () => {
     const { onClose } = await open();
     await fireEvent.press(screen.getByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("choosing what a new chat runs on", () => {
+  const controls = (allow_auto: boolean) => ({ controls: { allow_auto, presets: [{ id: "balanced", name: "Balanced", summary: "Sonnet" }, { id: "max", name: "Max", summary: "Opus" }] } });
+  async function openWithControls(allowAuto: boolean) {
+    const { controller } = makeController();
+    const session = attachSession(controller, { projects, new_chat: { slot: "s9" }, ...controls(allowAuto) }, ["controls"]);
+    const onStarted = jest.fn();
+    await renderWith(<NewChatSheet onClose={jest.fn()} onStarted={onStarted} />, { connection: connectedWithControls }, controller);
+    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
+    return { onStarted, ...session };
+  }
+
+  it("starts on Ask with the project's own models unless something else is chosen", async () => {
+    const { lastOf } = await openWithControls(true);
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" })).toBeTruthy());
+    expect(screen.getByRole("radio", { name: "Ask" }).props.accessibilityState).toMatchObject({ selected: true });
+    await write("Fix it");
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await waitFor(() => expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/lantern", text: "Fix it", permissions: "ask", preset: null }));
+  });
+
+  it("starts on Auto with a preset when those are chosen and the Mac lets phones use Auto", async () => {
+    const { lastOf } = await openWithControls(true);
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: false }));
+    await fireEvent.press(screen.getByRole("radio", { name: "Auto" }));
+    expect(screen.getByText(/starts on Auto/)).toBeTruthy();
+    await fireEvent.press(screen.getByRole("radio", { name: "Max" }));
+    await write("Fix it");
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await waitFor(() => expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/lantern", text: "Fix it", permissions: "auto", preset: "max" }));
+  });
+
+  it("can't pick Auto while the Mac's setting is off, and says where to turn it on", async () => {
+    await openWithControls(false);
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" })).toBeTruthy());
+    expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: true });
+    expect(screen.getByText(/Let paired phones use Auto/)).toBeTruthy();
+  });
+
+  it("offers nothing to choose from a Mac that can't say, and starts as before", async () => {
+    const { lastOf } = await open();
+    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
+    expect(screen.queryByRole("radio", { name: "Auto" })).toBeNull();
+    await write("Fix it");
+    await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
+    await waitFor(() => expect(lastOf("new_chat")).toMatchObject({ op: "new_chat", permissions: null, preset: null }));
   });
 });
