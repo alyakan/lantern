@@ -4,6 +4,7 @@ import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useController, useSyncState } from "../shell/hooks";
 import { Button, Tag, Txt } from "../ui/components";
+import { FadeSlideIn } from "../ui/motion";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { colors, radius, space } from "../ui/theme";
 import { approvalOf, promptView, type PromptView, type Question } from "../view/prompts";
@@ -181,9 +182,11 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
         </Txt>
       )}
       {outcome.kind === "done" && (
-        <Txt variant="body" tone="white" style={{ marginBottom: 12 }} accessibilityRole="alert">
-          {outcome.allowed ? (view.kind === "question" ? "Answer sent." : "Allowed.") : view.kind === "question" ? "Declined." : "Denied."}
-        </Txt>
+        <FadeSlideIn from={8}>
+          <Txt variant="body" tone="white" style={{ marginBottom: 12 }} accessibilityRole="alert">
+            {outcome.allowed ? (view.kind === "question" ? "Answer sent." : "Allowed.") : view.kind === "question" ? "Declined." : "Denied."}
+          </Txt>
+        </FadeSlideIn>
       )}
 
       {outcome.kind === "none" || outcome.kind === "sending" || outcome.kind === "failed" ? (

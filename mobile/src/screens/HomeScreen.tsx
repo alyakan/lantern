@@ -3,6 +3,7 @@ import { Animated, Platform, Pressable, RefreshControl, ScrollView, View } from 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
 import { Button, Tag, Tile, Txt } from "../ui/components";
+import { FadeSlideIn } from "../ui/motion";
 import { colors, radius, shadow, space } from "../ui/theme";
 import { cards, headline, rows, tileColors, type Card, type Row } from "../view/home";
 
@@ -38,7 +39,8 @@ function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomePr
     <View style={{ marginHorizontal: space.lg, paddingBottom: 14 }}>
       {behind >= 2 && <View style={{ position: "absolute", left: 14, right: 14, top: 14, bottom: -8, backgroundColor: colors.card, borderRadius: radius.card, opacity: 0.6 }} />}
       {behind >= 1 && <View style={{ position: "absolute", left: 7, right: 7, top: 7, bottom: -2, backgroundColor: colors.card, borderRadius: radius.card, opacity: 0.85 }} />}
-      <View style={[{ backgroundColor: colors.card, borderRadius: radius.card, padding: 18, gap: 4 }, shadow.card]}>
+      {/* A new card on top (the one before was answered) comes in, instead of the text changing under the eye. */}
+      <FadeSlideIn key={front.waiting.request_id} from={12} style={[{ backgroundColor: colors.card, borderRadius: radius.card, padding: 18, gap: 4 }, shadow.card]}>
         <Tag>{front.view.tag}</Tag>
         <Txt variant="heading" style={{ marginTop: 8 }}>
           {front.view.title}
@@ -57,7 +59,7 @@ function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomePr
           <Button label="Open chat" kind="ghost" style={{ flex: 1 }} onPress={() => onOpenChat(front.waiting.slot)} />
           <Button label="Review" style={{ flex: 1 }} onPress={() => onReview(front.waiting.slot, front.waiting.request_id)} />
         </View>
-      </View>
+      </FadeSlideIn>
     </View>
   );
 }

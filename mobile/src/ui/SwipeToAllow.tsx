@@ -12,9 +12,10 @@ const INSET = 5;
  * "Swipe to allow": a knob dragged to the end. Only a drag that is let go near the end allows; a tap does nothing. A
  * screen reader gets an "Allow" action instead (a deliberate double tap), since it can't drag.
  */
-export function SwipeToAllow({ onAllow, label = "Swipe to allow" }: { onAllow: () => void; label?: string }) {
+export function SwipeToAllow({ onAllow, label = "Swipe to allow", progress }: { onAllow: () => void; label?: string; /** The knob's position, for a test to move it (a drag can't be made in one). */ progress?: Animated.Value }) {
   const [width, setWidth] = useState(0);
-  const x = useRef(new Animated.Value(0)).current;
+  const own = useRef(new Animated.Value(0)).current;
+  const x = progress ?? own;
   const done = useRef(false);
   const max = Math.max(0, width - KNOB - INSET * 2);
   const maxRef = useRef(max);
@@ -53,17 +54,25 @@ export function SwipeToAllow({ onAllow, label = "Swipe to allow" }: { onAllow: (
       accessibilityActions={[{ name: "activate", label: "Allow" }]}
       onAccessibilityAction={(e: AccessibilityActionEvent) => e.nativeEvent.actionName === "activate" && allow()}
       onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
-      style={{ height: KNOB + INSET * 2, borderRadius: 999, backgroundColor: colors.nightRaised, justifyContent: "center", alignItems: "center" }}
+      style={{ height: KNOB + INSET * 2, borderRadius: 999, backgroundColor: colors.nightRaised, justifyContent: "center", alignItems: "center", overflow: "hidden" }}
     >
-      <Txt variant="body" tone="night" style={{ fontWeight: "600" }}>
-        {label}
-      </Txt>
+      {/* The bar fills green behind the knob as it is dragged, all of it by the end. */}
+      <Animated.View
+        testID="swipe-fill"
+        pointerEvents="none"
+        style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: x.interpolate({ inputRange: [0, Math.max(1, max)], outputRange: [KNOB + INSET * 2, Math.max(KNOB + INSET * 2, width)] }), borderRadius: 999, backgroundColor: colors.go, opacity: x.interpolate({ inputRange: [0, 8], outputRange: [0, 1], extrapolate: "clamp" }) }}
+      />
+      <Animated.View style={{ opacity: x.interpolate({ inputRange: [0, Math.max(1, max * 0.55)], outputRange: [1, 0], extrapolate: "clamp" }) }}>
+        <Txt variant="body" tone="night" style={{ fontWeight: "600" }}>
+          {label}
+        </Txt>
+      </Animated.View>
       <Animated.View
         testID="swipe-knob"
         {...pan.panHandlers}
-        style={{ position: "absolute", left: INSET, top: INSET, width: KNOB, height: KNOB, borderRadius: KNOB / 2, backgroundColor: colors.go, alignItems: "center", justifyContent: "center", transform: [{ translateX: x }] }}
+        style={{ position: "absolute", left: INSET, top: INSET, width: KNOB, height: KNOB, borderRadius: KNOB / 2, backgroundColor: x.interpolate({ inputRange: [0, 14], outputRange: [colors.go, "#ffffff"], extrapolate: "clamp" }), alignItems: "center", justifyContent: "center", transform: [{ translateX: x }] }}
       >
-        <View accessibilityElementsHidden style={{ width: 14, height: 14, marginLeft: -4, borderTopWidth: 3, borderRightWidth: 3, borderColor: "#fff", borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
+        <Animated.View accessibilityElementsHidden style={{ width: 14, height: 14, marginLeft: -4, borderTopWidth: 3, borderRightWidth: 3, borderColor: x.interpolate({ inputRange: [0, 14], outputRange: ["#ffffff", colors.go], extrapolate: "clamp" }), borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
       </Animated.View>
     </View>
   );

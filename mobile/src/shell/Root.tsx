@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useReducer, useState, type ReactNode } from "react";
 import { BackHandler, Modal, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -7,7 +7,9 @@ import { DecideScreen } from "../screens/DecideScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { MacSheet, OfflineScreen } from "../screens/OfflineScreen";
 import { ConfirmLink, PairScreen } from "../screens/PairScreen";
+import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
 import { Button, Txt } from "../ui/components";
+import { FadeSlideIn } from "../ui/motion";
 import { colors, radius, space } from "../ui/theme";
 import { rows } from "../view/home";
 import type { Controller } from "./controller";
@@ -91,18 +93,32 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     await controller.unpair();
   };
 
-  if (pendingLink) return <ConfirmLink link={pendingLink} onCancel={() => onClearLink?.()} onDone={() => onClearLink?.()} />;
-  if (connection.kind === "unpaired") return <PairScreen />;
+  // A screen that is not part of the stack comes in with a fade, so changing from one to another isn't a cut.
+  const fade = (key: string, screen: ReactNode) => (
+    <FadeSlideIn key={key} from={0} ms={200} style={{ flex: 1 }}>
+      {screen}
+    </FadeSlideIn>
+  );
+  if (pendingLink) return fade("confirm", <ConfirmLink link={pendingLink} onCancel={() => onClearLink?.()} onDone={() => onClearLink?.()} />);
+  if (connection.kind === "unpaired") return fade("pair", <PairScreen />);
   if (connection.kind === "connecting" || (connection.kind === "offline" && chats.length === 0)) {
-    return <OfflineScreen state={connection} onRetry={() => controller.resume()} onUnpair={unpair} />;
+    return fade("offline", <OfflineScreen state={connection} onRetry={() => controller.resume()} onUnpair={unpair} />);
   }
 
-  const route = stack[stack.length - 1];
-  return (
+  const items: StackItem[] = stack.map((route, i) => {
+    switch (route.name) {
+      case "home":
+        return { key: `${i}:home`, kind: "push", element: <HomeScreen onOpenChat={(slot) => go({ type: "open_chat", slot })} onReview={(slot, requestId) => go({ type: "review", slot, requestId })} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} /> };
+      case "chat":
+        return { key: `${i}:chat:${route.slot}`, kind: "push", element: <ChatScreen slot={route.slot} onBack={back} onReview={(requestId) => go({ type: "review", slot: route.slot, requestId })} /> };
+      case "decide":
+        return { key: `${i}:decide:${route.requestId}`, kind: "modal", element: <DecideScreen slot={route.slot} requestId={route.requestId} onClose={back} /> };
+    }
+  });
+  return fade(
+    "stack",
     <View style={{ flex: 1 }}>
-      {route.name === "home" && <HomeScreen onOpenChat={(slot) => go({ type: "open_chat", slot })} onReview={(slot, requestId) => go({ type: "review", slot, requestId })} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} />}
-      {route.name === "chat" && <ChatScreen key={route.slot} slot={route.slot} onBack={back} onReview={(requestId) => go({ type: "review", slot: route.slot, requestId })} />}
-      {route.name === "decide" && <DecideScreen key={route.requestId} slot={route.slot} requestId={route.requestId} onClose={back} />}
+      <AnimatedStack items={items} />
       {macSheet && <MacSheet state={connection} onClose={() => setMacSheet(false)} onUnpair={unpair} />}
       {picking && (
         <ChatPicker
@@ -113,7 +129,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
           }}
         />
       )}
-    </View>
+    </View>,
   );
 }
 
