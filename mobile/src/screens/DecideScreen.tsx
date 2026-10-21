@@ -4,6 +4,7 @@ import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useController, useSyncState } from "../shell/hooks";
 import { Button, Tag, Txt } from "../ui/components";
+import { AboveKeyboard, useKeyboardUp } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { colors, radius, space } from "../ui/theme";
@@ -110,6 +111,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   const controller = useController();
   const { waiting, chats } = useSyncState();
   const insets = useSafeAreaInsets();
+  const keyboard = useKeyboardUp();
   const [outcome, setOutcome] = useState<Outcome>({ kind: "none" });
   const [picks, setPicks] = useState<Record<string, string[]>>({});
   const [typed, setTyped] = useState<Record<string, string>>({});
@@ -176,9 +178,10 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.night, paddingTop: insets.top + 56, paddingBottom: Math.max(insets.bottom, 20), paddingHorizontal: 22 }}>
+    // The keyboard (for "Something else") pushes the buttons up with it, and the list above gets shorter.
+    <AboveKeyboard style={{ backgroundColor: colors.night, paddingTop: insets.top + 56, paddingBottom: keyboard ? 12 : Math.max(insets.bottom, 20), paddingHorizontal: 22 }}>
       <StatusBar style="light" />
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: 16 }}>
+      <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingBottom: 16 }}>
         {/* The parts of the decision arrive one after another as the screen rises. */}
         <FadeSlideIn from={10} delay={80} style={{ alignSelf: "flex-start" }}>
           <Tag>{view.tag}</Tag>
@@ -253,6 +256,6 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
       ) : (
         <Button label="Done" kind="night-ghost" onPress={onClose} />
       )}
-    </View>
+    </AboveKeyboard>
   );
 }

@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
 import { Button, Txt } from "../ui/components";
+import { AboveKeyboard } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { colors, shadow, space } from "../ui/theme";
 import { timeline, type Row } from "../view/timeline";
@@ -96,7 +97,7 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.paper }}>
+    <AboveKeyboard style={{ backgroundColor: colors.paper }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + 6, paddingHorizontal: 16, paddingBottom: 10 }}>
         <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={8} scaleTo={0.88} style={[{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }, shadow.float, { shadowOpacity: 0.08 }]}>
           <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
@@ -191,6 +192,6 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
         <Composer disabled={!online} onSend={(text) => void sync.send(slot, text)} />
       )}
       {files && <DiffSheet files={files} load={loadDiff} onClose={() => setFiles(null)} />}
-    </View>
+    </AboveKeyboard>
   );
 }

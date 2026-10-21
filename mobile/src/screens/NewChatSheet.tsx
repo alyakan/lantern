@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import { useController } from "../shell/hooks";
 import { Button, Txt } from "../ui/components";
+import { useKeyboardUp } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { colors, radius, shadow, space } from "../ui/theme";
@@ -35,6 +36,7 @@ export interface NewChatProps {
 export function NewChatSheet({ initialText = "", initialProject, continueChat, onClose, onStarted }: NewChatProps) {
   const { sync } = useController();
   const insets = useSafeAreaInsets();
+  const keyboard = useKeyboardUp();
   const [projects, setProjects] = useState<RemoteProject[] | null>(null);
   const [project, setProject] = useState<string | null>(initialProject ?? null);
   const [text, setText] = useState(initialText);
@@ -84,7 +86,9 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 12 }, shadow.float]}>
+        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, flexShrink: 1 }, shadow.float]}>
+         {/* It scrolls when the keyboard leaves less room than it needs (a small phone). */}
+         <ScrollView style={{ flexShrink: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: space.xl, paddingBottom: keyboard ? 16 : Math.max(insets.bottom, 16) + 8, gap: 12 }}>
           <Txt variant="title" accessibilityRole="header">
             {continueChat ? "Carry on" : "New chat"}
           </Txt>
@@ -138,6 +142,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
           )}
           <Button label={continueChat ? "Send" : busy ? "Starting…" : "Start the chat"} disabled={!ready} onPress={() => void start()} />
           <Button label="Cancel" kind="ghost" disabled={busy} onPress={close} />
+         </ScrollView>
         </View>
       )}
     </Sheet>

@@ -1,10 +1,12 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Modal, Pressable, ScrollView, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
 import { Button, Chip, Tag, Txt } from "../ui/components";
+import { useKeyboardUp } from "../ui/keyboard";
 import { Markdown } from "../ui/Markdown";
 import { bounce, buzz, PopIn, PressScale, skips } from "../ui/motion";
+import { Sheet } from "../ui/Sheet";
 import { colors, fonts, radius, shadow, space } from "../ui/theme";
 import { promptView } from "../view/prompts";
 import { turnLine, type Row, type StepChip } from "../view/timeline";
@@ -173,9 +175,11 @@ export const TurnRow = memo(function TurnRow({ item }: { item: Extract<Item, { k
 export function Composer({ onSend, disabled, placeholder = "Message Claude" }: { onSend: (text: string) => void; disabled?: boolean; placeholder?: string }) {
   const [text, setText] = useState("");
   const insets = useSafeAreaInsets();
+  // With the keyboard up it sits right under the box: the home-indicator space would be a gap.
+  const keyboard = useKeyboardUp();
   const ready = text.trim().length > 0 && !disabled;
   return (
-    <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: Math.max(insets.bottom, 12), backgroundColor: colors.paper }}>
+    <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 12), backgroundColor: colors.paper }}>
       <View style={[{ flexDirection: "row", alignItems: "flex-end", gap: 8, backgroundColor: colors.card, borderRadius: 26, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }, shadow.float, { shadowOpacity: 0.12 }]}>
         <TextInput
           accessibilityLabel="Message"
@@ -263,38 +267,39 @@ export function DiffSheet({ files, load, onClose }: { files: string[]; load: (pa
     };
   }, [path, load]);
   return (
-    <Modal animationType="slide" transparent onRequestClose={onClose}>
-      <Pressable accessibilityLabel="Close" style={{ flex: 1, backgroundColor: "#00000066" }} onPress={onClose} />
-      <View style={{ maxHeight: "75%", backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, paddingBottom: insets.bottom + 8 }}>
-        <View style={{ padding: space.lg, gap: 8 }}>
-          <Txt variant="heading">What changed</Txt>
-          {files.length > 1 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-              {files.map((f) => (
-                <Chip key={f} tone={f === path ? "ok" : "plain"} onPress={() => setPath(f)}>
-                  {f.split("/").pop() ?? f}
-                </Chip>
+    <Sheet onClose={onClose}>
+      {(close) => (
+        <View style={{ flexShrink: 1, backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, paddingBottom: insets.bottom + 8 }}>
+          <View style={{ padding: space.lg, gap: 8 }}>
+            <Txt variant="heading">What changed</Txt>
+            {files.length > 1 && (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                {files.map((f) => (
+                  <Chip key={f} tone={f === path ? "ok" : "plain"} onPress={() => setPath(f)}>
+                    {f.split("/").pop() ?? f}
+                  </Chip>
+                ))}
+              </ScrollView>
+            )}
+            <Txt variant="small" tone="ink2" numberOfLines={1}>
+              {path}
+            </Txt>
+          </View>
+          <ScrollView style={{ flexShrink: 1, paddingHorizontal: space.lg }}>
+            {text === null && !error && <ActivityIndicator style={{ margin: 24 }} />}
+            {error && <Txt tone="stop">{error}</Txt>}
+            {text !== null &&
+              text.split("\n").map((line, i) => (
+                <Txt key={i} variant="mono" style={{ fontFamily: fonts.mono, color: line.startsWith("+") && !line.startsWith("+++") ? colors.go : line.startsWith("-") && !line.startsWith("---") ? colors.stop : colors.ink2 }}>
+                  {line || " "}
+                </Txt>
               ))}
-            </ScrollView>
-          )}
-          <Txt variant="small" tone="ink2" numberOfLines={1}>
-            {path}
-          </Txt>
+          </ScrollView>
+          <View style={{ padding: space.lg }}>
+            <Button label="Close" kind="ghost" onPress={close} />
+          </View>
         </View>
-        <ScrollView style={{ paddingHorizontal: space.lg }}>
-          {text === null && !error && <ActivityIndicator style={{ margin: 24 }} />}
-          {error && <Txt tone="stop">{error}</Txt>}
-          {text !== null &&
-            text.split("\n").map((line, i) => (
-              <Txt key={i} variant="mono" style={{ fontFamily: fonts.mono, color: line.startsWith("+") && !line.startsWith("+++") ? colors.go : line.startsWith("-") && !line.startsWith("---") ? colors.stop : colors.ink2 }}>
-                {line || " "}
-              </Txt>
-            ))}
-        </ScrollView>
-        <View style={{ padding: space.lg }}>
-          <Button label="Close" kind="ghost" onPress={onClose} />
-        </View>
-      </View>
-    </Modal>
+      )}
+    </Sheet>
   );
 }
