@@ -39,3 +39,12 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# release secrets and output: they stay on the machine that releases (see fastlane/Fastfile)
+*.keystore
+play-service-account*.json
+*-service-account*.json
+/build
+fastlane/report.xml
+fastlane/README.md
+fastlane/.env*

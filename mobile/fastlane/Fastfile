@@ -1,0 +1,152 @@
+# Lantern phone app: release automation, run from `mobile/`.
+#
+#   fastlane check             # nothing is built or sent: says what a release would use, and what is missing
+#   fastlane ios beta          # build for the App Store and upload to TestFlight
+#   fastlane android beta      # build a signed bundle and upload it to Google Play's internal testing track
+#
+# Nothing secret is in this file or in the repository. Each secret stays on this Mac and is named by a variable:
+#
+#   ASC_KEY_ID, ASC_ISSUER_ID     the App Store Connect API key (the key file itself is ~/.appstoreconnect/private_keys/AuthKey_<ASC_KEY_ID>.p8)
+#   ANDROID_KEYSTORE              path to the upload keystore (keep it, and a backup of it, outside the repository)
+#   ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+#   PLAY_JSON_KEY                 path to the Google Play service account's JSON key
+#
+# The Android build needs Android Studio's own JDK: JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home".
+
+default_platform(:ios)
+
+BUNDLE_ID = "com.alyakan.lantern"
+# A team id is printed on every app in the store: it is not a secret.
+TEAM_ID = ENV["APPLE_TEAM_ID"] || "2NT5QR24SX"
+
+# What a release must not have: the preview switch for made-up tips (the build then thanks for a tip nobody paid).
+def refuse_preview_build!
+  if ENV["EXPO_PUBLIC_FAKE_TIPS"] == "1"
+    UI.user_error!("EXPO_PUBLIC_FAKE_TIPS=1 is set: that is for previews, and would put made-up tips in a release. Unset it.")
+  end
+end
+
+def need(name)
+  value = ENV[name].to_s
+  UI.user_error!("#{name} is not set (see the top of mobile/fastlane/Fastfile).") if value.empty?
+  value
+end
+
+def mobile_dir
+  File.expand_path("..", __dir__)
+end
+
+# The version in app.json: what the stores call the release.
+def app_version
+  require "json"
+  JSON.parse(File.read(File.join(mobile_dir, "app.json")))["expo"]["version"]
+end
+
+desc "Say what a release would use and what is missing; nothing is built or sent"
+lane :check do
+  refuse_preview_build!
+  UI.message("Version #{app_version}, id #{BUNDLE_ID}, team #{TEAM_ID}")
+  problems = []
+
+  key_id = ENV["ASC_KEY_ID"].to_s
+  key_file = File.expand_path("~/.appstoreconnect/private_keys/AuthKey_#{key_id}.p8")
+  problems << "ASC_KEY_ID is not set" if key_id.empty?
+  problems << "ASC_ISSUER_ID is not set" if ENV["ASC_ISSUER_ID"].to_s.empty?
+  problems << "no App Store Connect key at #{key_file}" unless !key_id.empty? && File.exist?(key_file)
+
+  keystore = ENV["ANDROID_KEYSTORE"].to_s
+  problems << "ANDROID_KEYSTORE is not set, or is not a file" if keystore.empty? || !File.exist?(File.expand_path(keystore))
+  %w[ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD].each { |n| problems << "#{n} is not set" if ENV[n].to_s.empty? }
+  play = ENV["PLAY_JSON_KEY"].to_s
+  problems << "PLAY_JSON_KEY is not set, or is not a file" if play.empty? || !File.exist?(File.expand_path(play))
+
+  if problems.empty?
+    UI.success("Everything a release needs is here.")
+  else
+    UI.important("Missing for a release:\n  - #{problems.join("\n  - ")}")
+  end
+end
+
+platform :ios do
+  def asc_key
+    key_id = need("ASC_KEY_ID")
+    app_store_connect_api_key(
+      key_id: key_id,
+      issuer_id: need("ASC_ISSUER_ID"),
+      key_filepath: File.expand_path("~/.appstoreconnect/private_keys/AuthKey_#{key_id}.p8"),
+      in_house: false,
+    )
+  end
+
+  desc "Build for the App Store and upload the build to TestFlight"
+  lane :beta do
+    refuse_preview_build!
+    key = asc_key
+    # TestFlight wants each build of a version to have a number above the last one's.
+    last = latest_testflight_build_number(api_key: key, app_identifier: BUNDLE_ID, version: app_version, initial_build_number: 0)
+    build_number = last + 1
+    UI.message("Build #{build_number} of #{app_version}")
+
+    # The native project is generated from app.json, never kept: every release starts from it.
+    sh("cd #{mobile_dir} && npx expo prebuild --platform ios --clean")
+
+    build_app(
+      workspace: File.join(mobile_dir, "ios", "Lantern.xcworkspace"),
+      scheme: "Lantern",
+      configuration: "Release",
+      export_method: "app-store",
+      clean: true,
+      output_directory: File.join(mobile_dir, "build"),
+      output_name: "Lantern.ipa",
+      xcargs: "-allowProvisioningUpdates DEVELOPMENT_TEAM=#{TEAM_ID} CURRENT_PROJECT_VERSION=#{build_number}",
+      export_xcargs: "-allowProvisioningUpdates",
+    )
+
+    upload_to_testflight(api_key: key, skip_waiting_for_build_processing: true, skip_submission: true)
+    UI.success("Uploaded build #{build_number}. Add it to a tester group in App Store Connect (testers inside your team need no review; an outside group needs a short beta review).")
+  end
+end
+
+platform :android do
+  desc "Build a signed bundle and upload it to Google Play's internal testing track"
+  lane :beta do
+    refuse_preview_build!
+    keystore = File.expand_path(need("ANDROID_KEYSTORE"))
+    UI.user_error!("No keystore at #{keystore}") unless File.exist?(keystore)
+    json_key = File.expand_path(need("PLAY_JSON_KEY"))
+    UI.user_error!("No Play key at #{json_key}") unless File.exist?(json_key)
+
+    # Google wants every upload to have a version code above the last one's: minutes since 1970 always are.
+    code = Time.now.to_i / 60
+    UI.message("Version #{app_version}, version code #{code}")
+
+    sh("cd #{mobile_dir} && npx expo prebuild --platform android --clean")
+    gradle_file = File.join(mobile_dir, "android", "app", "build.gradle")
+    text = File.read(gradle_file)
+    UI.user_error!("The generated build.gradle has no versionCode to set.") unless text.match?(/versionCode \d+/)
+    File.write(gradle_file, text.sub(/versionCode \d+/, "versionCode #{code}"))
+
+    gradle(
+      project_dir: File.join(mobile_dir, "android"),
+      task: "bundle",
+      build_type: "Release",
+      properties: {
+        "android.injected.signing.store.file" => keystore,
+        "android.injected.signing.store.password" => need("ANDROID_KEYSTORE_PASSWORD"),
+        "android.injected.signing.key.alias" => need("ANDROID_KEY_ALIAS"),
+        "android.injected.signing.key.password" => need("ANDROID_KEY_PASSWORD"),
+      },
+    )
+
+    upload_to_play_store(
+      package_name: BUNDLE_ID,
+      json_key: json_key,
+      aab: File.join(mobile_dir, "android", "app", "build", "outputs", "bundle", "release", "app-release.aab"),
+      track: "internal",
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true,
+    )
+    UI.success("Uploaded to the internal testing track. Promote it to a closed or open test from Play Console.")
+  end
+end
