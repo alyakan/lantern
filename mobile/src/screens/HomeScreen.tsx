@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Platform, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { loadGrouping, saveGrouping } from "../prefs";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
 import { useTipJar, useTips } from "../shell/tipsContext";
 import { Button, Tag, Tile, Txt } from "../ui/components";
@@ -8,7 +9,7 @@ import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
 import { useAccent } from "../ui/accent";
 import { Dots, HomeSkeleton } from "../ui/skeleton";
 import { colors, radius, shadow, space } from "../ui/theme";
-import { cards, headline, rows, tileColors, type Card, type Row } from "../view/home";
+import { cards, groups, headline, rows, tileColors, type Card, type Grouping, type Group, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
 import { Suggestions } from "./Suggestions";
 
@@ -74,19 +75,19 @@ function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomePr
   );
 }
 
-function ChatRow({ row, index, onPress }: { row: Row; index: number; onPress: () => void }) {
+function ChatRow({ row, index, onPress, showProject = true }: { row: Row; index: number; onPress: () => void; showProject?: boolean }) {
   const [bg, fg] = tileColors(row.title);
   const status = row.status === "needs_you" ? ", needs you" : row.status === "working" ? ", working" : row.status === "asleep" ? ", asleep" : row.status === "ended" ? ", stopped" : "";
   return (
     // The rows come in one after the other when Home opens (and a new chat comes in alone); a press gives under the finger.
     <FadeSlideIn from={14} delay={Math.min(index, 8) * 45 + 120}>
-    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${row.project ? `, ${row.project}` : ""}${status}`} onPress={onPress} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: space.xl, paddingVertical: 9, minHeight: 56 }}>
+    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}`} onPress={onPress} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: space.xl, paddingVertical: 9, minHeight: 56 }}>
       <Tile letter={row.initial} bg={bg} fg={fg} />
       <View style={{ flex: 1 }}>
         <Txt variant="body" numberOfLines={1} style={{ fontWeight: "600" }}>
           {row.title}
         </Txt>
-        {!!row.project && (
+        {showProject && !!row.project && (
           <Txt variant="small" tone="ink2" numberOfLines={1}>
             {row.project}
           </Txt>
@@ -104,6 +105,40 @@ function ChatRow({ row, index, onPress }: { row: Row; index: number; onPress: ()
       )}
     </PressScale>
     </FadeSlideIn>
+  );
+}
+
+/** How the chats are listed: most recent first, or under their projects. */
+function GroupingSwitch({ value, onChange }: { value: Grouping; onChange: (g: Grouping) => void }) {
+  const option = (g: Grouping, label: string) => (
+    <PressScale key={g} accessibilityRole="button" accessibilityLabel={`${label}${value === g ? ", selected" : ""}`} accessibilityState={{ selected: value === g }} onPress={() => onChange(g)} scaleTo={0.95} haptic="select" style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: value === g ? colors.ink : "transparent" }}>
+      <Txt variant="small" tone={value === g ? "white" : "ink2"} style={{ fontWeight: "700" }}>
+        {label}
+      </Txt>
+    </PressScale>
+  );
+  return <View style={{ flexDirection: "row", gap: 2, padding: 2, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule }}>{[option("recent", "Recent"), option("project", "Projects")]}</View>;
+}
+
+/** One project's chats under its name, which folds them away when pressed. */
+function ProjectGroup({ group, open, onToggle, onOpenChat }: { group: Group; open: boolean; onToggle: () => void; onOpenChat: HomeProps["onOpenChat"] }) {
+  const name = group.project || "No project";
+  return (
+    <View>
+      <PressScale accessibilityRole="button" accessibilityLabel={`${name}, ${group.rows.length === 1 ? "1 chat" : `${group.rows.length} chats`}${group.needsYou ? `, ${group.needsYou} need you` : ""}`} accessibilityState={{ expanded: open }} onPress={onToggle} haptic="select" scaleTo={0.985} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: space.xl, paddingTop: 16, paddingBottom: 4, minHeight: 40 }}>
+        <Txt variant="small" tone="ink3" accessibilityElementsHidden style={{ width: 12 }}>
+          {open ? "▾" : "▸"}
+        </Txt>
+        <Txt variant="small" style={{ fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
+          {name}
+        </Txt>
+        <Txt variant="small" tone="ink3">
+          {group.rows.length}
+        </Txt>
+        {group.needsYou > 0 && <PulseDot color={colors.hi} />}
+      </PressScale>
+      {open && group.rows.map((r, i) => <ChatRow key={r.slot} row={r} index={i} showProject={false} onPress={() => onOpenChat(r.slot)} />)}
+    </View>
   );
 }
 
@@ -143,6 +178,21 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const insets = useSafeAreaInsets();
   const [now, setNow] = useState(Date.now());
   const [refreshing, setRefreshing] = useState(false);
+  // How the chats are listed is remembered on this phone; the projects folded away are only for as long as Home is open.
+  const [grouping, setGrouping] = useState<Grouping>("recent");
+  const [folded, setFolded] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let live = true;
+    void loadGrouping().then((g) => live && setGrouping(g));
+    return () => {
+      live = false;
+    };
+  }, []);
+  const group = (g: Grouping) => {
+    setGrouping(g);
+    void saveGrouping(g);
+  };
+  const toggle = (project: string) => setFolded((f) => new Set(f.has(project) ? [...f].filter((p) => p !== project) : [...f, project]));
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
@@ -202,6 +252,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           <Txt variant="small" style={{ fontWeight: "700" }}>
             All chats
           </Txt>
+          {list.length > 1 && <GroupingSwitch value={grouping} onChange={group} />}
           <PressScale accessibilityRole="button" accessibilityLabel="New chat" onPress={() => onNewChat()} hitSlop={8} scaleTo={0.92} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule }}>
             <Txt variant="small" style={{ fontWeight: "700" }}>
               + New chat
@@ -212,6 +263,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           <Txt variant="body" tone="ink2" style={{ paddingHorizontal: space.xl, paddingTop: 8 }}>
             No chats are open on your Mac. Start one in Lantern and it shows up here.
           </Txt>
+        ) : grouping === "project" ? (
+          groups(list).map((g) => <ProjectGroup key={g.project} group={g} open={!folded.has(g.project)} onToggle={() => toggle(g.project)} onOpenChat={onOpenChat} />)
         ) : (
           list.map((r, i) => <ChatRow key={r.slot} row={r} index={i} onPress={() => onOpenChat(r.slot)} />)
         )}

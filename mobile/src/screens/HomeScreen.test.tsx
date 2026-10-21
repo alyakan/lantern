@@ -5,6 +5,15 @@ import { chat, makeController, NOW, renderWith, waiting } from "../test/render";
 import { noMemory, noPlatform, TipJar } from "../tips";
 import { HomeScreen } from "./HomeScreen";
 
+// What Home remembers about how it lists the chats: kept in memory here, not in the Keychain.
+let mockRemembered: "recent" | "project" = "recent";
+jest.mock("../prefs", () => ({
+  loadGrouping: jest.fn(async () => mockRemembered),
+  saveGrouping: jest.fn(async (g: "recent" | "project") => {
+    mockRemembered = g;
+  }),
+}));
+
 const handlers = () => ({ onOpenChat: jest.fn(), onReview: jest.fn(), onOpenMac: jest.fn(), onCompose: jest.fn(), onNewChat: jest.fn(), onSupport: jest.fn() });
 
 describe("the way in to the tip jar on Home", () => {
@@ -179,5 +188,64 @@ describe("Home", () => {
     await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()], waiting: [waiting({ tool_name: "AskUserQuestion", input: { questions: [{ question: "Which channel?", header: "Channel", options: [{ label: "Stable" }] }] } })] });
     expect(screen.getByText("A question")).toBeTruthy();
     expect(screen.getByText("Which channel?")).toBeTruthy();
+  });
+});
+
+describe("Home's chats by project", () => {
+  const chats = [
+    chat({ slot: "a", title: "Release", project: "lantern", active_at: NOW - 60_000 }),
+    chat({ slot: "b", title: "Prayers widget", project: "prayers", active_at: NOW - 30_000 }),
+    chat({ slot: "c", title: "Fix sync", project: "lantern", active_at: NOW - 120_000, status: "needs_you" }),
+  ];
+
+  beforeEach(() => {
+    mockRemembered = "recent";
+  });
+
+  it("lists the chats most recent first until Projects is chosen, then under each project with its count", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats });
+    expect(screen.getByRole("button", { name: "Recent, selected" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^lantern, 2 chats/ })).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
+    expect(screen.getByRole("button", { name: "Projects, selected" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "prayers, 1 chat" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "lantern, 2 chats, 1 need you" })).toBeTruthy();
+    // The project is in the heading, not repeated under every chat.
+    expect(screen.getByRole("button", { name: "Release" })).toBeTruthy();
+  });
+
+  it("folds a project away and opens it again", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats });
+    await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
+    await fireEvent.press(screen.getByRole("button", { name: "lantern, 2 chats, 1 need you" }));
+    expect(screen.queryByRole("button", { name: "Release" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Prayers widget" })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "lantern, 2 chats, 1 need you" }));
+    expect(screen.getByRole("button", { name: "Release" })).toBeTruthy();
+  });
+
+  it("opens a chat from under its project", async () => {
+    const h = handlers();
+    await renderWith(<HomeScreen {...h} />, { chats });
+    await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Prayers widget" }));
+    expect(h.onOpenChat).toHaveBeenCalledWith("b");
+  });
+
+  it("remembers the choice for next time", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats });
+    await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
+    expect(mockRemembered).toBe("project");
+  });
+
+  it("opens by project when that is what was chosen last time", async () => {
+    mockRemembered = "project";
+    await renderWith(<HomeScreen {...handlers()} />, { chats });
+    await waitFor(() => expect(screen.getByRole("button", { name: "prayers, 1 chat" })).toBeTruthy());
+  });
+
+  it("has no switch with a single chat: there is nothing to group", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()] });
+    expect(screen.queryByRole("button", { name: "Projects" })).toBeNull();
   });
 });

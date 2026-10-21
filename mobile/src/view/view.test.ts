@@ -1,6 +1,6 @@
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { Waiting } from "../protocol/generated/Waiting";
-import { ago, cards, headline, rows, tileColors } from "./home";
+import { ago, groups, cards, headline, rows, tileColors } from "./home";
 import { parseInline, parseMarkdown, plainText, type Block } from "./markdown";
 import { livePage, readPage } from "./pages";
 import { approvalOf, promptView, questionsOf } from "./prompts";
@@ -61,6 +61,26 @@ describe("the Home screen", () => {
     expect(r.map((x) => [x.slot, x.note])).toEqual([["now", null], ["idle", "5 min"], ["n", "Needs you"], ["old", "Asleep"]]);
     expect(r[0]).toMatchObject({ initial: "R", project: "lantern" });
     expect(r[1]).toMatchObject({ title: "New chat" });
+  });
+
+  it("lists chats under their projects: the project with the latest chat first, those with none last, the most recent chat first in each", () => {
+    const list = rows(
+      [
+        chat({ slot: "a1", project: "alpha", active_at: 100 }),
+        chat({ slot: "b1", project: "beta", active_at: 900, status: "needs_you" }),
+        chat({ slot: "n1", project: null, active_at: 1000 }),
+        chat({ slot: "a2", project: "alpha", active_at: 800 }),
+        chat({ slot: "b2", project: "beta", active_at: 50 }),
+      ],
+      2000,
+    );
+    const g = groups(list);
+    expect(g.map((x) => [x.project, x.rows.map((r) => r.slot), x.needsYou])).toEqual([
+      ["beta", ["b1", "b2"], 1],
+      ["alpha", ["a2", "a1"], 0],
+      ["", ["n1"], 0],
+    ]);
+    expect(groups([])).toEqual([]);
   });
 
   it("gives a title the same tile colours every time", () => {
