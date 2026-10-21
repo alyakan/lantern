@@ -1392,9 +1392,8 @@ pub(crate) mod tests {
         r.hub.session("a", "abc-123");
         let heard = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                match p.next().await.expect("something") {
-                    ServerMessage::Reset { events, .. } => break events,
-                    _ => {}
+                if let ServerMessage::Reset { events, .. } = p.next().await.expect("something") {
+                    break events;
                 }
             }
         })
