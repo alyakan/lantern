@@ -15,6 +15,7 @@ pub mod menu_bar;
 pub mod merge_tests;
 pub mod navigation;
 pub mod dashboard;
+pub mod dashboard_run;
 pub mod network;
 pub mod orchestra;
 pub mod permission;
@@ -67,6 +68,8 @@ pub struct AppState {
     prs: std::sync::Mutex<std::collections::HashMap<(std::path::PathBuf, u32), (std::time::Instant, pr::PrRange)>>,
     /// Network Monitor's captured traffic, as the network_* tools and the Network tab read it (see network.rs).
     network: Arc<network::Monitor>,
+    /// Which dashboards are trusted, the runs of their forms, and what is running now (see dashboard_run.rs).
+    dashboards: Arc<dashboard_run::Runner>,
     /// The Storage tab's scan, and what Claude's storage_* tools read and mark (see storage/mod.rs).
     storage: Arc<storage::Storage>,
     /// How many workers may run at once across all of Lantern (Settings → General; the window sends it).
@@ -460,6 +463,60 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
 #[tauri::command]
 async fn dashboards_list(folder: String) -> Result<Vec<dashboard::Dashboard>, String> {
     tauri::async_runtime::spawn_blocking(move || dashboard::load(std::path::Path::new(&folder))).await.map_err(|e| e.to_string())
+}
+
+/// Which of the folder's dashboards are trusted, what is running, and the history of runs.
+#[tauri::command]
+fn dashboards_state(state: State<'_, AppState>, folder: String) -> dashboard_run::State {
+    state.dashboards.state(&permission::rules::folder_key(std::path::Path::new(&folder)))
+}
+
+/// Trusts a dashboard as the user saw it (the hash they were shown); refused if the file has changed since.
+#[tauri::command]
+async fn dashboard_trust(state: State<'_, AppState>, folder: String, file: String, hash: String) -> Result<(), String> {
+    let runner = state.dashboards.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = std::path::Path::new(&folder);
+        runner.trust(&permission::rules::folder_key(root), root, &file, &hash)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// What pressing a form's button would run, with the values in: shown to the user before it does.
+#[tauri::command]
+async fn dashboard_preview(folder: String, file: String, form: String, values: dashboard_run::Values) -> Result<dashboard_run::Preview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let found = dashboard::load(std::path::Path::new(&folder)).into_iter().find(|d| d.file == file).ok_or("That dashboard is gone.")?;
+        let form = found.form(&form).ok_or_else(|| format!("That dashboard has no form called {form:?}."))?;
+        dashboard_run::preview(form, &values)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Runs a form of a trusted dashboard and returns the run. The user's own press of the button, after its confirm.
+#[tauri::command]
+async fn dashboard_run(state: State<'_, AppState>, folder: String, file: String, form: String, values: dashboard_run::Values) -> Result<dashboard_run::Run, String> {
+    let runner = state.dashboards.clone();
+    let path_env = login_path(&state).await;
+    let root = std::path::Path::new(&folder);
+    runner.run(&permission::rules::folder_key(root), root, &file, &form, values, path_env).await
+}
+
+#[tauri::command]
+fn dashboard_stop(state: State<'_, AppState>, folder: String, file: String, form: String) -> bool {
+    state.dashboards.stop(&permission::rules::folder_key(std::path::Path::new(&folder)), &file, &form)
+}
+
+#[tauri::command]
+fn dashboard_delete_run(state: State<'_, AppState>, folder: String, id: String) -> bool {
+    state.dashboards.delete_run(&permission::rules::folder_key(std::path::Path::new(&folder)), &id)
+}
+
+#[tauri::command]
+fn dashboard_clear_runs(state: State<'_, AppState>, folder: String, file: String, form: String) {
+    state.dashboards.clear_runs(&permission::rules::folder_key(std::path::Path::new(&folder)), &file, &form);
 }
 
 /// The Network tab's rows for a folder, with its watches and whether Network Monitor is running.
@@ -2101,6 +2158,11 @@ pub fn run() {
             network.set_on_change(move || {
                 let _ = handle.emit("network-changed", ());
             });
+            let dashboards = Arc::new(dashboard_run::Runner::load(app.path().app_data_dir().ok().map(|d| d.join("dashboards.json"))));
+            let handle = app.handle().clone();
+            dashboards.set_on_change(move || {
+                let _ = handle.emit("dashboards-changed", ());
+            });
             let handle = app.handle().clone();
             let for_in_use = app.handle().clone();
             let storage = Arc::new(storage::Storage::new(
@@ -2117,7 +2179,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into() });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, dashboards, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into() });
             app.manage(updates::Updates::default());
             app.manage(awake::Awake::default());
             app.manage(menu_bar::MenuBar::default());
@@ -2179,6 +2241,13 @@ pub fn run() {
             aside_stop_answering,
             orchestra_approve_merge,
             dashboards_list,
+            dashboards_state,
+            dashboard_trust,
+            dashboard_preview,
+            dashboard_run,
+            dashboard_stop,
+            dashboard_delete_run,
+            dashboard_clear_runs,
             network_state,
             network_response,
             network_unwatch,

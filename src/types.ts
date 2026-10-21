@@ -526,6 +526,47 @@ export interface Dashboard {
   issues: DashboardIssue[];
 }
 
+/** What a form's fields were set to: field id to a string, number, boolean or list of strings. */
+export type DashboardValues = Record<string, string | number | boolean | string[]>;
+
+/** One run of a dashboard form, as kept in the history. */
+export interface DashboardRun {
+  id: string;
+  file: string;
+  form: string;
+  /** Milliseconds since 1970. */
+  started_at: number;
+  duration_ms: number;
+  /** Null when a signal ended it (stopped or timed out) rather than the command exiting. */
+  exit_code: number | null;
+  stopped: boolean;
+  timed_out: boolean;
+  inputs: DashboardValues;
+  /** The program and arguments that ran, with the values in. */
+  args: string[];
+  stdout: string;
+  stderr: string;
+  /** More than the kept amount was printed; the start is missing. */
+  truncated: boolean;
+  /** For a form whose output is "json": the last line of stdout, when it parsed as an object or a list. */
+  output: Record<string, unknown> | unknown[] | null;
+}
+
+/** What the Dashboard tab knows about a folder besides its files. */
+export interface DashboardState {
+  /** Hashes of the dashboards the user trusted; one whose hash isn't here asks first. */
+  trusted: string[];
+  running: { file: string; form: string }[];
+  /** Newest first. */
+  runs: DashboardRun[];
+}
+
+/** What pressing a form's button will run, worked out by the code that runs it. */
+export interface DashboardPreview {
+  args: string[];
+  confirm: string | null;
+}
+
 export type StorageKind = "worktree" | "repo" | "build_output" | "cache" | "simulator" | "download" | "trash";
 /** How safe it is to delete: blocked items hold unsaved work and can't be deleted at all. */
 export type StorageRisk = "safe" | "review" | "blocked";

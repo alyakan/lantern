@@ -548,6 +548,16 @@ pub struct Dashboard {
     pub issues: Vec<Issue>,
 }
 
+impl Dashboard {
+    /// The form with this id, in a dashboard that checked out.
+    pub fn form(&self, id: &str) -> Option<&Form> {
+        self.spec.as_ref()?.panels.iter().find_map(|p| match p {
+            Panel::Form(f) if f.id == id => Some(f),
+            _ => None,
+        })
+    }
+}
+
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
