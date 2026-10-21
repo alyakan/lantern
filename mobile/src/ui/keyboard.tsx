@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Keyboard, KeyboardAvoidingView, Platform, type StyleProp, type ViewStyle } from "react-native";
+import { Keyboard, KeyboardAvoidingView, Platform, View, type StyleProp, type ViewStyle } from "react-native";
 
 /** Whether the on-screen keyboard is up (iOS says so as it starts to move, Android once it is there). */
 export function useKeyboardUp() {
@@ -22,8 +22,9 @@ export function useKeyboardUp() {
  */
 export function AboveKeyboard({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
   return (
-    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={[{ flex: 1 }, style]}>
-      {children}
+    // The avoiding view sets its own bottom padding (the keyboard's height), replacing any of `style`'s: so `style` is on a view inside it.
+    <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+      <View style={[{ flex: 1 }, style]}>{children}</View>
     </KeyboardAvoidingView>
   );
 }

@@ -53,4 +53,16 @@ describe("keyboard", () => {
     const box = screen.getByText("Inside").parent!;
     expect(StyleSheet.flatten(box.props.style)).toMatchObject({ flex: 1, backgroundColor: "red" });
   });
+
+  it("keeps its own padding on a view of its own: the avoiding view would replace the bottom one with the keyboard's height", async () => {
+    await render(
+      <AboveKeyboard style={{ paddingBottom: 34, paddingTop: 56 }}>
+        <Text>Inside</Text>
+      </AboveKeyboard>,
+    );
+    const box = screen.getByText("Inside").parent!;
+    expect(StyleSheet.flatten(box.props.style)).toMatchObject({ paddingBottom: 34, paddingTop: 56 });
+    // What lifts is outside it, and does not carry that padding itself.
+    expect(StyleSheet.flatten(box.parent!.props.style).paddingBottom).not.toBe(34);
+  });
 });
