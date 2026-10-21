@@ -93,9 +93,13 @@ pub enum Kind {
 /// Where a select's options come from when they aren't written in the file: a command that prints them.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct OptionsFrom {
-    /// The program and its arguments, as in an action's command but with no `{field}`: it runs when the form opens, before
-    /// anything is chosen. Its last line of output is a JSON list of strings.
+    /// The program and its arguments, as in an action's command. Its last line of output is a JSON list of strings. A `{field}` in
+    /// it must be one of `depends_on`: the list is then the one for the value chosen there (a staging's own addons).
     pub command: Vec<String>,
+    /// Fields of the same form whose chosen values the command takes (and the list depends on): selects, numbers or toggles
+    /// whose values are written in the file.
+    #[serde(rename = "dependsOn", skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -270,6 +274,7 @@ fn check_form(issues: &mut Issues, path: &str, object: &Map<String, Value>) -> O
         }
         Some(_) => issues.add(&join(path, "fields"), "must be a list of fields"),
     }
+    check_dependencies(issues, path, object.get("fields"), &fields);
     let action = match object.get("action") {
         Some(raw) => check_action(issues, &join(path, "action"), raw, &fields),
         None => {
@@ -340,9 +345,52 @@ fn check_options_from(issues: &mut Issues, path: &str, object: &Map<String, Valu
         issues.add(&at, "must be an object with a command: { \"command\": [\"program\", \"argument\"] }");
         return None;
     };
-    issues.only_keys(&at, inner, &["command"]);
-    let command = check_command(issues, &join(&at, "command"), inner.get("command"), None);
-    (!command.is_empty()).then_some(OptionsFrom { command })
+    issues.only_keys(&at, inner, &["command", "dependsOn"]);
+    let mut depends_on: Vec<String> = Vec::new();
+    match inner.get("dependsOn") {
+        None => {}
+        Some(Value::Array(items)) => {
+            for (i, item) in items.iter().enumerate() {
+                let here = format!("{at}.dependsOn[{i}]");
+                match id_at(issues, &here, Some(item)) {
+                    Some(id) if depends_on.contains(&id) => issues.add(&here, format!("'{id}' is listed twice")),
+                    Some(id) => depends_on.push(id),
+                    None => {}
+                }
+            }
+        }
+        Some(_) => issues.add(&join(&at, "dependsOn"), "must be a list of field ids"),
+    }
+    let command = check_command(issues, &join(&at, "command"), inner.get("command"), Slots::Later);
+    (!command.is_empty()).then_some(OptionsFrom { command, depends_on })
+}
+
+/// What a command-fed field depends on, once every field of the form is known: each dependency is a select, number or toggle of this
+/// form whose values are written in the file (the chosen value is then one the author listed, and can go into a command), and each
+/// `{field}` in the command is one of them.
+fn check_dependencies(issues: &mut Issues, form_path: &str, raw_fields: Option<&Value>, fields: &[Field]) {
+    for field in fields {
+        let Some(from) = &field.options_from else { continue };
+        let position = raw_fields.and_then(Value::as_array).and_then(|raw| raw.iter().position(|r| r["id"].as_str() == Some(field.id.as_str()))).unwrap_or(0);
+        let at = format!("{}[{position}].optionsFrom", join(form_path, "fields"));
+        for (i, dep) in from.depends_on.iter().enumerate() {
+            let here = format!("{at}.dependsOn[{i}]");
+            match fields.iter().find(|f| &f.id == dep) {
+                None => issues.add(&here, format!("'{dep}' isn't a field of this form")),
+                Some(d) if d.id == field.id => issues.add(&here, "a field can't depend on itself"),
+                Some(d) if d.options_from.is_some() => issues.add(&here, format!("'{dep}' is itself loaded by a command; depend on a field whose options are written in the file")),
+                Some(d) if !matches!(d.kind, Kind::Select | Kind::Number | Kind::Toggle) => issues.add(&here, format!("'{dep}' must be a select, number or toggle (a text or multiselect value can't go into the command)")),
+                Some(_) => {}
+            }
+        }
+        for (i, arg) in from.command.iter().enumerate() {
+            for (_, id) in placeholders(arg) {
+                if !from.depends_on.contains(&id) {
+                    issues.add(&format!("{at}.command[{i}]"), format!("{{{id}}} isn't listed in dependsOn: name the fields this command takes there"));
+                }
+            }
+        }
+    }
 }
 
 fn check_options(issues: &mut Issues, path: &str, object: &Map<String, Value>, kind: Kind) -> Vec<String> {
@@ -446,7 +494,7 @@ fn check_action(issues: &mut Issues, path: &str, raw: &Value, fields: &[Field]) 
         return None;
     };
     issues.only_keys(path, object, &["command", "confirm", "output"]);
-    let command = check_command(issues, &join(path, "command"), object.get("command"), Some(fields));
+    let command = check_command(issues, &join(path, "command"), object.get("command"), Slots::Fields(fields));
     let confirm = text_at(issues, &join(path, "confirm"), object.get("confirm"), false, MAX_LABEL).inspect(|text| {
         check_placeholders(issues, &join(path, "confirm"), text, fields, false);
     });
@@ -463,9 +511,14 @@ fn check_action(issues: &mut Issues, path: &str, raw: &Value, fields: &[Field]) 
     (!command.is_empty()).then_some(Action { command, confirm, output })
 }
 
-/// A command: a list of strings, the program then its arguments. With `fields` (an action's), each `{field}` has to name one of
-/// them; without (an options command's, which runs before anything is chosen), none may appear. The program never holds one.
-fn check_command(issues: &mut Issues, at: &str, raw: Option<&Value>, fields: Option<&[Field]>) -> Vec<String> {
+/// A command: a list of strings, the program then its arguments. An action's `{field}` markers each have to name a field of the
+/// form; an options command's are checked later, against what it depends on. The program never holds one.
+enum Slots<'a> {
+    Fields(&'a [Field]),
+    Later,
+}
+
+fn check_command(issues: &mut Issues, at: &str, raw: Option<&Value>, slots: Slots) -> Vec<String> {
     let mut command: Vec<String> = Vec::new();
     match raw.and_then(Value::as_array) {
         Some(raw) if !raw.is_empty() && raw.len() <= MAX_ARGS => {
@@ -474,10 +527,9 @@ fn check_command(issues: &mut Issues, at: &str, raw: Option<&Value>, fields: Opt
                 match arg.as_str() {
                     Some(s) if s.chars().count() > MAX_ARG => issues.add(&here, format!("longer than {MAX_ARG} characters")),
                     Some(s) => {
-                        match fields {
-                            Some(fields) => check_placeholders(issues, &here, s, fields, i > 0),
-                            None if !placeholders(s).is_empty() => issues.add(&here, "can't use a {field}: this command runs when the form opens, before anything is chosen"),
-                            None => {}
+                        // An options command's markers are checked once every field is known (see `check_dependencies`).
+                        if let Slots::Fields(fields) = slots {
+                            check_placeholders(issues, &here, s, fields, i > 0);
                         }
                         command.push(s.to_string());
                     }
@@ -487,7 +539,7 @@ fn check_command(issues: &mut Issues, at: &str, raw: Option<&Value>, fields: Opt
             match command.first() {
                 // A form value must never choose the program.
                 Some(program) if program.is_empty() => issues.add(&format!("{at}[0]"), "the program can't be empty"),
-                Some(program) if !placeholders(program).is_empty() && fields.is_some() => issues.add(&format!("{at}[0]"), "the program can't contain a {field}; only arguments can"),
+                Some(program) if !placeholders(program).is_empty() => issues.add(&format!("{at}[0]"), "the program can't contain a {field}; only arguments can"),
                 _ => {}
             }
         }
@@ -825,11 +877,40 @@ mod tests {
         assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": ["x", 5] })), &format!("{at}.command[1]"), "must be a string"));
         assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": [""] })), &format!("{at}.command[0]"), "can't be empty"));
         assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": ["x"], "also": 1 })), &format!("{at}.also"), "not a known key"));
-        // It runs before anything is chosen, so it can't use a field's value, in the program or in an argument.
-        assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": ["x", "{staging}"] })), &format!("{at}.command[1]"), "before anything is chosen"));
-        assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": ["{staging}"] })), &format!("{at}.command[0]"), "before anything is chosen"));
+        // A field's value can go into an argument only when the command says it depends on that field, and never into the program.
+        assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": ["x", "{staging}"] })), &format!("{at}.command[1]"), "isn't listed in dependsOn"));
+        assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": ["{staging}"], "dependsOn": ["staging"] })), &format!("{at}.command[0]"), "program can't contain"));
         // A select with neither options nor a command is still refused.
         assert!(has(with(|s| { s["panels"][0]["fields"][0].as_object_mut().unwrap().remove("options"); }), "panels[0].fields[0].options", "needs a list"));
+    }
+
+    #[test]
+    fn a_command_fed_list_can_depend_on_other_fields_of_the_form() {
+        let at = "panels[0].fields[2].optionsFrom";
+        let depending = |depends: Value, command: Value| dynamic(move |s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": command, "dependsOn": depends }));
+        let ok = depending(json!(["staging"]), json!(["python3", "x.py", "addons", "--staging", "{staging}"]));
+        assert!(errors(ok.clone()).is_empty(), "{:?}", errors(ok.clone()));
+        let spec = parse(&ok.to_string()).unwrap();
+        let Panel::Form(form) = &spec.panels[0] else { panic!() };
+        assert_eq!(form.fields[2].options_from.as_ref().unwrap().depends_on, ["staging"]);
+        assert!(serde_json::to_string(&spec).unwrap().contains("\"dependsOn\":[\"staging\"]"));
+        // A number or a toggle will do as well, and a dependency nothing uses is allowed.
+        assert!(errors(depending(json!(["users", "loud"]), json!(["x", "{users}", "{loud}"]))).is_empty());
+        assert!(errors(depending(json!(["staging"]), json!(["x"]))).is_empty());
+        // What it may not depend on.
+        assert!(has(depending(json!(["nope"]), json!(["x"])), &format!("{at}.dependsOn[0]"), "isn't a field of this form"));
+        assert!(has(depending(json!(["addons"]), json!(["x"])), &format!("{at}.dependsOn[0]"), "can't depend on itself"));
+        assert!(has(depending(json!(["name"]), json!(["x"])), &format!("{at}.dependsOn[0]"), "must be a select, number or toggle"));
+        assert!(has(depending(json!(["staging", "staging"]), json!(["x"])), &format!("{at}.dependsOn[1]"), "listed twice"));
+        assert!(has(depending(json!("staging"), json!(["x"])), &format!("{at}.dependsOn"), "list of field ids"));
+        assert!(has(depending(json!([5]), json!(["x"])), &format!("{at}.dependsOn[0]"), "needs an id"));
+        // Not on a field that a command fills in itself, in either direction.
+        let chained = dynamic(|s| {
+            s["panels"][0]["fields"][0].as_object_mut().unwrap().remove("options");
+            s["panels"][0]["fields"][0]["optionsFrom"] = json!({ "command": ["x"] });
+            s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": ["x", "{staging}"], "dependsOn": ["staging"] });
+        });
+        assert!(has(chained, &format!("{at}.dependsOn[0]"), "loaded by a command"));
     }
 
     #[test]

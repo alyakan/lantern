@@ -8,6 +8,7 @@ import { commandLine, formatDuration, initialState, isScalar, isTable, plain, ru
 // in these tables or as a mismatch below.
 const FIELD_KEYS: Record<keyof DashboardField, true> = { id: true, type: true, label: true, required: true, default: true, options: true, optionsFrom: true, min: true, max: true };
 const ACTION_KEYS: Record<keyof DashboardAction, true> = { command: true, confirm: true, output: true };
+const OPTIONS_FROM_KEYS: Record<keyof NonNullable<DashboardField["optionsFrom"]>, true> = { command: true, dependsOn: true };
 const FORM_KEYS = ["action", "fields", "id", "title", "type"];
 const LINK_KEYS = ["id", "of", "title", "type"];
 const ROOT_KEYS: Record<keyof DashboardSpec, true> = { title: true, panels: true };
@@ -33,6 +34,12 @@ describe("the dashboard spec the TypeScript types describe", () => {
   it("has exactly the field kinds and keys the types name", () => {
     expect([...new Set(fields.map((f) => f.type))].sort()).toEqual(["multiselect", "number", "select", "text", "toggle"]);
     expect(keysOf(fields)).toEqual(table(FIELD_KEYS));
+  });
+
+  it("has exactly the optionsFrom keys the types name", () => {
+    const from = fields.flatMap((f) => (f.optionsFrom ? [f.optionsFrom] : []));
+    expect(from.length).toBeGreaterThan(0);
+    expect(keysOf(from)).toEqual(table(OPTIONS_FROM_KEYS));
   });
 
   it("has exactly the action keys the types name", () => {

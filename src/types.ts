@@ -495,7 +495,7 @@ export interface DashboardField {
   /** Select and multiselect only. */
   options?: string[];
   /** Select and multiselect only, instead of `options`: a command whose last line of output is a JSON list of strings, run when the form opens. */
-  optionsFrom?: { command: string[] };
+  optionsFrom?: { command: string[]; dependsOn?: string[] };
   /** Number only. */
   min?: number;
   max?: number;
@@ -574,6 +574,8 @@ export interface DashboardCommand {
   kind: "action" | "options";
   /** For "options": the field whose options it loads. */
   field?: string;
+  /** For "options": the fields whose chosen values it takes (a `{field}` in the command), so the list is one per value. */
+  depends_on?: string[];
   /** The program and arguments as written, `~` as the home folder; `{field}` stands for that field's value. */
   command: string[];
   /** Where the program is on disk; null with `error` saying why not. */

@@ -155,7 +155,8 @@ function TrustCard({ folder, dashboard }: { folder: string; dashboard: Dashboard
       .dashboardTrust(folder, dashboard.file, dashboard.hash)
       .then(() => {
         // The card said these commands run now: fill in the lists the forms offer. A failure is shown by the field, with a Retry.
-        for (const c of commands ?? []) if (c.kind === "options" && c.field) api.dashboardLoadOptions(folder, dashboard.file, c.form, c.field).catch(() => {});
+        // Only the lists that don't depend on a choice: one that does (a staging's addons) has no value to load for until it is chosen.
+        for (const c of commands ?? []) if (c.kind === "options" && c.field && !c.depends_on?.length) api.dashboardLoadOptions(folder, dashboard.file, c.form, c.field, {}).catch(() => {});
       })
       .catch((e) => setError(String(e)))
       .finally(() => setBusy(false));
@@ -169,7 +170,7 @@ function TrustCard({ folder, dashboard }: { folder: string; dashboard: Dashboard
       {commands === null && !error && <div className="tests-note">Reading its commands…</div>}
       {commands?.map((c) => (
         <div key={`${c.form}/${c.kind}/${c.field ?? ""}`} className="dash-trust-command">
-          <div className="dash-trust-form">{c.kind === "options" ? `Loads the options of “${c.field}” in ${c.title ?? c.form}, when you trust the dashboard and when you press Reload` : c.title ?? c.form}</div>
+          <div className="dash-trust-form">{c.kind === "options" ? `Loads the options of “${c.field}” in ${c.title ?? c.form}${c.depends_on?.length ? `, for the ${c.depends_on.join(" and ")} you pick, when you press Load options or Reload` : ", when you trust the dashboard and when you press Reload"}` : c.title ?? c.form}</div>
           <pre className="dash-command" aria-label={c.kind === "options" ? `Options command of ${c.field} in ${c.title ?? c.form}` : `Command of ${c.title ?? c.form}`}>
             {commandLine(c.command)}
           </pre>

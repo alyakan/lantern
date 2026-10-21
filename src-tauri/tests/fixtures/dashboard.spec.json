@@ -49,7 +49,12 @@
               "python3",
               "~/tools/lumi_staging.py",
               "addons",
+              "--staging",
+              "{staging}",
               "--json"
+            ],
+            "dependsOn": [
+              "staging"
             ]
           }
         },

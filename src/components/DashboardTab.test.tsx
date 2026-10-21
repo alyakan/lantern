@@ -40,6 +40,8 @@ function load(list: Dashboard[], st: DashboardState, runs: DashboardRun[] = []) 
   vi.mocked(api.dashboardsState).mockResolvedValue({ ...st, runs: st.runs.length ? st.runs : runs.map(summary) });
   vi.mocked(api.dashboardRunDetail).mockImplementation(async (_f, id) => runs.find((r) => r.id === id) ?? null);
 }
+const staging = async (value: string) => fireEvent.change(await screen.findByLabelText(/Staging/), { target: { value } });
+
 beforeEach(() => {
   vi.resetAllMocks();
   changed = null;
@@ -236,29 +238,34 @@ describe("DashboardTab", () => {
     await waitFor(() => expect(reads()).toBe(before + 4));
   });
 
-  it("offers the list kept from the last time the field's command ran, and does not run it by opening the form", async () => {
+  it("waits for the staging, then offers the list kept for it, and does not run the command by opening the form", async () => {
     load([dash()], state());
-    render(<DashboardTab folder="/p" refreshKey={0} />);
+    // Its own folder name: what a form remembers is kept per folder, so no test leaves a choice for the next.
+    render(<DashboardTab folder="/dep1" refreshKey={0} />);
+    expect(await screen.findByText("Choose Staging first.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("testo_sensors")).toBeNull();
+    // Nothing is looked up, and nothing is run, until there is a staging to look up a list for.
+    expect(api.dashboardOptions).not.toHaveBeenCalled();
+    await staging("7");
     expect(await screen.findByLabelText("testo_sensors")).toBeInTheDocument();
-    expect(screen.getByLabelText("approvals")).toBeChecked();
     expect(screen.getByText(/Loaded 2m ago by the dashboard's command/)).toBeInTheDocument();
-    // Only the field that has a command is looked up (the staging list is written in the file), and nothing is run.
     expect(api.dashboardOptions).toHaveBeenCalledTimes(1);
-    expect(api.dashboardOptions).toHaveBeenCalledWith("/p", "staging.json", "org", "addons");
+    expect(api.dashboardOptions).toHaveBeenCalledWith("/dep1", "staging.json", "org", "addons", { staging: "7" });
     expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
     expect(within(screen.getByLabelText(/Staging/)).getAllByRole("option").map((o) => o.textContent)).toEqual(["Choose…", "1", "2", "3", "7", "9"]);
   });
 
-  it("says no options are loaded yet, and Load options runs the command", async () => {
+  it("says no options are loaded yet for this staging, and Load options runs the command for it", async () => {
     load([dash()], state());
     vi.mocked(api.dashboardOptions).mockResolvedValue(null);
-    render(<DashboardTab folder="/p" refreshKey={0} />);
-    expect(await screen.findByText(/No options loaded yet/)).toBeInTheDocument();
+    render(<DashboardTab folder="/dep2" refreshKey={0} />);
+    await staging("7");
+    expect(await screen.findByText(/No options loaded yet for this choice/)).toBeInTheDocument();
     expect(screen.queryByLabelText("sso")).toBeNull();
     expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Load options" }));
     expect(await screen.findByLabelText("testo_sensors")).toBeInTheDocument();
-    expect(api.dashboardLoadOptions).toHaveBeenCalledWith("/p", "staging.json", "org", "addons");
+    expect(api.dashboardLoadOptions).toHaveBeenCalledWith("/dep2", "staging.json", "org", "addons", { staging: "7" });
     expect(screen.queryByText(/No options loaded yet/)).toBeNull();
   });
 
@@ -309,10 +316,10 @@ describe("DashboardTab", () => {
 
   it("keeps a chosen value that the loaded list doesn't have visible, so it can be unticked", async () => {
     load([dash()], state());
-    // The form's default is "approvals"; the list the command printed doesn't have it.
+    // The form's default is "approvals"; the list the command printed for this staging doesn't have it.
     vi.mocked(api.dashboardOptions).mockResolvedValue({ options: ["sso", "testo_sensors"], loaded_at: Date.now() });
-    // Its own folder name: what a form remembers is kept per folder, so it can't be what an earlier test left.
     render(<DashboardTab folder="/stale" refreshKey={0} />);
+    await staging("7");
     const stale = await screen.findByLabelText(/approvals/);
     expect(stale).toBeChecked();
     expect(screen.getByText("not in the list")).toBeInTheDocument();
@@ -356,16 +363,30 @@ describe("DashboardTab", () => {
     expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
   });
 
-  it("runs the options commands only once the user has pressed Trust", async () => {
+  it("runs the options commands that need no choice only once the user has pressed Trust", async () => {
     load([dash()], state({ trusted: [] }));
     withOptionsCommand();
     render(<DashboardTab folder="/p" refreshKey={0} />);
     await screen.findByLabelText("Options command of addons in Create org");
     expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Trust this dashboard" }));
-    await waitFor(() => expect(api.dashboardLoadOptions).toHaveBeenCalledWith("/p", "staging.json", "org", "addons"));
+    await waitFor(() => expect(api.dashboardLoadOptions).toHaveBeenCalledWith("/p", "staging.json", "org", "addons", {}));
     expect(api.dashboardTrust).toHaveBeenCalledTimes(1);
     expect(api.dashboardLoadOptions).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not run an options command that takes a choice when Trust is pressed: there is no value to run it for", async () => {
+    load([dash()], state({ trusted: [] }));
+    vi.mocked(api.dashboardCommands).mockResolvedValue([
+      { form: "org", title: "Create org", kind: "action", command: ["python3", "~/tools/lumi_staging.py", "create"], program: "/opt/homebrew/bin/python3", error: null },
+      { form: "org", title: "Create org", kind: "options", field: "addons", depends_on: ["staging"], command: ["python3", "~/tools/lumi_staging.py", "addons", "--staging", "{staging}", "--json"], program: "/opt/homebrew/bin/python3", error: null },
+    ]);
+    render(<DashboardTab folder="/p" refreshKey={0} />);
+    await screen.findByLabelText("Options command of addons in Create org");
+    expect(screen.getByText(/for the staging you pick, when you press Load options or Reload/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Trust this dashboard" }));
+    await waitFor(() => expect(api.dashboardTrust).toHaveBeenCalledTimes(1));
+    expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
   });
 
   it("does not run the options commands when trusting is refused", async () => {
@@ -377,6 +398,75 @@ describe("DashboardTab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Trust this dashboard" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("changed since you looked");
     expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
+  });
+
+  /** Each staging has its own list: testo_sensors is on staging 7 only. */
+  const perStaging = () => {
+    const lists: Record<string, string[]> = { "7": ["approvals", "sso", "testo_sensors"], "9": ["approvals", "sso"] };
+    vi.mocked(api.dashboardOptions).mockImplementation(async (_f, _file, _form, _field, values) => (lists[String(values.staging)] ? { options: lists[String(values.staging)], loaded_at: Date.now() } : null));
+  };
+
+  it("shows each staging's own list: testo_sensors on staging 7 only, and waiting again when none is chosen", async () => {
+    load([dash()], state());
+    perStaging();
+    render(<DashboardTab folder="/dep3" refreshKey={0} />);
+    await staging("7");
+    expect(await screen.findByLabelText("testo_sensors")).toBeInTheDocument();
+    await staging("9");
+    await waitFor(() => expect(screen.queryByLabelText("testo_sensors")).toBeNull());
+    expect(screen.getByLabelText("sso")).toBeInTheDocument();
+    expect(api.dashboardOptions).toHaveBeenLastCalledWith("/dep3", "staging.json", "org", "addons", { staging: "9" });
+    // A staging nobody has loaded a list for has none; none chosen is nothing to show.
+    await staging("2");
+    expect(await screen.findByText(/No options loaded yet for this choice/)).toBeInTheDocument();
+    await staging("");
+    expect(await screen.findByText("Choose Staging first.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("sso")).toBeNull();
+  });
+
+  it("marks what was ticked for one staging as not in the list when another is chosen, so it can be unticked", async () => {
+    load([dash()], state());
+    perStaging();
+    render(<DashboardTab folder="/dep4" refreshKey={0} />);
+    await staging("7");
+    fireEvent.click(await screen.findByLabelText("testo_sensors"));
+    expect(screen.getByLabelText("testo_sensors")).toBeChecked();
+    await staging("9");
+    const stale = await screen.findByLabelText(/testo_sensors/);
+    expect(screen.getByText("not in the list")).toBeInTheDocument();
+    fireEvent.click(stale);
+    expect(screen.queryByLabelText(/testo_sensors/)).toBeNull();
+  });
+
+  it("does not show a list that arrives for a staging the user has already left", async () => {
+    load([dash()], state());
+    vi.mocked(api.dashboardOptions).mockImplementation(async (_f, _file, _form, _field, values) => (values.staging === "9" ? { options: ["approvals", "sso"], loaded_at: Date.now() } : null));
+    let arrive: (list: { options: string[]; loaded_at: number }) => void = () => {};
+    vi.mocked(api.dashboardLoadOptions).mockImplementation(() => new Promise((resolve) => (arrive = resolve)));
+    render(<DashboardTab folder="/dep5" refreshKey={0} />);
+    await staging("7");
+    fireEvent.click(await screen.findByRole("button", { name: "Load options" }));
+    await staging("9");
+    expect(await screen.findByLabelText("sso")).toBeInTheDocument();
+    // Staging 7's command finishes now: its list is not staging 9's.
+    await act(async () => arrive({ options: ["approvals", "sso", "testo_sensors"], loaded_at: Date.now() }));
+    expect(screen.queryByLabelText("testo_sensors")).toBeNull();
+    expect(screen.getByLabelText("sso")).toBeInTheDocument();
+  });
+
+  it("runs the options command on Reload for the staging chosen only, and not at all with none chosen", async () => {
+    load([dash()], state());
+    perStaging();
+    render(<DashboardTab folder="/dep6" refreshKey={0} />);
+    await screen.findByText("Choose Staging first.");
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(api.dashboardsList).toHaveBeenCalledTimes(2));
+    expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
+    await staging("7");
+    await screen.findByLabelText("testo_sensors");
+    fireEvent.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(api.dashboardLoadOptions).toHaveBeenCalledTimes(1));
+    expect(api.dashboardLoadOptions).toHaveBeenCalledWith("/dep6", "staging.json", "org", "addons", { staging: "7" });
   });
 
   it("picks between several dashboards, by their titles", async () => {

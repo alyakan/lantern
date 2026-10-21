@@ -509,14 +509,15 @@ async fn dashboard_commands(state: State<'_, AppState>, folder: String, file: St
     .map_err(|e| e.to_string())?
 }
 
-/// The list a select's options command printed the last time it ran for this dashboard file (null if never). Runs nothing: opening
-/// the tab must not run code, since a script the dashboard calls may have changed since the user trusted the file.
+/// The list a select's options command printed the last time it ran for this dashboard file, and for the values chosen so far of the
+/// fields it depends on (null if never). Runs nothing: opening the tab must not run code, since a script the dashboard calls may
+/// have changed since the user trusted the file.
 #[tauri::command]
-async fn dashboard_options(state: State<'_, AppState>, folder: String, file: String, form: String, field: String) -> Result<Option<dashboard_run::CachedList>, String> {
+async fn dashboard_options(state: State<'_, AppState>, folder: String, file: String, form: String, field: String, values: dashboard_run::Values) -> Result<Option<dashboard_run::CachedList>, String> {
     let runner = state.dashboards.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let root = std::path::Path::new(&folder);
-        runner.options_cached(&permission::rules::folder_key(root), root, &file, &form, &field)
+        runner.options_cached(&permission::rules::folder_key(root), root, &file, &form, &field, &values)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -524,10 +525,10 @@ async fn dashboard_options(state: State<'_, AppState>, folder: String, file: Str
 
 /// Runs a select's options command now and keeps its list, for a dashboard the user trusted. Only from a click: Trust, Reload, Retry.
 #[tauri::command]
-async fn dashboard_load_options(state: State<'_, AppState>, folder: String, file: String, form: String, field: String) -> Result<dashboard_run::CachedList, String> {
+async fn dashboard_load_options(state: State<'_, AppState>, folder: String, file: String, form: String, field: String, values: dashboard_run::Values) -> Result<dashboard_run::CachedList, String> {
     let path_env = login_path(&state).await;
     let root = std::path::Path::new(&folder);
-    state.dashboards.load_options(&permission::rules::folder_key(root), root, &file, &form, &field, path_env).await
+    state.dashboards.load_options(&permission::rules::folder_key(root), root, &file, &form, &field, &values, path_env).await
 }
 
 /// What pressing a form's button would run, with the values in: shown to the user before it does.

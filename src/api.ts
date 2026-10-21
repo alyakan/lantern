@@ -295,10 +295,10 @@ export const api = {
   dashboardTrust: (folder: string, file: string, hash: string) => invoke<void>("dashboard_trust", { folder, file, hash }),
   /** Each form's command in a dashboard, `~` expanded and its program found: what the user reads before trusting it. */
   dashboardCommands: (folder: string, file: string) => invoke<DashboardCommand[]>("dashboard_commands", { folder, file }),
-  /** The list a select's options command printed the last time it ran for this dashboard file (null if never). Runs nothing. */
-  dashboardOptions: (folder: string, file: string, form: string, field: string) => invoke<DashboardOptionsList | null>("dashboard_options", { folder, file, form, field }),
+  /** The list a select's options command printed the last time it ran for this dashboard file and these chosen values of what it depends on (null if never). Runs nothing. */
+  dashboardOptions: (folder: string, file: string, form: string, field: string, values: DashboardValues) => invoke<DashboardOptionsList | null>("dashboard_options", { folder, file, form, field, values }),
   /** Runs a select's options command now and keeps its list (rejects with why it couldn't). Only from a click: Trust, Reload, Retry, Load options. */
-  dashboardLoadOptions: (folder: string, file: string, form: string, field: string) => invoke<DashboardOptionsList>("dashboard_load_options", { folder, file, form, field }),
+  dashboardLoadOptions: (folder: string, file: string, form: string, field: string, values: DashboardValues) => invoke<DashboardOptionsList>("dashboard_load_options", { folder, file, form, field, values }),
   /** What pressing a form's button would run, with the values in (rejects with why when a value is wrong). */
   dashboardPreview: (folder: string, file: string, form: string, values: DashboardValues) => invoke<DashboardPreview>("dashboard_preview", { folder, file, form, values }),
   /** Runs a form of a trusted dashboard; resolves when it ends, with the run (also in the history). Rejects with why it didn't start. */

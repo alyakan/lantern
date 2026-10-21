@@ -1212,7 +1212,9 @@ let mockWatches = [{ label: "Checklists", method: "GET", url: "/v1/checklists" }
 let dashTrusted: string[] = [];
 let dashRuns: DashboardRun[] = [];
 let dashRunning = false;
-let dashOptions: { options: string[]; loaded_at: number } | null = null;
+// The kept addon lists, by the staging they were loaded for (testo_sensors exists on staging 7 only).
+let dashOptions: Record<string, { options: string[]; loaded_at: number }> = {};
+const addonsOf = (staging: string) => ["approvals", "public_api", "sso", "form_translations", "manual_form_translations", "ai_image_description", "trainings", "webhooks", "word_report_template", "global_sections", ...(staging === "7" ? ["testo_sensors"] : []), "all_integrations"];
 const dashSummary = ({ id, file, form, started_at, duration_ms, exit_code, stopped, timed_out, inputs }: DashboardRun) => ({ id, file, form, started_at, duration_ms, exit_code, stopped, timed_out, inputs });
 function mockDashboardRun(values: Record<string, unknown>): DashboardRun {
   const staging = String(values.staging ?? "");
@@ -1798,21 +1800,24 @@ export function installMockBackend() {
         case "dashboard_commands":
           return [
             { form: "org", title: "Create org", kind: "action", command: ["python3", "/Users/you/staging-tools/lumi_staging.py", "create", "--json", "--staging", "{staging}", "--users", "{users}", "--enable", "{addons}", "--name={name}"], program: "/opt/homebrew/bin/python3", error: null },
-            { form: "org", title: "Create org", kind: "options", field: "addons", command: ["python3", "/Users/you/staging-tools/lumi_staging.py", "addons", "--json"], program: "/opt/homebrew/bin/python3", error: null },
+            { form: "org", title: "Create org", kind: "options", field: "addons", depends_on: ["staging"], command: ["python3", "/Users/you/staging-tools/lumi_staging.py", "addons", "--staging", "{staging}", "--json"], program: "/opt/homebrew/bin/python3", error: null },
           ];
         case "dashboard_options":
-          // What was kept the last time the command ran; this never runs it.
-          return dashOptions;
-        case "dashboard_load_options":
-          // `?optionsfail` shows the field's error state; otherwise the script's own list, after a moment.
-          if (new URLSearchParams(location.search).has("optionsfail")) return Promise.reject("lumi_staging.py failed: no internal login for staging 7");
+          // What was kept the last time the command ran for this staging; this never runs it.
+          return dashOptions[String((a.values as Record<string, unknown>)?.staging ?? "")] ?? null;
+        case "dashboard_load_options": {
+          const staging = String((a.values as Record<string, unknown>)?.staging ?? "");
+          if (!staging) return Promise.reject("Choose Staging first.");
+          // `?optionsfail` shows the field's error state; otherwise the staging's own list, after a moment.
+          if (new URLSearchParams(location.search).has("optionsfail")) return Promise.reject("lumi_staging.py failed: no internal login for staging " + staging);
           return new Promise((resolve) =>
             setTimeout(() => {
-              dashOptions = { options: ["approvals", "public_api", "sso", "form_translations", "manual_form_translations", "ai_image_description", "trainings", "webhooks", "word_report_template", "global_sections", "testo_sensors", "all_integrations"], loaded_at: Date.now() };
+              dashOptions = { ...dashOptions, [staging]: { options: addonsOf(staging), loaded_at: Date.now() } };
               void emit("dashboards-changed");
-              resolve(dashOptions);
+              resolve(dashOptions[staging]);
             }, 400),
           );
+        }
         case "dashboard_preview": {
           const values = a.values as Record<string, unknown>;
           if (!values.staging) return Promise.reject("Staging is required.");

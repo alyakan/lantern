@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { commandLine, formatDuration, initialState, isScalar, isTable, plain, runStatus, summarizeInputs, tableColumns, toValues, type FormPanel as FormSpec, type FormState } from "../lib/dashboard";
 import { relativeTime } from "../lib/time";
-import type { DashboardField, DashboardPreview, DashboardRun, DashboardRunSummary } from "../types";
+import type { DashboardField, DashboardPreview, DashboardRun, DashboardRunSummary, DashboardValues } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Fold } from "./TestsTab";
 
@@ -43,31 +43,64 @@ type OptionsState =
   /** The command is running, because the user asked. */
   | { status: "loading" }
   | { status: "ready"; options: string[]; loadedAt: number }
-  /** The command has never run for this version of the file. */
+  /** The command has never run for this version of the file (and these values of what the list depends on). */
   | { status: "none" }
+  /** The list depends on a field that hasn't been chosen yet. */
+  | { status: "waiting"; on: string }
   | { status: "error"; message: string };
+
+/** What a command-fed list depends on, as the form stands: the chosen values of those fields, and the name of the first not chosen yet. */
+interface Dependencies {
+  values: DashboardValues;
+  /** The same values as one string, to tell when they change. */
+  key: string;
+  waitingOn: string | null;
+}
+
+function dependenciesOf(field: DashboardField, fields: DashboardField[], values: DashboardValues): Dependencies {
+  const picked: DashboardValues = {};
+  let waitingOn: string | null = null;
+  for (const id of field.optionsFrom?.dependsOn ?? []) {
+    const dep = fields.find((f) => f.id === id);
+    const value = values[id];
+    // A toggle always has a value; a select or number has one once it is chosen (a cleared number is left out of the values).
+    if (value === undefined || value === "") waitingOn ??= dep?.label ?? id;
+    else picked[id] = value;
+  }
+  return { values: picked, key: JSON.stringify(picked), waitingOn };
+}
 
 /**
  * A select's options: the ones written in the file, or (`optionsFrom`) the list its command printed the last time it was run,
  * which Lantern keeps. Opening a form never runs the command (a script it calls may have changed since the user trusted the
  * file); it runs when the user asks: Load options, Retry, Reload, or trusting the dashboard.
  */
-function useOptions(field: DashboardField, source: OptionsSource): { state: OptionsState; load: () => void } {
+function useOptions(field: DashboardField, source: OptionsSource, deps: Dependencies): { state: OptionsState; load: () => void } {
   const dynamic = !!field.optionsFrom;
   const [state, setState] = useState<OptionsState>({ status: "checking" });
   const { folder, file, form, reload, stamp } = source;
+  const waiting = deps.waitingOn !== null;
+  // What the list is for now: an answer for values the user has since changed must not land.
+  const current = useRef(deps.key);
+  current.current = deps.key;
   const load = () => {
+    if (waiting) return;
+    const mine = deps.key;
     setState({ status: "loading" });
-    api.dashboardLoadOptions(folder, file, form, field.id).then(
-      (list) => setState({ status: "ready", options: list.options, loadedAt: list.loaded_at }),
-      (e) => setState({ status: "error", message: String(e) }),
+    api.dashboardLoadOptions(folder, file, form, field.id, deps.values).then(
+      (list) => current.current === mine && setState({ status: "ready", options: list.options, loadedAt: list.loaded_at }),
+      (e) => current.current === mine && setState({ status: "error", message: String(e) }),
     );
   };
+  // Another value of what the list depends on is another list: start again from what is kept for it.
+  useEffect(() => {
+    setState({ status: "checking" });
+  }, [deps.key]);
   // The kept list: when the field appears, and again when the tab has read anything new. A slower, older answer never lands over a newer one.
   useEffect(() => {
-    if (!dynamic) return;
+    if (!dynamic || waiting) return;
     let live = true;
-    api.dashboardOptions(folder, file, form, field.id).then(
+    api.dashboardOptions(folder, file, form, field.id, deps.values).then(
       (list) =>
         live &&
         setState((now) => {
@@ -81,7 +114,7 @@ function useOptions(field: DashboardField, source: OptionsSource): { state: Opti
     return () => {
       live = false;
     };
-  }, [dynamic, folder, file, form, field.id, stamp]);
+  }, [dynamic, waiting, deps.key, folder, file, form, field.id, stamp]);
   // Reload runs the command again (not for the first render, which is no press).
   const pressed = useRef(reload);
   useEffect(() => {
@@ -89,7 +122,8 @@ function useOptions(field: DashboardField, source: OptionsSource): { state: Opti
     pressed.current = reload;
     load();
   }, [reload]);
-  return { state: dynamic ? state : { status: "ready", options: field.options ?? [], loadedAt: 0 }, load };
+  if (!dynamic) return { state: { status: "ready", options: field.options ?? [], loadedAt: 0 }, load };
+  return { state: waiting ? { status: "waiting", on: deps.waitingOn ?? "" } : state, load };
 }
 
 export function FormPanel({ folder, file, form, running, reload = 0, stamp = 0 }: FormProps) {
@@ -134,7 +168,7 @@ export function FormPanel({ folder, file, form, running, reload = 0, stamp = 0 }
         }}
       >
         {form.fields.map((f) => (
-          <Field key={f.id} id={`${key}-${f.id}`} field={f} source={{ folder, file, form: form.id, reload, stamp }} value={state[f.id]} disabled={busy} onChange={(v) => change({ ...state, [f.id]: v })} />
+          <Field key={f.id} id={`${key}-${f.id}`} field={f} fields={form.fields} values={values} source={{ folder, file, form: form.id, reload, stamp }} value={state[f.id]} disabled={busy} onChange={(v) => change({ ...state, [f.id]: v })} />
         ))}
         <div className="dash-actions">
           <button type="submit" className="primary" disabled={busy}>
@@ -174,18 +208,20 @@ export function FormPanel({ folder, file, form, running, reload = 0, stamp = 0 }
   );
 }
 
-function Field({ id, field, source, value, disabled, onChange }: { id: string; field: DashboardField; source: OptionsSource; value: string | boolean | string[] | undefined; disabled: boolean; onChange: (v: string | boolean | string[]) => void }) {
+function Field({ id, field, fields, values, source, value, disabled, onChange }: { id: string; field: DashboardField; fields: DashboardField[]; values: DashboardValues; source: OptionsSource; value: string | boolean | string[] | undefined; disabled: boolean; onChange: (v: string | boolean | string[]) => void }) {
   const label = field.label ?? field.id;
   const text = typeof value === "string" ? value : "";
-  const { state: loaded, load } = useOptions(field, source);
+  const { state: loaded, load } = useOptions(field, source, dependenciesOf(field, fields, values));
   const options = loaded.status === "ready" ? loaded.options : [];
   // What stands with the options of a field a command fills in: that they are loading, when they were loaded, or why they aren't.
   const note =
     loaded.status === "checking" || loaded.status === "loading" ? (
       <span className="tests-note">Loading options…</span>
+    ) : loaded.status === "waiting" ? (
+      <span className="tests-note dash-options-waiting">Choose {loaded.on} first.</span>
     ) : loaded.status === "none" ? (
       <span className="tests-note dash-options-none">
-        No options loaded yet.{" "}
+        No options loaded yet{field.optionsFrom?.dependsOn?.length ? " for this choice" : ""}.{" "}
         <button type="button" className="ghost" onClick={load} disabled={disabled}>
           Load options
         </button>
