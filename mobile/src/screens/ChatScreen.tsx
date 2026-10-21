@@ -22,6 +22,8 @@ export interface ChatProps {
 
 /** How long "Caught up on 14 events" stays up. */
 const BANNER_MS = 4000;
+/** How long "Waking…" waits for the chat to be awake before the button comes back. */
+export const WAKE_WAIT_MS = 20_000;
 
 /** A chat, as a timeline with a message box under it. */
 export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
@@ -57,6 +59,14 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
 
   const online = connection.kind === "connected";
   const asleep = chat?.status === "asleep";
+  // The Mac accepting the wake isn't the chat being awake: "Waking…" stays until the chat is no longer asleep, or a while
+  // has passed (it didn't wake: the button comes back to try again).
+  useEffect(() => {
+    if (!waking) return;
+    if (!asleep) return setWaking(false);
+    const t = setTimeout(() => setWaking(false), WAKE_WAIT_MS);
+    return () => clearTimeout(t);
+  }, [waking, asleep]);
   const working = chat?.status === "working";
   const loadDiff = useCallback((path: string) => sync.diff(slot, path), [sync, slot]);
 
@@ -224,7 +234,10 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
             disabled={!online || waking}
             onPress={() => {
               setWaking(true);
-              sync.wake(slot).catch(fail).finally(() => setWaking(false));
+              sync.wake(slot).catch((e) => {
+                setWaking(false);
+                fail(e);
+              });
             }}
           />
         </View>

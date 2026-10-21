@@ -100,6 +100,22 @@ describe("a chat", () => {
     await waitFor(() => expect(lastOf("wake")).toEqual({ op: "wake", slot: "a" }));
   });
 
+  it("keeps saying Waking… after the Mac accepts the wake, until the chat is awake, and then offers the message box", async () => {
+    const { controller } = await withSession(turn, {}, {}, { status: "asleep" });
+    await fireEvent.press(screen.getByRole("button", { name: "Wake this chat" }));
+    await act(async () => void (await new Promise((r) => setTimeout(r, 50))));
+    expect(screen.getByRole("button", { name: "Waking…" })).toBeTruthy();
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [chat({ status: "idle" })] } }));
+    expect(screen.queryByRole("button", { name: "Waking…" })).toBeNull();
+    expect(screen.getByLabelText("Message")).toBeTruthy();
+  });
+
+  it("brings the button back when the wake is refused", async () => {
+    await withSession(turn, {}, { wake: new Error("That chat isn't asleep.") }, { status: "asleep" });
+    await fireEvent.press(screen.getByRole("button", { name: "Wake this chat" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Wake this chat" })).toBeTruthy());
+  });
+
   it("says when it isn't connected, and won't take a message", async () => {
     const { controller } = makeController();
     await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()], events: { a: turn }, connection: { kind: "offline", reason: "x", retryInMs: 1000 } }, controller);

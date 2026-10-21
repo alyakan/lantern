@@ -308,6 +308,8 @@ impl Remote {
                 self.hub.asleep(&c.slot, &c.folder, Some(c.title.clone()), c.session_id.clone());
             } else {
                 self.hub.titled(&c.slot, &c.title);
+                // The window woke it (or it never slept): the hub hears no start from claude until its first message.
+                self.hub.awake(&c.slot);
                 // An awake chat the window resumed from History: claude names its session only with its first message, so
                 // without this the chat's transcript can't be found for a phone until then.
                 if let Some(id) = c.session_id.as_deref().filter(|id| crate::history::valid_id(id)) {
@@ -485,6 +487,13 @@ mod tests {
         assert_eq!((b.status, b.session_id.as_deref()), (hub::ChatStatus::Asleep, Some("s-b")));
         assert!(remote.wakeable("b"));
         assert!(!remote.wakeable("a"), "an awake chat isn't woken");
+        // The window wakes b (its claude starts again, with no word from claude until it has a message): b is awake here too.
+        remote.window_chats(&[chat("a", false), chat("b", false)]);
+        assert_eq!(remote.hub.chat("b").unwrap().status, hub::ChatStatus::Idle);
+        assert!(!remote.wakeable("b"), "a chat that was woken isn't woken again");
+        // And it can go to sleep again.
+        remote.window_chats(&[chat("a", false), chat("b", true)]);
+        assert!(remote.wakeable("b"));
         assert!(!remote.wakeable("nope"), "nor one that isn't listed");
         // A title for a chat the hub doesn't list doesn't list it.
         remote.window_chats(&[chat("c", false)]);
