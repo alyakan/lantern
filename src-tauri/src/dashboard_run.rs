@@ -129,6 +129,17 @@ pub fn resolve(form: &Form, values: &Values) -> Result<BTreeMap<String, String>,
     Ok(out)
 }
 
+/// Why a chosen value isn't one of a field's options: for a list a command prints, usually that none has been loaded yet.
+fn not_among(field: &dashboard::Field) -> String {
+    if field.options_from.is_some() && field.options.is_empty() {
+        "has no options loaded yet: press Reload in the Dashboard tab to load them.".into()
+    } else if field.kind == Kind::Multiselect {
+        "must be a list of its options.".into()
+    } else {
+        "must be one of its options.".into()
+    }
+}
+
 fn render(field: &dashboard::Field, value: &Value) -> Result<String, String> {
     match field.kind {
         Kind::Text => {
@@ -153,12 +164,8 @@ fn render(field: &dashboard::Field, value: &Value) -> Result<String, String> {
         }
         Kind::Select => {
             let text = value.as_str().ok_or("must be one of its options.")?;
-            if field.options_from.is_some() {
-                if !text.is_empty() {
-                    loaded_option(text)?;
-                }
-            } else if !text.is_empty() && !field.options.iter().any(|o| o == text) {
-                return Err("must be one of its options.".into());
+            if !text.is_empty() && !field.options.iter().any(|o| o == text) {
+                return Err(not_among(field));
             }
             Ok(text.to_string())
         }
@@ -166,21 +173,11 @@ fn render(field: &dashboard::Field, value: &Value) -> Result<String, String> {
             let items = value.as_array().ok_or("must be a list of its options.")?;
             let mut chosen = Vec::new();
             for item in items {
-                let text = item.as_str().ok_or("must be a list of its options.")?;
-                // The options a command printed aren't known here, so the value is held to what any of them could be (the
-                // script has its own say on whether it is one); a written list is checked against that list.
-                if field.options_from.is_some() {
-                    loaded_option(text)?;
-                } else if !field.options.iter().any(|o| o == text) {
-                    return Err("must be a list of its options.".into());
-                }
+                let text = item.as_str().filter(|t| field.options.iter().any(|o| o == t)).ok_or_else(|| not_among(field))?;
                 if chosen.contains(&text) {
                     return Err(format!("lists {text:?} twice."));
                 }
                 chosen.push(text);
-            }
-            if field.options_from.is_some() {
-                return Ok(chosen.join(","));
             }
             // In the field's own order, so the same choices always make the same command.
             Ok(field.options.iter().filter(|o| chosen.contains(&o.as_str())).cloned().collect::<Vec<_>>().join(","))
@@ -369,7 +366,33 @@ struct FolderData {
     trusted: Vec<String>,
     #[serde(default)]
     runs: Vec<Run>,
+    /// The lists that options commands printed, the last time each was run (see `CachedOptions`).
+    #[serde(default)]
+    options: Vec<CachedOptions>,
 }
+
+/// What an options command printed when it was last run, for the dashboard file it was run for. A form shows this list and a run is
+/// checked against it, so the command itself runs only when the user asks (trust, Reload, Retry), never by itself on opening a tab.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct CachedOptions {
+    /// The dashboard file's hash: an edited file starts with no list.
+    hash: String,
+    form: String,
+    field: String,
+    options: Vec<String>,
+    /// Milliseconds since 1970.
+    loaded_at: u64,
+}
+
+/// A cached list, as the form shows it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CachedList {
+    pub options: Vec<String>,
+    pub loaded_at: u64,
+}
+
+/// The most cached lists kept for a folder.
+const MAX_CACHED: usize = 100;
 
 type Key = (String, String, String);
 
@@ -394,6 +417,8 @@ struct Ticket {
     hash: String,
     form: String,
     values: Values,
+    /// The command the user was shown: the run must come to exactly this.
+    args: Vec<String>,
     expires: Instant,
 }
 
@@ -486,7 +511,7 @@ impl Runner {
         {
             let mut data = self.data.lock().unwrap();
             f(data.entry(folder.to_string()).or_default());
-            if data.get(folder).is_some_and(|d| d.trusted.is_empty() && d.runs.is_empty()) {
+            if data.get(folder).is_some_and(|d| d.trusted.is_empty() && d.runs.is_empty() && d.options.is_empty()) {
                 data.remove(folder);
             }
             self.save(&data);
@@ -547,10 +572,24 @@ impl Runner {
 
     // MARK: - Options from a command
 
-    /// The options of a select whose list comes from a command, read by running it now. Only for a dashboard the user trusted
-    /// (this runs a command without a button press, so it asks what a run asks), and only the command written in that exact
-    /// file, which is read again here.
-    pub async fn options(&self, folder: &str, root: &Path, file: &str, form_id: &str, field_id: &str, path_env: Option<String>) -> Result<Vec<String>, String> {
+    /// The list an options command printed the last time it was run for this exact dashboard file, if it has been. This never
+    /// runs anything: opening a tab must not run code (a script the dashboard calls may have been edited since the user trusted
+    /// the file), so a form shows this list, and the command runs only when the user asks (`load_options`).
+    pub fn cached_options(&self, folder: &str, hash: &str, form: &str, field: &str) -> Option<CachedList> {
+        let data = self.data.lock().unwrap();
+        let c = data.get(folder)?.options.iter().find(|c| c.hash == hash && c.form == form && c.field == field)?;
+        Some(CachedList { options: c.options.clone(), loaded_at: c.loaded_at })
+    }
+
+    /// `cached_options` for a dashboard file by name.
+    pub fn options_cached(&self, folder: &str, root: &Path, file: &str, form: &str, field: &str) -> Result<Option<CachedList>, String> {
+        let found = dashboard::load(root).into_iter().find(|d| d.file == file).ok_or("That dashboard is gone.")?;
+        Ok(self.cached_options(folder, &found.hash, form, field))
+    }
+
+    /// Runs a field's options command now and keeps what it printed for this exact file. Only for a dashboard the user trusted, only
+    /// the command written in that file (read again here), and only when the user asked: the trust button, Reload, or Retry.
+    pub async fn load_options(&self, folder: &str, root: &Path, file: &str, form_id: &str, field_id: &str, path_env: Option<String>) -> Result<CachedList, String> {
         let found = dashboard::load(root).into_iter().find(|d| d.file == file).ok_or("That dashboard is gone.")?;
         if found.spec.is_none() {
             return Err("That dashboard has problems.".into());
@@ -560,7 +599,36 @@ impl Runner {
         }
         let field = found.form(form_id).and_then(|f| f.fields.iter().find(|x| x.id == field_id)).ok_or_else(|| format!("That dashboard has no field {field_id:?} in a form {form_id:?}."))?;
         let from = field.options_from.as_ref().ok_or("That field's options are written in the dashboard, not loaded by a command.")?;
-        read_options(root, &from.command, path_env.as_deref(), OPTIONS_TIMEOUT).await
+        let options = read_options(root, &from.command, path_env.as_deref(), OPTIONS_TIMEOUT).await?;
+        let loaded_at = now_ms();
+        let cached = CachedOptions { hash: found.hash, form: form_id.to_string(), field: field_id.to_string(), options: options.clone(), loaded_at };
+        self.change(folder, |d| {
+            d.options.retain(|c| !(c.form == cached.form && c.field == cached.field && c.hash == cached.hash));
+            d.options.push(cached);
+            if d.options.len() > MAX_CACHED {
+                d.options.remove(0);
+            }
+        });
+        Ok(CachedList { options, loaded_at })
+    }
+
+    /// `form` with each command-fed field's options set to the cached list (none, if none has been loaded), so a value is checked
+    /// and a multiselect is joined the same way as for a list written in the file.
+    fn filled(&self, folder: &str, hash: &str, form: &Form) -> Form {
+        let mut form = form.clone();
+        for field in &mut form.fields {
+            if field.options_from.is_some() {
+                field.options = self.cached_options(folder, hash, &form.id, &field.id).map(|c| c.options).unwrap_or_default();
+            }
+        }
+        form
+    }
+
+    /// What pressing a form's button would run for `values`, worked out with the lists the form shows.
+    pub fn preview_for(&self, folder: &str, root: &Path, file: &str, form_id: &str, values: &Values) -> Result<Preview, String> {
+        let found = dashboard::load(root).into_iter().find(|d| d.file == file).ok_or("That dashboard is gone.")?;
+        let form = found.form(form_id).ok_or_else(|| format!("That dashboard has no form called {form_id:?}."))?;
+        preview(&self.filled(folder, &found.hash, form), values)
     }
 
     // MARK: - A run Claude proposes
@@ -577,7 +645,7 @@ impl Runner {
             return Err("The user hasn't trusted this version of the dashboard yet, and only they can: ask them to open the Dashboard tab, read its commands and press Trust. Nothing ran.".into());
         }
         let form = found.form(form_id).ok_or_else(|| format!("{file} has no form called {form_id:?}."))?;
-        let Preview { args, confirm } = preview(form, &values)?;
+        let Preview { args, confirm } = preview(&self.filled(folder, &found.hash, form), &values)?;
         find_program(&args[0], root, path_env)?;
         let title = form.title.as_deref().unwrap_or(&form.id);
         let action = format!("Run “{}” from {}", clip(title, 50), clip(file, 40));
@@ -589,7 +657,7 @@ impl Runner {
         if tickets.len() >= MAX_TICKETS {
             return Err("Too many runs are waiting for the user's approval. Wait for them to answer the cards they have.".into());
         }
-        tickets.insert(ticket.clone(), Ticket { folder: folder.to_string(), file: file.to_string(), hash: found.hash, form: form_id.to_string(), values, expires: Instant::now() + self.ticket_life });
+        tickets.insert(ticket.clone(), Ticket { folder: folder.to_string(), file: file.to_string(), hash: found.hash, form: form_id.to_string(), values, args, expires: Instant::now() + self.ticket_life });
         Ok(Prepared { ticket, action, details })
     }
 
@@ -601,7 +669,7 @@ impl Runner {
         if t.expires <= Instant::now() || t.folder != folder {
             return Err(GONE.into());
         }
-        self.run_pinned(folder, root, &t.file, &t.form, t.values, path_env, Some(&t.hash)).await
+        self.run_pinned(folder, root, &t.file, &t.form, t.values, path_env, Some((&t.hash, &t.args))).await
     }
 
     /// A ticket nobody can guess: the process's random hash keys, mixed with the time and a count.
@@ -625,19 +693,23 @@ impl Runner {
 
     /// `run`, but only if the file still is the `expect_hash` one (a run the user approved reading its command).
     #[allow(clippy::too_many_arguments)]
-    async fn run_pinned(self: &Arc<Self>, folder: &str, root: &Path, file: &str, form_id: &str, values: Values, path_env: Option<String>, expect_hash: Option<&str>) -> Result<Run, String> {
+    async fn run_pinned(self: &Arc<Self>, folder: &str, root: &Path, file: &str, form_id: &str, values: Values, path_env: Option<String>, expect: Option<(&str, &[String])>) -> Result<Run, String> {
         let dashboard = dashboard::load(root).into_iter().find(|d| d.file == file).ok_or("That dashboard is gone.")?;
         if dashboard.spec.is_none() {
             return Err("That dashboard has problems, so it doesn't run.".into());
         }
-        if expect_hash.is_some_and(|h| h != dashboard.hash) {
+        if expect.is_some_and(|(hash, _)| hash != dashboard.hash) {
             return Err("The dashboard file changed after the user approved this run, so nothing ran.".into());
         }
         if !self.is_trusted(folder, &dashboard.hash) {
             return Err("You haven't trusted this version of the dashboard, so it doesn't run.".into());
         }
         let form = dashboard.form(form_id).ok_or_else(|| format!("That dashboard has no form called {form_id:?}."))?;
-        let Preview { args, .. } = preview(form, &values)?;
+        let Preview { args, .. } = preview(&self.filled(folder, &dashboard.hash, form), &values)?;
+        // What the user approved was this command; a list reloaded since could make the same values a different one.
+        if expect.is_some_and(|(_, approved)| approved != args.as_slice()) {
+            return Err("The options changed after the user approved this run, so nothing ran.".into());
+        }
         let program = find_program(&args[0], root, path_env.as_deref())?;
 
         let key: Key = (folder.to_string(), file.to_string(), form_id.to_string());
@@ -1027,7 +1099,7 @@ mod tests {
     }
 
     async fn options_of(s: &Setup, field: &str) -> Result<Vec<String>, String> {
-        s.runner.options("k", s.folder.path(), "d.json", "f", field, None).await
+        s.runner.load_options("k", s.folder.path(), "d.json", "f", field, None).await.map(|c| c.options)
     }
 
     #[tokio::test]
@@ -1048,9 +1120,9 @@ mod tests {
         assert!(options_of(&s, "addons").await.unwrap_err().contains("haven't trusted"));
         trust(&s);
         assert!(options_of(&s, "nope").await.unwrap_err().contains("no field"));
-        assert!(s.runner.options("k", s.folder.path(), "d.json", "zz", "addons", None).await.unwrap_err().contains("no field"));
-        assert!(s.runner.options("k", s.folder.path(), "gone.json", "f", "addons", None).await.unwrap_err().contains("gone"));
-        assert!(s.runner.options("other", s.folder.path(), "d.json", "f", "addons", None).await.unwrap_err().contains("haven't trusted"));
+        assert!(s.runner.load_options("k", s.folder.path(), "d.json", "zz", "addons", None).await.unwrap_err().contains("no field"));
+        assert!(s.runner.load_options("k", s.folder.path(), "gone.json", "f", "addons", None).await.unwrap_err().contains("gone"));
+        assert!(s.runner.load_options("other", s.folder.path(), "d.json", "f", "addons", None).await.unwrap_err().contains("haven't trusted"));
         let written = setup(&spec(fields(), sh(json!([]))));
         trust(&written);
         assert!(options_of(&written, "who").await.unwrap_err().contains("written in the dashboard"));
@@ -1080,6 +1152,8 @@ mod tests {
             trust(&s);
             let err = options_of(&s, "addons").await.unwrap_err();
             assert!(err.contains(says), "{command}: {err}");
+            // A list that wasn't accepted isn't kept.
+            assert!(s.runner.options_cached("k", s.folder.path(), "d.json", "f", "addons").unwrap().is_none(), "{command}");
         }
         // One more than the most there may be, printed by a loop (written out, the list would be longer than a command argument may be).
         let loop_script = format!("i=0; printf '['; while [ $i -lt {MAX_LOADED_OPTIONS} ]; do printf '\"o%s\",' $i; i=$((i+1)); done; printf '\"last\"]\\n'");
@@ -1097,24 +1171,85 @@ mod tests {
         assert!(flood.contains("printed too much"), "{flood}");
     }
 
-    #[test]
-    fn what_is_chosen_from_a_commands_options_is_held_to_what_any_option_could_be() {
-        let form = form_of(&dyn_spec(json!(["x"])));
-        let ok = |v: Value| resolve(&form, &values(v));
-        // Not looked up against a list, in the order chosen, a select left empty is empty.
-        let got = ok(json!({ "addons": ["testo_sensors", "approvals"], "staging": "7" })).unwrap();
-        assert_eq!((got["addons"].as_str(), got["staging"].as_str()), ("testo_sensors,approvals", "7"));
-        assert_eq!(ok(json!({ "addons": [] })).unwrap()["staging"], "");
-        // A value the script gets as a whole argument can't be taken for one of its options, or smuggle in a second value.
-        for bad in ["-x", "--admins=99", "a,b", "a\nb", "", "a\u{202e}b", &"x".repeat(MAX_OPTION + 1)] {
-            let err = ok(json!({ "addons": [bad] })).unwrap_err();
-            assert!(err.starts_with("addons "), "{bad:?}: {err}");
-            if !bad.is_empty() {
-                assert!(ok(json!({ "staging": bad })).is_err(), "{bad:?}");
-            }
+    /// A dashboard whose options command leaves a marker file each time it runs, so a test can tell whether it ran.
+    fn marking(s: &Setup) -> std::path::PathBuf {
+        s.folder.path().join("ran-marker")
+    }
+
+    fn marking_spec(s: &Setup) -> String {
+        let script = format!("touch '{}'; printf '%s\\n' '[\"approvals\", \"testo_sensors\"]'", marking(s).display());
+        dyn_spec(json!(["/bin/sh", "-c", script]))
+    }
+
+    fn setup_marking() -> Setup {
+        let s = setup(&dyn_spec(json!(["x"])));
+        std::fs::write(s.folder.path().join(".lantern/dashboards/d.json"), marking_spec(&s)).unwrap();
+        trust(&s);
+        s
+    }
+
+    #[tokio::test]
+    async fn nothing_that_opens_or_checks_a_form_runs_its_options_command() {
+        let s = setup_marking();
+        let root = s.folder.path();
+        // What the tab does when it opens: read the files and the state, ask for the cached lists.
+        let hash = hash_of(&s);
+        assert!(s.runner.options_cached("k", root, "d.json", "f", "addons").unwrap().is_none());
+        assert!(s.runner.cached_options("k", &hash, "f", "staging").is_none());
+        let _ = s.runner.state("k");
+        let _ = dashboard::load(root);
+        let _ = commands(&dashboard::load(root)[0], root, None);
+        // What checking a value does, for the button and for Claude: refused, with nothing loaded, and still no command run.
+        let values = values(json!({ "addons": ["approvals"], "staging": "7" }));
+        assert!(s.runner.preview_for("k", root, "d.json", "f", &values).unwrap_err().contains("no options loaded yet"));
+        assert!(s.runner.prepare("k", root, "d.json", "f", values.clone(), None).unwrap_err().contains("no options loaded yet"));
+        assert!(s.runner.run("k", root, "d.json", "f", values, None).await.unwrap_err().contains("no options loaded yet"));
+        assert!(!marking(&s).exists(), "an options command ran without anyone asking");
+        // Asked for, it runs.
+        s.runner.load_options("k", root, "d.json", "f", "addons", None).await.unwrap();
+        assert!(marking(&s).exists());
+    }
+
+    #[tokio::test]
+    async fn a_loaded_list_is_kept_for_that_exact_file_and_survives_a_restart() {
+        let s = setup_marking();
+        let root = s.folder.path();
+        let loaded = s.runner.load_options("k", root, "d.json", "f", "addons", None).await.unwrap();
+        assert_eq!(loaded.options, ["approvals", "testo_sensors"]);
+        assert!(loaded.loaded_at > 0);
+        assert_eq!(s.runner.options_cached("k", root, "d.json", "f", "addons").unwrap(), Some(loaded.clone()));
+        // The other field has none, another folder's key has none.
+        assert!(s.runner.options_cached("k", root, "d.json", "f", "staging").unwrap().is_none());
+        assert!(s.runner.cached_options("other", &hash_of(&s), "f", "addons").is_none());
+        // Loading again replaces it, never adds a second.
+        s.runner.load_options("k", root, "d.json", "f", "addons", None).await.unwrap();
+        assert_eq!(s.runner.data.lock().unwrap()["k"].options.len(), 1);
+        // A new run of the app finds it.
+        let again = Runner::load(Some(s.data.path().join("dashboards.json")));
+        assert_eq!(again.cached_options("k", &hash_of(&s), "f", "addons").map(|c| c.options), Some(vec!["approvals".to_string(), "testo_sensors".to_string()]));
+        // An edit to the file is a different file: it starts with no list.
+        std::fs::write(root.join(".lantern/dashboards/d.json"), format!("{} ", marking_spec(&s))).unwrap();
+        assert!(s.runner.options_cached("k", root, "d.json", "f", "addons").unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn what_is_chosen_from_a_commands_options_is_checked_against_the_list_it_printed() {
+        let s = setup_marking();
+        let root = s.folder.path();
+        s.runner.load_options("k", root, "d.json", "f", "addons", None).await.unwrap();
+        s.runner.load_options("k", root, "d.json", "f", "staging", None).await.unwrap();
+        let preview = |v: Value| s.runner.preview_for("k", root, "d.json", "f", &values(v));
+        // In the order the command printed them, whatever order they were chosen in.
+        let ok = preview(json!({ "addons": ["testo_sensors", "approvals"], "staging": "7" })).unwrap();
+        assert_eq!(ok.args, ["/bin/echo", "--enable", "approvals,testo_sensors", "7"]);
+        assert_eq!(preview(json!({ "addons": [] })).unwrap().args[3], "");
+        // Anything the script didn't list is refused, so Claude can't pass a flag or a second value as an option.
+        for bad in ["-x", "--admins=99", "a,b", "a\nb", "brand_new_addon", "9"] {
+            let err = preview(json!({ "addons": [bad], "staging": "7" })).unwrap_err();
+            assert!(err.starts_with("addons must be a list of its options"), "{bad:?}: {err}");
         }
-        assert!(ok(json!({ "addons": ["a", "a"] })).unwrap_err().contains("twice"));
-        assert!(ok(json!({ "addons": "a" })).is_err() && ok(json!({ "addons": [1] })).is_err());
+        assert!(preview(json!({ "staging": "-x" })).unwrap_err().starts_with("staging must be one of its options"));
+        assert!(preview(json!({ "addons": ["approvals", "approvals"] })).unwrap_err().contains("twice"));
     }
 
     #[test]
@@ -1129,13 +1264,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_run_proposed_for_a_command_fed_select_carries_the_chosen_values_into_the_card() {
-        let s = setup(&dyn_spec(printing(r#"["approvals", "testo_sensors"]"#)));
-        trust(&s);
-        let p = s.runner.prepare("k", s.folder.path(), "d.json", "f", values(json!({ "addons": ["testo_sensors"], "staging": "7" })), None).unwrap();
-        assert!(p.details.contains("/bin/echo --enable testo_sensors 7"), "{}", p.details);
-        let refused = s.runner.prepare("k", s.folder.path(), "d.json", "f", values(json!({ "addons": ["--admins=99"] })), None).unwrap_err();
-        assert!(refused.contains("can't start with a dash"), "{refused}");
+    async fn a_run_proposed_for_a_command_fed_select_uses_the_loaded_list_and_is_pinned_to_the_command_the_user_saw() {
+        let s = setup_marking();
+        let root = s.folder.path();
+        s.runner.load_options("k", root, "d.json", "f", "addons", None).await.unwrap();
+        s.runner.load_options("k", root, "d.json", "f", "staging", None).await.unwrap();
+        let p = s.runner.prepare("k", root, "d.json", "f", values(json!({ "addons": ["testo_sensors", "approvals"], "staging": "7" })), None).unwrap();
+        assert!(p.details.contains("/bin/echo --enable approvals,testo_sensors 7"), "{}", p.details);
+        let refused = s.runner.prepare("k", root, "d.json", "f", values(json!({ "addons": ["--admins=99"], "staging": "7" })), None).unwrap_err();
+        assert!(refused.contains("must be a list of its options"), "{refused}");
+        // The list is reloaded in another order between the card and the yes: the same values would make another command.
+        s.runner.change("k", |d| d.options.iter_mut().filter(|c| c.field == "addons").for_each(|c| c.options.reverse()));
+        let err = s.runner.run_ticket("k", root, &p.ticket, None).await.unwrap_err();
+        assert!(err.contains("options changed after the user approved"), "{err}");
+        assert!(s.runner.state("k").runs.is_empty());
+        // Unchanged, the same approval runs exactly what was shown.
+        let again = s.runner.prepare("k", root, "d.json", "f", values(json!({ "addons": ["approvals"], "staging": "9" })), None).unwrap();
+        let run = s.runner.run_ticket("k", root, &again.ticket, None).await.unwrap();
+        assert_eq!(run.stdout, "--enable approvals 9\n");
     }
 
     // MARK: A run Claude proposes

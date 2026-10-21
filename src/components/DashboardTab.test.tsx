@@ -12,6 +12,7 @@ vi.mock("../api", () => ({
     dashboardTrust: vi.fn(),
     dashboardCommands: vi.fn(),
     dashboardOptions: vi.fn(),
+    dashboardLoadOptions: vi.fn(),
     dashboardPreview: vi.fn(),
     dashboardRun: vi.fn(),
     dashboardRunDetail: vi.fn(),
@@ -53,7 +54,9 @@ beforeEach(() => {
   vi.mocked(api.dashboardClearRuns).mockResolvedValue(undefined);
   vi.mocked(api.dashboardPreview).mockResolvedValue({ args: ["python3", "lumi_staging.py", "--name=QA org"], confirm: "Creates a real org on staging 7" });
   vi.mocked(api.dashboardCommands).mockResolvedValue([{ form: "org", title: "Create org", kind: "action", command: ["python3", "/Users/me/tools/lumi_staging.py", "create", "--name={name}"], program: "/opt/homebrew/bin/python3", error: null }]);
-  vi.mocked(api.dashboardOptions).mockResolvedValue(["approvals", "sso", "testo_sensors"]);
+  // The list kept from the last time the options command ran (it ran two minutes ago); loading runs the command again.
+  vi.mocked(api.dashboardOptions).mockResolvedValue({ options: ["approvals", "sso", "testo_sensors"], loaded_at: Date.now() - 120_000 });
+  vi.mocked(api.dashboardLoadOptions).mockResolvedValue({ options: ["approvals", "sso", "testo_sensors"], loaded_at: Date.now() });
   Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
 });
 
@@ -233,72 +236,129 @@ describe("DashboardTab", () => {
     await waitFor(() => expect(reads()).toBe(before + 4));
   });
 
-  it("asks a field's command for its options when the form opens, and offers what it printed", async () => {
+  it("offers the list kept from the last time the field's command ran, and does not run it by opening the form", async () => {
     load([dash()], state());
     render(<DashboardTab folder="/p" refreshKey={0} />);
     expect(await screen.findByLabelText("testo_sensors")).toBeInTheDocument();
     expect(screen.getByLabelText("approvals")).toBeChecked();
-    // Only the field that has a command is asked; the staging list is written in the file.
+    expect(screen.getByText(/Loaded 2m ago by the dashboard's command/)).toBeInTheDocument();
+    // Only the field that has a command is looked up (the staging list is written in the file), and nothing is run.
     expect(api.dashboardOptions).toHaveBeenCalledTimes(1);
     expect(api.dashboardOptions).toHaveBeenCalledWith("/p", "staging.json", "org", "addons");
+    expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
     expect(within(screen.getByLabelText(/Staging/)).getAllByRole("option").map((o) => o.textContent)).toEqual(["Choose…", "1", "2", "3", "7", "9"]);
   });
 
-  it("says the options are loading until they arrive", async () => {
+  it("says no options are loaded yet, and Load options runs the command", async () => {
     load([dash()], state());
-    let arrive: (options: string[]) => void = () => {};
-    vi.mocked(api.dashboardOptions).mockImplementation(() => new Promise((resolve) => (arrive = resolve)));
+    vi.mocked(api.dashboardOptions).mockResolvedValue(null);
     render(<DashboardTab folder="/p" refreshKey={0} />);
-    expect(await screen.findByText("Loading options…")).toBeInTheDocument();
+    expect(await screen.findByText(/No options loaded yet/)).toBeInTheDocument();
     expect(screen.queryByLabelText("sso")).toBeNull();
-    await act(async () => arrive(["sso"]));
+    expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Load options" }));
+    expect(await screen.findByLabelText("testo_sensors")).toBeInTheDocument();
+    expect(api.dashboardLoadOptions).toHaveBeenCalledWith("/p", "staging.json", "org", "addons");
+    expect(screen.queryByText(/No options loaded yet/)).toBeNull();
+  });
+
+  it("says the options are loading while the command runs", async () => {
+    load([dash()], state());
+    vi.mocked(api.dashboardOptions).mockResolvedValue(null);
+    let arrive: (list: { options: string[]; loaded_at: number }) => void = () => {};
+    vi.mocked(api.dashboardLoadOptions).mockImplementation(() => new Promise((resolve) => (arrive = resolve)));
+    render(<DashboardTab folder="/p" refreshKey={0} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Load options" }));
+    expect(await screen.findByText("Loading options…")).toBeInTheDocument();
+    await act(async () => arrive({ options: ["sso"], loaded_at: Date.now() }));
     expect(await screen.findByLabelText("sso")).toBeInTheDocument();
     expect(screen.queryByText("Loading options…")).toBeNull();
   });
 
-  it("says why the options couldn't be loaded, and Retry asks again", async () => {
+  it("says why the command failed, and Retry runs it again", async () => {
     load([dash()], state());
-    vi.mocked(api.dashboardOptions).mockRejectedValueOnce("lumi_staging.py failed: no internal login for staging 7");
+    vi.mocked(api.dashboardOptions).mockResolvedValue(null);
+    vi.mocked(api.dashboardLoadOptions).mockRejectedValueOnce("lumi_staging.py failed: no internal login for staging 7");
     render(<DashboardTab folder="/p" refreshKey={0} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Load options" }));
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("Couldn't load the options: lumi_staging.py failed: no internal login for staging 7");
-    expect(screen.queryByLabelText("sso")).toBeNull();
     fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
     expect(await screen.findByLabelText("sso")).toBeInTheDocument();
-    expect(api.dashboardOptions).toHaveBeenCalledTimes(2);
+    expect(api.dashboardLoadOptions).toHaveBeenCalledTimes(2);
     expect(screen.queryByText(/Couldn't load the options/)).toBeNull();
   });
 
   it("says when the command printed no options at all", async () => {
     load([dash()], state());
-    vi.mocked(api.dashboardOptions).mockResolvedValue([]);
+    vi.mocked(api.dashboardOptions).mockResolvedValue({ options: [], loaded_at: Date.now() });
     render(<DashboardTab folder="/p" refreshKey={0} />);
     expect(await screen.findByText("The command printed no options.")).toBeInTheDocument();
   });
 
-  it("asks the options command again when Reload is pressed, so a new addon shows up", async () => {
+  it("runs the options command again when Reload is pressed, so a new addon shows up", async () => {
     load([dash()], state());
     render(<DashboardTab folder="/p" refreshKey={0} />);
     await screen.findByLabelText("testo_sensors");
-    vi.mocked(api.dashboardOptions).mockResolvedValue(["approvals", "sso", "testo_sensors", "brand_new_addon"]);
+    expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
+    vi.mocked(api.dashboardLoadOptions).mockResolvedValue({ options: ["approvals", "sso", "testo_sensors", "brand_new_addon"], loaded_at: Date.now() });
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
     expect(await screen.findByLabelText("brand_new_addon")).toBeInTheDocument();
-    expect(api.dashboardOptions).toHaveBeenCalledTimes(2);
+    expect(api.dashboardLoadOptions).toHaveBeenCalledTimes(1);
   });
 
-  it("lists a form's options commands on the trust card, apart from its button's, and says they run by themselves", async () => {
-    load([dash()], state({ trusted: [] }));
+  it("picks up a list that was loaded elsewhere when the backend says something changed", async () => {
+    load([dash()], state());
+    vi.mocked(api.dashboardOptions).mockResolvedValue(null);
+    render(<DashboardTab folder="/p" refreshKey={0} />);
+    await screen.findByText(/No options loaded yet/);
+    vi.mocked(api.dashboardOptions).mockResolvedValue({ options: ["approvals", "testo_sensors"], loaded_at: Date.now() });
+    act(() => changed?.());
+    expect(await screen.findByLabelText("testo_sensors")).toBeInTheDocument();
+    expect(screen.queryByText(/No options loaded yet/)).toBeNull();
+    expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
+  });
+
+  const withOptionsCommand = () =>
     vi.mocked(api.dashboardCommands).mockResolvedValue([
       { form: "org", title: "Create org", kind: "action", command: ["python3", "~/tools/lumi_staging.py", "create"], program: "/opt/homebrew/bin/python3", error: null },
       { form: "org", title: "Create org", kind: "options", field: "addons", command: ["python3", "~/tools/lumi_staging.py", "addons", "--json"], program: "/opt/homebrew/bin/python3", error: null },
     ]);
+
+  it("lists a form's options commands on the trust card, apart from its button's, and says when they run", async () => {
+    load([dash()], state({ trusted: [] }));
+    withOptionsCommand();
     render(<DashboardTab folder="/p" refreshKey={0} />);
     expect(await screen.findByLabelText("Command of Create org")).toHaveTextContent("python3 ~/tools/lumi_staging.py create");
     expect(screen.getByLabelText("Options command of addons in Create org")).toHaveTextContent("python3 ~/tools/lumi_staging.py addons --json");
-    expect(screen.getByText(/Loads the options of “addons” in Create org, by itself/)).toBeInTheDocument();
-    expect(screen.getByText(/runs by itself, without a button press/)).toBeInTheDocument();
+    expect(screen.getByText(/Loads the options of “addons” in Create org, when you trust the dashboard and when you press Reload/)).toBeInTheDocument();
+    expect(screen.getByText(/never just because the tab opened/)).toBeInTheDocument();
     // Nothing is asked of any command before the user trusts the file.
     expect(api.dashboardOptions).not.toHaveBeenCalled();
+    expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
+  });
+
+  it("runs the options commands only once the user has pressed Trust", async () => {
+    load([dash()], state({ trusted: [] }));
+    withOptionsCommand();
+    render(<DashboardTab folder="/p" refreshKey={0} />);
+    await screen.findByLabelText("Options command of addons in Create org");
+    expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Trust this dashboard" }));
+    await waitFor(() => expect(api.dashboardLoadOptions).toHaveBeenCalledWith("/p", "staging.json", "org", "addons"));
+    expect(api.dashboardTrust).toHaveBeenCalledTimes(1);
+    expect(api.dashboardLoadOptions).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not run the options commands when trusting is refused", async () => {
+    load([dash()], state({ trusted: [] }));
+    withOptionsCommand();
+    vi.mocked(api.dashboardTrust).mockRejectedValue("That dashboard changed since you looked at it. Look at it again.");
+    render(<DashboardTab folder="/p" refreshKey={0} />);
+    await screen.findByLabelText("Options command of addons in Create org");
+    fireEvent.click(screen.getByRole("button", { name: "Trust this dashboard" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("changed since you looked");
+    expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
   });
 
   it("picks between several dashboards, by their titles", async () => {

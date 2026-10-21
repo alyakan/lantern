@@ -1212,6 +1212,7 @@ let mockWatches = [{ label: "Checklists", method: "GET", url: "/v1/checklists" }
 let dashTrusted: string[] = [];
 let dashRuns: DashboardRun[] = [];
 let dashRunning = false;
+let dashOptions: { options: string[]; loaded_at: number } | null = null;
 const dashSummary = ({ id, file, form, started_at, duration_ms, exit_code, stopped, timed_out, inputs }: DashboardRun) => ({ id, file, form, started_at, duration_ms, exit_code, stopped, timed_out, inputs });
 function mockDashboardRun(values: Record<string, unknown>): DashboardRun {
   const staging = String(values.staging ?? "");
@@ -1800,9 +1801,18 @@ export function installMockBackend() {
             { form: "org", title: "Create org", kind: "options", field: "addons", command: ["python3", "/Users/you/staging-tools/lumi_staging.py", "addons", "--json"], program: "/opt/homebrew/bin/python3", error: null },
           ];
         case "dashboard_options":
+          // What was kept the last time the command ran; this never runs it.
+          return dashOptions;
+        case "dashboard_load_options":
           // `?optionsfail` shows the field's error state; otherwise the script's own list, after a moment.
           if (new URLSearchParams(location.search).has("optionsfail")) return Promise.reject("lumi_staging.py failed: no internal login for staging 7");
-          return new Promise((resolve) => setTimeout(() => resolve(["approvals", "public_api", "sso", "form_translations", "manual_form_translations", "ai_image_description", "trainings", "webhooks", "word_report_template", "global_sections", "testo_sensors", "all_integrations"]), 400));
+          return new Promise((resolve) =>
+            setTimeout(() => {
+              dashOptions = { options: ["approvals", "public_api", "sso", "form_translations", "manual_form_translations", "ai_image_description", "trainings", "webhooks", "word_report_template", "global_sections", "testo_sensors", "all_integrations"], loaded_at: Date.now() };
+              void emit("dashboards-changed");
+              resolve(dashOptions);
+            }, 400),
+          );
         case "dashboard_preview": {
           const values = a.values as Record<string, unknown>;
           if (!values.staging) return Promise.reject("Staging is required.");

@@ -581,6 +581,13 @@ export interface DashboardCommand {
   error: string | null;
 }
 
+/** The list a select's options command printed the last time it ran for this dashboard file. */
+export interface DashboardOptionsList {
+  options: string[];
+  /** Milliseconds since 1970. */
+  loaded_at: number;
+}
+
 /** What pressing a form's button will run, worked out by the code that runs it. */
 export interface DashboardPreview {
   args: string[];

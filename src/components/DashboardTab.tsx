@@ -9,6 +9,8 @@ interface Loaded {
   folder: string;
   list: Dashboard[];
   state: DashboardState;
+  /** Counts the reads, so what shows a list kept by the backend knows to look again. */
+  stamp: number;
 }
 
 /**
@@ -23,7 +25,7 @@ export function useDashboards(folder: string, refreshKey: number) {
     const mine = ++latest.current;
     // A slower, older read never lands over a newer one.
     Promise.all([api.dashboardsList(folder), api.dashboardsState(folder)]).then(
-      ([list, state]) => latest.current === mine && setData({ folder, list, state }),
+      ([list, state]) => latest.current === mine && setData({ folder, list, state, stamp: mine }),
       () => {},
     );
   }, [folder]);
@@ -79,7 +81,7 @@ export function DashboardTab({ folder, refreshKey }: { folder: string; refreshKe
         </button>
       </div>
       <div className="dash-body">
-        <Shown key={`${folder}\n${current.file}`} folder={folder} dashboard={current} state={data.state} reloads={reloads} />
+        <Shown key={`${folder}\n${current.file}`} folder={folder} dashboard={current} state={data.state} reloads={reloads} stamp={data.stamp} />
       </div>
     </>
   );
@@ -95,7 +97,7 @@ function DashboardEmpty() {
 }
 
 /** One dashboard: what is wrong with its file, or the trust card, or its panels. */
-function Shown({ folder, dashboard, state, reloads }: { folder: string; dashboard: Dashboard; state: DashboardState; reloads: number }) {
+function Shown({ folder, dashboard, state, reloads, stamp }: { folder: string; dashboard: Dashboard; state: DashboardState; reloads: number; stamp: number }) {
   if (!dashboard.spec) return <Problems dashboard={dashboard} />;
   if (!state.trusted.includes(dashboard.hash)) return <TrustCard key={dashboard.hash} folder={folder} dashboard={dashboard} />;
   const file = dashboard.file;
@@ -103,7 +105,7 @@ function Shown({ folder, dashboard, state, reloads }: { folder: string; dashboar
   return (
     <>
       {dashboard.spec.panels.map((p, i) => {
-        if (p.type === "form") return <FormPanel key={`${i}-${p.id}`} folder={folder} file={file} form={p} running={isRunning(p.id)} reload={reloads} />;
+        if (p.type === "form") return <FormPanel key={`${i}-${p.id}`} folder={folder} file={file} form={p} running={isRunning(p.id)} reload={reloads} stamp={stamp} />;
         if (p.type === "result") return <ResultPanel key={i} folder={folder} file={file} formId={p.of} title={p.title} runs={state.runs} running={isRunning(p.of)} />;
         return <HistoryPanel key={i} folder={folder} file={file} formId={p.of} title={p.title} runs={state.runs} />;
       })}
@@ -151,6 +153,10 @@ function TrustCard({ folder, dashboard }: { folder: string; dashboard: Dashboard
     setError(null);
     api
       .dashboardTrust(folder, dashboard.file, dashboard.hash)
+      .then(() => {
+        // The card said these commands run now: fill in the lists the forms offer. A failure is shown by the field, with a Retry.
+        for (const c of commands ?? []) if (c.kind === "options" && c.field) api.dashboardLoadOptions(folder, dashboard.file, c.form, c.field).catch(() => {});
+      })
       .catch((e) => setError(String(e)))
       .finally(() => setBusy(false));
   };
@@ -163,14 +169,14 @@ function TrustCard({ folder, dashboard }: { folder: string; dashboard: Dashboard
       {commands === null && !error && <div className="tests-note">Reading its commands…</div>}
       {commands?.map((c) => (
         <div key={`${c.form}/${c.kind}/${c.field ?? ""}`} className="dash-trust-command">
-          <div className="dash-trust-form">{c.kind === "options" ? `Loads the options of “${c.field}” in ${c.title ?? c.form}, by itself, whenever the form opens or you press Reload` : c.title ?? c.form}</div>
+          <div className="dash-trust-form">{c.kind === "options" ? `Loads the options of “${c.field}” in ${c.title ?? c.form}, when you trust the dashboard and when you press Reload` : c.title ?? c.form}</div>
           <pre className="dash-command" aria-label={c.kind === "options" ? `Options command of ${c.field} in ${c.title ?? c.form}` : `Command of ${c.title ?? c.form}`}>
             {commandLine(c.command)}
           </pre>
           {c.program ? <div className="dash-trust-where">Runs {c.program}</div> : <div className="network-error">{c.error}</div>}
         </div>
       ))}
-      {commands?.some((c) => c.kind === "options") && <p className="tests-note">A command that “Loads the options…” runs by itself, without a button press, to fill in a list; it should only read.</p>}
+      {commands?.some((c) => c.kind === "options") && <p className="tests-note">A command that “Loads the options…” runs when you press Trust, and again when you press Reload or Retry on that list (never just because the tab opened), to fill in a list; it should only read.</p>}
       <p className="tests-note">Lantern checks this file, not the files its commands run: if a script they call changes, so does what runs. Any edit to the dashboard file asks you again.</p>
       {error && (
         <div className="network-error" role="alert">

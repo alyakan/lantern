@@ -509,22 +509,34 @@ async fn dashboard_commands(state: State<'_, AppState>, folder: String, file: St
     .map_err(|e| e.to_string())?
 }
 
-/// The options of a select whose list comes from a command (`optionsFrom`), read by running it: for a dashboard the user
-/// trusted, when its form opens.
+/// The list a select's options command printed the last time it ran for this dashboard file (null if never). Runs nothing: opening
+/// the tab must not run code, since a script the dashboard calls may have changed since the user trusted the file.
 #[tauri::command]
-async fn dashboard_options(state: State<'_, AppState>, folder: String, file: String, form: String, field: String) -> Result<Vec<String>, String> {
+async fn dashboard_options(state: State<'_, AppState>, folder: String, file: String, form: String, field: String) -> Result<Option<dashboard_run::CachedList>, String> {
+    let runner = state.dashboards.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = std::path::Path::new(&folder);
+        runner.options_cached(&permission::rules::folder_key(root), root, &file, &form, &field)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Runs a select's options command now and keeps its list, for a dashboard the user trusted. Only from a click: Trust, Reload, Retry.
+#[tauri::command]
+async fn dashboard_load_options(state: State<'_, AppState>, folder: String, file: String, form: String, field: String) -> Result<dashboard_run::CachedList, String> {
     let path_env = login_path(&state).await;
     let root = std::path::Path::new(&folder);
-    state.dashboards.options(&permission::rules::folder_key(root), root, &file, &form, &field, path_env).await
+    state.dashboards.load_options(&permission::rules::folder_key(root), root, &file, &form, &field, path_env).await
 }
 
 /// What pressing a form's button would run, with the values in: shown to the user before it does.
 #[tauri::command]
-async fn dashboard_preview(folder: String, file: String, form: String, values: dashboard_run::Values) -> Result<dashboard_run::Preview, String> {
+async fn dashboard_preview(state: State<'_, AppState>, folder: String, file: String, form: String, values: dashboard_run::Values) -> Result<dashboard_run::Preview, String> {
+    let runner = state.dashboards.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let found = dashboard::load(std::path::Path::new(&folder)).into_iter().find(|d| d.file == file).ok_or("That dashboard is gone.")?;
-        let form = found.form(&form).ok_or_else(|| format!("That dashboard has no form called {form:?}."))?;
-        dashboard_run::preview(form, &values)
+        let root = std::path::Path::new(&folder);
+        runner.preview_for(&permission::rules::folder_key(root), root, &file, &form, &values)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -2286,6 +2298,7 @@ pub fn run() {
             dashboard_trust,
             dashboard_commands,
             dashboard_options,
+            dashboard_load_options,
             dashboard_preview,
             dashboard_run,
             dashboard_run_detail,
