@@ -1267,7 +1267,7 @@ function mockDashboardRun(values: Record<string, unknown>, form = "org"): Dashbo
       ? ["python3", "/Users/you/staging-tools/lumi_staging.py", "addons-set", "--staging", staging, "--org", String(values.org ?? "")]
       : form === "users"
         ? ["python3", "/Users/you/staging-tools/lumi_staging.py", "users", "--staging", staging, "--org", String(values.org ?? ""), "--count", String(values.count ?? 3)]
-        : ["python3", "/Users/you/staging-tools/lumi_staging.py", "create", "--json", "--staging", staging, "--users", String(users)];
+        : ["python3", "/Users/you/staging-tools/lumi_staging.py", "create", "--json", "--staging", staging, "--users", String(users), "--admins", String(values.admins ?? 1), "--enable", ([] as string[]).concat((values.addons ?? []) as string[]).join(","), `--name=${String(values.name ?? "")}`];
   return { id: `${Date.now()}-${dashRuns.length + 1}`, file: "staging.json", form, started_at: Date.now(), duration_ms: 1840, exit_code: 0, stopped: false, timed_out: false, inputs: values as DashboardRun["inputs"], args, stdout: `creating org on staging ${staging}\n${JSON.stringify(output)}\n`, stderr: "", truncated: false, output };
 }
 

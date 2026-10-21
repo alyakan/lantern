@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { api } from "../api";
-import { commandLine, formatDuration, formatElapsed, initialState, isScalar, isTable, matching, plain, rowTsv, runStatus, summarizeInputs, tableColumns, tableTsv, toValues, type FormPanel as FormSpec, type FormState } from "../lib/dashboard";
+import { commandLine, formatDuration, formatElapsed, initialState, isScalar, isTable, matching, plain, quoteArg, rowTsv, runStatus, summarizeInputs, tableColumns, tableTsv, toValues, type FormPanel as FormSpec, type FormState } from "../lib/dashboard";
 import { relativeTime } from "../lib/time";
 import type { DashboardField, DashboardPreview, DashboardRun, DashboardRunSummary, DashboardValues } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -169,15 +169,15 @@ export function FormPanel({ folder, file, form, running, reload = 0, stamp = 0, 
     );
   };
   // The command the button would run for what is filled in now, from the same code that runs it: nothing is hidden behind Run.
-  const [line, setLine] = useState<{ text: string; refused: boolean } | null>(null);
+  const [line, setLine] = useState<{ text: string; args: string[]; refused: boolean } | null>(null);
   const valuesKey = JSON.stringify(values);
   useEffect(() => {
     let live = true;
     const t = window.setTimeout(() => {
       api.dashboardPreview(folder, file, form.id, values).then(
-        (p) => live && setLine({ text: commandLine(p.args), refused: false }),
+        (p) => live && setLine({ text: commandLine(p.args), args: p.args, refused: false }),
         // The same words pressing Run would say: what is wrong with the form is known before then.
-        (e) => live && setLine({ text: String(e), refused: true }),
+        (e) => live && setLine({ text: String(e), args: [], refused: true }),
       );
     }, 250);
     return () => {
@@ -201,10 +201,26 @@ export function FormPanel({ folder, file, form, running, reload = 0, stamp = 0, 
         {form.fields.map((f) => (
           <Field key={f.id} id={`${key}-${f.id}`} field={f} fields={form.fields} values={values} source={{ folder, file, form: form.id, reload, stamp }} value={state[f.id]} disabled={busy} onChange={(v) => change({ ...state, [f.id]: v })} />
         ))}
-        <div className="dash-actions">
-          <code className={`dash-preview${line?.refused ? " refused" : ""}`} aria-label="Will run" title={line?.text}>
-            {line?.text ?? "The command shows here."}
+        <div className={`dash-command-box${line?.refused ? " refused" : ""}`}>
+          <div className="dash-command-head">
+            <span>{line?.refused ? "Can't run yet" : "Will run"}</span>
+            {line && !line.refused && (
+              <CopyButton label="Copy command" text={line.text}>
+                Copy
+              </CopyButton>
+            )}
+          </div>
+          <code className="dash-preview" aria-label="Will run">
+            {/* Each argument stays whole: a long command wraps between arguments, never inside one. */}
+            {line && !line.refused ? line.args.map((a, i) => (
+              <span key={i}>
+                {i > 0 && " "}
+                <span className="dash-arg">{quoteArg(a)}</span>
+              </span>
+            )) : line?.text ?? "…"}
           </code>
+        </div>
+        <div className="dash-actions">
           {busy && (
             <button type="button" className="ghost" onClick={() => void api.dashboardStop(folder, file, form.id)}>
               Stop

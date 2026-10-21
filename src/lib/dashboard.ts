@@ -35,9 +35,12 @@ export function toValues(fields: DashboardField[], state: FormState): DashboardV
   return values;
 }
 
-/** A command as one line to read: an argument with a space or a quote in it is quoted. */
+/** One argument as it reads in a command line: with a space or a quote in it, it is quoted. */
+export const quoteArg = (a: string): string => (a === "" || /[^\w@%+=:,./~{}-]/.test(a) ? JSON.stringify(a) : a);
+
+/** A command as one line to read. */
 export function commandLine(args: string[]): string {
-  return args.map((a) => (a === "" || /[^\w@%+=:,./~{}-]/.test(a) ? JSON.stringify(a) : a)).join(" ");
+  return args.map(quoteArg).join(" ");
 }
 
 const ANSI = new RegExp("\\u001b\\[[0-9;?]*[ -/]*[@-~]", "g");
