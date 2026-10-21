@@ -49,8 +49,9 @@ pub struct Remote {
     new_chats: std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<Result<String, String>>>>,
 }
 
-/// What the window is asked when a phone starts a chat. The gateway has checked the folder and the text; the window
-/// checks them again, and starts the chat on `permissions` (always "ask") without switching what it shows.
+/// What the window is asked when a phone starts a chat. The gateway has checked the folder, the text, and Auto against the
+/// setting; the window checks them again, and starts the chat on `permissions` ("ask", or "auto" when the Mac lets phones
+/// use it) and the `preset`, without switching what it shows.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct NewChatRequest {
     /// Single-use: the window answers with it (`Remote::new_chat_done`).
@@ -58,6 +59,23 @@ pub struct NewChatRequest {
     pub folder: String,
     pub text: String,
     pub permissions: &'static str,
+    /// The id of one of the presets the window listed, or None for the project's own.
+    pub preset: Option<String>,
+}
+
+/// What the window is asked when a phone puts a chat on Ask or Auto. The gateway has checked the chat and Auto against the
+/// setting; the window checks again (any window can emit what it listens to).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SetPermissionsRequest {
+    pub slot: String,
+    pub permissions: &'static str,
+}
+
+/// What the window is asked when a phone puts a chat on one of the presets.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SetPresetRequest {
+    pub slot: String,
+    pub preset: String,
 }
 
 /// The projects a phone may start a chat in, as (folder, name): the folders the user has used Claude in lately and those
@@ -152,6 +170,7 @@ pub struct DeviceView {
 pub struct RemoteView {
     pub enabled: bool,
     pub show_titles: bool,
+    pub allow_phone_auto: bool,
     pub devices: Vec<DeviceView>,
     /// The ids of the devices connected now.
     pub connected: Vec<String>,
@@ -218,7 +237,7 @@ impl Remote {
     pub fn view(&self) -> RemoteView {
         let saved = self.store.saved();
         let devices = saved.devices.into_iter().map(|d| DeviceView { id: d.id, name: d.name, paired_at: d.paired_at, last_seen: d.last_seen }).collect();
-        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, devices, warning: None, connected: self.connected(), listening: self.is_running(), pairing: self.store.offer_open(now_ms()) }
+        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, allow_phone_auto: saved.allow_phone_auto, devices, warning: None, connected: self.connected(), listening: self.is_running(), pairing: self.store.offer_open(now_ms()) }
     }
 
     /// The view after a change, with why it couldn't be saved when it couldn't.
@@ -264,6 +283,12 @@ pub struct WindowChat {
     pub title: String,
     pub asleep: bool,
     pub session_id: Option<String>,
+    /// "ask" or "auto" (a window that doesn't say leaves what the hub has).
+    #[serde(default)]
+    pub permissions: Option<String>,
+    /// The id of the preset the chat runs on.
+    #[serde(default)]
+    pub preset: Option<String>,
 }
 
 impl Remote {
@@ -304,6 +329,9 @@ impl Remote {
     /// Takes in what the window knows of its open chats: the titles it shows, and which are asleep.
     pub fn window_chats(&self, chats: &[WindowChat]) {
         for c in chats {
+            if let Some(p) = c.permissions.as_deref() {
+                self.hub.controls(&c.slot, p, c.preset.as_deref());
+            }
             if c.asleep {
                 self.hub.asleep(&c.slot, &c.folder, Some(c.title.clone()), c.session_id.clone());
             } else {
@@ -478,7 +506,7 @@ mod tests {
     fn the_window_titles_its_chats_and_lists_the_asleep_ones_which_can_then_be_woken() {
         let remote = Remote::default();
         remote.hub.opened("a", "/p");
-        let chat = |slot: &str, asleep| WindowChat { slot: slot.into(), folder: "/p".into(), title: format!("Chat {slot}"), asleep, session_id: Some(format!("s-{slot}")) };
+        let chat = |slot: &str, asleep| WindowChat { slot: slot.into(), folder: "/p".into(), title: format!("Chat {slot}"), asleep, session_id: Some(format!("s-{slot}")), permissions: None, preset: None };
         remote.window_chats(&[chat("a", false), chat("b", true)]);
         assert_eq!(remote.hub.chat("a").unwrap().title.as_deref(), Some("Chat a"));
         let b = remote.hub.chat("b").unwrap();
@@ -492,12 +520,24 @@ mod tests {
     }
 
     #[test]
+    fn the_window_says_which_mode_and_preset_each_chat_runs_on() {
+        let remote = Remote::default();
+        remote.hub.opened("a", "/p");
+        remote.hub.opened("b", "/p");
+        let chat = |slot: &str, permissions: Option<&str>, preset: Option<&str>| WindowChat { slot: slot.into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: None, permissions: permissions.map(String::from), preset: preset.map(String::from) };
+        remote.window_chats(&[chat("a", Some("auto"), Some("max")), chat("b", None, None)]);
+        let (a, b) = (remote.hub.chat("a").unwrap(), remote.hub.chat("b").unwrap());
+        assert_eq!((a.permissions.as_deref(), a.preset.as_deref()), (Some("auto"), Some("max")));
+        assert_eq!((b.permissions, b.preset), (None, None), "a window that doesn't say leaves it unsaid");
+    }
+
+    #[test]
     fn an_awake_chat_resumed_from_history_gets_its_session_from_the_window_so_its_transcript_can_be_found() {
         let remote = Remote::default();
         // The chat is listed (its claude starts) but hasn't said anything: claude names its session only with its first message.
         remote.hub.opened("a", "/p");
         assert_eq!(remote.hub.chat("a").unwrap().session_id, None);
-        let chat = |id: Option<&str>| WindowChat { slot: "a".into(), folder: "/p".into(), title: "Old chat".into(), asleep: false, session_id: id.map(String::from) };
+        let chat = |id: Option<&str>| WindowChat { slot: "a".into(), folder: "/p".into(), title: "Old chat".into(), asleep: false, session_id: id.map(String::from), permissions: None, preset: None };
         remote.window_chats(&[chat(Some("0a1b2c3d-1111-2222-3333-444455556666"))]);
         let a = remote.hub.chat("a").unwrap();
         assert_eq!((a.status, a.session_id.as_deref()), (hub::ChatStatus::Idle, Some("0a1b2c3d-1111-2222-3333-444455556666")), "it is still awake, and now has its session");
@@ -510,7 +550,7 @@ mod tests {
     fn the_window_only_fills_a_gap_in_the_session_and_never_with_a_name_that_is_not_one() {
         let remote = Remote::default();
         remote.hub.opened("a", "/p");
-        let chat = |id: &str| WindowChat { slot: "a".into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: Some(id.into()) };
+        let chat = |id: &str| WindowChat { slot: "a".into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: Some(id.into()), permissions: None, preset: None };
         // Not a session id (a path, or something with slashes in it): ignored.
         remote.window_chats(&[chat("../../etc/passwd")]);
         assert_eq!(remote.hub.chat("a").unwrap().session_id, None);

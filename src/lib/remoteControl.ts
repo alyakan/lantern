@@ -10,6 +10,7 @@ export interface RemoteDevice {
 export interface RemoteView {
   enabled: boolean;
   show_titles: boolean;
+  allow_phone_auto: boolean;
   devices: RemoteDevice[];
   /** The ids of the phones connected now. */
   connected: string[];

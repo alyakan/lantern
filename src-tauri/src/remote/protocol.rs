@@ -194,12 +194,64 @@ pub struct RemoteChat {
     pub last_seq: u64,
     #[ts(type = "number")]
     pub active_at: u64,
+    /// Ask or Auto, as the Mac's window says it is (None until it has said).
+    #[serde(default)]
+    pub permissions: Option<RemotePermissions>,
+    /// The id of the preset (which models do what) the chat runs on, one of Controls' presets (None until the window has said).
+    #[serde(default)]
+    pub preset: Option<String>,
+}
+
+/// Ask or Auto: what a chat does about asking before it acts. A phone may ask for Auto only when the Mac's setting allows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub enum RemotePermissions {
+    Ask,
+    Auto,
+}
+
+impl RemotePermissions {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "ask" => Some(Self::Ask),
+            "auto" => Some(Self::Auto),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Auto => "auto",
+        }
+    }
+}
+
+/// A preset of the Mac's Settings › Models, as a phone lists it: which model does what, in a chat.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemotePreset {
+    /// What a phone sends back to choose it. The Mac only takes one it listed.
+    pub id: String,
+    pub name: String,
+    /// One line about what it does: "Sonnet · Opus advisor · Haiku subagents".
+    pub summary: String,
+}
+
+/// What a phone may choose for a chat (the answer to Request::Controls).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct Controls {
+    /// The Mac lets phones use Auto (Settings › Remote control). Off: Ask is the only choice, and the Mac refuses Auto.
+    pub allow_auto: bool,
+    pub presets: Vec<RemotePreset>,
 }
 
 impl From<super::hub::ChatInfo> for RemoteChat {
     fn from(c: super::hub::ChatInfo) -> Self {
         let project = c.folder.as_deref().and_then(|f| std::path::Path::new(f).file_name()).map(|n| n.to_string_lossy().into_owned());
-        Self { slot: c.slot, title: c.title, project, status: c.status.into(), last_seq: c.last_seq, active_at: c.active_at }
+        Self { slot: c.slot, title: c.title, project, status: c.status.into(), last_seq: c.last_seq, active_at: c.active_at, permissions: c.permissions.as_deref().and_then(RemotePermissions::parse), preset: c.preset }
     }
 }
 
@@ -303,9 +355,25 @@ pub enum Request {
     Wake { slot: String },
     /// The projects a chat may be started in from the phone.
     Projects,
-    /// Starts a chat in `project` (one of Projects' ids) with `text` as its first message. It starts on Ask, whatever the
-    /// project's Permissions were, and without switching what the Mac's window shows.
-    NewChat { project: String, text: String },
+    /// Starts a chat in `project` (one of Projects' ids) with `text` as its first message, without switching what the Mac's
+    /// window shows. It starts on Ask unless `permissions` says Auto and the Mac lets phones use Auto, whatever the project's
+    /// Permissions were; `preset` (one of Controls' ids) is the models it runs on, else the project's own.
+    NewChat {
+        project: String,
+        text: String,
+        #[serde(default)]
+        permissions: Option<RemotePermissions>,
+        #[serde(default)]
+        preset: Option<String>,
+    },
+    /// What a phone may choose: whether Auto is allowed, and the presets. Only sent to a Mac that said it has them
+    /// (Welcome's `features`): an older Mac ends the connection at a request it doesn't know.
+    Controls,
+    /// Puts a chat on Ask or Auto (its claude restarts on the same session). Refused for Auto unless the Mac lets phones use
+    /// it, and while the chat is working or waiting on someone: the restart would drop what it is doing.
+    SetPermissions { slot: String, permissions: RemotePermissions },
+    /// Puts a chat on one of Controls' presets (its claude restarts on the same session), under the same conditions.
+    SetPreset { slot: String, preset: String },
     /// What Claude would do next, from the recent chats: up to three drafts. Made by a short call to a small model, so
     /// they are kept for a while and shared by every phone; `refresh` asks again (not within a minute of the last time).
     Suggest { refresh: bool },
@@ -342,6 +410,10 @@ pub enum ServerMessage {
         mac_name: String,
         #[ts(type = "number")]
         epoch: u64,
+        /// What this Mac can do beyond protocol 1, by name ("controls": Request::Controls and what goes with it). A Mac that
+        /// is older says nothing, and a phone doesn't ask it for what it hasn't got.
+        #[serde(default)]
+        features: Vec<String>,
     },
     /// The answer to request `id`: `ok` with its result, or `error` with why (for the user).
     Response {
@@ -378,6 +450,28 @@ pub enum ServerMessage {
 mod tests {
     use super::*;
     use crate::ui_event::Hunk;
+
+    #[test]
+    fn what_an_older_phone_or_mac_says_still_reads() {
+        // An older phone starts a chat with no say in the mode or preset: it is Ask, the project's own models.
+        let old: Request = serde_json::from_str(r#"{"op":"new_chat","project":"/p","text":"hi"}"#).unwrap();
+        assert_eq!(old, Request::NewChat { project: "/p".into(), text: "hi".into(), permissions: None, preset: None });
+        // An older Mac's chat list and Welcome have neither field.
+        let chat: RemoteChat = serde_json::from_str(r#"{"slot":"a","title":null,"project":null,"status":"idle","last_seq":1,"active_at":2}"#).unwrap();
+        assert_eq!((chat.permissions, chat.preset), (None, None));
+        let welcome: ServerMessage = serde_json::from_str(r#"{"type":"welcome","protocol":1,"app_version":"0.1.53","mac_name":"M","epoch":3}"#).unwrap();
+        assert!(matches!(welcome, ServerMessage::Welcome { features, .. } if features.is_empty()));
+    }
+
+    #[test]
+    fn a_chat_says_its_mode_and_preset_and_only_the_two_modes_are_taken() {
+        let info = |p: Option<&str>| crate::remote::hub::ChatInfo { slot: "a".into(), title: None, folder: None, session_id: None, status: crate::remote::hub::ChatStatus::Idle, last_seq: 0, active_at: 0, permissions: p.map(String::from), preset: Some("max".into()) };
+        let auto = RemoteChat::from(info(Some("auto")));
+        assert_eq!((auto.permissions, auto.preset.as_deref()), (Some(RemotePermissions::Auto), Some("max")));
+        assert_eq!(RemoteChat::from(info(Some("ask"))).permissions, Some(RemotePermissions::Ask));
+        assert_eq!(RemoteChat::from(info(Some("bypass"))).permissions, None);
+        assert!(serde_json::from_str::<Request>(r#"{"op":"set_permissions","slot":"a","permissions":"bypass"}"#).is_err());
+    }
 
     #[test]
     fn export_bindings_are_where_the_phone_reads_them() {
@@ -445,7 +539,7 @@ mod tests {
 
     #[test]
     fn a_chat_is_listed_by_its_projects_name_not_its_path() {
-        let info = crate::remote::hub::ChatInfo { slot: "a".into(), title: Some("t".into()), folder: Some("/Users/me/dev/lantern".into()), session_id: Some("s".into()), status: crate::remote::hub::ChatStatus::NeedsYou, last_seq: 4, active_at: 9 };
+        let info = crate::remote::hub::ChatInfo { slot: "a".into(), title: Some("t".into()), folder: Some("/Users/me/dev/lantern".into()), session_id: Some("s".into()), status: crate::remote::hub::ChatStatus::NeedsYou, last_seq: 4, active_at: 9, permissions: Some("auto".into()), preset: Some("balanced".into()) };
         let chat = RemoteChat::from(info);
         assert_eq!((chat.project.as_deref(), chat.status), (Some("lantern"), ChatStatus::NeedsYou));
     }
