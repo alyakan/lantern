@@ -30,6 +30,16 @@ pub const SENT_BY_DESKTOP: &str = "desktop";
 /// The port Lantern listens on for phones while Remote control is on (Bonjour says it too).
 pub const PORT: u16 = 47123;
 
+/// The port to listen on: `PORT`, or LANTERN_REMOTE_PORT when it names a free-range one (above 1023), so a dev run can be
+/// listening beside the real app (which holds `PORT`) instead of failing to, and a phone then talking to the wrong one.
+pub fn port() -> u16 {
+    port_from(std::env::var("LANTERN_REMOTE_PORT").ok().as_deref())
+}
+
+fn port_from(var: Option<&str>) -> u16 {
+    var.and_then(|v| v.trim().parse::<u16>().ok()).filter(|p| *p > 1023).unwrap_or(PORT)
+}
+
 /// The bus and the hub, joined (everything published is kept by the hub before any subscriber sees it), with Remote
 /// control's settings, paired devices and the Mac's key.
 pub struct Remote {
@@ -298,7 +308,7 @@ impl Remote {
         }
         let key = self.mac_key()?;
         let offer = self.store.start_offer(now)?;
-        let link = pairing::pairing_link(&key.public, &offer, hosts, PORT, mac_name);
+        let link = pairing::pairing_link(&key.public, &offer, hosts, port(), mac_name);
         Ok(PairView { svg: pairing::qr_svg(&link)?, link, expires_at: offer.expires_at })
     }
 
@@ -613,6 +623,16 @@ mod tests {
         // A title for a chat the hub doesn't list doesn't list it.
         remote.window_chats(&[chat("c", false)]);
         assert!(remote.hub.chat("c").is_none());
+    }
+
+    #[test]
+    fn a_dev_run_may_listen_on_a_port_of_its_own_and_anything_else_is_the_usual_one() {
+        assert_eq!(port_from(None), PORT);
+        assert_eq!(port_from(Some("47124")), 47124);
+        assert_eq!(port_from(Some(" 50000 ")), 50000);
+        for bad in ["", "abc", "80", "0", "1023", "70000", "-1"] {
+            assert_eq!(port_from(Some(bad)), PORT, "{bad:?}");
+        }
     }
 
     #[test]
