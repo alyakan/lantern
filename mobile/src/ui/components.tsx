@@ -9,11 +9,12 @@ export function Txt({ variant = "body", tone = "ink", style, ...rest }: TextProp
   return <Text {...rest} style={[scale[variant], { color }, style]} />;
 }
 
-type ButtonKind = "ink" | "ghost" | "go" | "night-stop" | "night-ghost";
+type ButtonKind = "ink" | "ghost" | "go" | "hi" | "night-stop" | "night-ghost";
 
 /** A button at least as tall as a touch target; the label says what happens. */
 export function Button({ label, onPress, kind = "ink", disabled, style, accessibilityHint }: { label: string; onPress: () => void; kind?: ButtonKind; disabled?: boolean; style?: StyleProp<ViewStyle>; accessibilityHint?: string }) {
-  const bg = { ink: colors.ink, ghost: colors.paper, go: colors.go, "night-stop": "transparent", "night-ghost": colors.nightRaised }[kind];
+  // "hi" is the highlighter: dark words on yellow (white ones can't be read on it).
+  const bg = { ink: colors.ink, ghost: colors.paper, go: colors.go, hi: colors.hi, "night-stop": "transparent", "night-ghost": colors.nightRaised }[kind];
   const fg = kind === "ink" || kind === "go" ? "white" : kind === "night-stop" ? "night-stop" : kind === "night-ghost" ? "white" : "ink";
   return (
     <PressScale

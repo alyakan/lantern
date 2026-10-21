@@ -234,7 +234,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
       {outcome.kind === "none" || outcome.kind === "sending" || outcome.kind === "failed" ? (
         view.kind === "question" ? (
           <View style={{ gap: 8 }}>
-            <Button label="Send answer" disabled={!answers || busy} onPress={() => answers && answer(true, answers)} style={{ backgroundColor: colors.hi }} />
+            <Button label="Send answer" kind="hi" disabled={!answers || busy} onPress={() => answers && answer(true, answers)} />
             <Button label="Decline" kind="night-ghost" disabled={busy} onPress={() => answer(false)} />
           </View>
         ) : (
