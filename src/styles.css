@@ -1724,6 +1724,8 @@ button.network-row.current { background: var(--bg-active); color: var(--text); }
 .dash-multi > legend { width: 100%; }
 .dash-option { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
 .dash-required { color: var(--del); }
+.dash-options-error { width: 100%; font-size: calc(11.5px * var(--font-scale)); color: var(--del); overflow-wrap: anywhere; }
+.dash-options-error button.ghost { height: 18px; padding: 0 6px; font-size: calc(11px * var(--font-scale)); color: var(--text-2); }
 .dash-actions { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
 .dash-actions button { height: var(--pill-m); padding: 0 14px; border-radius: var(--radius-pill); }
 .dash-command, .dash-log { margin: 0; padding: 6px 8px; max-height: 280px; overflow: auto; border-radius: var(--radius-inner); background: var(--code-bg); font: calc(11.5px * var(--font-scale)) / 1.5 var(--mono); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }

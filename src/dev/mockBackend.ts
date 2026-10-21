@@ -1795,7 +1795,14 @@ export function installMockBackend() {
           void emit("dashboards-changed");
           return undefined;
         case "dashboard_commands":
-          return [{ form: "org", title: "Create org", command: ["python3", "/Users/you/staging-tools/lumi_staging.py", "create", "--json", "--staging", "{staging}", "--users", "{users}", "--enable", "{addons}", "--name={name}"], program: "/opt/homebrew/bin/python3", error: null }];
+          return [
+            { form: "org", title: "Create org", kind: "action", command: ["python3", "/Users/you/staging-tools/lumi_staging.py", "create", "--json", "--staging", "{staging}", "--users", "{users}", "--enable", "{addons}", "--name={name}"], program: "/opt/homebrew/bin/python3", error: null },
+            { form: "org", title: "Create org", kind: "options", field: "addons", command: ["python3", "/Users/you/staging-tools/lumi_staging.py", "addons", "--json"], program: "/opt/homebrew/bin/python3", error: null },
+          ];
+        case "dashboard_options":
+          // `?optionsfail` shows the field's error state; otherwise the script's own list, after a moment.
+          if (new URLSearchParams(location.search).has("optionsfail")) return Promise.reject("lumi_staging.py failed: no internal login for staging 7");
+          return new Promise((resolve) => setTimeout(() => resolve(["approvals", "public_api", "sso", "form_translations", "manual_form_translations", "ai_image_description", "trainings", "webhooks", "word_report_template", "global_sections", "testo_sensors", "all_integrations"]), 400));
         case "dashboard_preview": {
           const values = a.values as Record<string, unknown>;
           if (!values.staging) return Promise.reject("Staging is required.");

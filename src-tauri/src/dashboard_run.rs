@@ -153,7 +153,11 @@ fn render(field: &dashboard::Field, value: &Value) -> Result<String, String> {
         }
         Kind::Select => {
             let text = value.as_str().ok_or("must be one of its options.")?;
-            if !text.is_empty() && !field.options.iter().any(|o| o == text) {
+            if field.options_from.is_some() {
+                if !text.is_empty() {
+                    loaded_option(text)?;
+                }
+            } else if !text.is_empty() && !field.options.iter().any(|o| o == text) {
                 return Err("must be one of its options.".into());
             }
             Ok(text.to_string())
@@ -162,17 +166,111 @@ fn render(field: &dashboard::Field, value: &Value) -> Result<String, String> {
             let items = value.as_array().ok_or("must be a list of its options.")?;
             let mut chosen = Vec::new();
             for item in items {
-                let text = item.as_str().filter(|t| field.options.iter().any(|o| o == t)).ok_or("must be a list of its options.")?;
+                let text = item.as_str().ok_or("must be a list of its options.")?;
+                // The options a command printed aren't known here, so the value is held to what any of them could be (the
+                // script has its own say on whether it is one); a written list is checked against that list.
+                if field.options_from.is_some() {
+                    loaded_option(text)?;
+                } else if !field.options.iter().any(|o| o == text) {
+                    return Err("must be a list of its options.".into());
+                }
                 if chosen.contains(&text) {
                     return Err(format!("lists {text:?} twice."));
                 }
                 chosen.push(text);
+            }
+            if field.options_from.is_some() {
+                return Ok(chosen.join(","));
             }
             // In the field's own order, so the same choices always make the same command.
             Ok(field.options.iter().filter(|o| chosen.contains(&o.as_str())).cloned().collect::<Vec<_>>().join(","))
         }
         Kind::Toggle => Ok(value.as_bool().ok_or("must be on or off.")?.to_string()),
     }
+}
+
+/// Longest option a command may print.
+const MAX_OPTION: usize = 200;
+/// The most options a command may print.
+const MAX_LOADED_OPTIONS: usize = 200;
+/// How long an options command has to print its list.
+const OPTIONS_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Whether `text` could be one of the options a command printed, and so be a chosen value: one line of plain text, no comma (a
+/// multiselect's choices are joined with commas), and not starting with `-`, since a value that stands alone as an argument
+/// could otherwise be taken for an option of the program. Used for what a command printed and for what is chosen from it.
+fn loaded_option(text: &str) -> Result<(), String> {
+    if text.is_empty() || text.chars().count() > MAX_OPTION {
+        return Err(format!("must be 1 to {MAX_OPTION} characters."));
+    }
+    if text.contains(',') {
+        return Err("can't contain a comma.".into());
+    }
+    if text.starts_with('-') {
+        return Err("can't start with a dash.".into());
+    }
+    if text.chars().any(|c| c.is_control() || crate::permission::helper::hides_text(c)) {
+        return Err("can't contain a control character or a hidden or reordering one.".into());
+    }
+    Ok(())
+}
+
+/// What an options command printed: its last non-empty line, a JSON list of strings, each fit to be an option and none twice.
+fn parse_options(stdout: &str) -> Result<Vec<String>, String> {
+    let line = stdout.lines().rev().find(|l| !l.trim().is_empty()).ok_or("printed nothing; its last line should be a JSON list of strings like [\"a\", \"b\"].")?;
+    let options: Vec<String> = serde_json::from_str(line.trim()).map_err(|_| "its last line isn't a JSON list of strings like [\"a\", \"b\"].".to_string())?;
+    if options.len() > MAX_LOADED_OPTIONS {
+        return Err(format!("printed {} options; at most {MAX_LOADED_OPTIONS}.", options.len()));
+    }
+    for (i, option) in options.iter().enumerate() {
+        loaded_option(option).map_err(|why| format!("option {} ({}) {why}", i + 1, clip(option, 30)))?;
+        if options[..i].contains(option) {
+            return Err(format!("lists {option:?} twice."));
+        }
+    }
+    Ok(options)
+}
+
+/// Runs an options command and reads what it printed. Like a run it is its own process group, in the project folder, without
+/// a shell; unlike one it is given `OPTIONS_TIMEOUT`, and only its list is kept.
+async fn read_options(root: &Path, command: &[String], path_env: Option<&str>, timeout: Duration) -> Result<Vec<String>, String> {
+    let args = command.iter().map(|t| expand_home(t)).collect::<Result<Vec<_>, _>>()?;
+    let program = find_program(&args[0], root, path_env)?;
+    let mut cmd = tokio::process::Command::new(&program);
+    cmd.args(&args[1..]).current_dir(root).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true).process_group(0);
+    if let Some(p) = path_env {
+        cmd.env("PATH", p);
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("Could not run {}: {e}", args[0]))?;
+    let pgid = child.id().map_or(0, |p| p as i32);
+    let stdout = tokio::spawn(read_tail(child.stdout.take().expect("stdout is piped")));
+    let stderr = tokio::spawn(read_tail(child.stderr.take().expect("stderr is piped")));
+    let status = tokio::select! {
+        status = child.wait() => status.ok(),
+        _ = tokio::time::sleep(timeout) => {
+            if pgid > 1 {
+                crate::shell::kill_group(pgid);
+            }
+            let _ = child.wait().await;
+            return Err(format!("{} took longer than {} seconds to print its options.", args[0], timeout.as_secs().max(1)));
+        }
+    };
+    let (stdout, cut) = tokio::time::timeout(Duration::from_secs(2), stdout).await.ok().and_then(Result::ok).unwrap_or_default();
+    let (stderr, _) = tokio::time::timeout(Duration::from_secs(2), stderr).await.ok().and_then(Result::ok).unwrap_or_default();
+    if !status.is_some_and(|s| s.success()) {
+        let why = String::from_utf8_lossy(&stderr);
+        let why = why.trim();
+        return Err(if why.is_empty() { format!("{} failed.", args[0]) } else { format!("{} failed: {}", args[0], clip(&one_line(why), 300)) });
+    }
+    if cut {
+        return Err(format!("{} printed too much.", args[0]));
+    }
+    parse_options(&String::from_utf8_lossy(&stdout)).map_err(|why| format!("{}: {why}", args[0]))
+}
+
+/// `text` on one line, its line breaks as spaces.
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// `template` with each `{field}` replaced by that field's text. The values are put in once and never read again, so a
@@ -212,6 +310,10 @@ pub fn preview(form: &Form, values: &Values) -> Result<Preview, String> {
 pub struct CommandInfo {
     pub form: String,
     pub title: Option<String>,
+    /// "action" (what the form's button runs) or "options" (what loads a select's options when the form opens).
+    pub kind: &'static str,
+    /// For "options": the field whose options it loads.
+    pub field: Option<String>,
     /// The program and arguments as written, with `~` as the home folder; `{field}` stands for that field's value.
     pub command: Vec<String>,
     /// Where the program is on disk, or None with `error` saying why not.
@@ -222,18 +324,23 @@ pub struct CommandInfo {
 /// Every form's command in a dashboard that checked out, for the user to read before they trust it.
 pub fn commands(dashboard: &dashboard::Dashboard, root: &Path, path_env: Option<&str>) -> Vec<CommandInfo> {
     let Some(spec) = &dashboard.spec else { return Vec::new() };
-    spec.panels
-        .iter()
-        .filter_map(|p| match p {
-            dashboard::Panel::Form(f) => Some(f),
-            _ => None,
-        })
-        .map(|form| {
-            let command: Vec<String> = form.action.command.iter().map(|t| expand_home(t).unwrap_or_else(|_| t.clone())).collect();
-            let found = find_program(&command[0], root, path_env);
-            CommandInfo { form: form.id.clone(), title: form.title.clone(), program: found.as_ref().ok().map(|p| p.display().to_string()), error: found.err(), command }
-        })
-        .collect()
+    let info = |form: &Form, kind: &'static str, field: Option<String>, template: &[String]| {
+        let command: Vec<String> = template.iter().map(|t| expand_home(t).unwrap_or_else(|_| t.clone())).collect();
+        let found = find_program(&command[0], root, path_env);
+        CommandInfo { form: form.id.clone(), title: form.title.clone(), kind, field, program: found.as_ref().ok().map(|p| p.display().to_string()), error: found.err(), command }
+    };
+    let mut out = Vec::new();
+    for panel in &spec.panels {
+        let dashboard::Panel::Form(form) = panel else { continue };
+        out.push(info(form, "action", None, &form.action.command));
+        // These run on their own, when the form opens, so the user reads them before trusting just like the button's.
+        for field in &form.fields {
+            if let Some(from) = &field.options_from {
+                out.push(info(form, "options", Some(field.id.clone()), &from.command));
+            }
+        }
+    }
+    out
 }
 
 /// Where the program is: a path with a slash is that path (relative to the folder), a bare name is looked up on `path_env`.
@@ -436,6 +543,24 @@ impl Runner {
         }
         self.changed();
         true
+    }
+
+    // MARK: - Options from a command
+
+    /// The options of a select whose list comes from a command, read by running it now. Only for a dashboard the user trusted
+    /// (this runs a command without a button press, so it asks what a run asks), and only the command written in that exact
+    /// file, which is read again here.
+    pub async fn options(&self, folder: &str, root: &Path, file: &str, form_id: &str, field_id: &str, path_env: Option<String>) -> Result<Vec<String>, String> {
+        let found = dashboard::load(root).into_iter().find(|d| d.file == file).ok_or("That dashboard is gone.")?;
+        if found.spec.is_none() {
+            return Err("That dashboard has problems.".into());
+        }
+        if !self.is_trusted(folder, &found.hash) {
+            return Err("You haven't trusted this version of the dashboard, so its options aren't loaded.".into());
+        }
+        let field = found.form(form_id).and_then(|f| f.fields.iter().find(|x| x.id == field_id)).ok_or_else(|| format!("That dashboard has no field {field_id:?} in a form {form_id:?}."))?;
+        let from = field.options_from.as_ref().ok_or("That field's options are written in the dashboard, not loaded by a command.")?;
+        read_options(root, &from.command, path_env.as_deref(), OPTIONS_TIMEOUT).await
     }
 
     // MARK: - A run Claude proposes
@@ -883,6 +1008,134 @@ mod tests {
         // A dashboard with problems has nothing to list.
         let broken = dashboard::Dashboard { spec: None, ..found.clone() };
         assert!(commands(&broken, s.folder.path(), None).is_empty());
+    }
+
+    // MARK: Options from a command
+
+    /// A form whose addons and staging lists come from commands; the action echoes what was chosen.
+    fn dyn_spec(addons_command: Value) -> String {
+        json!({ "title": "t", "panels": [ { "type": "form", "id": "f", "fields": [
+            { "id": "addons", "type": "multiselect", "optionsFrom": { "command": addons_command } },
+            { "id": "staging", "type": "select", "optionsFrom": { "command": ["/bin/echo", "[\"7\", \"9\"]"] } }
+        ], "action": { "command": ["/bin/echo", "--enable", "{addons}", "{staging}"] } } ] })
+        .to_string()
+    }
+
+    fn printing(list: &str) -> Value {
+        // printf, not echo: this sh's echo reads backslash sequences, which would change the JSON before the checker sees it.
+        json!(["/bin/sh", "-c", format!("echo some log line; printf '%s\\n' '{list}'")])
+    }
+
+    async fn options_of(s: &Setup, field: &str) -> Result<Vec<String>, String> {
+        s.runner.options("k", s.folder.path(), "d.json", "f", field, None).await
+    }
+
+    #[tokio::test]
+    async fn a_selects_options_are_what_its_command_prints_on_its_last_line() {
+        let s = setup(&dyn_spec(printing(r#"["approvals", "testo_sensors"]"#)));
+        trust(&s);
+        assert_eq!(options_of(&s, "addons").await.unwrap(), ["approvals", "testo_sensors"]);
+        assert_eq!(options_of(&s, "staging").await.unwrap(), ["7", "9"]);
+        // An empty list is a list.
+        let none = setup(&dyn_spec(printing("[]")));
+        trust(&none);
+        assert!(options_of(&none, "addons").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn options_are_not_loaded_for_a_dashboard_that_is_not_trusted_or_a_field_that_has_none_to_load() {
+        let s = setup(&dyn_spec(printing(r#"["a"]"#)));
+        assert!(options_of(&s, "addons").await.unwrap_err().contains("haven't trusted"));
+        trust(&s);
+        assert!(options_of(&s, "nope").await.unwrap_err().contains("no field"));
+        assert!(s.runner.options("k", s.folder.path(), "d.json", "zz", "addons", None).await.unwrap_err().contains("no field"));
+        assert!(s.runner.options("k", s.folder.path(), "gone.json", "f", "addons", None).await.unwrap_err().contains("gone"));
+        assert!(s.runner.options("other", s.folder.path(), "d.json", "f", "addons", None).await.unwrap_err().contains("haven't trusted"));
+        let written = setup(&spec(fields(), sh(json!([]))));
+        trust(&written);
+        assert!(options_of(&written, "who").await.unwrap_err().contains("written in the dashboard"));
+        // Edited after it was trusted: not run until trusted again.
+        std::fs::write(s.folder.path().join(".lantern/dashboards/d.json"), dyn_spec(printing(r#"["b"]"#))).unwrap();
+        assert!(options_of(&s, "addons").await.unwrap_err().contains("haven't trusted"));
+    }
+
+    #[tokio::test]
+    async fn an_options_command_that_prints_the_wrong_thing_says_what_was_wrong() {
+        let cases = [
+            (json!(["/bin/sh", "-c", "true"]), "printed nothing"),
+            (printing("not json"), "isn't a JSON list of strings"),
+            (printing(r#"{"a": 1}"#), "isn't a JSON list of strings"),
+            (printing("[1, 2]"), "isn't a JSON list of strings"),
+            (printing(r#"["a,b"]"#), "can't contain a comma"),
+            (printing(r#"["-x"]"#), "can't start with a dash"),
+            (printing(r#"[""]"#), "must be 1 to"),
+            (printing(r#"["a", "a"]"#), "lists \"a\" twice"),
+            (printing(r#"["a\u202eb"]"#), "hidden or reordering"),
+            (printing(r#"["a\nb"]"#), "control character"),
+            (json!(["/bin/sh", "-c", "echo 'broken thing' >&2; exit 3"]), "failed: broken thing"),
+            (json!(["no-such-program-here"]), "isn't on the PATH"),
+        ];
+        for (command, says) in cases {
+            let s = setup(&dyn_spec(command.clone()));
+            trust(&s);
+            let err = options_of(&s, "addons").await.unwrap_err();
+            assert!(err.contains(says), "{command}: {err}");
+        }
+        // One more than the most there may be, printed by a loop (written out, the list would be longer than a command argument may be).
+        let loop_script = format!("i=0; printf '['; while [ $i -lt {MAX_LOADED_OPTIONS} ]; do printf '\"o%s\",' $i; i=$((i+1)); done; printf '\"last\"]\\n'");
+        let s = setup(&dyn_spec(json!(["/bin/sh", "-c", loop_script])));
+        trust(&s);
+        assert!(options_of(&s, "addons").await.unwrap_err().contains("at most"));
+    }
+
+    #[tokio::test]
+    async fn an_options_command_that_hangs_or_floods_is_stopped_and_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let slow = read_options(dir.path(), &["/bin/sh".into(), "-c".into(), "sleep 30".into()], None, Duration::from_millis(300)).await.unwrap_err();
+        assert!(slow.contains("took longer than"), "{slow}");
+        let flood = read_options(dir.path(), &["/bin/sh".into(), "-c".into(), "yes 0123456789 | head -c 400000".into()], None, Duration::from_secs(10)).await.unwrap_err();
+        assert!(flood.contains("printed too much"), "{flood}");
+    }
+
+    #[test]
+    fn what_is_chosen_from_a_commands_options_is_held_to_what_any_option_could_be() {
+        let form = form_of(&dyn_spec(json!(["x"])));
+        let ok = |v: Value| resolve(&form, &values(v));
+        // Not looked up against a list, in the order chosen, a select left empty is empty.
+        let got = ok(json!({ "addons": ["testo_sensors", "approvals"], "staging": "7" })).unwrap();
+        assert_eq!((got["addons"].as_str(), got["staging"].as_str()), ("testo_sensors,approvals", "7"));
+        assert_eq!(ok(json!({ "addons": [] })).unwrap()["staging"], "");
+        // A value the script gets as a whole argument can't be taken for one of its options, or smuggle in a second value.
+        for bad in ["-x", "--admins=99", "a,b", "a\nb", "", "a\u{202e}b", &"x".repeat(MAX_OPTION + 1)] {
+            let err = ok(json!({ "addons": [bad] })).unwrap_err();
+            assert!(err.starts_with("addons "), "{bad:?}: {err}");
+            if !bad.is_empty() {
+                assert!(ok(json!({ "staging": bad })).is_err(), "{bad:?}");
+            }
+        }
+        assert!(ok(json!({ "addons": ["a", "a"] })).unwrap_err().contains("twice"));
+        assert!(ok(json!({ "addons": "a" })).is_err() && ok(json!({ "addons": [1] })).is_err());
+    }
+
+    #[test]
+    fn the_trust_card_lists_a_forms_options_commands_too() {
+        let s = setup(&dyn_spec(json!(["python3", "~/tools/run.py", "addons", "--json"])));
+        let found = &dashboard::load(s.folder.path())[0];
+        let got = commands(found, s.folder.path(), Some("/bin:/usr/bin"));
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(got.iter().map(|c| (c.kind, c.field.as_deref())).collect::<Vec<_>>(), [("action", None), ("options", Some("addons")), ("options", Some("staging"))]);
+        assert_eq!(got[1].command, ["python3".to_string(), format!("{home}/tools/run.py"), "addons".into(), "--json".into()]);
+        assert!(got[2].program.as_deref().is_some_and(|p| p.ends_with("/echo")));
+    }
+
+    #[tokio::test]
+    async fn a_run_proposed_for_a_command_fed_select_carries_the_chosen_values_into_the_card() {
+        let s = setup(&dyn_spec(printing(r#"["approvals", "testo_sensors"]"#)));
+        trust(&s);
+        let p = s.runner.prepare("k", s.folder.path(), "d.json", "f", values(json!({ "addons": ["testo_sensors"], "staging": "7" })), None).unwrap();
+        assert!(p.details.contains("/bin/echo --enable testo_sensors 7"), "{}", p.details);
+        let refused = s.runner.prepare("k", s.folder.path(), "d.json", "f", values(json!({ "addons": ["--admins=99"] })), None).unwrap_err();
+        assert!(refused.contains("can't start with a dash"), "{refused}");
     }
 
     // MARK: A run Claude proposes

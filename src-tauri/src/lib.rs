@@ -509,6 +509,15 @@ async fn dashboard_commands(state: State<'_, AppState>, folder: String, file: St
     .map_err(|e| e.to_string())?
 }
 
+/// The options of a select whose list comes from a command (`optionsFrom`), read by running it: for a dashboard the user
+/// trusted, when its form opens.
+#[tauri::command]
+async fn dashboard_options(state: State<'_, AppState>, folder: String, file: String, form: String, field: String) -> Result<Vec<String>, String> {
+    let path_env = login_path(&state).await;
+    let root = std::path::Path::new(&folder);
+    state.dashboards.options(&permission::rules::folder_key(root), root, &file, &form, &field, path_env).await
+}
+
 /// What pressing a form's button would run, with the values in: shown to the user before it does.
 #[tauri::command]
 async fn dashboard_preview(folder: String, file: String, form: String, values: dashboard_run::Values) -> Result<dashboard_run::Preview, String> {
@@ -2276,6 +2285,7 @@ pub fn run() {
             dashboards_state,
             dashboard_trust,
             dashboard_commands,
+            dashboard_options,
             dashboard_preview,
             dashboard_run,
             dashboard_run_detail,

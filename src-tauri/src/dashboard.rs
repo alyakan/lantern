@@ -90,6 +90,14 @@ pub enum Kind {
     Toggle,
 }
 
+/// Where a select's options come from when they aren't written in the file: a command that prints them.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OptionsFrom {
+    /// The program and its arguments, as in an action's command but with no `{field}`: it runs when the form opens, before
+    /// anything is chosen. Its last line of output is a JSON list of strings.
+    pub command: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Field {
     pub id: String,
@@ -102,6 +110,8 @@ pub struct Field {
     pub default: Option<Value>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<String>,
+    #[serde(rename = "optionsFrom", skip_serializing_if = "Option::is_none")]
+    pub options_from: Option<OptionsFrom>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -275,7 +285,7 @@ fn check_field(issues: &mut Issues, path: &str, raw: &Value) -> Option<Field> {
         issues.add(path, "must be an object");
         return None;
     };
-    issues.only_keys(path, object, &["id", "type", "label", "required", "default", "options", "min", "max"]);
+    issues.only_keys(path, object, &["id", "type", "label", "required", "default", "options", "optionsFrom", "min", "max"]);
     let id = id_at(issues, &join(path, "id"), object.get("id"));
     let label = text_at(issues, &join(path, "label"), object.get("label"), false, MAX_LABEL);
     let kind = match object.get("type").and_then(Value::as_str) {
@@ -302,10 +312,37 @@ fn check_field(issues: &mut Issues, path: &str, raw: &Value) -> Option<Field> {
         }
     };
     let kind = kind?;
-    let options = check_options(issues, path, object, kind);
+    let options_from = check_options_from(issues, path, object, kind);
+    // Options written in the file, or loaded by a command: not both, and a command's are not known here.
+    let options = if object.contains_key("optionsFrom") {
+        if object.contains_key("options") {
+            issues.add(&join(path, "options"), "a field has options or optionsFrom, not both");
+        }
+        Vec::new()
+    } else {
+        check_options(issues, path, object, kind)
+    };
     let (min, max) = check_range(issues, path, object, kind);
-    let default = check_default(issues, &join(path, "default"), object.get("default"), kind, &options, min, max);
-    Some(Field { id: id?, kind, label, required, default, options, min, max })
+    let default = check_default(issues, &join(path, "default"), object.get("default"), kind, &options, options_from.is_some(), min, max);
+    Some(Field { id: id?, kind, label, required, default, options, options_from, min, max })
+}
+
+/// A select's `optionsFrom`: a command that prints its options. It runs by itself when the form opens (for a dashboard the user
+/// trusted), so it takes no `{field}`: nothing has been chosen yet.
+fn check_options_from(issues: &mut Issues, path: &str, object: &Map<String, Value>, kind: Kind) -> Option<OptionsFrom> {
+    let raw = object.get("optionsFrom")?;
+    let at = join(path, "optionsFrom");
+    if !matches!(kind, Kind::Select | Kind::Multiselect) {
+        issues.add(&at, "only a select or multiselect has optionsFrom");
+        return None;
+    }
+    let Some(inner) = raw.as_object() else {
+        issues.add(&at, "must be an object with a command: { \"command\": [\"program\", \"argument\"] }");
+        return None;
+    };
+    issues.only_keys(&at, inner, &["command"]);
+    let command = check_command(issues, &join(&at, "command"), inner.get("command"), None);
+    (!command.is_empty()).then_some(OptionsFrom { command })
 }
 
 fn check_options(issues: &mut Issues, path: &str, object: &Map<String, Value>, kind: Kind) -> Vec<String> {
@@ -366,19 +403,21 @@ fn check_range(issues: &mut Issues, path: &str, object: &Map<String, Value>, kin
     (min, max)
 }
 
-fn check_default(issues: &mut Issues, path: &str, raw: Option<&Value>, kind: Kind, options: &[String], min: Option<f64>, max: Option<f64>) -> Option<Value> {
+#[allow(clippy::too_many_arguments)]
+fn check_default(issues: &mut Issues, path: &str, raw: Option<&Value>, kind: Kind, options: &[String], dynamic: bool, min: Option<f64>, max: Option<f64>) -> Option<Value> {
     let raw = raw?;
+    // A command's options aren't known while the file is read, so a default of theirs is checked when the form loads them.
     let ok = match (kind, raw) {
         (Kind::Text, Value::String(s)) => s.chars().count() <= MAX_ARG || fail(issues, path, format!("longer than {MAX_ARG} characters")),
         (Kind::Number, Value::Number(n)) => match n.as_f64() {
             Some(n) if min.is_some_and(|m| n < m) || max.is_some_and(|m| n > m) => fail(issues, path, "is outside the field's min and max"),
             _ => true,
         },
-        (Kind::Select, Value::String(s)) => options.contains(s) || fail(issues, path, format!("'{}' isn't one of the options", clip(s))),
+        (Kind::Select, Value::String(s)) => dynamic || options.contains(s) || fail(issues, path, format!("'{}' isn't one of the options", clip(s))),
         (Kind::Multiselect, Value::Array(items)) => {
             let mut seen = HashSet::new();
             items.iter().all(|item| match item.as_str() {
-                Some(s) if options.iter().any(|o| o == s) => seen.insert(s) || fail(issues, path, format!("'{s}' is listed twice")),
+                Some(s) if dynamic || options.iter().any(|o| o == s) => seen.insert(s) || fail(issues, path, format!("'{s}' is listed twice")),
                 Some(s) => fail(issues, path, format!("'{}' isn't one of the options", clip(s))),
                 None => fail(issues, path, "must be a list of option strings"),
             })
@@ -406,30 +445,7 @@ fn check_action(issues: &mut Issues, path: &str, raw: &Value, fields: &[Field]) 
         return None;
     };
     issues.only_keys(path, object, &["command", "confirm", "output"]);
-    let command_at = join(path, "command");
-    let mut command: Vec<String> = Vec::new();
-    match object.get("command").and_then(Value::as_array) {
-        Some(raw) if !raw.is_empty() && raw.len() <= MAX_ARGS => {
-            for (i, arg) in raw.iter().enumerate() {
-                let at = format!("{command_at}[{i}]");
-                match arg.as_str() {
-                    Some(s) if s.chars().count() > MAX_ARG => issues.add(&at, format!("longer than {MAX_ARG} characters")),
-                    Some(s) => {
-                        check_placeholders(issues, &at, s, fields, i > 0);
-                        command.push(s.to_string());
-                    }
-                    None => issues.add(&at, "must be a string (the command is a list of strings, not a shell line)"),
-                }
-            }
-            match command.first() {
-                // A form value must never choose the program.
-                Some(program) if program.is_empty() => issues.add(&format!("{command_at}[0]"), "the program can't be empty"),
-                Some(program) if !placeholders(program).is_empty() => issues.add(&format!("{command_at}[0]"), "the program can't contain a {field}; only arguments can"),
-                _ => {}
-            }
-        }
-        _ => issues.add(&command_at, format!("must be a list of 1 to {MAX_ARGS} strings: the program, then its arguments")),
-    }
+    let command = check_command(issues, &join(path, "command"), object.get("command"), Some(fields));
     let confirm = text_at(issues, &join(path, "confirm"), object.get("confirm"), false, MAX_LABEL).inspect(|text| {
         check_placeholders(issues, &join(path, "confirm"), text, fields, false);
     });
@@ -444,6 +460,40 @@ fn check_action(issues: &mut Issues, path: &str, raw: &Value, fields: &[Field]) 
     };
     // A command with a bad argument has already been reported, which fails the whole file.
     (!command.is_empty()).then_some(Action { command, confirm, output })
+}
+
+/// A command: a list of strings, the program then its arguments. With `fields` (an action's), each `{field}` has to name one of
+/// them; without (an options command's, which runs before anything is chosen), none may appear. The program never holds one.
+fn check_command(issues: &mut Issues, at: &str, raw: Option<&Value>, fields: Option<&[Field]>) -> Vec<String> {
+    let mut command: Vec<String> = Vec::new();
+    match raw.and_then(Value::as_array) {
+        Some(raw) if !raw.is_empty() && raw.len() <= MAX_ARGS => {
+            for (i, arg) in raw.iter().enumerate() {
+                let here = format!("{at}[{i}]");
+                match arg.as_str() {
+                    Some(s) if s.chars().count() > MAX_ARG => issues.add(&here, format!("longer than {MAX_ARG} characters")),
+                    Some(s) => {
+                        match fields {
+                            Some(fields) => check_placeholders(issues, &here, s, fields, i > 0),
+                            None if !placeholders(s).is_empty() => issues.add(&here, "can't use a {field}: this command runs when the form opens, before anything is chosen"),
+                            None => {}
+                        }
+                        command.push(s.to_string());
+                    }
+                    None => issues.add(&here, "must be a string (the command is a list of strings, not a shell line)"),
+                }
+            }
+            match command.first() {
+                // A form value must never choose the program.
+                Some(program) if program.is_empty() => issues.add(&format!("{at}[0]"), "the program can't be empty"),
+                Some(program) if !placeholders(program).is_empty() && fields.is_some() => issues.add(&format!("{at}[0]"), "the program can't contain a {field}; only arguments can"),
+                _ => {}
+            }
+        }
+        _ => issues.add(at, format!("must be a list of 1 to {MAX_ARGS} strings: the program, then its arguments")),
+    }
+    // A command with a bad argument has already been reported, which fails the whole file.
+    if command.len() == raw.and_then(Value::as_array).map_or(0, Vec::len) { command } else { Vec::new() }
 }
 
 /// The `{field}` markers in `text`: where each starts, and the field id.
@@ -731,6 +781,54 @@ mod tests {
         assert!(has(with(|s| s["panels"][0]["fields"][2]["options"][0] = json!("")), "panels[0].fields[2].options[0]", "1 to"));
         assert!(has(with(|s| { s["panels"][0]["fields"][0].as_object_mut().unwrap().remove("options"); }), "panels[0].fields[0].options", "needs a list"));
         assert!(has(with(|s| s["panels"][0]["fields"][3]["options"] = json!(["a"])), "panels[0].fields[3].options", "only a select"));
+    }
+
+    /// `base()` with the addons field's options coming from a command.
+    fn dynamic(edit: impl FnOnce(&mut Value)) -> Value {
+        with(|s| {
+            let field = s["panels"][0]["fields"][2].as_object_mut().unwrap();
+            field.remove("options");
+            field.insert("optionsFrom".into(), json!({ "command": ["python3", "~/tools/run.py", "addons", "--json"] }));
+            edit(s);
+        })
+    }
+
+    #[test]
+    fn a_select_can_get_its_options_from_a_command() {
+        let spec = parse(&dynamic(|_| {}).to_string()).unwrap();
+        let Panel::Form(form) = &spec.panels[0] else { panic!() };
+        let field = &form.fields[2];
+        assert!(field.options.is_empty());
+        assert_eq!(field.options_from.as_ref().unwrap().command, ["python3", "~/tools/run.py", "addons", "--json"]);
+        // The default is kept, and checked when the options are loaded: they aren't known here.
+        assert_eq!(field.default, Some(json!(["sso"])));
+        assert!(errors(dynamic(|s| s["panels"][0]["fields"][2]["default"] = json!(["not-listed-here"]))).is_empty());
+        // A select too, and the file still says so when written out.
+        assert!(errors(with(|s| {
+            let f = s["panels"][0]["fields"][0].as_object_mut().unwrap();
+            f.remove("options");
+            f.insert("optionsFrom".into(), json!({ "command": ["./staging-list"] }));
+        }))
+        .is_empty());
+        assert!(serde_json::to_string(&spec).unwrap().contains("\"optionsFrom\":{\"command\":[\"python3\""));
+    }
+
+    #[test]
+    fn options_from_a_command_follow_the_same_rules_as_an_actions_command() {
+        let at = "panels[0].fields[2].optionsFrom";
+        assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["options"] = json!(["a"])), "panels[0].fields[2].options", "not both"));
+        assert!(has(dynamic(|s| s["panels"][0]["fields"][3]["optionsFrom"] = json!({ "command": ["x"] })), "panels[0].fields[3].optionsFrom", "only a select"));
+        assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!(["x"])), at, "must be an object"));
+        assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": "x y" })), &format!("{at}.command"), "list of 1 to"));
+        assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": [] })), &format!("{at}.command"), "list of 1 to"));
+        assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": ["x", 5] })), &format!("{at}.command[1]"), "must be a string"));
+        assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": [""] })), &format!("{at}.command[0]"), "can't be empty"));
+        assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": ["x"], "also": 1 })), &format!("{at}.also"), "not a known key"));
+        // It runs before anything is chosen, so it can't use a field's value, in the program or in an argument.
+        assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": ["x", "{staging}"] })), &format!("{at}.command[1]"), "before anything is chosen"));
+        assert!(has(dynamic(|s| s["panels"][0]["fields"][2]["optionsFrom"] = json!({ "command": ["{staging}"] })), &format!("{at}.command[0]"), "before anything is chosen"));
+        // A select with neither options nor a command is still refused.
+        assert!(has(with(|s| { s["panels"][0]["fields"][0].as_object_mut().unwrap().remove("options"); }), "panels[0].fields[0].options", "needs a list"));
     }
 
     #[test]

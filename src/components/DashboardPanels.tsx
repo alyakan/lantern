@@ -20,9 +20,44 @@ interface FormProps {
   form: FormSpec;
   /** The backend says a run of this form is going. */
   running: boolean;
+  /** Changes when the user presses Reload: options that a command loads are asked for again. */
+  reload?: number;
 }
 
-export function FormPanel({ folder, file, form, running }: FormProps) {
+/** Where a field's options come from when a command loads them. */
+interface OptionsSource {
+  folder: string;
+  file: string;
+  form: string;
+  reload: number;
+}
+
+type OptionsState = { status: "loading" } | { status: "ready"; options: string[] } | { status: "error"; message: string };
+
+/**
+ * A select's options: the ones written in the file, or (`optionsFrom`) what its command prints, asked for when the field appears,
+ * again on Reload and on `retry`. A slower, older answer never lands over a newer one.
+ */
+function useOptions(field: DashboardField, source: OptionsSource): { state: OptionsState; retry: () => void } {
+  const dynamic = !!field.optionsFrom;
+  const [state, setState] = useState<OptionsState>({ status: "loading" });
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    if (!dynamic) return;
+    let live = true;
+    setState({ status: "loading" });
+    api.dashboardOptions(source.folder, source.file, source.form, field.id).then(
+      (options) => live && setState({ status: "ready", options }),
+      (e) => live && setState({ status: "error", message: String(e) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [dynamic, source.folder, source.file, source.form, field.id, source.reload, attempt]);
+  return { state: dynamic ? state : { status: "ready", options: field.options ?? [] }, retry: () => setAttempt((n) => n + 1) };
+}
+
+export function FormPanel({ folder, file, form, running, reload = 0 }: FormProps) {
   // A form whose fields changed in the file starts over rather than inheriting controls that no longer match.
   const key = `${folder}\n${file}\n${form.id}\n${form.fields.map((f) => `${f.id}:${f.type}`).join(",")}`;
   const [state, setState] = useState<FormState>(() => kept.get(key) ?? initialState(form.fields));
@@ -64,7 +99,7 @@ export function FormPanel({ folder, file, form, running }: FormProps) {
         }}
       >
         {form.fields.map((f) => (
-          <Field key={f.id} id={`${key}-${f.id}`} field={f} value={state[f.id]} disabled={busy} onChange={(v) => change({ ...state, [f.id]: v })} />
+          <Field key={f.id} id={`${key}-${f.id}`} field={f} source={{ folder, file, form: form.id, reload }} value={state[f.id]} disabled={busy} onChange={(v) => change({ ...state, [f.id]: v })} />
         ))}
         <div className="dash-actions">
           <button type="submit" className="primary" disabled={busy}>
@@ -104,9 +139,25 @@ export function FormPanel({ folder, file, form, running }: FormProps) {
   );
 }
 
-function Field({ id, field, value, disabled, onChange }: { id: string; field: DashboardField; value: string | boolean | string[] | undefined; disabled: boolean; onChange: (v: string | boolean | string[]) => void }) {
+function Field({ id, field, source, value, disabled, onChange }: { id: string; field: DashboardField; source: OptionsSource; value: string | boolean | string[] | undefined; disabled: boolean; onChange: (v: string | boolean | string[]) => void }) {
   const label = field.label ?? field.id;
   const text = typeof value === "string" ? value : "";
+  const { state: loaded, retry } = useOptions(field, source);
+  const options = loaded.status === "ready" ? loaded.options : [];
+  // What stands in for the options until a command has printed them, or when it couldn't.
+  const note =
+    loaded.status === "loading" ? (
+      <span className="tests-note">Loading options…</span>
+    ) : loaded.status === "error" ? (
+      <span className="dash-options-error" role="alert">
+        Couldn't load the options: {loaded.message}{" "}
+        <button type="button" className="ghost" onClick={retry}>
+          Retry
+        </button>
+      </span>
+    ) : loaded.options.length === 0 && field.optionsFrom ? (
+      <span className="tests-note">The command printed no options.</span>
+    ) : null;
   if (field.type === "toggle") {
     return (
       <label className="dash-field dash-toggle">
@@ -120,12 +171,13 @@ function Field({ id, field, value, disabled, onChange }: { id: string; field: Da
     return (
       <fieldset className="dash-field dash-multi">
         <legend>{label}</legend>
-        {(field.options ?? []).map((o) => (
+        {options.map((o) => (
           <label key={o} className="dash-option">
             <input type="checkbox" checked={chosen.includes(o)} disabled={disabled} onChange={(e) => onChange(e.target.checked ? [...chosen, o] : chosen.filter((c) => c !== o))} />
             <span>{o}</span>
           </label>
         ))}
+        {note}
       </fieldset>
     );
   }
@@ -136,14 +188,17 @@ function Field({ id, field, value, disabled, onChange }: { id: string; field: Da
         {field.required && <span className="dash-required"> *</span>}
       </label>
       {field.type === "select" ? (
-        <select id={id} value={text} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
-          <option value="">Choose…</option>
-          {(field.options ?? []).map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
+        <>
+          <select id={id} value={text} disabled={disabled || loaded.status !== "ready"} onChange={(e) => onChange(e.target.value)}>
+            <option value="">{loaded.status === "loading" ? "Loading…" : "Choose…"}</option>
+            {options.map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
+          </select>
+          {note}
+        </>
       ) : (
         <input id={id} type={field.type === "number" ? "number" : "text"} value={text} min={field.min} max={field.max} step={field.type === "number" ? "any" : undefined} disabled={disabled} autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => onChange(e.target.value)} />
       )}

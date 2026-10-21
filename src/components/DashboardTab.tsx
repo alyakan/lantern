@@ -45,6 +45,8 @@ export function useDashboards(folder: string, refreshKey: number) {
 export function DashboardTab({ folder, refreshKey }: { folder: string; refreshKey: number }) {
   const { data, reload } = useDashboards(folder, refreshKey);
   const [picked, setPicked] = useState<string | null>(null);
+  // Counts the presses of Reload: a form's options that a command loads are asked for again, not only the files read again.
+  const [reloads, setReloads] = useState(0);
   if (!data) return <div className="tests-note dash-loading">Loading…</div>;
   if (data.list.length === 0) return <DashboardEmpty />;
   const current = data.list.find((d) => d.file === picked) ?? data.list[0];
@@ -65,12 +67,19 @@ export function DashboardTab({ folder, refreshKey }: { folder: string; refreshKe
         )}
         <span className="dash-bar-file">{current.file}</span>
         <div className="spacer" />
-        <button className="ghost" onClick={reload} title="Read the dashboard files again">
+        <button
+          className="ghost"
+          onClick={() => {
+            setReloads((n) => n + 1);
+            reload();
+          }}
+          title="Read the dashboard files again, and ask for the options a command loads again"
+        >
           Reload
         </button>
       </div>
       <div className="dash-body">
-        <Shown key={`${folder}\n${current.file}`} folder={folder} dashboard={current} state={data.state} />
+        <Shown key={`${folder}\n${current.file}`} folder={folder} dashboard={current} state={data.state} reloads={reloads} />
       </div>
     </>
   );
@@ -86,7 +95,7 @@ function DashboardEmpty() {
 }
 
 /** One dashboard: what is wrong with its file, or the trust card, or its panels. */
-function Shown({ folder, dashboard, state }: { folder: string; dashboard: Dashboard; state: DashboardState }) {
+function Shown({ folder, dashboard, state, reloads }: { folder: string; dashboard: Dashboard; state: DashboardState; reloads: number }) {
   if (!dashboard.spec) return <Problems dashboard={dashboard} />;
   if (!state.trusted.includes(dashboard.hash)) return <TrustCard key={dashboard.hash} folder={folder} dashboard={dashboard} />;
   const file = dashboard.file;
@@ -94,7 +103,7 @@ function Shown({ folder, dashboard, state }: { folder: string; dashboard: Dashbo
   return (
     <>
       {dashboard.spec.panels.map((p, i) => {
-        if (p.type === "form") return <FormPanel key={`${i}-${p.id}`} folder={folder} file={file} form={p} running={isRunning(p.id)} />;
+        if (p.type === "form") return <FormPanel key={`${i}-${p.id}`} folder={folder} file={file} form={p} running={isRunning(p.id)} reload={reloads} />;
         if (p.type === "result") return <ResultPanel key={i} folder={folder} file={file} formId={p.of} title={p.title} runs={state.runs} running={isRunning(p.of)} />;
         return <HistoryPanel key={i} folder={folder} file={file} formId={p.of} title={p.title} runs={state.runs} />;
       })}
@@ -153,14 +162,15 @@ function TrustCard({ folder, dashboard }: { folder: string; dashboard: Dashboard
       </p>
       {commands === null && !error && <div className="tests-note">Reading its commands…</div>}
       {commands?.map((c) => (
-        <div key={c.form} className="dash-trust-command">
-          <div className="dash-trust-form">{c.title ?? c.form}</div>
-          <pre className="dash-command" aria-label={`Command of ${c.title ?? c.form}`}>
+        <div key={`${c.form}/${c.kind}/${c.field ?? ""}`} className="dash-trust-command">
+          <div className="dash-trust-form">{c.kind === "options" ? `Loads the options of “${c.field}” in ${c.title ?? c.form}, by itself, whenever the form opens or you press Reload` : c.title ?? c.form}</div>
+          <pre className="dash-command" aria-label={c.kind === "options" ? `Options command of ${c.field} in ${c.title ?? c.form}` : `Command of ${c.title ?? c.form}`}>
             {commandLine(c.command)}
           </pre>
           {c.program ? <div className="dash-trust-where">Runs {c.program}</div> : <div className="network-error">{c.error}</div>}
         </div>
       ))}
+      {commands?.some((c) => c.kind === "options") && <p className="tests-note">A command that “Loads the options…” runs by itself, without a button press, to fill in a list; it should only read.</p>}
       <p className="tests-note">Lantern checks this file, not the files its commands run: if a script they call changes, so does what runs. Any edit to the dashboard file asks you again.</p>
       {error && (
         <div className="network-error" role="alert">

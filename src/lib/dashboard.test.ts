@@ -6,7 +6,7 @@ import { commandLine, formatDuration, initialState, isScalar, isTable, plain, ru
 // dashboard.spec.json is what Rust's checker makes of dashboard.input.json (a Rust test fails when it's stale). These tests
 // hold the TypeScript types to the same file: a key added on one side and not the other fails here, either as a type error
 // in these tables or as a mismatch below.
-const FIELD_KEYS: Record<keyof DashboardField, true> = { id: true, type: true, label: true, required: true, default: true, options: true, min: true, max: true };
+const FIELD_KEYS: Record<keyof DashboardField, true> = { id: true, type: true, label: true, required: true, default: true, options: true, optionsFrom: true, min: true, max: true };
 const ACTION_KEYS: Record<keyof DashboardAction, true> = { command: true, confirm: true, output: true };
 const FORM_KEYS = ["action", "fields", "id", "title", "type"];
 const LINK_KEYS = ["id", "of", "title", "type"];
