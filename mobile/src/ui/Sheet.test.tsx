@@ -37,6 +37,19 @@ describe("Sheet", () => {
     expect(props).toMatchObject({ animationType: "none", transparent: true, statusBarTranslucent: true });
   });
 
+  it("caps its height with a number, never a percentage: that cut the sheet short, with its Cancel button hanging below", async () => {
+    await render(<Sheet onClose={jest.fn()}>{() => <Text>Inside</Text>}</Sheet>);
+    let up = screen.getByText("Inside").parent;
+    const caps: unknown[] = [];
+    while (up) {
+      const cap = StyleSheet.flatten(up.props.style)?.maxHeight;
+      if (cap !== undefined) caps.push(cap);
+      up = up.parent;
+    }
+    expect(caps).toHaveLength(1);
+    expect(typeof caps[0]).toBe("number");
+  });
+
   it("keeps the dark on its own layer over the whole screen, apart from the sheet that moves", async () => {
     await render(<Sheet onClose={jest.fn()}>{() => <Text>Inside</Text>}</Sheet>);
     const dark = screen.getByLabelText("Close").parent!;

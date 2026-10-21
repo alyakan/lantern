@@ -84,7 +84,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 12, maxHeight: "88%" }, shadow.float]}>
+        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 12 }, shadow.float]}>
           <Txt variant="title" accessibilityRole="header">
             {continueChat ? "Carry on" : "New chat"}
           </Txt>

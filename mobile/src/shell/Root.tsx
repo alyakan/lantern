@@ -35,11 +35,11 @@ function ChatPicker({ onPick, onClose }: { onPick: (slot: string) => void; onClo
   return (
     <Sheet onClose={onClose}>
       {(close) => (
-        <View style={{ maxHeight: "70%", backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, paddingBottom: insets.bottom + space.lg }}>
+        <View style={{ flexShrink: 1, backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, paddingBottom: insets.bottom + space.lg }}>
           <Txt variant="heading" style={{ padding: space.xl, paddingBottom: space.sm }}>
             Message which chat?
           </Txt>
-          <ScrollView>
+          <ScrollView style={{ flexShrink: 1 }}>
             {rows(chats, Date.now()).map((r) => (
               <Pressable key={r.slot} accessibilityRole="button" accessibilityLabel={r.title} onPress={() => onPick(r.slot)} style={{ paddingHorizontal: space.xl, paddingVertical: 12, minHeight: 52, justifyContent: "center" }}>
                 <Txt variant="body" style={{ fontWeight: "600" }}>
