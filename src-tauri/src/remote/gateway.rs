@@ -13,7 +13,7 @@ use super::transport::Link;
 use crate::permission::bridge::Pending;
 use crate::ui_event::UiEvent;
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -269,7 +269,7 @@ impl Gateway {
         }
         self.store.seen(&device, (self.now)());
         self.changed();
-        let mut session = Session { gw: &self, device: device.clone(), subscribed: HashMap::new(), last_chats: Vec::new() };
+        let mut session = Session { gw: &self, device: device.clone(), subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
         let _ = session.run(&mut link, &mut channel, &mut killed).await;
         self.conns.lock().unwrap().remove(&id);
         self.store.seen(&device, (self.now)());
@@ -372,6 +372,10 @@ struct Session<'a> {
     device: String,
     /// The chats it subscribed to, with the number of the last event it was sent of each.
     subscribed: HashMap<String, u64>,
+    /// Chats it was sent a reset of before the hub knew their session, so before their transcript could be found: they
+    /// are reset again once it is known (a chat restored from History is opened on the phone before the window says which
+    /// session it is).
+    unnamed: HashSet<String>,
     last_chats: Vec<RemoteChat>,
 }
 
@@ -406,6 +410,13 @@ impl<'a> Session<'a> {
         if let Some(open) = open {
             open(slot);
         }
+    }
+
+    /// The chats it is following whose session has become known since they were last reset.
+    fn named_since_reset(&mut self) -> Vec<String> {
+        let named: Vec<String> = self.unnamed.iter().filter(|s| self.subscribed.contains_key(*s) && self.gw.hub.chat(s).is_some_and(|c| c.session_id.is_some())).cloned().collect();
+        self.unnamed.retain(|s| self.subscribed.contains_key(s) && !named.contains(s));
+        named
     }
 
     fn unfollow(&mut self, slot: &str) {
@@ -457,7 +468,12 @@ impl<'a> Session<'a> {
                     }
                     Err(broadcast::error::RecvError::Closed) => return Ok(()),
                 },
-                _ = tick.tick() => self.send_chats(link, channel, false)?,
+                _ = tick.tick() => {
+                    self.send_chats(link, channel, false)?;
+                    for slot in self.named_since_reset() {
+                        self.reset(link, channel, &slot).await?;
+                    }
+                }
             }
         }
     }
@@ -490,6 +506,11 @@ impl<'a> Session<'a> {
     /// come when the phone asks (Request::Earlier).
     async fn reset(&mut self, link: &Link, channel: &mut Channel, slot: &str) -> Result<(), String> {
         let seq = self.gw.bus.last_seq(slot);
+        if self.gw.hub.chat(slot).is_some_and(|c| c.session_id.is_none()) {
+            self.unnamed.insert(slot.to_string());
+        } else {
+            self.unnamed.remove(slot);
+        }
         let page = self.gw.host.history(slot.to_string(), None).await.unwrap_or(crate::history::Page { events: vec![], hidden: 0 });
         let hidden = page.hidden as u32;
         let mut events: Vec<RemoteEvent> = page.events.iter().filter_map(protocol::to_remote).collect();
@@ -1357,6 +1378,29 @@ pub(crate) mod tests {
         assert!(err.is_none());
         let page: protocol::EarlierPage = serde_json::from_value(ok.unwrap()).unwrap();
         assert_eq!(page.events.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_chat_opened_before_its_session_is_known_gets_its_history_once_it_is() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        let (_, mut p) = paired(&r).await;
+        // The phone opens a chat restored from History before the window has said which session it is: nothing to show yet.
+        let (_, _, before) = p.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
+        assert!(before.iter().any(|m| matches!(m, ServerMessage::Reset { events, .. } if events.is_empty())));
+        *r.host.history.lock().unwrap() = vec![user("last turn")];
+        r.hub.session("a", "abc-123");
+        let heard = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match p.next().await.expect("something") {
+                    ServerMessage::Reset { events, .. } => break events,
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("a reset with the history in it");
+        assert_eq!(heard.len(), 1);
     }
 
     #[tokio::test]
