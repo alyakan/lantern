@@ -11,6 +11,8 @@ export interface StepChip {
   tone: "plain" | "ok" | "bad";
   /** The files an edit chip stands for: a tap lists their diffs. */
   files?: string[];
+  /** What a grouped chip stands for ("Ran 5 commands"): a tap lists them, one line each. */
+  items?: { text: string; bad: boolean }[];
 }
 
 export type Row =
@@ -49,11 +51,32 @@ export function stepChips(steps: Step[]): StepChip[] {
     chips.push(t.failed > 0 ? { key: "tests", label: `${t.failed} failed, ${t.passed} passed`, tone: "bad" } : { key: "tests", label: `${plural(t.passed, "test")} passed`, tone: "ok" });
   }
 
-  for (const s of steps) {
-    if (s.tests || s.edits.length || ["Read", "Grep", "Glob", "WebSearch", "WebFetch"].includes(s.name)) continue;
-    const label = s.name === "Bash" ? `Ran ${clip(s.summary || "a command", 26)}` : s.name === "Agent" || s.name === "Task" ? "Ran a helper" : s.name ? clip(s.summary ? `${s.name} ${s.summary}` : s.name, 30) : "A step";
-    chips.push({ key: `step-${s.id}`, label, tone: "plain" });
+  // What is left is grouped by kind, as the desktop's summary line is ("Ran 5 commands, used 2 skills"), each group
+  // opening to its steps.
+  const rest = steps.filter((s) => !s.tests && !s.edits.length && !["Read", "Grep", "Glob", "WebSearch", "WebFetch"].includes(s.name));
+  const group = (key: string, label: string, of: Step[], line: (s: Step) => string) => {
+    if (of.length) chips.push({ key, label, tone: "plain", items: of.map((s) => ({ text: clip(line(s), 200), bad: s.isError })) });
+  };
+  const commands = rest.filter((s) => s.name === "Bash" || s.name === "BashOutput");
+  group("run", `Ran ${plural(commands.length, "command")}`, commands, (s) => s.summary || "a command");
+  const skills = rest.filter((s) => s.name === "Skill");
+  group("skill", `Used ${plural(skills.length, "skill")}`, skills, (s) => s.summary || "a skill");
+  const helpers = rest.filter((s) => s.name === "Agent" || s.name === "Task");
+  group("agent", `Ran ${plural(helpers.length, "helper")}`, helpers, (s) => s.summary || "a helper");
+  const advised = rest.filter((s) => s.name === "advisor");
+  group("advisor", advised.length === 1 ? "Consulted the advisor" : `Consulted the advisor ${advised.length} times`, advised, (s) => s.summary || "the advisor");
+  const servers = new Map<string, Step[]>();
+  for (const s of rest) {
+    const m = /^mcp__(.+?)__(.+)$/.exec(s.name);
+    if (m) servers.set(m[1], [...(servers.get(m[1]) ?? []), s]);
   }
+  for (const [server, of] of servers) {
+    const name = server.replace(/^claude_ai_/, "").replace(/_/g, " ");
+    group(`mcp-${server}`, `Used ${name.charAt(0).toUpperCase()}${name.slice(1)}${of.length === 1 ? "" : ` ${of.length} times`}`, of, (s) => `${s.name.replace(/^mcp__.+?__/, "").replace(/_/g, " ")}${s.summary ? ` ${s.summary}` : ""}`);
+  }
+  const grouped = new Set([...commands, ...skills, ...helpers, ...advised, ...[...servers.values()].flat()]);
+  const other = rest.filter((s) => !grouped.has(s));
+  group("other", `Used ${plural(other.length, "other tool")}`, other, (s) => (s.name ? `${s.name}${s.summary ? ` ${s.summary}` : ""}` : "A step"));
   const failed = steps.filter((s) => s.isError);
   if (failed.length) chips.push({ key: "failed", label: `${plural(failed.length, "step")} failed`, tone: "bad" });
   return chips;

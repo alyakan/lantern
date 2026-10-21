@@ -45,6 +45,24 @@ describe("a chat", () => {
     expect(screen.getByText("Finished in 3 s")).toBeTruthy();
   });
 
+  it("groups the commands into one chip that opens to each of them", async () => {
+    const commands: RemoteEvent[] = [
+      { kind: "user_text", text: "Check it.", at: 1_000_000, sent_by: "desktop" },
+      { kind: "tool_started", tool_use_id: "c1", name: "Bash", summary: "git status" },
+      { kind: "tool_finished", tool_use_id: "c1", is_error: false },
+      { kind: "tool_started", tool_use_id: "c2", name: "Bash", summary: "cargo build" },
+      { kind: "tool_finished", tool_use_id: "c2", is_error: true },
+      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1000 },
+    ];
+    await withSession(commands);
+    expect(screen.queryByText("git status")).toBeNull();
+    await fireEvent.press(screen.getByText("Ran 2 commands ▾"));
+    expect(screen.getByText("git status")).toBeTruthy();
+    expect(screen.getByText("cargo build")).toBeTruthy();
+    await fireEvent.press(screen.getByText("Ran 2 commands ▴"));
+    expect(screen.queryByText("git status")).toBeNull();
+  });
+
   it("follows the chat while it is open and lets go when it closes", async () => {
     const { asked, unmount } = await withSession(turn);
     expect(asked).toContainEqual({ op: "subscribe", slot: "a", after: 9, epoch: 1 });
