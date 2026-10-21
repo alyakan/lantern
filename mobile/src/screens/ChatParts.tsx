@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Pressable, ScrollView, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, Easing, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
 import { Button, Chip, Tag, Txt } from "../ui/components";
@@ -100,52 +100,144 @@ export function answeredBy(by: string | null, me: string | null): string {
   return "";
 }
 
+/** The small card a decision leaves behind: a mark in its colour, what was asked, and how it went. */
+function DecisionCard({ title, status, mark }: { title: string; status: string; mark: "check" | "cross" | "dash" }) {
+  const color = mark === "check" ? colors.go : mark === "cross" ? colors.stop : colors.ink3;
+  return (
+    <View style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 10 }}>
+      <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: color, alignItems: "center", justifyContent: "center" }}>
+        {mark === "check" ? <View style={{ width: 10, height: 6, marginTop: -2, borderLeftWidth: 2, borderBottomWidth: 2, borderColor: colors.white, transform: [{ rotate: "-45deg" }] }} /> : mark === "cross" ? <Txt variant="small" tone="white" style={{ fontWeight: "800", lineHeight: 16 }}>×</Txt> : <View style={{ width: 10, height: 2, backgroundColor: colors.white }} />}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Txt variant="small" numberOfLines={1} style={{ fontWeight: "700" }}>
+          {title}
+        </Txt>
+        <Txt variant="tiny" tone="ink2">
+          {status}
+        </Txt>
+      </View>
+    </View>
+  );
+}
+
+/** How long the open card takes to close in to the card a decision leaves, and how long to wait for that card to be measured. */
+const SETTLE_MS = 380;
+const SETTLE_WAIT_MS = 600;
+
 /**
  * What waits on you, in the chat. Something to allow can be allowed right here with a swipe (and "Expand" opens the full
  * screen: the whole command, and Deny); a question can't be swiped, so it opens the full screen to be answered.
  * `onAllow` rejects when the answer did not go; the bar then comes back fresh, for another try.
+ *
+ * Once it is decided, the card shrinks into a small one saying how it went (the open card is kept, fading, while it
+ * does, so the swipe's check circle doesn't vanish); one that was already decided when the chat loaded is just the small card.
  */
 export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow }: { item: Extract<Item, { kind: "prompt" }>; me: string | null; onReview: () => void; onAllow?: () => Promise<void> }) {
   const view = promptView(item.toolName, item.input);
   const [tries, setTries] = useState(0);
-  if (item.state === "open") {
-    const swipe = view.kind === "allow" && !!onAllow;
-    const approval = approvalOf(item.toolName, item.input);
+  const openHeight = useRef(0);
+  const [settling, setSettling] = useState<{ from: number } | null>(null);
+  const [last, setLast] = useState(item.state);
+  const h = useRef(new Animated.Value(0)).current;
+  const openOpacity = useRef(new Animated.Value(1)).current;
+  const doneOpacity = useRef(new Animated.Value(0)).current;
+  const started = useRef(false);
+  // It was open and now isn't: close in, from the height it had (when it had been laid out, and motion is wanted).
+  if (last !== item.state) {
+    setLast(item.state);
+    if (last === "open" && openHeight.current > 0 && !skips() && !(item.answer && item.state === "allowed")) {
+      // From the very first frame it has the height the open card had.
+      h.setValue(openHeight.current);
+      setSettling({ from: openHeight.current });
+    }
+  }
+
+  const finish = () => setSettling(null);
+  // The small card's height is known once it has been laid out: then the open one closes in to it.
+  const measured = (to: number) => {
+    if (!settling || started.current) return;
+    started.current = true;
+    h.setValue(settling.from);
+    Animated.parallel([
+      Animated.timing(h, { toValue: to, duration: SETTLE_MS, easing: Easing.out(Easing.cubic), useNativeDriver: false }),
+      Animated.timing(openOpacity, { toValue: 0, duration: 200, useNativeDriver: false }),
+      Animated.timing(doneOpacity, { toValue: 1, duration: 260, delay: 120, useNativeDriver: false }),
+    ]).start(({ finished }) => finished && finish());
+  };
+  // Never stuck: if the small card is not measured, or the animation is cut off, it ends all the same.
+  useEffect(() => {
+    if (!settling) {
+      started.current = false;
+      h.setValue(0);
+      openOpacity.setValue(1);
+      doneOpacity.setValue(0);
+      return;
+    }
+    const t = setTimeout(finish, SETTLE_WAIT_MS + SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [settling, h, openOpacity, doneOpacity]);
+
+  const swipe = view.kind === "allow" && !!onAllow;
+  const approval = approvalOf(item.toolName, item.input);
+  const openCard = (
+    <View style={{ backgroundColor: colors.hiSoft, borderColor: colors.hi, borderWidth: 1.5, borderRadius: 18, padding: 14, gap: 6 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+        <Tag>{view.tag}</Tag>
+        {swipe && (
+          <PressScale accessibilityRole="button" accessibilityLabel="Expand" accessibilityHint="Opens the whole decision" onPress={onReview} hitSlop={10} haptic="select" scaleTo={0.92} style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 2 }}>
+            <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
+              Expand
+            </Txt>
+            <Txt variant="small" tone="cobalt" accessibilityElementsHidden style={{ fontWeight: "700" }}>
+              ↗
+            </Txt>
+          </PressScale>
+        )}
+      </View>
+      <Txt variant="heading">{view.title}</Txt>
+      {view.detail && (
+        <Txt variant="mono" numberOfLines={2}>
+          {view.detail}
+        </Txt>
+      )}
+      {swipe ? (
+        <View style={{ marginTop: 8 }}>
+          {/* A failed answer brings a fresh bar back (the key), not one that looks allowed; and a list cell reused for another prompt starts it afresh. */}
+          <SwipeToAllow key={`${item.id}:${tries}`} compact label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => void onAllow().catch(() => setTries((t) => t + 1))} />
+        </View>
+      ) : (
+        <Button label="Review" style={{ marginTop: 6 }} onPress={onReview} />
+      )}
+    </View>
+  );
+
+  const status = item.state === "withdrawn" ? "Claude stopped asking" : `${item.state === "allowed" ? (view.kind === "question" ? "Answered" : "Allowed") : view.kind === "question" ? "Declined" : "Denied"} ${answeredBy(item.by, me)}`.trim();
+  const doneCard = <DecisionCard title={view.title.replace(/\?$/, "")} status={status} mark={item.state === "allowed" ? "check" : item.state === "denied" ? "cross" : "dash"} />;
+
+  if (item.state === "open" || settling) {
+    const going = !!settling && item.state !== "open";
     return (
       <View style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
-        <View style={{ backgroundColor: colors.hiSoft, borderColor: colors.hi, borderWidth: 1.5, borderRadius: 18, padding: 14, gap: 6 }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-            <Tag>{view.tag}</Tag>
-            {swipe && (
-              <PressScale accessibilityRole="button" accessibilityLabel="Expand" accessibilityHint="Opens the whole decision" onPress={onReview} hitSlop={10} haptic="select" scaleTo={0.92} style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 2 }}>
-                <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
-                  Expand
-                </Txt>
-                <Txt variant="small" tone="cobalt" accessibilityElementsHidden style={{ fontWeight: "700" }}>
-                  ↗
-                </Txt>
-              </PressScale>
-            )}
-          </View>
-          <Txt variant="heading">{view.title}</Txt>
-          {view.detail && (
-            <Txt variant="mono" numberOfLines={2}>
-              {view.detail}
-            </Txt>
+        <Animated.View style={going ? { height: h, overflow: "hidden" } : undefined}>
+          <Animated.View
+            pointerEvents={going ? "none" : "auto"}
+            onLayout={(e) => {
+              if (!going) openHeight.current = e.nativeEvent.layout.height;
+            }}
+            style={going ? { position: "absolute", left: 0, right: 0, top: 0, opacity: openOpacity } : undefined}
+          >
+            {openCard}
+          </Animated.View>
+          {going && (
+            <Animated.View onLayout={(e) => measured(e.nativeEvent.layout.height)} style={{ position: "absolute", left: 0, right: 0, top: 0, opacity: doneOpacity }}>
+              {doneCard}
+            </Animated.View>
           )}
-          {swipe ? (
-            <View style={{ marginTop: 8 }}>
-              {/* A failed answer brings a fresh bar back (the key), not one that looks allowed; and a list cell reused for another prompt starts it afresh. */}
-              <SwipeToAllow key={`${item.id}:${tries}`} compact label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => void onAllow().catch(() => setTries((t) => t + 1))} />
-            </View>
-          ) : (
-            <Button label="Review" style={{ marginTop: 6 }} onPress={onReview} />
-          )}
-        </View>
+        </Animated.View>
       </View>
     );
   }
-  const text = item.state === "withdrawn" ? "Claude stopped asking" : `${item.state === "allowed" ? (view.kind === "question" ? "Answered" : "Allowed") : view.kind === "question" ? "Declined" : "Denied"} ${answeredBy(item.by, me)}`.trim();
+
   // A question this phone answered says with what, as a chip beneath it: the answer itself, not how it was sent.
   if (item.answer && item.state === "allowed") {
     return (
@@ -165,11 +257,7 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow }
     );
   }
   return (
-    <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>
-      <Txt variant="small" tone="ink2">
-        {view.title.replace(/\?$/, "")}: {text}
-      </Txt>
-    </View>
+    <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>{doneCard}</View>
   );
 });
 

@@ -5,6 +5,7 @@ import { attachSession } from "../test/fakeSession";
 import { chat, connected, makeController, renderWith } from "../test/render";
 import { ChatScreen } from "./ChatScreen";
 import { PromptRow } from "./ChatParts";
+import { motion } from "../ui/motion";
 
 const handlers = () => ({ slot: "a", onBack: jest.fn(), onReview: jest.fn() });
 
@@ -218,10 +219,9 @@ describe("what waits on you, in a chat", () => {
 
   it("allows once, however often it is activated", async () => {
     const { asked: sent } = await withSession([...turn.slice(0, 2), asked]);
-    await act(async () => {
-      swipeAction();
-      swipeAction();
-    });
+    const bar = screen.getByLabelText("Swipe to allow");
+    await swipeAction(bar);
+    await swipeAction(bar);
     await waitFor(() => expect(sent.filter((r) => r.op === "answer")).toHaveLength(1));
   });
 
@@ -247,12 +247,61 @@ describe("what waits on you, in a chat", () => {
     expect(h.onReview).toHaveBeenCalledWith("q1");
   });
 
-  it("says who answered it afterwards: the Mac, this phone, or another", async () => {
+  it("says who answered it afterwards, on a small card: the Mac, this phone, or another", async () => {
     for (const [by, words] of [["desktop", "Allowed on your Mac"], ["phone-other", "Allowed on another phone"]] as const) {
       const { unmount } = await withSession([...turn.slice(0, 2), asked, { kind: "permission_resolved", request_id: "p1", allow: true, by }]);
-      expect(screen.getByText(`Push the branch: ${words}`)).toBeTruthy();
+      expect(screen.getByText("Push the branch")).toBeTruthy();
+      expect(screen.getByText(words)).toBeTruthy();
+      // Decided: nothing left to swipe or expand.
+      expect(screen.queryByLabelText("Swipe to allow")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
       await unmount();
     }
+  });
+
+  it("closes the open card in to the small one once it is decided, keeping the open card while it does", async () => {
+    const { controller } = await withSession([asked]);
+    const withLayout = (text: string, height: number) => {
+      let n = screen.getByText(text).parent;
+      while (n && !n.props.onLayout) n = n.parent;
+      return fireEvent(n!, "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height } } });
+    };
+    // Laid out as it was open: its height is what the card closes in from.
+    await withLayout("Push the branch", 170);
+    motion.instant = false;
+    try {
+      await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 50, event: { kind: "permission_resolved", request_id: "p1", allow: true, by: "desktop" } } }));
+      // Mid-way: the open card is still there, and the small one is arriving beside it.
+      expect(screen.getByLabelText("Swipe to allow")).toBeTruthy();
+      expect(screen.getByText("Allowed on your Mac")).toBeTruthy();
+      await withLayout("Allowed on your Mac", 52);
+      // And then only the small card is left.
+      await waitFor(() => expect(screen.queryByLabelText("Swipe to allow")).toBeNull(), { timeout: 3000 });
+      expect(screen.getByText("Allowed on your Mac")).toBeTruthy();
+    } finally {
+      motion.instant = true;
+    }
+  });
+
+  it("settles even if the small card is never laid out", async () => {
+    const { controller } = await withSession([asked]);
+    let n = screen.getByText("Push the branch").parent;
+    while (n && !n.props.onLayout) n = n.parent;
+    await fireEvent(n!, "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height: 170 } } });
+    motion.instant = false;
+    try {
+      await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 50, event: { kind: "permission_withdrawn", request_id: "p1" } } }));
+      await waitFor(() => expect(screen.queryByLabelText("Swipe to allow")).toBeNull(), { timeout: 3000 });
+      expect(screen.getByText("Claude stopped asking")).toBeTruthy();
+    } finally {
+      motion.instant = true;
+    }
+  });
+
+  it("shows a denial as a small card too", async () => {
+    await withSession([asked, { kind: "permission_resolved", request_id: "p1", allow: false, by: "desktop" }]);
+    expect(screen.getByText("Push the branch")).toBeTruthy();
+    expect(screen.getByText("Denied on your Mac")).toBeTruthy();
   });
 
   it("shows what this phone answered a question with, as the answer, not as JSON or only 'answered'", async () => {
@@ -266,7 +315,8 @@ describe("what waits on you, in a chat", () => {
 
   it("says Claude stopped asking when it withdraws", async () => {
     await withSession([asked, { kind: "permission_withdrawn", request_id: "p1" }]);
-    expect(screen.getByText("Push the branch: Claude stopped asking")).toBeTruthy();
+    expect(screen.getByText("Push the branch")).toBeTruthy();
+    expect(screen.getByText("Claude stopped asking")).toBeTruthy();
   });
 
   it("says what only the Mac can answer, instead of hiding it", async () => {

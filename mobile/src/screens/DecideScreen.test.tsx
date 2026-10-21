@@ -43,10 +43,9 @@ describe("deciding", () => {
 
   it("a screen reader's Allow action allows, once", async () => {
     const { lastOf, asked } = await decide();
-    await act(async () => {
-      activate();
-      activate();
-    });
+    const bar = swipe();
+    await activate(bar);
+    await activate(bar);
     await waitFor(() => expect(screen.getByText("Allowed.")).toBeTruthy());
     expect(lastOf("answer")).toEqual({ op: "answer", slot: "a", request_id: "p1", allow: true, message: null, answers: null });
     expect(asked.filter((r) => r.op === "answer")).toHaveLength(1);
