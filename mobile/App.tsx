@@ -17,6 +17,10 @@ import { iapPlatform, secureTipMemory, startTipListener } from "./src/platformTi
 import { demoPlatform, TipJar } from "./src/tips";
 import { onNotificationTap, pushPlatform, quietInForeground } from "./src/platformPush";
 import { secureMacStore } from "./src/storage";
+import { AppLock } from "./src/lock";
+import { lockPlatform, secureLockMemory } from "./src/platformLock";
+import { LockContext } from "./src/shell/lockContext";
+import { LockGate } from "./src/shell/LockGate";
 
 // The splash stays up until the headings' font is in (see below), instead of a blank screen.
 void SplashScreen.preventAutoHideAsync().catch(() => {});
@@ -45,6 +49,13 @@ export default function App() {
     // A tip that goes through while no screen is waiting on it (an Ask to Buy approval) still gets finished.
     if (process.env.EXPO_PUBLIC_FAKE_TIPS !== "1") startTipListener();
   }, []);
+  // The optional Face ID lock. It covers the app (which carries on underneath) until the phone is unlocked.
+  const lock = useMemo(() => new AppLock(lockPlatform, secureLockMemory), []);
+  useEffect(() => {
+    void lock.start();
+    const sub = AppState.addEventListener("change", (s) => lock.appState(s));
+    return () => sub.remove();
+  }, [lock]);
   const [pendingLink, setPendingLink] = useState<string | null>(null);
   const [openSlot, setOpenSlot] = useState<string | null>(null);
   const registered = useRef(false);
@@ -91,7 +102,11 @@ export default function App() {
     <KeyboardProvider>
       <TipsContext.Provider value={tipJar}>
         <AccentFromPledge>
-          <Root controller={controller} pendingLink={pendingLink} onClearLink={clearLink} openSlot={openSlot} onOpened={clearSlot} />
+          <LockContext.Provider value={lock}>
+            <LockGate>
+              <Root controller={controller} pendingLink={pendingLink} onClearLink={clearLink} openSlot={openSlot} onOpened={clearSlot} />
+            </LockGate>
+          </LockContext.Provider>
         </AccentFromPledge>
       </TipsContext.Provider>
     </KeyboardProvider>

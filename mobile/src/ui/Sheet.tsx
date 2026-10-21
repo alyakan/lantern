@@ -1,6 +1,8 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Animated, Modal, Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { LockCover } from "../shell/LockCover";
+import { useLockState } from "../shell/lockContext";
 import { run } from "./motion";
 import { colors } from "./theme";
 
@@ -15,6 +17,9 @@ const MOST = 0.88;
  */
 export function Sheet({ onClose, fill = colors.card, children }: { onClose: () => void; fill?: string; children: (close: () => void) => ReactNode }) {
   const { height } = useWindowDimensions();
+  // The app lock's cover is drawn in here too: a sheet is a Modal of its own, and where it is on top the lock's isn't.
+  const lock = useLockState();
+  const covered = lock.ready && (lock.locked || lock.covered);
   const p = useRef(new Animated.Value(0)).current;
   const closing = useRef(false);
   useEffect(() => {
@@ -40,6 +45,11 @@ export function Sheet({ onClose, fill = colors.card, children }: { onClose: () =
             <View pointerEvents="none" style={{ position: "absolute", top: "100%", left: 0, right: 0, height: 600, backgroundColor: fill }} />
           </Animated.View>
         </KeyboardAvoidingView>
+        {covered && (
+          <View style={StyleSheet.absoluteFill}>
+            <LockCover />
+          </View>
+        )}
       </View>
     </Modal>
   );
