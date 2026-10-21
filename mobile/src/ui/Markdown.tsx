@@ -2,11 +2,13 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Linking, ScrollView, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { parseMarkdown, plainText, type Align, type Block, type Span } from "../view/markdown";
+import { useAccent } from "./accent";
 import { colors, fonts, radius, type as scale } from "./theme";
 import { Txt } from "./components";
 import { PressScale } from "./motion";
 
 function Spans({ spans, tone }: { spans: Span[]; tone: "ink" | "night" }) {
+  const accent = useAccent();
   return (
     <>
       {spans.map((s, i) => {
@@ -37,7 +39,7 @@ function Spans({ spans, tone }: { spans: Span[]; tone: "ink" | "night" }) {
             );
           case "link":
             return (
-              <Text key={i} accessibilityRole="link" style={{ color: colors.cobalt, textDecorationLine: "underline" }} onPress={() => void Linking.openURL(s.url).catch(() => {})}>
+              <Text key={i} accessibilityRole="link" style={{ color: accent, textDecorationLine: "underline" }} onPress={() => void Linking.openURL(s.url).catch(() => {})}>
                 {s.text}
               </Text>
             );

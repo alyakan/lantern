@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { Animated, Easing, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
+import { useAccent } from "../ui/accent";
 import { Button, Chip, Tag, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
 import { Markdown } from "../ui/Markdown";
@@ -325,6 +326,7 @@ export function Composer({ onSend, disabled, placeholder = "Message Claude" }: {
  * sends the arrow up and out, and a fresh one rises into place.
  */
 function SendButton({ ready, onPress }: { ready: boolean; onPress: () => void }) {
+  const accent = useAccent();
   const tint = useRef(new Animated.Value(ready ? 1 : 0)).current;
   const spring = useRef(new Animated.Value(1)).current;
   const fly = useRef(new Animated.Value(0)).current;
@@ -353,7 +355,7 @@ function SendButton({ ready, onPress }: { ready: boolean; onPress: () => void })
   return (
     <Animated.View style={{ transform: [{ scale: spring }] }}>
       <PressScale accessibilityRole="button" accessibilityLabel="Send" accessibilityState={{ disabled: !ready }} disabled={!ready} onPress={send} haptic="none" scaleTo={0.88} style={{ width: 40, height: 40, borderRadius: 20, overflow: "hidden" }}>
-        <Animated.View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: tint.interpolate({ inputRange: [0, 1], outputRange: [colors.rule, colors.cobalt] }) }}>
+        <Animated.View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: tint.interpolate({ inputRange: [0, 1], outputRange: [colors.rule, accent] }) }}>
           <Animated.View style={{ opacity: fly.interpolate({ inputRange: [-1, 0, 1], outputRange: [0, 1, 0] }), transform: [{ translateY: fly.interpolate({ inputRange: [-1, 0, 1], outputRange: [22, 0, -22] }) }] }}>
             <Txt variant="heading" tone="white">
               ↑

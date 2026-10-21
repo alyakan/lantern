@@ -1,11 +1,14 @@
 import type { ReactNode } from "react";
 import { Text, View, type StyleProp, type TextProps, type ViewStyle } from "react-native";
+import { useAccent } from "./accent";
 import { PressScale } from "./motion";
 import { colors, MIN_TARGET, radius, space, type as scale, type Variant } from "./theme";
 
 /** Text in the type scale. Ink by default; `tone` picks another of the palette's. */
 export function Txt({ variant = "body", tone = "ink", style, ...rest }: TextProps & { variant?: Variant; tone?: "ink" | "ink2" | "ink3" | "white" | "night" | "go" | "stop" | "cobalt" | "night-stop" }) {
-  const color = { ink: colors.ink, ink2: colors.ink2, ink3: colors.ink3, white: colors.white, night: colors.nightText, go: colors.go, stop: colors.stop, cobalt: colors.cobalt, "night-stop": colors.nightStop }[tone];
+  // "cobalt" is the accent: another colour for someone who is a regular.
+  const accent = useAccent();
+  const color = { ink: colors.ink, ink2: colors.ink2, ink3: colors.ink3, white: colors.white, night: colors.nightText, go: colors.go, stop: colors.stop, cobalt: accent, "night-stop": colors.nightStop }[tone];
   return <Text {...rest} style={[scale[variant], { color }, style]} />;
 }
 

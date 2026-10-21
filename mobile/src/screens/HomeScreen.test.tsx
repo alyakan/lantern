@@ -2,13 +2,13 @@ import { Platform } from "react-native";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
 import { chat, makeController, NOW, renderWith, waiting } from "../test/render";
-import { TipJar } from "../tips";
+import { noMemory, noPlatform, TipJar } from "../tips";
 import { HomeScreen } from "./HomeScreen";
 
 const handlers = () => ({ onOpenChat: jest.fn(), onReview: jest.fn(), onOpenMac: jest.fn(), onCompose: jest.fn(), onNewChat: jest.fn(), onSupport: jest.fn() });
 
 describe("the way in to the tip jar on Home", () => {
-  const jarWith = (last: number | null) => new TipJar({ products: async () => [], buy: async () => "cancelled" }, { load: async () => last, save: async () => {} }, () => NOW);
+  const jarWith = (last: number | null, pledger: boolean | null = null) => new TipJar(noPlatform, { ...noMemory, load: async () => last, loadPledger: async () => pledger }, () => NOW);
 
   it("is a quiet card under the chats, saying everything stays free, that opens the tips", async () => {
     const h = handlers();
@@ -23,6 +23,15 @@ describe("the way in to the tip jar on Home", () => {
     const h = handlers();
     await renderWith(<HomeScreen {...h} />, { chats: [chat()], tips: jarWith(NOW - 3 * 86_400_000) });
     await waitFor(() => expect(screen.getByText("Thank you for supporting Lantern")).toBeTruthy());
+    await fireEvent.press(screen.getByRole("button", { name: "Support development" }));
+    expect(h.onSupport).toHaveBeenCalled();
+  });
+
+  it("says Ember glows for a regular, whenever the last tip was, and still opens the tips", async () => {
+    const h = handlers();
+    await renderWith(<HomeScreen {...h} />, { chats: [chat()], tips: jarWith(null, true) });
+    await waitFor(() => expect(screen.getByText("Ember glows for you")).toBeTruthy());
+    expect(screen.getByText("Thank you for supporting Lantern")).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Support development" }));
     expect(h.onSupport).toHaveBeenCalled();
   });

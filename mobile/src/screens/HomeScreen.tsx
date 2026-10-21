@@ -5,6 +5,7 @@ import { useConnectionState, useController, useSyncState } from "../shell/hooks"
 import { useTipJar, useTips } from "../shell/tipsContext";
 import { Button, Tag, Tile, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
+import { useAccent } from "../ui/accent";
 import { Dots, HomeSkeleton } from "../ui/skeleton";
 import { colors, radius, shadow, space } from "../ui/theme";
 import { cards, headline, rows, tileColors, type Card, type Row } from "../view/home";
@@ -27,6 +28,7 @@ export interface HomeProps {
 
 /** A thin bar that slides while a chat is working. */
 function Working() {
+  const accent = useAccent();
   const x = useRef(new Animated.Value(-1)).current;
   useEffect(() => {
     const loop = Animated.loop(Animated.timing(x, { toValue: 2.5, duration: 1400, useNativeDriver: true }));
@@ -35,7 +37,7 @@ function Working() {
   }, [x]);
   return (
     <View accessibilityLabel="Working" style={{ width: 54, height: 4, borderRadius: 2, backgroundColor: colors.rule, overflow: "hidden" }}>
-      <Animated.View style={{ width: "40%", height: "100%", backgroundColor: colors.cobalt, borderRadius: 2, transform: [{ translateX: Animated.multiply(x, 22) }] }} />
+      <Animated.View style={{ width: "40%", height: "100%", backgroundColor: accent, borderRadius: 2, transform: [{ translateX: Animated.multiply(x, 22) }] }} />
     </View>
   );
 }
@@ -108,20 +110,20 @@ function ChatRow({ row, index, onPress }: { row: Row; index: number; onPress: ()
 /** A quiet way in to the tip jar, under the chats: a tip is optional and nothing is locked behind it. Once there has been one this month it says thanks instead. */
 function SupportCard({ onPress }: { onPress: () => void }) {
   const jar = useTipJar();
-  useTips();
-  const tipped = jar.hasTippedThisMonth();
+  const { pledger } = useTips();
+  const tipped = jar.hasTippedThisMonth() || pledger;
   return (
     <FadeSlideIn from={10} delay={200} style={{ paddingHorizontal: space.lg, paddingTop: 26 }}>
       <PressScale accessibilityRole="button" accessibilityLabel="Support development" accessibilityHint="Opens the optional tips" onPress={onPress} scaleTo={0.97} haptic="select" style={[{ flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: colors.card, borderRadius: radius.card - 6, paddingVertical: 14, paddingHorizontal: 16 }, shadow.card, { shadowOpacity: 0.05 }]}>
         <Txt variant="heading" accessibilityElementsHidden style={{ width: 28, textAlign: "center" }}>
-          {tipped ? "✅" : "💛"}
+          {pledger ? "🔥" : tipped ? "✅" : "💛"}
         </Txt>
         <View style={{ flex: 1 }}>
           <Txt variant="small" style={{ fontWeight: "700" }}>
             {tipped ? "Thank you for supporting Lantern" : "Support development"}
           </Txt>
           <Txt variant="tiny" tone="ink2">
-            {tipped ? "You can leave another, if you like" : "Everything stays free either way"}
+            {pledger ? "Ember glows for you" : tipped ? "You can leave another, if you like" : "Everything stays free either way"}
           </Txt>
         </View>
         <Txt variant="body" tone="ink3" accessibilityElementsHidden>

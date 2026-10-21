@@ -17,7 +17,7 @@ When nothing is waiting, Lantern suggests what to pick up next, from your recent
 PRIVATE BY DESIGN
 No account. No analytics. No ads. Conversations are shown while the app is open and are not stored on the phone. The pairing key stays in your phone's secure storage.
 
-FREE, WITH AN OPTIONAL TIP
-Everything is free. If Lantern helps you, you can leave a tip under Support development.
+FREE, WITH OPTIONAL SUPPORT
+Everything is free for everyone. If Lantern helps you, you can leave a one-time tip, or become a regular with a small monthly or yearly pledge. Regulars get Ember, a warm accent for the app, and my thanks. Pledges renew automatically until you cancel them in your account settings. Terms of Use: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/ Privacy Policy: https://alyakan.github.io/lantern/privacy.html
 
 Lantern is an independent project and is not affiliated with or endorsed by Anthropic.
