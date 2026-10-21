@@ -6,10 +6,12 @@ import { colors } from "./theme";
 import { Txt } from "./components";
 import { buzz, FadeSlideIn, PopIn, skips } from "./motion";
 
-const KNOB = 52;
-const INSET = 5;
-/** The bar's height, and what it shrinks to across: a circle. */
-const BAR = KNOB + INSET * 2;
+/** The knob, and the space around it; the bar's height is both, and it is what the bar shrinks to across: a circle. */
+const sizes = (compact: boolean) => {
+  const KNOB = compact ? 38 : 52;
+  const INSET = compact ? 4 : 5;
+  return { KNOB, INSET, BAR: KNOB + INSET * 2 };
+};
 
 /**
  * "Swipe to allow": a knob dragged to the end, the bar filling green behind it. Only a drag that is let go near the end
@@ -17,7 +19,8 @@ const BAR = KNOB + INSET * 2;
  * holding it; with `onDone` that circle is a button (the one that takes you back). A screen reader gets an "Allow"
  * action instead of the drag (a deliberate double tap).
  */
-export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLabel = "Allowed", progress }: { onAllow: () => void; /** Once allowed, the circle can be pressed: this is what it does. */ onDone?: () => void; label?: string; doneLabel?: string; /** The knob's position, for a test to move it (a drag can't be made in one). */ progress?: Animated.Value }) {
+export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLabel = "Allowed", compact = false, progress }: { onAllow: () => void; /** Once allowed, the circle can be pressed: this is what it does. */ onDone?: () => void; label?: string; doneLabel?: string; /** A smaller bar, for sitting inside a card. */ compact?: boolean; /** The knob's position, for a test to move it (a drag can't be made in one). */ progress?: Animated.Value }) {
+  const { KNOB, INSET, BAR } = sizes(compact);
   const [width, setWidth] = useState(0);
   const [completed, setCompleted] = useState(false);
   const own = useRef(new Animated.Value(0)).current;
@@ -52,6 +55,8 @@ export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLa
       // Only a drag starts it: a touch that doesn't move is never an allow.
       onMoveShouldSetPanResponder: (_, g) => !done.current && Math.abs(g.dx) > 6 && Math.abs(g.dx) > Math.abs(g.dy),
       onPanResponderGrant: () => buzz("select"),
+      // Once it has the drag, a list it sits in (a chat) doesn't take it away.
+      onPanResponderTerminationRequest: () => false,
       onPanResponderMove: (_, g) => x.setValue(Math.min(maxRef.current, Math.max(0, g.dx))),
       onPanResponderRelease: (_, g) => {
         if (allows(g.dx, maxRef.current)) allow();

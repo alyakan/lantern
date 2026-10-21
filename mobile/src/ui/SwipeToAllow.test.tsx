@@ -33,6 +33,16 @@ describe("swipe to allow once allowed", () => {
     expect(before.transform[0].translateX).toBe(0);
   });
 
+  it("can be smaller, to sit in a card: the circle is then the smaller bar's height across", async () => {
+    await render(<SwipeToAllow onAllow={jest.fn()} compact />);
+    await act(async () => activate());
+    // With nothing to do on a press, the bar itself is what says Allowed.
+    const circle = screen.getByRole("button", { name: "Allowed" });
+    const s = Object.assign({}, ...[circle.props.style].flat(Infinity));
+    // A 38 knob with 4 around it.
+    expect(s).toMatchObject({ width: 46, height: 46 });
+  });
+
   it("is a button to press once it is a circle, when it is given something to do", async () => {
     const onDone = jest.fn();
     const onAllow = jest.fn();

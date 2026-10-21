@@ -82,7 +82,19 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
         case "steps":
           return <StepsRow chips={row.chips} onFiles={setFiles} />;
         case "prompt":
-          return <PromptRow item={row.item} me={me} onReview={() => onReview(row.item.id)} />;
+          return (
+            <PromptRow
+              item={row.item}
+              me={me}
+              onReview={() => onReview(row.item.id)}
+              onAllow={() =>
+                sync.answer(slot, row.item.id, true).catch((e) => {
+                  fail(e);
+                  throw e;
+                })
+              }
+            />
+          );
         case "desktop":
           return <DesktopRow item={row.item} />;
         case "turn":

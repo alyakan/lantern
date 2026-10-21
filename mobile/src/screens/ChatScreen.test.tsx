@@ -132,11 +132,56 @@ describe("a chat", () => {
 describe("what waits on you, in a chat", () => {
   const asked: RemoteEvent = { kind: "permission_requested", request_id: "p1", tool_name: "Bash", input: { command: "git push", description: "Push the branch" } };
 
-  it("shows an open prompt as a card to review", async () => {
+  const swipeAction = (node = screen.getByLabelText("Swipe to allow")) => fireEvent(node, "accessibilityAction", { nativeEvent: { actionName: "activate" } });
+
+  it("shows something to allow as a card with a swipe to allow it right there, and Expand for the whole screen", async () => {
     const { h } = await withSession([...turn.slice(0, 2), asked]);
     expect(screen.getByText("Push the branch")).toBeTruthy();
-    await fireEvent.press(screen.getByRole("button", { name: "Review" }));
+    expect(screen.getByLabelText("Swipe to allow")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Review" })).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Expand" }));
     expect(h.onReview).toHaveBeenCalledWith("p1");
+  });
+
+  it("allows it from the chat with the swipe, and the bar stays, closed in to the check, until the Mac says so", async () => {
+    const { lastOf, h } = await withSession([...turn.slice(0, 2), asked]);
+    await act(async () => swipeAction());
+    await waitFor(() => expect(lastOf("answer")).toEqual({ op: "answer", slot: "a", request_id: "p1", allow: true, message: null, answers: null }));
+    expect(screen.getByLabelText("Allowed")).toBeTruthy();
+    expect(screen.queryByLabelText("Swipe to allow")).toBeNull();
+    // It does not leave the chat.
+    expect(h.onReview).not.toHaveBeenCalled();
+  });
+
+  it("allows once, however often it is activated", async () => {
+    const { asked: sent } = await withSession([...turn.slice(0, 2), asked]);
+    await act(async () => {
+      swipeAction();
+      swipeAction();
+    });
+    await waitFor(() => expect(sent.filter((r) => r.op === "answer")).toHaveLength(1));
+  });
+
+  it("says why when it couldn't be answered, and brings a fresh bar back to try again", async () => {
+    const { lastOf } = await withSession([...turn.slice(0, 2), asked], {}, { answer: new Error("That was answered already, or Claude stopped asking.") });
+    await act(async () => swipeAction());
+    await waitFor(() => expect(screen.getByText("That was answered already, or Claude stopped asking.")).toBeTruthy());
+    expect(screen.getByLabelText("Swipe to allow")).toBeTruthy();
+    expect(screen.queryByLabelText("Allowed")).toBeNull();
+    expect(lastOf("answer")).toMatchObject({ allow: true });
+  });
+
+  it("says it approves, for an approval", async () => {
+    await withSession([{ kind: "permission_requested", request_id: "ap", tool_name: "mcp__lantern__request_approval", input: { action: "merge the PR", why: "It is green." } }]);
+    expect(screen.getByLabelText("Swipe to approve")).toBeTruthy();
+  });
+
+  it("has no swipe for a question: that is answered on the full screen, from Review", async () => {
+    const { h } = await withSession([{ kind: "permission_requested", request_id: "q1", tool_name: "AskUserQuestion", input: { questions: [{ question: "Which channel?", header: "", options: [{ label: "Stable", description: "" }], multiSelect: false }] } }]);
+    expect(screen.queryByLabelText("Swipe to allow")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Review" }));
+    expect(h.onReview).toHaveBeenCalledWith("q1");
   });
 
   it("says who answered it afterwards: the Mac, this phone, or another", async () => {

@@ -7,8 +7,9 @@ import { useKeyboardUp } from "../ui/keyboard";
 import { Markdown } from "../ui/Markdown";
 import { bounce, buzz, PopIn, PressScale, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
+import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { colors, fonts, radius, shadow, space } from "../ui/theme";
-import { promptView } from "../view/prompts";
+import { approvalOf, promptView } from "../view/prompts";
 import { turnLine, type Row, type StepChip } from "../view/timeline";
 import type { PageAction } from "../view/pages";
 
@@ -99,20 +100,47 @@ export function answeredBy(by: string | null, me: string | null): string {
   return "";
 }
 
-export const PromptRow = memo(function PromptRow({ item, me, onReview }: { item: Extract<Item, { kind: "prompt" }>; me: string | null; onReview: () => void }) {
+/**
+ * What waits on you, in the chat. Something to allow can be allowed right here with a swipe (and "Expand" opens the full
+ * screen: the whole command, and Deny); a question can't be swiped, so it opens the full screen to be answered.
+ * `onAllow` rejects when the answer did not go; the bar then comes back fresh, for another try.
+ */
+export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow }: { item: Extract<Item, { kind: "prompt" }>; me: string | null; onReview: () => void; onAllow?: () => Promise<void> }) {
   const view = promptView(item.toolName, item.input);
+  const [tries, setTries] = useState(0);
   if (item.state === "open") {
+    const swipe = view.kind === "allow" && !!onAllow;
+    const approval = approvalOf(item.toolName, item.input);
     return (
       <View style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
         <View style={{ backgroundColor: colors.hiSoft, borderColor: colors.hi, borderWidth: 1.5, borderRadius: 18, padding: 14, gap: 6 }}>
-          <Tag>{view.tag}</Tag>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+            <Tag>{view.tag}</Tag>
+            {swipe && (
+              <PressScale accessibilityRole="button" accessibilityLabel="Expand" accessibilityHint="Opens the whole decision" onPress={onReview} hitSlop={10} haptic="select" scaleTo={0.92} style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 2 }}>
+                <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
+                  Expand
+                </Txt>
+                <Txt variant="small" tone="cobalt" accessibilityElementsHidden style={{ fontWeight: "700" }}>
+                  ↗
+                </Txt>
+              </PressScale>
+            )}
+          </View>
           <Txt variant="heading">{view.title}</Txt>
           {view.detail && (
             <Txt variant="mono" numberOfLines={2}>
               {view.detail}
             </Txt>
           )}
-          <Button label="Review" style={{ marginTop: 6 }} onPress={onReview} />
+          {swipe ? (
+            <View style={{ marginTop: 8 }}>
+              {/* A failed answer brings a fresh bar back (the key), not one that looks allowed; and a list cell reused for another prompt starts it afresh. */}
+              <SwipeToAllow key={`${item.id}:${tries}`} compact label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => void onAllow().catch(() => setTries((t) => t + 1))} />
+            </View>
+          ) : (
+            <Button label="Review" style={{ marginTop: 6 }} onPress={onReview} />
+          )}
         </View>
       </View>
     );
