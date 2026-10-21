@@ -568,7 +568,11 @@ fn broken(file: &str, message: &str) -> Dashboard {
 
 /// Reads and checks one file's bytes.
 fn read_one(path: &Path, file: &str) -> Dashboard {
-    let Ok(handle) = std::fs::File::open(path) else { return broken(file, "couldn't be opened") };
+    // Not through a symlink even if the file was swapped for one since it was listed, and without waiting on a pipe that
+    // took its place; what was opened must still be a regular file.
+    use std::os::unix::fs::OpenOptionsExt;
+    let opened = std::fs::OpenOptions::new().read(true).custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK).open(path);
+    let Some(handle) = opened.ok().filter(|h| h.metadata().is_ok_and(|m| m.is_file())) else { return broken(file, "couldn't be opened as a regular file") };
     let mut bytes = Vec::new();
     // One byte past the cap, so a file that grew since its size was read is still refused.
     if handle.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes).is_err() {
@@ -590,6 +594,10 @@ fn read_one(path: &Path, file: &str) -> Dashboard {
 /// The folder's dashboards, by file name. Only regular `.json` files directly inside `.lantern/dashboards/` are read, and
 /// none of the folders on the way may be a symlink, so a dashboard can't point the reader at something outside the folder.
 pub fn load(folder: &Path) -> Vec<Dashboard> {
+    // A relative folder would mean Lantern's own working folder, which is nobody's project.
+    if !folder.is_absolute() {
+        return Vec::new();
+    }
     let mut dir = folder.to_path_buf();
     for part in DIR {
         dir.push(part);
@@ -809,6 +817,16 @@ mod tests {
             std::fs::write(dir.join(name), text).unwrap();
         }
         folder
+    }
+
+    #[test]
+    fn a_relative_folder_has_none() {
+        let folder = folder_with(&[("a.json", &base().to_string())]);
+        assert_eq!(load(folder.path()).len(), 1);
+        // The same folder, written relative to the working folder, isn't read.
+        assert!(load(Path::new(".")).is_empty());
+        assert!(load(Path::new("")).is_empty());
+        assert!(load(Path::new("some/where")).is_empty());
     }
 
     #[test]

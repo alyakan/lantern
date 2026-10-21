@@ -552,13 +552,16 @@ export interface DashboardRun {
   output: Record<string, unknown> | unknown[] | null;
 }
 
+/** A run without its output, as the history list has it; the output is fetched (`dashboardRunDetail`) for the one opened. */
+export type DashboardRunSummary = Pick<DashboardRun, "id" | "file" | "form" | "started_at" | "duration_ms" | "exit_code" | "stopped" | "timed_out" | "inputs">;
+
 /** What the Dashboard tab knows about a folder besides its files. */
 export interface DashboardState {
   /** Hashes of the dashboards the user trusted; one whose hash isn't here asks first. */
   trusted: string[];
   running: { file: string; form: string }[];
   /** Newest first. */
-  runs: DashboardRun[];
+  runs: DashboardRunSummary[];
 }
 
 /** What pressing a form's button will run, worked out by the code that runs it. */

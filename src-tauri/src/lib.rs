@@ -504,6 +504,12 @@ async fn dashboard_run(state: State<'_, AppState>, folder: String, file: String,
     runner.run(&permission::rules::folder_key(root), root, &file, &form, values, path_env).await
 }
 
+/// One kept run with its output, for a history entry the user opened.
+#[tauri::command]
+fn dashboard_run_detail(state: State<'_, AppState>, folder: String, id: String) -> Option<dashboard_run::Run> {
+    state.dashboards.run_detail(&permission::rules::folder_key(std::path::Path::new(&folder)), &id)
+}
+
 #[tauri::command]
 fn dashboard_stop(state: State<'_, AppState>, folder: String, file: String, form: String) -> bool {
     state.dashboards.stop(&permission::rules::folder_key(std::path::Path::new(&folder)), &file, &form)
@@ -2245,6 +2251,7 @@ pub fn run() {
             dashboard_trust,
             dashboard_preview,
             dashboard_run,
+            dashboard_run_detail,
             dashboard_stop,
             dashboard_delete_run,
             dashboard_clear_runs,

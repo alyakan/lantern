@@ -24,6 +24,8 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 
 /// The most output kept from a run, for each of stdout and stderr: the end of it, which is where errors and results are.
 const KEPT_OUTPUT: usize = 128 << 10;
+/// The most output kept in the history for each of stdout and stderr (the run itself returns what was captured).
+const KEPT_IN_HISTORY: usize = 64 << 10;
 /// The most runs kept for one form.
 const MAX_RUNS: usize = 50;
 /// The most trusted dashboards remembered for a folder; the oldest is forgotten first.
@@ -59,6 +61,27 @@ pub struct Run {
     pub output: Option<Value>,
 }
 
+/// A run without its output: what the history list shows. The output comes from `Runner::run_detail` when one is opened,
+/// so the state the tab reloads on every change stays small.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RunSummary {
+    pub id: String,
+    pub file: String,
+    pub form: String,
+    pub started_at: u64,
+    pub duration_ms: u64,
+    pub exit_code: Option<i32>,
+    pub stopped: bool,
+    pub timed_out: bool,
+    pub inputs: Values,
+}
+
+impl From<&Run> for RunSummary {
+    fn from(r: &Run) -> Self {
+        Self { id: r.id.clone(), file: r.file.clone(), form: r.form.clone(), started_at: r.started_at, duration_ms: r.duration_ms, exit_code: r.exit_code, stopped: r.stopped, timed_out: r.timed_out, inputs: r.inputs.clone() }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Running {
     pub file: String,
@@ -72,7 +95,7 @@ pub struct State {
     pub trusted: Vec<String>,
     pub running: Vec<Running>,
     /// Newest first.
-    pub runs: Vec<Run>,
+    pub runs: Vec<RunSummary>,
 }
 
 /// What a click on the button will do, worked out by the same code that runs it.
@@ -189,6 +212,8 @@ fn find_program(program: &str, folder: &Path, path_env: Option<&str>) -> Result<
     }
     let search = path_env.map(str::to_string).or_else(|| std::env::var("PATH").ok()).unwrap_or_default();
     std::env::split_paths(&search)
+        // A relative entry (like `.`) would mean Lantern's own working folder, not the project.
+        .filter(|dir| dir.is_absolute())
         .map(|dir| dir.join(program))
         .find(|candidate| {
             use std::os::unix::fs::PermissionsExt;
@@ -244,7 +269,12 @@ impl Runner {
         let data = self.data.lock().unwrap();
         let d = data.get(folder);
         let running = self.running.lock().unwrap().keys().filter(|(f, _, _)| f == folder).map(|(_, file, form)| Running { file: file.clone(), form: form.clone() }).collect();
-        State { trusted: d.map(|d| d.trusted.clone()).unwrap_or_default(), running, runs: d.map(|d| d.runs.clone()).unwrap_or_default() }
+        State { trusted: d.map(|d| d.trusted.clone()).unwrap_or_default(), running, runs: d.map(|d| d.runs.iter().map(RunSummary::from).collect()).unwrap_or_default() }
+    }
+
+    /// One kept run with its output, for the history entry the user opened.
+    pub fn run_detail(&self, folder: &str, id: &str) -> Option<Run> {
+        self.data.lock().unwrap().get(folder)?.runs.iter().find(|r| r.id == id).cloned()
     }
 
     pub fn is_trusted(&self, folder: &str, hash: &str) -> bool {
@@ -296,7 +326,10 @@ impl Runner {
         self.changed();
     }
 
-    fn record(&self, folder: &str, run: Run) {
+    fn record(&self, folder: &str, mut run: Run) {
+        // The history keeps the end of a long output, not all of it.
+        run.truncated |= keep_tail(&mut run.stdout, KEPT_IN_HISTORY);
+        run.truncated |= keep_tail(&mut run.stderr, KEPT_IN_HISTORY);
         self.change(folder, |d| {
             let (file, form) = (run.file.clone(), run.form.clone());
             d.runs.insert(0, run);
@@ -441,6 +474,19 @@ impl Runner {
         self.record(folder, run.clone());
         Ok(run)
     }
+}
+
+/// Cuts `text` down to its last `max` bytes (from a character boundary); true when something was dropped.
+fn keep_tail(text: &mut String, max: usize) -> bool {
+    if text.len() <= max {
+        return false;
+    }
+    let mut start = text.len() - max;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    text.drain(..start);
+    true
 }
 
 /// Reads to the end, keeping the last `KEPT_OUTPUT` bytes; true when something was dropped.
@@ -646,7 +692,34 @@ mod tests {
         assert_eq!(run.output, Some(json!({ "count": 3 })));
         assert_eq!(run.inputs["who"], "b");
         assert_eq!(run.args.last().unwrap(), "x,y");
-        assert_eq!(s.runner.state("k").runs, vec![run]);
+        // The state lists runs without their output; the output is fetched for the one opened.
+        assert_eq!(s.runner.state("k").runs, vec![RunSummary::from(&run)]);
+        assert_eq!(s.runner.run_detail("k", &run.id), Some(run));
+        assert_eq!(s.runner.run_detail("k", "nope"), None);
+        assert_eq!(s.runner.run_detail("other", "nope"), None);
+    }
+
+    #[tokio::test]
+    async fn the_history_keeps_less_output_than_a_run_returns() {
+        let s = setup(&spec(json!([]), json!(["/bin/sh", "-c", "yes 0123456789 | head -c 100000; echo; echo end"])));
+        trust(&s);
+        let run = run(&s, json!({})).await.unwrap();
+        // Returned in full (what was captured) …
+        assert!(run.stdout.len() > KEPT_IN_HISTORY && !run.truncated);
+        // … and kept as its end, marked cut.
+        let kept = s.runner.run_detail("k", &run.id).unwrap();
+        assert!(kept.stdout.len() <= KEPT_IN_HISTORY && kept.truncated);
+        assert!(kept.stdout.ends_with("end\n") && run.stdout.ends_with(&kept.stdout));
+    }
+
+    #[test]
+    fn a_cut_is_made_on_a_character_boundary() {
+        let mut text = "é".repeat(10);
+        assert!(keep_tail(&mut text, 5));
+        assert_eq!(text, "éé");
+        let mut short = "abc".to_string();
+        assert!(!keep_tail(&mut short, 3));
+        assert_eq!(short, "abc");
     }
 
     #[tokio::test]
@@ -783,7 +856,7 @@ mod tests {
         let path = s.data.path().join("dashboards.json");
         assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         let again = Runner::load(Some(path.clone()));
-        assert_eq!(again.state("k").runs, vec![run]);
+        assert_eq!(again.run_detail("k", &run.id), Some(run));
         assert!(again.is_trusted("k", &hash_of(&s)));
         // A damaged file is set aside, not trusted and not fatal.
         std::fs::write(&path, "{ nope").unwrap();

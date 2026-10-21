@@ -297,6 +297,8 @@ export const api = {
   dashboardPreview: (folder: string, file: string, form: string, values: DashboardValues) => invoke<DashboardPreview>("dashboard_preview", { folder, file, form, values }),
   /** Runs a form of a trusted dashboard; resolves when it ends, with the run (also in the history). Rejects with why it didn't start. */
   dashboardRun: (folder: string, file: string, form: string, values: DashboardValues) => invoke<DashboardRun>("dashboard_run", { folder, file, form, values }),
+  /** One kept run with its output (null when it has been deleted). */
+  dashboardRunDetail: (folder: string, id: string) => invoke<DashboardRun | null>("dashboard_run_detail", { folder, id }),
   /** Stops a running form's command and what it started; false when it wasn't running. */
   dashboardStop: (folder: string, file: string, form: string) => invoke<boolean>("dashboard_stop", { folder, file, form }),
   dashboardDeleteRun: (folder: string, id: string) => invoke<boolean>("dashboard_delete_run", { folder, id }),
