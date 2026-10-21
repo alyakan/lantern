@@ -3,6 +3,8 @@ import { render } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { Controller } from "../shell/controller";
 import { ControllerContext } from "../shell/hooks";
+import { TipsContext } from "../shell/tipsContext";
+import type { TipJar } from "../tips";
 import type { ConnectionState } from "../net/connection";
 import type { Transport } from "../net/transport";
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
@@ -30,6 +32,8 @@ export interface Seed {
   waiting?: Waiting[];
   /** Events of followed chats, as the Mac would send them live. */
   events?: Record<string, RemoteEvent[]>;
+  /** The tip jar the screens find (none: one with no store behind it). */
+  tips?: TipJar;
 }
 
 export const connected: ConnectionState = { kind: "connected", host: "192.168.1.20", welcome: { type: "welcome", protocol: 1, app_version: "0.1.53", mac_name: "Aly's MacBook Pro", epoch: 1 } };
@@ -49,7 +53,9 @@ export async function renderWith(ui: ReactElement, s: Seed = {}, controller = ma
   seed(controller, s);
   const result = await render(
     <SafeAreaProvider>
-      <ControllerContext.Provider value={controller}>{ui}</ControllerContext.Provider>
+      <ControllerContext.Provider value={controller}>
+        {s.tips ? <TipsContext.Provider value={s.tips}>{ui}</TipsContext.Provider> : ui}
+      </ControllerContext.Provider>
     </SafeAreaProvider>,
   );
   return { ...result, controller };

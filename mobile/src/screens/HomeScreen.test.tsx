@@ -1,10 +1,44 @@
 import { Platform } from "react-native";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
-import { chat, makeController, renderWith, waiting } from "../test/render";
+import { chat, makeController, NOW, renderWith, waiting } from "../test/render";
+import { TipJar } from "../tips";
 import { HomeScreen } from "./HomeScreen";
 
-const handlers = () => ({ onOpenChat: jest.fn(), onReview: jest.fn(), onOpenMac: jest.fn(), onCompose: jest.fn(), onNewChat: jest.fn() });
+const handlers = () => ({ onOpenChat: jest.fn(), onReview: jest.fn(), onOpenMac: jest.fn(), onCompose: jest.fn(), onNewChat: jest.fn(), onSupport: jest.fn() });
+
+describe("the way in to the tip jar on Home", () => {
+  const jarWith = (last: number | null) => new TipJar({ products: async () => [], buy: async () => "cancelled" }, { load: async () => last, save: async () => {} }, () => NOW);
+
+  it("is a quiet card under the chats, saying everything stays free, that opens the tips", async () => {
+    const h = handlers();
+    await renderWith(<HomeScreen {...h} />, { chats: [chat()] });
+    expect(screen.getByText("Support development")).toBeTruthy();
+    expect(screen.getByText("Everything stays free either way")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Support development" }));
+    expect(h.onSupport).toHaveBeenCalledTimes(1);
+  });
+
+  it("says thanks instead, once there has been a tip this month, and still opens the tips", async () => {
+    const h = handlers();
+    await renderWith(<HomeScreen {...h} />, { chats: [chat()], tips: jarWith(NOW - 3 * 86_400_000) });
+    await waitFor(() => expect(screen.getByText("Thank you for supporting Lantern")).toBeTruthy());
+    await fireEvent.press(screen.getByRole("button", { name: "Support development" }));
+    expect(h.onSupport).toHaveBeenCalled();
+  });
+
+  it("is the usual card again when the last tip was in an earlier month", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()], tips: jarWith(NOW - 70 * 86_400_000) });
+    await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
+    expect(screen.getByText("Everything stays free either way")).toBeTruthy();
+    expect(screen.queryByText("Thank you for supporting Lantern")).toBeNull();
+  });
+
+  it("is not there while Home is still a skeleton", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, {});
+    expect(screen.queryByRole("button", { name: "Support development" })).toBeNull();
+  });
+});
 
 describe("Home before the Mac has sent anything", () => {
   it("shows the shape of Home, not 'nothing waiting' or 'no chats', which would be a guess", async () => {

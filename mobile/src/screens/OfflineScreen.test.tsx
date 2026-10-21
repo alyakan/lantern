@@ -33,6 +33,16 @@ describe("the Mac's sheet", () => {
     expect(screen.getByText("Lantern 0.1.53")).toBeTruthy();
   });
 
+  it("offers the optional tips when it is given a way to open them, and not otherwise", async () => {
+    const onSupport = jest.fn();
+    const view = await render(<MacSheet state={connected} onClose={jest.fn()} onUnpair={jest.fn()} onSupport={onSupport} />);
+    await fireEvent.press(screen.getByRole("button", { name: "Support development" }));
+    expect(onSupport).toHaveBeenCalledTimes(1);
+    await view.unmount();
+    await render(<MacSheet state={connected} onClose={jest.fn()} onUnpair={jest.fn()} />);
+    expect(screen.queryByRole("button", { name: "Support development" })).toBeNull();
+  });
+
   it("says that unpairing only forgets the Mac here, and unpairs or closes", async () => {
     const onClose = jest.fn();
     const onUnpair = jest.fn();

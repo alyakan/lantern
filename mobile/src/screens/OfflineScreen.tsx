@@ -73,7 +73,7 @@ export function OfflineScreen({ state, onRetry, onUnpair }: { state: ConnectionS
 }
 
 /** The Mac, as a sheet: its name, where the connection stands, and unpairing this phone. */
-export function MacSheet({ state, onClose, onUnpair }: { state: ConnectionState; onClose: () => void; onUnpair: () => void }) {
+export function MacSheet({ state, onClose, onUnpair, onSupport }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the optional tips. */ onSupport?: () => void }) {
   const insets = useSafeAreaInsets();
   const where = state.kind === "connected" ? `Connected through ${state.host}` : state.kind === "offline" ? "Not connected" : state.kind === "connecting" ? "Connecting…" : "Not paired";
   return (
@@ -92,7 +92,8 @@ export function MacSheet({ state, onClose, onUnpair }: { state: ConnectionState;
           <Txt variant="small" tone="ink2" style={{ marginTop: 6 }}>
             Unpairing forgets this Mac on this phone. To stop it for good, also remove this phone in Lantern's Settings, under Remote control.
           </Txt>
-          <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ marginTop: 6 }} />
+          {onSupport && <Button label="Support development" kind="ghost" onPress={onSupport} style={{ marginTop: 6 }} />}
+          <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ marginTop: onSupport ? 0 : 6 }} />
           <Button label="Close" onPress={close} />
         </View>
       )}

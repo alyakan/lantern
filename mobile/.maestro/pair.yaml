@@ -4,7 +4,7 @@
 #   maestro test -e LINK='lantern://pair?…' mobile/.maestro/pair.yaml
 #
 # The link works once, for five minutes: get a new one for each flow.
-appId: io.github.alyakan.lantern.mobile
+appId: com.alyakan.lantern
 ---
 - launchApp:
     clearState: true

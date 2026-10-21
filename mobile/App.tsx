@@ -12,6 +12,9 @@ import { Root } from "./src/shell/Root";
 import { zeroconfDiscovery } from "./src/net/discovery";
 import { webSocketTransport } from "./src/net/transport";
 import { registerForPush, slotOfNotification } from "./src/notifications";
+import { TipsContext } from "./src/shell/tipsContext";
+import { iapPlatform, secureTipMemory, startTipListener } from "./src/platformTips";
+import { demoPlatform, TipJar } from "./src/tips";
 import { onNotificationTap, pushPlatform, quietInForeground } from "./src/platformPush";
 import { secureMacStore } from "./src/storage";
 
@@ -36,6 +39,12 @@ export default function App() {
       }),
     [],
   );
+  // The tip jar: the real store, or (EXPO_PUBLIC_FAKE_TIPS=1) three made-up tips for trying the screens without one.
+  const tipJar = useMemo(() => new TipJar(process.env.EXPO_PUBLIC_FAKE_TIPS === "1" ? demoPlatform : iapPlatform, secureTipMemory), []);
+  useEffect(() => {
+    // A tip that goes through while no screen is waiting on it (an Ask to Buy approval) still gets finished.
+    if (process.env.EXPO_PUBLIC_FAKE_TIPS !== "1") startTipListener();
+  }, []);
   const [pendingLink, setPendingLink] = useState<string | null>(null);
   const [openSlot, setOpenSlot] = useState<string | null>(null);
   const registered = useRef(false);
@@ -80,7 +89,9 @@ export default function App() {
   // The provider follows the keyboard on the native side, so what rides above it (a chat's message box) keeps pace with it.
   return (
     <KeyboardProvider>
-      <Root controller={controller} pendingLink={pendingLink} onClearLink={clearLink} openSlot={openSlot} onOpened={clearSlot} />
+      <TipsContext.Provider value={tipJar}>
+        <Root controller={controller} pendingLink={pendingLink} onClearLink={clearLink} openSlot={openSlot} onOpened={clearSlot} />
+      </TipsContext.Provider>
     </KeyboardProvider>
   );
 }

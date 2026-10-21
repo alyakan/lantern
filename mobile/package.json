@@ -18,6 +18,7 @@
     "expo-device": "~58.0.5",
     "expo-font": "~58.0.9",
     "expo-haptics": "~58.0.7",
+    "expo-iap": "^6.1.1",
     "expo-linking": "~58.0.13",
     "expo-notifications": "~58.1.5",
     "expo-secure-store": "~58.0.2",

@@ -8,7 +8,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "bundleIdentifier": "io.github.alyakan.lantern.mobile",
+      "bundleIdentifier": "com.alyakan.lantern",
       "supportsTablet": false,
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "Lantern finds your Mac on this Wi-Fi and connects to it.",
@@ -22,7 +22,7 @@
       }
     },
     "android": {
-      "package": "io.github.alyakan.lantern.mobile",
+      "package": "com.alyakan.lantern",
       "adaptiveIcon": {
         "backgroundColor": "#EEF1F4",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -57,7 +57,8 @@
           "imageWidth": 180,
           "backgroundColor": "#EEF1F4"
         }
-      ]
+      ],
+      "expo-iap"
     ]
   }
 }

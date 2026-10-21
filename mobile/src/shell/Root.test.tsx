@@ -164,7 +164,8 @@ describe("moving around", () => {
     await waitFor(() => expect(screen.getByText("Denied.")).toBeTruthy());
     await press("Done");
     await settle();
-    expect(screen.getByText(/thing/)).toBeTruthy();
+    // Back on Home: its headline, which counts what waits.
+    expect(screen.getByText(/^\d+ things?$/)).toBeTruthy();
   });
 
   it("the system's back button goes back a screen before it leaves the app", async () => {
@@ -183,6 +184,37 @@ describe("moving around", () => {
     await settle();
     expect(onOpened).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Back" })).toBeTruthy();
+  });
+});
+
+describe("the optional tips", () => {
+  it("open from the card on Home, and the system's back button closes them", async () => {
+    await open({ chats: [chat()], waiting: [] });
+    await press("Support development");
+    expect(screen.getByRole("header", { name: "Support development" })).toBeTruthy();
+    // It says it is optional (the card on Home says so too: the sheet's words are the longer ones).
+    expect(screen.getByText(/If it helps you, you can leave a small thanks/)).toBeTruthy();
+    await act(async () => void backHandlers[backHandlers.length - 1]({ nativeEvent: {} } as never));
+    expect(screen.queryByRole("header", { name: "Support development" })).toBeNull();
+  });
+
+  it("open from the Mac's sheet too, which gives way to them", async () => {
+    await open({ chats: [chat()], waiting: [] });
+    await press("Aly's MacBook Pro, connected");
+    // Two: the card on Home and, on top of it, the sheet's own button.
+    const buttons = screen.getAllByRole("button", { name: "Support development" });
+    expect(buttons).toHaveLength(2);
+    await fireEvent.press(buttons[buttons.length - 1]);
+    await settle();
+    expect(screen.getByRole("header", { name: "Support development" })).toBeTruthy();
+    expect(screen.queryByText("Connected through 192.168.1.20")).toBeNull();
+  });
+
+  it("close from Close", async () => {
+    await open({ chats: [chat()], waiting: [] });
+    await press("Support development");
+    await press("Close");
+    expect(screen.queryByRole("header", { name: "Support development" })).toBeNull();
   });
 });
 

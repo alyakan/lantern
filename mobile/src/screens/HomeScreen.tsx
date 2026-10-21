@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Animated, Platform, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
+import { useTipJar, useTips } from "../shell/tipsContext";
 import { Button, Tag, Tile, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
 import { Dots, HomeSkeleton } from "../ui/skeleton";
@@ -20,6 +21,8 @@ export interface HomeProps {
   onCompose: () => void;
   /** Starts a chat in a project, with a first message the user writes (or a suggestion's draft); or carries one on. */
   onNewChat: (draft?: Draft) => void;
+  /** Opens the optional tips. */
+  onSupport: () => void;
 }
 
 /** A thin bar that slides while a chat is working. */
@@ -102,8 +105,35 @@ function ChatRow({ row, index, onPress }: { row: Row; index: number; onPress: ()
   );
 }
 
+/** A quiet way in to the tip jar, under the chats: a tip is optional and nothing is locked behind it. Once there has been one this month it says thanks instead. */
+function SupportCard({ onPress }: { onPress: () => void }) {
+  const jar = useTipJar();
+  useTips();
+  const tipped = jar.hasTippedThisMonth();
+  return (
+    <FadeSlideIn from={10} delay={200} style={{ paddingHorizontal: space.lg, paddingTop: 26 }}>
+      <PressScale accessibilityRole="button" accessibilityLabel="Support development" accessibilityHint="Opens the optional tips" onPress={onPress} scaleTo={0.97} haptic="select" style={[{ flexDirection: "row", alignItems: "center", gap: 14, backgroundColor: colors.card, borderRadius: radius.card - 6, paddingVertical: 14, paddingHorizontal: 16 }, shadow.card, { shadowOpacity: 0.05 }]}>
+        <Txt variant="heading" accessibilityElementsHidden style={{ width: 28, textAlign: "center" }}>
+          {tipped ? "✅" : "💛"}
+        </Txt>
+        <View style={{ flex: 1 }}>
+          <Txt variant="small" style={{ fontWeight: "700" }}>
+            {tipped ? "Thank you for supporting Lantern" : "Support development"}
+          </Txt>
+          <Txt variant="tiny" tone="ink2">
+            {tipped ? "You can leave another, if you like" : "Everything stays free either way"}
+          </Txt>
+        </View>
+        <Txt variant="body" tone="ink3" accessibilityElementsHidden>
+          ›
+        </Txt>
+      </PressScale>
+    </FadeSlideIn>
+  );
+}
+
 /** Home: what waits on you, as a headline and a stack, then your chats. */
-export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat }: HomeProps) {
+export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport }: HomeProps) {
   const controller = useController();
   const { chats, waiting, chatsLoaded, waitingLoaded } = useSyncState();
   const loading = !chatsLoaded || !waitingLoaded;
@@ -183,6 +213,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         ) : (
           list.map((r, i) => <ChatRow key={r.slot} row={r} index={i} onPress={() => onOpenChat(r.slot)} />)
         )}
+        <SupportCard onPress={onSupport} />
           </>
         )}
       </ScrollView>

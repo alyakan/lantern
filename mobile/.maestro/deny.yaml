@@ -1,6 +1,6 @@
 # Denies the command Claude asked to run; the card goes and one fewer thing waits.
 # Starts from a phone already paired with the scripted Mac (run pair.yaml first, with the same fixture_gateway running).
-appId: io.github.alyakan.lantern.mobile
+appId: com.alyakan.lantern
 ---
 - launchApp
 - assertVisible: "2 things"

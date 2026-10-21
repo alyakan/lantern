@@ -8,6 +8,7 @@ import { HomeScreen } from "../screens/HomeScreen";
 import { NewChatSheet, type Draft } from "../screens/NewChatSheet";
 import { MacSheet, OfflineScreen } from "../screens/OfflineScreen";
 import { ConfirmLink, PairScreen } from "../screens/PairScreen";
+import { SupportSheet } from "../screens/SupportSheet";
 import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
 import { Button, Txt } from "../ui/components";
 import { FadeSlideIn } from "../ui/motion";
@@ -68,6 +69,8 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   const { chats } = useSyncState();
   const [stack, go] = useReducer(navigate, home);
   const [macSheet, setMacSheet] = useState(false);
+  // The optional tips, from Home or from the Mac sheet.
+  const [supporting, setSupporting] = useState(false);
   const [picking, setPicking] = useState(false);
   // Starting a chat from the phone: the sheet, with a draft when a suggestion made one.
   const [newChat, setNewChat] = useState<Draft | null>(null);
@@ -82,6 +85,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   // The system's back button (Android) goes back a screen before it leaves the app.
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (supporting) return setSupporting(false), true;
       if (newChat) return setNewChat(null), true;
       if (picking) return setPicking(false), true;
       if (macSheet) return setMacSheet(false), true;
@@ -90,7 +94,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       return true;
     });
     return () => sub.remove();
-  }, [stack, macSheet, picking, newChat]);
+  }, [stack, macSheet, picking, newChat, supporting]);
 
   const back = () => go({ type: "back" });
   const unpair = async () => {
@@ -114,7 +118,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   const items: StackItem[] = stack.map((route, i) => {
     switch (route.name) {
       case "home":
-        return { key: `${i}:home`, kind: "push", element: <HomeScreen onOpenChat={(slot) => go({ type: "open_chat", slot })} onReview={(slot, requestId) => go({ type: "review", slot, requestId })} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} /> };
+        return { key: `${i}:home`, kind: "push", element: <HomeScreen onOpenChat={(slot) => go({ type: "open_chat", slot })} onReview={(slot, requestId) => go({ type: "review", slot, requestId })} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} /> };
       case "chat":
         return { key: `${i}:chat:${route.slot}`, kind: "push", element: <ChatScreen slot={route.slot} onBack={back} onReview={(requestId) => go({ type: "review", slot: route.slot, requestId })} /> };
       case "decide":
@@ -125,7 +129,18 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     "stack",
     <View style={{ flex: 1 }}>
       <AnimatedStack items={items} />
-      {macSheet && <MacSheet state={connection} onClose={() => setMacSheet(false)} onUnpair={unpair} />}
+      {macSheet && (
+        <MacSheet
+          state={connection}
+          onClose={() => setMacSheet(false)}
+          onUnpair={unpair}
+          onSupport={() => {
+            setMacSheet(false);
+            setSupporting(true);
+          }}
+        />
+      )}
+      {supporting && <SupportSheet onClose={() => setSupporting(false)} />}
       {newChat && (
         <NewChatSheet
           initialText={newChat.text}
