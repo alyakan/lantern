@@ -1,7 +1,9 @@
 //! The real gateway and Wi-Fi transport behind three scripted chats (remote::fixture), for trying the phone app and for
 //! its integration tests, without a Mac's own chats:
 //!
-//!   cargo run --example fixture_gateway -- [--port N] [--bonjour] [--pace-ms N]
+//!   cargo run --example fixture_gateway -- [--port N] [--bonjour] [--pace-ms N] [--calm]
+//!
+//! `--calm` leaves nothing waiting on the user, so a phone's Home shows what Claude suggests.
 //!
 //! It prints one JSON line when it is ready (the port, a pairing link and its parts) and another for each `pair` line it
 //! is sent on standard input (a new code); it stops when standard input closes or it is sent `quit`. Nothing it keeps
@@ -29,7 +31,8 @@ async fn main() {
     let remote = Remote::new(RemoteStore::load(None), Box::new(Memory::default()));
     remote.store.set_enabled(true).unwrap();
     let pace = Duration::from_millis(arg("--pace-ms").and_then(|v| v.parse().ok()).unwrap_or(40));
-    let host = FixtureHost::new(&remote, pace);
+    // --calm: nothing waits on the user, so a phone's Home shows what Claude suggests.
+    let host = if std::env::args().any(|a| a == "--calm") { FixtureHost::calm(&remote, pace) } else { FixtureHost::new(&remote, pace) };
     let mac = remote.mac_key().unwrap();
     let gateway = Gateway::new(remote.bus.clone(), remote.hub.clone(), remote.store.clone(), host, mac.clone(), remote.epoch);
     let door = gateway.clone();

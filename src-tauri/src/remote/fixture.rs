@@ -87,6 +87,15 @@ fn done(result: &str) -> UiEvent {
 impl FixtureHost {
     /// The scripted chats, opened on `remote`'s bus and hub; `pace` is the pause between Claude's scripted steps.
     pub fn new(remote: &Remote, pace: Duration) -> Arc<Self> {
+        Self::build(remote, pace, true)
+    }
+
+    /// The same chats with nothing waiting on the user (no permission, no question): Home shows what Claude suggests.
+    pub fn calm(remote: &Remote, pace: Duration) -> Arc<Self> {
+        Self::build(remote, pace, false)
+    }
+
+    fn build(remote: &Remote, pace: Duration, waiting: bool) -> Arc<Self> {
         let (bus, hub) = (remote.bus.clone(), remote.hub.clone());
         let chat = |slot: &str, title: &str, asleep: bool| WindowChat { slot: slot.into(), folder: "/Users/you/dev/lantern".into(), title: title.into(), asleep, session_id: Some(format!("session-{slot}")) };
 
@@ -112,7 +121,18 @@ impl FixtureHost {
         hub.opened(DESIGN, "/Users/you/dev/lantern");
         remote.window_chats(&[chat(RELEASE, "Release 0.1.53", false), chat(DESIGN, "Mobile gateway design", false), chat(NETWORK, "Network tab filters", true)]);
 
-        // Release: a second turn is waiting on two things.
+        // Release: a second turn is waiting on two things (unless it is calm).
+        if waiting {
+            Self::wait_on_release(&bus, &host);
+        }
+
+        // Design: working.
+        bus.publish(DESIGN, UiEvent::UserText { text: "Keep going.".into(), at: Some(now_ms()), sent_by: Some("desktop".into()) });
+        bus.publish(DESIGN, UiEvent::Thinking { parent: None });
+        host
+    }
+
+    fn wait_on_release(bus: &Arc<EventBus>, host: &Arc<Self>) {
         bus.publish(RELEASE, UiEvent::UserText { text: "Go ahead and push it.".into(), at: Some(now_ms()), sent_by: Some("desktop".into()) });
         let push = Pending { request_id: PUSH_PROMPT.into(), tool_name: "Bash".into(), input: serde_json::json!({"command": "git push origin release/0.1.53", "description": "Push the release branch"}), at: now_ms() };
         let question = Pending {
@@ -125,11 +145,6 @@ impl FixtureHost {
             bus.publish(RELEASE, UiEvent::PermissionRequested { request_id: p.request_id.clone(), tool_name: p.tool_name.clone(), input: p.input.clone() });
         }
         host.pending.lock().unwrap().insert(RELEASE.into(), vec![push, question]);
-
-        // Design: working.
-        bus.publish(DESIGN, UiEvent::UserText { text: "Keep going.".into(), at: Some(now_ms()), sent_by: Some("desktop".into()) });
-        bus.publish(DESIGN, UiEvent::Thinking { parent: None });
-        host
     }
 
     /// Claude's scripted answer to a message or an answered prompt: thinking, an answer in pieces, and the turn's end.
