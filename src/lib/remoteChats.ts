@@ -1,4 +1,6 @@
 import type { Chats } from "../sessions";
+import { permissionsOf } from "./workflow";
+import { summary, type Harness } from "./harness";
 import type { ProjectOpen } from "./sidebar";
 
 /**
@@ -12,15 +14,47 @@ export interface WindowChat {
   title: string;
   asleep: boolean;
   session_id: string | null;
+  /** "ask" or "auto"; null for a chat the store doesn't have yet. */
+  permissions: "ask" | "auto" | null;
+  /** The id of the preset (which models do what) it runs on. */
+  preset: string | null;
 }
 
-export function windowChats(chats: Chats, open: Record<string, ProjectOpen>): WindowChat[] {
+/** `presetOf`: the id of the preset each chat's claude was started with. */
+export function windowChats(chats: Chats, open: Record<string, ProjectOpen>, presetOf: Record<string, string> = {}): WindowChat[] {
   return Object.entries(open).flatMap(([folder, project]) =>
     project.items.map((item) => {
       const s = chats.slots[item.slot];
-      return { slot: item.slot, folder: s?.folder ?? folder, title: item.title, asleep: s?.status === "asleep", session_id: s?.sessionId ?? null };
+      return { slot: item.slot, folder: s?.folder ?? folder, title: item.title, asleep: s?.status === "asleep", session_id: s?.sessionId ?? null, permissions: s ? permissionsOf(s) : null, preset: presetOf[item.slot] ?? null };
     }),
   );
+}
+
+/** What a phone may choose between, as the backend lists it (Settings › Models): the preset's id, name and one line. */
+export interface WindowPreset {
+  id: string;
+  name: string;
+  summary: string;
+}
+
+export function windowPresets(presets: Harness[]): WindowPreset[] {
+  return presets.map((h) => ({ id: h.id, name: h.name, summary: summary(h) }));
+}
+
+/** What the window knows when it checks a phone's request, read from its own settings and presets, never from the request. */
+export interface RemoteContext {
+  /** Settings › Remote control: "Let paired phones use Auto". */
+  allowAuto: boolean;
+  /** The ids of the presets the window offers. */
+  presetIds: string[];
+}
+
+/** Why a phone may not have this mode or preset, or null: Auto only when the Mac lets phones use it, a preset only if it is one of the Mac's. */
+function checkChoice(permissions: string, preset: string | null, ctx: RemoteContext): string | null {
+  if (permissions !== "ask" && permissions !== "auto") return "A phone can only choose Ask or Auto.";
+  if (permissions === "auto" && !ctx.allowAuto) return "Auto from a phone is off. Turn it on in Settings, under Remote control.";
+  if (preset !== null && !ctx.presetIds.includes(preset)) return "That isn't one of your presets.";
+  return null;
 }
 
 /** What the backend asks of the window when a phone starts a chat (see remote::NewChatRequest). */
@@ -29,17 +63,55 @@ export interface RemoteNewChat {
   folder: string;
   text: string;
   permissions: string;
+  /** The id of one of the window's presets, or null for the project's own. */
+  preset?: string | null;
 }
 
 /**
  * Whether the window starts the chat a phone asked for, and why not. The backend has checked the same things, but any window
- * can emit the event this one listens for, so this window checks for itself: the chat is to start on Ask (never Auto, whatever
- * the project was left on: nobody is at the Mac to approve), in a project the user already works in, with a message written
- * and not enormous.
+ * can emit the event this one listens for, so this window checks for itself: the chat starts on Ask, or on Auto only when the
+ * Mac's setting lets phones (`ctx`, read from the window's own settings, never from the event), with one of the window's
+ * presets or the project's own, in a project the user already works in, with a message written and not enormous.
  */
-export function checkRemoteNewChat(r: RemoteNewChat, isKnownProject: boolean, validText: boolean): string | null {
-  if (r.permissions !== "ask") return "A chat started from a phone starts on Ask.";
+export function checkRemoteNewChat(r: RemoteNewChat, isKnownProject: boolean, validText: boolean, ctx: RemoteContext = { allowAuto: false, presetIds: [] }): string | null {
+  const choice = checkChoice(r.permissions, r.preset ?? null, ctx);
+  if (choice) return choice;
   if (!validText) return "Write what the chat should start with.";
   if (!isKnownProject) return "That isn't one of your projects.";
   return null;
 }
+
+/** What the backend asks of the window when a phone puts a chat on Ask or Auto, or on a preset (see remote::SetPermissionsRequest). */
+export interface RemoteSetPermissions {
+  slot: string;
+  permissions: string;
+}
+export interface RemoteSetPreset {
+  slot: string;
+  preset: string;
+}
+
+/** What the window knows of the chat a phone wants to switch. */
+export interface SwitchTarget {
+  /** The window has this chat (and it is not an agent of a team: its Lead sets what it runs on). */
+  known: boolean;
+  idle: boolean;
+  asleep: boolean;
+  /** Background tasks (a workflow, a subagent, a command) that a restart would stop: the window asks the user about that, and nobody is at the Mac to answer. */
+  background: number;
+}
+
+/**
+ * Whether the window switches a chat for a phone, and why not: the same checks as the backend's (it checks again because any
+ * window can emit what it listens for), and never over background tasks, which a restart would stop without anyone to ask.
+ */
+export function checkRemoteSwitch(change: { permissions: string } | { preset: string }, target: SwitchTarget, ctx: RemoteContext): string | null {
+  const choice = "permissions" in change ? checkChoice(change.permissions, null, ctx) : checkChoice("ask", change.preset, ctx);
+  if (choice) return choice;
+  if (!target.known) return "That chat isn't open on your Mac.";
+  if (target.asleep) return "This chat is asleep. Wake it first.";
+  if (!target.idle) return "Claude is busy in this chat. Change it once it has finished.";
+  if (target.background > 0) return "This chat has background tasks running, which switching would stop.";
+  return null;
+}
+

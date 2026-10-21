@@ -3,6 +3,7 @@
 //! client was sent; anything older than it keeps is read from the chat's transcript.
 
 use super::bus::BusEvent;
+use super::protocol::RemotePreset;
 use crate::ui_event::UiEvent;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -38,6 +39,10 @@ pub struct ChatInfo {
     pub last_seq: u64,
     /// When something last happened in it (ms since the epoch).
     pub active_at: u64,
+    /// "ask" or "auto", as the window says (None until it has).
+    pub permissions: Option<String>,
+    /// The id of the preset it runs on, as the window says (None until it has).
+    pub preset: Option<String>,
 }
 
 /// What came after a number a client had.
@@ -67,6 +72,8 @@ struct Log {
     folder: Option<String>,
     session_id: Option<String>,
     active_at: u64,
+    permissions: Option<String>,
+    preset: Option<String>,
 }
 
 impl Log {
@@ -93,6 +100,8 @@ impl Log {
             status: self.status(),
             last_seq: self.last_seq,
             active_at: self.active_at,
+            permissions: self.permissions.clone(),
+            preset: self.preset.clone(),
         }
     }
 
@@ -189,6 +198,8 @@ pub fn without_notes(text: &str) -> &str {
 
 pub struct SessionHub {
     chats: Mutex<HashMap<String, Log>>,
+    /// The presets the window offers (Settings › Models), as it last said.
+    presets: Mutex<Vec<RemotePreset>>,
     cap: usize,
     now: fn() -> u64,
 }
@@ -205,7 +216,7 @@ impl Default for SessionHub {
 
 impl SessionHub {
     pub fn with_cap(cap: usize) -> Self {
-        Self { chats: Mutex::default(), cap, now: now_ms }
+        Self { chats: Mutex::default(), presets: Mutex::default(), cap, now: now_ms }
     }
 
     /// Keeps an event the bus numbered, and what it says about where its chat stands.
@@ -260,6 +271,27 @@ impl SessionHub {
         }
     }
 
+    /// What the window says a chat runs on: Ask or Auto, and a preset. Only a chat the hub lists is given them, and only
+    /// "ask" or "auto" is taken as the first.
+    pub fn controls(&self, slot: &str, permissions: &str, preset: Option<&str>) {
+        if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
+            if matches!(permissions, "ask" | "auto") {
+                log.permissions = Some(permissions.to_string());
+            }
+            log.preset = preset.map(String::from);
+        }
+    }
+
+    /// The presets the window offers, as it says them (at most a few dozen, with their texts cut short).
+    pub fn set_presets(&self, presets: Vec<RemotePreset>) {
+        let cut = |s: String, n: usize| s.chars().take(n).collect::<String>();
+        *self.presets.lock().unwrap() = presets.into_iter().take(40).map(|p| RemotePreset { id: cut(p.id, 64), name: cut(p.name, 60), summary: cut(p.summary, 160) }).collect();
+    }
+
+    pub fn presets(&self) -> Vec<RemotePreset> {
+        self.presets.lock().unwrap().clone()
+    }
+
     /// The window's title for the chat (it beats the first prompt).
     pub fn titled(&self, slot: &str, title: &str) {
         if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
@@ -293,7 +325,7 @@ mod tests {
     use super::*;
 
     fn hub() -> SessionHub {
-        SessionHub { chats: Mutex::default(), cap: CHAT_CAP, now: || 1000 }
+        SessionHub { chats: Mutex::default(), presets: Mutex::default(), cap: CHAT_CAP, now: || 1000 }
     }
 
     fn feed(hub: &SessionHub, slot: &str, events: Vec<UiEvent>) {
@@ -338,7 +370,7 @@ mod tests {
 
     #[test]
     fn a_chat_keeps_no_more_than_its_cap_and_a_client_too_far_behind_starts_again() {
-        let hub = SessionHub { chats: Mutex::default(), cap: 400, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), cap: 400, now: || 1 };
         let long = "x".repeat(150);
         feed(&hub, "a", (0..6).map(|_| UiEvent::AssistantText { parent: None, block_id: "b".into(), text: long.clone() }).collect());
         let Some(Since::TooOld { kept }) = hub.since("a", 0) else { panic!("events 1.. are gone") };
@@ -351,7 +383,7 @@ mod tests {
 
     #[test]
     fn the_newest_event_is_kept_even_when_it_is_bigger_than_the_cap() {
-        let hub = SessionHub { chats: Mutex::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), cap: 10, now: || 1 };
         feed(&hub, "a", vec![user("a long message, longer than the cap")]);
         assert_eq!(events(hub.since("a", 0).unwrap()).len(), 1);
     }
@@ -410,6 +442,33 @@ mod tests {
     }
 
     #[test]
+    fn a_chat_has_the_mode_and_preset_the_window_says_and_only_for_a_chat_it_lists() {
+        let hub = hub();
+        hub.controls("ghost", "auto", Some("max"));
+        assert!(hub.chat("ghost").is_none());
+        hub.opened("a", "/p");
+        hub.controls("a", "auto", Some("max"));
+        let a = hub.chat("a").unwrap();
+        assert_eq!((a.permissions.as_deref(), a.preset.as_deref()), (Some("auto"), Some("max")));
+        // Something that isn't a mode leaves the mode as it was; the preset is whatever the window says.
+        hub.controls("a", "bypassPermissions", None);
+        let a = hub.chat("a").unwrap();
+        assert_eq!((a.permissions.as_deref(), a.preset.as_deref()), (Some("auto"), None));
+    }
+
+    #[test]
+    fn the_presets_the_window_offers_are_kept_with_their_texts_cut_short() {
+        let hub = hub();
+        let p = |id: &str, n: usize| RemotePreset { id: id.into(), name: "n".repeat(n), summary: "s".repeat(n) };
+        hub.set_presets((0..50).map(|i| p(&format!("p{i}"), 500)).collect());
+        let kept = hub.presets();
+        assert_eq!(kept.len(), 40);
+        assert_eq!((kept[0].name.len(), kept[0].summary.len()), (60, 160));
+        hub.set_presets(vec![]);
+        assert!(hub.presets().is_empty(), "what the window says now replaces what it said");
+    }
+
+    #[test]
     fn a_chat_is_titled_by_the_window_or_else_by_its_first_prompt_without_lanterns_notes() {
         let hub = hub();
         feed(&hub, "a", vec![user("[Lantern: this chat switched to Debug. The user picked it.]\n\nit crashes on save\nmore detail"), user("second")]);
@@ -430,7 +489,7 @@ mod tests {
     #[test]
     fn chats_are_listed_most_recently_active_first() {
         static TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let hub = SessionHub { chats: Mutex::default(), cap: CHAT_CAP, now: || TICK.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), cap: CHAT_CAP, now: || TICK.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
         hub.opened("old", "/p");
         hub.opened("new", "/p");
         feed(&hub, "old", vec![user("again")]);

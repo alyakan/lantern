@@ -33,7 +33,7 @@ describe("what a prompt says", () => {
   });
 });
 
-const chat = (over: Partial<RemoteChat>): RemoteChat => ({ slot: "a", title: "Release", project: "lantern", status: "idle", last_seq: 1, active_at: 1000, ...over });
+const chat = (over: Partial<RemoteChat>): RemoteChat => ({ slot: "a", title: "Release", project: "lantern", status: "idle", last_seq: 1, active_at: 1000, permissions: null, preset: null, ...over });
 const wait = (over: Partial<Waiting>): Waiting => ({ slot: "a", chat_title: null, request_id: "p1", tool_name: "Bash", input: { command: "ls" }, at: 1, ...over });
 
 describe("the Home screen", () => {

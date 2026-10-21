@@ -3,7 +3,7 @@ import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { Role } from "./lib/roles";
-import type { RemoteNewChat, WindowChat } from "./lib/remoteChats";
+import type { RemoteNewChat, RemoteSetPermissions, RemoteSetPreset, WindowChat, WindowPreset } from "./lib/remoteChats";
 import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
 import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
@@ -331,6 +331,7 @@ export const api = {
   remoteSettings: () => invoke<RemoteView>("remote_settings"),
   remoteSetEnabled: (on: boolean) => invoke<RemoteView>("remote_set_enabled", { on }),
   remoteSetShowTitles: (on: boolean) => invoke<RemoteView>("remote_set_show_titles", { on }),
+  remoteSetAllowAuto: (on: boolean) => invoke<RemoteView>("remote_set_allow_auto", { on }),
   /** A QR code a phone pairs with: one try, for five minutes. Rejects while Remote control is off. */
   remotePair: () => invoke<PairView>("remote_pair"),
   remotePairCancel: () => invoke<void>("remote_pair_cancel"),
@@ -344,6 +345,12 @@ export const api = {
   onRemoteWake: (cb: (slot: string) => void): Promise<UnlistenFn> => listen<string>("remote-wake", (e) => cb(e.payload)),
   /** A paired phone asked to start a chat in a project: the window checks it, starts it on Ask, and answers with remoteNewChatDone. */
   onRemoteNewChat: (cb: (r: RemoteNewChat) => void): Promise<UnlistenFn> => listen<RemoteNewChat>("remote-new-chat", (e) => cb(e.payload)),
+  /** Which presets a phone may choose between (see lib/remoteChats.ts WindowPreset). */
+  remoteWindowControls: (presets: WindowPreset[]) => invoke<void>("remote_window_controls", { presets }),
+  /** A paired phone asked to put a chat on Ask or Auto: the window checks it (Auto only if Settings allows it) and switches it. */
+  onRemoteSetPermissions: (cb: (r: RemoteSetPermissions) => void): Promise<UnlistenFn> => listen<RemoteSetPermissions>("remote-set-permissions", (e) => cb(e.payload)),
+  /** A paired phone asked to put a chat on one of the presets. */
+  onRemoteSetPreset: (cb: (r: RemoteSetPreset) => void): Promise<UnlistenFn> => listen<RemoteSetPreset>("remote-set-preset", (e) => cb(e.payload)),
   /** Where this window found claude, for the calls the backend makes itself (what Claude suggests on a phone). */
   remoteClaudePath: (path: string) => invoke<void>("remote_claude_path", { path }),
   /** The window's answer to a phone's new chat: the slot it made, or why it didn't. */

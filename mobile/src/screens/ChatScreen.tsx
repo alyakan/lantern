@@ -11,6 +11,7 @@ import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { colors, shadow, space } from "../ui/theme";
 import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
+import { ControlChips } from "./ControlChips";
 import { AssistantRow, Composer, DesktopRow, DiffSheet, PageRow, PromptRow, StepsRow, TurnRow, UserRow } from "./ChatParts";
 
 export interface ChatProps {
@@ -40,6 +41,8 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
   const [files, setFiles] = useState<string[] | null>(null);
   const [banner, setBanner] = useState(false);
   const [waking, setWaking] = useState(false);
+  // While a swipe to allow is being dragged the chat holds still: it can't scroll out from under the finger.
+  const [swiping, setSwiping] = useState(false);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
@@ -99,6 +102,7 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
               item={row.item}
               me={me}
               onReview={() => onReview(row.item.id)}
+              onSwiping={setSwiping}
               onAllow={() =>
                 sync.answer(slot, row.item.id, true).catch((e) => {
                   fail(e);
@@ -146,6 +150,9 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
         )}
       </View>
 
+      {/* What the chat runs on (Ask or Auto, and its models), under the title. */}
+      <ControlChips slot={slot} chat={chat} onProblem={setProblem} />
+
       {!online && (
         <View accessibilityRole="alert" style={{ marginHorizontal: 16, marginBottom: 6, backgroundColor: colors.card, borderRadius: 10, padding: 10 }}>
           <Txt variant="small" tone="ink2">
@@ -173,6 +180,7 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
         data={rows}
         renderItem={renderRow}
         keyExtractor={(r) => r.key}
+        scrollEnabled={!swiping}
         getItemType={(r) => (r.kind === "page" ? `page-${r.live}` : r.kind)}
         maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 0.2, startRenderingFromBottom: true }}
         ListHeaderComponent={

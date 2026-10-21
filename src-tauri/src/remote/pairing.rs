@@ -60,6 +60,10 @@ pub struct Saved {
     /// Notifications name the chat (off: they only say a chat needs you, or finished).
     #[serde(default)]
     pub show_titles: bool,
+    /// Paired phones may start chats on Auto, and put chats on Auto (off: they are on Ask, and a phone can't change that).
+    /// It is only about what a phone may ask for: a chat already on Auto stays on it when this is turned off.
+    #[serde(default)]
+    pub allow_phone_auto: bool,
     #[serde(default)]
     pub devices: Vec<Device>,
 }
@@ -101,6 +105,10 @@ impl RemoteStore {
 
     pub fn set_show_titles(&self, on: bool) -> Result<(), String> {
         self.change(|s| s.show_titles = on)
+    }
+
+    pub fn set_allow_phone_auto(&self, on: bool) -> Result<(), String> {
+        self.change(|s| s.allow_phone_auto = on)
     }
 
     /// A new offer, in place of any other (an old QR code stops working).
@@ -206,9 +214,11 @@ mod tests {
         assert_eq!(s.saved(), Saved::default());
         s.set_enabled(true).unwrap();
         s.set_show_titles(true).unwrap();
+        assert!(!s.saved().allow_phone_auto, "phones may not use Auto until the user says so");
+        s.set_allow_phone_auto(true).unwrap();
         let d = s.add_device(&[1u8; 32], "Aly's iPhone", 10).unwrap();
         let again = RemoteStore::load(Some(dir.path().join("remote.json")));
-        assert_eq!(again.saved(), Saved { enabled: true, show_titles: true, devices: vec![d] });
+        assert_eq!(again.saved(), Saved { enabled: true, show_titles: true, allow_phone_auto: true, devices: vec![d] });
     }
 
     #[test]
