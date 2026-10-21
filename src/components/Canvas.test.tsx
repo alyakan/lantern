@@ -922,6 +922,8 @@ describe("cleaning up and closing an agent", () => {
     chooseClose();
     const dialog = await screen.findByRole("alertdialog");
     const [cancel, discard] = within(dialog).getAllByRole("button");
+    // The dialog puts the focus on Cancel in an effect: Tab is only a step from there once that has run (a slow run hasn't yet).
+    await waitFor(() => expect(document.activeElement).toBe(cancel));
     fireEvent.keyDown(cancel, { key: "Tab" });
     expect(document.activeElement).toBe(discard);
     fireEvent.keyDown(discard, { key: "Tab" });
