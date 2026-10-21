@@ -23,7 +23,7 @@ export type Item =
   | { kind: "user"; id: string; text: string; at: number | null; sentBy: string | null; sending?: boolean; failed?: string }
   | { kind: "assistant"; id: string; text: string; streaming: boolean }
   | { kind: "step"; id: string; name: string; summary: string; done: boolean; isError: boolean; edits: FileEdit[]; tests: { passed: number; failed: number; skipped: number } | null }
-  | { kind: "prompt"; id: string; toolName: string; input: unknown; state: "open" | "allowed" | "denied" | "withdrawn"; by: string | null }
+  | { kind: "prompt"; id: string; toolName: string; input: unknown; state: "open" | "allowed" | "denied" | "withdrawn"; by: string | null; /** What this phone answered a question with. */ answer?: string }
   | { kind: "desktop"; id: string; what: string }
   | { kind: "turn"; id: string; isError: boolean; result: string | null; durationMs: number | null };
 
@@ -58,6 +58,8 @@ export type Action =
   | { type: "waiting"; list: Waiting[] }
   | { type: "sending"; slot: string; clientId: string; text: string; at: number }
   | { type: "send_failed"; slot: string; clientId: string; error: string }
+  /** What this phone answered a question with, to show beside it afterwards (the Mac's events don't carry it). */
+  | { type: "answered_with"; slot: string; requestId: string; text: string }
   | { type: "earlier"; slot: string; events: RemoteEvent[]; hidden: number };
 
 /** The client id a message's `sent_by` ends with ("phone-…:<client id>"). */
@@ -171,6 +173,11 @@ export function reducer(state: State, action: Action): State {
       const view = state.views[action.slot];
       if (!view) return state;
       return { ...state, views: { ...state.views, [action.slot]: { ...view, items: updateById(view.items, "user", `local-${action.clientId}`, (u) => ({ ...u, sending: false, failed: action.error })) } } };
+    }
+    case "answered_with": {
+      const view = state.views[action.slot];
+      if (!view) return state;
+      return { ...state, views: { ...state.views, [action.slot]: { ...view, items: updateById(view.items, "prompt", action.requestId, (p) => ({ ...p, answer: action.text })) } } };
     }
     case "earlier": {
       const view = state.views[action.slot] ?? emptyView;

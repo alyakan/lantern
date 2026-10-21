@@ -135,6 +135,15 @@ describe("prompts", () => {
     expect(items(s)[0]).toMatchObject({ state: "allowed", by: "desktop" });
   });
 
+  it("remember what this phone answered a question with, for showing beside it", () => {
+    let s = run([event("a", 1, asked), event("a", 2, { kind: "permission_resolved", request_id: "p1", allow: true, by: "phone-1" })]);
+    s = reducer(s, { type: "answered_with", slot: "a", requestId: "p1", text: "Stable" });
+    expect(items(s)[0]).toMatchObject({ state: "allowed", answer: "Stable" });
+    // Of a chat or prompt that isn't there: nothing happens.
+    expect(reducer(s, { type: "answered_with", slot: "zzz", requestId: "p1", text: "x" })).toBe(s);
+    expect(items(reducer(s, { type: "answered_with", slot: "a", requestId: "nope", text: "x" }))[0]).toMatchObject({ answer: "Stable" });
+  });
+
   it("close when Claude stops asking, or a new claude starts", () => {
     expect(items(run([event("a", 1, asked), event("a", 2, { kind: "permission_withdrawn", request_id: "p1" })]))[0]).toMatchObject({ state: "withdrawn" });
     expect(openPrompts(run([event("a", 1, asked), event("a", 2, { kind: "session_ended", code: 1 })]).views.a)).toHaveLength(0);

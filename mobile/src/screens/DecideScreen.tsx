@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Pressable, ScrollView, TextInput, View } from "react-native";
+import { Animated, ScrollView, TextInput, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useController, useSyncState } from "../shell/hooks";
 import { Button, Tag, Txt } from "../ui/components";
-import { FadeSlideIn } from "../ui/motion";
+import { buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { colors, radius, space } from "../ui/theme";
 import { approvalOf, promptView, type PromptView, type Question } from "../view/prompts";
@@ -33,6 +33,50 @@ export function answersFrom(qs: Question[], picks: Record<string, string[]>, typ
   return out;
 }
 
+/** One answer to choose: it takes the highlighter colour as it is picked, with a check popping in, and gives under a press. */
+function OptionCard({ on, multi, label, description, onPress }: { on: boolean; multi: boolean; label: string; description?: string; onPress: () => void }) {
+  const sel = useRef(new Animated.Value(on ? 1 : 0)).current;
+  useEffect(() => {
+    if (skips()) sel.setValue(on ? 1 : 0);
+    else Animated.timing(sel, { toValue: on ? 1 : 0, duration: 200, useNativeDriver: false }).start();
+  }, [on, sel]);
+  return (
+    <PressScale accessibilityRole={multi ? "checkbox" : "radio"} accessibilityState={{ selected: on, checked: on }} onPress={onPress} haptic="select" scaleTo={0.97}>
+      <Animated.View
+        style={{
+          borderRadius: radius.inner,
+          borderWidth: 1.5,
+          borderColor: sel.interpolate({ inputRange: [0, 1], outputRange: ["rgba(255,255,255,0.18)", colors.hi] }),
+          backgroundColor: sel.interpolate({ inputRange: [0, 1], outputRange: ["rgba(255,194,26,0)", "rgba(255,194,26,0.14)"] }),
+          padding: 12,
+          minHeight: 56,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        <View style={{ flex: 1 }}>
+          <Txt variant="body" tone="white" style={{ fontWeight: "600" }}>
+            {label}
+          </Txt>
+          {!!description && (
+            <Txt variant="small" tone="night">
+              {description}
+            </Txt>
+          )}
+        </View>
+        {on && (
+          <PopIn>
+            <View accessibilityElementsHidden style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: colors.hi, alignItems: "center", justifyContent: "center" }}>
+              <View style={{ width: 11, height: 6, marginTop: -2, borderLeftWidth: 2.5, borderBottomWidth: 2.5, borderColor: colors.night, transform: [{ rotate: "-45deg" }] }} />
+            </View>
+          </PopIn>
+        )}
+      </Animated.View>
+    </PressScale>
+  );
+}
+
 function Options({ q, picks, typed, onPick, onType }: { q: Question; picks: string[]; typed: string; onPick: (label: string) => void; onType: (text: string) => void }) {
   return (
     <View style={{ gap: 8 }}>
@@ -44,27 +88,11 @@ function Options({ q, picks, typed, onPick, onType }: { q: Question; picks: stri
       <Txt variant="heading" tone="white">
         {q.question}
       </Txt>
-      {q.options.map((o) => {
-        const on = picks.includes(o.label) && !typed.trim();
-        return (
-          <Pressable
-            key={o.label}
-            accessibilityRole={q.multiSelect ? "checkbox" : "radio"}
-            accessibilityState={{ selected: on, checked: on }}
-            onPress={() => onPick(o.label)}
-            style={{ borderRadius: radius.inner, borderWidth: 1.5, borderColor: on ? colors.hi : "rgba(255,255,255,0.18)", backgroundColor: on ? "rgba(255,194,26,0.14)" : "transparent", padding: 12, minHeight: 56 }}
-          >
-            <Txt variant="body" tone="white" style={{ fontWeight: "600" }}>
-              {o.label}
-            </Txt>
-            {!!o.description && (
-              <Txt variant="small" tone="night">
-                {o.description}
-              </Txt>
-            )}
-          </Pressable>
-        );
-      })}
+      {q.options.map((o, i) => (
+        <FadeSlideIn key={o.label} from={12} delay={260 + i * 60}>
+          <OptionCard on={picks.includes(o.label) && !typed.trim()} multi={!!q.multiSelect} label={o.label} description={o.description} onPress={() => onPick(o.label)} />
+        </FadeSlideIn>
+      ))}
       <TextInput
         accessibilityLabel="Something else"
         value={typed}
@@ -131,6 +159,9 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
     try {
       await controller.sync.answer(slot, requestId, allow, withAnswers);
       setOutcome({ kind: "done", allowed: allow });
+      // The swipe buzzes for itself; the rest say what it came to.
+      if (!allow) buzz("warning");
+      else if (withAnswers) buzz("success");
     } catch (e) {
       setOutcome({ kind: "failed", why: (e as Error).message });
     }
@@ -148,25 +179,36 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
     <View style={{ flex: 1, backgroundColor: colors.night, paddingTop: insets.top + 56, paddingBottom: Math.max(insets.bottom, 20), paddingHorizontal: 22 }}>
       <StatusBar style="light" />
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 12, paddingBottom: 16 }}>
-        <Tag>{view.tag}</Tag>
-        <Txt variant="title" tone="white" accessibilityRole="header">
-          {view.title}
-        </Txt>
-        <Txt variant="body" tone="night">
-          {chat?.title ? `${chat.title}${chat.project ? `, in ${chat.project}` : ""}` : "A chat on your Mac"}
-        </Txt>
+        {/* The parts of the decision arrive one after another as the screen rises. */}
+        <FadeSlideIn from={10} delay={80} style={{ alignSelf: "flex-start" }}>
+          <Tag>{view.tag}</Tag>
+        </FadeSlideIn>
+        <FadeSlideIn from={14} delay={130}>
+          <Txt variant="title" tone="white" accessibilityRole="header">
+            {view.title}
+          </Txt>
+        </FadeSlideIn>
+        <FadeSlideIn from={12} delay={180}>
+          <Txt variant="body" tone="night">
+            {chat?.title ? `${chat.title}${chat.project ? `, in ${chat.project}` : ""}` : "A chat on your Mac"}
+          </Txt>
+        </FadeSlideIn>
 
         {view.kind === "allow" && view.detail && (
-          <View style={{ backgroundColor: colors.nightRaised, borderRadius: radius.inner, padding: 14, marginTop: 6 }}>
-            <Txt variant="mono" tone="white" selectable>
-              {view.detail}
-            </Txt>
-          </View>
+          <FadeSlideIn from={14} delay={240}>
+            <View style={{ backgroundColor: colors.nightRaised, borderRadius: radius.inner, padding: 14, marginTop: 6 }}>
+              <Txt variant="mono" tone="white" selectable>
+                {view.detail}
+              </Txt>
+            </View>
+          </FadeSlideIn>
         )}
         {view.kind === "allow" && (
-          <Txt variant="small" tone="night">
-            This runs on <Txt variant="small" style={{ color: colors.hi, fontWeight: "700" }}>your Mac</Txt>, not this phone.
-          </Txt>
+          <FadeSlideIn from={10} delay={300}>
+            <Txt variant="small" tone="night">
+              This runs on <Txt variant="small" style={{ color: colors.hi, fontWeight: "700" }}>your Mac</Txt>, not this phone.
+            </Txt>
+          </FadeSlideIn>
         )}
         {view.kind === "question" && view.questions.map((q) => <Options key={q.question} q={q} picks={picks[q.question] ?? []} typed={typed[q.question] ?? ""} onPick={(l) => toggle(q, l)} onType={(t) => setTyped((s) => ({ ...s, [q.question]: t }))} />)}
       </ScrollView>
@@ -197,10 +239,17 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
           </View>
         ) : (
           <View style={{ gap: 12 }}>
-            {!busy && <SwipeToAllow label={approval ? "Swipe to approve" : "Swipe to allow"} onAllow={() => answer(true)} />}
+            {/* It stays up while the answer goes, and shows it was allowed (it can't be dragged again). */}
+            {/* A failed answer brings a fresh one back (the key), not the one that looks allowed. */}
+            <SwipeToAllow key={outcome.kind === "failed" ? "again" : "first"} label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => answer(true)} />
             <Button label={approval ? "Don't approve" : "Deny"} kind="night-stop" disabled={busy} onPress={() => answer(false)} style={{ backgroundColor: "transparent" }} />
           </View>
         )
+      ) : outcome.kind === "done" && outcome.allowed && view.kind !== "question" ? (
+        <View style={{ gap: 12 }}>
+          <SwipeToAllow key="first" label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => {}} />
+          <Button label="Done" kind="night-ghost" onPress={onClose} />
+        </View>
       ) : (
         <Button label="Done" kind="night-ghost" onPress={onClose} />
       )}

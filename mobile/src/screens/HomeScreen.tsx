@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Platform, Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { Animated, Platform, RefreshControl, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
 import { Button, Tag, Tile, Txt } from "../ui/components";
-import { FadeSlideIn } from "../ui/motion";
+import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
 import { colors, radius, shadow, space } from "../ui/theme";
 import { cards, headline, rows, tileColors, type Card, type Row } from "../view/home";
 
@@ -64,11 +64,13 @@ function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomePr
   );
 }
 
-function ChatRow({ row, onPress }: { row: Row; onPress: () => void }) {
+function ChatRow({ row, index, onPress }: { row: Row; index: number; onPress: () => void }) {
   const [bg, fg] = tileColors(row.title);
   const status = row.status === "needs_you" ? ", needs you" : row.status === "working" ? ", working" : row.status === "asleep" ? ", asleep" : row.status === "ended" ? ", stopped" : "";
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={`${row.title}${row.project ? `, ${row.project}` : ""}${status}`} onPress={onPress} style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: space.xl, paddingVertical: 9, minHeight: 56, opacity: pressed ? 0.7 : row.status === "asleep" ? 0.7 : 1 })}>
+    // The rows come in one after the other when Home opens (and a new chat comes in alone); a press gives under the finger.
+    <FadeSlideIn from={14} delay={Math.min(index, 8) * 45 + 120}>
+    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${row.project ? `, ${row.project}` : ""}${status}`} onPress={onPress} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: space.xl, paddingVertical: 9, minHeight: 56 }}>
       <Tile letter={row.initial} bg={bg} fg={fg} />
       <View style={{ flex: 1 }}>
         <Txt variant="body" numberOfLines={1} style={{ fontWeight: "600" }}>
@@ -84,13 +86,14 @@ function ChatRow({ row, onPress }: { row: Row; onPress: () => void }) {
         <Working />
       ) : (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          {row.status === "needs_you" && <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.hi }} />}
+          {row.status === "needs_you" && <PulseDot color={colors.hi} />}
           <Txt variant="tiny" tone="ink3">
             {row.note}
           </Txt>
         </View>
       )}
-    </Pressable>
+    </PressScale>
+    </FadeSlideIn>
   );
 }
 
@@ -123,12 +126,12 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose }: HomeP
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       <ScrollView contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 96 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: space.xl }}>
-          <Pressable accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected` : "Your Mac"} onPress={onOpenMac} hitSlop={10} style={{ flexDirection: "row", alignItems: "center", gap: 6, minHeight: 32 }}>
-            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: macName ? colors.go : colors.ink3 }} />
+          <PressScale accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected` : "Your Mac"} onPress={onOpenMac} hitSlop={10} haptic="select" scaleTo={0.94} style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 32 }}>
+            {macName ? <PulseDot color={colors.go} size={8} ms={2600} /> : <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ink3 }} />}
             <Txt variant="small" tone="ink2">
               {macName ?? "Your Mac"}
             </Txt>
-          </Pressable>
+          </PressScale>
         </View>
         <View accessibilityRole="header" style={{ paddingHorizontal: space.xl, paddingTop: 14, paddingBottom: 16 }}>
           <Txt variant="headline">{head.big}</Txt>
@@ -154,15 +157,15 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose }: HomeP
             No chats are open on your Mac. Start one in Lantern and it shows up here.
           </Txt>
         ) : (
-          list.map((r) => <ChatRow key={r.slot} row={r} onPress={() => onOpenChat(r.slot)} />)
+          list.map((r, i) => <ChatRow key={r.slot} row={r} index={i} onPress={() => onOpenChat(r.slot)} />)
         )}
       </ScrollView>
       {Platform.OS === "android" && list.length > 0 && (
-        <Pressable accessibilityRole="button" accessibilityLabel="Message a chat" onPress={onCompose} style={[{ position: "absolute", right: 18, bottom: insets.bottom + 18, backgroundColor: colors.ink, borderRadius: 18, paddingHorizontal: 18, minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8 }, shadow.float]}>
+        <PressScale accessibilityRole="button" accessibilityLabel="Message a chat" onPress={onCompose} scaleTo={0.92} style={[{ position: "absolute", right: 18, bottom: insets.bottom + 18, backgroundColor: colors.ink, borderRadius: 18, paddingHorizontal: 18, minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8 }, shadow.float]}>
           <Txt variant="body" tone="white" style={{ fontWeight: "700" }}>
             + Message a chat
           </Txt>
-        </Pressable>
+        </PressScale>
       )}
     </View>
   );

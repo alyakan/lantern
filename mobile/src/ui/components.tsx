@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { Pressable, Text, View, type StyleProp, type TextProps, type ViewStyle } from "react-native";
+import { Text, View, type StyleProp, type TextProps, type ViewStyle } from "react-native";
+import { PressScale } from "./motion";
 import { colors, MIN_TARGET, radius, space, type as scale, type Variant } from "./theme";
 
 /** Text in the type scale. Ink by default; `tone` picks another of the palette's. */
@@ -15,19 +16,20 @@ export function Button({ label, onPress, kind = "ink", disabled, style, accessib
   const bg = { ink: colors.ink, ghost: colors.paper, go: colors.go, "night-stop": "transparent", "night-ghost": colors.nightRaised }[kind];
   const fg = kind === "ink" || kind === "go" ? "white" : kind === "night-stop" ? "night-stop" : kind === "night-ghost" ? "white" : "ink";
   return (
-    <Pressable
+    <PressScale
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint={accessibilityHint}
       accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [{ minHeight: MIN_TARGET, borderRadius: radius.inner, paddingHorizontal: space.lg, alignItems: "center", justifyContent: "center", backgroundColor: bg, opacity: disabled ? 0.4 : pressed ? 0.8 : 1 }, style]}
+      opacity={disabled ? 0.4 : 1}
+      style={[{ minHeight: MIN_TARGET, borderRadius: radius.inner, paddingHorizontal: space.lg, alignItems: "center", justifyContent: "center", backgroundColor: bg }, style]}
     >
       <Txt variant="body" tone={fg} style={{ fontWeight: "700" }}>
         {label}
       </Txt>
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -54,9 +56,9 @@ export function Chip({ children, tone = "plain", onPress }: { children: ReactNod
   );
   if (!onPress) return content;
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} hitSlop={8}>
+    <PressScale accessibilityRole="button" onPress={onPress} hitSlop={8} haptic="select" scaleTo={0.93}>
       {content}
-    </Pressable>
+    </PressScale>
   );
 }
 

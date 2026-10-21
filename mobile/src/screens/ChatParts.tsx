@@ -1,9 +1,10 @@
-import { memo, useEffect, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, ScrollView, TextInput, View } from "react-native";
+import { memo, useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Animated, Modal, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
 import { Button, Chip, Tag, Txt } from "../ui/components";
 import { Markdown } from "../ui/Markdown";
+import { bounce, buzz, PopIn, PressScale, skips } from "../ui/motion";
 import { colors, fonts, radius, shadow, space } from "../ui/theme";
 import { promptView } from "../view/prompts";
 import { turnLine, type Row, type StepChip } from "../view/timeline";
@@ -115,6 +116,24 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview }: { item:
     );
   }
   const text = item.state === "withdrawn" ? "Claude stopped asking" : `${item.state === "allowed" ? (view.kind === "question" ? "Answered" : "Allowed") : view.kind === "question" ? "Declined" : "Denied"} ${answeredBy(item.by, me)}`.trim();
+  // A question this phone answered says with what, as a chip beneath it: the answer itself, not how it was sent.
+  if (item.answer && item.state === "allowed") {
+    return (
+      <View style={{ paddingHorizontal: space.lg, paddingTop: 10, alignItems: "flex-start", gap: 4 }}>
+        <Txt variant="small" tone="ink2">
+          {view.title.replace(/\?$/, "")}
+        </Txt>
+        <PopIn>
+          <View style={{ backgroundColor: colors.card, borderColor: colors.go, borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View accessibilityElementsHidden style={{ width: 10, height: 6, marginTop: -2, borderLeftWidth: 2, borderBottomWidth: 2, borderColor: colors.go, transform: [{ rotate: "-45deg" }] }} />
+            <Txt variant="small" style={{ fontWeight: "700" }}>
+              {item.answer}
+            </Txt>
+          </View>
+        </PopIn>
+      </View>
+    );
+  }
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>
       <Txt variant="small" tone="ink2">
@@ -168,23 +187,60 @@ export function Composer({ onSend, disabled, placeholder = "Message Claude" }: {
           editable={!disabled}
           style={{ flex: 1, maxHeight: 120, minHeight: 36, fontSize: 15, color: colors.ink, paddingTop: 8, paddingBottom: 8 }}
         />
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Send"
-          accessibilityState={{ disabled: !ready }}
-          disabled={!ready}
+        <SendButton
+          ready={ready}
           onPress={() => {
             onSend(text.trim());
             setText("");
           }}
-          style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: ready ? colors.cobalt : colors.rule, alignItems: "center", justifyContent: "center" }}
-        >
-          <Txt variant="heading" tone="white">
-            ↑
-          </Txt>
-        </Pressable>
+        />
       </View>
     </View>
+  );
+}
+
+/**
+ * The send button: grey until there is something to send, then it takes its colour with a little spring; pressing it
+ * sends the arrow up and out, and a fresh one rises into place.
+ */
+function SendButton({ ready, onPress }: { ready: boolean; onPress: () => void }) {
+  const tint = useRef(new Animated.Value(ready ? 1 : 0)).current;
+  const spring = useRef(new Animated.Value(1)).current;
+  const fly = useRef(new Animated.Value(0)).current;
+  const first = useRef(true);
+  useEffect(() => {
+    if (skips()) tint.setValue(ready ? 1 : 0);
+    else Animated.timing(tint, { toValue: ready ? 1 : 0, duration: 180, useNativeDriver: false }).start();
+    // Becoming ready is a small event: the button pops.
+    if (!first.current && ready) {
+      spring.setValue(0.8);
+      bounce(spring, 1, { bounciness: 18 });
+    }
+    first.current = false;
+  }, [ready, tint, spring]);
+  const send = () => {
+    buzz("light");
+    if (!skips()) {
+      Animated.sequence([
+        Animated.timing(fly, { toValue: 1, duration: 130, useNativeDriver: true }),
+        Animated.timing(fly, { toValue: -1, duration: 0, useNativeDriver: true }),
+        Animated.timing(fly, { toValue: 0, duration: 200, useNativeDriver: true }),
+      ]).start();
+    }
+    onPress();
+  };
+  return (
+    <Animated.View style={{ transform: [{ scale: spring }] }}>
+      <PressScale accessibilityRole="button" accessibilityLabel="Send" accessibilityState={{ disabled: !ready }} disabled={!ready} onPress={send} haptic="none" scaleTo={0.88} style={{ width: 40, height: 40, borderRadius: 20, overflow: "hidden" }}>
+        <Animated.View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: tint.interpolate({ inputRange: [0, 1], outputRange: [colors.rule, colors.cobalt] }) }}>
+          <Animated.View style={{ opacity: fly.interpolate({ inputRange: [-1, 0, 1], outputRange: [0, 1, 0] }), transform: [{ translateY: fly.interpolate({ inputRange: [-1, 0, 1], outputRange: [22, 0, -22] }) }] }}>
+            <Txt variant="heading" tone="white">
+              ↑
+            </Txt>
+          </Animated.View>
+        </Animated.View>
+      </PressScale>
+    </Animated.View>
   );
 }
 

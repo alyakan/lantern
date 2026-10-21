@@ -94,6 +94,41 @@ describe("the phone's sync", () => {
     expect(s.asked.filter((r) => r.op === "list_waiting").length).toBe(before + 2);
   });
 
+  it("keeps what a question was answered with, once the Mac has taken it, joined for a multi-select", async () => {
+    const { sync, frame } = rig();
+    const s = fakeSession(7);
+    sync.onSession(s.session);
+    await settle();
+    sync.onPushed({ type: "event", slot: "a", seq: 1, event: { kind: "permission_requested", request_id: "q1", tool_name: "AskUserQuestion", input: {} } });
+    frame();
+    await sync.answer("a", "q1", true, { "Which channel?": "Stable", "Which tests?": "Unit, Integration" });
+    frame();
+    expect(sync.getState().views.a.items[0]).toMatchObject({ kind: "prompt", answer: "Stable, Unit, Integration" });
+  });
+
+  it("doesn't keep an answer the Mac refused as something answered with", async () => {
+    const { sync, frame } = rig();
+    const s = fakeSession(7, {}, { answer: "That was answered already." });
+    sync.onSession(s.session);
+    await settle();
+    sync.onPushed({ type: "event", slot: "a", seq: 1, event: { kind: "permission_requested", request_id: "q1", tool_name: "AskUserQuestion", input: {} } });
+    frame();
+    await expect(sync.answer("a", "q1", true, { "Which?": "Dark" })).rejects.toThrow("answered already");
+    frame();
+    expect(sync.getState().views.a.items[0]).not.toHaveProperty("answer");
+  });
+
+  it("doesn't call a declined question answered with anything", async () => {
+    const { sync, frame } = rig();
+    sync.onSession(fakeSession(7).session);
+    await settle();
+    sync.onPushed({ type: "event", slot: "a", seq: 1, event: { kind: "permission_requested", request_id: "q1", tool_name: "AskUserQuestion", input: {} } });
+    frame();
+    await sync.answer("a", "q1", false, { "Which?": "Dark" });
+    frame();
+    expect(sync.getState().views.a.items[0]).not.toHaveProperty("answer");
+  });
+
   it("loads earlier turns when there are some, and says so when not connected", async () => {
     const { sync, frame } = rig();
     await expect(sync.wake("a")).rejects.toThrow("Not connected");

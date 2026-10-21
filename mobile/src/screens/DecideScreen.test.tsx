@@ -51,6 +51,27 @@ describe("deciding", () => {
     expect(asked.filter((r) => r.op === "answer")).toHaveLength(1);
   });
 
+  it("keeps the swipe on screen once allowed, saying so, with a Done beside it instead of Deny", async () => {
+    await decide();
+    await act(async () => activate());
+    await waitFor(() => expect(screen.getByText("Allowed.")).toBeTruthy());
+    expect(screen.getByLabelText("Allowed")).toBeTruthy();
+    expect(screen.queryByLabelText("Swipe to allow")).toBeNull();
+    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Deny" })).toBeNull();
+  });
+
+  it("brings a fresh swipe back when the answer failed, not one that looks allowed", async () => {
+    await decide(push, { answer: new Error("That was answered already, or Claude stopped asking.") });
+    await act(async () => activate());
+    await waitFor(() => expect(screen.getByText("That was answered already, or Claude stopped asking.")).toBeTruthy());
+    expect(screen.getByLabelText("Swipe to allow")).toBeTruthy();
+    expect(screen.queryByLabelText("Allowed")).toBeNull();
+    // And it can be tried again.
+    await act(async () => activate(screen.getByLabelText("Swipe to allow")));
+    await waitFor(() => expect(screen.getAllByText("That was answered already, or Claude stopped asking.").length).toBeGreaterThan(0));
+  });
+
   it("denies with one tap", async () => {
     const { lastOf } = await decide();
     await fireEvent.press(screen.getByRole("button", { name: "Deny" }));

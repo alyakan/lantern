@@ -35,6 +35,22 @@ fn user(text: &str, at: u64) -> UiEvent {
     UiEvent::UserText { text: text.into(), at: Some(at), sent_by: None }
 }
 
+/// What Claude says once what it asked is answered, as a person would say it (not the answers' JSON).
+fn in_words(allow: bool, updated_input: Option<&serde_json::Value>) -> String {
+    match updated_input {
+        Some(input) => {
+            let chosen: Vec<&str> = input["answers"].as_object().map(|a| a.values().filter_map(|v| v.as_str()).collect()).unwrap_or_default();
+            if chosen.is_empty() {
+                "Thanks, that settles it.".into()
+            } else {
+                format!("Thanks, going with {}.", chosen.join(" and "))
+            }
+        }
+        None if allow => "Allowed, carrying on.".into(),
+        None => "Understood, I won't do that.".into(),
+    }
+}
+
 fn said(block: &str, text: &str) -> UiEvent {
     UiEvent::AssistantText { parent: None, block_id: block.into(), text: text.into() }
 }
@@ -136,8 +152,7 @@ impl Host for FixtureHost {
         drop(pending);
         self.bus.publish(slot, UiEvent::PermissionResolved { request_id: request_id.into(), allow, by: by.into() });
         if self.pending(slot).is_empty() {
-            let answered = updated_input.map_or_else(|| (if allow { "allowed" } else { "denied" }).to_string(), |i| i["answers"].to_string());
-            self.reply(slot, format!("answered {answered}"));
+            self.reply(slot, in_words(allow, updated_input.as_ref()));
         }
         Ok(())
     }
@@ -168,5 +183,22 @@ impl Host for FixtureHost {
 
     fn app_version(&self) -> String {
         "fixture".into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::in_words;
+    use serde_json::json;
+
+    #[test]
+    fn what_claude_says_once_answered_is_a_sentence_not_the_answers_json() {
+        assert_eq!(in_words(true, Some(&json!({"answers": {"Which channel?": "Stable"}}))), "Thanks, going with Stable.");
+        assert_eq!(in_words(true, Some(&json!({"answers": {"a": "Stable", "b": "Beta"}}))), "Thanks, going with Stable and Beta.");
+        assert_eq!(in_words(true, Some(&json!({"answers": {}}))), "Thanks, that settles it.");
+        assert_eq!(in_words(true, None), "Allowed, carrying on.");
+        assert_eq!(in_words(false, None), "Understood, I won't do that.");
+        let said = in_words(true, Some(&json!({"answers": {"Which channel?": "Stable"}})));
+        assert!(!said.contains('{') && !said.contains('"'), "{said}");
     }
 }

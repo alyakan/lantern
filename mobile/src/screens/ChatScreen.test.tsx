@@ -1,9 +1,10 @@
 import "@shopify/flash-list/jestSetup";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import { attachSession } from "../test/fakeSession";
 import { chat, connected, makeController, renderWith } from "../test/render";
 import { ChatScreen } from "./ChatScreen";
+import { PromptRow } from "./ChatParts";
 
 const handlers = () => ({ slot: "a", onBack: jest.fn(), onReview: jest.fn() });
 
@@ -144,6 +145,15 @@ describe("what waits on you, in a chat", () => {
       expect(screen.getByText(`Push the branch: ${words}`)).toBeTruthy();
       await unmount();
     }
+  });
+
+  it("shows what this phone answered a question with, as the answer, not as JSON or only 'answered'", async () => {
+    const item = { kind: "prompt" as const, id: "q1", toolName: "AskUserQuestion", input: { questions: [{ question: "Which channel?", header: "", options: [{ label: "Stable", description: "" }], multiSelect: false }] }, state: "allowed" as const, by: "phone-x", answer: "Stable" };
+    await render(<PromptRow item={item} me="phone-x" onReview={() => {}} />);
+    expect(screen.getByText("Which channel")).toBeTruthy();
+    expect(screen.getByText("Stable")).toBeTruthy();
+    expect(screen.queryByText(/Answered/)).toBeNull();
+    expect(screen.queryByText(/[{}"]/)).toBeNull();
   });
 
   it("says Claude stopped asking when it withdraws", async () => {

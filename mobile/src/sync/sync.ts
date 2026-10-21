@@ -135,6 +135,8 @@ export class Sync {
   async answer(slot: string, requestId: string, allow: boolean, answers: Record<string, string> | null = null, message: string | null = null) {
     try {
       await this.ask({ op: "answer", slot, request_id: requestId, allow, message, answers });
+      const text = allow && answers ? Object.values(answers).filter(Boolean).join(", ") : "";
+      if (text) this.apply({ type: "answered_with", slot, requestId, text });
     } finally {
       void this.refreshWaiting();
     }

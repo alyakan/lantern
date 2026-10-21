@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
 import { Button, Txt } from "../ui/components";
+import { FadeSlideIn, PressScale } from "../ui/motion";
 import { colors, shadow, space } from "../ui/theme";
 import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
@@ -62,31 +63,44 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
   };
   const fail = (e: unknown) => setProblem((e as Error).message);
 
+  // What was in the chat when it finished loading just is; what comes after (a message sent, Claude's words, a prompt)
+  // comes in with a fade and a rise.
+  const known = useRef<Set<string> | null>(null);
+  if (known.current === null && !view.resetting && rows.length > 0) known.current = new Set(rows.map((r) => r.key));
+  const arrives = (key: string) => known.current !== null && !known.current.has(key);
+
   const renderRow = ({ item: row }: { item: Row }) => {
-    switch (row.kind) {
-      case "user":
-        return <UserRow item={row.item} />;
-      case "assistant":
-        return <AssistantRow item={row.item} />;
-      case "page":
-        return <PageRow row={row} answered={answered.has(row.item.id)} onAction={(a) => reply(row.item.id, a)} />;
-      case "steps":
-        return <StepsRow chips={row.chips} onFiles={setFiles} />;
-      case "prompt":
-        return <PromptRow item={row.item} me={me} onReview={() => onReview(row.item.id)} />;
-      case "desktop":
-        return <DesktopRow item={row.item} />;
-      case "turn":
-        return <TurnRow item={row.item} />;
-    }
+    const body = (() => {
+      switch (row.kind) {
+        case "user":
+          return <UserRow item={row.item} />;
+        case "assistant":
+          return <AssistantRow item={row.item} />;
+        case "page":
+          return <PageRow row={row} answered={answered.has(row.item.id)} onAction={(a) => reply(row.item.id, a)} />;
+        case "steps":
+          return <StepsRow chips={row.chips} onFiles={setFiles} />;
+        case "prompt":
+          return <PromptRow item={row.item} me={me} onReview={() => onReview(row.item.id)} />;
+        case "desktop":
+          return <DesktopRow item={row.item} />;
+        case "turn":
+          return <TurnRow item={row.item} />;
+      }
+    })();
+    return (
+      <FadeSlideIn animate={arrives(row.key)} from={row.kind === "user" ? 18 : 12} ms={row.kind === "user" ? 280 : 240}>
+        {body}
+      </FadeSlideIn>
+    );
   };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + 6, paddingHorizontal: 16, paddingBottom: 10 }}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={8} style={[{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }, shadow.float, { shadowOpacity: 0.08 }]}>
+        <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={8} scaleTo={0.88} style={[{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }, shadow.float, { shadowOpacity: 0.08 }]}>
           <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
-        </Pressable>
+        </PressScale>
         <View style={{ flex: 1 }}>
           <Txt variant="heading" numberOfLines={1} accessibilityRole="header">
             {chat?.title?.trim() || "Chat"}
@@ -96,12 +110,14 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           </Txt>
         </View>
         {working && (
-          <Pressable accessibilityRole="button" accessibilityLabel="Stop" onPress={() => sync.interrupt(slot).catch(fail)} hitSlop={8} style={{ height: 40, paddingHorizontal: 14, borderRadius: 20, backgroundColor: colors.ink, flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View style={{ width: 11, height: 11, borderRadius: 2, backgroundColor: colors.white }} />
-            <Txt variant="small" tone="white" style={{ fontWeight: "700" }}>
-              Stop
-            </Txt>
-          </Pressable>
+          <FadeSlideIn from={-6} ms={200}>
+            <PressScale accessibilityRole="button" accessibilityLabel="Stop" onPress={() => sync.interrupt(slot).catch(fail)} hitSlop={8} scaleTo={0.92} style={{ height: 40, paddingHorizontal: 14, borderRadius: 20, backgroundColor: colors.ink, flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <View style={{ width: 11, height: 11, borderRadius: 2, backgroundColor: colors.white }} />
+              <Txt variant="small" tone="white" style={{ fontWeight: "700" }}>
+                Stop
+              </Txt>
+            </PressScale>
+          </FadeSlideIn>
         )}
       </View>
 
