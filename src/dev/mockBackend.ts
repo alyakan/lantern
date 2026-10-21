@@ -4,6 +4,7 @@ import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import type { McpServer, NetworkDetail, NetworkItem, NetworkTx, NetworkView, SkillEntry, UiEvent } from "../types";
 import { version as APP_VERSION } from "../../package.json";
+import dashboardSpec from "../../src-tauri/tests/fixtures/dashboard.spec.json";
 import { TESTO_MAP } from "../lib/testoMap";
 import { DENSE_MAP, DENSE_PARTS } from "../lib/denseMap";
 import type { ReviewCheck } from "../lib/reviewChain";
@@ -1767,6 +1768,12 @@ export function installMockBackend() {
           if (session) session.title = String(a.title);
           return undefined;
         }
+        case "dashboards_list":
+          // The same spec the Rust tests check, plus one file that doesn't check out.
+          return [
+            { file: "staging.json", hash: "mock-staging", spec: dashboardSpec, issues: [] },
+            { file: "broken.json", hash: "mock-broken", spec: null, issues: [{ path: "panels[0].action.command[2]", message: "must be a string (the command is a list of strings, not a shell line)" }] },
+          ];
         case "network_state":
           return mockNetwork();
         case "network_response":

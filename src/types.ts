@@ -477,6 +477,55 @@ export interface NetworkView {
   items: NetworkItem[];
 }
 
+/** A problem found in a dashboard file, where it is (like `panels[0].fields[2].default`; empty for the whole file) and what's wrong. */
+export interface DashboardIssue {
+  path: string;
+  message: string;
+}
+
+export type DashboardFieldKind = "text" | "number" | "select" | "multiselect" | "toggle";
+
+export interface DashboardField {
+  id: string;
+  type: DashboardFieldKind;
+  label?: string;
+  required: boolean;
+  /** A string, number, boolean or list of strings, matching the type. */
+  default?: string | number | boolean | string[];
+  /** Select and multiselect only. */
+  options?: string[];
+  /** Number only. */
+  min?: number;
+  max?: number;
+}
+
+export interface DashboardAction {
+  /** The program, then its arguments; `{field}` stands for that field's value. */
+  command: string[];
+  /** Shown, with the values in, before the command runs. */
+  confirm?: string;
+  output: "json" | "text";
+}
+
+export type DashboardPanel =
+  | { type: "form"; id: string; title?: string; fields: DashboardField[]; action: DashboardAction }
+  /** `of` is the id of the form it belongs to. */
+  | { type: "result" | "history"; id?: string; title?: string; of: string };
+
+export interface DashboardSpec {
+  title: string;
+  panels: DashboardPanel[];
+}
+
+/** One file in a folder's `.lantern/dashboards/`: its checked spec, or why it isn't one. Lantern checks; the UI only renders. */
+export interface Dashboard {
+  file: string;
+  /** SHA-256 of the exact bytes that were checked; what trusting a dashboard pins. */
+  hash: string;
+  spec: DashboardSpec | null;
+  issues: DashboardIssue[];
+}
+
 export type StorageKind = "worktree" | "repo" | "build_output" | "cache" | "simulator" | "download" | "trash";
 /** How safe it is to delete: blocked items hold unsaved work and can't be deleted at all. */
 export type StorageRisk = "safe" | "review" | "blocked";

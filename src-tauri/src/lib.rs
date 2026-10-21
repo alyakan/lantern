@@ -14,6 +14,7 @@ pub mod menu;
 pub mod menu_bar;
 pub mod merge_tests;
 pub mod navigation;
+pub mod dashboard;
 pub mod network;
 pub mod orchestra;
 pub mod permission;
@@ -453,6 +454,12 @@ fn slot_for(app: &AppHandle, state: &AppState, slot: &str) -> Result<Arc<Slot>, 
         })
     }));
     Ok(slot)
+}
+
+/// The folder's dashboards (`.lantern/dashboards/*.json`), each as a checked spec or the issues found in it.
+#[tauri::command]
+async fn dashboards_list(folder: String) -> Result<Vec<dashboard::Dashboard>, String> {
+    tauri::async_runtime::spawn_blocking(move || dashboard::load(std::path::Path::new(&folder))).await.map_err(|e| e.to_string())
 }
 
 /// The Network tab's rows for a folder, with its watches and whether Network Monitor is running.
@@ -2171,6 +2178,7 @@ pub fn run() {
             aside_stop,
             aside_stop_answering,
             orchestra_approve_merge,
+            dashboards_list,
             network_state,
             network_response,
             network_unwatch,
