@@ -131,7 +131,11 @@ pub fn resolve(form: &Form, values: &Values) -> Result<BTreeMap<String, String>,
 
 /// Why a chosen value isn't one of a field's options: for a list a command prints, usually that none has been loaded yet.
 fn not_among(field: &dashboard::Field) -> String {
-    if field.options_from.is_some() && field.options.is_empty() {
+    let depends_on = field.options_from.as_ref().map(|f| f.depends_on.join(" and ")).filter(|d| !d.is_empty());
+    if let (Some(depends_on), true) = (&depends_on, field.options.is_empty()) {
+        // Reload loads only the list for the choice showing in the tab, so for another choice the click is Load options.
+        format!("has no options loaded for this choice yet: choose {depends_on} in the Dashboard tab and press Load options.")
+    } else if field.options_from.is_some() && field.options.is_empty() {
         "has no options loaded yet: press Reload in the Dashboard tab to load them.".into()
     } else if field.kind == Kind::Multiselect {
         "must be a list of its options.".into()
@@ -1347,7 +1351,7 @@ mod tests {
         assert_eq!(preview(json!({ "staging": "7", "addons": ["only_on_7"] })).unwrap().args, ["/bin/echo", "--enable", "only_on_7", "7"]);
         // The addon of staging 7 isn't one on staging 9, whose list nobody has loaded: refused, with how to get it.
         let err = preview(json!({ "staging": "9", "addons": ["approvals"] })).unwrap_err();
-        assert!(err.contains("no options loaded yet"), "{err}");
+        assert!(err.contains("no options loaded for this choice yet") && err.contains("choose staging in the Dashboard tab and press Load options"), "{err}");
         load_for(&s, json!("9")).await.unwrap();
         let err = preview(json!({ "staging": "9", "addons": ["only_on_7"] })).unwrap_err();
         assert!(err.starts_with("addons must be a list of its options"), "{err}");
