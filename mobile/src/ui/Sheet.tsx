@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Animated, Modal, Pressable, StyleSheet, useWindowDimensions, View } from "react-native";
-import { useKeyboardLift } from "./keyboard";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { run } from "./motion";
 import { colors } from "./theme";
 
@@ -10,12 +10,11 @@ const MOST = 0.88;
 /**
  * A bottom sheet over the whole screen. The dark behind it fades in where it is, over the full height (the status bar
  * too), and only the sheet rises: the system's own "slide" would carry the dark up with it. `children` is given `close`,
- * which slides it away first and then calls `onClose`. With the keyboard up the sheet rides on top of it, and the room
- * under the sheet (the keyboard's rounded corners) is the sheet's own colour, `fill`.
+ * which slides it away first and then calls `onClose`. With the keyboard up the sheet rides on top of it, following it
+ * frame by frame, and what shows under the sheet at the keyboard's rounded corners is the sheet's own colour, `fill`.
  */
 export function Sheet({ onClose, fill = colors.card, children }: { onClose: () => void; fill?: string; children: (close: () => void) => ReactNode }) {
   const { height } = useWindowDimensions();
-  const lift = useKeyboardLift();
   const p = useRef(new Animated.Value(0)).current;
   const closing = useRef(false);
   useEffect(() => {
@@ -32,13 +31,15 @@ export function Sheet({ onClose, fill = colors.card, children }: { onClose: () =
         <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: "#00000066", opacity: p }]}>
           <Pressable accessibilityLabel="Close" onPress={close} style={StyleSheet.absoluteFill} />
         </Animated.View>
-        {/* Under the sheet, where the keyboard is: its colour, so no gap shows at the keyboard's corners. */}
-        <Animated.View pointerEvents="none" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: lift, backgroundColor: fill, opacity: p }} />
         {/* Taps above the sheet reach the dark behind it. */}
-        <Animated.View pointerEvents="box-none" style={{ flex: 1, justifyContent: "flex-end", paddingBottom: lift }}>
+        <KeyboardAvoidingView behavior="padding" pointerEvents="box-none" style={{ flex: 1, justifyContent: "flex-end" }}>
           {/* The most it may take is a number: a percentage of a parent with no height of its own cuts the sheet short. */}
-          <Animated.View style={{ maxHeight: height * MOST, flexShrink: 1, transform: [{ translateY: p.interpolate({ inputRange: [0, 1], outputRange: [height, 0] }) }] }}>{children(close)}</Animated.View>
-        </Animated.View>
+          <Animated.View style={{ maxHeight: height * MOST, flexShrink: 1, transform: [{ translateY: p.interpolate({ inputRange: [0, 1], outputRange: [height, 0] }) }] }}>
+            {children(close)}
+            {/* Under the sheet, where the keyboard's rounded corners are: its colour, so there is no gap to see through. */}
+            <View pointerEvents="none" style={{ position: "absolute", top: "100%", left: 0, right: 0, height: 600, backgroundColor: fill }} />
+          </Animated.View>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );

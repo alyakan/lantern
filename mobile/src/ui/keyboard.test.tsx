@@ -1,4 +1,4 @@
-import { Dimensions, Keyboard, Platform, StyleSheet, Text } from "react-native";
+import { Keyboard, Platform, StyleSheet, Text } from "react-native";
 import { act, render, renderHook, screen } from "@testing-library/react-native";
 import { AboveKeyboard, useKeyboardUp } from "./keyboard";
 
@@ -54,35 +54,17 @@ describe("keyboard", () => {
     expect(StyleSheet.flatten(box.props.style)).toMatchObject({ flex: 1, backgroundColor: "red" });
   });
 
-  it("on iOS rides on top of the keyboard as it comes and goes, and paints what is under it in its own colour", async () => {
-    Platform.OS = "ios";
-    const k = fakeKeyboard();
+  it("has the library follow the keyboard, as padding, and paints what is under the content in its own colour", async () => {
     await render(
       <AboveKeyboard style={{ backgroundColor: "red" }}>
         <Text>Inside</Text>
       </AboveKeyboard>,
     );
-    const { height } = Dimensions.get("window");
-    const outer = () => StyleSheet.flatten(screen.getByText("Inside").parent!.parent!.props.style);
-    expect(outer().paddingBottom).toBe(0);
-    await k.emit("keyboardWillChangeFrame", { duration: 250, endCoordinates: { screenY: height - 336, height: 336 } });
-    // The room the keyboard takes is under the content, painted: no gap to see through at the keyboard's rounded corners.
-    expect(outer()).toMatchObject({ paddingBottom: 336, backgroundColor: "red" });
-    await k.emit("keyboardWillChangeFrame", { duration: 250, endCoordinates: { screenY: height, height: 336 } });
-    expect(outer().paddingBottom).toBe(0);
-    k.restore();
-  });
-
-  it("on Android leaves the keyboard to the window, which resizes by itself", async () => {
-    Platform.OS = "android";
-    const k = fakeKeyboard();
-    await render(
-      <AboveKeyboard>
-        <Text>Inside</Text>
-      </AboveKeyboard>,
-    );
-    expect(k.handlers.has("keyboardWillChangeFrame")).toBe(false);
-    k.restore();
+    // The avoiding view (the library's: it follows the keyboard on the native side) owns the room the keyboard takes,
+    // and paints it: no gap to see through at the keyboard's rounded corners.
+    const avoiding = screen.getByText("Inside").parent!.parent!;
+    expect(avoiding.props.behavior).toBe("padding");
+    expect(StyleSheet.flatten(avoiding.props.style)).toMatchObject({ flex: 1, backgroundColor: "red" });
   });
 
   it("keeps its own padding on a view of its own: the avoiding view would replace the bottom one with the keyboard's height", async () => {

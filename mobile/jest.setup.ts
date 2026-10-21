@@ -1,5 +1,6 @@
 // What the screens' tests need from the native side, as nothing: the tests run on Node.
 jest.mock("react-native-safe-area-context", () => require("react-native-safe-area-context/jest/mock").default);
+jest.mock("react-native-keyboard-controller", () => require("react-native-keyboard-controller/jest"));
 jest.mock("expo-haptics", () => ({
   notificationAsync: jest.fn(async () => {}),
   impactAsync: jest.fn(async () => {}),

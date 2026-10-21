@@ -6,6 +6,7 @@ import { useFonts } from "expo-font";
 import * as Linking from "expo-linking";
 import * as SplashScreen from "expo-splash-screen";
 import { BricolageGrotesque_700Bold, BricolageGrotesque_800ExtraBold } from "@expo-google-fonts/bricolage-grotesque";
+import { KeyboardProvider } from "react-native-keyboard-controller";
 import { Controller } from "./src/shell/controller";
 import { Root } from "./src/shell/Root";
 import { zeroconfDiscovery } from "./src/net/discovery";
@@ -76,5 +77,10 @@ export default function App() {
   }, [fontsReady]);
   // Until the headings' font is in, the splash: showing the system font for a moment and then swapping is worse.
   if (!fontsReady) return null;
-  return <Root controller={controller} pendingLink={pendingLink} onClearLink={clearLink} openSlot={openSlot} onOpened={clearSlot} />;
+  // The provider follows the keyboard on the native side, so what rides above it (a chat's message box) keeps pace with it.
+  return (
+    <KeyboardProvider>
+      <Root controller={controller} pendingLink={pendingLink} onClearLink={clearLink} openSlot={openSlot} onOpened={clearSlot} />
+    </KeyboardProvider>
+  );
 }
