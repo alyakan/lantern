@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import spec from "../../src-tauri/tests/fixtures/dashboard.spec.json";
 import type { DashboardAction, DashboardField, DashboardSpec } from "../types";
-import { commandLine, formatDuration, initialState, isScalar, isTable, plain, runStatus, summarizeInputs, tableColumns, toValues } from "./dashboard";
+import { commandLine, formatDuration, formatElapsed, initialState, isScalar, isTable, matching, plain, rowTsv, runStatus, summarizeInputs, tableColumns, tableTsv, toValues } from "./dashboard";
 
 // dashboard.spec.json is what Rust's checker makes of dashboard.input.json (a Rust test fails when it's stale). These tests
 // hold the TypeScript types to the same file: a key added on one side and not the other fails here, either as a type error
@@ -105,5 +105,28 @@ describe("reading a run", () => {
     expect([[], ["a"], [[1]], [null], "x", { a: 1 }].map(isTable)).toEqual([false, false, false, false, false, false]);
     expect(tableColumns([{ a: 1, b: 2, c: 3 }], 2)).toEqual(["a", "b"]);
     expect([null, 1, "a", true, [], {}].map(isScalar)).toEqual([true, true, true, true, false, false]);
+  });
+});
+
+describe("reading and copying a result", () => {
+  it("says how long a run has been going", () => {
+    expect([0, 999, 3200, 59_999, 65_000, 3_725_000].map(formatElapsed)).toEqual(["0 s", "0 s", "3 s", "59 s", "1 min 5 s", "62 min 5 s"]);
+    expect(formatElapsed(-5)).toBe("0 s");
+  });
+
+  it("writes a row and a table as tab-separated lines, with nothing in a cell that would break one", () => {
+    const rows = [{ email: "a@x", note: "line one\nline\ttwo", n: 3, nested: { k: [1] }, gone: null }, { email: "b@x" }];
+    const columns = ["email", "note", "n", "nested", "gone"];
+    expect(rowTsv(rows[0], columns)).toBe('a@x\tline one line two\t3\t{"k":[1]}\t');
+    expect(rowTsv(rows[1], columns)).toBe("b@x\t\t\t\t");
+    expect(tableTsv(rows, columns).split("\n")).toEqual(["email\tnote\tn\tnested\tgone", 'a@x\tline one line two\t3\t{"k":[1]}\t', "b@x\t\t\t\t"]);
+  });
+
+  it("filters options by what they contain, ignoring case and spaces around the query", () => {
+    const options = ["approvals", "form_translations", "manual_form_translations", "sso"];
+    expect(matching(options, "")).toBe(options);
+    expect(matching(options, "  ")).toBe(options);
+    expect(matching(options, " TRANS ")).toEqual(["form_translations", "manual_form_translations"]);
+    expect(matching(options, "zzz")).toEqual([]);
   });
 });

@@ -248,7 +248,8 @@ describe("DashboardTab", () => {
     expect(api.dashboardOptions).not.toHaveBeenCalled();
     await staging("7");
     expect(await screen.findByLabelText("testo_sensors")).toBeInTheDocument();
-    expect(screen.getByText(/Loaded 2m ago by the dashboard's command/)).toBeInTheDocument();
+    expect(screen.getByText(/loaded 2m ago/)).toBeInTheDocument();
+    expect(screen.getByLabelText("1 of 3 selected")).toBeInTheDocument();
     expect(api.dashboardOptions).toHaveBeenCalledTimes(1);
     expect(api.dashboardOptions).toHaveBeenCalledWith("/dep1", "staging.json", "org", "addons", { staging: "7" });
     expect(api.dashboardLoadOptions).not.toHaveBeenCalled();
@@ -467,6 +468,124 @@ describe("DashboardTab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
     await waitFor(() => expect(api.dashboardLoadOptions).toHaveBeenCalledTimes(1));
     expect(api.dashboardLoadOptions).toHaveBeenCalledWith("/dep6", "staging.json", "org", "addons", { staging: "7" });
+  });
+
+  it("lays short fields out two to a row and everything else across the whole row", async () => {
+    load([dash()], state());
+    render(<DashboardTab folder="/layout" refreshKey={0} />);
+    await screen.findByLabelText(/Users/);
+    const cell = (label: RegExp) => screen.getByLabelText(label).closest(".dash-field")!;
+    expect(cell(/Users/)).toHaveClass("dash-half");
+    expect(cell(/Admins/)).toHaveClass("dash-half");
+    expect(screen.getByLabelText("Trial").closest(".dash-field")).toHaveClass("dash-half");
+    expect(cell(/Staging/)).toHaveClass("dash-wide");
+    expect(cell(/Org name/)).toHaveClass("dash-wide");
+    expect(screen.getByRole("group", { name: /Addons on/ })).toHaveClass("dash-wide");
+  });
+
+  /** Twelve addons, as the real list is. */
+  const twelve = ["approvals", "public_api", "sso", "form_translations", "manual_form_translations", "ai_image_description", "trainings", "webhooks", "word_report_template", "global_sections", "testo_sensors", "all_integrations"];
+
+  it("shows a long list as chips with a count, search, and select all / none", async () => {
+    load([dash()], state());
+    vi.mocked(api.dashboardOptions).mockResolvedValue({ options: twelve, loaded_at: Date.now() });
+    render(<DashboardTab folder="/chips" refreshKey={0} />);
+    await staging("7");
+    await screen.findByLabelText("sso");
+    expect(screen.getByLabelText("1 of 12 selected")).toBeInTheDocument();
+    // Search narrows what is shown; selecting acts on what matches.
+    const search = screen.getByRole("searchbox", { name: "Search Addons on" });
+    fireEvent.change(search, { target: { value: "trans" } });
+    expect(screen.getAllByRole("checkbox").map((c) => c.closest("label")?.textContent).filter((t) => t?.includes("translations"))).toEqual(["form_translations", "manual_form_translations"]);
+    expect(screen.queryByLabelText("sso")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Select matches" }));
+    expect(screen.getByLabelText("3 of 12 selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear matches" }));
+    expect(screen.getByLabelText("1 of 12 selected")).toBeInTheDocument();
+    fireEvent.change(search, { target: { value: "zzz" } });
+    expect(screen.getByText("No option matches “zzz”.")).toBeInTheDocument();
+    // Without a search, All and None are all of them.
+    fireEvent.change(search, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(screen.getByLabelText("12 of 12 selected")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "None" }));
+    expect(screen.getByLabelText("0 of 12 selected")).toBeInTheDocument();
+    // The values sent are what the chips say.
+    fireEvent.click(screen.getByLabelText("sso"));
+    fireEvent.click(screen.getByLabelText("testo_sensors"));
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await waitFor(() => expect(api.dashboardPreview).toHaveBeenCalled());
+    expect(vi.mocked(api.dashboardPreview).mock.calls[0][3]).toMatchObject({ addons: ["sso", "testo_sensors"] });
+  });
+
+  it("has no search box for a short list", async () => {
+    load([dash()], state());
+    render(<DashboardTab folder="/short" refreshKey={0} />);
+    await staging("7");
+    await screen.findByLabelText("sso");
+    expect(screen.queryByRole("searchbox")).toBeNull();
+  });
+
+  it("reloads just one list with its own refresh button, not the whole tab", async () => {
+    load([dash()], state());
+    render(<DashboardTab folder="/refresh" refreshKey={0} />);
+    await staging("7");
+    await screen.findByLabelText("sso");
+    const reads = vi.mocked(api.dashboardsList).mock.calls.length;
+    vi.mocked(api.dashboardLoadOptions).mockResolvedValue({ options: ["approvals", "sso", "testo_sensors", "brand_new_addon"], loaded_at: Date.now() });
+    fireEvent.click(screen.getByRole("button", { name: "Reload Addons on" }));
+    expect(await screen.findByLabelText("brand_new_addon")).toBeInTheDocument();
+    expect(api.dashboardLoadOptions).toHaveBeenCalledWith("/refresh", "staging.json", "org", "addons", { staging: "7" });
+    expect(vi.mocked(api.dashboardsList).mock.calls.length).toBe(reads);
+  });
+
+  it("copies a table row, the whole table, and the JSON of a result", async () => {
+    load([dash()], state(), [run()]);
+    render(<DashboardTab folder="/copy" refreshKey={0} />);
+    await screen.findByRole("table", { name: "users" });
+    const write = vi.mocked(navigator.clipboard.writeText);
+    fireEvent.click(screen.getByRole("button", { name: "Copy row 2 of users" }));
+    expect(write).toHaveBeenLastCalledWith("qa-2@example.com\tOther-secret\tuser");
+    fireEvent.click(screen.getByRole("button", { name: "Copy users table" }));
+    expect(write).toHaveBeenLastCalledWith("email\tpassword\trole\nqa-1@example.com\tSup3r-secret\tadmin\nqa-2@example.com\tOther-secret\tuser");
+    fireEvent.click(screen.getByRole("button", { name: "Copy JSON" }));
+    expect(JSON.parse(String(write.mock.calls[write.mock.calls.length - 1]?.[0]))).toMatchObject({ org: { id: 41872 }, users: [{ email: "qa-1@example.com" }, { email: "qa-2@example.com" }] });
+    // Each button that copied says so for a moment.
+    expect(await screen.findAllByText("Copied")).toHaveLength(3);
+  });
+
+  it("shows how long a run has been going once it is a second or more", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    try {
+      load([dash()], state({ running: [{ file: "staging.json", form: "org" }] }));
+      render(<DashboardTab folder="/timer" refreshKey={0} />);
+      expect(await screen.findByRole("button", { name: "Running…" })).toBeDisabled();
+      act(() => void vi.advanceTimersByTime(3200));
+      expect(screen.getByRole("button", { name: "Running… 3 s" })).toBeInTheDocument();
+      act(() => void vi.advanceTimersByTime(62_000));
+      expect(screen.getByRole("button", { name: "Running… 1 min 5 s" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("brings a result into view when a run finishes while the tab is open, but not on the first look", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    // Opened with a result already there: no scrolling.
+    load([dash()], state(), [run({ id: "old" })]);
+    const first = render(<DashboardTab folder="/scroll" refreshKey={0} />);
+    await screen.findByRole("table", { name: "users" });
+    expect(scroll).not.toHaveBeenCalled();
+    first.unmount();
+    // Opened with none, then one finishes.
+    load([dash()], state());
+    render(<DashboardTab folder="/scroll2" refreshKey={0} />);
+    await screen.findByText(/Nothing has run yet/);
+    load([dash()], state(), [run({ id: "new" })]);
+    act(() => changed?.());
+    await screen.findByRole("table", { name: "users" });
+    await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1));
   });
 
   it("picks between several dashboards, by their titles", async () => {

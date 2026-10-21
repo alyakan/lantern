@@ -89,3 +89,28 @@ export function tableColumns(rows: Record<string, unknown>[], max = 12): string[
   for (const row of rows) for (const key of Object.keys(row)) if (!columns.includes(key)) columns.push(key);
   return columns.slice(0, max);
 }
+
+/** How long a run has been going, as the button says it: "12 s", "1 min 5 s". */
+export function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return total < 60 ? `${total} s` : `${Math.floor(total / 60)} min ${total % 60} s`;
+}
+
+/** A cell as a line of text to paste: a nested value as JSON, and nothing in it that would break a tab-separated line. */
+const cellText = (v: unknown): string => (typeof v === "object" && v !== null ? JSON.stringify(v) : String(v ?? "")).replace(/[\t\r\n]+/g, " ");
+
+/** One table row as a tab-separated line, in the columns' order (what a row's Copy puts on the clipboard). */
+export function rowTsv(row: Record<string, unknown>, columns: string[]): string {
+  return columns.map((c) => cellText(row[c])).join("\t");
+}
+
+/** The whole table as tab-separated lines with a header: pastes into a sheet, a ticket or a chat as it looks here. */
+export function tableTsv(rows: Record<string, unknown>[], columns: string[]): string {
+  return [columns.join("\t"), ...rows.map((r) => rowTsv(r, columns))].join("\n");
+}
+
+/** The options whose text contains `query`, ignoring case; all of them for an empty query. */
+export function matching(options: string[], query: string): string[] {
+  const q = query.trim().toLowerCase();
+  return q === "" ? options : options.filter((o) => o.toLowerCase().includes(q));
+}

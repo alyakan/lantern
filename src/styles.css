@@ -1714,20 +1714,42 @@ button.network-row.current { background: var(--bg-active); color: var(--text); }
 .dash-panel > p { margin: 0; color: var(--text-2); line-height: 1.5; overflow-wrap: anywhere; }
 .dash-title { margin: 0; font: 600 calc(12.5px * var(--font-scale)) var(--ui); color: var(--text); overflow-wrap: anywhere; }
 .dash-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.dash-fields { display: flex; flex-direction: column; gap: 8px; }
+.dash-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
+/* Short fields (a number, a toggle) sit two to a row; everything else takes the whole row. In a narrow pane there is one column. */
+.dash-wide { grid-column: 1 / -1; }
+@container (max-width: 380px) {
+  .dash-fields { grid-template-columns: minmax(0, 1fr); }
+  .dash-half { grid-column: 1 / -1; }
+}
 .dash-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; margin: 0; padding: 0; border: none; }
-.dash-field > label, .dash-field > legend { padding: 0; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
-.dash-field input[type="text"], .dash-field input[type="number"], .dash-field select { width: 100%; min-width: 0; height: 26px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: inherit; }
-.dash-field input:focus-visible, .dash-field select:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
-.dash-toggle { flex-direction: row; align-items: center; gap: 6px; color: var(--text-2); }
-.dash-multi { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
-.dash-multi > legend { width: 100%; }
-.dash-option { display: inline-flex; align-items: center; gap: 5px; color: var(--text-2); }
+.dash-label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.dash-label-row > label { padding: 0; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.dash-field input[type="text"], .dash-field input[type="number"], .dash-field input[type="search"], .dash-field select { width: 100%; min-width: 0; height: 26px; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: inherit; }
+.dash-field input:focus-visible, .dash-field select:focus-visible, .dash-field input[type="search"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.dash-toggle { flex-direction: row; align-items: center; gap: 6px; align-self: end; height: 26px; color: var(--text-2); }
+.dash-multi { gap: 6px; }
+.dash-legend { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; margin-bottom: 4px; font-size: calc(11.5px * var(--font-scale)); color: var(--muted-text); }
+.dash-count { padding: 0 7px; border-radius: var(--radius-pill); background: var(--bg-active); font-size: calc(11px * var(--font-scale)); font-variant-numeric: tabular-nums; color: var(--text-2); }
+.dash-meta { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; font-size: calc(11px * var(--font-scale)); color: var(--muted-text); white-space: nowrap; }
+button.ghost.dash-refresh { height: 18px; padding: 0 5px; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
+.dash-chip-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.dash-chip-tools button.ghost { height: 22px; padding: 0 8px; font-size: calc(11.5px * var(--font-scale)); color: var(--text-2); }
+.dash-chip-tools .dash-search { flex: 1 1 120px; width: auto; height: 24px; }
+.dash-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dash-chip { position: relative; display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--field); color: var(--text-2); font: calc(11.5px * var(--font-scale)) var(--mono); user-select: none; }
+/* The real checkbox stays (keyboard, screen readers, clicks), laid over the chip and invisible; the chip shows its state. */
+.dash-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; }
+.dash-chip:hover { background: var(--bg-hover); }
+.dash-chip:has(input:checked) { border-color: var(--accent); background: var(--accent); color: var(--accent-text); }
+.dash-chip:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dash-chip:has(input:disabled) { opacity: 0.55; }
+.dash-chip.dash-stale { border-style: dashed; }
+.dash-chip.dash-stale em { font-style: normal; opacity: 0.85; }
 .dash-required { color: var(--del); }
 .dash-stale em { font-style: normal; color: var(--warn); }
 .dash-options-error { width: 100%; font-size: calc(11.5px * var(--font-scale)); color: var(--del); overflow-wrap: anywhere; }
 .dash-options-error button.ghost { height: 18px; padding: 0 6px; font-size: calc(11px * var(--font-scale)); color: var(--text-2); }
-.dash-actions { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+.dash-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; position: sticky; bottom: 0; z-index: 1; margin: 2px -12px -10px; padding: 8px 12px; border-top: 1px solid var(--line); border-radius: 0 0 var(--radius-md) var(--radius-md); background: var(--bg-subtle); }
 .dash-actions button { height: var(--pill-m); padding: 0 14px; border-radius: var(--radius-pill); }
 .dash-command, .dash-log { margin: 0; padding: 6px 8px; max-height: 280px; overflow: auto; border-radius: var(--radius-inner); background: var(--code-bg); font: calc(11.5px * var(--font-scale)) / 1.5 var(--mono); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .dash-error { color: var(--del); }
@@ -1745,7 +1767,16 @@ button.network-row.current { background: var(--bg-active); color: var(--text); }
 .dash-kv dd { margin: 0; min-width: 0; }
 .dash-items { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
 .dash-table-wrap { overflow-x: auto; }
+.dash-table-tools { display: flex; justify-content: flex-end; margin-bottom: 2px; }
+button.ghost.dash-copy-button { height: 18px; padding: 0 6px; border-radius: var(--radius-chip); font-size: calc(11px * var(--font-scale)); color: var(--muted-text); }
+button.ghost.dash-run-copy { margin-left: auto; }
+.dash-row-copy { text-align: right; white-space: nowrap; padding-right: 0; }
+.dash-row-copy .dash-copy-button { opacity: 0; }
+.dash-table tr:hover .dash-copy-button, .dash-copy-button:focus-visible { opacity: 1; }
+.dash-kv .dash-kv { padding-left: 8px; border-left: 2px solid var(--line); }
 .dash-table { border-collapse: collapse; font-size: calc(11.5px * var(--font-scale)); }
+/* Cells stay on one line (an email or a password broken in two can't be read or checked); a wide table scrolls sideways in its box. */
+.dash-table th, .dash-table td { white-space: nowrap; }
 .dash-table th { text-align: left; padding: 3px 12px 3px 0; font-weight: 500; color: var(--muted-text); border-bottom: 1px solid var(--line); white-space: nowrap; }
 .dash-table td { padding: 3px 12px 3px 0; vertical-align: top; border-bottom: 1px solid var(--line); }
 .dash-scalar { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; }

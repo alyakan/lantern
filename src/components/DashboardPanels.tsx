@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { commandLine, formatDuration, initialState, isScalar, isTable, plain, runStatus, summarizeInputs, tableColumns, toValues, type FormPanel as FormSpec, type FormState } from "../lib/dashboard";
+import { commandLine, formatDuration, formatElapsed, initialState, isScalar, isTable, matching, plain, rowTsv, runStatus, summarizeInputs, tableColumns, tableTsv, toValues, type FormPanel as FormSpec, type FormState } from "../lib/dashboard";
 import { relativeTime } from "../lib/time";
 import type { DashboardField, DashboardPreview, DashboardRun, DashboardRunSummary, DashboardValues } from "../types";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -139,6 +139,16 @@ export function FormPanel({ folder, file, form, running, reload = 0, stamp = 0 }
   const [pending, setPending] = useState(false);
   const busy = pending || running;
   const values = toValues(form.fields, state);
+  // How long it has been going, once that is a second or more (a run's output comes when it ends, so this is the sign it is alive).
+  const [since, setSince] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!busy) return setSince(null);
+    setSince((s) => s ?? Date.now());
+    const tick = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(tick);
+  }, [busy]);
+  const elapsed = busy && since !== null && now - since >= 1000 ? formatElapsed(now - since) : null;
 
   const go = () => {
     setPending(true);
@@ -172,7 +182,7 @@ export function FormPanel({ folder, file, form, running, reload = 0, stamp = 0 }
         ))}
         <div className="dash-actions">
           <button type="submit" className="primary" disabled={busy}>
-            {busy ? "Running…" : "Run"}
+            {busy ? `Running…${elapsed ? ` ${elapsed}` : ""}` : "Run"}
           </button>
           {busy && (
             <button type="button" className="ghost" onClick={() => void api.dashboardStop(folder, file, form.id)}>
@@ -212,7 +222,18 @@ function Field({ id, field, fields, values, source, value, disabled, onChange }:
   const label = field.label ?? field.id;
   const text = typeof value === "string" ? value : "";
   const { state: loaded, load } = useOptions(field, source, dependenciesOf(field, fields, values));
+  const [query, setQuery] = useState("");
   const options = loaded.status === "ready" ? loaded.options : [];
+  // When the list was loaded, and a ↻ that runs the dashboard's command again for this one list.
+  const meta =
+    loaded.status === "ready" && field.optionsFrom ? (
+      <span className="dash-meta">
+        loaded {relativeTime(loaded.loadedAt)}
+        <button type="button" className="ghost dash-refresh" aria-label={`Reload ${label}`} title="Run the dashboard's command again for this list" onClick={load} disabled={disabled}>
+          ↻
+        </button>
+      </span>
+    ) : null;
   // What stands with the options of a field a command fills in: that they are loading, when they were loaded, or why they aren't.
   const note =
     loaded.status === "checking" || loaded.status === "loading" ? (
@@ -233,12 +254,12 @@ function Field({ id, field, fields, values, source, value, disabled, onChange }:
           Retry
         </button>
       </span>
-    ) : field.optionsFrom ? (
-      <span className="tests-note dash-options-age">{loaded.options.length === 0 ? "The command printed no options." : `Loaded ${relativeTime(loaded.loadedAt)} by the dashboard's command. Reload to ask it again.`}</span>
+    ) : field.optionsFrom && loaded.options.length === 0 ? (
+      <span className="tests-note">The command printed no options.</span>
     ) : null;
   if (field.type === "toggle") {
     return (
-      <label className="dash-field dash-toggle">
+      <label className="dash-field dash-half dash-toggle">
         <input type="checkbox" checked={value === true} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
         <span>{label}</span>
       </label>
@@ -246,38 +267,62 @@ function Field({ id, field, fields, values, source, value, disabled, onChange }:
   }
   if (field.type === "multiselect") {
     const chosen = Array.isArray(value) ? value : [];
+    const shown = matching(options, query);
+    const stale = loaded.status === "ready" && field.optionsFrom ? chosen.filter((c) => !options.includes(c)) : [];
+    const picked = chosen.filter((c) => options.includes(c)).length;
     return (
-      <fieldset className="dash-field dash-multi">
-        <legend>{label}</legend>
-        {options.map((o) => (
-          <label key={o} className="dash-option">
-            <input type="checkbox" checked={chosen.includes(o)} disabled={disabled} onChange={(e) => onChange(e.target.checked ? [...chosen, o] : chosen.filter((c) => c !== o))} />
-            <span>{o}</span>
-          </label>
-        ))}
-        {/* A choice the loaded list doesn't have (a default, or one made before the list changed) stays visible, so it can be unticked. */}
-        {loaded.status === "ready" &&
-          field.optionsFrom &&
-          chosen
-            .filter((c) => !options.includes(c))
-            .map((o) => (
-              <label key={o} className="dash-option dash-stale">
-                <input type="checkbox" checked disabled={disabled} onChange={() => onChange(chosen.filter((c) => c !== o))} />
-                <span>
-                  {o} <em>not in the list</em>
-                </span>
-              </label>
-            ))}
+      <fieldset className="dash-field dash-wide dash-multi">
+        <legend className="dash-legend">
+          <span className="dash-legend-name">{label}</span>
+          {options.length > 0 && (
+            <span className="dash-count" aria-label={`${picked} of ${options.length} selected`}>
+              {picked} of {options.length}
+            </span>
+          )}
+          {meta}
+        </legend>
+        {options.length > 1 && (
+          <div className="dash-chip-tools">
+            {options.length > 8 && <input type="search" className="dash-search" aria-label={`Search ${label}`} placeholder="Search…" value={query} disabled={disabled} autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => setQuery(e.target.value)} />}
+            <button type="button" className="ghost" disabled={disabled} onClick={() => onChange([...chosen, ...shown.filter((o) => !chosen.includes(o))])}>
+              {query.trim() ? "Select matches" : "All"}
+            </button>
+            <button type="button" className="ghost" disabled={disabled} onClick={() => onChange(chosen.filter((c) => !shown.includes(c)))}>
+              {query.trim() ? "Clear matches" : "None"}
+            </button>
+          </div>
+        )}
+        <div className="dash-chips">
+          {shown.map((o) => (
+            <label key={o} className="dash-chip" title={o}>
+              <input type="checkbox" checked={chosen.includes(o)} disabled={disabled} onChange={(e) => onChange(e.target.checked ? [...chosen, o] : chosen.filter((c) => c !== o))} />
+              <span>{o}</span>
+            </label>
+          ))}
+          {/* A choice the loaded list doesn't have (a default, or one made before the list changed) stays visible, so it can be unticked. */}
+          {stale.map((o) => (
+            <label key={o} className="dash-chip dash-stale">
+              <input type="checkbox" checked disabled={disabled} onChange={() => onChange(chosen.filter((c) => c !== o))} />
+              <span>
+                {o} <em>not in the list</em>
+              </span>
+            </label>
+          ))}
+        </div>
+        {options.length > 0 && shown.length === 0 && <span className="tests-note">No option matches “{query}”.</span>}
         {note}
       </fieldset>
     );
   }
   return (
-    <div className="dash-field">
-      <label htmlFor={id}>
-        {label}
-        {field.required && <span className="dash-required"> *</span>}
-      </label>
+    <div className={`dash-field ${field.type === "number" ? "dash-half" : "dash-wide"}`}>
+      <div className="dash-label-row">
+        <label htmlFor={id}>
+          {label}
+          {field.required && <span className="dash-required"> *</span>}
+        </label>
+        {meta}
+      </div>
       {field.type === "select" ? (
         <>
           <select id={id} value={text} disabled={disabled || loaded.status !== "ready"} onChange={(e) => onChange(e.target.value)}>
@@ -322,8 +367,16 @@ function useRunDetail(folder: string, id: string | null): DashboardRun | null | 
 export function ResultPanel({ folder, file, formId, title, runs, running }: { folder: string; file: string; formId: string; title?: string; runs: DashboardRunSummary[]; running: boolean }) {
   const latest = runs.find((r) => r.file === file && r.form === formId) ?? null;
   const run = useRunDetail(folder, latest?.id ?? null);
+  // A run that finishes while the tab is open brings its result into view (the form above it is long); the first look doesn't scroll.
+  const section = useRef<HTMLElement>(null);
+  const seen = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const id = latest?.id ?? null;
+    if (seen.current !== undefined && id && id !== seen.current) section.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+    seen.current = id;
+  }, [latest?.id]);
   return (
-    <section className="dash-panel dash-result" aria-label={title ?? "Result"}>
+    <section ref={section} className="dash-panel dash-result" aria-label={title ?? "Result"}>
       <h3 className="dash-title">{title ?? "Result"}</h3>
       {running && <div className="tests-note">Running…</div>}
       {!latest && !running && <div className="tests-note">Nothing has run yet. The result of the last run shows here.</div>}
@@ -346,6 +399,11 @@ export function RunView({ run }: { run: DashboardRun }) {
         <span className="dash-run-meta">
           {relativeTime(run.started_at)} · {formatDuration(run.duration_ms)}
         </span>
+        {run.output !== null && (
+          <CopyButton className="dash-run-copy" label="Copy JSON" text={JSON.stringify(run.output, null, 2)}>
+            Copy JSON
+          </CopyButton>
+        )}
       </div>
       {run.output !== null && <OutputView value={run.output} />}
       {failed && stderr && (
@@ -421,28 +479,55 @@ function Output({ value, depth, label }: { value: unknown; depth: number; label:
 
 function Table({ rows, depth, label }: { rows: Record<string, unknown>[]; depth: number; label: string }) {
   const columns = tableColumns(rows);
+  const shown = rows.slice(0, MAX_ROWS);
   return (
     <div className="dash-table-wrap">
+      <div className="dash-table-tools">
+        <CopyButton label={`Copy ${label} table`} text={tableTsv(shown, columns)}>
+          Copy table
+        </CopyButton>
+      </div>
       <table className="dash-table" aria-label={label}>
         <thead>
           <tr>
             {columns.map((c) => (
               <th key={c}>{c}</th>
             ))}
+            <th aria-hidden />
           </tr>
         </thead>
         <tbody>
-          {rows.slice(0, MAX_ROWS).map((row, i) => (
+          {shown.map((row, i) => (
             <tr key={i}>
               {columns.map((c) => (
                 <td key={c}>{c in row ? <Output value={row[c]} depth={depth + 1} label={c} /> : null}</td>
               ))}
+              <td className="dash-row-copy">
+                <CopyButton label={`Copy row ${i + 1} of ${label}`} text={rowTsv(row, columns)}>
+                  Copy row
+                </CopyButton>
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
       {rows.length > MAX_ROWS && <div className="tests-note">Showing the first {MAX_ROWS} of {rows.length} rows.</div>}
     </div>
+  );
+}
+
+/** A small button that copies `text` and says "Copied" for a moment. */
+function CopyButton({ text, label, className = "", children }: { text: string; label: string; className?: string; children: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = window.setTimeout(() => setCopied(false), 1200);
+    return () => window.clearTimeout(t);
+  }, [copied]);
+  return (
+    <button type="button" className={`ghost dash-copy-button ${className}`} aria-label={label} onClick={() => navigator.clipboard?.writeText(text).then(() => setCopied(true), () => {})}>
+      {copied ? "Copied" : children}
+    </button>
   );
 }
 
