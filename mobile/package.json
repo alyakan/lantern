@@ -1,6 +1,7 @@
 {
   "name": "lantern-mobile",
   "version": "0.1.0",
+  "license": "SEE LICENSE IN LICENSE",
   "main": "index.ts",
   "dependencies": {
     "@expo-google-fonts/bricolage-grotesque": "^0.4.1",

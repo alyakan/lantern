@@ -55,3 +55,7 @@ On the iOS simulator, against `fixture_gateway` (the real Rust gateway behind sc
 - A relay or tailnet transport (the adapter is there, the transport isn't).
 - A Live Activity for a running turn.
 - A real-device pass: camera scanning, the Bonjour permission prompt, push delivery and the swipe-to-allow drag are verified only by tests and the simulator.
+
+## Licence
+
+The rest of this repository is MIT. **`mobile/` is not**: it is source-available under the [PolyForm Noncommercial License 1.0.0](../mobile/LICENSE) (the licence text is the project's official one, with a Required Notice line for the copyright). Anyone may read, run, change and share it for non-commercial use; using it commercially (selling it, or shipping a copy to a store as their own paid or ad-supported app) needs the author's permission. The Mac side of the remote control (`src-tauri/src/remote/`) stays MIT, so anyone can still write a client of their own against the documented protocol. Code taken into `mobile/` from a contributor is under the same licence. A licence is no technical barrier: a clone in a store is a matter for a takedown request, which this licence gives firmer ground than MIT does.
