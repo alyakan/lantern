@@ -38,6 +38,10 @@ export interface ChatView {
   resetting: boolean;
   /** How many events a catch-up covered when this phone had followed the chat before (0: none, or the first time). */
   caughtUp: number;
+  /** Whether the Mac has sent the chat's history yet (what tells an empty chat from one still loading). */
+  loaded: boolean;
+  /** Why asking for the chat's history failed, while it has not come (null: nothing wrong, or not asked). */
+  loadError: string | null;
 }
 
 export interface State {
@@ -50,7 +54,7 @@ export interface State {
 
 export const initialState: State = { chats: [], waiting: [], views: {}, epoch: null };
 
-export const emptyView: ChatView = { items: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0 };
+export const emptyView: ChatView = { items: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
 
 export type Action =
   | { type: "welcome"; epoch: number }
@@ -58,6 +62,9 @@ export type Action =
   | { type: "waiting"; list: Waiting[] }
   | { type: "sending"; slot: string; clientId: string; text: string; at: number }
   | { type: "send_failed"; slot: string; clientId: string; error: string }
+  /** The chat's history was asked for (again), or the asking failed. */
+  | { type: "load_started"; slot: string }
+  | { type: "load_failed"; slot: string; why: string }
   /** What this phone answered a question with, to show beside it afterwards (the Mac's events don't carry it). */
   | { type: "answered_with"; slot: string; requestId: string; text: string }
   | { type: "earlier"; slot: string; events: RemoteEvent[]; hidden: number };
@@ -169,6 +176,15 @@ export function reducer(state: State, action: Action): State {
       const item: Item = { kind: "user", id: `local-${action.clientId}`, text: action.text, at: action.at, sentBy: null, sending: true };
       return { ...state, views: { ...state.views, [action.slot]: { ...view, items: upsert(view.items, item) } } };
     }
+    case "load_started": {
+      const view = state.views[action.slot];
+      if (!view || view.loadError === null) return state;
+      return { ...state, views: { ...state.views, [action.slot]: { ...view, loadError: null } } };
+    }
+    case "load_failed": {
+      const view = state.views[action.slot] ?? emptyView;
+      return { ...state, views: { ...state.views, [action.slot]: { ...view, loadError: action.why } } };
+    }
     case "send_failed": {
       const view = state.views[action.slot];
       if (!view) return state;
@@ -202,7 +218,7 @@ export function reducer(state: State, action: Action): State {
           const next = applyAll(base, msg.events);
           // A chat this phone already followed, started over because it was away too long: say how much it missed.
           const caughtUp = msg.page === 0 ? (view.seq > 0 && msg.seq > view.seq ? msg.seq - view.seq : 0) : view.caughtUp;
-          return { ...state, views: { ...state.views, [msg.slot]: { ...next, seq: msg.seq, hidden: msg.hidden, resetting: !msg.done, caughtUp } } };
+          return { ...state, views: { ...state.views, [msg.slot]: { ...next, seq: msg.seq, hidden: msg.hidden, resetting: !msg.done, caughtUp, loaded: true, loadError: null } } };
         }
       }
     }

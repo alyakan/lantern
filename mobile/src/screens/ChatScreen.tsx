@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, View } from "react-native";
+import { ActivityIndicator, Pressable, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
@@ -180,9 +180,27 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           )
         }
         ListEmptyComponent={
-          <Txt variant="body" tone="ink2" style={{ padding: space.xl }}>
-            {view.resetting || !online ? "Loading this chat…" : "Nothing in this chat yet."}
-          </Txt>
+          // Never a bare "nothing": it is loading (with a spinner), it failed (and says why, with a way to try again), or it is truly empty.
+          view.loadError && !view.loaded && online ? (
+            <View accessibilityRole="alert" style={{ padding: space.xl, gap: 10, alignItems: "flex-start" }}>
+              <Txt variant="heading">Couldn't load this chat</Txt>
+              <Txt variant="small" tone="ink2">
+                {view.loadError}
+              </Txt>
+              <Button label="Try again" kind="ghost" onPress={() => sync.retryLoad(slot)} />
+            </View>
+          ) : !view.loaded || view.resetting || !online ? (
+            <View accessibilityLabel="Loading this chat" style={{ padding: space.xl, flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <ActivityIndicator />
+              <Txt variant="body" tone="ink2">
+                {online ? "Loading this chat…" : "Waiting for your Mac…"}
+              </Txt>
+            </View>
+          ) : (
+            <Txt variant="body" tone="ink2" style={{ padding: space.xl }}>
+              {asleep ? "Nothing to show yet. Wake this chat to pick up where it left off." : "Nothing in this chat yet."}
+            </Txt>
+          )
         }
       />
 

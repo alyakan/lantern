@@ -101,9 +101,16 @@ export class Sync {
   }
 
   private subscribeTo(slot: string) {
+    this.apply({ type: "load_started", slot });
     this.flush();
     const after = this.state.views[slot]?.seq ?? 0;
-    return this.ask({ op: "subscribe", slot, after, epoch: this.state.epoch ?? 0 }).catch(() => {});
+    // A failure is the chat's to show (it has nothing else to show), not swallowed.
+    return this.ask({ op: "subscribe", slot, after, epoch: this.state.epoch ?? 0 }).catch((e: Error) => this.apply({ type: "load_failed", slot, why: e.message || "Couldn't load this chat." }));
+  }
+
+  /** Asks again for a chat whose history didn't come. */
+  retryLoad(slot: string) {
+    if (this.followed.has(slot)) void this.subscribeTo(slot);
   }
 
   async refreshWaiting() {

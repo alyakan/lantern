@@ -129,6 +129,69 @@ describe("a chat", () => {
   });
 });
 
+describe("a chat that has nothing to show yet", () => {
+  const open = async (answers = {}) => {
+    const { controller } = makeController();
+    const session = attachSession(controller, answers);
+    const view = await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()] }, controller);
+    await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+    return { ...view, ...session, controller };
+  };
+
+  it("says it is loading, with a spinner, until the Mac sends the chat", async () => {
+    await open();
+    expect(screen.getByLabelText("Loading this chat")).toBeTruthy();
+    expect(screen.getByText("Loading this chat…")).toBeTruthy();
+    expect(screen.queryByText("Nothing in this chat yet.")).toBeNull();
+  });
+
+  it("says nothing is there only once the Mac has sent a chat with nothing in it", async () => {
+    const { controller } = await open();
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 0, page: 0, done: true, hidden: 0, events: [] } }));
+    expect(screen.getByText("Nothing in this chat yet.")).toBeTruthy();
+    expect(screen.queryByLabelText("Loading this chat")).toBeNull();
+  });
+
+  it("says it is loading while the pages of a long chat are still coming", async () => {
+    const { controller } = await open();
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 0, page: 0, done: false, hidden: 0, events: [] } }));
+    expect(screen.getByLabelText("Loading this chat")).toBeTruthy();
+  });
+
+  it("says why it couldn't be loaded, and asks again when told to", async () => {
+    const { asked } = await open({ subscribe: new Error("That chat isn't open on your Mac any more.") });
+    await waitFor(() => expect(screen.getByText("Couldn't load this chat")).toBeTruthy());
+    expect(screen.getByText("That chat isn't open on your Mac any more.")).toBeTruthy();
+    expect(screen.queryByLabelText("Loading this chat")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(asked.filter((r) => r.op === "subscribe")).toHaveLength(2));
+  });
+
+  it("goes from the error to the chat when a retry works", async () => {
+    const { controller } = await open({ subscribe: new Error("Slow Mac.") });
+    await waitFor(() => expect(screen.getByText("Couldn't load this chat")).toBeTruthy());
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 2, page: 0, done: true, hidden: 0, events: [{ kind: "user_text", text: "Hello there", at: 1, sent_by: "desktop" }] } }));
+    expect(screen.queryByText("Couldn't load this chat")).toBeNull();
+    expect(screen.getByText("Hello there")).toBeTruthy();
+  });
+
+  it("says it is waiting for the Mac, not that it failed, while the phone is not connected", async () => {
+    const { controller } = makeController();
+    await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()], connection: { kind: "offline", reason: "No route to the Mac", retryInMs: 2000 } }, controller);
+    await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+    expect(screen.queryByText("Couldn't load this chat")).toBeNull();
+    expect(screen.getByText("Waiting for your Mac…")).toBeTruthy();
+  });
+
+  it("tells an asleep chat's emptiness from a loading one, and points at waking it", async () => {
+    const { controller } = makeController();
+    attachSession(controller);
+    await renderWith(<ChatScreen {...handlers()} />, { chats: [chat({ status: "asleep" })] }, controller);
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 0, page: 0, done: true, hidden: 0, events: [] } }));
+    expect(screen.getByText("Nothing to show yet. Wake this chat to pick up where it left off.")).toBeTruthy();
+  });
+});
+
 describe("what waits on you, in a chat", () => {
   const asked: RemoteEvent = { kind: "permission_requested", request_id: "p1", tool_name: "Bash", input: { command: "git push", description: "Push the branch" } };
 

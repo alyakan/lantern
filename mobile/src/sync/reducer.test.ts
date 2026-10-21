@@ -22,6 +22,25 @@ const turn: RemoteEvent[] = [
   { kind: "turn_done", is_error: false, result: "done", duration_ms: 3000 },
 ];
 
+describe("whether a chat's history has come", () => {
+  it("is not loaded until the Mac sends it, even when it is empty", () => {
+    expect(emptyView).toMatchObject({ loaded: false, loadError: null });
+    const s = run([reset("a", 0, [])]);
+    expect(s.views.a).toMatchObject({ loaded: true, loadError: null, items: [] });
+  });
+
+  it("keeps why asking failed, until asked again or the history comes", () => {
+    const failed = run([{ type: "load_failed", slot: "a", why: "That chat isn't open." }]);
+    expect(failed.views.a).toMatchObject({ loaded: false, loadError: "That chat isn't open." });
+    expect(run([{ type: "load_started", slot: "a" }], failed).views.a.loadError).toBeNull();
+    expect(run([reset("a", 3, turn)], failed).views.a).toMatchObject({ loaded: true, loadError: null });
+  });
+
+  it("starting to load changes nothing for a chat that has no view yet", () => {
+    expect(run([{ type: "load_started", slot: "a" }])).toBe(initialState);
+  });
+});
+
 describe("a chat, built from its events", () => {
   it("streams text into its block, folds steps with their edits and tests, and ends the turn", () => {
     const s = run(turn.map((e, i) => event("a", i + 1, e)));
