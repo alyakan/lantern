@@ -7,6 +7,7 @@ import type { Request } from "../protocol/generated/Request";
 import type { EarlierPage } from "../protocol/generated/EarlierPage";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { StartedChat } from "../protocol/generated/StartedChat";
+import type { Suggestions } from "../protocol/generated/Suggestions";
 import type { Waiting } from "../protocol/generated/Waiting";
 import type { Pushed, Session } from "../net/session";
 import { initialState, reducer, type Action, type State } from "./reducer";
@@ -22,7 +23,11 @@ const defaultSchedule = (fn: () => void) => (typeof requestAnimationFrame === "f
 let ids = 0;
 const defaultId = () => `m-${Date.now().toString(36)}-${(++ids).toString(36)}`;
 
+/** How long the phone keeps what Claude suggested before it asks the Mac again. */
+export const SUGGESTIONS_KEPT_MS = 10 * 60 * 1000;
+
 export class Sync {
+  private suggested: { at: number; value: Suggestions } | null = null;
   private state: State = initialState;
   private listeners = new Set<() => void>();
   private queue: Action[] = [];
@@ -155,6 +160,20 @@ export class Sync {
   /** The projects a chat may be started in from this phone (those the user already works in on the Mac). */
   projects() {
     return this.ask<RemoteProject[]>({ op: "projects" });
+  }
+
+  /**
+   * What Claude suggests doing next (drafts, from the recent chats). The Mac makes them with a call that costs usage, so
+   * they are kept here for a few minutes too: coming back to Home doesn't ask again. `refresh` asks the Mac for new ones.
+   */
+  async suggest(refresh = false): Promise<Suggestions> {
+    const kept = this.suggested;
+    if (kept && !refresh && this.now() - kept.at < SUGGESTIONS_KEPT_MS) return kept.value;
+    const value = await this.ask<Suggestions>({ op: "suggest", refresh });
+    // Whatever the Mac sends is checked before it is kept or shown.
+    if (!value || !Array.isArray(value.items)) throw new Error("Claude's suggestions didn't come through.");
+    this.suggested = { at: this.now(), value };
+    return value;
   }
 
   /** Starts a chat in a project with a first message: the new chat's slot, once it is open on the Mac (on Ask). */

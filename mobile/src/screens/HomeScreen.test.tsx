@@ -1,6 +1,7 @@
 import { Platform } from "react-native";
-import { fireEvent, screen } from "@testing-library/react-native";
-import { chat, renderWith, waiting } from "../test/render";
+import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { attachSession } from "../test/fakeSession";
+import { chat, makeController, renderWith, waiting } from "../test/render";
 import { HomeScreen } from "./HomeScreen";
 
 const handlers = () => ({ onOpenChat: jest.fn(), onReview: jest.fn(), onOpenMac: jest.fn(), onCompose: jest.fn(), onNewChat: jest.fn() });
@@ -27,6 +28,26 @@ describe("Home", () => {
     expect(h.onReview).toHaveBeenCalledWith("a", "early");
     await fireEvent.press(screen.getByRole("button", { name: "Open chat" }));
     expect(h.onOpenChat).toHaveBeenCalledWith("a");
+  });
+
+  it("suggests what to do next when nothing waits on you, and offers to start something new", async () => {
+    const { controller } = makeController();
+    const { asked } = attachSession(controller, { suggest: { items: [], generated_at: 1 } });
+    const h = handlers();
+    await renderWith(<HomeScreen {...h} />, { chats: [chat()], waiting: [] }, controller);
+    await waitFor(() => expect(screen.getByText("Claude suggests")).toBeTruthy());
+    expect(asked.some((r) => r.op === "suggest")).toBe(true);
+    await fireEvent.press(screen.getByRole("button", { name: "Start something new" }));
+    expect(h.onNewChat).toHaveBeenCalledWith();
+  });
+
+  it("doesn't suggest anything, or ask Claude, while something waits on you: that leads", async () => {
+    const { controller } = makeController();
+    const { asked } = attachSession(controller, { suggest: { items: [], generated_at: 1 } });
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()], waiting: [waiting()] }, controller);
+    expect(screen.queryByText("Claude suggests")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start something new" })).toBeNull();
+    expect(asked.filter((r) => r.op === "suggest")).toEqual([]);
   });
 
   it("says nothing waits, and shows no stack", async () => {

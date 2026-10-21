@@ -61,6 +61,9 @@ pub trait Host: Send + Sync + 'static {
     /// Starts a chat in `folder` (the gateway has checked it is one of `projects`) with `text` as its first message, on
     /// Ask, without changing what the window shows; the new chat's slot once it is open.
     fn new_chat(&self, folder: String, text: String, by: String) -> BoxFut<Result<String, String>>;
+    /// Asks a small model, with no tools and no saved session, and gives its reply (see suggest.rs, which asks for this
+    /// rarely and checks what comes back).
+    fn suggest_reply(&self, prompt: String) -> BoxFut<Result<String, String>>;
     /// A file the chat changed, as a unified diff from the chat's start; any other file is refused.
     fn diff(&self, slot: String, path: String) -> BoxFut<Result<String, String>>;
     /// A page of the chat's transcript: its last turns (`before` None), or the turns before the `before` it hasn't
@@ -100,6 +103,8 @@ pub struct Gateway {
     on_open: Mutex<Option<OnOpen>>,
     /// When each phone started its latest chats (ms), for the limit on how fast it may.
     started: Mutex<HashMap<String, Vec<u64>>>,
+    /// What Claude suggests next, kept and shared by every phone.
+    suggester: super::suggest::Suggester,
 }
 
 /// Why a connection ended before it was in (for tests and logs; the phone just sees it close).
@@ -131,6 +136,7 @@ impl Gateway {
             watchers: Mutex::default(),
             on_open: Mutex::new(None),
             started: Mutex::default(),
+            suggester: Default::default(),
         })
     }
 
@@ -532,6 +538,12 @@ impl Session<'_> {
                 self.chat_known(&slot)?;
                 host.diff(slot, path).await.map(serde_json::Value::String)
             }
+            Request::Suggest { refresh } => {
+                let projects = host.projects().await;
+                let chats = super::suggest::digests(&self.gw.hub);
+                let suggestions = self.gw.suggester.get((self.gw.now)(), &chats, &projects, refresh, |prompt| host.suggest_reply(prompt)).await?;
+                Ok(json(&suggestions))
+            }
             Request::PushToken { token } => self.gw.store.set_push_token(&self.device, &token).map(|()| serde_json::Value::Null),
         }
     }
@@ -617,6 +629,9 @@ pub(crate) mod tests {
         /// The projects it offers for starting a chat in, and the chats it was asked to start (folder, text, by).
         pub projects: Mutex<Vec<(String, String)>>,
         pub started: Mutex<Vec<(String, String, String)>>,
+        /// What the model says next (the first is used first; "[]" when none are left), and what it was asked.
+        pub replies: Mutex<Vec<Result<String, String>>>,
+        pub prompts: Mutex<Vec<String>>,
     }
 
     impl Host for FakeHost {
@@ -646,6 +661,12 @@ pub(crate) mod tests {
         fn new_chat(&self, folder: String, text: String, by: String) -> BoxFut<Result<String, String>> {
             self.started.lock().unwrap().push((folder, text, by));
             Box::pin(async { Ok("s9".to_string()) })
+        }
+        fn suggest_reply(&self, prompt: String) -> BoxFut<Result<String, String>> {
+            self.prompts.lock().unwrap().push(prompt);
+            let mut replies = self.replies.lock().unwrap();
+            let reply = if replies.is_empty() { Ok("[]".to_string()) } else { replies.remove(0) };
+            Box::pin(async move { reply })
         }
         fn diff(&self, _: String, path: String) -> BoxFut<Result<String, String>> {
             Box::pin(async move { if path == "/p/a.rs" { Ok("--- a\n+++ b\n".into()) } else { Err("not changed".into()) } })
@@ -1001,6 +1022,68 @@ pub(crate) mod tests {
         assert!(r.gw.allow_new_chat_at("phone-a", at(10)).is_err());
         assert!(r.gw.allow_new_chat_at("phone-b", at(10)).is_ok(), "another phone has its own count");
         assert!(r.gw.allow_new_chat_at("phone-a", at(NEW_CHAT_WINDOW_MS + 5)).is_ok(), "the earliest ones have aged out");
+    }
+
+    /// A chat "a" with something said in it, for the suggestions to go on.
+    fn talked(r: &Rig) {
+        r.hub.opened("a", "/Users/me/app");
+        r.hub.titled("a", "Release 0.1.53");
+        r.bus.publish("a", UiEvent::UserText { text: "Cut the release".into(), at: Some(1), sent_by: None });
+        r.bus.publish("a", UiEvent::AssistantText { parent: None, block_id: "b".into(), text: "Done: tests pass.".into() });
+    }
+
+    const REPLY: &str = r#"[{"kind":"continue","slot":"a","title":"Write the notes","why":"The release is cut.","message":"Write the release notes."},{"kind":"new","project":"site","title":"Fix the footer","why":"It says 2025.","message":"Update the year."}]"#;
+
+    #[tokio::test]
+    async fn a_phone_is_given_drafts_made_from_the_chats_for_chats_and_projects_that_exist() {
+        let r = rig();
+        talked(&r);
+        *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into()), ("/Users/me/site".into(), "site".into())];
+        *r.host.replies.lock().unwrap() = vec![Ok(REPLY.into())];
+        let (_, mut p) = paired(&r).await;
+        let (ok, err, _) = p.ask(Request::Suggest { refresh: false }).await;
+        assert!(err.is_none(), "{err:?}");
+        let ok = ok.unwrap();
+        assert_eq!(ok["items"][0], json!({"id": "s1", "title": "Write the notes", "why": "The release is cut.", "message": "Write the release notes.", "target": {"kind": "continue", "slot": "a"}}));
+        assert_eq!(ok["items"][1]["target"], json!({"kind": "new_chat", "project": "/Users/me/site", "project_name": "site"}));
+        assert!(ok["generated_at"].as_u64().unwrap() > 0);
+        // The model was told about the chat, what was said in it, and the projects by name: and nothing like a path.
+        let prompts = r.host.prompts.lock().unwrap();
+        assert_eq!(prompts.len(), 1);
+        for must in ["id=a", "project=app", "Release 0.1.53", "Cut the release", "Done: tests pass.", "app, site"] {
+            assert!(prompts[0].contains(must), "{must}: {}", prompts[0]);
+        }
+        assert!(!prompts[0].contains("/Users/me"), "no folder paths go to the model");
+    }
+
+    #[tokio::test]
+    async fn suggestions_are_kept_and_shared_so_phones_asking_again_cost_nothing() {
+        let r = rig();
+        talked(&r);
+        *r.host.replies.lock().unwrap() = vec![Ok(REPLY.into())];
+        let (_, mut one) = paired(&r).await;
+        let first = one.ask(Request::Suggest { refresh: false }).await.0;
+        let (_, mut two) = paired(&r).await;
+        let second = two.ask(Request::Suggest { refresh: false }).await.0;
+        assert_eq!(first, second);
+        // A refresh straight after is not a new call either.
+        assert_eq!(one.ask(Request::Suggest { refresh: true }).await.0, first);
+        assert_eq!(r.host.prompts.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_model_that_fails_is_said_to_the_phone_in_its_words_and_garbage_gives_no_drafts() {
+        let r = rig();
+        talked(&r);
+        *r.host.replies.lock().unwrap() = vec![Err("Claude didn't answer in time.".into())];
+        let (_, mut p) = paired(&r).await;
+        let (ok, err, _) = p.ask(Request::Suggest { refresh: false }).await;
+        assert!(ok.is_none() && err.as_deref() == Some("Claude didn't answer in time."));
+        let r2 = rig();
+        talked(&r2);
+        *r2.host.replies.lock().unwrap() = vec![Ok("I think you should rm -rf everything".into())];
+        let (_, mut q) = paired(&r2).await;
+        assert_eq!(q.ask(Request::Suggest { refresh: false }).await.0.unwrap()["items"], json!([]));
     }
 
     #[tokio::test]

@@ -344,6 +344,8 @@ export const api = {
   onRemoteWake: (cb: (slot: string) => void): Promise<UnlistenFn> => listen<string>("remote-wake", (e) => cb(e.payload)),
   /** A paired phone asked to start a chat in a project: the window checks it, starts it on Ask, and answers with remoteNewChatDone. */
   onRemoteNewChat: (cb: (r: RemoteNewChat) => void): Promise<UnlistenFn> => listen<RemoteNewChat>("remote-new-chat", (e) => cb(e.payload)),
+  /** Where this window found claude, for the calls the backend makes itself (what Claude suggests on a phone). */
+  remoteClaudePath: (path: string) => invoke<void>("remote_claude_path", { path }),
   /** The window's answer to a phone's new chat: the slot it made, or why it didn't. */
   remoteNewChatDone: (id: string, slot: string | null, error: string | null) => invoke<void>("remote_new_chat_done", { id, slot, error }),
   onUiEvent: (cb: (slot: string, event: UiEvent) => void): Promise<UnlistenFn> =>

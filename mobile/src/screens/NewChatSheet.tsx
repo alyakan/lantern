@@ -7,11 +7,20 @@ import { Button, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { colors, radius, shadow, space } from "../ui/theme";
 
+/** What the sheet starts from: a suggestion's draft, the project it names, or the chat it carries on. */
+export interface Draft {
+  text: string;
+  project?: string;
+  continueChat?: { slot: string; title: string };
+}
+
 export interface NewChatProps {
   /** A draft to start from (a suggestion's), which the user may change. */
   initialText?: string;
   /** The project to start in (a suggestion's), when the Mac lists it. */
   initialProject?: string;
+  /** Send the draft to this open chat instead of starting a new one (a suggestion to carry on). */
+  continueChat?: { slot: string; title: string };
   onClose: () => void;
   /** The chat was started on the Mac: its slot. */
   onStarted: (slot: string) => void;
@@ -22,7 +31,7 @@ export interface NewChatProps {
  * runs anything, and the questions come to this phone like any other. Only a project the user already works in on the
  * Mac is offered (the Mac decides, whatever is sent).
  */
-export function NewChatSheet({ initialText = "", initialProject, onClose, onStarted }: NewChatProps) {
+export function NewChatSheet({ initialText = "", initialProject, continueChat, onClose, onStarted }: NewChatProps) {
   const { sync } = useController();
   const insets = useSafeAreaInsets();
   const [projects, setProjects] = useState<RemoteProject[] | null>(null);
@@ -32,6 +41,8 @@ export function NewChatSheet({ initialText = "", initialProject, onClose, onStar
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Carrying on a chat needs no project.
+    if (continueChat) return;
     let live = true;
     sync.projects().then(
       (list) => {
@@ -48,11 +59,17 @@ export function NewChatSheet({ initialText = "", initialProject, onClose, onStar
     return () => {
       live = false;
     };
-  }, [sync]);
+  }, [sync, continueChat]);
 
-  const ready = !!project && text.trim().length > 0 && !busy;
+  const ready = (!!continueChat || !!project) && text.trim().length > 0 && !busy;
   const start = async () => {
-    if (!ready || !project) return;
+    if (!ready) return;
+    if (continueChat) {
+      // A send never throws: it shows in the chat at once, and says there if it didn't go.
+      void sync.send(continueChat.slot, text.trim());
+      return onStarted(continueChat.slot);
+    }
+    if (!project) return;
     setBusy(true);
     setError(null);
     try {
@@ -69,13 +86,13 @@ export function NewChatSheet({ initialText = "", initialProject, onClose, onStar
         <Pressable accessibilityLabel="Close" onPress={onClose} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "#00000066" }} />
         <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 12, maxHeight: "88%" }, shadow.float]}>
           <Txt variant="title" accessibilityRole="header">
-            New chat
+            {continueChat ? "Carry on" : "New chat"}
           </Txt>
           <Txt variant="small" tone="ink2">
-            It starts on Ask: Claude asks you before it runs anything, and its questions come to this phone.
+            {continueChat ? `This goes to “${continueChat.title}”. Read it first: you can change it.` : "It starts on Ask: Claude asks you before it runs anything, and its questions come to this phone."}
           </Txt>
 
-          {projects === null ? (
+          {continueChat ? null : projects === null ? (
             <Txt variant="body" tone="ink2">
               Looking at your projects…
             </Txt>
@@ -114,12 +131,12 @@ export function NewChatSheet({ initialText = "", initialProject, onClose, onStar
             style={{ backgroundColor: colors.paper, borderRadius: 14, padding: 12, minHeight: 96, maxHeight: 200, color: colors.ink, fontSize: 15, textAlignVertical: "top" }}
           />
 
-          {error && projects && projects.length > 0 && (
+          {error && (continueChat || (projects && projects.length > 0)) && (
             <Txt variant="small" tone="stop" accessibilityRole="alert">
               {error}
             </Txt>
           )}
-          <Button label={busy ? "Starting…" : "Start the chat"} disabled={!ready} onPress={() => void start()} />
+          <Button label={continueChat ? "Send" : busy ? "Starting…" : "Start the chat"} disabled={!ready} onPress={() => void start()} />
           <Button label="Cancel" kind="ghost" disabled={busy} onPress={onClose} />
         </View>
       </KeyboardAvoidingView>

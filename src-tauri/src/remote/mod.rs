@@ -11,6 +11,7 @@ pub mod notifier;
 pub mod pairing;
 pub mod protocol;
 pub mod secure;
+pub mod suggest;
 pub mod transport;
 pub mod gateway;
 
@@ -42,6 +43,8 @@ pub struct Remote {
     pub lifecycle: tokio::sync::Mutex<()>,
     /// The gateway, listener and Bonjour while Remote control is on.
     running: std::sync::Mutex<Option<Running>>,
+    /// Where the window found `claude` (it tells the backend), for the calls the backend makes itself (suggestions).
+    claude: std::sync::Mutex<Option<String>>,
     /// Chats a phone asked the window to start, waiting for the window to say which slot it made (see `expect_new_chat`).
     new_chats: std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<Result<String, String>>>>,
 }
@@ -197,7 +200,7 @@ impl Remote {
         bus.tap(Arc::new(move |ev: &BusEvent| keeper.record(ev)));
         let mut e = [0u8; 8];
         let _ = getrandom::fill(&mut e);
-        Self { bus, hub, store: Arc::new(store), keys, running: std::sync::Mutex::new(None), epoch: u64::from_le_bytes(e) & ((1 << 53) - 1), lifecycle: tokio::sync::Mutex::new(()), new_chats: Default::default() }
+        Self { bus, hub, store: Arc::new(store), keys, running: std::sync::Mutex::new(None), epoch: u64::from_le_bytes(e) & ((1 << 53) - 1), lifecycle: tokio::sync::Mutex::new(()), claude: Default::default(), new_chats: Default::default() }
     }
 
     pub fn view(&self) -> RemoteView {
@@ -252,6 +255,19 @@ pub struct WindowChat {
 }
 
 impl Remote {
+    /// The window says where it found `claude`. Only an absolute path is taken.
+    pub fn set_claude(&self, path: &str) -> bool {
+        let ok = path.starts_with('/') && !path.contains('\0') && path.len() <= 4096;
+        if ok {
+            *self.claude.lock().unwrap() = Some(path.to_string());
+        }
+        ok
+    }
+
+    pub fn claude_path(&self) -> Option<String> {
+        self.claude.lock().unwrap().clone()
+    }
+
     /// A phone is starting a chat: an id for the window to answer with, and what that answer will be. Used once.
     pub fn expect_new_chat(&self) -> (String, tokio::sync::oneshot::Receiver<Result<String, String>>) {
         let mut raw = [0u8; 12];
@@ -343,6 +359,20 @@ mod tests {
         assert!(!second_listener.is_finished() && !second_notifier.is_finished(), "the new run's tasks were stopped");
         remote.stop();
         assert!(stopped(&second_notifier).await);
+    }
+
+    #[test]
+    fn the_backend_takes_the_path_to_claude_only_when_it_is_a_plain_absolute_one() {
+        let remote = Remote::default();
+        assert_eq!(remote.claude_path(), None);
+        for bad in ["claude", "./claude", "", "/usr/local/bin/cl\0aude", &format!("/{}", "x".repeat(5000))] {
+            assert!(!remote.set_claude(bad), "{bad:?}");
+        }
+        assert_eq!(remote.claude_path(), None);
+        assert!(remote.set_claude("/Users/me/.local/bin/claude"));
+        assert_eq!(remote.claude_path().as_deref(), Some("/Users/me/.local/bin/claude"));
+        assert!(!remote.set_claude("relative/claude"));
+        assert_eq!(remote.claude_path().as_deref(), Some("/Users/me/.local/bin/claude"), "a bad one changes nothing");
     }
 
     #[test]

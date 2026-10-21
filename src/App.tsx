@@ -710,6 +710,10 @@ export default function App() {
       unlisten.then((f) => f?.());
     };
   }, []);
+  // The backend makes one call of its own to Claude (what to suggest on a phone): it is told where this window found it.
+  useEffect(() => {
+    if (state.claudePath) void api.remoteClaudePath(state.claudePath).catch(() => {});
+  }, [state.claudePath]);
   // A paired phone asked to start a chat in a project (the backend checked it too). It starts on Ask, beside what is on screen:
   // this window doesn't switch to it, and neither the project's Permissions nor the folder to reopen change. The backend is
   // answered with the slot it made, or why not. The ref is read when it happens, so it sees the chats as they are then.

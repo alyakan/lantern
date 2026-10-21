@@ -1,6 +1,6 @@
 import type { Request } from "../protocol/generated/Request";
 import type { Pushed, Session } from "../net/session";
-import { Sync } from "./sync";
+import { Sync, SUGGESTIONS_KEPT_MS } from "./sync";
 
 /** A session that records what it was asked and answers from a table. */
 function fakeSession(epoch: number, answers: Partial<Record<Request["op"], unknown>> = {}, fail: Partial<Record<Request["op"], string>> = {}) {
@@ -127,6 +127,56 @@ describe("the phone's sync", () => {
     await sync.answer("a", "q1", false, { "Which?": "Dark" });
     frame();
     expect(sync.getState().views.a.items[0]).not.toHaveProperty("answer");
+  });
+
+  describe("what Claude suggests", () => {
+    const suggestions = { items: [{ id: "s1", title: "Write the notes", why: "It is cut.", message: "Write the release notes.", target: { kind: "continue", slot: "a" } }], generated_at: 1 };
+    const connected = async (t: { now: number }, answers = {}, fail = {}) => {
+      const sync = new Sync({ schedule: (fn) => fn(), now: () => t.now });
+      const s = fakeSession(7, answers, fail);
+      sync.onSession(s.session);
+      await settle();
+      return { sync, asked: () => s.asked.filter((r) => r.op === "suggest") };
+    };
+
+    it("is asked of the Mac once and kept for a few minutes, and a refresh asks again", async () => {
+      const t = { now: 1_000 };
+      const { sync, asked } = await connected(t, { suggest: suggestions });
+      expect(await sync.suggest()).toEqual(suggestions);
+      await sync.suggest();
+      expect(asked()).toEqual([{ op: "suggest", refresh: false }]);
+      t.now += SUGGESTIONS_KEPT_MS - 1;
+      await sync.suggest();
+      expect(asked()).toHaveLength(1);
+      t.now += 1;
+      await sync.suggest();
+      expect(asked()).toHaveLength(2);
+      await sync.suggest(true);
+      expect(asked()[2]).toEqual({ op: "suggest", refresh: true });
+    });
+
+    it("says why when the Mac couldn't make them, and doesn't keep that", async () => {
+      const t = { now: 1_000 };
+      const { sync, asked } = await connected(t, {}, { suggest: "Claude didn't answer in time." });
+      await expect(sync.suggest()).rejects.toThrow("Claude didn't answer in time.");
+      await expect(sync.suggest()).rejects.toThrow("Claude didn't answer in time.");
+      expect(asked()).toHaveLength(2);
+    });
+
+    it("doesn't take or keep an answer that isn't a list of suggestions", async () => {
+      const t = { now: 1_000 };
+      for (const bad of [null, {}, { items: "none" }, "text"]) {
+        const { sync, asked } = await connected(t, { suggest: bad });
+        await expect(sync.suggest()).rejects.toThrow("didn't come through");
+        await expect(sync.suggest()).rejects.toThrow("didn't come through");
+        expect(asked()).toHaveLength(2);
+      }
+    });
+
+    it("can't be asked while not connected", async () => {
+      const sync = new Sync({ schedule: (fn) => fn() });
+      await expect(sync.suggest()).rejects.toThrow("Not connected");
+    });
   });
 
   it("loads earlier turns when there are some, and says so when not connected", async () => {

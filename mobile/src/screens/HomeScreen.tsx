@@ -6,6 +6,8 @@ import { Button, Tag, Tile, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
 import { colors, radius, shadow, space } from "../ui/theme";
 import { cards, headline, rows, tileColors, type Card, type Row } from "../view/home";
+import type { Draft } from "./NewChatSheet";
+import { Suggestions } from "./Suggestions";
 
 export interface HomeProps {
   onOpenChat: (slot: string) => void;
@@ -15,8 +17,8 @@ export interface HomeProps {
   onOpenMac: () => void;
   /** Android's "Message a chat". */
   onCompose: () => void;
-  /** Starts a chat in a project, with a first message the user writes (or a suggestion's draft). */
-  onNewChat: (draft?: { text: string; project?: string }) => void;
+  /** Starts a chat in a project, with a first message the user writes (or a suggestion's draft); or carries one on. */
+  onNewChat: (draft?: Draft) => void;
 }
 
 /** A thin bar that slides while a chat is working. */
@@ -143,6 +145,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         </View>
 
         {stack.length > 0 && <Deck list={stack} onOpenChat={onOpenChat} onReview={onReview} />}
+        {/* Nothing waits: Claude suggests what to do next, and there is a way to start something new. */}
+        {stack.length === 0 && macName && <Suggestions onPick={onNewChat} onNewChat={() => onNewChat()} />}
         {stack.length > 1 && (
           <Txt variant="small" tone="ink2" style={{ paddingHorizontal: space.xl, paddingTop: 2 }}>
             {stack.length - 1} more after this one

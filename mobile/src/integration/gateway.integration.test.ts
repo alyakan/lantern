@@ -136,6 +136,22 @@ suite("the phone's client against the real gateway", () => {
     p.conn.stop();
   });
 
+  it("gets suggestions through the gateway's own checks: drafts for chats and projects that exist, kept for the next ask", async () => {
+    const p = await paired();
+    const first = await p.sync.suggest();
+    expect(first.items.map((s) => s.title)).toEqual(["Write the 0.1.53 release notes", "Ask for the design's risks", "Check the footer links"]);
+    expect(first.items.map((s) => s.target)).toEqual([
+      { kind: "continue", slot: "release" },
+      { kind: "continue", slot: "design" },
+      { kind: "new_chat", project: "/Users/you/dev/website", project_name: "website" },
+    ]);
+    expect(first.items.every((s) => s.message.length > 0 && s.why.length > 0)).toBe(true);
+    // A second ask is served from what the phone kept, and a refresh straight after from what the Mac kept.
+    expect(await p.sync.suggest()).toBe(first);
+    expect((await p.sync.suggest(true)).items).toEqual(first.items);
+    p.conn.stop();
+  });
+
   it("a code that was already used ends pairing at once: the Mac hangs up, and the other addresses aren't waited for", async () => {
     const first = makePhone(ready);
     await first.conn.pair(offerOf(ready));

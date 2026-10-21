@@ -39,6 +39,13 @@ pub struct FixtureHost {
 /// The projects the fixture offers to start a chat in.
 pub const PROJECTS: [(&str, &str); 2] = [("/Users/you/dev/lantern", "lantern"), ("/Users/you/dev/website", "website")];
 
+/// What the fixture's "Claude" suggests: a chat to carry on, another to carry on, and a new chat in a project.
+pub const SUGGESTIONS: &str = r#"[
+  {"kind":"continue","slot":"release","title":"Write the 0.1.53 release notes","why":"The release branch is cut and only waiting on a push.","message":"Once the push goes through, write the release notes for 0.1.53 from the commits since 0.1.52."},
+  {"kind":"continue","slot":"design","title":"Ask for the design's risks","why":"The gateway design is still being drafted.","message":"List the three biggest risks in this design and how we would test each one."},
+  {"kind":"new","project":"website","title":"Check the footer links","why":"A quick tidy while nothing is waiting on you.","message":"Check every link in the footer and fix the ones that are broken."}
+]"#;
+
 /// A chat's title from the first thing said in it: its first line, cut short.
 fn title_of(text: &str) -> String {
     let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("New chat").trim();
@@ -191,6 +198,15 @@ impl Host for FixtureHost {
         self.bus.publish(&slot, UiEvent::UserText { text: text.clone(), at: Some(now_ms()), sent_by: Some(by) });
         self.reply(&slot, text);
         Box::pin(async move { Ok(slot) })
+    }
+
+    fn suggest_reply(&self, _prompt: String) -> BoxFut<Result<String, String>> {
+        // Claude takes a few seconds to think; here it takes as long as ten of the fixture's pauses.
+        let wait = self.pace * 10;
+        Box::pin(async move {
+            tokio::time::sleep(wait).await;
+            Ok(SUGGESTIONS.to_string())
+        })
     }
 
     fn diff(&self, _slot: String, path: String) -> BoxFut<Result<String, String>> {

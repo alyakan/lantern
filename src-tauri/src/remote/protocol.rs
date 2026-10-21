@@ -213,6 +213,40 @@ pub struct RemoteProject {
     pub name: String,
 }
 
+/// What a suggestion would do if the user chose it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub enum SuggestionTarget {
+    /// Send `message` to an open chat.
+    Continue { slot: String },
+    /// Start a chat in a project (a Projects id) with `message`.
+    NewChat { project: String, project_name: String },
+}
+
+/// One thing Claude suggests doing next. It only ever fills in a draft the user can change: nothing is sent by itself.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct Suggestion {
+    pub id: String,
+    pub title: String,
+    /// One short sentence: why this.
+    pub why: String,
+    /// The draft message, in the user's voice.
+    pub message: String,
+    pub target: SuggestionTarget,
+}
+
+/// The answer to Request::Suggest.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct Suggestions {
+    pub items: Vec<Suggestion>,
+    /// When they were made (ms since the epoch).
+    #[ts(type = "number")]
+    pub generated_at: u64,
+}
+
 /// The chat a phone started, once it is open on the Mac.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../mobile/src/protocol/generated/")]
@@ -272,6 +306,9 @@ pub enum Request {
     /// Starts a chat in `project` (one of Projects' ids) with `text` as its first message. It starts on Ask, whatever the
     /// project's Permissions were, and without switching what the Mac's window shows.
     NewChat { project: String, text: String },
+    /// What Claude would do next, from the recent chats: up to three drafts. Made by a short call to a small model, so
+    /// they are kept for a while and shared by every phone; `refresh` asks again (not within a minute of the last time).
+    Suggest { refresh: bool },
     /// One file's diff from the chat's start, as unified-diff text.
     Diff { slot: String, path: String },
     /// The token Expo's push service delivers this phone's notifications with.

@@ -92,6 +92,31 @@ describe("starting a chat from the phone", () => {
     await waitFor(() => expect(screen.getByText("Not connected to your Mac.")).toBeTruthy());
   });
 
+  describe("carrying on a chat from a suggestion", () => {
+    const carry = { slot: "a", title: "Release 0.1.53" };
+
+    it("sends the draft to that chat without asking for a project, and goes into the chat", async () => {
+      const { asked, lastOf, onStarted } = await open({}, { continueChat: carry, initialText: "Write the release notes." });
+      expect(screen.getByText("Carry on")).toBeTruthy();
+      expect(screen.getByText(/Release 0\.1\.53/)).toBeTruthy();
+      expect(screen.queryByRole("radio")).toBeNull();
+      expect(asked.filter((r) => r.op === "projects")).toEqual([]);
+      await write("Write the release notes, short.");
+      await fireEvent.press(screen.getByRole("button", { name: "Send" }));
+      expect(onStarted).toHaveBeenCalledWith("a");
+      await waitFor(() => expect(lastOf("send")).toMatchObject({ op: "send", slot: "a", text: "Write the release notes, short." }));
+      expect(asked.filter((r) => r.op === "new_chat")).toEqual([]);
+    });
+
+    it("can't send a draft that was emptied", async () => {
+      const { asked } = await open({}, { continueChat: carry, initialText: "Write the notes." });
+      await write("  ");
+      expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+      await fireEvent.press(screen.getByRole("button", { name: "Send" }));
+      expect(asked.filter((r) => r.op === "send")).toEqual([]);
+    });
+  });
+
   it("closes from Cancel", async () => {
     const { onClose } = await open();
     await fireEvent.press(screen.getByRole("button", { name: "Cancel" }));

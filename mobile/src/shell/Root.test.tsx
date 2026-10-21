@@ -110,6 +110,31 @@ describe("starting a chat from Home", () => {
     expect(lastOf("subscribe")).toMatchObject({ slot: "s9" });
   });
 
+  it("carries on a chat from a suggestion: the draft is read first, then sent to that chat, and the chat opens", async () => {
+    const suggest = { generated_at: 1, items: [{ id: "s1", title: "Write the notes", why: "The release is cut.", message: "Write the release notes.", target: { kind: "continue", slot: "a" } }] };
+    const { lastOf } = await open({ chats: [chat()] }, {}, { suggest });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Write the notes. The release is cut." })).toBeTruthy());
+    await press("Write the notes. The release is cut.");
+    // The sheet shows the draft, for reading and changing; nothing has been sent yet.
+    expect(screen.getByLabelText("What to start with").props.value).toBe("Write the release notes.");
+    expect(lastOf("send")).toBeUndefined();
+    await press("Send");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Back" })).toBeTruthy());
+    expect(lastOf("send")).toMatchObject({ slot: "a", text: "Write the release notes." });
+    expect(lastOf("subscribe")).toMatchObject({ slot: "a" });
+  });
+
+  it("starts a new chat from a suggestion in the project it names", async () => {
+    const suggest = { generated_at: 1, items: [{ id: "s1", title: "Check the footer", why: "Quick tidy.", message: "Fix the footer links.", target: { kind: "new_chat", project: "/Users/me/site", project_name: "site" } }] };
+    const projects = [{ id: "/Users/me/lantern", name: "lantern" }, { id: "/Users/me/site", name: "site" }];
+    const { lastOf } = await open({ chats: [chat()] }, {}, { suggest, projects, new_chat: { slot: "s9" } });
+    await waitFor(() => screen.getByRole("button", { name: "Check the footer. Quick tidy." }));
+    await press("Check the footer. Quick tidy.");
+    await waitFor(() => expect(screen.getByRole("radio", { name: "site" }).props.accessibilityState).toMatchObject({ selected: true }));
+    await press("Start the chat");
+    await waitFor(() => expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/site", text: "Fix the footer links." }));
+  });
+
   it("closes the sheet with the system's back button before it leaves anything else", async () => {
     await open({ chats: [chat()] }, {}, answers);
     await press("New chat");

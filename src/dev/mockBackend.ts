@@ -1801,6 +1801,7 @@ export function installMockBackend() {
         case "remote_pair_cancel":
         case "remote_window_chats":
         case "remote_new_chat_done":
+        case "remote_claude_path":
           return undefined;
         case "menubar_hide":
           return undefined;

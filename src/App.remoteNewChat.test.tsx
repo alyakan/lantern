@@ -49,6 +49,16 @@ beforeEach(() => {
   window.history.replaceState({}, "", "/");
 });
 
+describe("what the backend is told for a phone's suggestions", () => {
+  it("is where this window found claude, once it has", async () => {
+    const calls = await launch();
+    await waitFor(() => expect(calls.some(([c]) => c === "remote_claude_path")).toBe(true));
+    const told = calls.find(([c]) => c === "remote_claude_path")?.[1]?.path;
+    expect(typeof told).toBe("string");
+    expect(String(told).startsWith("/")).toBe(true);
+  });
+});
+
 describe("a chat a paired phone starts", () => {
   it("starts in a project the user works in, sends the first message, and says which chat it made", async () => {
     const calls = await launch();

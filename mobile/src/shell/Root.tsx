@@ -5,7 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import { ChatScreen } from "../screens/ChatScreen";
 import { DecideScreen } from "../screens/DecideScreen";
 import { HomeScreen } from "../screens/HomeScreen";
-import { NewChatSheet } from "../screens/NewChatSheet";
+import { NewChatSheet, type Draft } from "../screens/NewChatSheet";
 import { MacSheet, OfflineScreen } from "../screens/OfflineScreen";
 import { ConfirmLink, PairScreen } from "../screens/PairScreen";
 import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
@@ -68,7 +68,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   const [macSheet, setMacSheet] = useState(false);
   const [picking, setPicking] = useState(false);
   // Starting a chat from the phone: the sheet, with a draft when a suggestion made one.
-  const [newChat, setNewChat] = useState<{ text: string; project?: string } | null>(null);
+  const [newChat, setNewChat] = useState<Draft | null>(null);
 
   // A tapped notification opens its chat.
   useEffect(() => {
@@ -128,6 +128,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
         <NewChatSheet
           initialText={newChat.text}
           initialProject={newChat.project}
+          continueChat={newChat.continueChat}
           onClose={() => setNewChat(null)}
           onStarted={(slot) => {
             setNewChat(null);

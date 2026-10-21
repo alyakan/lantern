@@ -356,6 +356,16 @@ impl remote::gateway::Host for RemoteHost {
         Box::pin(async move { request_new_chat(&app, folder, text).await })
     }
 
+    fn suggest_reply(&self, prompt: String) -> remote::gateway::BoxFut<Result<String, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let claude = state.remote.claude_path().ok_or("Lantern doesn't know where Claude is yet. Open a chat in Lantern first.")?;
+            let path_env = login_path(&state).await;
+            remote::suggest::ask_claude(std::path::Path::new(&claude), path_env.as_deref(), &prompt).await
+        })
+    }
+
     fn diff(&self, slot: String, path: String) -> remote::gateway::BoxFut<Result<String, String>> {
         let app = self.app.clone();
         Box::pin(async move {
@@ -1811,6 +1821,12 @@ async fn request_new_chat(app: &AppHandle, folder: String, text: String) -> Resu
     listed.map(|()| slot).map_err(|_| "The chat started, but it isn't listed yet. Look for it in a moment.".to_string())
 }
 
+/// The window says where it found `claude`, for the calls the backend makes by itself (what to suggest on a phone).
+#[tauri::command]
+fn remote_claude_path(state: State<'_, AppState>, path: String) {
+    state.remote.set_claude(&path);
+}
+
 /// The window's answer to `remote-new-chat`: the slot of the chat it started, or why it didn't.
 #[tauri::command]
 fn remote_new_chat_done(state: State<'_, AppState>, id: String, slot: Option<String>, error: Option<String>) {
@@ -2505,6 +2521,7 @@ pub fn run() {
             remote_pair_cancel,
             remote_remove_device,
             remote_new_chat_done,
+            remote_claude_path,
             claude_login,
             sidebar_menu,
             keep_awake,
