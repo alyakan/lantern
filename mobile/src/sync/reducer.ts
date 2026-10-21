@@ -47,12 +47,15 @@ export interface ChatView {
 export interface State {
   chats: RemoteChat[];
   waiting: Waiting[];
+  /** Whether the Mac has sent the chat list, and what waits on this phone, at least once (what tells "none" from "not yet"). */
+  chatsLoaded: boolean;
+  waitingLoaded: boolean;
   views: Record<string, ChatView>;
   /** The Mac's run the numbers in `views` belong to (its Welcome's). */
   epoch: number | null;
 }
 
-export const initialState: State = { chats: [], waiting: [], views: {}, epoch: null };
+export const initialState: State = { chats: [], waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, epoch: null };
 
 export const emptyView: ChatView = { items: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
 
@@ -170,7 +173,7 @@ export function reducer(state: State, action: Action): State {
       if (state.epoch === action.epoch) return state;
       return { ...state, epoch: action.epoch, views: Object.fromEntries(Object.entries(state.views).map(([slot, v]) => [slot, { ...v, seq: 0 }])) };
     case "waiting":
-      return { ...state, waiting: [...action.list].sort((a, b) => a.at - b.at) };
+      return { ...state, waitingLoaded: true, waiting: [...action.list].sort((a, b) => a.at - b.at) };
     case "sending": {
       const view = state.views[action.slot] ?? emptyView;
       const item: Item = { kind: "user", id: `local-${action.clientId}`, text: action.text, at: action.at, sentBy: null, sending: true };
@@ -204,7 +207,7 @@ export function reducer(state: State, action: Action): State {
       const msg = action.msg;
       switch (msg.type) {
         case "chats":
-          return { ...state, chats: msg.chats };
+          return { ...state, chatsLoaded: true, chats: msg.chats };
         case "event": {
           const view = state.views[msg.slot] ?? emptyView;
           const waiting = settleWaiting(state.waiting, msg.slot, msg.event);

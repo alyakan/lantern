@@ -130,6 +130,48 @@ describe("a chat", () => {
   });
 });
 
+describe("while more of a chat is coming", () => {
+  /** A session whose answers to `pending` ops wait until released. */
+  const slow = async (ops: string[], events: RemoteEvent[]) => {
+    const { controller } = makeController();
+    const releases: Record<string, (v: unknown) => void> = {};
+    controller.sync.onSession({
+      welcome: { type: "welcome", protocol: 1, app_version: "t", mac_name: "Mac", epoch: 1 },
+      ask: (r: { op: string }) => (ops.includes(r.op) ? new Promise((res) => (releases[r.op] = res)) : Promise.resolve(null)),
+    } as never);
+    await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()] }, controller);
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "reset", slot: "a", seq: 9, page: 0, done: true, hidden: 3, events } }));
+    return { controller, releases };
+  };
+
+  it("shows the shape of the earlier messages while they come, then they are there", async () => {
+    const { releases } = await slow(["earlier"], turn);
+    await fireEvent.press(screen.getByRole("button", { name: "Show earlier messages (3 turns)" }));
+    expect(screen.getByLabelText("Loading earlier messages")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Show earlier messages/ })).toBeNull();
+    await act(async () => releases.earlier({ events: [{ kind: "user_text", text: "the very first thing", at: 1, sent_by: "desktop" }], hidden: 0 }));
+    await waitFor(() => expect(screen.getByText("the very first thing")).toBeTruthy());
+    expect(screen.queryByLabelText("Loading earlier messages")).toBeNull();
+  });
+
+  it("goes back to the button when the earlier messages couldn't be loaded", async () => {
+    const { controller } = await slow([], turn);
+    controller.sync.onSession({ welcome: { type: "welcome", protocol: 1, app_version: "t", mac_name: "Mac", epoch: 1 }, ask: () => Promise.reject(new Error("The Mac is busy.")) } as never);
+    await fireEvent.press(screen.getByRole("button", { name: "Show earlier messages (3 turns)" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Show earlier messages (3 turns)" })).toBeTruthy());
+    expect(screen.getByText("The Mac is busy.")).toBeTruthy();
+  });
+
+  it("shows the shape of a diff while it comes, in the sheet", async () => {
+    const { releases } = await slow(["diff"], turn);
+    await fireEvent.press(screen.getByText("Edited 1 file +1 −1"));
+    await waitFor(() => expect(screen.getByLabelText("Loading the changes")).toBeTruthy());
+    await act(async () => releases.diff("--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n"));
+    await waitFor(() => expect(screen.getByText("+new")).toBeTruthy());
+    expect(screen.queryByLabelText("Loading the changes")).toBeNull();
+  });
+});
+
 describe("a chat that has nothing to show yet", () => {
   const open = async (answers = {}) => {
     const { controller } = makeController();
@@ -139,11 +181,11 @@ describe("a chat that has nothing to show yet", () => {
     return { ...view, ...session, controller };
   };
 
-  it("says it is loading, with a spinner, until the Mac sends the chat", async () => {
+  it("shows the shape of a chat, breathing, until the Mac sends the chat: no spinner, no bare words", async () => {
     await open();
     expect(screen.getByLabelText("Loading this chat")).toBeTruthy();
-    expect(screen.getByText("Loading this chat…")).toBeTruthy();
     expect(screen.queryByText("Nothing in this chat yet.")).toBeNull();
+    expect(screen.queryByText("Loading this chat…")).toBeNull();
   });
 
   it("says nothing is there only once the Mac has sent a chat with nothing in it", async () => {
@@ -181,7 +223,7 @@ describe("a chat that has nothing to show yet", () => {
     await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()], connection: { kind: "offline", reason: "No route to the Mac", retryInMs: 2000 } }, controller);
     await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
     expect(screen.queryByText("Couldn't load this chat")).toBeNull();
-    expect(screen.getByText("Waiting for your Mac…")).toBeTruthy();
+    expect(screen.getByLabelText("Waiting for your Mac")).toBeTruthy();
   });
 
   it("tells an asleep chat's emptiness from a loading one, and points at waking it", async () => {

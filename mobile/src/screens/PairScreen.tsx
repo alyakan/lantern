@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
-import { ActivityIndicator, TextInput, View } from "react-native";
+import { TextInput, View } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Clipboard from "expo-clipboard";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useController } from "../shell/hooks";
 import { Button, Txt } from "../ui/components";
+import { Dots } from "../ui/skeleton";
 import { colors, space } from "../ui/theme";
 
 /** How long a code the camera has seen and refused is ignored, so one bad code isn't refused thirty times a second. */
@@ -98,8 +99,8 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
           </>
         )}
         {busy && (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <ActivityIndicator />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <Dots />
             <Txt variant="small" tone="ink2">
               Pairing…
             </Txt>

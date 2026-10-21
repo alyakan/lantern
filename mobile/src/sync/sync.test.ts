@@ -94,6 +94,28 @@ describe("the phone's sync", () => {
     expect(s.asked.filter((r) => r.op === "list_waiting").length).toBe(before + 2);
   });
 
+  it("knows what waits on you once the Mac has answered, and still when it couldn't answer (not waiting for ever)", async () => {
+    const answered = rig();
+    answered.sync.onSession(fakeSession(7, { list_waiting: [] }).session);
+    await settle();
+    answered.frame();
+    expect(answered.sync.getState().waitingLoaded).toBe(true);
+
+    const failed = rig();
+    failed.sync.onSession(fakeSession(7, {}, { list_waiting: "The Mac is busy." }).session);
+    await settle();
+    failed.frame();
+    expect(failed.sync.getState().waitingLoaded).toBe(true);
+    expect(failed.sync.getState().waiting).toEqual([]);
+  });
+
+  it("does not claim to know it while there is no connection to ask", async () => {
+    const { sync, frame } = rig();
+    await sync.refreshWaiting();
+    frame();
+    expect(sync.getState().waitingLoaded).toBe(false);
+  });
+
   it("keeps what a question was answered with, once the Mac has taken it, joined for a multi-select", async () => {
     const { sync, frame } = rig();
     const s = fakeSession(7);

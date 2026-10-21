@@ -37,8 +37,11 @@ export const connected: ConnectionState = { kind: "connected", host: "192.168.1.
 export function seed(controller: Controller, s: Seed) {
   controller.setConnection(s.connection ?? connected);
   const sync = controller.sync;
-  if (s.chats) sync.apply({ type: "pushed", msg: { type: "chats", chats: s.chats } });
-  if (s.waiting) sync.apply({ type: "waiting", list: s.waiting });
+  // Seeding either says what the Mac sent: the other is then "none", not "not yet" (which Home shows as a skeleton).
+  if (s.chats || s.waiting) {
+    sync.apply({ type: "pushed", msg: { type: "chats", chats: s.chats ?? [] } });
+    sync.apply({ type: "waiting", list: s.waiting ?? [] });
+  }
   for (const [slot, events] of Object.entries(s.events ?? {})) events.forEach((event, i) => sync.apply({ type: "pushed", msg: { type: "event", slot, seq: i + 1, event } }));
 }
 

@@ -7,6 +7,7 @@ import { Button, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
+import { ProjectsSkeleton } from "../ui/skeleton";
 import { colors, radius, shadow, space } from "../ui/theme";
 
 /** What the sheet starts from: a suggestion's draft, the project it names, or the chat it carries on. */
@@ -97,9 +98,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
           </Txt>
 
           {continueChat ? null : projects === null ? (
-            <Txt variant="body" tone="ink2">
-              Looking at your projects…
-            </Txt>
+            <ProjectsSkeleton />
           ) : projects.length === 0 ? (
             <Txt variant="body" tone="ink2">
               {error ?? "No projects yet. Open a folder in Lantern on your Mac first, then it is here."}

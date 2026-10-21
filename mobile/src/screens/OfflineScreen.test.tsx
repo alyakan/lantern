@@ -4,9 +4,10 @@ import { connected } from "../test/render";
 import { MacSheet, OfflineScreen } from "./OfflineScreen";
 
 describe("the Offline screen", () => {
-  it("says it is connecting, in a moment's words", async () => {
+  it("says it is connecting, with a lantern being lit rather than a spinner", async () => {
     await render(<OfflineScreen state={{ kind: "connecting" }} onRetry={jest.fn()} onUnpair={jest.fn()} />);
-    expect(screen.getByText("Connecting to your Mac…")).toBeTruthy();
+    expect(screen.getByLabelText("Connecting to your Mac")).toBeTruthy();
+    expect(screen.getByText("Connecting to your Mac")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 

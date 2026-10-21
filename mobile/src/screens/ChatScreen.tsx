@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
@@ -7,6 +7,7 @@ import { emptyView } from "../sync/reducer";
 import { Button, Txt } from "../ui/components";
 import { AboveKeyboard } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
+import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { colors, shadow, space } from "../ui/theme";
 import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
@@ -37,6 +38,7 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
   const [files, setFiles] = useState<string[] | null>(null);
   const [banner, setBanner] = useState(false);
   const [waking, setWaking] = useState(false);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
   // The chat's events come for as long as this screen is open.
@@ -164,17 +166,29 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
         getItemType={(r) => (r.kind === "page" ? `page-${r.live}` : r.kind)}
         maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 0.2, startRenderingFromBottom: true }}
         ListHeaderComponent={
-          view.hidden > 0 ? (
+          loadingEarlier ? (
+            <ChatSkeleton label="Loading earlier messages" />
+          ) : view.hidden > 0 ? (
             <View style={{ padding: space.lg, alignItems: "center" }}>
-              <Button label={`Show earlier messages (${view.hidden} ${view.hidden === 1 ? "turn" : "turns"})`} kind="ghost" onPress={() => sync.loadEarlier(slot).catch(fail)} />
+              <Button
+                label={`Show earlier messages (${view.hidden} ${view.hidden === 1 ? "turn" : "turns"})`}
+                kind="ghost"
+                onPress={() => {
+                  setLoadingEarlier(true);
+                  sync.loadEarlier(slot).catch(fail).finally(() => setLoadingEarlier(false));
+                }}
+              />
             </View>
           ) : null
         }
         ListFooterComponent={
           working ? (
-            <Txt variant="small" tone="ink3" style={{ paddingHorizontal: space.lg, paddingTop: 12, paddingBottom: 6 }}>
-              Claude is working…
-            </Txt>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: space.lg, paddingTop: 12, paddingBottom: 6 }}>
+              <Dots />
+              <Txt variant="small" tone="ink3">
+                Claude is working…
+              </Txt>
+            </View>
           ) : (
             <View style={{ height: 8 }} />
           )
@@ -190,12 +204,8 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
               <Button label="Try again" kind="ghost" onPress={() => sync.retryLoad(slot)} />
             </View>
           ) : !view.loaded || view.resetting || !online ? (
-            <View accessibilityLabel="Loading this chat" style={{ padding: space.xl, flexDirection: "row", alignItems: "center", gap: 10 }}>
-              <ActivityIndicator />
-              <Txt variant="body" tone="ink2">
-                {online ? "Loading this chat…" : "Waiting for your Mac…"}
-              </Txt>
-            </View>
+            // The shape of a chat in grey, breathing (the banner above already says when the Mac can't be reached).
+            <ChatSkeleton label={online ? "Loading this chat" : "Waiting for your Mac"} />
           ) : (
             <Txt variant="body" tone="ink2" style={{ padding: space.xl }}>
               {asleep ? "Nothing to show yet. Wake this chat to pick up where it left off." : "Nothing in this chat yet."}

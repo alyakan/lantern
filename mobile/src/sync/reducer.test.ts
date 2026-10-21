@@ -22,6 +22,20 @@ const turn: RemoteEvent[] = [
   { kind: "turn_done", is_error: false, result: "done", duration_ms: 3000 },
 ];
 
+describe("whether the chat list and what waits have come", () => {
+  it("are not known until the Mac has sent them, even when there are none", () => {
+    expect(initialState).toMatchObject({ chatsLoaded: false, waitingLoaded: false });
+    const chatsOnly = run([{ type: "pushed", msg: { type: "chats", chats: [] } }]);
+    expect(chatsOnly).toMatchObject({ chatsLoaded: true, waitingLoaded: false });
+    expect(run([{ type: "waiting", list: [] }], chatsOnly)).toMatchObject({ chatsLoaded: true, waitingLoaded: true });
+  });
+
+  it("stay known when the Mac starts a new run: what was shown is still shown while it is asked again", () => {
+    const known = run([{ type: "pushed", msg: { type: "chats", chats: [] } }, { type: "waiting", list: [] }]);
+    expect(run([{ type: "welcome", epoch: 7 }], known)).toMatchObject({ chatsLoaded: true, waitingLoaded: true });
+  });
+});
+
 describe("whether a chat's history has come", () => {
   it("is not loaded until the Mac sends it, even when it is empty", () => {
     expect(emptyView).toMatchObject({ loaded: false, loadError: null });

@@ -19,6 +19,26 @@ async function open(answers: Parameters<typeof attachSession>[1] = { projects, n
 
 const write = (text: string) => fireEvent.changeText(screen.getByLabelText("What to start with"), text);
 
+describe("while the projects are coming", () => {
+  it("shows the shape of the project picker, and then the projects in its place", async () => {
+    const { controller } = makeController();
+    let release: (v: unknown) => void = () => {};
+    controller.sync.onSession({ welcome: { type: "welcome", protocol: 1, app_version: "t", mac_name: "Mac", epoch: 1 }, ask: () => new Promise((r) => (release = r)) } as never);
+    await renderWith(<NewChatSheet onClose={jest.fn()} onStarted={jest.fn()} />, {}, controller);
+    expect(screen.getByLabelText("Looking at your projects")).toBeTruthy();
+    expect(screen.queryByText("Looking at your projects…")).toBeNull();
+    expect(screen.queryByRole("radio")).toBeNull();
+    release(projects);
+    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
+    expect(screen.queryByLabelText("Looking at your projects")).toBeNull();
+  });
+
+  it("has none of it when carrying a chat on: there are no projects to wait for", async () => {
+    await open(undefined, { continueChat: { slot: "a", title: "Release 0.1.53" } });
+    expect(screen.queryByLabelText("Looking at your projects")).toBeNull();
+  });
+});
+
 describe("starting a chat from the phone", () => {
   it("says it starts on Ask, offers the projects, and starts in the first one by default", async () => {
     const { lastOf, onStarted } = await open();

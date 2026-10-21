@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
 import { Button, Tag, Tile, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
+import { HomeSkeleton } from "../ui/skeleton";
 import { colors, radius, shadow, space } from "../ui/theme";
 import { cards, headline, rows, tileColors, type Card, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
@@ -104,7 +105,8 @@ function ChatRow({ row, index, onPress }: { row: Row; index: number; onPress: ()
 /** Home: what waits on you, as a headline and a stack, then your chats. */
 export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat }: HomeProps) {
   const controller = useController();
-  const { chats, waiting } = useSyncState();
+  const { chats, waiting, chatsLoaded, waitingLoaded } = useSyncState();
+  const loading = !chatsLoaded || !waitingLoaded;
   const connection = useConnectionState();
   const insets = useSafeAreaInsets();
   const [now, setNow] = useState(Date.now());
@@ -137,6 +139,11 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             </Txt>
           </PressScale>
         </View>
+        {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}
+        {loading ? (
+          <HomeSkeleton />
+        ) : (
+          <>
         <View accessibilityRole="header" style={{ paddingHorizontal: space.xl, paddingTop: 14, paddingBottom: 16 }}>
           <Txt variant="headline">{head.big}</Txt>
           <Txt variant="headline" tone="ink3">
@@ -169,6 +176,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
           </Txt>
         ) : (
           list.map((r, i) => <ChatRow key={r.slot} row={r} index={i} onPress={() => onOpenChat(r.slot)} />)
+        )}
+          </>
         )}
       </ScrollView>
       {Platform.OS === "android" && list.length > 0 && (

@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Easing, Pressable, ScrollView, TextInput, View } from "react-native";
+import { Animated, Easing, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
 import { Button, Chip, Tag, Txt } from "../ui/components";
@@ -7,6 +7,7 @@ import { useKeyboardUp } from "../ui/keyboard";
 import { Markdown } from "../ui/Markdown";
 import { bounce, buzz, PopIn, PressScale, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
+import { DiffSkeleton } from "../ui/skeleton";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { colors, fonts, radius, shadow, space } from "../ui/theme";
 import { approvalOf, promptView } from "../view/prompts";
@@ -402,7 +403,7 @@ export function DiffSheet({ files, load, onClose }: { files: string[]; load: (pa
             </Txt>
           </View>
           <ScrollView style={{ flexShrink: 1, paddingHorizontal: space.lg }}>
-            {text === null && !error && <ActivityIndicator style={{ margin: 24 }} />}
+            {text === null && !error && <DiffSkeleton />}
             {error && <Txt tone="stop">{error}</Txt>}
             {text !== null &&
               text.split("\n").map((line, i) => (

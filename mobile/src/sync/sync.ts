@@ -118,7 +118,9 @@ export class Sync {
       const list = await this.ask<Waiting[]>({ op: "list_waiting" });
       if (Array.isArray(list)) this.apply({ type: "waiting", list });
     } catch {
-      // Not connected: it is asked again when a connection comes up.
+      // Not connected: it is asked again when a connection comes up. Connected but it failed: what was known stays, and Home
+      // shows that rather than waiting for ever on an answer that isn't coming.
+      if (this.session) this.apply({ type: "waiting", list: this.state.waiting });
     }
   }
 

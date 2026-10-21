@@ -1,10 +1,44 @@
 import { Platform } from "react-native";
-import { fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
 import { chat, makeController, renderWith, waiting } from "../test/render";
 import { HomeScreen } from "./HomeScreen";
 
 const handlers = () => ({ onOpenChat: jest.fn(), onReview: jest.fn(), onOpenMac: jest.fn(), onCompose: jest.fn(), onNewChat: jest.fn() });
+
+describe("Home before the Mac has sent anything", () => {
+  it("shows the shape of Home, not 'nothing waiting' or 'no chats', which would be a guess", async () => {
+    const { controller } = makeController();
+    const { asked } = attachSession(controller, { suggest: { items: [], generated_at: 1 } });
+    await renderWith(<HomeScreen {...handlers()} />, {}, controller);
+    expect(screen.getByLabelText("Loading your chats")).toBeTruthy();
+    expect(screen.queryByText("Nothing")).toBeNull();
+    expect(screen.queryByText(/No chats are open/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "New chat" })).toBeNull();
+    // And Claude isn't asked for suggestions on a guess either.
+    expect(asked.filter((r) => r.op === "suggest")).toEqual([]);
+  });
+
+  it("is still the skeleton when only the chats have come: what waits on you is not known yet", async () => {
+    const { controller } = makeController();
+    await renderWith(<HomeScreen {...handlers()} />, {}, controller);
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [chat()] } }));
+    expect(screen.getByLabelText("Loading your chats")).toBeTruthy();
+    await act(async () => controller.sync.apply({ type: "waiting", list: [] }));
+    expect(screen.queryByLabelText("Loading your chats")).toBeNull();
+    expect(screen.getByText("Nothing")).toBeTruthy();
+  });
+
+  it("settles into Home, with an empty list said to be empty, once both have come", async () => {
+    const { controller } = makeController();
+    await renderWith(<HomeScreen {...handlers()} />, {}, controller);
+    await act(async () => {
+      controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [] } });
+      controller.sync.apply({ type: "waiting", list: [] });
+    });
+    expect(screen.getByText(/No chats are open on your Mac/)).toBeTruthy();
+  });
+});
 
 describe("Home", () => {
   it("has a way to start a chat, with nothing written yet", async () => {

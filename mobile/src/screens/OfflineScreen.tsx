@@ -1,8 +1,11 @@
-import { ActivityIndicator, View } from "react-native";
+import { useEffect, useRef } from "react";
+import { Animated, Easing, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectionState } from "../net/connection";
 import { Button, Txt } from "../ui/components";
+import { skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
+import { Dots } from "../ui/skeleton";
 import { colors, radius, space } from "../ui/theme";
 
 /** A lantern gone dark: the empty state's picture, drawn from a few boxes. */
@@ -15,6 +18,31 @@ function DarkLantern() {
   );
 }
 
+/** A lantern being lit: its glow swells and settles, over and over, while the phone finds the Mac. */
+function LitLantern() {
+  const glow = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (skips()) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glow, { toValue: 1, duration: 1100, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(glow, { toValue: 0, duration: 1100, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [glow]);
+  return (
+    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ alignItems: "center", justifyContent: "center", width: 150, height: 150, marginBottom: 8 }}>
+      <Animated.View style={{ position: "absolute", width: 130, height: 130, borderRadius: 65, backgroundColor: colors.hi, opacity: glow.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.28] }), transform: [{ scale: glow.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.12] }) }] }} />
+      <View style={{ width: 16, height: 10, borderWidth: 2, borderBottomWidth: 0, borderColor: colors.ink2, borderTopLeftRadius: 8, borderTopRightRadius: 8 }} />
+      <View style={{ width: 44, height: 64, borderWidth: 2, borderColor: colors.ink2, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderBottomLeftRadius: 12, borderBottomRightRadius: 12, alignItems: "center", justifyContent: "center" }}>
+        <Animated.View style={{ width: 16, height: 24, borderRadius: 9, backgroundColor: colors.hi, opacity: glow.interpolate({ inputRange: [0, 1], outputRange: [0.55, 1] }) }} />
+      </View>
+    </View>
+  );
+}
+
 /** Not connected yet: connecting (a moment), or why not and what to check. */
 export function OfflineScreen({ state, onRetry, onUnpair }: { state: ConnectionState; onRetry: () => void; onUnpair: () => void }) {
   const insets = useSafeAreaInsets();
@@ -22,12 +50,11 @@ export function OfflineScreen({ state, onRetry, onUnpair }: { state: ConnectionS
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper, alignItems: "center", justifyContent: "center", padding: 30, paddingTop: insets.top }}>
       {connecting ? (
-        <>
-          <ActivityIndicator size="large" />
-          <Txt variant="heading" style={{ marginTop: 18 }}>
-            Connecting to your Mac…
-          </Txt>
-        </>
+        <View accessibilityLabel="Connecting to your Mac" accessibilityRole="progressbar" accessible style={{ alignItems: "center", gap: 10 }}>
+          <LitLantern />
+          <Txt variant="heading">Connecting to your Mac</Txt>
+          <Dots />
+        </View>
       ) : (
         <>
           <DarkLantern />

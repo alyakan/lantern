@@ -41,7 +41,7 @@ describe("which screen is up", () => {
 
   it("says it is connecting, then why it can't reach the Mac when there is nothing to show yet", async () => {
     const connecting = await open({ connection: { kind: "connecting" } });
-    expect(screen.getByText("Connecting to your Mac…")).toBeTruthy();
+    expect(screen.getByLabelText("Connecting to your Mac")).toBeTruthy();
     await connecting.view.unmount();
     const { controller } = await open({ connection: { kind: "offline", reason: "Can't reach Aly's Mac.", retryInMs: 1000 }, chats: [] });
     expect(screen.getByText("Can't reach your Mac")).toBeTruthy();
