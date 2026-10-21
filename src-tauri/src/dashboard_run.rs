@@ -204,6 +204,35 @@ pub fn preview(form: &Form, values: &Values) -> Result<Preview, String> {
     Ok(Preview { args, confirm: form.action.confirm.as_ref().map(|c| fill(c, &resolved)) })
 }
 
+/// One form's command as the trust card shows it: what would be run, before any value is in.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CommandInfo {
+    pub form: String,
+    pub title: Option<String>,
+    /// The program and arguments as written, with `~` as the home folder; `{field}` stands for that field's value.
+    pub command: Vec<String>,
+    /// Where the program is on disk, or None with `error` saying why not.
+    pub program: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Every form's command in a dashboard that checked out, for the user to read before they trust it.
+pub fn commands(dashboard: &dashboard::Dashboard, root: &Path, path_env: Option<&str>) -> Vec<CommandInfo> {
+    let Some(spec) = &dashboard.spec else { return Vec::new() };
+    spec.panels
+        .iter()
+        .filter_map(|p| match p {
+            dashboard::Panel::Form(f) => Some(f),
+            _ => None,
+        })
+        .map(|form| {
+            let command: Vec<String> = form.action.command.iter().map(|t| expand_home(t).unwrap_or_else(|_| t.clone())).collect();
+            let found = find_program(&command[0], root, path_env);
+            CommandInfo { form: form.id.clone(), title: form.title.clone(), program: found.as_ref().ok().map(|p| p.display().to_string()), error: found.err(), command }
+        })
+        .collect()
+}
+
 /// Where the program is: a path with a slash is that path (relative to the folder), a bare name is looked up on `path_env`.
 fn find_program(program: &str, folder: &Path, path_env: Option<&str>) -> Result<PathBuf, String> {
     if program.contains('/') {
@@ -710,6 +739,28 @@ mod tests {
         let kept = s.runner.run_detail("k", &run.id).unwrap();
         assert!(kept.stdout.len() <= KEPT_IN_HISTORY && kept.truncated);
         assert!(kept.stdout.ends_with("end\n") && run.stdout.ends_with(&kept.stdout));
+    }
+
+    #[test]
+    fn the_trust_card_lists_each_forms_command_and_where_its_program_is() {
+        let text = json!({ "title": "t", "panels": [
+            { "type": "form", "id": "a", "title": "First", "action": { "command": ["echo", "~/x", "{none}"] }, "fields": [{ "id": "none", "type": "toggle" }] },
+            { "type": "form", "id": "b", "action": { "command": ["no-such-program-here"] } },
+            { "type": "result", "of": "a" }
+        ] })
+        .to_string();
+        let s = setup(&text);
+        let found = &dashboard::load(s.folder.path())[0];
+        let got = commands(found, s.folder.path(), Some("/bin:/usr/bin:relative/dir"));
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(got.len(), 2);
+        assert_eq!((got[0].form.as_str(), got[0].title.as_deref()), ("a", Some("First")));
+        assert_eq!(got[0].command, ["echo".to_string(), format!("{home}/x"), "{none}".to_string()]);
+        assert!(got[0].program.as_deref().is_some_and(|p| p.ends_with("/echo")) && got[0].error.is_none());
+        assert!(got[1].program.is_none() && got[1].error.as_deref().is_some_and(|e| e.contains("isn't on the PATH")));
+        // A dashboard with problems has nothing to list.
+        let broken = dashboard::Dashboard { spec: None, ..found.clone() };
+        assert!(commands(&broken, s.folder.path(), None).is_empty());
     }
 
     #[test]

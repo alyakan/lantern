@@ -483,6 +483,20 @@ async fn dashboard_trust(state: State<'_, AppState>, folder: String, file: Strin
     .map_err(|e| e.to_string())?
 }
 
+/// Each form's command in a dashboard, with `~` expanded and its program found on the PATH commands run with: what the user
+/// reads before trusting it.
+#[tauri::command]
+async fn dashboard_commands(state: State<'_, AppState>, folder: String, file: String) -> Result<Vec<dashboard_run::CommandInfo>, String> {
+    let path_env = login_path(&state).await;
+    tauri::async_runtime::spawn_blocking(move || {
+        let root = std::path::Path::new(&folder);
+        let found = dashboard::load(root).into_iter().find(|d| d.file == file).ok_or("That dashboard is gone.")?;
+        Ok(dashboard_run::commands(&found, root, path_env.as_deref()))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// What pressing a form's button would run, with the values in: shown to the user before it does.
 #[tauri::command]
 async fn dashboard_preview(folder: String, file: String, form: String, values: dashboard_run::Values) -> Result<dashboard_run::Preview, String> {
@@ -2249,6 +2263,7 @@ pub fn run() {
             dashboards_list,
             dashboards_state,
             dashboard_trust,
+            dashboard_commands,
             dashboard_preview,
             dashboard_run,
             dashboard_run_detail,

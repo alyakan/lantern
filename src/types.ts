@@ -564,6 +564,17 @@ export interface DashboardState {
   runs: DashboardRunSummary[];
 }
 
+/** One form's command as the trust card shows it: what would run, before any value is in. */
+export interface DashboardCommand {
+  form: string;
+  title?: string;
+  /** The program and arguments as written, `~` as the home folder; `{field}` stands for that field's value. */
+  command: string[];
+  /** Where the program is on disk; null with `error` saying why not. */
+  program: string | null;
+  error: string | null;
+}
+
 /** What pressing a form's button will run, worked out by the code that runs it. */
 export interface DashboardPreview {
   args: string[];

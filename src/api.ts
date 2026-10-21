@@ -4,7 +4,7 @@ import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { Role } from "./lib/roles";
 import type { ReviewSetting } from "./lib/reviewChain";
-import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, Dashboard, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, Dashboard, DashboardCommand, DashboardPreview, DashboardRun, DashboardState, DashboardValues, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -293,6 +293,8 @@ export const api = {
   dashboardsState: (folder: string) => invoke<DashboardState>("dashboards_state", { folder }),
   /** Trusts a dashboard as the user saw it (the hash they were shown); rejects if the file changed since. */
   dashboardTrust: (folder: string, file: string, hash: string) => invoke<void>("dashboard_trust", { folder, file, hash }),
+  /** Each form's command in a dashboard, `~` expanded and its program found: what the user reads before trusting it. */
+  dashboardCommands: (folder: string, file: string) => invoke<DashboardCommand[]>("dashboard_commands", { folder, file }),
   /** What pressing a form's button would run, with the values in (rejects with why when a value is wrong). */
   dashboardPreview: (folder: string, file: string, form: string, values: DashboardValues) => invoke<DashboardPreview>("dashboard_preview", { folder, file, form, values }),
   /** Runs a form of a trusted dashboard; resolves when it ends, with the run (also in the history). Rejects with why it didn't start. */

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import spec from "../../src-tauri/tests/fixtures/dashboard.spec.json";
 import type { DashboardAction, DashboardField, DashboardSpec } from "../types";
+import { commandLine, formatDuration, initialState, isScalar, isTable, plain, runStatus, summarizeInputs, tableColumns, toValues } from "./dashboard";
 
 // dashboard.spec.json is what Rust's checker makes of dashboard.input.json (a Rust test fails when it's stale). These tests
 // hold the TypeScript types to the same file: a key added on one side and not the other fails here, either as a type error
@@ -42,5 +43,60 @@ describe("the dashboard spec the TypeScript types describe", () => {
   it("keeps a field's default the shape of its type", () => {
     const defaults = Object.fromEntries(fields.map((f) => [f.type, typeof f.default === "object" ? "list" : typeof f.default]));
     expect(defaults).toEqual({ select: "undefined", number: "number", multiselect: "list", text: "string", toggle: "boolean" });
+  });
+});
+
+describe("the form's controls", () => {
+  const fields = spec.panels.flatMap((p) => ("fields" in p ? (p.fields as DashboardField[]) : []));
+
+  it("start from each field's default, a toggle off", () => {
+    expect(initialState(fields)).toEqual({ staging: "", users: "2", admins: "1", addons: ["approvals"], name: "QA org", trial: false });
+  });
+
+  it("become the values Lantern checks: numbers as numbers, a cleared number left out, a cleared text kept empty", () => {
+    const state = { ...initialState(fields), staging: "7", users: "3", admins: "", name: "", addons: ["sso"], trial: true };
+    expect(toValues(fields, state)).toEqual({ staging: "7", users: 3, addons: ["sso"], name: "", trial: true });
+  });
+
+  it("send digits that aren't a number as typed, so Lantern says which field is wrong", () => {
+    expect(toValues(fields, { ...initialState(fields), users: "two" }).users).toBe("two");
+    expect(toValues(fields, { ...initialState(fields), users: " 4 " }).users).toBe(4);
+  });
+});
+
+describe("reading a run", () => {
+  it("quotes only the arguments that need it", () => {
+    expect(commandLine(["python3", "~/x.py", "--name=QA org", "--n", "2", "", 'a"b'])).toBe('python3 ~/x.py "--name=QA org" --n 2 "" "a\\"b"');
+  });
+
+  it("drops terminal colour codes from output", () => {
+    expect(plain("\u001b[31mred\u001b[0m and \u001b[1;32mgreen\u001b[0m")).toBe("red and green");
+    expect(plain("no codes")).toBe("no codes");
+  });
+
+  it("says how a run went", () => {
+    expect(runStatus({ exit_code: 0, stopped: false, timed_out: false })).toEqual({ label: "done", tone: "ok" });
+    expect(runStatus({ exit_code: 3, stopped: false, timed_out: false })).toEqual({ label: "failed (3)", tone: "failed" });
+    expect(runStatus({ exit_code: null, stopped: true, timed_out: false })).toEqual({ label: "stopped", tone: "stopped" });
+    expect(runStatus({ exit_code: null, stopped: false, timed_out: true })).toEqual({ label: "timed out", tone: "stopped" });
+    expect(runStatus({ exit_code: null, stopped: false, timed_out: false })).toEqual({ label: "ended", tone: "failed" });
+  });
+
+  it("formats durations", () => {
+    expect([250, 1500, 12000, 61000].map(formatDuration)).toEqual(["250 ms", "1.5 s", "12 s", "1 min 1 s"]);
+  });
+
+  it("summarizes what a run was given, leaving out what is empty or off", () => {
+    expect(summarizeInputs({ staging: "7", users: 2, addons: ["approvals", "sso"], name: "", trial: false, loud: true, none: [] })).toBe("staging 7 · users 2 · addons approvals,sso · loud");
+    expect(summarizeInputs({ note: "x".repeat(200) }, 20)).toHaveLength(20);
+  });
+
+  it("finds a table in a list of objects and its columns in the order they appear", () => {
+    const rows = [{ email: "a", role: "admin" }, { email: "b", password: "p" }];
+    expect(isTable(rows)).toBe(true);
+    expect(tableColumns(rows)).toEqual(["email", "role", "password"]);
+    expect([[], ["a"], [[1]], [null], "x", { a: 1 }].map(isTable)).toEqual([false, false, false, false, false, false]);
+    expect(tableColumns([{ a: 1, b: 2, c: 3 }], 2)).toEqual(["a", "b"]);
+    expect([null, 1, "a", true, [], {}].map(isScalar)).toEqual([true, true, true, true, false, false]);
   });
 });

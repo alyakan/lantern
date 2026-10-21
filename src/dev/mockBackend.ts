@@ -2,7 +2,7 @@
 // It answers the app's Tauri commands and plays a scripted Claude turn. Never imported in production builds.
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
-import type { McpServer, NetworkDetail, NetworkItem, NetworkTx, NetworkView, SkillEntry, UiEvent } from "../types";
+import type { DashboardRun, McpServer, NetworkDetail, NetworkItem, NetworkTx, NetworkView, SkillEntry, UiEvent } from "../types";
 import { version as APP_VERSION } from "../../package.json";
 import dashboardSpec from "../../src-tauri/tests/fixtures/dashboard.spec.json";
 import { TESTO_MAP } from "../lib/testoMap";
@@ -1208,6 +1208,20 @@ const MOCK_CHECKLISTS = {
 };
 let mockWatches = [{ label: "Checklists", method: "GET", url: "/v1/checklists" }];
 
+// The Dashboard tab: which mock dashboards are trusted, the runs kept, and whether the form is running.
+let dashTrusted: string[] = [];
+let dashRuns: DashboardRun[] = [];
+let dashRunning = false;
+const dashSummary = ({ id, file, form, started_at, duration_ms, exit_code, stopped, timed_out, inputs }: DashboardRun) => ({ id, file, form, started_at, duration_ms, exit_code, stopped, timed_out, inputs });
+function mockDashboardRun(values: Record<string, unknown>): DashboardRun {
+  const staging = String(values.staging ?? "");
+  const users = Number(values.users ?? 2);
+  const logins = Array.from({ length: users }, (_, i) => ({ email: `qa+${Date.now() % 100000}-${i + 1}@example.com`, password: "Sup3r-secret", role: i === 0 ? "admin" : "user" }));
+  const output = { org: { id: 41872, name: String(values.name ?? ""), staging }, addons: values.addons ?? [], users: logins };
+  const args = ["python3", "/Users/you/staging-tools/lumi_staging.py", "create", "--json", "--staging", staging, "--users", String(users)];
+  return { id: `${Date.now()}-${dashRuns.length + 1}`, file: "staging.json", form: "org", started_at: Date.now(), duration_ms: 1840, exit_code: 0, stopped: false, timed_out: false, inputs: values as DashboardRun["inputs"], args, stdout: `creating org on staging ${staging}\n${JSON.stringify(output)}\n`, stderr: "", truncated: false, output };
+}
+
 // The Storage panel's scan in the browser preview: items of every kind (one a hair of the scan, one inside another), one blocked, two with a suggestion from Claude.
 const mockStorageItem = (id: string, kind: string, name: string, gb: number, over: Record<string, unknown> = {}) => ({
   id, kind, name, path: `/Users/you/${name}`, bytes: Math.round(gb * 1e9), risk: "safe", removal: kind === "worktree" ? "worktree" : kind === "repo" ? "trash" : "permanent", note: "Comes back with a build.", warning: null, ticked: false, idle_days: 12, within: null, suggestion: null, ...over,
@@ -1774,6 +1788,44 @@ export function installMockBackend() {
             { file: "staging.json", hash: "mock-staging", spec: dashboardSpec, issues: [] },
             { file: "broken.json", hash: "mock-broken", spec: null, issues: [{ path: "panels[0].action.command[2]", message: "must be a string (the command is a list of strings, not a shell line)" }] },
           ];
+        case "dashboards_state":
+          return { trusted: dashTrusted, running: dashRunning ? [{ file: "staging.json", form: "org" }] : [], runs: dashRuns.map(dashSummary) };
+        case "dashboard_trust":
+          if (a.hash === "mock-staging") dashTrusted = [...dashTrusted, "mock-staging"];
+          void emit("dashboards-changed");
+          return undefined;
+        case "dashboard_commands":
+          return [{ form: "org", title: "Create org", command: ["python3", "/Users/you/staging-tools/lumi_staging.py", "create", "--json", "--staging", "{staging}", "--users", "{users}", "--enable", "{addons}", "--name={name}"], program: "/opt/homebrew/bin/python3", error: null }];
+        case "dashboard_preview": {
+          const values = a.values as Record<string, unknown>;
+          if (!values.staging) return Promise.reject("Staging is required.");
+          return { args: mockDashboardRun(values).args, confirm: `Creates a real org on staging ${values.staging}` };
+        }
+        case "dashboard_run": {
+          dashRunning = true;
+          void emit("dashboards-changed");
+          return new Promise((resolve) =>
+            setTimeout(() => {
+              const run = mockDashboardRun(a.values as Record<string, unknown>);
+              dashRuns = [run, ...dashRuns];
+              dashRunning = false;
+              void emit("dashboards-changed");
+              resolve(run);
+            }, 900),
+          );
+        }
+        case "dashboard_run_detail":
+          return dashRuns.find((r) => r.id === a.id) ?? null;
+        case "dashboard_stop":
+          return false;
+        case "dashboard_delete_run":
+          dashRuns = dashRuns.filter((r) => r.id !== a.id);
+          void emit("dashboards-changed");
+          return true;
+        case "dashboard_clear_runs":
+          dashRuns = [];
+          void emit("dashboards-changed");
+          return undefined;
         case "network_state":
           return mockNetwork();
         case "network_response":
