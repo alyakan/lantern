@@ -1,6 +1,39 @@
 import { StyleSheet, View } from "react-native";
 import { render, screen } from "@testing-library/react-native";
-import { Bar, ChatSkeleton, DiffSkeleton, Dots, HomeSkeleton, ProjectsSkeleton, Pulse } from "./skeleton";
+import { Bar, ChatSkeleton, DiffSkeleton, Dots, HomeSkeleton, ProjectsSkeleton, Pulse, PULSE_MIN, SHAPE, SHAPE_DARK } from "./skeleton";
+import { colors } from "./theme";
+
+/** WCAG's contrast ratio between two #rrggbb colours (1: the same, 21: black on white). */
+function contrast(a: string, b: string) {
+  const lum = (hex: string) => {
+    const [r, g, bl] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+  };
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/** A colour laid over a background at some opacity (what breathing does to a shape against the page). */
+function over(fg: string, bg: string, alpha: number) {
+  const mix = (i: number) => Math.round(parseInt(fg.slice(i, i + 2), 16) * alpha + parseInt(bg.slice(i, i + 2), 16) * (1 - alpha));
+  return `#${[1, 3, 5].map((i) => mix(i).toString(16).padStart(2, "0")).join("")}`;
+}
+
+describe("the loading shapes can be seen", () => {
+  it("against the page and a white card, even at the faintest of their breathing", () => {
+    for (const [name, shape] of [["light", SHAPE], ["dark", SHAPE_DARK]] as const) {
+      for (const [where, ground] of [["page", colors.paper], ["card", colors.card]] as const) {
+        expect(contrast(over(shape, ground, PULSE_MIN), ground)).toBeGreaterThanOrEqual(name === "light" ? 1.12 : 1.3);
+        void where;
+      }
+    }
+  });
+
+  it("which the page's own rule colour, used before, did not manage", () => {
+    // Under the 1.12 the lightest shape is held to above.
+    expect(contrast(over(colors.rule, colors.paper, 0.45), colors.paper)).toBeLessThan(1.12);
+  });
+});
 
 describe("the loading shapes", () => {
   it("tell a screen reader what is loading, once, and keep their grey blocks out of its way", async () => {

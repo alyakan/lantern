@@ -3,19 +3,22 @@ import { Animated, Easing, View, type DimensionValue, type StyleProp, type ViewS
 import { skips } from "./motion";
 import { colors, radius, space } from "./theme";
 
+/** How faint the shapes get at the bottom of their breathing. */
+export const PULSE_MIN = 0.6;
+
 /**
  * What is shown where something is still coming: the shape of it in grey, breathing, instead of a spinner and a line of
  * words. A group breathes together (`Pulse`), its blocks are `Bar`s. Hidden from a screen reader, which is told by `label`.
  */
 export function Pulse({ children, label, delay = 0, style }: { children: ReactNode; label?: string; delay?: number; style?: StyleProp<ViewStyle> }) {
-  const p = useRef(new Animated.Value(skips() ? 0.75 : 0.45)).current;
+  const p = useRef(new Animated.Value(skips() ? 1 : PULSE_MIN)).current;
   useEffect(() => {
     if (skips()) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.delay(delay),
         Animated.timing(p, { toValue: 1, duration: 750, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.timing(p, { toValue: 0.45, duration: 750, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(p, { toValue: PULSE_MIN, duration: 750, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
       ]),
     );
     loop.start();
@@ -30,9 +33,16 @@ export function Pulse({ children, label, delay = 0, style }: { children: ReactNo
   );
 }
 
+/**
+ * The greys of the shapes. They have to stand out from the page (`colors.paper`) and from a white card, at the dimmest the
+ * breathing makes them: the page's own `colors.rule` is too close to it to be seen.
+ */
+export const SHAPE = "#cdd5de";
+export const SHAPE_DARK = "#aeb9c6";
+
 /** One grey block of the shape being waited for. */
 export function Bar({ w = "100%", h = 12, r, dark, style }: { w?: DimensionValue; h?: number; r?: number; dark?: boolean; style?: StyleProp<ViewStyle> }) {
-  return <View style={[{ width: w, height: h, borderRadius: r ?? h / 2, backgroundColor: dark ? colors.ink3 : colors.rule, opacity: dark ? 0.35 : 1 }, style]} />;
+  return <View style={[{ width: w, height: h, borderRadius: r ?? h / 2, backgroundColor: dark ? SHAPE_DARK : SHAPE }, style]} />;
 }
 
 /** Three dots that rise and fall in turn: "it is working on it", where there is nothing to draw the shape of. */

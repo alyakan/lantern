@@ -194,7 +194,7 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           )
         }
         ListEmptyComponent={
-          // Never a bare "nothing": it is loading (with a spinner), it failed (and says why, with a way to try again), or it is truly empty.
+          // Never a bare "nothing": it is loading (the shape of a chat, breathing), it failed (and says why, with a way to try again), or it is truly empty.
           view.loadError && !view.loaded && online ? (
             <View accessibilityRole="alert" style={{ padding: space.xl, gap: 10, alignItems: "flex-start" }}>
               <Txt variant="heading">Couldn't load this chat</Txt>

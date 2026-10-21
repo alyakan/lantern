@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
 import { Button, Tag, Tile, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
-import { HomeSkeleton } from "../ui/skeleton";
+import { Dots, HomeSkeleton } from "../ui/skeleton";
 import { colors, radius, shadow, space } from "../ui/theme";
 import { cards, headline, rows, tileColors, type Card, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
@@ -130,7 +130,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
-      <ScrollView contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 96 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}>
+      {/* Pulling down still refreshes, but with no system spinner (it is made clear: the dots under the Mac's name say it is working). */}
+      <ScrollView contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: insets.bottom + 96 }} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor="transparent" colors={["transparent"]} progressBackgroundColor="transparent" />}>
         <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: space.xl }}>
           <PressScale accessibilityRole="button" accessibilityLabel={macName ? `${macName}, connected` : "Your Mac"} onPress={onOpenMac} hitSlop={10} haptic="select" scaleTo={0.94} style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 32 }}>
             {macName ? <PulseDot color={colors.go} size={8} ms={2600} /> : <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.ink3 }} />}
@@ -138,6 +139,11 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
               {macName ?? "Your Mac"}
             </Txt>
           </PressScale>
+          {refreshing && (
+            <View accessibilityLabel="Refreshing" accessibilityRole="progressbar" accessible>
+              <Dots />
+            </View>
+          )}
         </View>
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}
         {loading ? (
