@@ -480,10 +480,10 @@ describe("DashboardTab", () => {
     render(<DashboardTab folder="/preview" refreshKey={0} />);
     await screen.findByLabelText("Will run");
     await waitFor(() => expect(screen.getByLabelText("Will run")).toHaveTextContent('python3 lumi_staging.py "--name=QA org"'));
-    // A form that can't run yet (a required field empty) says so instead of showing a command.
-    vi.mocked(api.dashboardPreview).mockRejectedValue("Staging is required.");
+    // A form that can't run says why, in the words pressing Run would use, instead of showing a command.
+    vi.mocked(api.dashboardPreview).mockRejectedValue("Org name has a character that can't be sent.");
     await staging("7");
-    await waitFor(() => expect(screen.getByLabelText("Will run")).toHaveTextContent("Fill in the form to see the command."));
+    await waitFor(() => expect(screen.getByLabelText("Will run")).toHaveTextContent("Org name has a character that can't be sent."));
   });
 
   it("offers a short list as options to tap: one press chooses, another press on the chosen one clears it", async () => {

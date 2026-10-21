@@ -169,14 +169,15 @@ export function FormPanel({ folder, file, form, running, reload = 0, stamp = 0, 
     );
   };
   // The command the button would run for what is filled in now, from the same code that runs it: nothing is hidden behind Run.
-  const [line, setLine] = useState<string | null>(null);
+  const [line, setLine] = useState<{ text: string; refused: boolean } | null>(null);
   const valuesKey = JSON.stringify(values);
   useEffect(() => {
     let live = true;
     const t = window.setTimeout(() => {
       api.dashboardPreview(folder, file, form.id, values).then(
-        (p) => live && setLine(commandLine(p.args)),
-        () => live && setLine(null),
+        (p) => live && setLine({ text: commandLine(p.args), refused: false }),
+        // The same words pressing Run would say: what is wrong with the form is known before then.
+        (e) => live && setLine({ text: String(e), refused: true }),
       );
     }, 250);
     return () => {
@@ -201,8 +202,8 @@ export function FormPanel({ folder, file, form, running, reload = 0, stamp = 0, 
           <Field key={f.id} id={`${key}-${f.id}`} field={f} fields={form.fields} values={values} source={{ folder, file, form: form.id, reload, stamp }} value={state[f.id]} disabled={busy} onChange={(v) => change({ ...state, [f.id]: v })} />
         ))}
         <div className="dash-actions">
-          <code className="dash-preview" aria-label="Will run" title={line ?? undefined}>
-            {line ?? "Fill in the form to see the command."}
+          <code className={`dash-preview${line?.refused ? " refused" : ""}`} aria-label="Will run" title={line?.text}>
+            {line?.text ?? "The command shows here."}
           </code>
           {busy && (
             <button type="button" className="ghost" onClick={() => void api.dashboardStop(folder, file, form.id)}>

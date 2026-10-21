@@ -1808,7 +1808,10 @@ button.ghost.dash-run-copy { margin-left: auto; }
 .dash-table tr:hover .dash-copy-button, .dash-copy-button:focus-visible { opacity: 1; }
 .dash-kv .dash-kv { padding-left: 8px; border-left: 2px solid var(--line); }
 .dash-output > .dash-kv { display: flex; flex-direction: column; gap: 14px; }
-.dash-output > .dash-kv > div { display: flex; flex-direction: column; gap: 4px; }
+.dash-output > .dash-kv > div { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.dash-output > .dash-kv > div > dd > .dash-table-wrap > .dash-table-tools { position: absolute; top: -4px; right: 0; margin: 0; }
+.dash-chip-tools > button.ghost:first-child { margin-left: -8px; }
+.dash-preview.refused { color: var(--text-2); font-family: var(--ui); }
 .dash-output > .dash-kv > div > dt { font: 500 calc(12px * var(--font-scale)) var(--ui); color: var(--text-2); }
 .dash-output > .dash-kv > div > dd > .dash-kv { padding-left: 0; border-left: none; }
 .dash-options-none button.ghost { height: 22px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); color: var(--text); }
