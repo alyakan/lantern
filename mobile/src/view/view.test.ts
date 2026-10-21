@@ -1,7 +1,7 @@
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { Waiting } from "../protocol/generated/Waiting";
 import { ago, cards, headline, rows, tileColors } from "./home";
-import { parseInline, parseMarkdown } from "./markdown";
+import { parseInline, parseMarkdown, plainText, type Block } from "./markdown";
 import { livePage, readPage } from "./pages";
 import { approvalOf, promptView, questionsOf } from "./prompts";
 
@@ -133,6 +133,92 @@ describe("the little markdown", () => {
     expect(blocks[2]).toMatchObject({ ordered: false, items: [[{ kind: "text", text: "one" }], [{ kind: "bold", text: "two" }]] });
     expect(blocks[3]).toMatchObject({ ordered: true });
     expect(blocks[5]).toEqual({ kind: "code", lang: "ts", text: "const x = 1;\n\nconst y = 2;" });
+  });
+
+  it("reads a table: its header, the alignment from the dashes, and its rows, with marks inside cells", () => {
+    const [table] = parseMarkdown("| Name | Count | Note |\n|:--|--:|:-:|\n| `npm test` | **412** | passed |\n| lint | 0 | ok |");
+    expect(table).toMatchObject({ kind: "table", align: ["left", "right", "center"] });
+    const t = table as Extract<Block, { kind: "table" }>;
+    expect(t.head.map((c) => plainText(c))).toEqual(["Name", "Count", "Note"]);
+    expect(t.rows).toHaveLength(2);
+    expect(t.rows[0][0]).toEqual([{ kind: "code", text: "npm test" }]);
+    expect(t.rows[0][1]).toEqual([{ kind: "bold", text: "412" }]);
+    expect(t.rows[1].map((c) => plainText(c))).toEqual(["lint", "0", "ok"]);
+  });
+
+  it("reads a table without outer bars, and keeps a bar inside code or escaped as text", () => {
+    const [table] = parseMarkdown("a | b\n-- | --\n`x | y` | 1 \\| 2");
+    const t = table as Extract<Block, { kind: "table" }>;
+    expect(t.head.map((c) => plainText(c))).toEqual(["a", "b"]);
+    expect(t.rows[0].map((c) => plainText(c))).toEqual(["x | y", "1 | 2"]);
+  });
+
+  it("pads a short row and ignores the extra cells of a long one, so a table still streaming in doesn't break", () => {
+    const [table] = parseMarkdown("| a | b | c |\n|---|---|---|\n| 1 |\n| 1 | 2 | 3 | 4 |");
+    const t = table as Extract<Block, { kind: "table" }>;
+    expect(t.rows[0].map((c) => plainText(c))).toEqual(["1", "", ""]);
+    expect(t.rows[1].map((c) => plainText(c))).toEqual(["1", "2", "3"]);
+  });
+
+  it("shows a table's header as text until the dashes under it have come, and ends it at the first line without a bar", () => {
+    expect(parseMarkdown("| a | b |").map((b) => b.kind)).toEqual(["paragraph"]);
+    expect(parseMarkdown("| a | b |\n|---|").map((b) => b.kind)).not.toContain("table");
+    expect(parseMarkdown("| a |\n|---|\n| 1 |\n\nafter it").map((b) => b.kind)).toEqual(["table", "paragraph"]);
+    expect(parseMarkdown("| a |\n|---|").map((b) => b.kind)).toEqual(["table"]);
+  });
+
+  it("reads a rule, and keeps a dash list a list", () => {
+    expect(parseMarkdown("before\n\n---\n\nafter").map((b) => b.kind)).toEqual(["paragraph", "rule", "paragraph"]);
+    expect(parseMarkdown("***").map((b) => b.kind)).toEqual(["rule"]);
+    expect(parseMarkdown("- one\n- two").map((b) => b.kind)).toEqual(["list"]);
+  });
+
+  it("reads nested lists with their depth and marks, and keeps the numbers the message gave", () => {
+    const [list] = parseMarkdown("1. first\n   - inner a\n   - inner b\n     - deeper\n2. second");
+    const l = list as Extract<Block, { kind: "list" }>;
+    expect(l.meta.map((m) => [m.depth, m.marker])).toEqual([[0, "1."], [1, "◦"], [1, "◦"], [2, "▪"], [0, "2."]]);
+    expect(l.items.map((i) => plainText(i))).toEqual(["first", "inner a", "inner b", "deeper", "second"]);
+  });
+
+  it("keeps a loose numbered list (blank lines between items) as one list, not many starting at 1", () => {
+    const blocks = parseMarkdown("1. one\n\n2. two\n\n3. three");
+    expect(blocks).toHaveLength(1);
+    expect((blocks[0] as Extract<Block, { kind: "list" }>).meta.map((m) => m.marker)).toEqual(["1.", "2.", "3."]);
+  });
+
+  it("goes on with an indented line under an item, and ends the list at text that isn't", () => {
+    const blocks = parseMarkdown("- first item\n  carries on here\n- second\nplain text");
+    expect(blocks.map((b) => b.kind)).toEqual(["list", "paragraph"]);
+    expect(plainText((blocks[0] as Extract<Block, { kind: "list" }>).items[0])).toBe("first item carries on here");
+  });
+
+  it("reads task boxes, ticked or not", () => {
+    const [list] = parseMarkdown("- [ ] write it\n- [x] test it\n- [X] ship it\n- plain");
+    const l = list as Extract<Block, { kind: "list" }>;
+    expect(l.meta.map((m) => m.checked)).toEqual([false, true, true, null]);
+    expect(l.items.map((i) => plainText(i))).toEqual(["write it", "test it", "ship it", "plain"]);
+  });
+
+  it("starts another list when the kind changes at the list's own level", () => {
+    expect(parseMarkdown("- a\n\n1. b").map((b) => b.kind)).toEqual(["list", "list"]);
+  });
+
+  it("reads strikethrough, marks inside marks, and bare links without the full stop after them", () => {
+    expect(parseInline("~~old~~ **bold `code`** *it's `x`*")).toEqual([
+      { kind: "strike", text: "old" },
+      { kind: "text", text: " " },
+      { kind: "bold", text: "bold `code`", spans: [{ kind: "text", text: "bold " }, { kind: "code", text: "code" }] },
+      { kind: "text", text: " " },
+      { kind: "italic", text: "it's `x`", spans: [{ kind: "text", text: "it's " }, { kind: "code", text: "x" }] },
+    ]);
+    expect(parseInline("see https://example.com/a?b=1, then (https://x.dev/y).")).toEqual([
+      { kind: "text", text: "see " },
+      { kind: "link", text: "https://example.com/a?b=1", url: "https://example.com/a?b=1" },
+      { kind: "text", text: ", then (" },
+      { kind: "link", text: "https://x.dev/y", url: "https://x.dev/y" },
+      { kind: "text", text: ")." },
+    ]);
+    expect(parseInline("snake__case__name and a ~ b")).toEqual([{ kind: "text", text: "snake__case__name and a ~ b" }]);
   });
 
   it("takes an unterminated code block to the end, and an empty message to nothing", () => {

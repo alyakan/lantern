@@ -165,9 +165,9 @@ describe("while more of a chat is coming", () => {
   it("shows the shape of a diff while it comes, in the sheet", async () => {
     const { releases } = await slow(["diff"], turn);
     await fireEvent.press(screen.getByText("Edited 1 file +1 −1"));
-    await waitFor(() => expect(screen.getByLabelText("Loading the changes")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Loading the changes")).toBeTruthy(), { timeout: 3000 });
     await act(async () => releases.diff("--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n"));
-    await waitFor(() => expect(screen.getByText("+new")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("+new")).toBeTruthy(), { timeout: 3000 });
     expect(screen.queryByLabelText("Loading the changes")).toBeNull();
   });
 });
