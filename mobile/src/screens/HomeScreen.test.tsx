@@ -30,15 +30,15 @@ describe("Home", () => {
     expect(h.onOpenChat).toHaveBeenCalledWith("a");
   });
 
-  it("suggests what to do next when nothing waits on you, and offers to start something new", async () => {
+  it("suggests what to do next when nothing waits on you, with one way to start a chat of your own: New chat", async () => {
     const { controller } = makeController();
     const { asked } = attachSession(controller, { suggest: { items: [], generated_at: 1 } });
     const h = handlers();
     await renderWith(<HomeScreen {...h} />, { chats: [chat()], waiting: [] }, controller);
     await waitFor(() => expect(screen.getByText("Claude suggests")).toBeTruthy());
     expect(asked.some((r) => r.op === "suggest")).toBe(true);
-    await fireEvent.press(screen.getByRole("button", { name: "Start something new" }));
-    expect(h.onNewChat).toHaveBeenCalledWith();
+    expect(screen.queryByRole("button", { name: "Start something new" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "New chat" })).toHaveLength(1);
   });
 
   it("doesn't suggest anything, or ask Claude, while something waits on you: that leads", async () => {
@@ -46,7 +46,7 @@ describe("Home", () => {
     const { asked } = attachSession(controller, { suggest: { items: [], generated_at: 1 } });
     await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()], waiting: [waiting()] }, controller);
     expect(screen.queryByText("Claude suggests")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Start something new" })).toBeNull();
+    expect(screen.getByRole("button", { name: "New chat" })).toBeTruthy();
     expect(asked.filter((r) => r.op === "suggest")).toEqual([]);
   });
 

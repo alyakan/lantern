@@ -17,9 +17,8 @@ async function show(answers: Parameters<typeof attachSession>[1] = { suggest: an
   const { controller } = makeController();
   const session = attachSession(controller, answers);
   const onPick = jest.fn();
-  const onNewChat = jest.fn();
-  await renderWith(<Suggestions onPick={onPick} onNewChat={onNewChat} />, { chats: [chat({ slot: "a", title: "Release 0.1.53" })] }, controller);
-  return { onPick, onNewChat, ...session };
+  await renderWith(<Suggestions onPick={onPick} />, { chats: [chat({ slot: "a", title: "Release 0.1.53" })] }, controller);
+  return { onPick, ...session };
 }
 
 describe("what Claude suggests on Home", () => {
@@ -37,7 +36,7 @@ describe("what Claude suggests on Home", () => {
     const { controller } = makeController();
     let release: (v: unknown) => void = () => {};
     controller.sync.onSession({ welcome: { type: "welcome", protocol: 1, app_version: "t", mac_name: "Mac", epoch: 1 }, ask: () => new Promise((r) => (release = r)) } as never);
-    await renderWith(<Suggestions onPick={jest.fn()} onNewChat={jest.fn()} />, { chats: [chat()] }, controller);
+    await renderWith(<Suggestions onPick={jest.fn()} />, { chats: [chat()] }, controller);
     expect(screen.getByLabelText("Thinking about what is next")).toBeTruthy();
     expect(screen.getByText("Thinking about what's next…")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "New ideas" })).toBeNull();
@@ -59,10 +58,10 @@ describe("what Claude suggests on Home", () => {
     expect(onPick).toHaveBeenCalledWith({ text: "Fix the broken footer links.", project: "/Users/me/site" });
   });
 
-  it("starts something new with nothing written, always", async () => {
-    const { onNewChat } = await show();
-    await fireEvent.press(screen.getByRole("button", { name: "Start something new" }));
-    expect(onNewChat).toHaveBeenCalledWith();
+  it("has no second way to start a chat of its own: that is Home's New chat", async () => {
+    await show();
+    await waitFor(() => screen.getByRole("button", { name: "New ideas" }));
+    expect(screen.queryByRole("button", { name: "Start something new" })).toBeNull();
   });
 
   it("asks the Mac for new ones when asked", async () => {
@@ -75,14 +74,12 @@ describe("what Claude suggests on Home", () => {
   it("says why when Claude couldn't, and can try again", async () => {
     const { asked } = await show({ suggest: new Error("Claude didn't answer in time.") });
     await waitFor(() => expect(screen.getByText("Claude didn't answer in time.")).toBeTruthy());
-    expect(screen.getByRole("button", { name: "Start something new" })).toBeTruthy();
     await fireEvent.press(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(asked.filter((r) => r.op === "suggest")).toHaveLength(2));
   });
 
-  it("says so when nothing comes to mind, and still offers to start something", async () => {
+  it("says so when nothing comes to mind", async () => {
     await show({ suggest: { items: [], generated_at: 1 } });
     await waitFor(() => expect(screen.getByText(/Nothing in particular comes to mind/)).toBeTruthy());
-    expect(screen.getByRole("button", { name: "Start something new" })).toBeTruthy();
   });
 });

@@ -145,8 +145,8 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
         </View>
 
         {stack.length > 0 && <Deck list={stack} onOpenChat={onOpenChat} onReview={onReview} />}
-        {/* Nothing waits: Claude suggests what to do next, and there is a way to start something new. */}
-        {stack.length === 0 && macName && <Suggestions onPick={onNewChat} onNewChat={() => onNewChat()} />}
+        {/* Nothing waits: Claude suggests what to do next (starting something of your own is "New chat", below). */}
+        {stack.length === 0 && macName && <Suggestions onPick={onNewChat} />}
         {stack.length > 1 && (
           <Txt variant="small" tone="ink2" style={{ paddingHorizontal: space.xl, paddingTop: 2 }}>
             {stack.length - 1} more after this one

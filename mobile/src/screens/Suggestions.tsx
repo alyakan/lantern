@@ -35,11 +35,10 @@ function Skeleton({ delay }: { delay: number }) {
 
 /**
  * What Claude suggests when nothing waits on you: a few drafts from your recent chats, each opening a sheet where you read
- * and change it before it goes anywhere, and a way to start something of your own. The Mac makes them with a call that costs
+ * and change it before it goes anywhere (starting something of your own is Home's "New chat"). The Mac makes them with a call that costs
  * usage, so they are asked for when this appears and again only when you ask.
  */
-export function Suggestions({ onPick, onNewChat }: { onPick: (draft: Draft) => void; onNewChat: () => void }) {
-  // (`onNewChat` is called with nothing: a press's event is never passed on as a draft.)
+export function Suggestions({ onPick }: { onPick: (draft: Draft) => void }) {
   const { sync } = useController();
   const { chats } = useSyncState();
   const [state, setState] = useState<State>({ status: "loading", items: [] });
@@ -105,7 +104,7 @@ export function Suggestions({ onPick, onNewChat }: { onPick: (draft: Draft) => v
       {state.status === "ready" && shown.length === 0 && (
         <FadeSlideIn from={8}>
           <Txt variant="small" tone="ink2">
-            Nothing in particular comes to mind. Start something of your own?
+            Nothing in particular comes to mind.
           </Txt>
         </FadeSlideIn>
       )}
@@ -128,7 +127,6 @@ export function Suggestions({ onPick, onNewChat }: { onPick: (draft: Draft) => v
           </FadeSlideIn>
         ))}
 
-      <Button label="Start something new" kind="ghost" onPress={() => onNewChat()} />
     </View>
   );
 }
