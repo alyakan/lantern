@@ -9,12 +9,55 @@ const MAX = BAR - 52 - 10;
 async function bar() {
   const x = new Animated.Value(0);
   await render(<SwipeToAllow onAllow={jest.fn()} progress={x} />);
-  await fireEvent(screen.getByRole("button", { name: "Swipe to allow" }), "layout", { nativeEvent: { layout: { width: BAR, height: 62, x: 0, y: 0 } } });
+  // The measuring view is the bar's parent: the bar inside it is what shrinks.
+  await fireEvent(screen.getByRole("button", { name: "Swipe to allow" }).parent!, "layout", { nativeEvent: { layout: { width: BAR, height: 62, x: 0, y: 0 } } });
   return x;
 }
 
 const style = (id: string) => screen.getByTestId(id).props.style as Record<string, number | string>;
 const flat = (id: string) => Object.assign({}, ...[style(id)].flat(Infinity));
+
+const activate = () => fireEvent(screen.getByRole("button", { name: "Swipe to allow" }), "accessibilityAction", { nativeEvent: { actionName: "activate" } });
+
+describe("swipe to allow once allowed", () => {
+  it("closes in to a circle (the bar's height across) at the right edge, holding the knob", async () => {
+    await render(<SwipeToAllow onAllow={jest.fn()} onDone={jest.fn()} />);
+    await fireEvent(screen.getByRole("button", { name: "Swipe to allow" }).parent!, "layout", { nativeEvent: { layout: { width: BAR, height: 62, x: 0, y: 0 } } });
+    const before = flat("swipe-knob");
+    await act(async () => activate());
+    const circle = screen.getByRole("button", { name: "Allowed" }).parent!;
+    const s = Object.assign({}, ...[circle.props.style].flat(Infinity));
+    expect(s).toMatchObject({ alignSelf: "flex-end", width: 62, height: 62, borderRadius: 999 });
+    // The knob ran to the end of the bar and stays there: the bar closes in around it.
+    expect(flat("swipe-knob").transform[0].translateX).toBe(MAX);
+    expect(before.transform[0].translateX).toBe(0);
+  });
+
+  it("is a button to press once it is a circle, when it is given something to do", async () => {
+    const onDone = jest.fn();
+    const onAllow = jest.fn();
+    await render(<SwipeToAllow onAllow={onAllow} onDone={onDone} />);
+    await act(async () => activate());
+    expect(onAllow).toHaveBeenCalledTimes(1);
+    expect(onDone).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByRole("button", { name: "Allowed" }));
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("is only a sign that it was allowed, without something to do", async () => {
+    await render(<SwipeToAllow onAllow={jest.fn()} />);
+    await act(async () => activate());
+    expect(screen.getByLabelText("Allowed")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Allowed" }).props.accessibilityState).toMatchObject({ disabled: true });
+  });
+
+  it("is not a button to press before it was allowed, even with something to do", async () => {
+    const onDone = jest.fn();
+    await render(<SwipeToAllow onAllow={jest.fn()} onDone={onDone} />);
+    await fireEvent.press(screen.getByRole("button", { name: "Swipe to allow" }));
+    expect(onDone).not.toHaveBeenCalled();
+  });
+});
 
 describe("swipe to allow while it is dragged", () => {
   it("shows no green until the knob moves, then fills the bar behind it", async () => {

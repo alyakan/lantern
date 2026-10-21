@@ -20,7 +20,8 @@ export interface DecideProps {
 /** How long "Answered on your Mac" stays before the screen closes by itself. */
 export const CLOSE_AFTER_MS = 2500;
 
-type Outcome = { kind: "none" } | { kind: "sending" } | { kind: "done"; allowed: boolean } | { kind: "elsewhere" } | { kind: "failed"; why: string };
+/** `tap`: it closes when the person taps (an allow, by the circle), not by itself. */
+type Outcome = { kind: "none" } | { kind: "sending" } | { kind: "done"; allowed: boolean; tap: boolean } | { kind: "elsewhere" } | { kind: "failed"; why: string };
 
 /** What the answers to a prompt's questions come to, one string per question (a multi-select joined with commas). */
 export function answersFrom(qs: Question[], picks: Record<string, string[]>, typed: Record<string, string>): Record<string, string> | null {
@@ -130,9 +131,10 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   }, [gone, outcome.kind]);
   useEffect(() => {
     if (outcome.kind !== "elsewhere" && outcome.kind !== "done") return;
+    if (outcome.kind === "done" && outcome.tap) return;
     const t = setTimeout(onClose, CLOSE_AFTER_MS);
     return () => clearTimeout(t);
-  }, [outcome.kind, onClose]);
+  }, [outcome, onClose]);
 
   if (!asked) {
     return (
@@ -160,7 +162,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
     setOutcome({ kind: "sending" });
     try {
       await controller.sync.answer(slot, requestId, allow, withAnswers);
-      setOutcome({ kind: "done", allowed: allow });
+      setOutcome({ kind: "done", allowed: allow, tap: allow && !withAnswers });
       // The swipe buzzes for itself; the rest say what it came to.
       if (!allow) buzz("warning");
       else if (withAnswers) buzz("success");
@@ -250,8 +252,8 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
         )
       ) : outcome.kind === "done" && outcome.allowed && view.kind !== "question" ? (
         <View style={{ gap: 12 }}>
-          <SwipeToAllow key="first" label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => {}} />
-          <Button label="Done" kind="night-ghost" onPress={onClose} />
+          {/* The same bar, now closed in to a circle with the check: it is the way back to the chat. */}
+          <SwipeToAllow key="first" label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => {}} onDone={onClose} />
         </View>
       ) : (
         <Button label="Done" kind="night-ghost" onPress={onClose} />

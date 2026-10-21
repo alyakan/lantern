@@ -51,14 +51,46 @@ describe("deciding", () => {
     expect(asked.filter((r) => r.op === "answer")).toHaveLength(1);
   });
 
-  it("keeps the swipe on screen once allowed, saying so, with a Done beside it instead of Deny", async () => {
-    await decide();
+  it("keeps the bar on screen once allowed, closed in to a check circle that goes back to the chat, in place of Deny and Done", async () => {
+    const { onClose } = await decide();
     await act(async () => activate());
     await waitFor(() => expect(screen.getByText("Allowed.")).toBeTruthy());
-    expect(screen.getByLabelText("Allowed")).toBeTruthy();
     expect(screen.queryByLabelText("Swipe to allow")).toBeNull();
-    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Deny" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByRole("button", { name: "Allowed" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("an allow waits to be tapped: it doesn't close by itself", async () => {
+    const { onClose } = await decide();
+    jest.useFakeTimers();
+    try {
+      await act(async () => activate());
+      await act(async () => void (await Promise.resolve()));
+      await act(async () => void jest.advanceTimersByTime(CLOSE_AFTER_MS * 3));
+      expect(screen.getByText("Allowed.")).toBeTruthy();
+      expect(onClose).not.toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it("the circle can't be tapped away before the answer has gone", async () => {
+    let release: (v: unknown) => void = () => {};
+    const { controller } = makeController();
+    controller.sync.onSession({ welcome: { type: "welcome", protocol: 1, app_version: "t", mac_name: "Mac", epoch: 1 }, ask: () => new Promise((r) => (release = r)) } as never);
+    const onClose = jest.fn();
+    await renderWith(<DecideScreen slot="a" requestId="p1" onClose={onClose} />, { chats: [chat()], waiting: [waiting()] }, controller);
+    await act(async () => activate());
+    // The bar says it was allowed, but it is not yet something to press.
+    await fireEvent.press(screen.getByRole("button", { name: "Allowed" }));
+    expect(onClose).not.toHaveBeenCalled();
+    release(null);
+    await waitFor(() => expect(screen.getByText("Allowed.")).toBeTruthy());
+    await fireEvent.press(screen.getByRole("button", { name: "Allowed" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("brings a fresh swipe back when the answer failed, not one that looks allowed", async () => {
