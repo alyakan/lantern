@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Animated, Easing, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectionState } from "../net/connection";
+import { EMBER, useAccent } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
 import { skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
@@ -20,6 +21,9 @@ function DarkLantern() {
 
 /** A lantern being lit: its glow swells and settles, over and over, while the phone finds the Mac. */
 function LitLantern() {
+  // The flame is Ember for a regular.
+  const accent = useAccent();
+  const flame = accent === EMBER ? EMBER : colors.hi;
   const glow = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (skips()) return;
@@ -34,10 +38,10 @@ function LitLantern() {
   }, [glow]);
   return (
     <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ alignItems: "center", justifyContent: "center", width: 150, height: 150, marginBottom: 8 }}>
-      <Animated.View style={{ position: "absolute", width: 130, height: 130, borderRadius: 65, backgroundColor: colors.hi, opacity: glow.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.28] }), transform: [{ scale: glow.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.12] }) }] }} />
+      <Animated.View style={{ position: "absolute", width: 130, height: 130, borderRadius: 65, backgroundColor: flame, opacity: glow.interpolate({ inputRange: [0, 1], outputRange: [0.08, 0.28] }), transform: [{ scale: glow.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.12] }) }] }} />
       <View style={{ width: 16, height: 10, borderWidth: 2, borderBottomWidth: 0, borderColor: colors.ink2, borderTopLeftRadius: 8, borderTopRightRadius: 8 }} />
       <View style={{ width: 44, height: 64, borderWidth: 2, borderColor: colors.ink2, borderTopLeftRadius: 22, borderTopRightRadius: 22, borderBottomLeftRadius: 12, borderBottomRightRadius: 12, alignItems: "center", justifyContent: "center" }}>
-        <Animated.View style={{ width: 16, height: 24, borderRadius: 9, backgroundColor: colors.hi, opacity: glow.interpolate({ inputRange: [0, 1], outputRange: [0.55, 1] }) }} />
+        <Animated.View style={{ width: 16, height: 24, borderRadius: 9, backgroundColor: flame, opacity: glow.interpolate({ inputRange: [0, 1], outputRange: [0.55, 1] }) }} />
       </View>
     </View>
   );

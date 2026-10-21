@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Text, View, type StyleProp, type TextProps, type ViewStyle } from "react-native";
-import { useAccent } from "./accent";
+import { EMBER, useAccent } from "./accent";
 import { PressScale } from "./motion";
 import { colors, MIN_TARGET, radius, space, type as scale, type Variant } from "./theme";
 
@@ -17,7 +17,9 @@ type ButtonKind = "ink" | "ghost" | "go" | "hi" | "night-stop" | "night-ghost";
 /** A button at least as tall as a touch target; the label says what happens. */
 export function Button({ label, onPress, kind = "ink", disabled, style, accessibilityHint }: { label: string; onPress: () => void; kind?: ButtonKind; disabled?: boolean; style?: StyleProp<ViewStyle>; accessibilityHint?: string }) {
   // "hi" is the highlighter: dark words on yellow (white ones can't be read on it).
-  const bg = { ink: colors.ink, ghost: colors.paper, go: colors.go, hi: colors.hi, "night-stop": "transparent", "night-ghost": colors.nightRaised }[kind];
+  // A regular's main buttons are Ember too.
+  const accent = useAccent();
+  const bg = { ink: accent === EMBER ? EMBER : colors.ink, ghost: colors.paper, go: colors.go, hi: colors.hi, "night-stop": "transparent", "night-ghost": colors.nightRaised }[kind];
   const fg = kind === "ink" || kind === "go" ? "white" : kind === "night-stop" ? "night-stop" : kind === "night-ghost" ? "white" : "ink";
   return (
     <PressScale

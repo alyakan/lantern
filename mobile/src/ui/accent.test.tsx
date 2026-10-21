@@ -3,7 +3,7 @@ import { act, render, screen } from "@testing-library/react-native";
 import { AccentFromPledge, TipsContext } from "../shell/tipsContext";
 import { noMemory, noPlatform, TipJar } from "../tips";
 import { AccentContext, EMBER } from "./accent";
-import { Txt } from "./components";
+import { Button, Txt } from "./components";
 import { Markdown } from "./Markdown";
 import { colors } from "./theme";
 
@@ -31,6 +31,20 @@ describe("the accent", () => {
     );
     expect(color("warm")).toBe(EMBER);
     expect(color("still plain")).toBe(colors.ink2);
+  });
+
+  it("makes a regular's main buttons Ember and leaves everyone else's ink, and the other kinds alone", async () => {
+    const bg = (label: string) => StyleSheet.flatten(screen.getByRole("button", { name: label }).props.style).backgroundColor;
+    await render(<Button label="Plain" onPress={() => {}} />);
+    expect(bg("Plain")).toBe(colors.ink);
+    await render(
+      <AccentContext.Provider value={EMBER}>
+        <Button label="Warm" onPress={() => {}} />
+        <Button label="Quiet" kind="ghost" onPress={() => {}} />
+      </AccentContext.Provider>,
+    );
+    expect(bg("Warm")).toBe(EMBER);
+    expect(bg("Quiet")).toBe(colors.paper);
   });
 
   it("colours the links in Claude's text", async () => {
