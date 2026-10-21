@@ -6,7 +6,7 @@ import { useAccent } from "../ui/accent";
 import { Button, Chip, Tag, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
 import { Markdown } from "../ui/Markdown";
-import { bounce, buzz, PopIn, PressScale, skips } from "../ui/motion";
+import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { DiffSkeleton } from "../ui/skeleton";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
@@ -51,13 +51,29 @@ export const AssistantRow = memo(function AssistantRow({ item }: { item: Extract
 });
 
 export const StepsRow = memo(function StepsRow({ chips, onFiles }: { chips: StepChip[]; onFiles: (files: string[]) => void }) {
+  // A grouped chip ("Ran 5 commands") opens to what it stands for, one line each.
+  const [open, setOpen] = useState<string | null>(null);
+  const opened = chips.find((c) => c.key === open && c.items);
   return (
-    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, paddingHorizontal: space.lg, paddingTop: 10 }}>
-      {chips.map((c) => (
-        <Chip key={c.key} tone={c.tone} onPress={c.files ? () => onFiles(c.files!) : undefined}>
-          {c.label}
-        </Chip>
-      ))}
+    <View style={{ paddingHorizontal: space.lg, paddingTop: 10, gap: 8 }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+        {chips.map((c) => (
+          <Chip key={c.key} tone={c.tone} onPress={c.files ? () => onFiles(c.files!) : c.items ? () => setOpen(open === c.key ? null : c.key) : undefined}>
+            {c.items ? `${c.label} ${open === c.key ? "▴" : "▾"}` : c.label}
+          </Chip>
+        ))}
+      </View>
+      {opened?.items && (
+        <FadeSlideIn>
+          <View accessibilityLabel={opened.label} style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.inner, padding: 10, gap: 6 }}>
+            {opened.items.map((it, i) => (
+              <Txt key={i} variant="mono" tone={it.bad ? "stop" : "ink2"} numberOfLines={3} style={{ fontSize: 12, lineHeight: 17 }}>
+                {it.text}
+              </Txt>
+            ))}
+          </View>
+        </FadeSlideIn>
+      )}
     </View>
   );
 });

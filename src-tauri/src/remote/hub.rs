@@ -243,6 +243,14 @@ impl SessionHub {
         log.session_id = session_id.or(log.session_id.take());
     }
 
+    /// The window says the chat is awake (its claude was started again). Claude names its session only once it has a message to
+    /// answer, so a woken chat sends no start until then and would stay asleep here: this is what ends it.
+    pub fn awake(&self, slot: &str) {
+        if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
+            log.asleep = false;
+        }
+    }
+
     /// The window knows which session a chat is. Claude only names its session once it has a message to answer, so a chat
     /// resumed from History has none here until then, and without it its transcript can't be found for a phone. Claude's own
     /// word (the session's start) stands once it has come: this only fills a gap.
@@ -386,6 +394,19 @@ mod tests {
         // Claude's own start replaces it: that is the session now.
         feed(&hub, "a", vec![UiEvent::SessionStarted { session_id: "cccc-3333".into(), model: "m".into(), cwd: "/p".into(), permission_mode: "auto".into(), claude_version: "1".into() }]);
         assert_eq!(hub.chat("a").unwrap().session_id.as_deref(), Some("cccc-3333"));
+    }
+
+    #[test]
+    fn a_chat_the_window_woke_is_awake_here_without_waiting_for_claudes_first_message() {
+        let hub = hub();
+        hub.asleep("a", "/p", Some("Old".into()), Some("aaaa-1111".into()));
+        assert_eq!(hub.chat("a").unwrap().status, ChatStatus::Asleep);
+        hub.awake("a");
+        let a = hub.chat("a").unwrap();
+        assert_eq!((a.status, a.session_id.as_deref(), a.title.as_deref()), (ChatStatus::Idle, Some("aaaa-1111"), Some("Old")), "awake, and nothing it knew is lost");
+        // A chat the hub doesn't list isn't listed by it.
+        hub.awake("ghost");
+        assert!(hub.chat("ghost").is_none());
     }
 
     #[test]
