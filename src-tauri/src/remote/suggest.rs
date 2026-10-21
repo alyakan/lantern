@@ -70,7 +70,6 @@ pub struct Digest {
     pub title: String,
     pub project: String,
     pub state: &'static str,
-    pub last_seq: u64,
     pub said: Option<String>,
     pub replied: Option<String>,
 }
@@ -115,7 +114,6 @@ pub fn digests(hub: &SessionHub) -> Vec<Digest> {
                 title: c.title.map(|t| clip(&t, 120)).unwrap_or_default(),
                 project,
                 state: state_of(c.status),
-                last_seq: c.last_seq,
             }
         })
         .collect()
@@ -181,11 +179,13 @@ pub fn parse(reply: &str, chats: &[Digest], projects: &[(String, String)]) -> Ve
     out
 }
 
-/// What the chats are as far as a suggestion goes: when it changes, what was suggested is out of date.
+/// What the chats are as far as a suggestion goes: when it changes, what was suggested is out of date. It is what was
+/// last said and replied and where each chat stands, which change when a message is said or a turn begins or ends, not
+/// with every streamed piece of one (an event's number would: it goes up with each).
 fn state_key(chats: &[Digest], projects: &[(String, String)]) -> u64 {
     let mut h = DefaultHasher::new();
     for c in chats {
-        (&c.slot, c.last_seq, c.state).hash(&mut h);
+        (&c.slot, &c.said, &c.replied, c.state).hash(&mut h);
     }
     projects.hash(&mut h);
     h.finish()
@@ -223,15 +223,17 @@ impl Suggester {
         let key = state_key(chats, projects);
         let mut inner = self.inner.lock().await;
         let kept = |c: &Cached| Suggestions { items: c.items.clone(), generated_at: c.at };
+        // The model is never called twice within MIN_GAP_MS, whoever asks and whatever the chats are doing: within it, what
+        // is kept comes back (stale or not), or the failure the last call ended in.
+        let just_called = inner.last_call.is_some_and(|at| now.saturating_sub(at) < MIN_GAP_MS);
         if let Some(c) = &inner.cached {
             let fresh = c.key == key && now.saturating_sub(c.at) < TTL_MS;
-            let just_asked = now.saturating_sub(c.at) < MIN_GAP_MS;
-            if (fresh && !refresh) || (refresh && just_asked) {
+            if (fresh && !refresh) || just_called {
                 return Ok(kept(c));
             }
         }
-        if let (Some(at), Some(why)) = (inner.last_call, &inner.last_error) {
-            if now.saturating_sub(at) < MIN_GAP_MS {
+        if just_called {
+            if let Some(why) = &inner.last_error {
                 return Err(why.clone());
             }
         }
@@ -263,7 +265,7 @@ mod tests {
     use std::sync::Arc;
 
     fn chat(slot: &str, state: &'static str) -> Digest {
-        Digest { slot: slot.into(), title: format!("Chat {slot}"), project: "lantern".into(), state, last_seq: 3, said: Some("Cut the release".into()), replied: Some("Done, tests pass.".into()) }
+        Digest { slot: slot.into(), title: format!("Chat {slot}"), project: "lantern".into(), state, said: Some("Cut the release".into()), replied: Some("Done, tests pass.".into()) }
     }
 
     fn projects() -> Vec<(String, String)> {
@@ -442,14 +444,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_chats_changing_makes_them_out_of_date() {
+    async fn the_chats_changing_makes_them_out_of_date_but_never_means_two_calls_within_a_minute() {
         let s = Suggester::default();
         let calls = Arc::new(AtomicUsize::new(0));
-        s.get(0, &[chat("a", "idle")], &projects(), false, runner(&calls, Ok(reply()))).await.unwrap();
+        let first = s.get(0, &[chat("a", "idle")], &projects(), false, runner(&calls, Ok(reply()))).await.unwrap();
         let mut moved = chat("a", "idle");
-        moved.last_seq = 9;
-        s.get(5_000, &[moved], &projects(), false, runner(&calls, Ok("[]".into()))).await.unwrap();
-        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        moved.said = Some("Now push it".into());
+        let soon = s.get(5_000, &[moved.clone()], &projects(), false, runner(&calls, Ok("[]".into()))).await.unwrap();
+        assert_eq!(soon, first, "changed, but too soon after the last call: what is kept comes back");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let later = s.get(MIN_GAP_MS, &[moved], &projects(), false, runner(&calls, Ok("[]".into()))).await.unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "a minute on, a changed chat is asked about again");
+        assert!(later.items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn however_often_a_busy_chat_changes_the_model_is_called_at_most_once_a_minute() {
+        let s = Suggester::default();
+        let calls = Arc::new(AtomicUsize::new(0));
+        // A chat that says something new every second for ten minutes, asked about every second by a phone that doesn't cache.
+        for t in 0..600u64 {
+            let mut busy = chat("a", "working");
+            busy.said = Some(format!("message {t}"));
+            s.get(t * 1_000, &[busy], &projects(), false, runner(&calls, Ok(reply()))).await.unwrap();
+        }
+        assert!(calls.load(Ordering::SeqCst) <= 10, "{} calls in ten minutes", calls.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn streaming_in_a_chat_doesnt_change_what_the_suggestions_depend_on_but_a_finished_message_does() {
+        let remote = crate::remote::Remote::default();
+        remote.hub.opened("a", "/Users/me/app");
+        remote.hub.titled("a", "Release");
+        remote.bus.publish("a", UiEvent::UserText { text: "Cut the release".into(), at: Some(1), sent_by: None });
+        let before = digests(&remote.hub);
+        for piece in ["Do", "ing ", "it ", "now"] {
+            remote.bus.publish("a", UiEvent::TextDelta { parent: None, block_id: "b".into(), text: piece.into() });
+        }
+        let streaming = digests(&remote.hub);
+        assert_eq!(state_key(&before, &projects()), state_key(&streaming, &projects()), "every piece moves the event number, not the key");
+        remote.bus.publish("a", UiEvent::AssistantText { parent: None, block_id: "b".into(), text: "Doing it now".into() });
+        let finished = digests(&remote.hub);
+        assert_ne!(state_key(&before, &projects()), state_key(&finished, &projects()), "a finished reply does");
     }
 
     #[tokio::test]

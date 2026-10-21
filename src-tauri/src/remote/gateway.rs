@@ -12,6 +12,7 @@ use super::secure::{self, Channel, Handshake, Keypair};
 use super::transport::Link;
 use crate::permission::bridge::Pending;
 use crate::ui_event::UiEvent;
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -30,6 +31,9 @@ pub const HANDSHAKES_AT_ONCE: usize = 4;
 pub const TEXT_MAX: usize = 100_000;
 /// About how big a page of a Reset is, in bytes of JSON.
 const PAGE_BYTES: usize = 512 << 10;
+/// How many slow requests (what Claude suggests, a chat starting) one phone may have going at once. They run beside the
+/// phone's other requests and its chats' events, not in front of them, so a phone waiting on Claude isn't stuck.
+pub const SLOW_AT_ONCE: usize = 3;
 /// The longest first message a phone may start a chat with (the menu bar panel's limit, in characters).
 pub const NEW_CHAT_TEXT_MAX: usize = 20_000;
 /// How many chats one phone may start, in how long: a stuck or hostile phone can't fill the Mac with them.
@@ -138,6 +142,28 @@ impl Gateway {
             started: Mutex::default(),
             suggester: Default::default(),
         })
+    }
+
+    /// What Claude suggests for the chats as they are (see suggest.rs): the answer to Request::Suggest.
+    async fn suggest(&self, refresh: bool) -> Result<serde_json::Value, String> {
+        let host = self.host.clone();
+        let projects = host.projects().await;
+        let chats = super::suggest::digests(&self.hub);
+        let suggestions = self.suggester.get((self.now)(), &chats, &projects, refresh, |prompt| host.suggest_reply(prompt)).await?;
+        serde_json::to_value(&suggestions).map_err(|e| e.to_string())
+    }
+
+    /// Starts a chat for `device` in `project` with `text`: the answer to Request::NewChat. The folder must be exactly one
+    /// of the projects, and the phone may only start so many.
+    async fn start_chat(&self, device: &str, project: String, text: String) -> Result<serde_json::Value, String> {
+        check_new_chat(&project, &text)?;
+        // The phone names a folder; whether it is one of the user's projects is decided here, by exact match.
+        if !self.host.projects().await.iter().any(|(folder, _)| *folder == project) {
+            return Err("That isn't one of your projects.".into());
+        }
+        self.allow_new_chat(device)?;
+        let slot = self.host.new_chat(project, text, device.to_string()).await?;
+        serde_json::to_value(protocol::StartedChat { slot }).map_err(|e| e.to_string())
     }
 
     /// Counts a chat started by `device`, or refuses it: too many lately.
@@ -358,7 +384,19 @@ impl Drop for Session<'_> {
     }
 }
 
-impl Session<'_> {
+/// The answer to request `id`, sealed and queued for the phone.
+fn respond(link: &Link, channel: &mut Channel, id: u64, answer: Result<serde_json::Value, String>) -> Result<(), String> {
+    let (ok, error) = match answer {
+        Ok(v) => (Some(v), None),
+        Err(e) => (None, Some(e)),
+    };
+    send_message(link, channel, &ServerMessage::Response { id, ok, error })
+}
+
+/// A request's answer in the making: what takes long (see `SLOW_AT_ONCE`).
+type Slow<'a> = Pin<Box<dyn Future<Output = (u64, Result<serde_json::Value, String>)> + Send + 'a>>;
+
+impl<'a> Session<'a> {
     /// The phone follows `slot` from event `last` on; it has opened the chat (what was pushed about it has been seen).
     fn follow(&mut self, slot: &str, last: u64) {
         if self.subscribed.insert(slot.to_string(), last).is_none() {
@@ -379,6 +417,11 @@ impl Session<'_> {
     async fn run(&mut self, link: &mut Link, channel: &mut Channel, killed: &mut watch::Receiver<bool>) -> Result<(), String> {
         let mut events = self.gw.bus.subscribe();
         let mut tick = tokio::time::interval(Duration::from_secs(1));
+        // What takes long (Claude thinking up suggestions, a chat opening) is waited for here, beside the loop's other work:
+        // the phone's other requests are answered, and its chats' events keep coming, meanwhile. Dropped with the
+        // connection, which stops what they were waiting on.
+        let gw: &'a Gateway = self.gw;
+        let mut slow: FuturesUnordered<Slow<'a>> = FuturesUnordered::new();
         self.send_chats(link, channel, true)?;
         loop {
             tokio::select! {
@@ -388,13 +431,22 @@ impl Session<'_> {
                     let Some(plain) = channel.open(&frame)? else { continue };
                     let msg: ClientMessage = serde_json::from_slice(&plain).map_err(|e| e.to_string())?;
                     let ClientMessage::Request { id, request } = msg else { continue };
-                    let answer = self.handle(link, channel, request).await;
-                    let (ok, error) = match answer {
-                        Ok(v) => (Some(v), None),
-                        Err(e) => (None, Some(e)),
-                    };
-                    send_message(link, channel, &ServerMessage::Response { id, ok, error })?;
+                    match request {
+                        Request::Suggest { .. } | Request::NewChat { .. } if slow.len() >= SLOW_AT_ONCE => {
+                            respond(link, channel, id, Err("That is one thing at a time: wait for the others to finish first.".into()))?;
+                        }
+                        Request::Suggest { refresh } => slow.push(Box::pin(async move { (id, gw.suggest(refresh).await) })),
+                        Request::NewChat { project, text } => {
+                            let device = self.device.clone();
+                            slow.push(Box::pin(async move { (id, gw.start_chat(&device, project, text).await) }));
+                        }
+                        request => {
+                            let answer = self.handle(link, channel, request).await;
+                            respond(link, channel, id, answer)?;
+                        }
+                    }
                 }
+                Some((id, answer)) = slow.next(), if !slow.is_empty() => respond(link, channel, id, answer)?,
                 ev = events.recv() => match ev {
                     Ok(ev) => self.forward(link, channel, &ev)?,
                     // Fell behind the bus: each chat it follows starts over from the hub.
@@ -525,25 +577,14 @@ impl Session<'_> {
                 host.wake(&slot).map(|()| serde_json::Value::Null)
             }
             Request::Projects => Ok(json(&host.projects().await.into_iter().map(|(id, name)| protocol::RemoteProject { id, name }).collect::<Vec<_>>())),
-            Request::NewChat { project, text } => {
-                check_new_chat(&project, &text)?;
-                // The phone names a folder; whether it is one of the user's projects is decided here, by exact match.
-                if !host.projects().await.iter().any(|(folder, _)| *folder == project) {
-                    return Err("That isn't one of your projects.".into());
-                }
-                self.gw.allow_new_chat(&self.device)?;
-                host.new_chat(project, text, self.device.clone()).await.map(|slot| json(&protocol::StartedChat { slot }))
-            }
+            // These two can take long: the connection's loop runs them beside everything else (see `run`); asked here, as a
+            // plain request, they are the same thing.
+            Request::NewChat { project, text } => self.gw.start_chat(&self.device, project, text).await,
             Request::Diff { slot, path } => {
                 self.chat_known(&slot)?;
                 host.diff(slot, path).await.map(serde_json::Value::String)
             }
-            Request::Suggest { refresh } => {
-                let projects = host.projects().await;
-                let chats = super::suggest::digests(&self.gw.hub);
-                let suggestions = self.gw.suggester.get((self.gw.now)(), &chats, &projects, refresh, |prompt| host.suggest_reply(prompt)).await?;
-                Ok(json(&suggestions))
-            }
+            Request::Suggest { refresh } => self.gw.suggest(refresh).await,
             Request::PushToken { token } => self.gw.store.set_push_token(&self.device, &token).map(|()| serde_json::Value::Null),
         }
     }
@@ -632,6 +673,9 @@ pub(crate) mod tests {
         /// What the model says next (the first is used first; "[]" when none are left), and what it was asked.
         pub replies: Mutex<Vec<Result<String, String>>>,
         pub prompts: Mutex<Vec<String>>,
+        /// How long the model takes to answer, and a chat started from a phone takes to open.
+        pub suggest_delay: Mutex<Duration>,
+        pub new_chat_delay: Mutex<Duration>,
     }
 
     impl Host for FakeHost {
@@ -660,13 +704,21 @@ pub(crate) mod tests {
         }
         fn new_chat(&self, folder: String, text: String, by: String) -> BoxFut<Result<String, String>> {
             self.started.lock().unwrap().push((folder, text, by));
-            Box::pin(async { Ok("s9".to_string()) })
+            let delay = *self.new_chat_delay.lock().unwrap();
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+                Ok("s9".to_string())
+            })
         }
         fn suggest_reply(&self, prompt: String) -> BoxFut<Result<String, String>> {
             self.prompts.lock().unwrap().push(prompt);
             let mut replies = self.replies.lock().unwrap();
             let reply = if replies.is_empty() { Ok("[]".to_string()) } else { replies.remove(0) };
-            Box::pin(async move { reply })
+            let delay = *self.suggest_delay.lock().unwrap();
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+                reply
+            })
         }
         fn diff(&self, _: String, path: String) -> BoxFut<Result<String, String>> {
             Box::pin(async move { if path == "/p/a.rs" { Ok("--- a\n+++ b\n".into()) } else { Err("not changed".into()) } })
@@ -1054,6 +1106,78 @@ pub(crate) mod tests {
             assert!(prompts[0].contains(must), "{must}: {}", prompts[0]);
         }
         assert!(!prompts[0].contains("/Users/me"), "no folder paths go to the model");
+    }
+
+    /// What a phone hears, in order, until it has had the answers to all of `ids` (events and chat lists in between are noted).
+    async fn heard_until(p: &mut Phone, ids: &[u64]) -> Vec<String> {
+        let mut seen = Vec::new();
+        let mut left: Vec<u64> = ids.to_vec();
+        while !left.is_empty() {
+            match p.next().await.expect("something") {
+                ServerMessage::Response { id, .. } => {
+                    seen.push(format!("answer {id}"));
+                    left.retain(|i| *i != id);
+                }
+                ServerMessage::Event { .. } => seen.push("event".into()),
+                _ => {}
+            }
+        }
+        seen
+    }
+
+    #[tokio::test]
+    async fn a_slow_suggestion_doesnt_stop_that_phone_getting_answers_or_events_meanwhile() {
+        let r = rig();
+        talked(&r);
+        *r.host.suggest_delay.lock().unwrap() = Duration::from_millis(600);
+        let (_, mut p) = paired(&r).await;
+        assert!(p.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await.1.is_none());
+        p.send(&ClientMessage::Request { id: 100, request: Request::Suggest { refresh: false } });
+        p.send(&ClientMessage::Request { id: 101, request: Request::ListChats });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        r.bus.publish("a", user("typed on the Mac while Claude thinks"));
+        let order = heard_until(&mut p, &[100, 101]).await;
+        let at = |what: &str| order.iter().position(|x| x == what).unwrap_or_else(|| panic!("{what} in {order:?}"));
+        assert!(at("answer 101") < at("answer 100"), "a quick request is answered while the slow one waits: {order:?}");
+        assert!(at("event") < at("answer 100"), "and the chat's events keep coming: {order:?}");
+    }
+
+    #[tokio::test]
+    async fn a_chat_that_is_slow_to_open_doesnt_stop_that_phone_either() {
+        let r = rig();
+        *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
+        *r.host.new_chat_delay.lock().unwrap() = Duration::from_millis(600);
+        let (_, mut p) = paired(&r).await;
+        p.send(&ClientMessage::Request { id: 100, request: Request::NewChat { project: "/Users/me/app".into(), text: "Fix it".into() } });
+        p.send(&ClientMessage::Request { id: 101, request: Request::ListChats });
+        let order = heard_until(&mut p, &[100, 101]).await;
+        assert_eq!(order, vec!["answer 101".to_string(), "answer 100".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn one_phone_cant_have_more_than_a_few_slow_requests_going_at_once() {
+        let r = rig();
+        *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
+        *r.host.new_chat_delay.lock().unwrap() = Duration::from_millis(400);
+        let (_, mut p) = paired(&r).await;
+        for id in 100..110 {
+            p.send(&ClientMessage::Request { id, request: Request::NewChat { project: "/Users/me/app".into(), text: format!("chat {id}") } });
+        }
+        // All ten arrive before the first of the slow ones finishes: three run, and the rest are refused at once.
+        let (mut ran, mut refused) = (0, Vec::new());
+        while ran + refused.len() < 10 {
+            if let Some(ServerMessage::Response { ok, error, .. }) = p.next().await {
+                match (ok, error) {
+                    (Some(_), _) => ran += 1,
+                    (_, Some(why)) => refused.push(why),
+                    _ => {}
+                }
+            }
+        }
+        assert_eq!(ran, SLOW_AT_ONCE);
+        assert_eq!(refused.len(), 10 - SLOW_AT_ONCE);
+        assert!(refused.iter().all(|e| e.contains("one thing at a time")), "{refused:?}");
+        assert_eq!(r.host.started.lock().unwrap().len(), SLOW_AT_ONCE, "only the ones that ran reached the app");
     }
 
     #[tokio::test]

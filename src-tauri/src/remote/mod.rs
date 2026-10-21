@@ -70,9 +70,21 @@ pub fn known_projects(recent: &[String], open: &[String]) -> Vec<(String, String
             seen.push(f);
         }
     }
-    seen.into_iter()
-        .take(LIMIT)
-        .map(|f| (f.clone(), std::path::Path::new(f).file_name().map_or_else(|| f.clone(), |n| n.to_string_lossy().into_owned())))
+    let chosen: Vec<&String> = seen.into_iter().take(LIMIT).collect();
+    let name = |f: &str, parents: usize| {
+        let parts: Vec<String> = std::path::Path::new(f).components().filter_map(|c| match c {
+            std::path::Component::Normal(n) => Some(n.to_string_lossy().into_owned()),
+            _ => None,
+        }).collect();
+        if parts.is_empty() { f.to_string() } else { parts[parts.len().saturating_sub(1 + parents)..].join("/") }
+    };
+    // Two folders with the same name ("app" in two places) are told apart by their parent: "work/app" and "play/app".
+    chosen
+        .iter()
+        .map(|f| {
+            let clash = chosen.iter().filter(|o| name(o, 0) == name(f, 0)).count() > 1;
+            (f.to_string(), name(f, usize::from(clash)))
+        })
         .collect()
 }
 
@@ -383,6 +395,20 @@ mod tests {
         let many: Vec<String> = (0..30).map(|i| format!("/p/{i}")).collect();
         assert_eq!(known_projects(&many, &[]).len(), 12);
         assert!(known_projects(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn two_projects_with_the_same_folder_name_are_told_apart_by_their_parent() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let out = known_projects(&s(&["/Users/me/work/app", "/Users/me/play/app", "/Users/me/site"]), &[]);
+        let names: Vec<&str> = out.iter().map(|(_, n)| n.as_str()).collect();
+        assert_eq!(names, vec!["work/app", "play/app", "site"]);
+        let mut all = names.clone();
+        all.sort();
+        all.dedup();
+        assert_eq!(all.len(), 3, "every name is its own");
+        // A name that isn't clashing stays plain, and the root alone keeps its path.
+        assert_eq!(known_projects(&s(&["/"]), &[])[0].1, "/");
     }
 
     #[tokio::test]

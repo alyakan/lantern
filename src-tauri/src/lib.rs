@@ -1808,7 +1808,8 @@ async fn request_new_chat(app: &AppHandle, folder: String, text: String) -> Resu
         Ok(Ok(result)) => result?,
         _ => {
             state.remote.forget_new_chat(&id);
-            return Err("Lantern didn't start that chat. Is it open on your Mac?".into());
+            // The window may have started it after all (it only answered late): don't invite a second one.
+            return Err("Lantern didn't answer in time. The chat may still have started on your Mac: look in your chats before trying again.".into());
         }
     };
     // The window has made the chat; the phone may only follow it once the hub lists it.
