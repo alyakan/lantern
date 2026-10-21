@@ -136,13 +136,11 @@ fn render(field: &dashboard::Field, value: &Value) -> Result<String, String> {
             if text.chars().count() > MAX_TEXT {
                 return Err(format!("is longer than {MAX_TEXT} characters."));
             }
-            if text.contains('\0') {
-                return Err("can't contain a null character.".into());
-            }
-            // Text the user is shown to confirm a run (and the approval card Claude's runs ask) can't carry marks that
-            // reorder or hide what follows them.
-            if text.chars().any(crate::permission::helper::hides_text) {
-                return Err("can't contain hidden or reordering characters.".into());
+            // A value is shown to the user in the confirm line and on the approval card Claude's runs ask. A new line in it
+            // could start a section of its own that looks like the card's ("Command: …"), and a mark that hides or reorders
+            // text could disguise what follows, so neither can be in it. A tab is the one control character left.
+            if text.chars().any(|c| (c.is_control() && c != '\t') || crate::permission::helper::hides_text(c)) {
+                return Err("can't contain a new line, another control character, or a hidden or reordering one.".into());
             }
             Ok(text.to_string())
         }
@@ -744,7 +742,12 @@ mod tests {
         assert!(bad(json!({ "who": "a", "tags": "x" })).starts_with("tags must be a list"));
         assert!(bad(json!({ "who": "a", "note": 5 })).starts_with("note must be text"));
         assert!(bad(json!({ "who": "a", "note": "x".repeat(MAX_TEXT + 1) })).contains("longer than"));
-        assert!(bad(json!({ "who": "a", "note": "a\0b" })).contains("null"));
+        // No control character but a tab (a new line could fake a section of the card the user approves from), and no mark
+        // that hides or reorders text.
+        for evil in ["a\0b", "a\nb", "a\r\nb", "a\u{1b}[2Jb", "a\u{202e}b", "a\u{2028}b"] {
+            assert!(bad(json!({ "who": "a", "note": evil })).contains("can't contain a new line"), "{evil:?}");
+        }
+        assert!(resolve(&form, &values(json!({ "who": "a", "note": "tab\there" }))).is_ok());
         assert!(bad(json!({ "who": "a", "on": "yes" })).starts_with("on must be on or off"));
         assert!(bad(json!({ "who": "a", "extra": 1 })).contains("no field called"));
     }
