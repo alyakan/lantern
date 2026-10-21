@@ -81,7 +81,7 @@ export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLa
           accessibilityState={button ? undefined : { disabled: completed }}
           accessibilityActions={completed ? [] : [{ name: "activate", label: "Allow" }]}
           onAccessibilityAction={(e: AccessibilityActionEvent) => e.nativeEvent.actionName === "activate" && allow()}
-          style={{ alignSelf: "flex-end", height: BAR, width: completed ? shrink.interpolate({ inputRange: [0, 1], outputRange: [Math.max(BAR, width), BAR] }) : "100%", borderRadius: 999, backgroundColor: colors.nightRaised, overflow: "hidden" }}
+          style={{ alignSelf: "flex-end", height: BAR, width: completed ? shrink.interpolate({ inputRange: [0, 1], outputRange: [Math.max(BAR, width), BAR] }) : "100%", borderRadius: 999, backgroundColor: compact ? colors.ink : colors.nightRaised, overflow: "hidden" }}
         >
           {/* Everything is held to the right edge, so the bar closes in on the knob and the rest is clipped. */}
           <View style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: width || "100%", justifyContent: "center", alignItems: "center" }}>

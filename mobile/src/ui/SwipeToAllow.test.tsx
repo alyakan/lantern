@@ -1,6 +1,7 @@
 import { Animated } from "react-native";
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
 import { SwipeToAllow } from "./SwipeToAllow";
+import { colors } from "./theme";
 
 const BAR = 300;
 // The bar is 300 wide, the knob 52 with 5 around it: it travels 238.
@@ -31,6 +32,17 @@ describe("swipe to allow once allowed", () => {
     // The knob ran to the end of the bar and stays there: the bar closes in around it.
     expect(flat("swipe-knob").transform[0].translateX).toBe(MAX);
     expect(before.transform[0].translateX).toBe(0);
+  });
+
+  it("is a dark bar of its own in a card (on a light page the screen's faint tint would not show), and the faint tint on the dark screen", async () => {
+    const bg = async (compact: boolean) => {
+      const view = await render(<SwipeToAllow onAllow={jest.fn()} compact={compact} />);
+      const style = Object.assign({}, ...[screen.getByRole("button", { name: "Swipe to allow" }).props.style].flat(Infinity));
+      await view.unmount();
+      return style.backgroundColor as string;
+    };
+    expect(await bg(true)).toBe(colors.ink);
+    expect(await bg(false)).toBe(colors.nightRaised);
   });
 
   it("can be smaller, to sit in a card: the circle is then the smaller bar's height across", async () => {
