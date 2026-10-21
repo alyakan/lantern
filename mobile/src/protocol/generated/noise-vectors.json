@@ -1,0 +1,83 @@
+[
+  {
+    "impostor": false,
+    "mac_ephemeral": "0e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7",
+    "mac_static": "06090c0f1215181b1e2124272a2d303336393c3f4245484b4e5154575a5d6063",
+    "mac_to_phone": {
+      "frames": [
+        "ae1fadf65d7bd5c00b2bc5f3fca33cd22b4d3981c37b4759c33a598e"
+      ],
+      "plain": "hello phone"
+    },
+    "messages": [
+      "04cfedb665fad685c22e72e6fd6654182971c4a14f12a4717166b41d8737a30ad9bc94488e9c258830b3e05e176e2e85",
+      "7d0c85cb9d79059839640ae51624055acf5f1b1c9480bba37c1d66d8090092174b09a0ac131979857ac8abc1536aef25264ba732b46bea4e76ad535239619a87836bb6aec149ae647ee71e3436da39b6688ed299f291ae78332e93b8d2151865",
+      "701c4eab8d424a90539c981a33625203aa5a7099730d5169fa96cc378f56301e0f21fea933f172043180df201fb434f1ede58d7c0f0f18a1bcaf0a06d4a67880"
+    ],
+    "pattern": "Noise_XXpsk3_25519_ChaChaPoly_SHA256",
+    "phone_ephemeral": "16212c37424d58636e79848f9aa5b0bbc6d1dce7f2fd08131e29343f4a55606b",
+    "phone_static": "0a0f14191e23282d32373c41464b50555a5f64696e73787d82878c91969ba0a5",
+    "phone_to_mac": {
+      "frames": [
+        "c83a2cabe04ce14377557f7d7efccd47f2375cb1ef27a6640196"
+      ],
+      "plain": "hello mac"
+    },
+    "prologue": "6c616e7465726e2d72656d6f74652f31",
+    "psk": "0909090909090909090909090909090909090909090909090909090909090909"
+  },
+  {
+    "impostor": false,
+    "mac_ephemeral": "0e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9e0e7",
+    "mac_static": "06090c0f1215181b1e2124272a2d303336393c3f4245484b4e5154575a5d6063",
+    "mac_to_phone": {
+      "frames": [
+        "0e6be9df12e21138dd9642ad9371f30417d9d68988886b7f49d4a573"
+      ],
+      "plain": "hello phone"
+    },
+    "messages": [
+      "04cfedb665fad685c22e72e6fd6654182971c4a14f12a4717166b41d8737a30a",
+      "7d0c85cb9d79059839640ae51624055acf5f1b1c9480bba37c1d66d80900921759f1ea754f401618a1ede7cbab4baab70f26cb4f7607d1585349d0578722066dd53c535f6723e9cc838d9440db7cbfbbe4942db382fcee053ff967ae2c23a000",
+      "396e7186f6dbf4cbf321c781771ac71a39f98280d9fcc81522fe5df77e22b914f59dd68684ab57a106dd09494ede8adef42ad461f3c689a30d9ffe976ef50a69"
+    ],
+    "pattern": "Noise_XX_25519_ChaChaPoly_SHA256",
+    "phone_ephemeral": "16212c37424d58636e79848f9aa5b0bbc6d1dce7f2fd08131e29343f4a55606b",
+    "phone_static": "0a0f14191e23282d32373c41464b50555a5f64696e73787d82878c91969ba0a5",
+    "phone_to_mac": {
+      "frames": [
+        "23da0b0419c90da9508bc40894f734b8c098f966cbc04027c5ca"
+      ],
+      "plain": "hello mac"
+    },
+    "prologue": "6c616e7465726e2d72656d6f74652f31",
+    "psk": ""
+  },
+  {
+    "impostor": true,
+    "mac_ephemeral": "2233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f2031",
+    "mac_static": "1a2734414e5b6875828f9ca9b6c3d0ddeaf704111e2b3845525f6c798693a0ad",
+    "mac_to_phone": {
+      "frames": [
+        "c78ac9e3f60dfecbfb3d5879d63125453dab725082bf874fb89cac80"
+      ],
+      "plain": "hello phone"
+    },
+    "messages": [
+      "04cfedb665fad685c22e72e6fd6654182971c4a14f12a4717166b41d8737a30ad9bc94488e9c258830b3e05e176e2e85",
+      "73b951dacaae145661f87c21ef9fc0ff0be5701400459853a9f62e0630e4353dcd7a96bb6d6eafc2a685f359bb853971936733586c16bb551bd01dd52bd7d6111c26b51696d6db7ed46a15226470bbe04a75de589f18c6d7b55f5b0bc2ec9697",
+      "2f271dca14d3acafe08a8e7c42155fe5834a4497255393f105b3a8ee64c9b91e689394c638f671a42f7159e00e5832a38e738a1fd52df9165aea98dde9380bd8"
+    ],
+    "pattern": "Noise_XXpsk3_25519_ChaChaPoly_SHA256",
+    "phone_ephemeral": "16212c37424d58636e79848f9aa5b0bbc6d1dce7f2fd08131e29343f4a55606b",
+    "phone_static": "0a0f14191e23282d32373c41464b50555a5f64696e73787d82878c91969ba0a5",
+    "phone_to_mac": {
+      "frames": [
+        "4f3266a7e8b124c5bd04b9e31f8e53f78e8beb7fb061768d6064"
+      ],
+      "plain": "hello mac"
+    },
+    "prologue": "6c616e7465726e2d72656d6f74652f31",
+    "psk": "0909090909090909090909090909090909090909090909090909090909090909"
+  }
+]

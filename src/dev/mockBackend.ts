@@ -1791,6 +1791,18 @@ export function installMockBackend() {
           return mockMemory();
         case "set_menu_bar":
         case "menubar_fit":
+        case "remote_settings":
+        case "remote_set_enabled":
+        case "remote_set_show_titles":
+        case "remote_remove_device":
+          return { enabled: false, show_titles: false, devices: [], connected: [], listening: false, pairing: false };
+        case "remote_pair":
+          throw "Remote control needs the app.";
+        case "remote_pair_cancel":
+        case "remote_window_chats":
+        case "remote_new_chat_done":
+        case "remote_claude_path":
+          return undefined;
         case "menubar_hide":
           return undefined;
         case "menubar_stats":

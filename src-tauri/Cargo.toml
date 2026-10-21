@@ -33,6 +33,17 @@ similar = "2"
 regex = "1"
 tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
+snow = "0.9"
+base64 = "0.22"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+ts-rs = "10"
+security-framework = "3"
+getrandom = "0.3"
+if-addrs = "0.13"
+tokio-tungstenite = { version = "0.26", default-features = false, features = ["handshake", "connect"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
@@ -47,3 +58,5 @@ strip = true
 tempfile = "3.27.0"
 # The menu's accelerators are checked with the parser the menu itself uses (tauri's own copy of it).
 muda = "0.20"
+# The gateway's handshake timeout is tested on a paused clock.
+tokio = { version = "1.53.1", features = ["test-util"] }

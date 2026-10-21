@@ -854,6 +854,8 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 .canvas-toggle, .settings-button, .storage-button { position: relative; }
 .storage-button .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn); }
 .settings-button .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
+.phones-connected { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: var(--radius-pill); border: 1px solid var(--line); background: var(--bg-subtle); color: var(--text); font-size: calc(11.5px * var(--font-scale)); white-space: nowrap; }
+.phones-dot { width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--add); flex: none; }
 .canvas-toggle .dot { position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--attn); }
 .title-center .dot { position: absolute; top: 4px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--working); }
 /* …or one finished there that you haven't opened: blue, like an unread message. */
@@ -2114,6 +2116,14 @@ body::after { content: var(--crt-on); position: fixed; inset: 0; z-index: 214748
 .settings-loading, .settings-muted { font-size: calc(12px * var(--font-scale)); color: var(--muted); }
 .settings-muted { display: block; }
 .settings-error { padding: 7px 10px; border-radius: var(--radius-inner); background: var(--error-bg); color: var(--text); font-size: calc(12.5px * var(--font-scale)); overflow-wrap: anywhere; }
+.remote-pair-code { display: flex; gap: 16px; align-items: center; }
+.remote-pair-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.remote-pair-code p { margin: 0 0 8px; font-size: calc(12.5px * var(--font-scale)); color: var(--text-2); max-width: 46ch; }
+.remote-qr {
+  --qr-paper: #ffffff;
+  width: 132px; height: 132px; padding: 8px; background: var(--qr-paper); border-radius: var(--radius-inner); flex: none; image-rendering: pixelated; }
+.remote-devices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.remote-devices li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); font-size: calc(12.5px * var(--font-scale)); }
 .settings-notice { display: flex; align-items: center; gap: 10px; padding: 7px 8px 7px 10px; border-radius: var(--radius-inner); background: var(--info-bg); font-size: calc(12.5px * var(--font-scale)); }
 .settings-notice button { margin-left: auto; }
 button.danger { color: var(--del); }

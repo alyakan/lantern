@@ -1,7 +1,7 @@
 import type { RevertOutcome } from "./api";
 import type { Hunk, ModelCost, ModelOption, Mode, Rule, RuleScope, SlashCommand, UiEvent, TestRun } from "./types";
 import { countChanges } from "./lib/diff";
-import { readFlavourNote, type Flavour } from "./lib/flavour";
+import { readFlavourNote, readSettingsNote, type Flavour } from "./lib/flavour";
 import { readPageNote } from "./lib/pageNote";
 import { restoreNoteId, revertSummary, undoOf, undoSummary, type RevertNote, type RevertUndo } from "./lib/revert";
 import { KEEP_CHARS, readShellContext, takesShellContext } from "./lib/shell";
@@ -547,7 +547,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       return { ...state, model: ev.model, sessionId: ev.session_id, status: state.status === "starting" ? "idle" : state.status, agentAsleep: false };
     case "user_text": {
       const seq = state.seq + 1;
-      const sent = readShellContext(ev.text);
+      const sent = readShellContext(readSettingsNote(ev.text));
       const read = readFlavourNote(readPageNote(sent.text));
       const { flavour, explain } = read;
       const text = readSkillNote(read.text);
@@ -555,7 +555,9 @@ function applyEvent(state: State, ev: UiEvent): State {
       const shells = sent.shells.map((s, i): ShellItem => ({ type: "shell", id: `sh-u${seq}-${i}`, command: s.command, output: s.output, status: s.stopped ? "stopped" : s.running ? "unknown" : s.code ? "failed" : "done", code: s.code, startedAt: at, endedAt: at, shared: true }));
       // Commands alone (Claude Code's own `!` mode writes them so): no prompt to show after them.
       if (shells.length > 0 && !text.trim()) return { ...state, seq, items: [...state.items, ...shells] };
-      return { ...state, seq, items: [...state.items, ...shells, { type: "user", id: `u${seq}`, text, at: ev.at, ...(flavour ? { switchedTo: flavour, ...(explain ? { explained: true } : {}) } : {}) }] };
+      // Sent live from a paired phone (the window's own messages never come back as events): Claude is working on it now.
+      const live = ev.sent_by ? { status: "running" as const, thinking: true } : {};
+      return { ...state, ...live, seq, items: [...state.items, ...shells, { type: "user", id: `u${seq}`, text, at: ev.at, ...(flavour ? { switchedTo: flavour, ...(explain ? { explained: true } : {}) } : {}) }] };
     }
     case "shell_output":
       if (ev.id.startsWith(RUN_PREFIX)) {
@@ -694,6 +696,13 @@ function applyEvent(state: State, ev: UiEvent): State {
       return {
         ...state,
         items: state.items.map((it): ChatItem => (it.type === "permission" && it.id === ev.request_id && it.decision === null ? { ...it, decision: "denied" } : it)),
+      };
+    case "permission_resolved":
+      // Answered (here, or on a paired phone first): the card closes with that answer. One this window answered itself
+      // already shows it.
+      return {
+        ...state,
+        items: state.items.map((it): ChatItem => (it.type === "permission" && it.id === ev.request_id && it.decision === null ? { ...it, decision: ev.allow ? "allowed" : "denied" } : it)),
       };
     case "session_ended": {
       const detail = lastLine(ev.stderr_tail);

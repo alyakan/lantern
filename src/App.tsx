@@ -5,6 +5,8 @@ import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { agentsAtRest, canSleep, membersToSleep, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
+import { checkRemoteNewChat, windowChats, type RemoteNewChat } from "./lib/remoteChats";
+import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
 import { api, type BranchReview, type ChangeScope, type RestoreResult, type RevertOutcome, type WorkView } from "./api";
@@ -482,22 +484,24 @@ export default function App() {
    * `team`: the chat is the Lead of a team, which can start agents, on the project's last Permissions (the agents never exceed them).
    * `first`: a team from a template: the Lead's first instruction, which names its members and their roles.
    * `routine`: a routine's chat, on the routine's own Permissions (never the project's) and the standard preset; it doesn't become the project to reopen.
+   * `remote`: a chat a paired phone started: always on Ask (nobody is at the Mac to approve anything else), whatever the project's
+   * Permissions are, and it doesn't become the project to reopen either.
    */
-  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting) => {
+  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote = false) => {
     const { claudePath } = state;
     if (!claudePath) return;
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
     reopened.current = true;
     // A team's Lead runs on the project's last Permissions, which its agents never exceed; Team is not remembered as the
     // project's Workflow (see the effect below).
-    const { mode, autoApprove } = routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team);
+    const { mode, autoApprove } = remote ? launchOf("ask", "chat") : routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team);
     const orchestrator = team;
     const h = routine ? BUILT_IN[0] : findHarness(presets, harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode, autoApprove });
     to(slot)({ type: "orchestrator_set", on: orchestrator });
-    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first, routine, review);
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first, routine, review, remote);
     // The notes the chat starts with: what is saved now, which a later change doesn't reach.
     const notes = notesOf(notesBy, folder);
     to(slot)({ type: "notes_applied", text: notes || null });
@@ -511,7 +515,7 @@ export default function App() {
           startRoles(slot, folder);
           startReview(slot, review);
         }
-        if (!routine) setLastFolder(folder);
+        if (!routine && !remote) setLastFolder(folder);
         to(slot)({ type: "session_ready" });
         // A team from a template: the Lead's first instruction names its members and their roles.
         if (first) doingRef.current.send(slot, first);
@@ -685,16 +689,57 @@ export default function App() {
     }
   };
 
-  // An asleep chat is woken as soon as it is on screen, however it got there (the sidebar, a notification, Restore all…).
-  useEffect(() => {
-    const slot = active;
+  // Wakes an asleep chat (with its team, when it has one); nothing for one that is awake or already waking.
+  const wakeChat = (slot: string) => {
     const s = chats.slots[slot];
     if (s?.status !== "asleep" || !s.folder || !s.sessionId || waking.current.has(slot)) return;
     const lead = teamMain(chats, slot);
     if (lead && s.asleepSaved?.orchestra) return wakeTeam(lead);
     waking.current.add(slot);
     void resumeIn(slot, s.folder, s.sessionId).finally(() => waking.current.delete(slot));
-  }, [active, state.status]);
+  };
+  // An asleep chat is woken as soon as it is on screen, however it got there (the sidebar, a notification, Restore all…).
+  useEffect(() => wakeChat(active), [active, state.status]);
+  // A paired phone asked for a chat that is asleep (the backend checked it is one of these): it wakes where it is, without
+  // taking the screen. The ref is read when it happens, so it sees the chats as they are then.
+  const wakeRef = useRef(wakeChat);
+  wakeRef.current = wakeChat;
+  useEffect(() => {
+    const unlisten = api.onRemoteWake((slot) => wakeRef.current(slot)).catch(() => null);
+    return () => {
+      unlisten.then((f) => f?.());
+    };
+  }, []);
+  // The backend makes one call of its own to Claude (what to suggest on a phone): it is told where this window found it.
+  useEffect(() => {
+    if (state.claudePath) void api.remoteClaudePath(state.claudePath).catch(() => {});
+  }, [state.claudePath]);
+  // A paired phone asked to start a chat in a project (the backend checked it too). It starts on Ask, beside what is on screen:
+  // this window doesn't switch to it, and neither the project's Permissions nor the folder to reopen change. The backend is
+  // answered with the slot it made, or why not. The ref is read when it happens, so it sees the chats as they are then.
+  const newChatRef = useRef<(r: RemoteNewChat) => void>(() => {});
+  newChatRef.current = (r) => {
+    const fail = (why: string) => void api.remoteNewChatDone(r.id, null, why).catch(() => {});
+    api.recentFolders().then(
+      (recent) => {
+        const openFolders = Object.values(chats.slots).map((s) => s.folder);
+        const why = checkRemoteNewChat(r, knownProject(r.folder, recent, openFolders), validChatText(r.text));
+        if (why) return fail(why);
+        if (!state.claudePath) return fail("Claude isn't set up on your Mac yet.");
+        const slot = `s${++slotSeq.current}`;
+        dispatchChats({ type: "add", slot });
+        startIn(slot, r.folder, false, false, r.text, undefined, undefined, true);
+        void api.remoteNewChatDone(r.id, slot, null).catch(() => {});
+      },
+      () => fail("Lantern couldn't look up your projects."),
+    );
+  };
+  useEffect(() => {
+    const unlisten = api.onRemoteNewChat((r) => newChatRef.current(r)).catch(() => null);
+    return () => {
+      unlisten.then((f) => f?.());
+    };
+  }, []);
 
   // An agent's conversation is recorded once it has one, so it can be told from the user's own chats.
   useEffect(() => {
@@ -2027,6 +2072,23 @@ export default function App() {
   useEffect(() => {
     void api.publishMenubarChats(menuBarSent.current).catch(() => {});
   }, [menuBarKey]);
+  // The phones connected now (Remote control), for the title bar: asked again whenever one connects or goes.
+  const [phonesOn, setPhonesOn] = useState<string[]>([]);
+  useEffect(() => {
+    const refresh = () => api.remoteSettings().then((v) => setPhonesOn(connectedNames(v)), () => {});
+    refresh();
+    const unlisten = api.onRemoteChanged(refresh).catch(() => null);
+    return () => {
+      unlisten.then((f) => f?.());
+    };
+  }, []);
+  // The backend's session hub knows where each chat stands from its events; what only this window knows (the title it
+  // shows, which chats are asleep) it is told when that changes.
+  const hubList = windowChats(chats, openByProject);
+  const hubKey = JSON.stringify(hubList);
+  useEffect(() => {
+    void api.remoteWindowChats(hubList).catch(() => {});
+  }, [hubKey]);
   // What the panel asked of this window, which the backend already checked and brought forward: open a chat, start one in a
   // project the user knows, or open Storage or Settings. The ref is read when it happens, so it sees the chats as they are then.
   const menuBarAct = useRef<(a: MenuBarAction) => void>(() => {});
@@ -2307,6 +2369,7 @@ export default function App() {
           sidebar={sidebarHidden ? { needs: needsYou(openByProject), onShow: () => setSidebarHidden(false) } : undefined}
           inbox={{ items: inbox, onGo: goToInbox, onDecide: answerFromInbox, paused: guards.pause, onResume: guards.resume, onDismissPause: guards.dismiss }}
           run={topRun ? { command: topRun, running: state.run?.status === "running", onRun: () => doing.run(active) } : undefined}
+          phones={phonesOn.length ? { names: phonesOn, onOpen: () => setSettingsAt("remote") } : undefined}
         />
         <Hud event={hud} onOpenChat={switchTo} />
         <div className="app-body">

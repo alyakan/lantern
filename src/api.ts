@@ -3,6 +3,8 @@ import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { Role } from "./lib/roles";
+import type { RemoteNewChat, WindowChat } from "./lib/remoteChats";
+import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
 import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
@@ -325,6 +327,27 @@ export const api = {
   onMenubarNeedChats: (cb: () => void): Promise<UnlistenFn> => listen("menubar-need-chats", () => cb()),
   /** The scan moved on, finished, or Claude marked suggestions. */
   onStorageChanged: (cb: () => void): Promise<UnlistenFn> => listen("storage-changed", () => cb()),
+  /** Settings › Remote control: whether it is on, and the paired phones. */
+  remoteSettings: () => invoke<RemoteView>("remote_settings"),
+  remoteSetEnabled: (on: boolean) => invoke<RemoteView>("remote_set_enabled", { on }),
+  remoteSetShowTitles: (on: boolean) => invoke<RemoteView>("remote_set_show_titles", { on }),
+  /** A QR code a phone pairs with: one try, for five minutes. Rejects while Remote control is off. */
+  remotePair: () => invoke<PairView>("remote_pair"),
+  remotePairCancel: () => invoke<void>("remote_pair_cancel"),
+  /** Forgets a paired phone: it can't connect again until it pairs again. */
+  remoteRemoveDevice: (id: string) => invoke<RemoteView>("remote_remove_device", { id }),
+  /** Tells the backend's session hub each open chat's title and which are asleep (see lib/remoteChats.ts). */
+  remoteWindowChats: (chats: WindowChat[]) => invoke<void>("remote_window_chats", { chats }),
+  /** A phone connected or went: ask remoteSettings who is connected now. */
+  onRemoteChanged: (cb: () => void): Promise<UnlistenFn> => listen("remote-changed", () => cb()),
+  /** A paired phone asked for an asleep chat: wake it where it is. */
+  onRemoteWake: (cb: (slot: string) => void): Promise<UnlistenFn> => listen<string>("remote-wake", (e) => cb(e.payload)),
+  /** A paired phone asked to start a chat in a project: the window checks it, starts it on Ask, and answers with remoteNewChatDone. */
+  onRemoteNewChat: (cb: (r: RemoteNewChat) => void): Promise<UnlistenFn> => listen<RemoteNewChat>("remote-new-chat", (e) => cb(e.payload)),
+  /** Where this window found claude, for the calls the backend makes itself (what Claude suggests on a phone). */
+  remoteClaudePath: (path: string) => invoke<void>("remote_claude_path", { path }),
+  /** The window's answer to a phone's new chat: the slot it made, or why it didn't. */
+  remoteNewChatDone: (id: string, slot: string | null, error: string | null) => invoke<void>("remote_new_chat_done", { id, slot, error }),
   onUiEvent: (cb: (slot: string, event: UiEvent) => void): Promise<UnlistenFn> =>
     listen<{ slot: string; event: UiEvent }>("ui-event", (e) => cb(e.payload.slot, e.payload.event)),
 };

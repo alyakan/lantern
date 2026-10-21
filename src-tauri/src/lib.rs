@@ -29,6 +29,7 @@ pub mod slots;
 pub mod offstream;
 pub mod outside;
 pub mod relocate;
+pub mod remote;
 pub mod roles;
 pub mod storage;
 pub mod stream_parser;
@@ -78,6 +79,8 @@ pub struct AppState {
     setups: setup::SetupStore,
     /// "Keep restore points before each message" (Settings → General; the window sends it). On until the user turns it off.
     restore_points: std::sync::atomic::AtomicBool,
+    /// Where every chat's events leave from, and what is kept of them for a client joining late (see remote/).
+    remote: remote::Remote,
 }
 
 /// Where a test makes folders that must not be in the system temp dir (which recent folders leave out): the target dir
@@ -160,11 +163,35 @@ async fn login_path(state: &AppState) -> Option<String> {
     tauri::async_runtime::spawn_blocking(move || cell.get_or_init(cli_locator::login_shell_path).clone()).await.ok().flatten()
 }
 
-/// Sends a chat's events to the UI, and lets the orchestra see them too (a worker finishing a turn wakes its main agent).
+/// The bus and hub, with the window tapped in (it is sent every chat event as `ui-event`, see remote::for_window), and
+/// Remote control's settings and devices from app data, with the Mac's key in the Keychain.
+fn window_remote(app: &AppHandle) -> remote::Remote {
+    // LANTERN_REMOTE_FILE: a dev run keeps its Remote control settings, paired phones and Mac key apart from the real
+    // app's, so trying things out never touches them.
+    let dev_file = std::env::var_os("LANTERN_REMOTE_FILE").map(std::path::PathBuf::from);
+    let store = remote::pairing::RemoteStore::load(dev_file.clone().or_else(|| app.path().app_data_dir().ok().map(|d| d.join("remote.json"))));
+    let keychain = remote::keys::Keychain { service: if dev_file.is_some() { "Lantern Remote control (dev)" } else { remote::keys::SERVICE } };
+    let remote = remote::Remote::new(store, Box::new(keychain));
+    let app = app.clone();
+    remote.tap_window(move |ev| {
+        let _ = app.emit("ui-event", &ev);
+    });
+    remote
+}
+
+/// Sends an event of chat `slot` out through the bus: to the window, the hub and any paired phone.
+fn publish(app: &AppHandle, slot: &str, event: ui_event::UiEvent) {
+    if let Some(state) = app.try_state::<AppState>() {
+        state.remote.publish(slot, event);
+    }
+}
+
+/// Sends a chat's events out (see `publish`), and lets the orchestra see them too (a worker finishing a turn wakes its
+/// main agent).
 fn emitter(app: &AppHandle) -> impl Fn(SlotEvent) + Send + Sync + Clone + 'static {
     let app = app.clone();
     move |ev| {
-        let _ = app.emit("ui-event", &ev);
+        publish(&app, &ev.slot, ev.event.clone());
         if let Some(state) = app.try_state::<AppState>() {
             // Its claude is gone: the pid it had could be given to some other process, which must not pass for it.
             if matches!(ev.event, ui_event::UiEvent::SessionEnded { .. }) {
@@ -210,6 +237,19 @@ fn ceiling_of(main: Option<(Mode, bool, ProviderId)>) -> Mode {
     main.map_or(Mode::Ask, |(mode, auto, provider)| args::worker_mode(mode, auto, &capabilities_of(provider)))
 }
 
+/// Whether a restart into `cfg` changes what Claude was told about its Permissions or Workflow (`before`: the mode,
+/// whether it was on Auto, and the role it ran with; None: it never ran). Only Claude's prompt says them.
+fn settings_changed(before: Option<(Mode, bool, Role)>, cfg: &SessionConfig) -> bool {
+    let after = (cfg.mode, args::is_auto(cfg.mode, cfg.auto_approve), cfg.helper.role.clone());
+    cfg.provider == ProviderId::Claude && before.is_some_and(|b| b != after)
+}
+
+/// Whether a message can carry the settings note: not a slash command, which claude reads as one only at the very start
+/// of the message (`/clear` after a switch must still clear). The note waits for the next message instead.
+fn carries_settings_note(text: &str) -> bool {
+    !text.trim_start().starts_with('/')
+}
+
 /// `cfg`'s mode and auto-approve, no freer than `ceiling` allows (None: no ceiling, the chat is no worker). True when that
 /// lowered them.
 fn cap_mode(cfg: &mut SessionConfig, ceiling: Option<Mode>) -> bool {
@@ -228,7 +268,7 @@ fn worker_ceiling(state: &AppState, slot: &str) -> Option<Mode> {
 
 /// Tells the window a worker runs on Ask: its mode was lowered under it.
 fn told_ask(app: &AppHandle, slot: &str) {
-    let _ = app.emit("ui-event", SlotEvent { slot: slot.to_string(), event: ui_event::UiEvent::AgentMode { mode: "ask".into() } });
+    publish(app, slot, ui_event::UiEvent::AgentMode { mode: "ask".into() });
 }
 
 /// How the worker `worker` runs once its main agent's mode allows no more than `ceiling`: lowered (its claude restarted on
@@ -248,9 +288,166 @@ async fn lower_worker(app: &AppHandle, state: &AppState, worker: &str, ceiling: 
     if let Ok(helper) = helper_config(&s, cfg.helper.role.clone(), cfg.helper.project_notes.clone()) {
         cfg.helper = helper;
     }
+    // Its claude restarts on Ask: it hears so with its next message, as a chat whose user switched does.
+    let note = args::settings_note(cfg.mode, cfg.auto_approve, &cfg.helper);
+    let claude = cfg.provider == ProviderId::Claude;
     if launch(app, worker, &s, cfg, false).await.is_ok() {
+        if claude {
+            *s.settings_note.lock().unwrap() = Some(note);
+        }
         told_ask(app, worker);
     }
+}
+
+/// The app, as the remote gateway needs it (see remote::gateway::Host): what a paired phone may ask, done the way the
+/// window's own commands do it.
+struct RemoteHost {
+    app: AppHandle,
+    mac_name: String,
+}
+
+/// The longest diff a phone is sent.
+const PHONE_DIFF_MAX: usize = 512 << 10;
+
+impl remote::gateway::Host for RemoteHost {
+    fn send(&self, slot: String, text: String, by: String) -> remote::gateway::BoxFut<Result<(), String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            send_user_message(&app, &state, &slot, &text, &by).await.map(|_| ())
+        })
+    }
+
+    fn interrupt(&self, slot: String) -> remote::gateway::BoxFut<Result<(), String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            stop_turn(&app, &slot).await;
+            Ok(())
+        })
+    }
+
+    fn pending(&self, slot: &str) -> Vec<permission::bridge::Pending> {
+        self.app.state::<AppState>().slots.get(slot).map(|s| s.bridge.pending()).unwrap_or_default()
+    }
+
+    fn answer(&self, slot: &str, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> Result<(), String> {
+        answer_prompt(&self.app.state::<AppState>(), slot, request_id, allow, message, updated_input, by)
+    }
+
+    fn wake(&self, slot: &str) -> Result<(), String> {
+        request_wake(&self.app, &self.app.state::<AppState>(), slot)
+    }
+
+    fn projects(&self) -> remote::gateway::BoxFut<Vec<(String, String)>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            // The folders used in Claude lately, and those with a chat open: nothing else is a project to a phone.
+            let open: Vec<String> = app.state::<AppState>().remote.hub.chats().into_iter().filter_map(|c| c.folder).collect();
+            let recent = match projects_root() {
+                Ok(root) => tauri::async_runtime::spawn_blocking(move || history::recent_folders(&root, 8)).await.unwrap_or_default(),
+                Err(_) => Vec::new(),
+            };
+            remote::known_projects(&recent.into_iter().map(|r| r.path).collect::<Vec<_>>(), &open)
+        })
+    }
+
+    fn new_chat(&self, folder: String, text: String, _by: String) -> remote::gateway::BoxFut<Result<String, String>> {
+        let app = self.app.clone();
+        Box::pin(async move { request_new_chat(&app, folder, text).await })
+    }
+
+    fn suggest_reply(&self, prompt: String) -> remote::gateway::BoxFut<Result<String, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let claude = state.remote.claude_path().ok_or("Lantern doesn't know where Claude is yet. Open a chat in Lantern first.")?;
+            let path_env = login_path(&state).await;
+            remote::suggest::ask_claude(std::path::Path::new(&claude), path_env.as_deref(), &prompt).await
+        })
+    }
+
+    fn diff(&self, slot: String, path: String) -> remote::gateway::BoxFut<Result<String, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let s = app.state::<AppState>().slots.get(&slot)?;
+            // Only a file the chat changed: the tracker knows no other.
+            let d = s.changes.lock().unwrap().diff(&path, changes::Scope::Session, None, None)?;
+            let text = similar::TextDiff::from_lines(&d.original, &d.current).unified_diff().header(&path, &path).to_string();
+            Ok(if text.len() > PHONE_DIFF_MAX { format!("{}\n… (cut short: the rest is on your Mac)", &text[..text.floor_char_boundary(PHONE_DIFF_MAX)]) } else { text })
+        })
+    }
+
+    fn history(&self, slot: String, before: Option<usize>) -> remote::gateway::BoxFut<Result<history::Page, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let chat = state.remote.hub.chat(&slot).ok_or("That chat isn't open.")?;
+            let none = history::Page { events: vec![], hidden: 0 };
+            let (Some(folder), Some(session_id)) = (chat.folder, chat.session_id) else { return Ok(none) };
+            if !history::valid_id(&session_id) {
+                return Ok(none);
+            }
+            let (root, aliases) = (projects_root()?, aliases_for(&state, &folder));
+            tauri::async_runtime::spawn_blocking(move || {
+                let path = history::transcript_path_with_aliases(&root, std::path::Path::new(&folder), &aliases, &session_id)?;
+                Ok(history::page(history::replay(&path).events, before, history::PAGE_TURNS))
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        })
+    }
+
+    fn mac_name(&self) -> String {
+        self.mac_name.clone()
+    }
+
+    fn app_version(&self) -> String {
+        self.app.package_info().version.to_string()
+    }
+}
+
+/// Stops what chat `slot`'s claude is doing (Stop in the window, or a phone's): the prompts it was waiting on can't be
+/// answered any more, and every client is told so.
+async fn stop_turn(app: &AppHandle, slot: &str) {
+    let state = app.state::<AppState>();
+    let Ok(s) = state.slots.get(slot) else { return };
+    if let Some(x) = s.session.lock().await.as_mut() {
+        x.interrupt().await;
+    }
+    for request_id in s.bridge.cancel_all() {
+        state.remote.publish(slot, ui_event::UiEvent::PermissionWithdrawn { request_id });
+    }
+}
+
+/// Turns Remote control's listener on: the gateway, the Wi-Fi transport and Bonjour. Nothing if it is already on.
+async fn start_remote(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let _one_at_a_time = state.remote.lifecycle.lock().await;
+    if state.remote.is_running() {
+        return Ok(());
+    }
+    let handle = app.clone();
+    let (mac, name) = tauri::async_runtime::spawn_blocking(move || (handle.state::<AppState>().remote.mac_key(), mac_name())).await.map_err(|e| e.to_string())?;
+    let mac = mac?;
+    let host = Arc::new(RemoteHost { app: app.clone(), mac_name: name.clone() });
+    let r = &state.remote;
+    let gateway = remote::gateway::Gateway::new(r.bus.clone(), r.hub.clone(), r.store.clone(), host, mac.clone(), r.epoch);
+    let notify = app.clone();
+    gateway.on_change(Arc::new(move || {
+        let _ = notify.emit("remote-changed", ());
+    }));
+    let door = gateway.clone();
+    let (listener, port) = remote::transport::serve_lan(remote::PORT, move |link| door.accept(link)).await?;
+    let id: String = base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, &mac.public).chars().take(10).collect();
+    let bonjour = remote::transport::Bonjour::advertise(port, &name, &id).ok();
+    // Pushes to phones that aren't looking at a chat when it needs them or finishes (see remote/notifier.rs).
+    let watching = gateway.clone();
+    let notifier = remote::notifier::Notifier::new(r.store.clone(), r.hub.clone(), Arc::new(remote::notifier::ExpoPush::new()?), Arc::new(move |slot| watching.watched(slot)));
+    let opened = notifier.clone();
+    gateway.on_open(Arc::new(move |slot| opened.opened(slot)));
+    let task = tokio::spawn(notifier.run(r.bus.clone()));
+    state.remote.set_running(remote::Running { gateway, listener, bonjour, notifier: Some(task) });
+    Ok(())
 }
 
 /// The app, as the orchestra needs it (see orchestra::Host).
@@ -260,7 +457,7 @@ struct AppHost {
 
 impl orchestra::Host for AppHost {
     fn emit(&self, slot: &str, event: ui_event::UiEvent) {
-        let _ = self.app.emit("ui-event", SlotEvent { slot: slot.to_string(), event });
+        publish(&self.app, slot, event);
     }
 
     fn main_folder(&self, main: &str) -> Result<std::path::PathBuf, String> {
@@ -563,6 +760,9 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, 
     slot.claude_pid.store(started.pid(), std::sync::atomic::Ordering::SeqCst);
     started.initialize().await;
     *session = Some(started);
+    if let Some(state) = app.try_state::<AppState>() {
+        state.remote.hub.opened(id, &cfg.folder.display().to_string());
+    }
     *slot.config.lock().unwrap() = Some(cfg);
     Ok(())
 }
@@ -759,7 +959,13 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
     // A worker asked for more freedom than its main agent allows gets what it allows (the window is told).
     let lowered = cap_mode(&mut cfg, worker_ceiling(&state, &slot));
     let (new_mode, new_auto, provider) = (cfg.mode, cfg.auto_approve, cfg.provider);
+    // What it ran with before, to tell Claude when that changed (see args::settings_note).
+    let before = s.config.lock().unwrap().as_ref().map(|c| (c.mode, args::is_auto(c.mode, c.auto_approve), c.helper.role.clone()));
+    let note = settings_changed(before, &cfg).then(|| args::settings_note(cfg.mode, cfg.auto_approve, &cfg.helper));
     launch(&app, &slot, &s, cfg, false).await?;
+    if note.is_some() {
+        *s.settings_note.lock().unwrap() = note;
+    }
     // Registered as the Lead (or taken out of the team registry) once it runs as one; a worker's role never changes here.
     if team.is_some() && !matches!(role, Role::Worker { .. }) {
         enroll(&state, &slot, &s, &role);
@@ -803,6 +1009,7 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
 async fn close_session(state: State<'_, AppState>, slot: String) -> Result<(), String> {
     state.orchestra.forget(&slot);
     state.asides.stop_slot(&slot).await;
+    state.remote.hub.closed(&slot);
     if let Some(s) = state.slots.remove(&slot) {
         s.shut_down().await;
     }
@@ -878,12 +1085,20 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 #[tauri::command]
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
 async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
-    let s = state.slots.get(&slot)?;
+    send_user_message(&app, &state, &slot, &text, remote::SENT_BY_DESKTOP).await
+}
+
+/// Sends what the user typed (in the window, or on a paired phone: `sent_by`) to chat `slot`. Every client is told of it
+/// first, so it comes before Claude's answer; the window, which shows its own messages already, isn't.
+async fn send_user_message(app: &AppHandle, state: &AppState, slot: &str, text: &str, sent_by: &str) -> Result<usize, String> {
+    let s = state.slots.get(slot)?;
     // An agent that was put to sleep to save memory wakes for the user's message too.
-    state.orchestra.wake_agent(&slot).await?;
-    let turn = send_text(&app, &slot, &s, &text).await?;
+    state.orchestra.wake_agent(slot).await?;
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as u64);
+    state.remote.publish(slot, ui_event::UiEvent::UserText { text: text.to_string(), at, sent_by: Some(sent_by.to_string()) });
+    let turn = send_text(app, slot, &s, text).await?;
     // Said to a worker by the user themselves: its main agent hears of it with its next wake-up.
-    state.orchestra.note_user_message(&slot, &text);
+    state.orchestra.note_user_message(slot, text);
     Ok(turn)
 }
 
@@ -930,7 +1145,14 @@ async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str) -> Resu
         }
     }
     s.checkpoints.turn_started();
-    if let Err(e) = claude.send(text).await {
+    // The chat's Permissions or Workflow changed since its last message: Claude hears it with this one (the user's, or its
+    // Lead's for an agent). Put back if the message doesn't go, so the next one carries it.
+    let note = if carries_settings_note(text) { s.settings_note.lock().unwrap().take() } else { None };
+    let noted = note.as_ref().map(|note| format!("{note}\n\n{text}"));
+    if let Err(e) = claude.send(noted.as_deref().unwrap_or(text)).await {
+        if let Some(note) = note {
+            s.settings_note.lock().unwrap().get_or_insert(note);
+        }
         s.checkpoints.turn_ended();
         s.changes.lock().unwrap().cancel_turn(turn);
         return Err(e);
@@ -1408,12 +1630,8 @@ async fn stop_task(state: State<'_, AppState>, slot: String, task_id: String) ->
 }
 
 #[tauri::command]
-async fn interrupt(state: State<'_, AppState>, slot: String) -> Result<(), String> {
-    let Ok(s) = state.slots.get(&slot) else { return Ok(()) };
-    if let Some(x) = s.session.lock().await.as_mut() {
-        x.interrupt().await;
-    }
-    s.bridge.cancel_all();
+async fn interrupt(app: AppHandle, slot: String) -> Result<(), String> {
+    stop_turn(&app, &slot).await;
     Ok(())
 }
 
@@ -1492,10 +1710,143 @@ async fn change_summary(
 
 #[tauri::command]
 fn respond_permission(state: State<'_, AppState>, slot: String, request_id: String, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>) -> Result<(), String> {
-    if state.slots.get(&slot)?.bridge.respond(&request_id, allow, message, updated_input) {
+    answer_prompt(&state, &slot, &request_id, allow, message, updated_input, remote::SENT_BY_DESKTOP)
+}
+
+/// What the window knows of its open chats, for the session hub: the titles it shows, and which are asleep.
+#[tauri::command]
+fn remote_window_chats(state: State<'_, AppState>, chats: Vec<remote::WindowChat>) {
+    state.remote.window_chats(&chats);
+}
+
+/// Settings › Remote control: whether it is on, and the paired devices.
+#[tauri::command]
+fn remote_settings(state: State<'_, AppState>) -> remote::RemoteView {
+    state.remote.view()
+}
+
+/// The view after a change, with why it couldn't be saved when it couldn't (it holds until Lantern restarts).
+#[tauri::command]
+async fn remote_set_enabled(app: AppHandle, state: State<'_, AppState>, on: bool) -> Result<remote::RemoteView, String> {
+    let saved = state.remote.store.set_enabled(on);
+    if on {
+        // Couldn't listen (the port is taken, the Keychain said no): it is off again, unless another start got it going.
+        if let Err(e) = start_remote(&app).await {
+            if !state.remote.is_running() {
+                let _ = state.remote.store.set_enabled(false);
+            }
+            return Ok(state.remote.view_after::<()>(Err(e)));
+        }
+    } else {
+        let _one_at_a_time = state.remote.lifecycle.lock().await;
+        state.remote.stop();
+    }
+    Ok(state.remote.view_after(saved))
+}
+
+#[tauri::command]
+fn remote_set_show_titles(state: State<'_, AppState>, on: bool) -> remote::RemoteView {
+    state.remote.view_after(state.remote.store.set_show_titles(on))
+}
+
+/// A QR code for pairing a phone, good for five minutes and one try. Off the main thread: the Mac's key comes from the
+/// Keychain, which may ask the user first.
+#[tauri::command]
+async fn remote_pair(app: AppHandle) -> Result<remote::PairView, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().remote.pair(&remote::local_addresses(), &mac_name(), remote::now_ms())).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn remote_pair_cancel(state: State<'_, AppState>) {
+    state.remote.store.cancel_offer();
+}
+
+/// Forgets a paired device: it can't connect again until it pairs again.
+#[tauri::command]
+fn remote_remove_device(state: State<'_, AppState>, id: String) -> remote::RemoteView {
+    let removed = state.remote.store.remove_device(&id);
+    state.remote.disconnect(&id);
+    state.remote.view_after(removed)
+}
+
+/// The Mac's name as the user set it (Sharing settings), for the phone to show.
+fn mac_name() -> String {
+    std::process::Command::new("/usr/sbin/scutil")
+        .args(["--get", "ComputerName"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Mac".into())
+}
+
+/// Asks the window to wake an asleep chat for a paired phone (the window wakes chats: it has what they were restored
+/// with). Refused for a chat that isn't listed, or isn't asleep.
+fn request_wake(app: &AppHandle, state: &AppState, slot: &str) -> Result<(), String> {
+    if !state.remote.wakeable(slot) {
+        return Err("That chat isn't asleep.".into());
+    }
+    app.emit("remote-wake", slot).map_err(|e| e.to_string())
+}
+
+/// How long the window has to open the chat a phone asked for, and then to list it where the phone can follow it.
+const NEW_CHAT_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+const NEW_CHAT_LISTED_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Asks the window to start a chat for a paired phone, and says which slot it made once the chat is listed where the phone
+/// can follow it. The window does it (it owns chats and what they start with), on Ask, without switching what it shows.
+async fn request_new_chat(app: &AppHandle, folder: String, text: String) -> Result<String, String> {
+    let state = app.state::<AppState>();
+    let (id, answer) = state.remote.expect_new_chat();
+    let request = remote::NewChatRequest { id: id.clone(), folder, text, permissions: "ask" };
+    if let Err(e) = app.emit("remote-new-chat", &request) {
+        state.remote.forget_new_chat(&id);
+        return Err(e.to_string());
+    }
+    let slot = match tokio::time::timeout(NEW_CHAT_WAIT, answer).await {
+        Ok(Ok(result)) => result?,
+        _ => {
+            state.remote.forget_new_chat(&id);
+            // The window may have started it after all (it only answered late): don't invite a second one.
+            return Err("Lantern didn't answer in time. The chat may still have started on your Mac: look in your chats before trying again.".into());
+        }
+    };
+    // The window has made the chat; the phone may only follow it once the hub lists it.
+    let listed = tokio::time::timeout(NEW_CHAT_LISTED_WAIT, async {
+        while state.remote.hub.chat(&slot).is_none() {
+            tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+        }
+    })
+    .await;
+    listed.map(|()| slot).map_err(|_| "The chat started, but it isn't listed yet. Look for it in a moment.".to_string())
+}
+
+/// The window says where it found `claude`, for the calls the backend makes by itself (what to suggest on a phone).
+#[tauri::command]
+fn remote_claude_path(state: State<'_, AppState>, path: String) {
+    state.remote.set_claude(&path);
+}
+
+/// The window's answer to `remote-new-chat`: the slot of the chat it started, or why it didn't.
+#[tauri::command]
+fn remote_new_chat_done(state: State<'_, AppState>, id: String, slot: Option<String>, error: Option<String>) {
+    let result = match (slot, error) {
+        (Some(slot), None) if slots::valid_slot(&slot) => Ok(slot),
+        (_, Some(e)) => Err(e.chars().take(300).collect()),
+        _ => Err("Lantern didn't start that chat.".to_string()),
+    };
+    state.remote.new_chat_done(&id, result);
+}
+
+/// Answers a prompt of chat `slot` for whoever answered it (`by`: the window, or a paired phone). The first answer
+/// counts: every client is told it was answered, and a later answer is refused.
+fn answer_prompt(state: &AppState, slot: &str, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> Result<(), String> {
+    if state.slots.get(slot)?.bridge.respond(request_id, allow, message, updated_input) {
+        state.remote.publish(slot, ui_event::UiEvent::PermissionResolved { request_id: request_id.to_string(), allow, by: by.to_string() });
         Ok(())
     } else {
-        Err("That permission request is no longer pending.".into())
+        Err("That permission request is no longer pending: it was answered already, or Claude stopped asking.".into())
     }
 }
 
@@ -2110,7 +2461,14 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into() });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), remote: window_remote(app.handle()) });
+            // Remote control left on: it listens again from launch.
+            if app.state::<AppState>().remote.store.saved().enabled {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = start_remote(&handle).await;
+                });
+            }
             app.manage(updates::Updates::default());
             app.manage(awake::Awake::default());
             app.manage(menu_bar::MenuBar::default());
@@ -2156,6 +2514,15 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             locate_claude,
+            remote_window_chats,
+            remote_settings,
+            remote_set_enabled,
+            remote_set_show_titles,
+            remote_pair,
+            remote_pair_cancel,
+            remote_remove_device,
+            remote_new_chat_done,
+            remote_claude_path,
             claude_login,
             sidebar_menu,
             keep_awake,
@@ -2345,6 +2712,30 @@ mod tests {
             helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![], project_notes: None },
             path_env: None,
         }
+    }
+
+    #[test]
+    fn claude_is_told_when_a_restart_changes_its_permissions_or_workflow_and_not_otherwise() {
+        let normal = |mode, auto| SessionConfig { helper: HelperConfig { role: Role::Normal, ..config(mode, auto).helper }, ..config(mode, auto) };
+        let was = |mode, auto: bool| Some((mode, args::is_auto(mode, auto), Role::Normal));
+        // Step by step to Chat: the switch the chat that found this bug made.
+        assert!(settings_changed(was(Mode::Steps, true), &normal(Mode::Auto, false)));
+        assert!(settings_changed(was(Mode::Ask, false), &normal(Mode::Auto, false)));
+        assert!(settings_changed(was(Mode::Auto, false), &SessionConfig { helper: HelperConfig { role: Role::Main, ..config(Mode::Auto, false).helper }, ..config(Mode::Auto, false) }));
+        // The same settings again (a new effort, a restart after Stop), or Step by step on Auto put the same way: no note.
+        assert!(!settings_changed(was(Mode::Auto, false), &normal(Mode::Auto, false)));
+        assert!(!settings_changed(was(Mode::Steps, true), &normal(Mode::Steps, true)));
+        // A chat that never ran has nothing to correct, and only Claude's prompt says these settings.
+        assert!(!settings_changed(None, &normal(Mode::Auto, false)));
+        assert!(!settings_changed(was(Mode::Ask, false), &SessionConfig { provider: ProviderId::Fake, ..normal(Mode::Auto, false) }));
+    }
+
+    #[test]
+    fn a_slash_command_goes_without_the_settings_note_so_it_still_runs_as_one() {
+        assert!(!carries_settings_note("/clear"));
+        assert!(!carries_settings_note("  /incremental-dev build it"));
+        assert!(carries_settings_note("build it"));
+        assert!(carries_settings_note("what does /clear do?"));
     }
 
     /// The git tool is answered for a read-only agent and no one else, from the role Lantern started the chat with: the same

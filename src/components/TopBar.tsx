@@ -49,7 +49,12 @@ interface Props {
   inbox?: InboxProps;
   /** The project's Run command (saved in its setup): a Run button beside the folder. Disabled while a run goes. */
   run?: { command: string; running: boolean; onRun: () => void };
+  /** Paired phones connected now (Remote control): a chip naming them, which opens Remote control's settings. */
+  phones?: { names: string[]; onOpen: () => void };
 }
+
+/** "Aly's iPhone is connected", "2 phones are connected". */
+export const phonesLabel = (names: string[]) => (names.length === 1 ? `${names[0]} is connected` : `${names.length} phones are connected`);
 
 const showSidebarLabel = (needs: number) => (needs > 0 ? `Show sidebar, ${needs} ${needs === 1 ? "chat needs" : "chats need"} you` : "Show sidebar");
 const sidebarShortcut = (() => {
@@ -73,7 +78,7 @@ function taskKind(type: string): string {
 // Xcode's activity viewer: the folder and branch on the left (it opens the folder menu, like Xcode's scheme), what
 // Claude is doing on the right, and a progress bar along its bottom edge while it works. The projects, new chats and
 // teams, and past chats are in the sidebar.
-export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, storage, mcpIssues = [], branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, onBringOld, orchestra, usage, sidebar, inbox, run }: Props) {
+export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFolder, onToggleReview, onOpenSettings, storage, mcpIssues = [], branch = null, activity, issues, background = [], onStopTask, onShowFailure, onClearFailures, onBringOld, orchestra, usage, sidebar, inbox, run, phones }: Props) {
   // A working chat keeps running in the background when you switch away, so only a starting one blocks switching.
   const busy = status === "starting";
   const toggleLabel = reviewCollapsed ? "Show side panel" : "Hide side panel";
@@ -282,6 +287,12 @@ export function TopBar({ folder, status, changeCount, reviewCollapsed, onOpenFol
             >
               <DiskIcon />
               {storage.suggested > 0 && <span className="dot" aria-hidden="true" />}
+            </button>
+          )}
+          {phones && phones.names.length > 0 && (
+            <button className="phones-connected" onClick={phones.onOpen} title="Remote control (Settings)">
+              <span className="phones-dot" aria-hidden="true" />
+              {phonesLabel(phones.names)}
             </button>
           )}
           {onOpenSettings && (

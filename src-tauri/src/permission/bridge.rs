@@ -38,10 +38,30 @@ pub enum Subagents {
 /// What a Lead reads when its Agent call is turned down because the team's Subagents are on the canvas.
 pub const CANVAS_REFUSAL: &str = "Not run inline: the team's Subagents setting is the canvas: helpers are agents with a chat of their own. Start this one with spawn_agent instead, using the same task as its brief (isolation \"shared\" if it only reads), then carry on or end your turn; you'll get a note when it finishes a turn.";
 
+/// A prompt waiting for the user's answer, as any client may be shown it (a phone that connects after its card appeared).
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Pending {
+    pub request_id: String,
+    pub tool_name: String,
+    pub input: Value,
+    /// When it was asked (ms since the epoch).
+    pub at: u64,
+}
+
+/// A pending prompt and where its answer goes.
+struct Waiting {
+    tx: oneshot::Sender<BridgeResponse>,
+    asked: Pending,
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
 /// Unix-socket server that turns helper requests into UI permission cards, or answers them by a rule.
 pub struct PermissionBridge {
     pub socket_path: PathBuf,
-    pending: Mutex<HashMap<String, oneshot::Sender<BridgeResponse>>>,
+    pending: Mutex<HashMap<String, Waiting>>,
     counter: AtomicU64,
     /// The accept loop, stopped by `close`.
     accept: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
@@ -234,7 +254,8 @@ impl PermissionBridge {
             return;
         }
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id.clone(), tx);
+        let asked = Pending { request_id: id.clone(), tool_name: req.tool_name.clone(), input: req.input.clone(), at: now_ms() };
+        self.pending.lock().unwrap().insert(id.clone(), Waiting { tx, asked });
         sink(UiEvent::PermissionRequested { request_id: id.clone(), tool_name: req.tool_name, input: req.input });
         tokio::select! {
             // A dropped sender (cancel_all) closes the connection; the helper then denies.
@@ -273,14 +294,21 @@ impl PermissionBridge {
     /// `updated_input`: on allow, the tool's input as it should run (AskUserQuestion's, with the user's answers).
     pub fn respond(&self, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>) -> bool {
         match self.pending.lock().unwrap().remove(request_id) {
-            Some(tx) => tx.send(BridgeResponse { allow, message, updated_input, failed: false }).is_ok(),
+            Some(waiting) => waiting.tx.send(BridgeResponse { allow, message, updated_input, failed: false }).is_ok(),
             None => false,
         }
     }
 
-    /// Denies every pending request (used when the session restarts or stops).
-    pub fn cancel_all(&self) {
-        self.pending.lock().unwrap().clear();
+    /// The prompts waiting for an answer, the oldest first.
+    pub fn pending(&self) -> Vec<Pending> {
+        let mut all: Vec<Pending> = self.pending.lock().unwrap().values().map(|w| w.asked.clone()).collect();
+        all.sort_by(|a, b| a.at.cmp(&b.at).then_with(|| a.request_id.cmp(&b.request_id)));
+        all
+    }
+
+    /// Denies every pending request (used when the session restarts or stops); returns the ids it dropped.
+    pub fn cancel_all(&self) -> Vec<String> {
+        self.pending.lock().unwrap().drain().map(|(id, _)| id).collect()
     }
 
     /// The chat is in this folder from now on: its folder rules apply.
@@ -431,6 +459,56 @@ mod tests {
         let id = next_request_id(&mut rx).await;
         assert!(bridge.respond(&id, false, None, None));
         assert!(!helper.await.unwrap().allow);
+    }
+
+    #[tokio::test]
+    async fn a_pending_prompt_can_be_listed_with_what_it_asks_until_it_is_answered() {
+        let (bridge, mut rx, _dir) = setup();
+        assert!(bridge.pending().is_empty());
+        let helper = ask_in_background(&bridge);
+        let id = next_request_id(&mut rx).await;
+        let listed = bridge.pending();
+        assert_eq!(listed.len(), 1);
+        assert_eq!((listed[0].request_id.as_str(), listed[0].tool_name.as_str(), listed[0].input["command"].as_str()), (id.as_str(), "Bash", Some("npm test")));
+        assert!(listed[0].at > 0);
+        assert!(bridge.respond(&id, true, None, None));
+        assert!(bridge.pending().is_empty());
+        helper.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn when_two_clients_answer_at_once_exactly_one_answer_counts() {
+        for _ in 0..20 {
+            let (bridge, mut rx, _dir) = setup();
+            let helper = ask_in_background(&bridge);
+            let id = next_request_id(&mut rx).await;
+            let answers: Vec<_> = [true, false]
+                .into_iter()
+                .map(|allow| {
+                    let (bridge, id) = (bridge.clone(), id.clone());
+                    tokio::spawn(async move { (allow, bridge.respond(&id, allow, None, None)) })
+                })
+                .collect();
+            let mut won = Vec::new();
+            for a in answers {
+                let (allow, ok) = a.await.unwrap();
+                if ok {
+                    won.push(allow);
+                }
+            }
+            assert_eq!(won.len(), 1, "exactly one answer is taken");
+            assert_eq!(helper.await.unwrap().allow, won[0], "and it is the one the helper gets");
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelling_says_which_prompts_it_dropped_so_clients_can_be_told() {
+        let (bridge, mut rx, _dir) = setup();
+        let helper = ask_in_background(&bridge);
+        let id = next_request_id(&mut rx).await;
+        assert_eq!(bridge.cancel_all(), vec![id]);
+        assert!(bridge.cancel_all().is_empty());
+        let _ = helper.await;
     }
 
     #[tokio::test]

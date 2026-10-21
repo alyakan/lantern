@@ -54,7 +54,7 @@ export interface ProviderInfo {
 
 export type UiEvent =
   | { kind: "session_started"; session_id: string; model: string; cwd: string; permission_mode: string; claude_version: string }
-  | { kind: "user_text"; text: string; at?: number }
+  | { kind: "user_text"; text: string; at?: number; sent_by?: string }
   | { kind: "thinking"; parent: string | null }
   | { kind: "text_delta"; parent: string | null; block_id: string; text: string }
   | { kind: "assistant_text"; parent: string | null; block_id: string; text: string }
@@ -80,6 +80,7 @@ export type UiEvent =
   | { kind: "conversation_reset" }
   | { kind: "permission_requested"; request_id: string; tool_name: string; input: unknown }
   | { kind: "permission_withdrawn"; request_id: string }
+  | { kind: "permission_resolved"; request_id: string; allow: boolean; by: string }
   | { kind: "permission_auto_allowed"; request_id: string; tool_name: string; input: unknown; scope: RuleScope; rule: Rule }
   | { kind: "session_ended"; code: number | null; stderr_tail: string }
   | { kind: "shell_output"; id: string; text: string }
