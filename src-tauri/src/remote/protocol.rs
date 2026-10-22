@@ -410,6 +410,10 @@ pub enum ServerMessage {
         mac_name: String,
         #[ts(type = "number")]
         epoch: u64,
+        /// The addresses the Mac can be reached at now, local ones first then Tailscale's: the phone keeps them in place
+        /// of what the QR code said, so a Mac whose address changed (or that joined Tailscale) is still found.
+        #[serde(default)]
+        hosts: Vec<String>,
         /// What this Mac can do beyond protocol 1, by name ("controls": Request::Controls and what goes with it). A Mac that
         /// is older says nothing, and a phone doesn't ask it for what it hasn't got.
         #[serde(default)]

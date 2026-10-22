@@ -41,6 +41,8 @@ export interface FakeMacOptions {
   protocol?: number;
   epoch?: number;
   macName?: string;
+  /** The addresses its Welcome gives (an older Mac gives none: leave this out). */
+  hosts?: string[];
   /** The Mac's answer to a request; an Error is sent back as the request's error. */
   answer?: (req: Request) => unknown;
 }
@@ -62,14 +64,17 @@ export class FakeMac implements Transport {
   readonly hellos: Extract<ClientMessage, { type: "hello" }>[] = [];
   private live: { link: ReturnType<typeof queueLink>; channel: Channel | null }[] = [];
   opened: string[] = [];
+  /** How long the phone said each address (in `opened`'s order) had to answer. */
+  openWaits: (number | undefined)[] = [];
 
   constructor(
     private readonly c: Case,
     private readonly o: FakeMacOptions = {},
   ) {}
 
-  async open(host: string, port: number, _waitMs?: number): Promise<Link> {
+  async open(host: string, port: number, waitMs?: number): Promise<Link> {
     this.opened.push(`${host}:${port}`);
+    this.openWaits.push(waitMs);
     if (this.o.reachable && !this.o.reachable.includes(host)) throw new Error(`Couldn't reach ${host}.`);
     const conn: { link: ReturnType<typeof queueLink>; channel: Channel | null } = { link: null!, channel: null };
     let step = 0;
@@ -92,7 +97,7 @@ export class FakeMac implements Transport {
         const msg = JSON.parse(utf8Decode(plain)) as ClientMessage;
         if (msg.type === "hello") {
           this.hellos.push(msg);
-          this.sendOn(conn, { type: "welcome", protocol: this.o.protocol ?? 1, app_version: "test", mac_name: this.o.macName ?? "Test Mac", epoch: this.o.epoch ?? 7, features: [] });
+          this.sendOn(conn, { type: "welcome", protocol: this.o.protocol ?? 1, app_version: "test", mac_name: this.o.macName ?? "Test Mac", epoch: this.o.epoch ?? 7, features: [], ...(this.o.hosts ? { hosts: this.o.hosts } : {}) } as ServerMessage);
         } else {
           this.requests.push(msg.request);
           let ok: unknown = null;

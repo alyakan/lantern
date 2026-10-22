@@ -89,7 +89,7 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
       <div className="settings-head">
         <div>
           <h2 className="mode-guide-title">Remote control</h2>
-          <p className="mode-guide-summary">Paired phones can see your open chats, answer their cards, send messages and wake sleeping chats, while they're on the same Wi-Fi as this Mac.</p>
+          <p className="mode-guide-summary">Paired phones can see your open chats, answer their cards, send messages and wake sleeping chats, on the same Wi-Fi as this Mac or from anywhere over Tailscale.</p>
           <p className="settings-muted">A message to a chat on Auto can run commands on this Mac, so pair only your own devices. Everything between the phone and this Mac is encrypted end to end.</p>
         </div>
       </div>
@@ -139,6 +139,25 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
                 </>
               )}
               <span className="settings-muted">If the phone can't connect, check that macOS lets Lantern accept incoming connections (System Settings › Network › Firewall).</span>
+            </section>
+          )}
+          {view.enabled && (
+            <section className="general-section" aria-labelledby="remote-away">
+              <h3 id="remote-away" className="general-title">
+                Away from home
+              </h3>
+              {view.tailnet.length > 0 ? (
+                <span className="settings-muted">
+                  Tailscale is on: phones on your tailnet reach this Mac at {view.tailnet.join(", ")}. Install Tailscale on the phone and sign in to the same account. A phone that is paired already picks the address up the next time it connects.
+                </span>
+              ) : (
+                <span className="settings-muted">Tailscale isn't on this Mac. Install it here and on the phone, sign in to the same account on both, and a phone can reach this Mac from anywhere. Show a new pairing code after that.</span>
+              )}
+              <label className="general-option">
+                <input type="checkbox" checked={view.keep_awake} onChange={(e) => act(api.remoteSetKeepAwake(e.target.checked))} />
+                <span>Keep this Mac awake while Remote control is on</span>
+              </label>
+              <span className="settings-muted">A sleeping Mac can't be reached, and a phone can't wake it. This stops the Mac sleeping from idling (the screen can still turn off, and closing the lid still sleeps it). Off, the Mac sleeps on its usual schedule.</span>
             </section>
           )}
           <section className="general-section" aria-labelledby="remote-devices">

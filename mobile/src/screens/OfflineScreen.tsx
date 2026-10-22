@@ -58,7 +58,7 @@ export function OfflineScreen({ state, onRetry, onUnpair }: { state: ConnectionS
             Can't reach your Mac
           </Txt>
           <Txt variant="body" tone="ink2" style={{ textAlign: "center", marginTop: 8, marginBottom: 22 }}>
-            {state.kind === "offline" ? state.reason : "Check that it's awake, on the same Wi-Fi as this phone, and that Remote control is on in Lantern."}
+            {state.kind === "offline" ? state.reason : "It may be asleep or offline. Away from home, check that Tailscale is on here and on the Mac, and that Remote control is on in Lantern."}
           </Txt>
           <Button label="Try again" onPress={onRetry} style={{ alignSelf: "stretch" }} />
           <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ alignSelf: "stretch", marginTop: 10, backgroundColor: "transparent" }} />

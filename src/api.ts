@@ -331,6 +331,8 @@ export const api = {
   remoteSettings: () => invoke<RemoteView>("remote_settings"),
   remoteSetEnabled: (on: boolean) => invoke<RemoteView>("remote_set_enabled", { on }),
   remoteSetShowTitles: (on: boolean) => invoke<RemoteView>("remote_set_show_titles", { on }),
+  /** Holds the Mac awake while Remote control is on, so a phone away from home can still reach it. */
+  remoteSetKeepAwake: (on: boolean) => invoke<RemoteView>("remote_set_keep_awake", { on }),
   remoteSetAllowAuto: (on: boolean) => invoke<RemoteView>("remote_set_allow_auto", { on }),
   /** A QR code a phone pairs with: one try, for five minutes. Rejects while Remote control is off. */
   remotePair: () => invoke<PairView>("remote_pair"),

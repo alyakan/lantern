@@ -7,6 +7,11 @@ import type { RemoteEvent } from "./RemoteEvent";
  */
 export type ServerMessage = { "type": "welcome", protocol: number, app_version: string, mac_name: string, epoch: number, 
 /**
+ * The addresses the Mac can be reached at now, local ones first then Tailscale's: the phone keeps them in place
+ * of what the QR code said, so a Mac whose address changed (or that joined Tailscale) is still found.
+ */
+hosts: Array<string>, 
+/**
  * What this Mac can do beyond protocol 1, by name ("controls": Request::Controls and what goes with it). A Mac that
  * is older says nothing, and a phone doesn't ask it for what it hasn't got.
  */
