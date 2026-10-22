@@ -355,3 +355,42 @@ describe("what goes wrong around a connection", () => {
     }
   });
 });
+
+describe("an address typed in", () => {
+  const quiet = { deviceName: "Test phone", appVersion: "1.0", onPushed: () => {}, onState: () => {} };
+
+  function stuckAway() {
+    // Away from home: the Wi-Fi address kept from pairing doesn't answer, the Mac's Tailscale address does.
+    const mac = new FakeMac(connectCase, { reachable: ["100.90.157.106"] });
+    const k = phoneKeys(connectCase);
+    const store = new MemoryStore();
+    store.mac = { macKey: toBase64Url(k.macKey), deviceKey: toBase64Url(k.device.privateKey), hosts: ["192.168.68.107"], port: 47123, macName: "Test Mac" };
+    const states: ConnectionState[] = [];
+    // A pause that never ends by itself: only the typed address can start the next try.
+    const conn = new Connection({ ...quiet, onState: (s) => states.push(s), transport: mac, store, fixedEphemeral: k.ephemeral, wait: () => new Promise(() => {}) });
+    return { mac, store, states, conn };
+  }
+
+  it("is dialled at once and kept first, so the phone reaches its Mac over Tailscale when it never learned that address", async () => {
+    const r = stuckAway();
+    await r.conn.start();
+    for (let i = 0; i < 10 && !r.states.some((s) => s.kind === "offline"); i++) await flush();
+    expect(r.mac.opened).toEqual(["192.168.68.107:47123"]);
+    await expect(r.conn.useAddress(" 100.90.157.106 ")).resolves.toBeNull();
+    for (let i = 0; i < 20 && r.states.at(-1)?.kind !== "connected"; i++) await flush();
+    expect(r.mac.opened[1]).toBe("100.90.157.106:47123");
+    expect(r.states.at(-1)).toMatchObject({ kind: "connected", host: "100.90.157.106" });
+    expect(r.store.mac?.hosts[0]).toBe("100.90.157.106");
+    expect(r.store.mac?.hosts).toContain("192.168.68.107");
+    r.conn.stop();
+  });
+
+  it("that isn't an address is refused, and nothing kept changes", async () => {
+    const r = stuckAway();
+    for (const odd of ["", "a b", "ws://100.90.157.106", "100.90.157.106:47123", "x".repeat(300)]) {
+      await expect(r.conn.useAddress(odd)).resolves.toMatch(/address/);
+    }
+    expect(r.store.mac?.hosts).toEqual(["192.168.68.107"]);
+    expect(r.mac.opened).toEqual([]);
+  });
+});

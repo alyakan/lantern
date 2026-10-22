@@ -33,6 +33,12 @@ describe("reading a pairing code", () => {
     expect(o.hosts).toEqual(["192.168.1.4", "172.16.0.1"]);
   });
 
+  it("keeps the Mac's Tailscale address from a code, so a phone can reach it away from home without first connecting on its Wi-Fi", () => {
+    const o = readPairingLink(link({ h: "192.168.68.107%2C100.90.157.106%2C100.63.0.1%2C100.128.0.1" }), 0);
+    if ("error" in o) throw new Error(o.error);
+    expect(o.hosts).toEqual(["192.168.68.107", "100.90.157.106"]);
+  });
+
   it("round-trips URL-safe base64", () => {
     const b = Uint8Array.from({ length: 33 }, (_, i) => i * 7);
     expect(fromBase64Url(toBase64Url(b))).toEqual(b);

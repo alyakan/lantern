@@ -23,6 +23,36 @@ describe("the Offline screen", () => {
     expect(onRetry).toHaveBeenCalled();
     expect(onUnpair).toHaveBeenCalled();
   });
+
+  it("takes the Mac's address typed in, and says why one is refused", async () => {
+    const onAddress = jest.fn(async (text: string) => (text === "nope" ? "That isn't an address." : null));
+    const state: ConnectionState = { kind: "offline", reason: "Can't reach Aly's Mac.", retryInMs: 2000 };
+    await render(<OfflineScreen state={state} onRetry={jest.fn()} onUnpair={jest.fn()} onAddress={onAddress} />);
+    expect(screen.queryByLabelText("Your Mac's address")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Enter your Mac's address" }));
+    await fireEvent.changeText(screen.getByLabelText("Your Mac's address"), "nope");
+    await fireEvent.press(screen.getByRole("button", { name: "Connect" }));
+    expect(await screen.findByText("That isn't an address.")).toBeTruthy();
+    await fireEvent.changeText(screen.getByLabelText("Your Mac's address"), "100.90.157.106");
+    await fireEvent.press(screen.getByRole("button", { name: "Connect" }));
+    expect(onAddress).toHaveBeenLastCalledWith("100.90.157.106");
+    expect(screen.queryByText("That isn't an address.")).toBeNull();
+  });
+
+  it("stays put while it tries again on its own, so an address being typed isn't taken away", async () => {
+    const props = { onRetry: jest.fn(), onUnpair: jest.fn(), onAddress: jest.fn(async () => null) };
+    const offline: ConnectionState = { kind: "offline", reason: "Can't reach Aly's Mac.", retryInMs: 2000 };
+    const view = await render(<OfflineScreen state={offline} {...props} />);
+    await fireEvent.press(screen.getByRole("button", { name: "Enter your Mac's address" }));
+    await fireEvent.changeText(screen.getByLabelText("Your Mac's address"), "100.90");
+    await view.rerender(<OfflineScreen state={{ kind: "connecting" }} {...props} />);
+    expect(screen.queryByLabelText("Connecting to your Mac")).toBeNull();
+    expect(screen.getByText("Trying again…")).toBeTruthy();
+    expect(screen.getByLabelText("Your Mac's address").props.value).toBe("100.90");
+    await view.rerender(<OfflineScreen state={offline} {...props} />);
+    expect(screen.getByLabelText("Your Mac's address").props.value).toBe("100.90");
+    expect(screen.getByText("Can't reach Aly's Mac.")).toBeTruthy();
+  });
 });
 
 describe("the Mac's sheet", () => {

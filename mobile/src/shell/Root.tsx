@@ -112,7 +112,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   if (pendingLink) return fade("confirm", <ConfirmLink link={pendingLink} onCancel={() => onClearLink?.()} onDone={() => onClearLink?.()} />);
   if (connection.kind === "unpaired") return fade("pair", <PairScreen />);
   if (connection.kind === "connecting" || (connection.kind === "offline" && chats.length === 0)) {
-    return fade("offline", <OfflineScreen state={connection} onRetry={() => controller.resume()} onUnpair={unpair} />);
+    return fade("offline", <OfflineScreen state={connection} onRetry={() => controller.resume()} onUnpair={unpair} onAddress={(text) => controller.useAddress(text)} />);
   }
 
   const items: StackItem[] = stack.map((route, i) => {
