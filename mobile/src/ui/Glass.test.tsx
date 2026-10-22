@@ -1,16 +1,20 @@
 import { AccessibilityInfo, StyleSheet, Text } from "react-native";
 import { act, render, screen } from "@testing-library/react-native";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
-import { Glass } from "./Glass";
 import { lightColors } from "./theme";
+
+// The module asks the phone about reduced transparency as it loads, and listens for the setting changing: watch for that.
+const subscribe = jest.spyOn(AccessibilityInfo, "addEventListener");
+const { Glass } = require("./Glass") as typeof import("./Glass");
+const reduce = (on: boolean) => act(async () => void (subscribe.mock.calls.find((c) => c[0] === "reduceTransparencyChanged")![1] as (on: boolean) => void)(on));
 
 const available = isLiquidGlassAvailable as jest.Mock;
 const surface = () => screen.getByTestId("surface");
 const fill = () => StyleSheet.flatten(surface().props.style).backgroundColor;
 
-afterEach(() => {
+afterEach(async () => {
   available.mockReturnValue(false);
-  jest.restoreAllMocks();
+  await reduce(false);
 });
 
 describe("a glass surface", () => {
@@ -40,9 +44,16 @@ describe("a glass surface", () => {
 
   it("is solid for someone who asked for less transparency, even on iOS 26", async () => {
     available.mockReturnValue(true);
-    jest.spyOn(AccessibilityInfo, "isReduceTransparencyEnabled").mockResolvedValue(true);
     await render(<Glass testID="surface" />);
-    await act(async () => void (await Promise.resolve()));
+    expect(surface().props.glassEffectStyle).toBe("regular");
+    await reduce(true);
+    expect(surface().props.glassEffectStyle).toBeUndefined();
+    expect(fill()).toBe(lightColors.card);
+  });
+
+  it("stays the solid card where asked to, even on iOS 26: for words that must read over what is behind", async () => {
+    available.mockReturnValue(true);
+    await render(<Glass solid testID="surface" />);
     expect(surface().props.glassEffectStyle).toBeUndefined();
     expect(fill()).toBe(lightColors.card);
   });

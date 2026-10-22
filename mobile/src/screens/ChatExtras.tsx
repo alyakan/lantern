@@ -179,7 +179,7 @@ export function QuickReplies({ replies, onSend }: { replies: string[]; onSend: (
       {replies.map((r, i) => (
         <FadeSlideIn key={r} from={8} delay={i * 50} ms={180}>
           <PressScale accessibilityRole="button" accessibilityLabel={`Reply: ${r}`} onPress={() => onSend(r)} haptic="select" scaleTo={0.94}>
-            <Glass lift={0.06} style={{ borderRadius: radius.pill, paddingHorizontal: 18, paddingVertical: 9 }}>
+            <Glass solid lift={0.06} style={{ borderColor: colors.rule, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 18, paddingVertical: 9 }}>
               <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
                 {r}
               </Txt>
@@ -202,7 +202,7 @@ export function PlanCard({ todos }: { todos: RemoteTodo[] }) {
   if (todos.length === 0 || p.finished) return null;
   return (
     <FadeSlideIn from={8} ms={180} style={{ marginHorizontal: 12, marginBottom: 6 }}>
-      <Glass style={{ borderRadius: radius.inner, overflow: "hidden" }}>
+      <Glass solid style={{ borderRadius: radius.inner, overflow: "hidden" }}>
         <PressScale accessibilityRole="button" accessibilityLabel={`Plan, ${p.done} of ${p.total} done${p.current ? `, now: ${p.current}` : ""}`} accessibilityState={{ expanded: open }} onPress={() => setOpen((o) => !o)} haptic="select" scaleTo={0.99} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, paddingHorizontal: 12 }}>
           <View style={{ backgroundColor: colors.paper, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 }}>
             <Txt variant="tiny" tone="ink2" style={{ fontWeight: "700" }}>
@@ -239,7 +239,7 @@ export function SlashPicker({ matches, onPick }: { matches: RemoteCommand[]; onP
   if (matches.length === 0) return null;
   return (
     <FadeSlideIn from={6} ms={140} style={{ marginHorizontal: 12, marginBottom: 6 }}>
-      <Glass accessibilityLabel="Commands" lift={0.1} style={{ borderRadius: radius.inner, overflow: "hidden" }}>
+      <Glass solid accessibilityLabel="Commands" lift={0.1} style={{ borderRadius: radius.inner, overflow: "hidden" }}>
         <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 232 }}>
           {matches.map((c, i) => (
             <PressScale key={c.name} accessibilityRole="button" accessibilityLabel={`/${c.name}${c.description ? `, ${c.description}` : ""}`} onPress={() => onPick(c)} haptic="select" scaleTo={0.99} style={{ paddingVertical: 9, paddingHorizontal: 12, gap: 1, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: colors.rule }}>
