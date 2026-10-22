@@ -97,7 +97,7 @@ export class FakeMac implements Transport {
         const msg = JSON.parse(utf8Decode(plain)) as ClientMessage;
         if (msg.type === "hello") {
           this.hellos.push(msg);
-          this.sendOn(conn, { type: "welcome", protocol: this.o.protocol ?? 1, app_version: "test", mac_name: this.o.macName ?? "Test Mac", epoch: this.o.epoch ?? 7, ...(this.o.hosts ? { hosts: this.o.hosts } : {}) } as ServerMessage);
+          this.sendOn(conn, { type: "welcome", protocol: this.o.protocol ?? 1, app_version: "test", mac_name: this.o.macName ?? "Test Mac", epoch: this.o.epoch ?? 7, features: [], ...(this.o.hosts ? { hosts: this.o.hosts } : {}) } as ServerMessage);
         } else {
           this.requests.push(msg.request);
           let ok: unknown = null;

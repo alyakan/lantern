@@ -59,7 +59,13 @@
           "backgroundColor": "#EEF1F4"
         }
       ],
-      "expo-iap"
+      "expo-iap",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Lantern asks for Face ID to unlock itself, only if you turn the lock on."
+        }
+      ]
     ]
   }
 }

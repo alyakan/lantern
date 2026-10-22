@@ -183,6 +183,18 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
             )}
             <span className="settings-muted">A removed phone is disconnected at once, and can't connect again until it pairs again.</span>
           </section>
+          <section className="general-section" aria-labelledby="remote-auto">
+            <h3 id="remote-auto" className="general-title">
+              Auto from a phone
+            </h3>
+            <label className="general-option">
+              <input type="checkbox" checked={view.allow_phone_auto} onChange={(e) => act(api.remoteSetAllowAuto(e.target.checked))} />
+              <span>Let paired phones use Auto</span>
+            </label>
+            <span className="settings-muted">
+              Off, chats a phone starts are on Ask and it can't switch a chat to Auto. On, a phone can choose Auto, where a classifier approves most actions and nobody has to be at the Mac. Turning it off doesn't change chats already on Auto.
+            </span>
+          </section>
           <section className="general-section" aria-labelledby="remote-notify">
             <h3 id="remote-notify" className="general-title">
               Notifications

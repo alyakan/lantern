@@ -6,7 +6,7 @@ import { useAccent } from "../ui/accent";
 import { Button, Chip, Tag, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
 import { Markdown } from "../ui/Markdown";
-import { bounce, buzz, PopIn, PressScale, skips } from "../ui/motion";
+import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { DiffSkeleton } from "../ui/skeleton";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
@@ -51,13 +51,29 @@ export const AssistantRow = memo(function AssistantRow({ item }: { item: Extract
 });
 
 export const StepsRow = memo(function StepsRow({ chips, onFiles }: { chips: StepChip[]; onFiles: (files: string[]) => void }) {
+  // A grouped chip ("Ran 5 commands") opens to what it stands for, one line each.
+  const [open, setOpen] = useState<string | null>(null);
+  const opened = chips.find((c) => c.key === open && c.items);
   return (
-    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, paddingHorizontal: space.lg, paddingTop: 10 }}>
-      {chips.map((c) => (
-        <Chip key={c.key} tone={c.tone} onPress={c.files ? () => onFiles(c.files!) : undefined}>
-          {c.label}
-        </Chip>
-      ))}
+    <View style={{ paddingHorizontal: space.lg, paddingTop: 10, gap: 8 }}>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+        {chips.map((c) => (
+          <Chip key={c.key} tone={c.tone} onPress={c.files ? () => onFiles(c.files!) : c.items ? () => setOpen(open === c.key ? null : c.key) : undefined}>
+            {c.items ? `${c.label} ${open === c.key ? "▴" : "▾"}` : c.label}
+          </Chip>
+        ))}
+      </View>
+      {opened?.items && (
+        <FadeSlideIn>
+          <View accessibilityLabel={opened.label} style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.inner, padding: 10, gap: 6 }}>
+            {opened.items.map((it, i) => (
+              <Txt key={i} variant="mono" tone={it.bad ? "stop" : "ink2"} numberOfLines={3} style={{ fontSize: 12, lineHeight: 17 }}>
+                {it.text}
+              </Txt>
+            ))}
+          </View>
+        </FadeSlideIn>
+      )}
     </View>
   );
 });
@@ -134,7 +150,7 @@ const SETTLE_WAIT_MS = 600;
  * Once it is decided, the card shrinks into a small one saying how it went (the open card is kept, fading, while it
  * does, so the swipe's check circle doesn't vanish); one that was already decided when the chat loaded is just the small card.
  */
-export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow }: { item: Extract<Item, { kind: "prompt" }>; me: string | null; onReview: () => void; onAllow?: () => Promise<void> }) {
+export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, onSwiping }: { item: Extract<Item, { kind: "prompt" }>; me: string | null; onReview: () => void; onAllow?: () => Promise<void>; /** Told when the swipe is being dragged: the chat holds still meanwhile. */ onSwiping?: (swiping: boolean) => void }) {
   const view = promptView(item.toolName, item.input);
   const [tries, setTries] = useState(0);
   const openHeight = useRef(0);
@@ -203,9 +219,10 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow }
         </Txt>
       )}
       {swipe ? (
-        <View style={{ marginTop: 8 }}>
+        // Half the card's width, from the middle to the right edge, where the thumb is.
+        <View style={{ marginTop: 8, width: "50%", alignSelf: "flex-end" }}>
           {/* A failed answer brings a fresh bar back (the key), not one that looks allowed; and a list cell reused for another prompt starts it afresh. */}
-          <SwipeToAllow key={`${item.id}:${tries}`} compact label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => void onAllow().catch(() => setTries((t) => t + 1))} />
+          <SwipeToAllow key={`${item.id}:${tries}`} compact onDrag={onSwiping} label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => void onAllow().catch(() => setTries((t) => t + 1))} />
         </View>
       ) : (
         <Button label="Review" style={{ marginTop: 6 }} onPress={onReview} />

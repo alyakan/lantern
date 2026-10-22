@@ -2,13 +2,16 @@ import { useEffect, useState } from "react";
 import { ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
+import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
 import { useController } from "../shell/hooks";
+import { useControls } from "../shell/useControls";
 import { Button, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { ProjectsSkeleton } from "../ui/skeleton";
 import { colors, radius, shadow, space } from "../ui/theme";
+import { autoNote, MODES } from "../view/controls";
 
 /** What the sheet starts from: a suggestion's draft, the project it names, or the chat it carries on. */
 export interface Draft {
@@ -30,9 +33,10 @@ export interface NewChatProps {
 }
 
 /**
- * Starting a chat from the phone: which project, and what to start with. It starts on Ask, so Claude asks before it
- * runs anything, and the questions come to this phone like any other. Only a project the user already works in on the
- * Mac is offered (the Mac decides, whatever is sent).
+ * Starting a chat from the phone: which project, and what to start with. It starts on Ask unless Auto is chosen (and the
+ * Mac lets phones use it), so Claude asks before it runs anything, and the questions come to this phone like any other.
+ * The models are the project's own unless a preset is chosen. Only a project the user already works in on the Mac is
+ * offered (the Mac decides, whatever is sent).
  */
 export function NewChatSheet({ initialText = "", initialProject, continueChat, onClose, onStarted }: NewChatProps) {
   const { sync } = useController();
@@ -43,6 +47,10 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
   const [text, setText] = useState(initialText);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // What it runs on: Ask unless chosen, and the project's own models unless a preset is.
+  const { supported, controls } = useControls();
+  const [permissions, setPermissions] = useState<RemotePermissions>("ask");
+  const [preset, setPreset] = useState<string | null>(null);
 
   useEffect(() => {
     // Carrying on a chat needs no project.
@@ -77,7 +85,8 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
     setBusy(true);
     setError(null);
     try {
-      onStarted(await sync.newChat(project, text.trim()));
+      // Only what was chosen is sent, and only to a Mac that can take it.
+      onStarted(await sync.newChat(project, text.trim(), supported ? { permissions, ...(preset ? { preset } : {}) } : {}));
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -94,7 +103,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
             {continueChat ? "Carry on" : "New chat"}
           </Txt>
           <Txt variant="small" tone="ink2">
-            {continueChat ? `This goes to “${continueChat.title}”. Read it first: you can change it.` : "It starts on Ask: Claude asks you before it runs anything, and its questions come to this phone."}
+            {continueChat ? `This goes to “${continueChat.title}”. Read it first: you can change it.` : permissions === "auto" ? "It starts on Auto: a classifier approves most actions, so Claude rarely asks. Its questions come to this phone." : "It starts on Ask: Claude asks you before it runs anything, and its questions come to this phone."}
           </Txt>
 
           {continueChat ? null : projects === null ? (
@@ -120,6 +129,46 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
                   );
                 })}
               </ScrollView>
+            </FadeSlideIn>
+          )}
+
+          {!continueChat && supported && controls && (
+            <FadeSlideIn from={8}>
+              <Txt variant="small" style={{ fontWeight: "700", marginBottom: 6 }}>
+                Runs on
+              </Txt>
+              <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                {MODES.map((m) => {
+                  const on = m.value === permissions;
+                  const off = m.value === "auto" ? autoNote(controls) : null;
+                  return (
+                    <PressScale key={m.value} accessibilityRole="radio" accessibilityLabel={m.label} accessibilityHint={off ?? m.hint} accessibilityState={{ selected: on, checked: on, disabled: !!off }} disabled={!!off} opacity={off ? 0.45 : 1} onPress={() => setPermissions(m.value)} haptic="select" scaleTo={0.94} style={{ backgroundColor: on ? colors.ink : colors.paper, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 9, borderWidth: 1, borderColor: on ? colors.ink : colors.rule }}>
+                      <Txt variant="small" tone={on ? "white" : "ink"} style={{ fontWeight: "700" }}>
+                        {m.label}
+                      </Txt>
+                    </PressScale>
+                  );
+                })}
+              </View>
+              {autoNote(controls) && (
+                <Txt variant="tiny" tone="ink2" style={{ marginTop: 6 }}>
+                  {autoNote(controls)}
+                </Txt>
+              )}
+              {controls.presets.length > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8, paddingTop: 8 }}>
+                  {[{ id: null as string | null, name: "Project's own" }, ...controls.presets].map((p) => {
+                    const on = p.id === preset;
+                    return (
+                      <PressScale key={p.id ?? "own"} accessibilityRole="radio" accessibilityLabel={p.name} accessibilityState={{ selected: on, checked: on }} onPress={() => setPreset(p.id)} haptic="select" scaleTo={0.94} style={{ backgroundColor: on ? colors.ink : colors.paper, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 9, borderWidth: 1, borderColor: on ? colors.ink : colors.rule }}>
+                        <Txt variant="small" tone={on ? "white" : "ink"} style={{ fontWeight: "700" }}>
+                          {p.name}
+                        </Txt>
+                      </PressScale>
+                    );
+                  })}
+                </ScrollView>
+              )}
             </FadeSlideIn>
           )}
 

@@ -48,6 +48,8 @@ export interface Row {
   /** The first letter of the title, for the tile. */
   initial: string;
   status: RemoteChat["status"];
+  /** When the chat was last active, for ordering groups. */
+  activeAt: number;
   /** What is said at the right: "Asleep", "4 min", "Needs you", "Stopped"; null while working (a moving bar shows). */
   note: string | null;
 }
@@ -66,8 +68,31 @@ export function rows(chats: RemoteChat[], now: number): Row[] {
     .sort((a, b) => b.active_at - a.active_at)
     .map((c) => {
       const title = c.title?.trim() || "New chat";
-      return { slot: c.slot, title, project: c.project ?? "", initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, note: STATUS_NOTE[c.status](c, now) };
+      return { slot: c.slot, title, project: c.project ?? "", initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now) };
     });
+}
+
+/** How Home lists the chats: all of them, the most recent first, or under their project. */
+export type Grouping = "recent" | "project";
+
+export interface Group {
+  /** The project's name; "" for chats with none. */
+  project: string;
+  rows: Row[];
+  /** How many of them need you. */
+  needsYou: number;
+}
+
+/**
+ * The rows under their projects: the project with the most recently active chat first (chats with no project last), and
+ * in each the most recent chat first. Projects are told apart by name, which is all a phone is told of a folder.
+ */
+export function groups(list: Row[]): Group[] {
+  const byProject = new Map<string, Row[]>();
+  for (const r of list) byProject.set(r.project, [...(byProject.get(r.project) ?? []), r]);
+  return [...byProject]
+    .map(([project, rs]) => ({ project, rows: [...rs].sort((a, b) => b.activeAt - a.activeAt), needsYou: rs.filter((r) => r.status === "needs_you").length }))
+    .sort((a, b) => (a.project === "" ? 1 : b.project === "" ? -1 : b.rows[0].activeAt - a.rows[0].activeAt));
 }
 
 /** A tile colour from the title, one of a few soft pairs (background, letter), the same for the same title every time. */

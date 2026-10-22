@@ -25,10 +25,30 @@ describe("a run of steps as chips", () => {
     expect(stepChips([step("1", "Bash", { tests: { passed: 1, failed: 0, skipped: 0 } })])[0].label).toBe("1 test passed");
   });
 
-  it("says other commands and tools in a few words, and failed steps in red", () => {
-    const chips = stepChips([step("1", "Bash", { summary: "git push origin release/0.1.53 --force-with-lease" }), step("2", "Agent"), step("3", "mcp__x__y", { summary: "go" }), step("4", "Bash", { summary: "ls", isError: true })]);
-    expect(chips.map((c) => c.label)).toEqual(["Ran git push origin release/0…", "Ran a helper", "mcp__x__y go", "Ran ls", "1 step failed"]);
+  it("groups commands, skills, helpers and other tools by kind, like the desktop's summary, and says failed steps in red", () => {
+    const chips = stepChips([
+      step("1", "Bash", { summary: "git push origin release/0.1.53 --force-with-lease" }),
+      step("2", "Agent", { summary: "check the build" }),
+      step("3", "mcp__claude_ai_Linear__list_issues", { summary: "mine" }),
+      step("4", "Bash", { summary: "ls", isError: true }),
+      step("5", "Skill", { summary: "brainstorming" }),
+      step("6", "Bash"),
+      step("7", "mcp__claude_ai_Linear__get_issue"),
+      step("8", "SomethingNew"),
+    ]);
+    expect(chips.map((c) => c.label)).toEqual(["Ran 3 commands", "Used 1 skill", "Ran 1 helper", "Used Linear 2 times", "Used 1 other tool", "1 step failed"]);
+    expect(chips[0].items).toEqual([
+      { text: "git push origin release/0.1.53 --force-with-lease", bad: false },
+      { text: "ls", bad: true },
+      { text: "a command", bad: false },
+    ]);
+    expect(chips[3].items?.map((i) => i.text)).toEqual(["list issues mine", "get issue"]);
     expect(chips.at(-1)?.tone).toBe("bad");
+  });
+
+  it("keeps a test run apart from the commands, and says a lone command as a group of one", () => {
+    const chips = stepChips([step("1", "Bash", { tests: { passed: 3, failed: 0, skipped: 0 } }), step("2", "Bash", { summary: "git status" })]);
+    expect(chips.map((c) => c.label)).toEqual(["3 tests passed", "Ran 1 command"]);
   });
 
   it("looks up web pages apart from searching files", () => {

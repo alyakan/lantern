@@ -5,7 +5,7 @@ import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { agentsAtRest, canSleep, membersToSleep, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
-import { checkRemoteNewChat, windowChats, type RemoteNewChat } from "./lib/remoteChats";
+import { checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset } from "./lib/remoteChats";
 import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
@@ -217,6 +217,8 @@ export default function App() {
   const [teamAsk, setTeamAsk] = useState<{ teams: WorkingTeam[]; go: () => void; cancel?: () => void } | null>(null);
   // Each open chat's preset.
   const [harnessBySlot, setHarnessBySlot] = useState<Record<string, string>>({});
+  // The Permissions a paired phone last put each chat on, so that they aren't taken for the project's own choice.
+  const phoneMode = useRef<Record<string, Permissions>>({});
   // Every open chat. The one on screen is `active`; the others keep running in the background.
   const [chats, dispatchChats] = useReducer(chatsReducer, undefined, () => initialChats({ ...initialState, ...(lastFolder ? { mode: launchFor(lastFolder).mode, autoApprove: launchFor(lastFolder).autoApprove } : {}) }));
   const active = chats.active;
@@ -484,19 +486,20 @@ export default function App() {
    * `team`: the chat is the Lead of a team, which can start agents, on the project's last Permissions (the agents never exceed them).
    * `first`: a team from a template: the Lead's first instruction, which names its members and their roles.
    * `routine`: a routine's chat, on the routine's own Permissions (never the project's) and the standard preset; it doesn't become the project to reopen.
-   * `remote`: a chat a paired phone started: always on Ask (nobody is at the Mac to approve anything else), whatever the project's
-   * Permissions are, and it doesn't become the project to reopen either.
+   * `remote`: a chat a paired phone started: on Ask, or on Auto when the Mac's Settings let phones use it (the caller has checked),
+   * whatever the project's Permissions are, and on the preset the phone chose (else the project's own); it doesn't become the
+   * project to reopen either, and neither the project's Permissions nor its preset are remembered from it.
    */
-  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote = false) => {
+  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote: { permissions: Permissions; preset: string | null } | false = false) => {
     const { claudePath } = state;
     if (!claudePath) return;
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
     reopened.current = true;
     // A team's Lead runs on the project's last Permissions, which its agents never exceed; Team is not remembered as the
     // project's Workflow (see the effect below).
-    const { mode, autoApprove } = remote ? launchOf("ask", "chat") : routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team);
+    const { mode, autoApprove } = remote ? launchOf(remote.permissions, "chat") : routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team);
     const orchestrator = team;
-    const h = routine ? BUILT_IN[0] : findHarness(presets, harnessByFolder[folder]);
+    const h = routine ? BUILT_IN[0] : findHarness(presets, remote && remote.preset ? remote.preset : harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)({ type: "folder_opened", folder });
     to(slot)({ type: "mode_changed", mode, autoApprove });
@@ -535,7 +538,9 @@ export default function App() {
     // Nor an asleep chat's, which has the mode of whichever chat was open when it was made, until it wakes on its own.
     if (!state.folder || chats.agents[active] || routineSlots.current[active] || state.status === "asleep") return;
     const permissions = permissionsOf(state);
-    if (permissionsBy[state.folder] !== permissions) setPermissionsBy({ ...permissionsBy, [state.folder]: permissions });
+    // A phone's switch isn't the project's next default: nobody chose it at the Mac (a change here forgets it, and counts).
+    const fromPhone = phoneMode.current[active] === permissions;
+    if (!fromPhone && permissionsBy[state.folder] !== permissions) setPermissionsBy({ ...permissionsBy, [state.folder]: permissions });
     // A Team is the chat's own: the project's next chat starts as a chat (or in Step by step, if that is where it was).
     const workflow = workflowOf(state);
     if (workflow !== "team" && workflowBy[state.folder] !== workflow) setWorkflowBy({ ...workflowBy, [state.folder]: workflow });
@@ -714,21 +719,27 @@ export default function App() {
   useEffect(() => {
     if (state.claudePath) void api.remoteClaudePath(state.claudePath).catch(() => {});
   }, [state.claudePath]);
-  // A paired phone asked to start a chat in a project (the backend checked it too). It starts on Ask, beside what is on screen:
+  // What a phone may choose, read when it asks: whether Settings let phones use Auto (the backend's saved setting, not anything the
+  // request says) and which presets there are.
+  const remoteContext = async (): Promise<RemoteContext> => {
+    const view = await api.remoteSettings().catch(() => null);
+    return { allowAuto: view?.allow_phone_auto === true, presetIds: presets.map((h) => h.id) };
+  };
+  // A paired phone asked to start a chat in a project (the backend checked it too). It starts on Ask or Auto, beside what is on screen:
   // this window doesn't switch to it, and neither the project's Permissions nor the folder to reopen change. The backend is
   // answered with the slot it made, or why not. The ref is read when it happens, so it sees the chats as they are then.
   const newChatRef = useRef<(r: RemoteNewChat) => void>(() => {});
   newChatRef.current = (r) => {
     const fail = (why: string) => void api.remoteNewChatDone(r.id, null, why).catch(() => {});
-    api.recentFolders().then(
-      (recent) => {
+    Promise.all([api.recentFolders(), remoteContext()]).then(
+      ([recent, ctx]) => {
         const openFolders = Object.values(chats.slots).map((s) => s.folder);
-        const why = checkRemoteNewChat(r, knownProject(r.folder, recent, openFolders), validChatText(r.text));
+        const why = checkRemoteNewChat(r, knownProject(r.folder, recent, openFolders), validChatText(r.text), ctx);
         if (why) return fail(why);
         if (!state.claudePath) return fail("Claude isn't set up on your Mac yet.");
         const slot = `s${++slotSeq.current}`;
         dispatchChats({ type: "add", slot });
-        startIn(slot, r.folder, false, false, r.text, undefined, undefined, true);
+        startIn(slot, r.folder, false, false, r.text, undefined, undefined, { permissions: r.permissions === "auto" ? "auto" : "ask", preset: r.preset ?? null });
         void api.remoteNewChatDone(r.id, slot, null).catch(() => {});
       },
       () => fail("Lantern couldn't look up your projects."),
@@ -740,6 +751,37 @@ export default function App() {
       unlisten.then((f) => f?.());
     };
   }, []);
+  // A paired phone asked to put a chat on Ask or Auto, or on a preset (the backend checked it; any window can emit this, so this
+  // window checks again, reading Settings' "Let paired phones use Auto" itself). Nothing is asked of the user: with background tasks
+  // running, whose restart the window would ask about, it just doesn't switch. The project's Permissions and preset aren't changed.
+  const remoteSwitchRef = useRef<(slot: string, change: { permissions: string } | { preset: string }) => void>(() => {});
+  remoteSwitchRef.current = (slot, change) => {
+    const s = chats.slots[slot];
+    const team = !!s && (!!s.orchestrator || !!chats.agents[slot]);
+    remoteContext().then((ctx) => {
+      const target = { known: !!s && !team, idle: s?.status === "idle", asleep: s?.status === "asleep", background: s?.backgroundTasks.length ?? 0 };
+      if (team) return;
+      if (checkRemoteSwitch(change, target, ctx)) return;
+      if ("permissions" in change) {
+        const permissions: Permissions = change.permissions === "auto" ? "auto" : "ask";
+        phoneMode.current[slot] = permissions;
+        setSettings(slot, permissions, workflowOf(s));
+      } else {
+        applyHarness(findHarness(presets, change.preset), slot, false);
+      }
+    });
+  };
+  useEffect(() => {
+    const offs = [api.onRemoteSetPermissions((r: RemoteSetPermissions) => remoteSwitchRef.current(r.slot, { permissions: r.permissions })), api.onRemoteSetPreset((r: RemoteSetPreset) => remoteSwitchRef.current(r.slot, { preset: r.preset }))].map((p) => p.catch(() => null));
+    return () => {
+      offs.forEach((p) => p.then((f) => f?.()));
+    };
+  }, []);
+  // The presets a phone may choose between, as Settings › Models has them.
+  const presetsKey = JSON.stringify(windowPresets(presets));
+  useEffect(() => {
+    void api.remoteWindowControls(windowPresets(presets)).catch(() => {});
+  }, [presetsKey]);
 
   // An agent's conversation is recorded once it has one, so it can be told from the user's own chats.
   useEffect(() => {
@@ -1182,6 +1224,7 @@ export default function App() {
       else apply();
     });
   const changePermissions = (permissions: Permissions, slot = active) => {
+    delete phoneMode.current[slot];
     const s = chats.slots[slot];
     if (s && permissionsOf(s) !== permissions) setSettings(slot, permissions, workflowOf(s));
   };
@@ -1230,11 +1273,12 @@ export default function App() {
    * preset's models, as for a new mode.
    */
   const switchHarness = (h: Harness, slot = active) => unlessBackground(slot, () => applyHarness(h, slot));
-  const applyHarness = (h: Harness, slot: string) => {
+  // `remember`: it also becomes the folder's preset, for the project's next chats; a phone's switch doesn't (nobody chose it at the Mac).
+  const applyHarness = (h: Harness, slot: string, remember = true) => {
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     const folder = chats.slots[slot]?.folder;
     if (!folder) return;
-    setHarnessByFolder({ ...harnessByFolder, [folder]: h.id });
+    if (remember) setHarnessByFolder({ ...harnessByFolder, [folder]: h.id });
     to(slot)({ type: "restarting" });
     api.applyHarness(slot, settingsFor(slot, h)).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
   };
@@ -2084,7 +2128,7 @@ export default function App() {
   }, []);
   // The backend's session hub knows where each chat stands from its events; what only this window knows (the title it
   // shows, which chats are asleep) it is told when that changes.
-  const hubList = windowChats(chats, openByProject);
+  const hubList = windowChats(chats, openByProject, harnessBySlot);
   const hubKey = JSON.stringify(hubList);
   useEffect(() => {
     void api.remoteWindowChats(hubList).catch(() => {});

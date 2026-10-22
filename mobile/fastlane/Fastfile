@@ -1,6 +1,7 @@
 # Lantern phone app: release automation, run from `mobile/`.
 #
 #   fastlane check             # nothing is built or sent: says what a release would use, and what is missing
+#   fastlane ios archive       # build and sign for the App Store, upload nothing (the dry run of beta)
 #   fastlane ios beta          # build for the App Store and upload to TestFlight
 #   fastlane android beta      # build a signed bundle and upload it to Google Play's internal testing track
 #
@@ -83,6 +84,24 @@ platform :ios do
       key_filepath: File.expand_path("~/.appstoreconnect/private_keys/AuthKey_#{key_id}.p8"),
       in_house: false,
     )
+  end
+
+  desc "Build and sign for the App Store, and upload nothing: the dry run of `beta`, which needs no app in App Store Connect"
+  lane :archive do
+    refuse_preview_build!
+    sh("cd #{mobile_dir} && npx expo prebuild --platform ios --clean")
+    build_app(
+      workspace: File.join(mobile_dir, "ios", "Lantern.xcworkspace"),
+      scheme: "Lantern",
+      configuration: "Release",
+      export_method: "app-store",
+      clean: true,
+      output_directory: File.join(mobile_dir, "build"),
+      output_name: "Lantern.ipa",
+      xcargs: "-allowProvisioningUpdates DEVELOPMENT_TEAM=#{TEAM_ID} CURRENT_PROJECT_VERSION=1",
+      export_xcargs: "-allowProvisioningUpdates",
+    )
+    UI.success("Built and signed mobile/build/Lantern.ipa. Nothing was uploaded.")
   end
 
   desc "Build for the App Store and upload the build to TestFlight"
