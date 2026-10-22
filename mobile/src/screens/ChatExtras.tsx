@@ -149,10 +149,10 @@ export function ChatSearchSheet({ search, onPick, onClose }: { search: (query: s
 }
 
 /** A round button over the chat that takes it to the latest message, with how many came while it was scrolled away. */
-export function JumpToBottom({ unseen, onPress }: { unseen: number; onPress: () => void }) {
+export function JumpToBottom({ unseen, onPress, lift = 0 }: { unseen: number; onPress: () => void; /** How far above the bottom of its box it sits, where the message box floats over the list. */ lift?: number }) {
   const colors = useColors();
   return (
-    <FadeSlideIn from={8} ms={160} style={{ position: "absolute", right: 14, bottom: 10, alignItems: "flex-end", gap: 6 }}>
+    <FadeSlideIn from={8} ms={160} style={{ position: "absolute", right: 14, bottom: 10 + lift, alignItems: "flex-end", gap: 6 }}>
       {unseen > 0 && (
         <View accessibilityElementsHidden style={{ backgroundColor: colors.ink, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 3 }}>
           <Txt variant="tiny" tone="on-ink" style={{ fontWeight: "700" }}>
