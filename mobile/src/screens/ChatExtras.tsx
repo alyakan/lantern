@@ -8,6 +8,7 @@ import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Txt } from "../ui/components";
 import { Chevron } from "../ui/Chevron";
+import { Glass } from "../ui/Glass";
 import { useKeyboardUp } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
@@ -148,10 +149,10 @@ export function ChatSearchSheet({ search, onPick, onClose }: { search: (query: s
 }
 
 /** A round button over the chat that takes it to the latest message, with how many came while it was scrolled away. */
-export function JumpToBottom({ unseen, onPress }: { unseen: number; onPress: () => void }) {
+export function JumpToBottom({ unseen, onPress, lift = 0 }: { unseen: number; onPress: () => void; /** How far above the bottom of its box it sits, where the message box floats over the list. */ lift?: number }) {
   const colors = useColors();
   return (
-    <FadeSlideIn from={8} ms={160} style={{ position: "absolute", right: 14, bottom: 10, alignItems: "flex-end", gap: 6 }}>
+    <FadeSlideIn from={8} ms={160} style={{ position: "absolute", right: 14, bottom: 10 + lift, alignItems: "flex-end", gap: 6 }}>
       {unseen > 0 && (
         <View accessibilityElementsHidden style={{ backgroundColor: colors.ink, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 3 }}>
           <Txt variant="tiny" tone="on-ink" style={{ fontWeight: "700" }}>
@@ -159,10 +160,12 @@ export function JumpToBottom({ unseen, onPress }: { unseen: number; onPress: () 
           </Txt>
         </View>
       )}
-      <PressScale accessibilityRole="button" accessibilityLabel={unseen > 0 ? `Jump to the latest, ${unseen} new` : "Jump to the latest"} onPress={onPress} haptic="light" scaleTo={0.9} style={[{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }, shadow.float, { shadowOpacity: 0.16 }]}>
-        <View style={{ transform: [{ rotate: "90deg" }] }}>
-          <Chevron open={false} color={colors.ink} />
-        </View>
+      <PressScale accessibilityRole="button" accessibilityLabel={unseen > 0 ? `Jump to the latest, ${unseen} new` : "Jump to the latest"} onPress={onPress} haptic="light" scaleTo={0.9}>
+        <Glass lift={0.16} style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+          <View style={{ transform: [{ rotate: "90deg" }] }}>
+            <Chevron open={false} color={colors.ink} />
+          </View>
+        </Glass>
       </PressScale>
     </FadeSlideIn>
   );
@@ -175,10 +178,12 @@ export function QuickReplies({ replies, onSend }: { replies: string[]; onSend: (
     <View accessibilityLabel="Quick replies" style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 6 }}>
       {replies.map((r, i) => (
         <FadeSlideIn key={r} from={8} delay={i * 50} ms={180}>
-          <PressScale accessibilityRole="button" accessibilityLabel={`Reply: ${r}`} onPress={() => onSend(r)} haptic="select" scaleTo={0.94} style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 18, paddingVertical: 9 }}>
-            <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
-              {r}
-            </Txt>
+          <PressScale accessibilityRole="button" accessibilityLabel={`Reply: ${r}`} onPress={() => onSend(r)} haptic="select" scaleTo={0.94}>
+            <Glass solid lift={0.06} style={{ borderColor: colors.rule, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 18, paddingVertical: 9 }}>
+              <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
+                {r}
+              </Txt>
+            </Glass>
           </PressScale>
         </FadeSlideIn>
       ))}
@@ -197,7 +202,7 @@ export function PlanCard({ todos }: { todos: RemoteTodo[] }) {
   if (todos.length === 0 || p.finished) return null;
   return (
     <FadeSlideIn from={8} ms={180} style={{ marginHorizontal: 12, marginBottom: 6 }}>
-      <View style={[{ backgroundColor: colors.card, borderRadius: radius.inner, overflow: "hidden" }, shadow.float, { shadowOpacity: 0.08 }]}>
+      <Glass solid style={{ borderRadius: radius.inner, overflow: "hidden" }}>
         <PressScale accessibilityRole="button" accessibilityLabel={`Plan, ${p.done} of ${p.total} done${p.current ? `, now: ${p.current}` : ""}`} accessibilityState={{ expanded: open }} onPress={() => setOpen((o) => !o)} haptic="select" scaleTo={0.99} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, paddingHorizontal: 12 }}>
           <View style={{ backgroundColor: colors.paper, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 }}>
             <Txt variant="tiny" tone="ink2" style={{ fontWeight: "700" }}>
@@ -223,7 +228,7 @@ export function PlanCard({ todos }: { todos: RemoteTodo[] }) {
             ))}
           </ScrollView>
         )}
-      </View>
+      </Glass>
     </FadeSlideIn>
   );
 }
@@ -234,7 +239,7 @@ export function SlashPicker({ matches, onPick }: { matches: RemoteCommand[]; onP
   if (matches.length === 0) return null;
   return (
     <FadeSlideIn from={6} ms={140} style={{ marginHorizontal: 12, marginBottom: 6 }}>
-      <View accessibilityLabel="Commands" style={[{ backgroundColor: colors.card, borderRadius: radius.inner, overflow: "hidden" }, shadow.float, { shadowOpacity: 0.1 }]}>
+      <Glass solid accessibilityLabel="Commands" lift={0.1} style={{ borderRadius: radius.inner, overflow: "hidden" }}>
         <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 232 }}>
           {matches.map((c, i) => (
             <PressScale key={c.name} accessibilityRole="button" accessibilityLabel={`/${c.name}${c.description ? `, ${c.description}` : ""}`} onPress={() => onPick(c)} haptic="select" scaleTo={0.99} style={{ paddingVertical: 9, paddingHorizontal: 12, gap: 1, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: colors.rule }}>
@@ -255,7 +260,7 @@ export function SlashPicker({ matches, onPick }: { matches: RemoteCommand[]; onP
             </PressScale>
           ))}
         </ScrollView>
-      </View>
+      </Glass>
     </FadeSlideIn>
   );
 }

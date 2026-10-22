@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
@@ -8,7 +8,8 @@ import { Button, ProjectTag, Txt } from "../ui/components";
 import { AboveKeyboard } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
-import { shadow, space, useColors } from "../ui/theme";
+import { Glass, useGlass } from "../ui/Glass";
+import { space, useColors } from "../ui/theme";
 import { quickReplies, quote, searchRows } from "../view/chatText";
 import { projectColorOf } from "../view/home";
 import { timeline, type Row } from "../view/timeline";
@@ -41,6 +42,10 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
   const connection = useConnectionState();
   const me = useDeviceId();
   const insets = useSafeAreaInsets();
+  // On iOS 26 the list runs under the header and the message box: how much room they take.
+  const glass = useGlass();
+  const [top, setTop] = useState(0);
+  const [bottom, setBottom] = useState(0);
   const chat = chats.find((c) => c.slot === slot);
   const view = views[slot] ?? emptyView;
   const rows = useMemo(() => timeline(view.items), [view.items]);
@@ -157,11 +162,14 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
     );
   };
 
-  return (
-    <AboveKeyboard style={{ backgroundColor: colors.paper }}>
+  // The pieces of the screen. On iOS 26 the list runs under the header and the message box, which are glass; elsewhere they sit above and below it as before.
+  const head = (
+    <>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + 6, paddingHorizontal: 16, paddingBottom: 10 }}>
-        <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={8} scaleTo={0.88} style={[{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }, shadow.float, { shadowOpacity: 0.08 }]}>
-          <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
+        <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={8} scaleTo={0.88}>
+          <Glass style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+            <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
+          </Glass>
         </PressScale>
         {/* The title bar opens the chat's settings (what it runs on, and its models) when the Mac can say what those are. */}
         <ChatSettings slot={slot} chat={chat} plan={plan} context={view.context} onProblem={setProblem} onClosed={onBack}>
@@ -183,11 +191,13 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           )}
         </ChatSettings>
         {/* Looking for something said in this chat. */}
-        <PressScale accessibilityRole="button" accessibilityLabel="Search this chat" onPress={() => setSearching(true)} hitSlop={8} scaleTo={0.88} style={[{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }, shadow.float, { shadowOpacity: 0.08 }]}>
-          <View accessibilityElementsHidden style={{ width: 20, height: 20 }}>
-            <View style={{ width: 13, height: 13, borderRadius: 7, borderWidth: 2, borderColor: colors.ink }} />
-            <View style={{ position: "absolute", left: 11, top: 12, width: 8, height: 2.5, borderRadius: 2, backgroundColor: colors.ink, transform: [{ rotate: "45deg" }] }} />
-          </View>
+        <PressScale accessibilityRole="button" accessibilityLabel="Search this chat" onPress={() => setSearching(true)} hitSlop={8} scaleTo={0.88}>
+          <Glass style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+            <View accessibilityElementsHidden style={{ width: 20, height: 20 }}>
+              <View style={{ width: 13, height: 13, borderRadius: 7, borderWidth: 2, borderColor: colors.ink }} />
+              <View style={{ position: "absolute", left: 11, top: 12, width: 8, height: 2.5, borderRadius: 2, backgroundColor: colors.ink, transform: [{ rotate: "45deg" }] }} />
+            </View>
+          </Glass>
         </PressScale>
         {working && (
           <FadeSlideIn from={-6} ms={200}>
@@ -223,10 +233,38 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           </Txt>
         </Pressable>
       )}
-
-      <View style={{ flex: 1 }}>
+    </>
+  );
+  const foot = (
+    <>
+      <PlanCard todos={view.todos} />
+      {replies.length > 0 && <QuickReplies replies={replies} onSend={send} />}
+      {asleep ? (
+        <View style={{ padding: 16, paddingBottom: Math.max(insets.bottom, 16), gap: 6 }}>
+          <Txt variant="small" tone="ink2">
+            This chat is asleep to save memory. It picks up where it left off.
+          </Txt>
+          <Button
+            label={waking ? "Waking…" : "Wake this chat"}
+            disabled={!online || waking}
+            onPress={() => {
+              setWaking(true);
+              sync.wake(slot).catch((e) => {
+                setWaking(false);
+                fail(e);
+              });
+            }}
+          />
+        </View>
+      ) : (
+        <Composer disabled={!online} onSend={(text) => void sync.send(slot, text)} seed={seed} commands={view.commands} />
+      )}
+    </>
+  );
+  const listEl = (
       <FlashList
         testID="chat-list"
+        contentContainerStyle={glass ? { paddingTop: top, paddingBottom: bottom } : undefined}
         ref={list}
         onScroll={onScroll}
         scrollEventThrottle={64}
@@ -284,31 +322,37 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           )
         }
       />
+  );
+  const jump = away && <JumpToBottom unseen={unseen} lift={glass ? bottom : 0} onPress={() => list.current?.scrollToEnd({ animated: true })} />;
 
-      {away && <JumpToBottom unseen={unseen} onPress={() => list.current?.scrollToEnd({ animated: true })} />}
-      </View>
-
-      <PlanCard todos={view.todos} />
-      {replies.length > 0 && <QuickReplies replies={replies} onSend={send} />}
-      {asleep ? (
-        <View style={{ padding: 16, paddingBottom: Math.max(insets.bottom, 16), gap: 6 }}>
-          <Txt variant="small" tone="ink2">
-            This chat is asleep to save memory. It picks up where it left off.
-          </Txt>
-          <Button
-            label={waking ? "Waking…" : "Wake this chat"}
-            disabled={!online || waking}
-            onPress={() => {
-              setWaking(true);
-              sync.wake(slot).catch((e) => {
-                setWaking(false);
-                fail(e);
-              });
-            }}
-          />
+  return (
+    <AboveKeyboard style={{ backgroundColor: colors.paper }}>
+      {glass ? (
+        <View style={{ flex: 1 }}>
+          <View style={StyleSheet.absoluteFill}>{listEl}</View>
+          {jump}
+          {/* The header is solid, with the page's colour fading out below it, so the words under it never run into the title. */}
+          <View style={{ position: "absolute", top: 0, left: 0, right: 0 }} onLayout={(e) => setTop(e.nativeEvent.layout.height)}>
+            <View style={{ backgroundColor: colors.paper }}>{head}</View>
+            <View pointerEvents="none" style={{ height: 18 }}>
+              {[0.95, 0.7, 0.4, 0.15].map((a) => (
+                <View key={a} style={{ flex: 1, backgroundColor: `${colors.paper}${Math.round(a * 255).toString(16).padStart(2, "0")}` }} />
+              ))}
+            </View>
+          </View>
+          <View style={{ position: "absolute", bottom: 0, left: 0, right: 0 }} onLayout={(e) => setBottom(e.nativeEvent.layout.height)}>
+            {foot}
+          </View>
         </View>
       ) : (
-        <Composer disabled={!online} onSend={(text) => void sync.send(slot, text)} seed={seed} commands={view.commands} />
+        <>
+          {head}
+          <View style={{ flex: 1 }}>
+            {listEl}
+            {jump}
+          </View>
+          {foot}
+        </>
       )}
       {actions && (
         <MessageActionsSheet

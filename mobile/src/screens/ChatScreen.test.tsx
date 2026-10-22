@@ -1,6 +1,7 @@
 import "@shopify/flash-list/jestSetup";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
+import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { attachSession } from "../test/fakeSession";
 import { chat, connected, makeController, renderWith } from "../test/render";
 import { ChatScreen } from "./ChatScreen";
@@ -573,4 +574,23 @@ it("is a connected chat: the seeded connection is the one the screen reads", asy
   const { controller } = makeController();
   await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()] }, controller);
   expect(controller.getConnection()).toEqual(connected);
+});
+
+describe("a chat on iOS 26, where its header and message box are glass over the list", () => {
+  beforeEach(() => (isLiquidGlassAvailable as jest.Mock).mockReturnValue(true));
+  afterEach(() => (isLiquidGlassAvailable as jest.Mock).mockReturnValue(false));
+
+  it("still shows the rows, goes back, and sends what is typed", async () => {
+    const { h, lastOf } = await withSession(turn);
+    expect(screen.getByText("Release 0.1.53")).toBeTruthy();
+    expect(screen.getByText("Bumping the version, then running the tests.")).toBeTruthy();
+    // The list's room above and below is what the glass covers, taken from where those are laid out.
+    const list = screen.getByTestId("chat-list");
+    expect(list.props.contentContainerStyle).toMatchObject({ paddingTop: 0, paddingBottom: 0 });
+    await fireEvent.press(screen.getByRole("button", { name: "Back" }));
+    expect(h.onBack).toHaveBeenCalled();
+    await fireEvent.changeText(screen.getByLabelText("Message"), "ship it");
+    await fireEvent.press(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(lastOf("send")).toMatchObject({ op: "send", text: "ship it" }));
+  });
 });

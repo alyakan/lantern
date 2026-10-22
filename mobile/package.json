@@ -17,6 +17,7 @@
     "expo-crypto": "~58.0.7",
     "expo-device": "~58.0.5",
     "expo-font": "~58.0.9",
+    "expo-glass-effect": "~58.0.4",
     "expo-haptics": "~58.0.7",
     "expo-iap": "^6.1.1",
     "expo-linking": "~58.0.13",

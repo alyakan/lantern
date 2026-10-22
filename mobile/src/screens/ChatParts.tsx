@@ -15,6 +15,7 @@ import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motio
 import { Sheet } from "../ui/Sheet";
 import { DiffSkeleton } from "../ui/skeleton";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
+import { Glass, useGlass } from "../ui/Glass";
 import { fonts, radius, shadow, space, useColors } from "../ui/theme";
 import { approvalOf, promptView } from "../view/prompts";
 import { turnLine, type Row, type StepChip } from "../view/timeline";
@@ -408,6 +409,8 @@ export const TurnRow = memo(function TurnRow({ item }: { item: Extract<Item, { k
 /** The message box: a capsule with a send button; typing and sending only while connected. */
 export function Composer({ onSend, disabled, placeholder = "Message Claude", seed, commands = [] }: { onSend: (text: string) => void; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
   const colors = useColors();
+  // Over a list that runs under it, the box has no ground of its own.
+  const glass = useGlass();
   const [text, setText] = useState("");
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   useSeed(seed, (s) => {
@@ -423,7 +426,7 @@ export function Composer({ onSend, disabled, placeholder = "Message Claude", see
   const query = slashQuery(text);
   const matches = query === null || commands.length === 0 ? [] : matchCommands(commands, query);
   return (
-    <View style={{ paddingTop: 8, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 12), backgroundColor: colors.paper }}>
+    <View style={{ paddingTop: 8, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 12), backgroundColor: glass ? "transparent" : colors.paper }}>
       <SlashPicker
         matches={matches}
         onPick={(c) => {
@@ -432,7 +435,7 @@ export function Composer({ onSend, disabled, placeholder = "Message Claude", see
         }}
       />
       <View style={{ paddingHorizontal: 12 }}>
-      <View style={[{ flexDirection: "row", alignItems: "flex-end", gap: 8, backgroundColor: colors.card, borderRadius: 26, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }, shadow.float, { shadowOpacity: 0.12 }]}>
+      <Glass lift={0.12} style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }}>
         <TextInput
           ref={input}
           accessibilityLabel="Message"
@@ -451,7 +454,7 @@ export function Composer({ onSend, disabled, placeholder = "Message Claude", see
             setText("");
           }}
         />
-      </View>
+      </Glass>
       </View>
     </View>
   );
