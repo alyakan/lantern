@@ -236,6 +236,8 @@ export default function App() {
   const reopened = useRef(false);
   // This launch follows a restart to update, which asked for the chats back: they are restored by themselves, not offered.
   const [restoringAfterUpdate, setRestoringAfterUpdate] = useState(restoreAfterUpdatePending);
+  // The offered agents whose worktrees are gone have been left out (nothing to check counts as checked).
+  const [goneChecked, setGoneChecked] = useState(false);
   const slotSeq = useRef(1);
   // Each chat's unsent text, so switching away and back doesn't lose it. A ref: typing needn't re-render the app.
   const drafts = useRef<Record<string, string>>({});
@@ -570,21 +572,22 @@ export default function App() {
   // After a restart to update the chats that were open come back by themselves, in place of the last project (which the
   // first of them is, or else the project is reopened as usual). Ahead of that effect, which it then keeps from running.
   useEffect(() => {
-    if (!restoringAfterUpdate || reopened.current || state.status !== "no_folder" || !state.claudePath || !moves) return;
+    if (!restoringAfterUpdate || !state.claudePath || !moves || !goneChecked) return;
     clearRestoreAfterUpdate();
     setRestoringAfterUpdate(false);
-    if (offer.length > 0) {
+    // Something was opened meanwhile: nothing is restored over it, and the card is back.
+    if (!reopened.current && state.status === "no_folder" && offer.length > 0) {
       reopened.current = true;
       restoreAll();
     }
-  }, [restoringAfterUpdate, state.status, state.claudePath, moves]);
+  }, [restoringAfterUpdate, state.claudePath, moves, goneChecked]);
 
-  // Reopen the last project once claude has been found (where it is now, if it moved).
+  // Reopen the last project once claude has been found (where it is now, if it moved), unless the chats are coming back instead.
   useEffect(() => {
-    if (reopened.current || state.status !== "no_folder" || !state.claudePath || !moves) return;
+    if (restoringAfterUpdate || reopened.current || state.status !== "no_folder" || !state.claudePath || !moves) return;
     reopened.current = true;
     if (lastFolder) startFresh(here(lastFolder), true);
-  }, [state.status, state.claudePath, moves]);
+  }, [restoringAfterUpdate, state.status, state.claudePath, moves]);
 
   const openFolder = async () => {
     const folder = await open({ directory: true, multiple: false });
@@ -834,7 +837,15 @@ export default function App() {
   // A worker's worktree is removed once its branch is merged: it isn't brought back from a folder that is gone.
   useEffect(() => {
     const folders = [...new Set(offer.filter((c) => c.orchestra?.role === "worker").map((c) => c.folder))];
-    if (folders.length > 0) api.foldersGone(folders).then((gone) => gone.length > 0 && setOffer((o) => withoutGone(o, new Set(gone))), () => {});
+    if (folders.length === 0) return setGoneChecked(true);
+    // Settled either way, so a restore by itself (after an update) doesn't start before the offer is cleaned.
+    api.foldersGone(folders).then(
+      (gone) => {
+        if (gone.length > 0) setOffer((o) => withoutGone(o, new Set(gone)));
+        setGoneChecked(true);
+      },
+      () => setGoneChecked(true),
+    );
   }, []);
   // Offered where their folders are now, once the moves are known.
   useEffect(() => {

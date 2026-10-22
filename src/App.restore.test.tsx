@@ -171,11 +171,21 @@ describe("restoring chats at launch", () => {
     // The chat on screen is running again; the other is in the sidebar, asleep, and both stay saved.
     expect(await screen.findByTitle("Retry transient fetch errors")).toBeInTheDocument();
     expect(calls.filter(([c]) => c === "open_session").map(([, a]) => a?.sessionId)).toEqual(["3f1c2a"]);
+    // The last project isn't also reopened as a fresh chat beside them.
+    expect(calls.filter(([c]) => c === "start_session")).toEqual([]);
     await waitFor(() => {
       const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
       expect(saved.map((c) => c.sessionId).sort()).toEqual(["3f1c2a", "9b7e01"]);
     });
     // Used up: a later launch that isn't after an update offers the chats as usual.
+    expect(localStorage.getItem("session.restoreAfterUpdate")).toBeNull();
+  });
+
+  it("reopens the last project as usual after a restart to update when there were no chats to bring back", async () => {
+    localStorage.setItem("session.restoreAfterUpdate", String(Date.now()));
+    localStorage.setItem("session.openChats", "[]");
+    const calls = await launch(false);
+    await waitFor(() => expect(calls.filter(([c]) => c === "start_session").map(([, a]) => a?.folder)).toEqual([FOLDER]));
     expect(localStorage.getItem("session.restoreAfterUpdate")).toBeNull();
   });
 
