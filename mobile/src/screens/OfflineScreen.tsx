@@ -1,10 +1,11 @@
-import { useEffect, useRef } from "react";
-import { Animated, Easing, Switch, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Animated, Easing, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectionState } from "../net/connection";
 import { useAppLock, useLockState } from "../shell/lockContext";
 import { EMBER, useAccent } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
+import { AboveKeyboard } from "../ui/keyboard";
 import { DarkLantern } from "../ui/lanterns";
 import { skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
@@ -39,12 +40,59 @@ function LitLantern() {
   );
 }
 
+/**
+ * The Mac's address typed in, behind a button: for a phone that can't find its Mac on its own, such as one away from home
+ * that never learned the Mac's Tailscale address. `onAddress` resolves to why one was refused, or null.
+ */
+function AddressField({ onAddress }: { onAddress: (text: string) => Promise<string | null> }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (!open) return <Button label="Enter your Mac's address" kind="ghost" onPress={() => setOpen(true)} style={{ alignSelf: "stretch", marginTop: 10, backgroundColor: "transparent" }} />;
+  const connect = async () => {
+    setBusy(true);
+    try {
+      setProblem(await onAddress(text));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <View style={{ alignSelf: "stretch", marginTop: 16, gap: 8 }}>
+      <Txt variant="small" tone="ink2">
+        Away from home, use the Mac's Tailscale address: the Tailscale app on the Mac shows it, and it starts with 100.
+      </Txt>
+      <TextInput
+        accessibilityLabel="Your Mac's address"
+        value={text}
+        onChangeText={setText}
+        placeholder="100.x.y.z"
+        placeholderTextColor={colors.ink3}
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoFocus
+        keyboardType="numbers-and-punctuation"
+        returnKeyType="go"
+        onSubmitEditing={() => void connect()}
+        style={{ backgroundColor: colors.card, borderRadius: radius.inner, padding: 12, color: colors.ink, fontSize: 16 }}
+      />
+      {problem && (
+        <Txt variant="small" tone="stop" accessibilityRole="alert">
+          {problem}
+        </Txt>
+      )}
+      <Button label="Connect" disabled={busy || !text.trim()} onPress={() => void connect()} />
+    </View>
+  );
+}
+
 /** Not connected yet: connecting (a moment), or why not and what to check. */
-export function OfflineScreen({ state, onRetry, onUnpair }: { state: ConnectionState; onRetry: () => void; onUnpair: () => void }) {
+export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: ConnectionState; onRetry: () => void; onUnpair: () => void; /** Dials an address typed in; resolves to why it was refused, or null. */ onAddress?: (text: string) => Promise<string | null> }) {
   const insets = useSafeAreaInsets();
   const connecting = state.kind === "connecting";
   return (
-    <View style={{ flex: 1, backgroundColor: colors.paper, alignItems: "center", justifyContent: "center", padding: 30, paddingTop: insets.top }}>
+    <AboveKeyboard style={{ backgroundColor: colors.paper, alignItems: "center", justifyContent: "center", padding: 30, paddingTop: insets.top }}>
       {connecting ? (
         <View accessibilityLabel="Connecting to your Mac" accessibilityRole="progressbar" accessible style={{ alignItems: "center", gap: 10 }}>
           <LitLantern />
@@ -61,10 +109,11 @@ export function OfflineScreen({ state, onRetry, onUnpair }: { state: ConnectionS
             {state.kind === "offline" ? state.reason : "It may be asleep or offline. Away from home, check that Tailscale is on here and on the Mac, and that Remote control is on in Lantern."}
           </Txt>
           <Button label="Try again" onPress={onRetry} style={{ alignSelf: "stretch" }} />
+          {onAddress && <AddressField onAddress={onAddress} />}
           <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ alignSelf: "stretch", marginTop: 10, backgroundColor: "transparent" }} />
         </>
       )}
-    </View>
+    </AboveKeyboard>
   );
 }
 

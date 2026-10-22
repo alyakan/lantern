@@ -23,6 +23,21 @@ describe("the Offline screen", () => {
     expect(onRetry).toHaveBeenCalled();
     expect(onUnpair).toHaveBeenCalled();
   });
+
+  it("takes the Mac's address typed in, and says why one is refused", async () => {
+    const onAddress = jest.fn(async (text: string) => (text === "nope" ? "That isn't an address." : null));
+    const state: ConnectionState = { kind: "offline", reason: "Can't reach Aly's Mac.", retryInMs: 2000 };
+    await render(<OfflineScreen state={state} onRetry={jest.fn()} onUnpair={jest.fn()} onAddress={onAddress} />);
+    expect(screen.queryByLabelText("Your Mac's address")).toBeNull();
+    await fireEvent.press(screen.getByRole("button", { name: "Enter your Mac's address" }));
+    await fireEvent.changeText(screen.getByLabelText("Your Mac's address"), "nope");
+    await fireEvent.press(screen.getByRole("button", { name: "Connect" }));
+    expect(await screen.findByText("That isn't an address.")).toBeTruthy();
+    await fireEvent.changeText(screen.getByLabelText("Your Mac's address"), "100.90.157.106");
+    await fireEvent.press(screen.getByRole("button", { name: "Connect" }));
+    expect(onAddress).toHaveBeenLastCalledWith("100.90.157.106");
+    expect(screen.queryByText("That isn't an address.")).toBeNull();
+  });
 });
 
 describe("the Mac's sheet", () => {

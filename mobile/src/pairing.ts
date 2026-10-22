@@ -18,13 +18,16 @@ export interface PairingOffer {
   expiresAt: number;
 }
 
-/** An IPv4 address on a private network: the only kind the phone dials from a code. */
+/**
+ * An IPv4 address on a private network, or on Tailscale's (100.64.0.0/10, the one that reaches the Mac away from home):
+ * the only kinds the phone dials from a code.
+ */
 const privateIPv4 = (h: string) => {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(h);
   if (!m) return false;
   if (m.slice(1).some((x) => Number(x) > 255)) return false;
   const [a, b] = [Number(m[1]), Number(m[2])];
-  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
 };
 
 const NOT_OURS = { error: "That isn't a Lantern pairing code." };

@@ -205,6 +205,23 @@ export class Connection {
     else void this.start();
   }
 
+  /**
+   * An address typed in for the Mac (its Tailscale one, say, when this phone never learned it): kept first and dialled at
+   * once. Safe whatever is typed: only the paired Mac's key gets through the handshake. Resolves to why it was refused, or null.
+   */
+  async useAddress(text: string): Promise<string | null> {
+    const host = text.trim();
+    if (!plainHost(host)) return "That isn't an address. Type it like 100.90.157.106, without the port.";
+    const paired = await this.d.store.load();
+    if (!paired) return "Pair with your Mac first, then you can add an address.";
+    await this.d.store.save({ ...paired, hosts: [host, ...paired.hosts.filter((h) => h !== host)].slice(0, MAX_HOSTS) });
+    if (this.session) return null;
+    // A fresh run: the one going holds the addresses it loaded when it started.
+    this.stop();
+    void this.start();
+    return null;
+  }
+
   stop() {
     this.gen++;
     this.hangUp();
