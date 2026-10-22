@@ -3,7 +3,7 @@ import { Animated, Easing, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectionState } from "../net/connection";
 import { useAppLock, useLockState } from "../shell/lockContext";
-import { EMBER, useAccent } from "../ui/accent";
+import { EMBER, useRegular } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
 import { AboveKeyboard } from "../ui/keyboard";
 import { DarkLantern } from "../ui/lanterns";
@@ -16,8 +16,8 @@ import { radius, space, useColors } from "../ui/theme";
 function LitLantern() {
   const colors = useColors();
   // The flame is Ember for a regular.
-  const accent = useAccent();
-  const flame = accent === EMBER ? EMBER : colors.hi;
+  const regular = useRegular();
+  const flame = regular ? EMBER : colors.hi;
   const glow = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     if (skips()) return;

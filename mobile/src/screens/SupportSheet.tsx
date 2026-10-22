@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { Linking, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTipJar, useTips } from "../shell/tipsContext";
-import { EMBER } from "../ui/accent";
+import { EMBER, EMBER_NIGHT } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
 import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
@@ -75,6 +75,8 @@ export function SupportSheet({ onClose }: { onClose: () => void }) {
 
 function Content({ close, bottom, thanked, onThanksSeen }: { close: () => void; bottom: number; thanked: boolean; onThanksSeen: () => void }) {
   const colors = useColors();
+  // Ember as words: lighter on Night, where the plain one is too dim to read.
+  const ember = colors.isDark ? EMBER_NIGHT : EMBER;
   const jar = useTipJar();
   const tips = useTips();
   const busy = tips.phase === "purchasing";
@@ -160,7 +162,7 @@ function Content({ close, bottom, thanked, onThanksSeen }: { close: () => void; 
                         You're a regular here: Ember glows for you. Thank you.
                       </Txt>
                       <PressScale accessibilityRole="button" accessibilityLabel="Manage pledge" onPress={() => void jar.manage()} hitSlop={10} haptic="select" scaleTo={0.92}>
-                        <Txt variant="small" style={{ fontWeight: "700", color: EMBER }}>
+                        <Txt variant="small" style={{ fontWeight: "700", color: ember }}>
                           Manage
                         </Txt>
                       </PressScale>
@@ -190,16 +192,16 @@ function Content({ close, bottom, thanked, onThanksSeen }: { close: () => void; 
                       </Txt>
                       <Txt variant="tiny" tone="ink3">
                         A pledge renews by itself until you cancel it, any time, in your {Platform.OS === "ios" ? "App Store" : "Google Play"} account settings. Payment is charged to that account when you confirm.{" "}
-                        <Txt variant="tiny" accessibilityRole="link" onPress={link(TERMS_URL)} style={{ color: EMBER, textDecorationLine: "underline" }}>
+                        <Txt variant="tiny" accessibilityRole="link" onPress={link(TERMS_URL)} style={{ color: ember, textDecorationLine: "underline" }}>
                           Terms of Use
                         </Txt>
                         {" · "}
-                        <Txt variant="tiny" accessibilityRole="link" onPress={link(PRIVACY_URL)} style={{ color: EMBER, textDecorationLine: "underline" }}>
+                        <Txt variant="tiny" accessibilityRole="link" onPress={link(PRIVACY_URL)} style={{ color: ember, textDecorationLine: "underline" }}>
                           Privacy Policy
                         </Txt>
                       </Txt>
                       <PressScale accessibilityRole="button" accessibilityLabel="Restore purchases" accessibilityHint="Brings back a pledge you made on this account" disabled={busy} onPress={() => void jar.restore()} hitSlop={10} haptic="select" scaleTo={0.94} style={{ alignSelf: "flex-start" }}>
-                        <Txt variant="small" style={{ fontWeight: "700", color: EMBER }}>
+                        <Txt variant="small" style={{ fontWeight: "700", color: ember }}>
                           Restore purchases
                         </Txt>
                       </PressScale>
