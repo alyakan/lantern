@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Chats } from "../sessions";
 import { initialState, type State } from "../store";
 import { BUILT_IN } from "./harness";
+import { PROJECT_COLORS } from "./projectColors";
 import { checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, type RemoteContext, type SwitchTarget } from "./remoteChats";
 import type { ProjectOpen } from "./sidebar";
 
@@ -13,8 +14,8 @@ describe("windowChats", () => {
     const chats: Chats = { active: "a", agents: {}, slots: { a: chat({ status: "running", sessionId: "s-a" }), b: chat({ status: "asleep", sessionId: "s-b" }) } };
     const open = { "/work/lantern": project([{ slot: "a", title: "Release 0.1.53" }, { slot: "b", title: "Network tab filters" }]) };
     expect(windowChats(chats, open)).toEqual([
-      { slot: "a", folder: "/work/lantern", title: "Release 0.1.53", asleep: false, session_id: "s-a", permissions: "ask", preset: null },
-      { slot: "b", folder: "/work/lantern", title: "Network tab filters", asleep: true, session_id: "s-b", permissions: "ask", preset: null },
+      { slot: "a", folder: "/work/lantern", title: "Release 0.1.53", asleep: false, session_id: "s-a", permissions: "ask", preset: null, color: null },
+      { slot: "b", folder: "/work/lantern", title: "Network tab filters", asleep: true, session_id: "s-b", permissions: "ask", preset: null, color: null },
     ]);
   });
 
@@ -25,9 +26,17 @@ describe("windowChats", () => {
     expect(told.map((c) => [c.slot, c.permissions, c.preset])).toEqual([["a", "auto", "max"], ["b", "ask", null]]);
   });
 
+  it("tells the hub the colour the sidebar gives each chat's project, so a phone shows the same", () => {
+    const chats: Chats = { active: "a", agents: {}, slots: { a: chat({ status: "idle" }), b: chat({ status: "idle", folder: "/work/other" }) } };
+    const open = { "/work/lantern": project([{ slot: "a", title: "A" }]), "/work/other": project([{ slot: "b", title: "B" }]), "/work/new": project([{ slot: "c", title: "C" }]) };
+    const told = windowChats(chats, open, {}, { "/work/lantern": 0, "/work/other": 2 });
+    expect(told.map((c) => [c.slot, c.color])).toEqual([["a", PROJECT_COLORS[0]], ["b", PROJECT_COLORS[2]], ["c", null]]);
+    expect(PROJECT_COLORS[0]).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
   it("uses the project's folder for a chat the store doesn't have yet", () => {
     const chats: Chats = { active: "a", agents: {}, slots: {} };
-    expect(windowChats(chats, { "/p": project([{ slot: "x", title: "New chat" }]) })).toEqual([{ slot: "x", folder: "/p", title: "New chat", asleep: false, session_id: null, permissions: null, preset: null }]);
+    expect(windowChats(chats, { "/p": project([{ slot: "x", title: "New chat" }]) })).toEqual([{ slot: "x", folder: "/p", title: "New chat", asleep: false, session_id: null, permissions: null, preset: null, color: null }]);
   });
 });
 

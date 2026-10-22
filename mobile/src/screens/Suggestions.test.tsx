@@ -4,6 +4,18 @@ import { attachSession } from "../test/fakeSession";
 import { chat, makeController, renderWith } from "../test/render";
 import { Suggestions } from "./Suggestions";
 
+// What the phone remembers about the suggestions (folded away, dismissed): kept in memory here, not in the Keychain.
+let mockPrefs = { collapsed: false, dismissed: [] as string[] };
+jest.mock("../prefs", () => ({
+  loadSuggestionPrefs: jest.fn(async () => ({ ...mockPrefs })),
+  saveSuggestionPrefs: jest.fn(async (p: typeof mockPrefs) => {
+    mockPrefs = { ...p };
+  }),
+}));
+beforeEach(() => {
+  mockPrefs = { collapsed: false, dismissed: [] };
+});
+
 const answer: Answer = {
   generated_at: 1,
   items: [
@@ -81,5 +93,51 @@ describe("what Claude suggests on Home", () => {
   it("says so when nothing comes to mind", async () => {
     await show({ suggest: { items: [], generated_at: 1 } });
     await waitFor(() => expect(screen.getByText(/Nothing in particular comes to mind/)).toBeTruthy());
+  });
+});
+
+describe("hiding and dismissing suggestions", () => {
+  it("dismisses one for good: it goes, the others stay, and it isn't offered again", async () => {
+    await show();
+    await waitFor(() => screen.getByRole("button", { name: "Write the release notes. The release is cut." }));
+    await fireEvent.press(screen.getByRole("button", { name: "Dismiss Write the release notes" }));
+    expect(screen.queryByRole("button", { name: "Write the release notes. The release is cut." })).toBeNull();
+    expect(screen.getByRole("button", { name: "Check the footer links. A quick tidy." })).toBeTruthy();
+    expect(mockPrefs.dismissed).toEqual(["Write the release notes|Write the notes for 0.1.53."]);
+    // Home opened again later: the same suggestion comes from the Mac, and stays gone.
+    await show();
+    await waitFor(() => screen.getAllByRole("button", { name: "Check the footer links. A quick tidy." }));
+    expect(screen.queryByRole("button", { name: "Write the release notes. The release is cut." })).toBeNull();
+  });
+
+  it("says so when every one is dismissed, and New ideas is still there", async () => {
+    await show();
+    await waitFor(() => screen.getByRole("button", { name: "Check the footer links. A quick tidy." }));
+    await fireEvent.press(screen.getByRole("button", { name: "Dismiss Write the release notes" }));
+    await fireEvent.press(screen.getByRole("button", { name: "Dismiss Check the footer links" }));
+    expect(screen.getByText("Those are dismissed. New ideas has more.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "New ideas" })).toBeTruthy();
+  });
+
+  it("folds away and comes back, and remembers it", async () => {
+    await show();
+    await waitFor(() => screen.getByRole("button", { name: "Check the footer links. A quick tidy." }));
+    await fireEvent.press(screen.getByRole("button", { name: "Hide suggestions" }));
+    expect(screen.queryByRole("button", { name: "Check the footer links. A quick tidy." })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New ideas" })).toBeNull();
+    expect(mockPrefs.collapsed).toBe(true);
+    await fireEvent.press(screen.getByRole("button", { name: "Show suggestions" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Check the footer links. A quick tidy." })).toBeTruthy());
+    expect(mockPrefs.collapsed).toBe(false);
+  });
+
+  it("asks the Mac for nothing while folded away, since each ask costs usage, and asks once it is opened", async () => {
+    mockPrefs = { collapsed: true, dismissed: [] };
+    const { asked } = await show();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(asked.some((r) => r.op === "suggest")).toBe(false);
+    expect(screen.getByRole("button", { name: "Show suggestions" })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Show suggestions" }));
+    await waitFor(() => expect(asked.some((r) => r.op === "suggest")).toBe(true));
   });
 });

@@ -4,14 +4,15 @@ import { FlashList } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
-import { Button, Txt } from "../ui/components";
+import { Button, ProjectTag, Txt } from "../ui/components";
 import { AboveKeyboard } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { colors, shadow, space } from "../ui/theme";
+import { projectColorOf } from "../view/home";
 import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
-import { ControlChips } from "./ControlChips";
+import { ChatSettings } from "./ChatSettings";
 import { AssistantRow, Composer, DesktopRow, DiffSheet, PageRow, PromptRow, StepsRow, TurnRow, UserRow } from "./ChatParts";
 
 export interface ChatProps {
@@ -130,14 +131,25 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
         <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={8} scaleTo={0.88} style={[{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }, shadow.float, { shadowOpacity: 0.08 }]}>
           <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
         </PressScale>
-        <View style={{ flex: 1 }}>
-          <Txt variant="heading" numberOfLines={1} accessibilityRole="header">
-            {chat?.title?.trim() || "Chat"}
-          </Txt>
-          <Txt variant="small" tone="ink2" numberOfLines={1}>
-            {[chat?.project, asleep ? "asleep" : working ? "working" : null].filter(Boolean).join(", ")}
-          </Txt>
-        </View>
+        {/* The title bar opens the chat's settings (what it runs on, and its models) when the Mac can say what those are. */}
+        <ChatSettings slot={slot} chat={chat} onProblem={setProblem}>
+          {(line) => (
+            <View style={{ flex: 1 }}>
+              <Txt variant="heading" numberOfLines={1} accessibilityRole="header">
+                {chat?.title?.trim() || "Chat"}
+              </Txt>
+              {/* The project in its colour (the desktop sidebar's), then how the chat stands and what it runs on. */}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                {!!chat?.project && <ProjectTag name={chat.project} color={projectColorOf(chat.project_color)} />}
+                {!!([asleep ? "asleep" : working ? "working" : null, line].filter(Boolean).length) && (
+                  <Txt variant="small" tone="ink2" numberOfLines={1} style={{ flexShrink: 1 }}>
+                    {[asleep ? "asleep" : working ? "working" : null, line].filter(Boolean).join(" · ")}
+                  </Txt>
+                )}
+              </View>
+            </View>
+          )}
+        </ChatSettings>
         {working && (
           <FadeSlideIn from={-6} ms={200}>
             <PressScale accessibilityRole="button" accessibilityLabel="Stop" onPress={() => sync.interrupt(slot).catch(fail)} hitSlop={8} scaleTo={0.92} style={{ height: 40, paddingHorizontal: 14, borderRadius: 20, backgroundColor: colors.ink, flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -149,9 +161,6 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           </FadeSlideIn>
         )}
       </View>
-
-      {/* What the chat runs on (Ask or Auto, and its models), under the title. */}
-      <ControlChips slot={slot} chat={chat} onProblem={setProblem} />
 
       {!online && (
         <View accessibilityRole="alert" style={{ marginHorizontal: 16, marginBottom: 6, backgroundColor: colors.card, borderRadius: 10, padding: 10 }}>

@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, View } from "react-native";
 import type { Suggestion } from "../protocol/generated/Suggestion";
+import { loadSuggestionPrefs, saveSuggestionPrefs, type SuggestionPrefs } from "../prefs";
 import { useController, useSyncState } from "../shell/hooks";
 import { Button, Txt } from "../ui/components";
+import { Chevron } from "../ui/Chevron";
 import { FadeSlideIn, PressScale, skips } from "../ui/motion";
 import { colors, radius, shadow, space } from "../ui/theme";
 import type { Draft } from "./NewChatSheet";
 
 type State = { status: "loading" | "ready" | "failed"; items: Suggestion[]; error?: string };
+
+/** What a suggestion is, for remembering that it was dismissed: its words (the ids are the model's, and come again). */
+export const suggestionKey = (s: Suggestion) => `${s.title}|${s.message}`.slice(0, 300);
 
 /** A card's worth of grey, breathing while Claude thinks. */
 function Skeleton({ delay }: { delay: number }) {
@@ -43,6 +48,15 @@ export function Suggestions({ onPick }: { onPick: (draft: Draft) => void }) {
   const { chats } = useSyncState();
   const [state, setState] = useState<State>({ status: "loading", items: [] });
   const live = useRef(true);
+  // Folded away or not, and the ones dismissed: remembered on this phone. Until they are read nothing is asked of the Mac.
+  const [prefs, setPrefs] = useState<SuggestionPrefs | null>(null);
+  useEffect(() => {
+    void loadSuggestionPrefs().then(setPrefs);
+  }, []);
+  const change = (next: SuggestionPrefs) => {
+    setPrefs(next);
+    void saveSuggestionPrefs(next);
+  };
 
   const load = useCallback(
     (refresh: boolean) => {
@@ -54,26 +68,33 @@ export function Suggestions({ onPick }: { onPick: (draft: Draft) => void }) {
     },
     [sync],
   );
+  const collapsed = prefs?.collapsed ?? false;
   useEffect(() => {
     live.current = true;
-    load(false);
+    // Folded away, they aren't asked for: each ask costs usage.
+    if (prefs && !prefs.collapsed) load(false);
     return () => {
       live.current = false;
     };
-  }, [load]);
+  }, [load, prefs === null, collapsed]);
 
   const titleOf = (slot: string) => chats.find((c) => c.slot === slot)?.title?.trim() || "this chat";
   // Carrying on a chat that has since gone isn't offered.
-  const shown = state.items.filter((s) => s.target.kind === "new_chat" || chats.some((c) => c.slot === (s.target as { slot: string }).slot));
+  const dismissed = prefs?.dismissed ?? [];
+  const shown = state.items.filter((s) => (s.target.kind === "new_chat" || chats.some((c) => c.slot === (s.target as { slot: string }).slot)) && !dismissed.includes(suggestionKey(s)));
+  const dismiss = (s: Suggestion) => change({ collapsed, dismissed: [...dismissed.filter((k) => k !== suggestionKey(s)), suggestionKey(s)] });
   const pick = (s: Suggestion) => (s.target.kind === "continue" ? onPick({ text: s.message, continueChat: { slot: s.target.slot, title: titleOf(s.target.slot) } }) : onPick({ text: s.message, project: s.target.project }));
 
   return (
     <View style={{ paddingHorizontal: space.xl, paddingTop: 4, gap: 10 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-        <Txt variant="small" style={{ fontWeight: "700" }}>
-          Claude suggests
-        </Txt>
-        {state.status !== "loading" && (
+        <PressScale accessibilityRole="button" accessibilityLabel={collapsed ? "Show suggestions" : "Hide suggestions"} accessibilityState={{ expanded: !collapsed }} onPress={() => change({ collapsed: !collapsed, dismissed })} hitSlop={8} scaleTo={0.96} haptic="select" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Chevron open={!collapsed} />
+          <Txt variant="small" style={{ fontWeight: "700" }}>
+            Claude suggests
+          </Txt>
+        </PressScale>
+        {!collapsed && state.status !== "loading" && (
           <PressScale accessibilityRole="button" accessibilityLabel="New ideas" onPress={() => load(true)} hitSlop={8} scaleTo={0.92}>
             <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
               New ideas
@@ -82,7 +103,7 @@ export function Suggestions({ onPick }: { onPick: (draft: Draft) => void }) {
         )}
       </View>
 
-      {state.status === "loading" && (
+      {!collapsed && state.status === "loading" && (
         <View accessibilityLabel="Thinking about what is next" style={{ gap: 10 }}>
           <Skeleton delay={0} />
           <Skeleton delay={180} />
@@ -92,7 +113,7 @@ export function Suggestions({ onPick }: { onPick: (draft: Draft) => void }) {
         </View>
       )}
 
-      {state.status === "failed" && (
+      {!collapsed && state.status === "failed" && (
         <View style={{ gap: 8 }}>
           <Txt variant="small" tone="ink2" accessibilityRole="alert">
             {state.error}
@@ -101,21 +122,30 @@ export function Suggestions({ onPick }: { onPick: (draft: Draft) => void }) {
         </View>
       )}
 
-      {state.status === "ready" && shown.length === 0 && (
+      {!collapsed && state.status === "ready" && shown.length === 0 && (
         <FadeSlideIn from={8}>
           <Txt variant="small" tone="ink2">
-            Nothing in particular comes to mind.
+            {state.items.length > 0 ? "Those are dismissed. New ideas has more." : "Nothing in particular comes to mind."}
           </Txt>
         </FadeSlideIn>
       )}
 
-      {state.status === "ready" &&
+      {!collapsed &&
+        state.status === "ready" &&
         shown.map((s, i) => (
           <FadeSlideIn key={s.id} from={14} delay={i * 80}>
             <PressScale accessibilityRole="button" accessibilityLabel={`${s.title}. ${s.why}`} onPress={() => pick(s)} scaleTo={0.97} haptic="select" style={[{ backgroundColor: colors.card, borderRadius: radius.card, padding: 14, gap: 4 }, shadow.card, { shadowOpacity: 0.06 }]}>
-              <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
-                {s.target.kind === "continue" ? `Carry on · ${titleOf(s.target.slot)}` : `New chat · ${s.target.project_name}`}
-              </Txt>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                <Txt variant="small" tone="cobalt" style={{ fontWeight: "700", flex: 1 }}>
+                  {s.target.kind === "continue" ? `Carry on · ${titleOf(s.target.slot)}` : `New chat · ${s.target.project_name}`}
+                </Txt>
+                {/* Gone for good (it isn't offered again), without opening it. */}
+                <PressScale accessibilityRole="button" accessibilityLabel={`Dismiss ${s.title}`} onPress={() => dismiss(s)} hitSlop={12} scaleTo={0.85} haptic="light" style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: colors.paper, alignItems: "center", justifyContent: "center" }}>
+                  <Txt variant="tiny" tone="ink2" accessibilityElementsHidden style={{ fontWeight: "700", lineHeight: 14 }}>
+                    ✕
+                  </Txt>
+                </PressScale>
+              </View>
               <Txt variant="heading">{s.title}</Txt>
               <Txt variant="small" tone="ink2">
                 {s.why}

@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { Text, View, type StyleProp, type TextProps, type ViewStyle } from "react-native";
 import { EMBER, useAccent } from "./accent";
+import { Chevron } from "./Chevron";
 import { PressScale } from "./motion";
+import { projectTint } from "../view/home";
 import { colors, MIN_TARGET, radius, space, type as scale, type Variant } from "./theme";
 
 /** Text in the type scale. Ink by default; `tone` picks another of the palette's. */
@@ -51,20 +53,39 @@ export function Tag({ children }: { children: string }) {
 }
 
 /** One small fact, as the timeline folds a turn's steps into a row of them. */
-export function Chip({ children, tone = "plain", onPress }: { children: ReactNode; tone?: "plain" | "ok" | "bad"; onPress?: () => void }) {
+export function Chip({ children, tone = "plain", onPress, chevron }: { children: ReactNode; tone?: "plain" | "ok" | "bad"; onPress?: () => void; /** A chip that opens something: a small chevron after the words, turned down while it is open. */ chevron?: "open" | "closed" }) {
   const border = tone === "ok" ? "#1f9d5555" : tone === "bad" ? "#d93b3b55" : colors.rule;
   const content = (
     <View style={{ backgroundColor: colors.card, borderColor: border, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 }}>
-      <Txt variant="small" tone={tone === "ok" ? "go" : tone === "bad" ? "stop" : "ink2"}>
-        {children}
-      </Txt>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <Txt variant="small" tone={tone === "ok" ? "go" : tone === "bad" ? "stop" : "ink2"}>
+          {children}
+        </Txt>
+        {chevron && <Chevron open={chevron === "open"} size={6} />}
+      </View>
     </View>
   );
   if (!onPress) return content;
   return (
-    <PressScale accessibilityRole="button" onPress={onPress} hitSlop={8} haptic="select" scaleTo={0.93}>
+    <PressScale accessibilityRole="button" accessibilityState={chevron ? { expanded: chevron === "open" } : undefined} onPress={onPress} hitSlop={8} haptic="select" scaleTo={0.93}>
       {content}
     </PressScale>
+  );
+}
+
+/**
+ * A project's name as a tag in its colour (the one the Mac's sidebar gives it): the colour faintly behind, the colour in the
+ * words and in a dot, so which project a chat belongs to reads at a glance. A project the Mac gave no colour is a plain grey tag.
+ */
+export function ProjectTag({ name, color }: { name: string; color: string | null }) {
+  const { bg, fg } = projectTint(color);
+  return (
+    <View style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: bg, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, maxWidth: "100%" }}>
+      <View accessibilityElementsHidden style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fg }} />
+      <Txt variant="tiny" numberOfLines={1} style={{ color: fg, fontWeight: "700", flexShrink: 1 }}>
+        {name}
+      </Txt>
+    </View>
   );
 }
 

@@ -14,7 +14,7 @@ import { MemoryStore } from "./memoryStore";
 
 export const NOW = 1_000_000_000;
 
-export const chat = (over: Partial<RemoteChat> = {}): RemoteChat => ({ slot: "a", title: "Release 0.1.53", project: "lantern", status: "idle", last_seq: 1, active_at: NOW - 60_000, permissions: null, preset: null, ...over });
+export const chat = (over: Partial<RemoteChat> = {}): RemoteChat => ({ slot: "a", title: "Release 0.1.53", project: "lantern", status: "idle", last_seq: 1, active_at: NOW - 60_000, permissions: null, preset: null, project_color: null, ...over });
 
 export const waiting = (over: Partial<Waiting> = {}): Waiting => ({ slot: "a", chat_title: null, request_id: "p1", tool_name: "Bash", input: { command: "git push origin release/0.1.53", description: "Push the release branch" }, at: 1, ...over });
 

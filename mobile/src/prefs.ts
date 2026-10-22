@@ -14,6 +14,35 @@ export async function loadGrouping(): Promise<Grouping> {
   }
 }
 
+const SUGGESTIONS_KEY = "lantern.suggestions";
+/** How many dismissed suggestions are remembered (the newest). */
+export const DISMISSED_KEPT = 40;
+
+export interface SuggestionPrefs {
+  /** Folded away: not even asked for (each ask costs usage). */
+  collapsed: boolean;
+  /** The suggestions dismissed, by what they say (`suggestionKey`), newest last. */
+  dismissed: string[];
+}
+
+export async function loadSuggestionPrefs(): Promise<SuggestionPrefs> {
+  try {
+    const raw: unknown = JSON.parse((await SecureStore.getItemAsync(SUGGESTIONS_KEY, OPTIONS)) ?? "{}");
+    const o = raw as Partial<SuggestionPrefs>;
+    return { collapsed: o.collapsed === true, dismissed: Array.isArray(o.dismissed) ? o.dismissed.filter((k): k is string => typeof k === "string").slice(-DISMISSED_KEPT) : [] };
+  } catch {
+    return { collapsed: false, dismissed: [] };
+  }
+}
+
+export async function saveSuggestionPrefs(p: SuggestionPrefs): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(SUGGESTIONS_KEY, JSON.stringify({ collapsed: p.collapsed, dismissed: p.dismissed.slice(-DISMISSED_KEPT) }), OPTIONS);
+  } catch {
+    // Not remembered: it holds until the app closes.
+  }
+}
+
 export async function saveGrouping(g: Grouping): Promise<void> {
   try {
     await SecureStore.setItemAsync(KEY, g, OPTIONS);

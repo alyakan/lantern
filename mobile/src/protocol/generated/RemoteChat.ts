@@ -17,4 +17,8 @@ permissions: RemotePermissions | null,
 /**
  * The id of the preset (which models do what) the chat runs on, one of Controls' presets (None until the window has said).
  */
-preset: string | null, };
+preset: string | null, 
+/**
+ * The colour the Mac's window gives the chat's project, "#rrggbb": the phone shows the same (None from a Mac that doesn't say).
+ */
+project_color: string | null, };

@@ -2128,7 +2128,7 @@ export default function App() {
   }, []);
   // The backend's session hub knows where each chat stands from its events; what only this window knows (the title it
   // shows, which chats are asleep) it is told when that changes.
-  const hubList = windowChats(chats, openByProject, harnessBySlot);
+  const hubList = windowChats(chats, openByProject, harnessBySlot, projectColors);
   const hubKey = JSON.stringify(hubList);
   useEffect(() => {
     void api.remoteWindowChats(hubList).catch(() => {});

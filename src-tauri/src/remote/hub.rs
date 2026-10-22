@@ -43,6 +43,8 @@ pub struct ChatInfo {
     pub permissions: Option<String>,
     /// The id of the preset it runs on, as the window says (None until it has).
     pub preset: Option<String>,
+    /// The colour the window gives the chat's project, "#rrggbb" (None until it has).
+    pub color: Option<String>,
 }
 
 /// What came after a number a client had.
@@ -74,6 +76,7 @@ struct Log {
     active_at: u64,
     permissions: Option<String>,
     preset: Option<String>,
+    color: Option<String>,
 }
 
 impl Log {
@@ -102,6 +105,7 @@ impl Log {
             active_at: self.active_at,
             permissions: self.permissions.clone(),
             preset: self.preset.clone(),
+            color: self.color.clone(),
         }
     }
 
@@ -282,6 +286,15 @@ impl SessionHub {
         }
     }
 
+    /// The colour the window gives a chat's project (the one its sidebar shows), so a phone shows the same. Only "#rrggbb" is
+    /// taken; anything else leaves the chat with none.
+    pub fn colored(&self, slot: &str, color: Option<&str>) {
+        let ok = |c: &str| c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|h| h.is_ascii_hexdigit());
+        if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
+            log.color = color.filter(|c| ok(c)).map(str::to_string);
+        }
+    }
+
     /// The presets the window offers, as it says them (at most a few dozen, with their texts cut short).
     pub fn set_presets(&self, presets: Vec<RemotePreset>) {
         let cut = |s: String, n: usize| s.chars().take(n).collect::<String>();
@@ -454,6 +467,23 @@ mod tests {
         hub.controls("a", "bypassPermissions", None);
         let a = hub.chat("a").unwrap();
         assert_eq!((a.permissions.as_deref(), a.preset.as_deref()), (Some("auto"), None));
+    }
+
+    #[test]
+    fn a_chat_has_its_projects_colour_only_as_a_hex_colour_and_only_if_it_is_listed() {
+        let hub = hub();
+        hub.colored("ghost", Some("#5b5bd6"));
+        assert!(hub.chat("ghost").is_none());
+        hub.opened("a", "/p");
+        hub.colored("a", Some("#5b5bd6"));
+        assert_eq!(hub.chat("a").unwrap().color.as_deref(), Some("#5b5bd6"));
+        for bad in ["red", "#12345", "#12345g", "5b5bd6", "#5b5bd6;x", ""] {
+            hub.colored("a", Some(bad));
+            assert_eq!(hub.chat("a").unwrap().color, None, "{bad:?}");
+        }
+        hub.colored("a", Some("#0F8A7E"));
+        hub.colored("a", None);
+        assert_eq!(hub.chat("a").unwrap().color, None, "what the window says now replaces what it said");
     }
 
     #[test]

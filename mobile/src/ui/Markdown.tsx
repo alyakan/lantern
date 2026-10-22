@@ -7,7 +7,10 @@ import { colors, fonts, radius, type as scale } from "./theme";
 import { Txt } from "./components";
 import { PressScale } from "./motion";
 
-function Spans({ spans, tone }: { spans: Span[]; tone: "ink" | "night" }) {
+/** The colour of the words: ink on the page, night or white on a dark background (white: your own message). */
+type Tone = "ink" | "night" | "white";
+
+function Spans({ spans, tone }: { spans: Span[]; tone: Tone }) {
   const accent = useAccent();
   return (
     <>
@@ -61,7 +64,7 @@ function TaskBox({ checked }: { checked: boolean }) {
 }
 
 /** A code block: the language and a Copy on top, the code below (it scrolls sideways rather than wrapping). */
-function CodeBlock({ lang, text, tone }: { lang: string; text: string; tone: "ink" | "night" }) {
+function CodeBlock({ lang, text, tone }: { lang: string; text: string; tone: Tone }) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
@@ -71,7 +74,7 @@ function CodeBlock({ lang, text, tone }: { lang: string; text: string; tone: "in
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => setCopied(false), 1500);
   };
-  const night = tone === "night";
+  const night = tone !== "ink";
   return (
     <View style={{ backgroundColor: night ? colors.nightRaised : colors.paper, borderRadius: radius.inner, overflow: "hidden" }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingLeft: 12, paddingRight: 6, minHeight: 30 }}>
@@ -100,10 +103,10 @@ const columnWidth = (cells: Span[][]) => Math.round(Math.min(240, Math.max(72, M
  * A table in a box of its own: the header on a tint, a line between rows, columns as wide as their content (up to a
  * limit, past which a cell wraps), aligned as the table says. It scrolls sideways in there when it can't fit, not the page.
  */
-function Table({ block, tone }: { block: Extract<Block, { kind: "table" }>; tone: "ink" | "night" }) {
+function Table({ block, tone }: { block: Extract<Block, { kind: "table" }>; tone: Tone }) {
   const widths = block.head.map((h, c) => columnWidth([h, ...block.rows.map((r) => r[c] ?? [])]));
   const textAlign = (a: Align) => a;
-  const night = tone === "night";
+  const night = tone !== "ink";
   const line = night ? "rgba(255,255,255,0.14)" : colors.rule;
   const row = (cells: Span[][], key: string, head: boolean, last: boolean) => (
     <View key={key} accessibilityRole={head ? "header" : undefined} style={{ flexDirection: "row", backgroundColor: head ? (night ? colors.nightRaised : colors.paper) : "transparent", borderBottomWidth: last ? 0 : 1, borderBottomColor: line }}>
@@ -127,7 +130,7 @@ function Table({ block, tone }: { block: Extract<Block, { kind: "table" }>; tone
 }
 
 /** Claude's text: headings, paragraphs, lists, tables, quotes, rules and code blocks. Memoised per text, so only a streaming block redraws. */
-export const Markdown = memo(function Markdown({ text, tone = "ink" }: { text: string; tone?: "ink" | "night" }) {
+export const Markdown = memo(function Markdown({ text, tone = "ink" }: { text: string; tone?: Tone }) {
   const blocks = useMemo(() => parseMarkdown(text), [text]);
   return (
     <View style={{ gap: 8 }}>

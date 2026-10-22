@@ -56,10 +56,12 @@ describe("a chat", () => {
     ];
     await withSession(commands);
     expect(screen.queryByText("git status")).toBeNull();
-    await fireEvent.press(screen.getByText("Ran 2 commands ▾"));
+    expect(screen.getByRole("button", { name: "Ran 2 commands" }).props.accessibilityState).toMatchObject({ expanded: false });
+    await fireEvent.press(screen.getByText("Ran 2 commands"));
     expect(screen.getByText("git status")).toBeTruthy();
     expect(screen.getByText("cargo build")).toBeTruthy();
-    await fireEvent.press(screen.getByText("Ran 2 commands ▴"));
+    expect(screen.getByRole("button", { name: "Ran 2 commands" }).props.accessibilityState).toMatchObject({ expanded: true });
+    await fireEvent.press(screen.getByText("Ran 2 commands"));
     expect(screen.queryByText("git status")).toBeNull();
   });
 
@@ -68,6 +70,28 @@ describe("a chat", () => {
     expect(asked).toContainEqual({ op: "subscribe", slot: "a", after: 9, epoch: 1 });
     await unmount();
     expect(asked).toContainEqual({ op: "unsubscribe", slot: "a" });
+  });
+
+  it("continues a list as it is typed: Return after 1. starts 2., and Return on an empty item ends the list", async () => {
+    await withSession(turn);
+    const box = () => screen.getByLabelText("Message");
+    await fireEvent.changeText(box(), "1. first");
+    await fireEvent.changeText(box(), "1. first\n");
+    expect(box().props.value).toBe("1. first\n2. ");
+    await fireEvent.changeText(box(), "1. first\n2. second");
+    await fireEvent.changeText(box(), "1. first\n2. second\n");
+    expect(box().props.value).toBe("1. first\n2. second\n3. ");
+    await fireEvent.changeText(box(), "1. first\n2. second\n3. \n");
+    expect(box().props.value).toBe("1. first\n2. second\n\n");
+  });
+
+  it("shows what you wrote the way Claude's text is shown: a list as a list", async () => {
+    const { controller } = makeController();
+    attachSession(controller, {});
+    await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()], events: { a: [{ kind: "user_text", text: "Do these:\n\n1. the tests\n2. the build", at: 1_000_000, sent_by: "desktop" }] } }, controller);
+    await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+    expect(screen.getByText("1.")).toBeTruthy();
+    expect(screen.getByText("the build")).toBeTruthy();
   });
 
   it("goes back", async () => {

@@ -215,7 +215,7 @@ describe("the Mac", () => {
   });
 
   it("keeps the chat list as the Mac last sent it", () => {
-    const s = reducer(initialState, { type: "pushed", msg: { type: "chats", chats: [{ slot: "a", title: "Release", project: "lantern", status: "needs_you", last_seq: 3, active_at: 1, permissions: null, preset: null }] } });
+    const s = reducer(initialState, { type: "pushed", msg: { type: "chats", chats: [{ slot: "a", title: "Release", project: "lantern", status: "needs_you", last_seq: 3, active_at: 1, permissions: null, preset: null, project_color: null }] } });
     expect(s.chats[0]).toMatchObject({ slot: "a", status: "needs_you" });
     expect(emptyView.items).toEqual([]);
   });

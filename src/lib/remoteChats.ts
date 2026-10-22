@@ -1,4 +1,5 @@
 import type { Chats } from "../sessions";
+import { PROJECT_COLORS } from "./projectColors";
 import { permissionsOf } from "./workflow";
 import { summary, type Harness } from "./harness";
 import type { ProjectOpen } from "./sidebar";
@@ -18,14 +19,16 @@ export interface WindowChat {
   permissions: "ask" | "auto" | null;
   /** The id of the preset (which models do what) it runs on. */
   preset: string | null;
+  /** The colour the sidebar gives its project, "#rrggbb", so a phone shows the same. */
+  color: string | null;
 }
 
-/** `presetOf`: the id of the preset each chat's claude was started with. */
-export function windowChats(chats: Chats, open: Record<string, ProjectOpen>, presetOf: Record<string, string> = {}): WindowChat[] {
+/** `presetOf`: the id of the preset each chat's claude was started with. `projectColors`: each folder's colour, an index into PROJECT_COLORS (see assignColors). */
+export function windowChats(chats: Chats, open: Record<string, ProjectOpen>, presetOf: Record<string, string> = {}, projectColors: Record<string, number> = {}): WindowChat[] {
   return Object.entries(open).flatMap(([folder, project]) =>
     project.items.map((item) => {
       const s = chats.slots[item.slot];
-      return { slot: item.slot, folder: s?.folder ?? folder, title: item.title, asleep: s?.status === "asleep", session_id: s?.sessionId ?? null, permissions: s ? permissionsOf(s) : null, preset: presetOf[item.slot] ?? null };
+      return { slot: item.slot, folder: s?.folder ?? folder, title: item.title, asleep: s?.status === "asleep", session_id: s?.sessionId ?? null, permissions: s ? permissionsOf(s) : null, preset: presetOf[item.slot] ?? null, color: PROJECT_COLORS[projectColors[folder]] ?? null };
     }),
   );
 }

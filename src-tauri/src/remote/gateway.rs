@@ -536,7 +536,7 @@ impl<'a> Session<'a> {
     fn send_chats(&mut self, link: &Link, channel: &mut Channel, always: bool) -> Result<(), String> {
         let chats: Vec<RemoteChat> = self.gw.hub.chats().into_iter().map(RemoteChat::from).collect();
         // Only what a list shows counts as a change, not every new event's number (a chat's mode and preset are shown).
-        let shown = |c: &[RemoteChat]| c.iter().map(|c| (c.slot.clone(), c.title.clone(), c.status, c.permissions, c.preset.clone())).collect::<Vec<_>>();
+        let shown = |c: &[RemoteChat]| c.iter().map(|c| (c.slot.clone(), c.title.clone(), c.status, c.permissions, c.preset.clone(), c.project_color.clone())).collect::<Vec<_>>();
         if always || shown(&chats) != shown(&self.last_chats) {
             send_message(link, channel, &ServerMessage::Chats { chats: chats.clone() })?;
         }
@@ -1473,6 +1473,9 @@ pub(crate) mod tests {
         r.hub.controls("a", "auto", Some("max"));
         let again = next_chats(&mut p).await;
         assert_eq!(again[0].preset.as_deref(), Some("max"));
+        r.hub.colored("a", Some("#0f8a7e"));
+        let again = next_chats(&mut p).await;
+        assert_eq!(again[0].project_color.as_deref(), Some("#0f8a7e"), "a project's colour changing is shown too");
     }
 
     /// A phone's side over a real transport link (the Wi-Fi one), as `phone` does over memory.
