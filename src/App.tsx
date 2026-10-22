@@ -5,7 +5,7 @@ import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { agentsAtRest, canSleep, membersToSleep, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
-import { checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset } from "./lib/remoteChats";
+import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset, type RemoteSetWorkflow } from "./lib/remoteChats";
 import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
@@ -219,6 +219,8 @@ export default function App() {
   const [harnessBySlot, setHarnessBySlot] = useState<Record<string, string>>({});
   // The Permissions a paired phone last put each chat on, so that they aren't taken for the project's own choice.
   const phoneMode = useRef<Record<string, Permissions>>({});
+  // And the Workflow a phone last put each chat on, likewise.
+  const phoneFlow = useRef<Record<string, Workflow>>({});
   // Every open chat. The one on screen is `active`; the others keep running in the background.
   const [chats, dispatchChats] = useReducer(chatsReducer, undefined, () => initialChats({ ...initialState, ...(lastFolder ? { mode: launchFor(lastFolder).mode, autoApprove: launchFor(lastFolder).autoApprove } : {}) }));
   const active = chats.active;
@@ -490,14 +492,14 @@ export default function App() {
    * whatever the project's Permissions are, and on the preset the phone chose (else the project's own); it doesn't become the
    * project to reopen either, and neither the project's Permissions nor its preset are remembered from it.
    */
-  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote: { permissions: Permissions; preset: string | null } | false = false) => {
+  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote: { permissions: Permissions; preset: string | null; workflow: "chat" | "steps" } | false = false) => {
     const { claudePath } = state;
     if (!claudePath) return;
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
     reopened.current = true;
     // A team's Lead runs on the project's last Permissions, which its agents never exceed; Team is not remembered as the
     // project's Workflow (see the effect below).
-    const { mode, autoApprove } = remote ? launchOf(remote.permissions, "chat") : routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team);
+    const { mode, autoApprove } = remote ? launchOf(remote.permissions, remote.workflow) : routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team);
     const orchestrator = team;
     const h = routine ? BUILT_IN[0] : findHarness(presets, remote && remote.preset ? remote.preset : harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
@@ -543,7 +545,7 @@ export default function App() {
     if (!fromPhone && permissionsBy[state.folder] !== permissions) setPermissionsBy({ ...permissionsBy, [state.folder]: permissions });
     // A Team is the chat's own: the project's next chat starts as a chat (or in Step by step, if that is where it was).
     const workflow = workflowOf(state);
-    if (workflow !== "team" && workflowBy[state.folder] !== workflow) setWorkflowBy({ ...workflowBy, [state.folder]: workflow });
+    if (workflow !== "team" && phoneFlow.current[active] !== workflow && workflowBy[state.folder] !== workflow) setWorkflowBy({ ...workflowBy, [state.folder]: workflow });
   }, [state.mode, state.autoApprove, state.orchestrator, state.folder]);
   // Every open chat's, not just the one on screen: a worker's mode is set in the background (and may be lowered there).
   const modesKey = Object.values(chats.slots).map((s) => `${s.sessionId}:${savedModeOf(s)}`).join(" ");
@@ -739,7 +741,7 @@ export default function App() {
         if (!state.claudePath) return fail("Claude isn't set up on your Mac yet.");
         const slot = `s${++slotSeq.current}`;
         dispatchChats({ type: "add", slot });
-        startIn(slot, r.folder, false, false, r.text, undefined, undefined, { permissions: r.permissions === "auto" ? "auto" : "ask", preset: r.preset ?? null });
+        startIn(slot, r.folder, false, false, r.text, undefined, undefined, { permissions: r.permissions === "auto" ? "auto" : "ask", preset: r.preset ?? null, workflow: r.workflow === "steps" ? "steps" : "chat" });
         void api.remoteNewChatDone(r.id, slot, null).catch(() => {});
       },
       () => fail("Lantern couldn't look up your projects."),
@@ -754,7 +756,7 @@ export default function App() {
   // A paired phone asked to put a chat on Ask or Auto, or on a preset (the backend checked it; any window can emit this, so this
   // window checks again, reading Settings' "Let paired phones use Auto" itself). Nothing is asked of the user: with background tasks
   // running, whose restart the window would ask about, it just doesn't switch. The project's Permissions and preset aren't changed.
-  const remoteSwitchRef = useRef<(slot: string, change: { permissions: string } | { preset: string }) => void>(() => {});
+  const remoteSwitchRef = useRef<(slot: string, change: { permissions: string } | { preset: string } | { workflow: string }) => void>(() => {});
   remoteSwitchRef.current = (slot, change) => {
     const s = chats.slots[slot];
     const team = !!s && (!!s.orchestrator || !!chats.agents[slot]);
@@ -766,15 +768,33 @@ export default function App() {
         const permissions: Permissions = change.permissions === "auto" ? "auto" : "ask";
         phoneMode.current[slot] = permissions;
         setSettings(slot, permissions, workflowOf(s));
+      } else if ("workflow" in change) {
+        const workflow: Workflow = change.workflow === "steps" ? "steps" : "chat";
+        phoneFlow.current[slot] = workflow;
+        setSettings(slot, permissionsOf(s), workflow);
       } else {
         applyHarness(findHarness(presets, change.preset), slot, false);
       }
     });
   };
   useEffect(() => {
-    const offs = [api.onRemoteSetPermissions((r: RemoteSetPermissions) => remoteSwitchRef.current(r.slot, { permissions: r.permissions })), api.onRemoteSetPreset((r: RemoteSetPreset) => remoteSwitchRef.current(r.slot, { preset: r.preset }))].map((p) => p.catch(() => null));
+    const offs = [api.onRemoteSetPermissions((r: RemoteSetPermissions) => remoteSwitchRef.current(r.slot, { permissions: r.permissions })), api.onRemoteSetPreset((r: RemoteSetPreset) => remoteSwitchRef.current(r.slot, { preset: r.preset })), api.onRemoteSetWorkflow((r: RemoteSetWorkflow) => remoteSwitchRef.current(r.slot, { workflow: r.workflow }))].map((p) => p.catch(() => null));
     return () => {
       offs.forEach((p) => p.then((f) => f?.()));
+    };
+  }, []);
+  // A paired phone asked to close a chat (the backend checked it is listed and not busy): closed as the sidebar closes one, and
+  // nothing is asked of the user, so one with background tasks, or a team's, is left open.
+  const remoteCloseRef = useRef<(slot: string) => void>(() => {});
+  remoteCloseRef.current = (slot) => {
+    const s = chats.slots[slot];
+    const why = checkRemoteClose({ known: !!s, team: !!s && (!!s.orchestrator || !!chats.agents[slot]), busy: !!s && isBusy(s), background: s?.backgroundTasks.length ?? 0 });
+    if (!why) closeChats([slot]);
+  };
+  useEffect(() => {
+    const off = api.onRemoteClose((r) => remoteCloseRef.current(r.slot)).catch(() => null);
+    return () => {
+      off.then((f) => f?.());
     };
   }, []);
   // The presets a phone may choose between, as Settings › Models has them.
@@ -1229,6 +1249,7 @@ export default function App() {
     if (s && permissionsOf(s) !== permissions) setSettings(slot, permissions, workflowOf(s));
   };
   const changeWorkflow = (workflow: Workflow, slot = active) => {
+    delete phoneFlow.current[slot];
     const s = chats.slots[slot];
     if (s && workflowOf(s) !== workflow) setSettings(slot, permissionsOf(s), workflow);
   };

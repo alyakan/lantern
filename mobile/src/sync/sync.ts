@@ -7,6 +7,7 @@ import type { Request } from "../protocol/generated/Request";
 import type { Controls } from "../protocol/generated/Controls";
 import type { EarlierPage } from "../protocol/generated/EarlierPage";
 import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
+import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { StartedChat } from "../protocol/generated/StartedChat";
 import type { Suggestions } from "../protocol/generated/Suggestions";
@@ -192,15 +193,25 @@ export class Sync {
    * `permissions` is Auto (which the Mac allows only if its Settings let phones), with `preset` (one of controls()' ids) or
    * else the project's own.
    */
-  async newChat(project: string, text: string, choice: { permissions?: RemotePermissions; preset?: string } = {}): Promise<string> {
+  async newChat(project: string, text: string, choice: { permissions?: RemotePermissions; preset?: string; workflow?: Exclude<RemoteWorkflow, "team"> } = {}): Promise<string> {
     // Only what was chosen is sent: a Mac that is older doesn't know the fields, and a chat on Ask asks for nothing more.
-    const started = await this.ask<StartedChat>({ op: "new_chat", project, text, permissions: choice.permissions ?? null, preset: choice.preset ?? null });
+    const started = await this.ask<StartedChat>({ op: "new_chat", project, text, permissions: choice.permissions ?? null, preset: choice.preset ?? null, workflow: choice.workflow ?? null });
     return started.slot;
   }
 
-  /** Whether this Mac can be asked what a phone may choose (Welcome lists "controls"); an older Mac ends the connection at a request it doesn't know. */
+  /** Whether this Mac says it can do `feature` (Welcome's features); an older Mac ends the connection at a request it doesn't know. */
+  has(feature: string): boolean {
+    return this.session?.welcome.features?.includes(feature) === true;
+  }
+
+  /** Whether this Mac can be asked what a phone may choose (Welcome lists "controls"). */
   get hasControls(): boolean {
-    return this.session?.welcome.features?.includes("controls") === true;
+    return this.has("controls");
+  }
+
+  /** Closes a chat on the Mac, as the window's sidebar does; rejects with why not (Claude is busy, a team's chat…). */
+  async close(slot: string): Promise<void> {
+    await this.ask({ op: "close", slot });
   }
 
   /** What may be chosen for a chat: whether Auto is allowed, and the presets. Null for a Mac that can't say. */
@@ -215,6 +226,11 @@ export class Sync {
   /** Puts a chat on Ask or Auto; rejects with why not (Auto is off on the Mac, Claude is busy…). */
   setPermissions(slot: string, permissions: RemotePermissions) {
     return this.ask({ op: "set_permissions", slot, permissions });
+  }
+
+  /** Puts a chat on Chat or Step by step (a Mac that lists "workflow"); rejects with why not (a team, busy…). */
+  setWorkflow(slot: string, workflow: Exclude<RemoteWorkflow, "team">) {
+    return this.ask({ op: "set_workflow", slot, workflow });
   }
 
   /** Puts a chat on one of controls()' presets; rejects with why not. */

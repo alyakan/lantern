@@ -1,6 +1,6 @@
 import type { Chats } from "../sessions";
 import { PROJECT_COLORS } from "./projectColors";
-import { permissionsOf } from "./workflow";
+import { permissionsOf, workflowOf } from "./workflow";
 import { summary, type Harness } from "./harness";
 import type { ProjectOpen } from "./sidebar";
 
@@ -21,6 +21,8 @@ export interface WindowChat {
   preset: string | null;
   /** The colour the sidebar gives its project, "#rrggbb", so a phone shows the same. */
   color: string | null;
+  /** "chat", "steps" (Step by step) or "team"; null for a chat the store doesn't have yet. */
+  workflow: "chat" | "steps" | "team" | null;
 }
 
 /** `presetOf`: the id of the preset each chat's claude was started with. `projectColors`: each folder's colour, an index into PROJECT_COLORS (see assignColors). */
@@ -28,7 +30,7 @@ export function windowChats(chats: Chats, open: Record<string, ProjectOpen>, pre
   return Object.entries(open).flatMap(([folder, project]) =>
     project.items.map((item) => {
       const s = chats.slots[item.slot];
-      return { slot: item.slot, folder: s?.folder ?? folder, title: item.title, asleep: s?.status === "asleep", session_id: s?.sessionId ?? null, permissions: s ? permissionsOf(s) : null, preset: presetOf[item.slot] ?? null, color: PROJECT_COLORS[projectColors[folder]] ?? null };
+      return { slot: item.slot, folder: s?.folder ?? folder, title: item.title, asleep: s?.status === "asleep", session_id: s?.sessionId ?? null, permissions: s ? permissionsOf(s) : null, preset: presetOf[item.slot] ?? null, color: PROJECT_COLORS[projectColors[folder]] ?? null, workflow: s ? workflowOf(s) : null };
     }),
   );
 }
@@ -52,6 +54,11 @@ export interface RemoteContext {
   presetIds: string[];
 }
 
+/** Why a phone may not have this workflow, or null: a chat or Step by step; a team is started and left on the Mac. */
+function checkWorkflow(workflow: string): string | null {
+  return workflow === "chat" || workflow === "steps" ? null : "A phone can only start a chat or Step by step.";
+}
+
 /** Why a phone may not have this mode or preset, or null: Auto only when the Mac lets phones use it, a preset only if it is one of the Mac's. */
 function checkChoice(permissions: string, preset: string | null, ctx: RemoteContext): string | null {
   if (permissions !== "ask" && permissions !== "auto") return "A phone can only choose Ask or Auto.";
@@ -68,6 +75,8 @@ export interface RemoteNewChat {
   permissions: string;
   /** The id of one of the window's presets, or null for the project's own. */
   preset?: string | null;
+  /** "chat" or "steps"; a team is started at the Mac. Missing: a chat. */
+  workflow?: string | null;
 }
 
 /**
@@ -79,6 +88,8 @@ export interface RemoteNewChat {
 export function checkRemoteNewChat(r: RemoteNewChat, isKnownProject: boolean, validText: boolean, ctx: RemoteContext = { allowAuto: false, presetIds: [] }): string | null {
   const choice = checkChoice(r.permissions, r.preset ?? null, ctx);
   if (choice) return choice;
+  const flow = checkWorkflow(r.workflow ?? "chat");
+  if (flow) return flow;
   if (!validText) return "Write what the chat should start with.";
   if (!isKnownProject) return "That isn't one of your projects.";
   return null;
@@ -92,6 +103,35 @@ export interface RemoteSetPermissions {
 export interface RemoteSetPreset {
   slot: string;
   preset: string;
+}
+export interface RemoteSetWorkflow {
+  slot: string;
+  workflow: string;
+}
+
+/** What the backend asks of the window when a phone closes a chat (see remote::CloseRequest). */
+export interface RemoteClose {
+  slot: string;
+}
+
+/** What the window knows of the chat a phone wants to close. */
+export interface CloseTarget {
+  known: boolean;
+  /** A team's Lead or one of its agents: closing it is a decision about the whole team, made at the Mac. */
+  team: boolean;
+  /** Working or waiting on someone: it is stopped first. */
+  busy: boolean;
+  /** Background tasks (a workflow, a subagent, a command) that closing would stop: the sidebar asks the user, and nobody is at the Mac to answer. */
+  background: number;
+}
+
+/** Whether the window closes a chat for a phone, and why not (the backend has checked too; any window can emit what this one listens for). */
+export function checkRemoteClose(t: CloseTarget): string | null {
+  if (!t.known) return "That chat isn't open on your Mac.";
+  if (t.team) return "That chat is part of a team: close it on your Mac.";
+  if (t.busy) return "Claude is busy in this chat. Stop it first, then close it.";
+  if (t.background > 0) return "This chat has background tasks running, which closing would stop.";
+  return null;
 }
 
 /** What the window knows of the chat a phone wants to switch. */
@@ -108,8 +148,8 @@ export interface SwitchTarget {
  * Whether the window switches a chat for a phone, and why not: the same checks as the backend's (it checks again because any
  * window can emit what it listens for), and never over background tasks, which a restart would stop without anyone to ask.
  */
-export function checkRemoteSwitch(change: { permissions: string } | { preset: string }, target: SwitchTarget, ctx: RemoteContext): string | null {
-  const choice = "permissions" in change ? checkChoice(change.permissions, null, ctx) : checkChoice("ask", change.preset, ctx);
+export function checkRemoteSwitch(change: { permissions: string } | { preset: string } | { workflow: string }, target: SwitchTarget, ctx: RemoteContext): string | null {
+  const choice = "permissions" in change ? checkChoice(change.permissions, null, ctx) : "workflow" in change ? checkWorkflow(change.workflow) : checkChoice("ask", change.preset, ctx);
   if (choice) return choice;
   if (!target.known) return "That chat isn't open on your Mac.";
   if (target.asleep) return "This chat is asleep. Wake it first.";

@@ -3,6 +3,7 @@ import { Animated, Platform, RefreshControl, ScrollView, View } from "react-nati
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { loadGrouping, saveGrouping } from "../prefs";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
+import { useMacCan } from "../shell/useControls";
 import { useTipJar, useTips } from "../shell/tipsContext";
 import { Button, ProjectTag, Tag, Tile, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
@@ -12,6 +13,7 @@ import { Dots, HomeSkeleton } from "../ui/skeleton";
 import { colors, radius, shadow, space } from "../ui/theme";
 import { cards, groups, headline, projectTint, rows, type Card, type Grouping, type Group, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
+import { CloseChatSheet } from "./CloseChat";
 import { Suggestions } from "./Suggestions";
 
 export interface HomeProps {
@@ -76,14 +78,14 @@ function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomePr
   );
 }
 
-function ChatRow({ row, index, onPress, showProject = true }: { row: Row; index: number; onPress: () => void; showProject?: boolean }) {
+function ChatRow({ row, index, onPress, onLongPress, showProject = true }: { row: Row; index: number; onPress: () => void; onLongPress?: () => void; showProject?: boolean }) {
   // The tile is the chat's project's colour (the desktop sidebar's), so a chat is placed by it before it is read.
   const { bg, fg } = projectTint(row.projectColor);
   const status = row.status === "needs_you" ? ", needs you" : row.status === "working" ? ", working" : row.status === "asleep" ? ", asleep" : row.status === "ended" ? ", stopped" : "";
   return (
     // The rows come in one after the other when Home opens (and a new chat comes in alone); a press gives under the finger.
     <FadeSlideIn from={14} delay={Math.min(index, 8) * 45 + 120}>
-    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}`} onPress={onPress} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: space.xl, paddingVertical: 9, minHeight: 56 }}>
+    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}`} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "Close this chat" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: space.xl, paddingVertical: 9, minHeight: 56 }}>
       <Tile letter={row.initial} bg={bg} fg={fg} />
       <View style={{ flex: 1 }}>
         <Txt variant="body" numberOfLines={1} style={{ fontWeight: "600" }}>
@@ -123,7 +125,7 @@ function GroupingSwitch({ value, onChange }: { value: Grouping; onChange: (g: Gr
 }
 
 /** One project's chats under its name, which folds them away when pressed. */
-function ProjectGroup({ group, open, onToggle, onOpenChat }: { group: Group; open: boolean; onToggle: () => void; onOpenChat: HomeProps["onOpenChat"] }) {
+function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose }: { group: Group; open: boolean; onToggle: () => void; onOpenChat: HomeProps["onOpenChat"]; onAskClose?: (r: Row) => void }) {
   const name = group.project || "No project";
   return (
     <View>
@@ -138,7 +140,7 @@ function ProjectGroup({ group, open, onToggle, onOpenChat }: { group: Group; ope
         </Txt>
         {group.needsYou > 0 && <PulseDot color={colors.hi} />}
       </PressScale>
-      {open && group.rows.map((r, i) => <ChatRow key={r.slot} row={r} index={i} showProject={false} onPress={() => onOpenChat(r.slot)} />)}
+      {open && group.rows.map((r, i) => <ChatRow key={r.slot} row={r} index={i} showProject={false} onPress={() => onOpenChat(r.slot)} onLongPress={onAskClose && (() => onAskClose(r))} />)}
     </View>
   );
 }
@@ -182,6 +184,9 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   // How the chats are listed is remembered on this phone; the projects folded away are only for as long as Home is open.
   const [grouping, setGrouping] = useState<Grouping>("recent");
   const [folded, setFolded] = useState<Set<string>>(new Set());
+  // Holding a chat down offers to close it (on the Mac too), for a Mac that can.
+  const canClose = useMacCan("close");
+  const [closing, setClosing] = useState<Row | null>(null);
   useEffect(() => {
     let live = true;
     void loadGrouping().then((g) => live && setGrouping(g));
@@ -265,14 +270,22 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             No chats are open on your Mac. Start one in Lantern and it shows up here.
           </Txt>
         ) : grouping === "project" ? (
-          groups(list).map((g) => <ProjectGroup key={g.project} group={g} open={!folded.has(g.project)} onToggle={() => toggle(g.project)} onOpenChat={onOpenChat} />)
+          groups(list).map((g) => <ProjectGroup key={g.project} group={g} open={!folded.has(g.project)} onToggle={() => toggle(g.project)} onOpenChat={onOpenChat} onAskClose={canClose ? setClosing : undefined} />)
         ) : (
-          list.map((r, i) => <ChatRow key={r.slot} row={r} index={i} onPress={() => onOpenChat(r.slot)} />)
+          list.map((r, i) => <ChatRow key={r.slot} row={r} index={i} onPress={() => onOpenChat(r.slot)} onLongPress={canClose ? () => setClosing(r) : undefined} />)
         )}
         <SupportCard onPress={onSupport} />
           </>
         )}
       </ScrollView>
+      {closing && (
+        <CloseChatSheet
+          title={closing.title}
+          why={closing.status === "working" || closing.status === "needs_you" ? "Claude is busy in this chat. Stop it first, then close it." : null}
+          onConfirm={() => controller.sync.close(closing.slot)}
+          onClose={() => setClosing(null)}
+        />
+      )}
       {Platform.OS === "android" && list.length > 0 && (
         <PressScale accessibilityRole="button" accessibilityLabel="Message a chat" onPress={onCompose} scaleTo={0.92} style={[{ position: "absolute", right: 18, bottom: insets.bottom + 18, backgroundColor: colors.ink, borderRadius: 18, paddingHorizontal: 18, minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8 }, shadow.float]}>
           <Txt variant="body" tone="white" style={{ fontWeight: "700" }}>

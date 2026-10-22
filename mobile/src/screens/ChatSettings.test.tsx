@@ -1,7 +1,7 @@
 import { Text } from "react-native";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
-import { chat, connected, connectedWithControls, makeController, renderWith } from "../test/render";
+import { chat, connectedWith, connectedWithControls, makeController, renderWith } from "../test/render";
 import { ChatSettings } from "./ChatSettings";
 
 const presets = [
@@ -12,18 +12,20 @@ const controlsAnswer = (allow_auto: boolean) => ({ controls: { allow_auto, prese
 
 async function open(opts: { allowAuto?: boolean; features?: string[]; chatOver?: Parameters<typeof chat>[0]; answers?: Parameters<typeof attachSession>[1]; waitMs?: number } = {}) {
   const { controller } = makeController();
-  const session = attachSession(controller, { ...controlsAnswer(opts.allowAuto ?? false), ...opts.answers }, opts.features ?? ["controls"]);
+  const session = attachSession(controller, { ...controlsAnswer(opts.allowAuto ?? false), ...opts.answers }, opts.features ?? ["controls", "close", "workflow"]);
   const onProblem = jest.fn();
+  const onClosed = jest.fn();
   const c = chat({ permissions: "ask", preset: "balanced", ...opts.chatOver });
   const view = await renderWith(
-    <ChatSettings slot="a" chat={c} onProblem={onProblem} waitMs={opts.waitMs}>
+    <ChatSettings slot="a" chat={c} onProblem={onProblem} onClosed={onClosed} waitMs={opts.waitMs}>
       {(line) => <Text>{`under the title: ${line ?? "nothing"}`}</Text>}
     </ChatSettings>,
-    { chats: [c], connection: opts.features && !opts.features.includes("controls") ? connected : connectedWithControls },
+    // The Mac the phone is connected to lists what `features` says (an older one, nothing).
+    { chats: [c], connection: opts.features ? connectedWith(opts.features) : connectedWithControls },
     controller,
   );
   await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
-  return { onProblem, c, ...view, ...session, controller };
+  return { onProblem, onClosed, c, ...view, ...session, controller };
 }
 
 const openSheet = async () => {
@@ -123,5 +125,77 @@ describe("switching the models", () => {
     await waitFor(() => expect(screen.getByRole("radio", { name: "Balanced" })).toBeTruthy());
     await fireEvent.press(screen.getByRole("radio", { name: "Balanced" }));
     await waitFor(() => expect(lastOf("set_preset")).toEqual({ op: "set_preset", slot: "a", preset: "balanced" }));
+  });
+});
+
+describe("closing the chat from its settings", () => {
+  it("asks first, then closes it on the Mac and leaves the screen", async () => {
+    const { lastOf, onClosed } = await open();
+    await openSheet();
+    await fireEvent.press(screen.getByRole("button", { name: "Close this chat" }));
+    await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy());
+    expect(screen.getByText(/closes on your Mac too/)).toBeTruthy();
+    expect(lastOf("close")).toBeUndefined();
+    await fireEvent.press(screen.getByRole("button", { name: "Close chat" }));
+    await waitFor(() => expect(lastOf("close")).toEqual({ op: "close", slot: "a" }));
+    await waitFor(() => expect(onClosed).toHaveBeenCalled());
+  });
+
+  it("keeps the chat when it is asked to keep it", async () => {
+    const { lastOf, onClosed } = await open();
+    await openSheet();
+    await fireEvent.press(screen.getByRole("button", { name: "Close this chat" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Keep it" })).toBeTruthy());
+    await fireEvent.press(screen.getByRole("button", { name: "Keep it" }));
+    expect(lastOf("close")).toBeUndefined();
+    expect(onClosed).not.toHaveBeenCalled();
+  });
+
+  it("says why it didn't close when the Mac refuses, and stays", async () => {
+    const { onClosed } = await open({ answers: { close: new Error("That chat is part of a team: close it on your Mac.") } });
+    await openSheet();
+    await fireEvent.press(screen.getByRole("button", { name: "Close this chat" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Close chat" })).toBeTruthy());
+    await fireEvent.press(screen.getByRole("button", { name: "Close chat" }));
+    await waitFor(() => expect(screen.getByText("That chat is part of a team: close it on your Mac.")).toBeTruthy());
+    expect(onClosed).not.toHaveBeenCalled();
+  });
+
+  it("says Claude is busy instead of asking, while it is", async () => {
+    await open({ chatOver: { status: "working" } });
+    await openSheet();
+    await fireEvent.press(screen.getByRole("button", { name: "Close this chat" }));
+    await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy());
+    expect(screen.getAllByText("Claude is busy in this chat. Stop it first, then close it.").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Close chat" })).toBeNull();
+  });
+});
+
+describe("the workflow", () => {
+  it("says Step by step in the title bar's line, and nothing for a plain chat", async () => {
+    await open({ chatOver: { workflow: "steps" } });
+    await waitFor(() => expect(screen.getByText("under the title: Step by step · Ask · Balanced")).toBeTruthy());
+  });
+
+  it("is switched to Step by step from the sheet, with Switching… until the chat says so", async () => {
+    const { controller, lastOf, c } = await open({ chatOver: { workflow: "chat" } });
+    await openSheet();
+    expect(screen.getByText("Workflow")).toBeTruthy();
+    await fireEvent.press(screen.getByRole("radio", { name: "Step by step" }));
+    await waitFor(() => expect(lastOf("set_workflow")).toEqual({ op: "set_workflow", slot: "a", workflow: "steps" }));
+    await waitFor(() => expect(screen.getByText("under the title: Switching… · Ask · Balanced")).toBeTruthy());
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [{ ...c, workflow: "steps" }] } }));
+  });
+
+  it("is not offered for a team's Lead, which is led on the Mac, nor by a Mac that can't switch it", async () => {
+    await open({ chatOver: { workflow: "team" } });
+    await openSheet();
+    expect(screen.queryByText("Workflow")).toBeNull();
+  });
+
+  it("is not offered by a Mac that doesn't list it", async () => {
+    await open({ features: ["controls", "close"], chatOver: { workflow: "chat" } });
+    await openSheet();
+    expect(screen.queryByText("Workflow")).toBeNull();
   });
 });

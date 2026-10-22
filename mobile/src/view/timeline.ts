@@ -19,6 +19,7 @@ export type Row =
   | { key: string; kind: "user"; item: Extract<Item, { kind: "user" }> }
   | { key: string; kind: "assistant"; item: Extract<Item, { kind: "assistant" }> }
   | { key: string; kind: "page"; item: Extract<Item, { kind: "assistant" }>; page: Page; live: boolean }
+  | { key: string; kind: "summary"; item: Extract<Item, { kind: "assistant" }>; chips: StepChip[]; durationMs: number | null }
   | { key: string; kind: "steps"; chips: StepChip[] }
   | { key: string; kind: "prompt"; item: Extract<Item, { kind: "prompt" }> }
   | { key: string; kind: "desktop"; item: Extract<Item, { kind: "desktop" }> }
@@ -82,6 +83,31 @@ export function stepChips(steps: Step[]): StepChip[] {
   return chips;
 }
 
+/** What of a turn's work a summary card says (the rest is in the steps above it). */
+const SUMMARY_CHIPS = ["edits", "run", "tests", "failed"];
+
+/**
+ * A turn's closing message is a summary when the turn did real work (three steps, or any edit) and the message says
+ * something (a few sentences, or a list): the card it is shown as carries what the turn did, in its chips. Null for an
+ * ordinary message, one still streaming, or one a turn didn't end on.
+ */
+export function summaryOf(items: Item[], i: number): { chips: StepChip[]; durationMs: number | null } | null {
+  const item = items[i];
+  if (item?.kind !== "assistant" || item.streaming) return null;
+  let j = i + 1;
+  while (j < items.length && items[j].kind === "step") j++;
+  const end = items[j];
+  if (end?.kind !== "turn" || end.isError) return null;
+  let from = i;
+  while (from > 0 && items[from - 1].kind !== "user" && items[from - 1].kind !== "turn") from--;
+  const steps = items.slice(from, j).filter((it): it is Step => it.kind === "step");
+  const text = item.text.trim();
+  const worked = steps.length >= 3 || steps.some((s) => s.edits.length > 0);
+  const says = text.length >= 160 || /^\s*(?:[-*•]|\d+[.)])\s/m.test(text);
+  if (!worked || !says) return null;
+  return { chips: stepChips(steps).filter((c) => SUMMARY_CHIPS.includes(c.key)), durationMs: end.durationMs };
+}
+
 export function timeline(items: Item[]): Row[] {
   const rows: Row[] = [];
   let run: Step[] = [];
@@ -98,6 +124,8 @@ export function timeline(items: Item[]): Row[] {
       case "assistant": {
         const page = readPage(item.text);
         if (page && !item.streaming) return void rows.push({ key: `a-${item.id}`, kind: "page", item, page, live: livePage(items, i) });
+        const summary = summaryOf(items, i);
+        if (summary) return void rows.push({ key: `a-${item.id}`, kind: "summary", item, ...summary });
         return void rows.push({ key: `a-${item.id}`, kind: "assistant", item });
       }
       case "prompt":

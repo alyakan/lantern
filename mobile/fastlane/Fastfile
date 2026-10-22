@@ -115,6 +115,8 @@ platform :ios do
 
     # The native project is generated from app.json, never kept: every release starts from it.
     sh("cd #{mobile_dir} && npx expo prebuild --platform ios --clean")
+    # Expo writes CFBundleVersion into the generated Info.plist as a fixed "1", which no build setting changes: it is set here.
+    sh("/usr/libexec/PlistBuddy -c 'Set :CFBundleVersion #{build_number}' '#{File.join(mobile_dir, "ios", "Lantern", "Info.plist")}'")
 
     build_app(
       workspace: File.join(mobile_dir, "ios", "Lantern.xcworkspace"),

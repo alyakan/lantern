@@ -45,6 +45,8 @@ pub struct ChatInfo {
     pub preset: Option<String>,
     /// The colour the window gives the chat's project, "#rrggbb" (None until it has).
     pub color: Option<String>,
+    /// "chat", "steps" or "team", as the window says (None until it has).
+    pub workflow: Option<String>,
 }
 
 /// What came after a number a client had.
@@ -77,6 +79,7 @@ struct Log {
     permissions: Option<String>,
     preset: Option<String>,
     color: Option<String>,
+    workflow: Option<String>,
 }
 
 impl Log {
@@ -106,6 +109,7 @@ impl Log {
             permissions: self.permissions.clone(),
             preset: self.preset.clone(),
             color: self.color.clone(),
+            workflow: self.workflow.clone(),
         }
     }
 
@@ -292,6 +296,15 @@ impl SessionHub {
         let ok = |c: &str| c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|h| h.is_ascii_hexdigit());
         if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
             log.color = color.filter(|c| ok(c)).map(str::to_string);
+        }
+    }
+
+    /// The workflow the window says a chat is on. Only "chat", "steps" and "team" are taken, and only for a chat the hub lists.
+    pub fn flow(&self, slot: &str, workflow: &str) {
+        if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
+            if matches!(workflow, "chat" | "steps" | "team") {
+                log.workflow = Some(workflow.to_string());
+            }
         }
     }
 
@@ -484,6 +497,20 @@ mod tests {
         hub.colored("a", Some("#0F8A7E"));
         hub.colored("a", None);
         assert_eq!(hub.chat("a").unwrap().color, None, "what the window says now replaces what it said");
+    }
+
+    #[test]
+    fn a_chat_has_the_workflow_the_window_says_only_if_it_is_one_and_the_chat_is_listed() {
+        let hub = hub();
+        hub.flow("ghost", "steps");
+        assert!(hub.chat("ghost").is_none());
+        hub.opened("a", "/p");
+        assert_eq!(hub.chat("a").unwrap().workflow, None);
+        hub.flow("a", "steps");
+        assert_eq!(hub.chat("a").unwrap().workflow.as_deref(), Some("steps"));
+        hub.flow("a", "workflow");
+        hub.flow("a", "");
+        assert_eq!(hub.chat("a").unwrap().workflow.as_deref(), Some("steps"), "what isn't one leaves it as it was");
     }
 
     #[test]

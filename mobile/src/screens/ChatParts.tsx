@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { Animated, Easing, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
+import * as Clipboard from "expo-clipboard";
 import { useAccent } from "../ui/accent";
 import { Button, Chip, Tag, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
@@ -38,6 +39,84 @@ export const UserRow = memo(function UserRow({ item }: { item: UserItem }) {
           Not sent. {item.failed}
         </Txt>
       )}
+    </View>
+  );
+});
+
+/** How tall a summary card's text is before "Show all" (a long one is clipped to this). */
+const SUMMARY_COLLAPSED = 230;
+
+/**
+ * What a turn did, as a card: the turn's closing message when it did real work (see summaryOf), with how long it took, what
+ * it changed and ran as chips (the edits one lists their diffs), a Copy, and a long one clipped to a few lines with Show all.
+ */
+export const SummaryRow = memo(function SummaryRow({ row, onFiles }: { row: Extract<Row, { kind: "summary" }>; onFiles: (files: string[]) => void }) {
+  const [full, setFull] = useState(false);
+  const [height, setHeight] = useState<number | null>(null);
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
+  const long = height !== null && height > SUMMARY_COLLAPSED + 50;
+  const clipped = long && !full;
+  const took = row.durationMs ? turnLine({ kind: "turn", id: "", isError: false, result: null, durationMs: row.durationMs }).text.replace("Finished in ", "") : null;
+  const copy = () => {
+    void Promise.resolve(Clipboard.setStringAsync(row.item.text)).catch(() => {});
+    setCopied(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <View style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
+      <View accessibilityLabel="Summary of the work" style={[{ backgroundColor: colors.card, borderRadius: 20, overflow: "hidden", flexDirection: "row" }, shadow.card, { shadowOpacity: 0.07 }]}>
+        <View accessibilityElementsHidden style={{ width: 4, backgroundColor: colors.go }} />
+        <View style={{ flex: 1, padding: 14, gap: 10 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <View accessibilityElementsHidden style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: colors.go, alignItems: "center", justifyContent: "center" }}>
+              <View style={{ width: 9, height: 5, marginTop: -2, borderLeftWidth: 2, borderBottomWidth: 2, borderColor: colors.white, transform: [{ rotate: "-45deg" }] }} />
+            </View>
+            <Txt variant="small" style={{ fontWeight: "700", flex: 1 }} accessibilityRole="header">
+              Summary
+            </Txt>
+            {took && (
+              <Txt variant="tiny" tone="ink3">
+                {took}
+              </Txt>
+            )}
+          </View>
+          <View style={{ maxHeight: clipped ? SUMMARY_COLLAPSED : undefined, overflow: "hidden" }}>
+            <View onLayout={(e) => setHeight(e.nativeEvent.layout.height)}>
+              <Markdown text={row.item.text} />
+            </View>
+            {/* The cut is softened: strips of the card's own colour, more and more of it. */}
+            {clipped && (
+              <View pointerEvents="none" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 44 }}>
+                {[0.25, 0.5, 0.75, 0.95].map((a) => (
+                  <View key={a} style={{ flex: 1, backgroundColor: `rgba(255,255,255,${a})` }} />
+                ))}
+              </View>
+            )}
+          </View>
+          {long && (
+            <PressScale accessibilityRole="button" accessibilityLabel={full ? "Show less" : "Show all"} accessibilityState={{ expanded: full }} onPress={() => setFull(!full)} hitSlop={8} haptic="select" scaleTo={0.96} style={{ alignSelf: "flex-start" }}>
+              <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
+                {full ? "Show less" : "Show all"}
+              </Txt>
+            </PressScale>
+          )}
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+            {row.chips.map((c) => (
+              <Chip key={c.key} tone={c.tone} onPress={c.files ? () => onFiles(c.files!) : undefined}>
+                {c.label}
+              </Chip>
+            ))}
+            <PressScale accessibilityRole="button" accessibilityLabel={copied ? "Copied" : "Copy summary"} onPress={copy} hitSlop={8} haptic="light" scaleTo={0.92} style={{ paddingHorizontal: 6, paddingVertical: 4 }}>
+              <Txt variant="small" tone={copied ? "go" : "cobalt"} style={{ fontWeight: "700" }}>
+                {copied ? "Copied" : "Copy"}
+              </Txt>
+            </PressScale>
+          </View>
+        </View>
+      </View>
     </View>
   );
 });

@@ -11,6 +11,10 @@ use ts_rs::TS;
 /// asks for the newer app (or the newer Lantern) instead of breaking.
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
+/// since a Mac that doesn't know a request ends the connection.
+pub const FEATURES: &[&str] = &["controls", "close", "workflow"];
+
 /// Where the generated TypeScript goes, from ts-rs's export folder (src-tauri/bindings): each type below says it again.
 #[cfg(test)]
 const BINDINGS: &str = "../../mobile/src/protocol/generated/";
@@ -203,6 +207,39 @@ pub struct RemoteChat {
     /// The colour the Mac's window gives the chat's project, "#rrggbb": the phone shows the same (None from a Mac that doesn't say).
     #[serde(default)]
     pub project_color: Option<String>,
+    /// Chat, Step by step or Team, as the Mac's window says (None until it has, or from a Mac that doesn't).
+    #[serde(default)]
+    pub workflow: Option<RemoteWorkflow>,
+}
+
+/// How a chat goes about its work: a plain conversation, one page at a time in a flavour (Build, Review, Debug or Design), or a
+/// Lead running a team of agents. A phone can put a chat on Chat or Step by step; a team is started on the Mac.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub enum RemoteWorkflow {
+    Chat,
+    Steps,
+    Team,
+}
+
+impl RemoteWorkflow {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "chat" => Some(Self::Chat),
+            "steps" => Some(Self::Steps),
+            "team" => Some(Self::Team),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Chat => "chat",
+            Self::Steps => "steps",
+            Self::Team => "team",
+        }
+    }
 }
 
 /// Ask or Auto: what a chat does about asking before it acts. A phone may ask for Auto only when the Mac's setting allows it.
@@ -254,7 +291,7 @@ pub struct Controls {
 impl From<super::hub::ChatInfo> for RemoteChat {
     fn from(c: super::hub::ChatInfo) -> Self {
         let project = c.folder.as_deref().and_then(|f| std::path::Path::new(f).file_name()).map(|n| n.to_string_lossy().into_owned());
-        Self { slot: c.slot, title: c.title, project, status: c.status.into(), last_seq: c.last_seq, active_at: c.active_at, permissions: c.permissions.as_deref().and_then(RemotePermissions::parse), preset: c.preset, project_color: c.color }
+        Self { slot: c.slot, title: c.title, project, status: c.status.into(), last_seq: c.last_seq, active_at: c.active_at, permissions: c.permissions.as_deref().and_then(RemotePermissions::parse), preset: c.preset, project_color: c.color, workflow: c.workflow.as_deref().and_then(RemoteWorkflow::parse) }
     }
 }
 
@@ -356,6 +393,10 @@ pub enum Request {
         answers: Option<std::collections::BTreeMap<String, String>>,
     },
     Wake { slot: String },
+    /// Closes a chat on the Mac, as closing it in the window's sidebar does (its conversation stays in History). Refused while
+    /// the chat is working or waiting on someone (stop it first), and for a team's Lead or agent (the window decides that).
+    /// Only sent to a Mac whose Welcome lists "close" in `features`: an older Mac ends the connection at a request it doesn't know.
+    Close { slot: String },
     /// The projects a chat may be started in from the phone.
     Projects,
     /// Starts a chat in `project` (one of Projects' ids) with `text` as its first message, without switching what the Mac's
@@ -368,6 +409,9 @@ pub enum Request {
         permissions: Option<RemotePermissions>,
         #[serde(default)]
         preset: Option<String>,
+        /// Step by step, or else a plain Chat. A team is started on the Mac.
+        #[serde(default)]
+        workflow: Option<RemoteWorkflow>,
     },
     /// What a phone may choose: whether Auto is allowed, and the presets. Only sent to a Mac that said it has them
     /// (Welcome's `features`): an older Mac ends the connection at a request it doesn't know.
@@ -377,6 +421,9 @@ pub enum Request {
     SetPermissions { slot: String, permissions: RemotePermissions },
     /// Puts a chat on one of Controls' presets (its claude restarts on the same session), under the same conditions.
     SetPreset { slot: String, preset: String },
+    /// Puts a chat on Chat or Step by step (its claude restarts on the same session), under the same conditions. Not a team's
+    /// Lead, and not onto Team: a team is started and left on the Mac. Only sent to a Mac whose Welcome lists "workflow".
+    SetWorkflow { slot: String, workflow: RemoteWorkflow },
     /// What Claude would do next, from the recent chats: up to three drafts. Made by a short call to a small model, so
     /// they are kept for a while and shared by every phone; `refresh` asks again (not within a minute of the last time).
     Suggest { refresh: bool },
@@ -462,17 +509,17 @@ mod tests {
     fn what_an_older_phone_or_mac_says_still_reads() {
         // An older phone starts a chat with no say in the mode or preset: it is Ask, the project's own models.
         let old: Request = serde_json::from_str(r#"{"op":"new_chat","project":"/p","text":"hi"}"#).unwrap();
-        assert_eq!(old, Request::NewChat { project: "/p".into(), text: "hi".into(), permissions: None, preset: None });
+        assert_eq!(old, Request::NewChat { project: "/p".into(), text: "hi".into(), permissions: None, preset: None, workflow: None });
         // An older Mac's chat list and Welcome have neither field.
         let chat: RemoteChat = serde_json::from_str(r#"{"slot":"a","title":null,"project":null,"status":"idle","last_seq":1,"active_at":2}"#).unwrap();
-        assert_eq!((chat.permissions, chat.preset, chat.project_color), (None, None, None));
+        assert_eq!((chat.permissions, chat.preset, chat.project_color, chat.workflow), (None, None, None, None));
         let welcome: ServerMessage = serde_json::from_str(r#"{"type":"welcome","protocol":1,"app_version":"0.1.53","mac_name":"M","epoch":3}"#).unwrap();
         assert!(matches!(welcome, ServerMessage::Welcome { features, .. } if features.is_empty()));
     }
 
     #[test]
     fn a_chat_says_its_mode_and_preset_and_only_the_two_modes_are_taken() {
-        let info = |p: Option<&str>| crate::remote::hub::ChatInfo { slot: "a".into(), title: None, folder: None, session_id: None, status: crate::remote::hub::ChatStatus::Idle, last_seq: 0, active_at: 0, permissions: p.map(String::from), preset: Some("max".into()), color: None };
+        let info = |p: Option<&str>| crate::remote::hub::ChatInfo { slot: "a".into(), title: None, folder: None, session_id: None, status: crate::remote::hub::ChatStatus::Idle, last_seq: 0, active_at: 0, permissions: p.map(String::from), preset: Some("max".into()), color: None, workflow: None };
         let auto = RemoteChat::from(info(Some("auto")));
         assert_eq!((auto.permissions, auto.preset.as_deref()), (Some(RemotePermissions::Auto), Some("max")));
         assert_eq!(RemoteChat::from(info(Some("ask"))).permissions, Some(RemotePermissions::Ask));
@@ -546,7 +593,7 @@ mod tests {
 
     #[test]
     fn a_chat_is_listed_by_its_projects_name_not_its_path() {
-        let info = crate::remote::hub::ChatInfo { slot: "a".into(), title: Some("t".into()), folder: Some("/Users/me/dev/lantern".into()), session_id: Some("s".into()), status: crate::remote::hub::ChatStatus::NeedsYou, last_seq: 4, active_at: 9, permissions: Some("auto".into()), preset: Some("balanced".into()), color: Some("#5b5bd6".into()) };
+        let info = crate::remote::hub::ChatInfo { slot: "a".into(), title: Some("t".into()), folder: Some("/Users/me/dev/lantern".into()), session_id: Some("s".into()), status: crate::remote::hub::ChatStatus::NeedsYou, last_seq: 4, active_at: 9, permissions: Some("auto".into()), preset: Some("balanced".into()), color: Some("#5b5bd6".into()), workflow: Some("steps".into()) };
         let chat = RemoteChat::from(info);
         assert_eq!((chat.project.as_deref(), chat.status), (Some("lantern"), ChatStatus::NeedsYou));
     }

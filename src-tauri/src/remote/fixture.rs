@@ -97,7 +97,7 @@ impl FixtureHost {
 
     fn build(remote: &Remote, pace: Duration, waiting: bool) -> Arc<Self> {
         let (bus, hub) = (remote.bus.clone(), remote.hub.clone());
-        let chat = |slot: &str, title: &str, asleep: bool| WindowChat { slot: slot.into(), folder: "/Users/you/dev/lantern".into(), title: title.into(), asleep, session_id: Some(format!("session-{slot}")), permissions: None, preset: None, color: None };
+        let chat = |slot: &str, title: &str, asleep: bool| WindowChat { slot: slot.into(), folder: "/Users/you/dev/lantern".into(), title: title.into(), asleep, session_id: Some(format!("session-{slot}")), permissions: None, preset: None, color: None, workflow: None };
 
         let mut history: HashMap<String, Vec<UiEvent>> = HashMap::new();
         history.insert(
@@ -206,6 +206,11 @@ impl Host for FixtureHost {
         Box::pin(async { PROJECTS.iter().map(|(f, n)| (f.to_string(), n.to_string())).collect() })
     }
 
+    fn close(&self, slot: &str) -> Result<(), String> {
+        self.hub.closed(slot);
+        Ok(())
+    }
+
     fn set_permissions(&self, slot: &str, permissions: super::protocol::RemotePermissions) -> Result<(), String> {
         self.hub.controls(slot, permissions.as_str(), None);
         Ok(())
@@ -217,10 +222,16 @@ impl Host for FixtureHost {
         Ok(())
     }
 
-    fn new_chat(&self, folder: String, text: String, by: String, permissions: super::protocol::RemotePermissions, preset: Option<String>) -> BoxFut<Result<String, String>> {
+    fn set_workflow(&self, slot: &str, workflow: super::protocol::RemoteWorkflow) -> Result<(), String> {
+        self.hub.flow(slot, workflow.as_str());
+        Ok(())
+    }
+
+    fn new_chat(&self, folder: String, text: String, by: String, permissions: super::protocol::RemotePermissions, preset: Option<String>, workflow: super::protocol::RemoteWorkflow) -> BoxFut<Result<String, String>> {
         let slot = format!("new{}", self.started.fetch_add(1, Ordering::SeqCst) + 1);
         self.hub.opened(&slot, &folder);
         self.hub.controls(&slot, permissions.as_str(), preset.as_deref());
+        self.hub.flow(&slot, workflow.as_str());
         self.hub.titled(&slot, &title_of(&text));
         self.bus.publish(&slot, UiEvent::UserText { text: text.clone(), at: Some(now_ms()), sent_by: Some(by) });
         self.reply(&slot, text);

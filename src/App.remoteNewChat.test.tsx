@@ -211,3 +211,62 @@ describe("a chat a paired phone switches", () => {
     expect(harnessApplied(calls)).toHaveLength(0);
   });
 });
+
+describe("a chat a paired phone closes", () => {
+  const firstSlot = (calls: Call[]) => String(sessions(calls)[0]?.[1]?.slot);
+  const closed = (calls: Call[]) => calls.filter(([c]) => c === "close_session").map(([, a]) => a?.slot);
+
+  it("is closed as the sidebar closes one", async () => {
+    const calls = await launch();
+    await quiet();
+    await fromPhoneEvent("remote-close-chat", { slot: firstSlot(calls) });
+    await waitFor(() => expect(closed(calls)).toContain(firstSlot(calls)));
+  });
+
+  it("does nothing for a chat it doesn't have", async () => {
+    const calls = await launch();
+    await quiet();
+    await fromPhoneEvent("remote-close-chat", { slot: "nope" });
+    await quiet();
+    expect(closed(calls)).not.toContain("nope");
+  });
+});
+
+describe("a chat a paired phone starts or switches to Step by step", () => {
+  const firstSlot = (calls: Call[]) => String(sessions(calls)[0]?.[1]?.slot);
+
+  it("starts in Step by step when asked", async () => {
+    const calls = await launch();
+    const before = sessions(calls).length;
+    await fromPhone(ask({ workflow: "steps" }));
+    await waitFor(() => expect(sessions(calls).length).toBe(before + 1));
+    expect((sessions(calls)[sessions(calls).length - 1]?.[1]?.settings as { mode: string }).mode).toBe("steps");
+  });
+
+  it("starts nothing as a team, and says why", async () => {
+    const calls = await launch();
+    const before = sessions(calls).length;
+    await fromPhone(ask({ workflow: "team" }));
+    await waitFor(() => expect(answers(calls)).toHaveLength(1));
+    expect(sessions(calls).length).toBe(before);
+    expect(answers(calls)[0]).toMatchObject({ slot: null, error: expect.stringContaining("only start a chat or Step by step") });
+  });
+
+  it("puts a chat on Step by step without making it the project's Workflow", async () => {
+    const calls = await launch();
+    await quiet();
+    await fromPhoneEvent("remote-set-workflow", { slot: firstSlot(calls), workflow: "steps" });
+    await waitFor(() => expect(restarts(calls)).toHaveLength(1));
+    expect(restarts(calls)[0][1]).toMatchObject({ slot: firstSlot(calls), mode: "steps" });
+    await quiet();
+    expect(JSON.parse(localStorage.getItem("settings.workflowByFolder") ?? "{}")[FOLDER]).not.toBe("steps");
+  });
+
+  it("puts a chat on nothing it doesn't know", async () => {
+    const calls = await launch();
+    await quiet();
+    await fromPhoneEvent("remote-set-workflow", { slot: firstSlot(calls), workflow: "team" });
+    await quiet();
+    expect(restarts(calls)).toHaveLength(0);
+  });
+});
