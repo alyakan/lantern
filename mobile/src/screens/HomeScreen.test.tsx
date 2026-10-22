@@ -1,4 +1,4 @@
-import { Platform } from "react-native";
+import { Platform, StyleSheet } from "react-native";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
 import { chat, makeController, NOW, renderWith, waiting } from "../test/render";
@@ -247,5 +247,27 @@ describe("Home's chats by project", () => {
   it("has no switch with a single chat: there is nothing to group", async () => {
     await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()] });
     expect(screen.queryByRole("button", { name: "Projects" })).toBeNull();
+  });
+});
+
+describe("each chat's project, in its colour", () => {
+  const colorOf = (text: string) => StyleSheet.flatten(screen.getByText(text).props.style).color;
+
+  it("is a tag in the colour the Mac gave the project, so which project a chat is in reads at a glance", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ slot: "a", title: "Release", project: "lantern", project_color: "#c2255c" }), chat({ slot: "b", title: "Widget", project: "prayers", project_color: "#0f8a7e" })] });
+    expect(colorOf("lantern")).toBe("#c2255c");
+    expect(colorOf("prayers")).toBe("#0f8a7e");
+  });
+
+  it("is a plain grey tag for a project the Mac gave no colour, and for garbage", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ slot: "a", project: "lantern", project_color: null }), chat({ slot: "b", title: "Other", project: "site", project_color: "url(evil)" })] });
+    expect(colorOf("lantern")).toBe("#566272");
+    expect(colorOf("site")).toBe("#566272");
+  });
+
+  it("colours the project's name above its chats in the Projects view", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ slot: "a", project: "lantern", project_color: "#5b5bd6" }), chat({ slot: "b", title: "Other", project: "lantern", project_color: "#5b5bd6" })] });
+    await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
+    expect(colorOf("lantern")).toBe("#5b5bd6");
   });
 });

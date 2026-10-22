@@ -4,12 +4,12 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { loadGrouping, saveGrouping } from "../prefs";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
 import { useTipJar, useTips } from "../shell/tipsContext";
-import { Button, Tag, Tile, Txt } from "../ui/components";
+import { Button, ProjectTag, Tag, Tile, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
 import { useAccent } from "../ui/accent";
 import { Dots, HomeSkeleton } from "../ui/skeleton";
 import { colors, radius, shadow, space } from "../ui/theme";
-import { cards, groups, headline, rows, tileColors, type Card, type Grouping, type Group, type Row } from "../view/home";
+import { cards, groups, headline, projectTint, rows, type Card, type Grouping, type Group, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
 import { Suggestions } from "./Suggestions";
 
@@ -76,7 +76,8 @@ function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomePr
 }
 
 function ChatRow({ row, index, onPress, showProject = true }: { row: Row; index: number; onPress: () => void; showProject?: boolean }) {
-  const [bg, fg] = tileColors(row.title);
+  // The tile is the chat's project's colour (the desktop sidebar's), so a chat is placed by it before it is read.
+  const { bg, fg } = projectTint(row.projectColor);
   const status = row.status === "needs_you" ? ", needs you" : row.status === "working" ? ", working" : row.status === "asleep" ? ", asleep" : row.status === "ended" ? ", stopped" : "";
   return (
     // The rows come in one after the other when Home opens (and a new chat comes in alone); a press gives under the finger.
@@ -88,9 +89,9 @@ function ChatRow({ row, index, onPress, showProject = true }: { row: Row; index:
           {row.title}
         </Txt>
         {showProject && !!row.project && (
-          <Txt variant="small" tone="ink2" numberOfLines={1}>
-            {row.project}
-          </Txt>
+          <View style={{ marginTop: 3 }}>
+            <ProjectTag name={row.project} color={row.projectColor} />
+          </View>
         )}
       </View>
       {row.status === "working" ? (
@@ -129,7 +130,8 @@ function ProjectGroup({ group, open, onToggle, onOpenChat }: { group: Group; ope
         <Txt variant="small" tone="ink3" accessibilityElementsHidden style={{ width: 12 }}>
           {open ? "▾" : "▸"}
         </Txt>
-        <Txt variant="small" style={{ fontWeight: "700", flexShrink: 1 }} numberOfLines={1}>
+        <View accessibilityElementsHidden style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: projectTint(group.rows[0]?.projectColor ?? null).fg }} />
+        <Txt variant="small" style={{ fontWeight: "700", flexShrink: 1, color: projectTint(group.rows[0]?.projectColor ?? null).fg }} numberOfLines={1}>
           {name}
         </Txt>
         <Txt variant="small" tone="ink3">

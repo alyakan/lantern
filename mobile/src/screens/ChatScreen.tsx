@@ -4,11 +4,12 @@ import { FlashList } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
-import { Button, Txt } from "../ui/components";
+import { Button, ProjectTag, Txt } from "../ui/components";
 import { AboveKeyboard } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { colors, shadow, space } from "../ui/theme";
+import { projectColorOf } from "../view/home";
 import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
 import { ChatSettings } from "./ChatSettings";
@@ -137,9 +138,15 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
               <Txt variant="heading" numberOfLines={1} accessibilityRole="header">
                 {chat?.title?.trim() || "Chat"}
               </Txt>
-              <Txt variant="small" tone="ink2" numberOfLines={1}>
-                {[[chat?.project, asleep ? "asleep" : working ? "working" : null].filter(Boolean).join(", "), line].filter(Boolean).join(" · ")}
-              </Txt>
+              {/* The project in its colour (the desktop sidebar's), then how the chat stands and what it runs on. */}
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                {!!chat?.project && <ProjectTag name={chat.project} color={projectColorOf(chat.project_color)} />}
+                {!!([asleep ? "asleep" : working ? "working" : null, line].filter(Boolean).length) && (
+                  <Txt variant="small" tone="ink2" numberOfLines={1} style={{ flexShrink: 1 }}>
+                    {[asleep ? "asleep" : working ? "working" : null, line].filter(Boolean).join(" · ")}
+                  </Txt>
+                )}
+              </View>
             </View>
           )}
         </ChatSettings>

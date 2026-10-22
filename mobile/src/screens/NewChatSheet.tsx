@@ -3,7 +3,7 @@ import { ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
-import { useController } from "../shell/hooks";
+import { useController, useSyncState } from "../shell/hooks";
 import { useControls } from "../shell/useControls";
 import { Button, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
@@ -12,6 +12,7 @@ import { Sheet } from "../ui/Sheet";
 import { ProjectsSkeleton } from "../ui/skeleton";
 import { colors, radius, shadow, space } from "../ui/theme";
 import { autoNote, MODES } from "../view/controls";
+import { projectColorOf, projectTint } from "../view/home";
 
 /** What the sheet starts from: a suggestion's draft, the project it names, or the chat it carries on. */
 export interface Draft {
@@ -42,6 +43,9 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
   const { sync } = useController();
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardUp();
+  // A project's colour is the one the Mac's sidebar gives it, known from a chat the Mac has open there.
+  const { chats } = useSyncState();
+  const colorOf = (name: string) => projectTint(projectColorOf(chats.find((c) => c.project === name)?.project_color)).fg;
   const [projects, setProjects] = useState<RemoteProject[] | null>(null);
   const [project, setProject] = useState<string | null>(initialProject ?? null);
   const [text, setText] = useState(initialText);
@@ -122,9 +126,12 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
                   const on = p.id === project;
                   return (
                     <PressScale key={p.id} accessibilityRole="radio" accessibilityLabel={p.name} accessibilityState={{ selected: on, checked: on }} onPress={() => setProject(p.id)} haptic="select" scaleTo={0.94} style={{ backgroundColor: on ? colors.ink : colors.paper, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 9, borderWidth: 1, borderColor: on ? colors.ink : colors.rule }}>
-                      <Txt variant="small" tone={on ? "white" : "ink"} style={{ fontWeight: "700" }}>
-                        {p.name}
-                      </Txt>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
+                        <View accessibilityElementsHidden style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colorOf(p.name) }} />
+                        <Txt variant="small" tone={on ? "white" : "ink"} style={{ fontWeight: "700" }}>
+                          {p.name}
+                        </Txt>
+                      </View>
                     </PressScale>
                   );
                 })}

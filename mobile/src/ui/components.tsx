@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Text, View, type StyleProp, type TextProps, type ViewStyle } from "react-native";
 import { EMBER, useAccent } from "./accent";
 import { PressScale } from "./motion";
+import { projectTint } from "../view/home";
 import { colors, MIN_TARGET, radius, space, type as scale, type Variant } from "./theme";
 
 /** Text in the type scale. Ink by default; `tone` picks another of the palette's. */
@@ -65,6 +66,22 @@ export function Chip({ children, tone = "plain", onPress }: { children: ReactNod
     <PressScale accessibilityRole="button" onPress={onPress} hitSlop={8} haptic="select" scaleTo={0.93}>
       {content}
     </PressScale>
+  );
+}
+
+/**
+ * A project's name as a tag in its colour (the one the Mac's sidebar gives it): the colour faintly behind, the colour in the
+ * words and in a dot, so which project a chat belongs to reads at a glance. A project the Mac gave no colour is a plain grey tag.
+ */
+export function ProjectTag({ name, color }: { name: string; color: string | null }) {
+  const { bg, fg } = projectTint(color);
+  return (
+    <View style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: bg, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, maxWidth: "100%" }}>
+      <View accessibilityElementsHidden style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fg }} />
+      <Txt variant="tiny" numberOfLines={1} style={{ color: fg, fontWeight: "700", flexShrink: 1 }}>
+        {name}
+      </Txt>
+    </View>
   );
 }
 

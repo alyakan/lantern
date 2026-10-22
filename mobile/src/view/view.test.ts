@@ -1,6 +1,6 @@
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { Waiting } from "../protocol/generated/Waiting";
-import { ago, groups, cards, headline, rows, tileColors } from "./home";
+import { ago, groups, cards, headline, projectColorOf, projectTint, rows } from "./home";
 import { parseInline, parseMarkdown, plainText, type Block } from "./markdown";
 import { livePage, readPage } from "./pages";
 import { approvalOf, promptView, questionsOf } from "./prompts";
@@ -33,7 +33,7 @@ describe("what a prompt says", () => {
   });
 });
 
-const chat = (over: Partial<RemoteChat>): RemoteChat => ({ slot: "a", title: "Release", project: "lantern", status: "idle", last_seq: 1, active_at: 1000, permissions: null, preset: null, ...over });
+const chat = (over: Partial<RemoteChat>): RemoteChat => ({ slot: "a", title: "Release", project: "lantern", status: "idle", last_seq: 1, active_at: 1000, permissions: null, preset: null, project_color: null, ...over });
 const wait = (over: Partial<Waiting>): Waiting => ({ slot: "a", chat_title: null, request_id: "p1", tool_name: "Bash", input: { command: "ls" }, at: 1, ...over });
 
 describe("the Home screen", () => {
@@ -83,9 +83,13 @@ describe("the Home screen", () => {
     expect(groups([])).toEqual([]);
   });
 
-  it("gives a title the same tile colours every time", () => {
-    expect(tileColors("Release")).toEqual(tileColors("Release"));
-    expect(tileColors("Release")[0]).toMatch(/^#[0-9a-f]{6}$/);
+  it("shows a project in the colour the Mac gave it, and in a plain one when it gave none or garbage", () => {
+    expect(projectColorOf("#5b5bd6")).toBe("#5b5bd6");
+    for (const bad of [null, undefined, "", "red", "#12345", "#12345g", "5b5bd6", "#5b5bd6aa", 5]) expect(projectColorOf(bad)).toBeNull();
+    expect(projectTint("#5b5bd6")).toEqual({ bg: "#5b5bd626", fg: "#5b5bd6" });
+    expect(projectTint(null).fg).toBe("#566272");
+    const r = rows([chat({ slot: "a", project: "lantern", project_color: "#0f8a7e" }), chat({ slot: "b", project: "site", project_color: "javascript:1" })], 5000);
+    expect(r.map((x) => [x.slot, x.projectColor]).sort()).toEqual([["a", "#0f8a7e"], ["b", null]]);
   });
 });
 

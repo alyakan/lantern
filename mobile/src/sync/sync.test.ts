@@ -87,7 +87,7 @@ describe("the phone's sync", () => {
     frame();
     expect(sync.getState().waiting).toEqual(waiting);
     const before = s.asked.filter((r) => r.op === "list_waiting").length;
-    sync.onPushed({ type: "chats", chats: [{ slot: "a", title: null, project: null, status: "needs_you", last_seq: 1, active_at: 1, permissions: null, preset: null }] });
+    sync.onPushed({ type: "chats", chats: [{ slot: "a", title: null, project: null, status: "needs_you", last_seq: 1, active_at: 1, permissions: null, preset: null, project_color: null }] });
     await sync.answer("a", "p1", true, { "Which?": "Dark" });
     await settle();
     expect(s.asked).toContainEqual({ op: "answer", slot: "a", request_id: "p1", allow: true, message: null, answers: { "Which?": "Dark" } });

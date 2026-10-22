@@ -41,10 +41,22 @@ export function cards(waiting: Waiting[], chats: RemoteChat[]): Card[] {
     });
 }
 
+/** A colour the Mac sent for a project, if it is a plain "#rrggbb": what the phone shows is only ever that or nothing. */
+export function projectColorOf(color: unknown): string | null {
+  return typeof color === "string" && /^#[0-9a-fA-F]{6}$/.test(color) ? color : null;
+}
+
+/** A project's colour as a quiet fill behind its name (the colour at about 15%), and the colour itself for the words; plain ones for a project the Mac gave no colour. */
+export function projectTint(color: string | null): { bg: string; fg: string } {
+  return color ? { bg: `${color}26`, fg: color } : { bg: "#dce2e8", fg: "#566272" };
+}
+
 export interface Row {
   slot: string;
   title: string;
   project: string;
+  /** The colour the Mac's window gives the project ("#rrggbb"), when it said. */
+  projectColor: string | null;
   /** The first letter of the title, for the tile. */
   initial: string;
   status: RemoteChat["status"];
@@ -68,7 +80,7 @@ export function rows(chats: RemoteChat[], now: number): Row[] {
     .sort((a, b) => b.active_at - a.active_at)
     .map((c) => {
       const title = c.title?.trim() || "New chat";
-      return { slot: c.slot, title, project: c.project ?? "", initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now) };
+      return { slot: c.slot, title, project: c.project ?? "", projectColor: projectColorOf(c.project_color), initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now) };
     });
 }
 
@@ -93,18 +105,4 @@ export function groups(list: Row[]): Group[] {
   return [...byProject]
     .map(([project, rs]) => ({ project, rows: [...rs].sort((a, b) => b.activeAt - a.activeAt), needsYou: rs.filter((r) => r.status === "needs_you").length }))
     .sort((a, b) => (a.project === "" ? 1 : b.project === "" ? -1 : b.rows[0].activeAt - a.rows[0].activeAt));
-}
-
-/** A tile colour from the title, one of a few soft pairs (background, letter), the same for the same title every time. */
-const TILES: [string, string][] = [
-  ["#dfe7ff", "#2f5bff"],
-  ["#e3f3e8", "#1f9d55"],
-  ["#fff1c7", "#8a6300"],
-  ["#f3e3f0", "#9b2f86"],
-  ["#e1f1f4", "#1b7385"],
-];
-export function tileColors(title: string): [string, string] {
-  let h = 0;
-  for (const ch of title) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return TILES[h % TILES.length];
 }
