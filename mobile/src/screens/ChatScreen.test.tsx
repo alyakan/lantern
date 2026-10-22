@@ -65,6 +65,26 @@ describe("a chat", () => {
     expect(screen.queryByText("git status")).toBeNull();
   });
 
+  it("shows what a turn did as a card: the closing message, how long it took, and what it changed and ran", async () => {
+    const work: RemoteEvent[] = [
+      { kind: "user_text", text: "Ship it.", at: 1_000_000, sent_by: "desktop" },
+      { kind: "tool_started", tool_use_id: "w1", name: "Read", summary: "a.ts" },
+      { kind: "tool_started", tool_use_id: "w2", name: "Edit", summary: "a.ts" },
+      { kind: "file_edited", tool_use_id: "w2", path: "/p/a.ts", created: false, added: 4, removed: 1 },
+      { kind: "tool_started", tool_use_id: "w3", name: "Bash", summary: "npm test" },
+      { kind: "tests_ran", tool_use_id: "w3", command: "npm test", passed: 9, failed: 0, skipped: 0 },
+      { kind: "assistant_text", block_id: "f1", text: "All done. What changed:\n\n- the gateway checks Auto\n- the window checks again" },
+      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 192_000 },
+    ];
+    await withSession(work);
+    expect(screen.getByLabelText("Summary of the work")).toBeTruthy();
+    expect(screen.getByText("Summary")).toBeTruthy();
+    expect(screen.getByText("3 min 12 s")).toBeTruthy();
+    expect(screen.getByText("the gateway checks Auto")).toBeTruthy();
+    expect(screen.getAllByText("Edited 1 file +4 −1").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Copy summary" })).toBeTruthy();
+  });
+
   it("follows the chat while it is open and lets go when it closes", async () => {
     const { asked, unmount } = await withSession(turn);
     expect(asked).toContainEqual({ op: "subscribe", slot: "a", after: 9, epoch: 1 });

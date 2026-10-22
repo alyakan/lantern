@@ -1,5 +1,5 @@
 import type { Item } from "../sync/reducer";
-import { stepChips, timeline, turnLine } from "./timeline";
+import { stepChips, summaryOf, timeline, turnLine } from "./timeline";
 
 type Step = Extract<Item, { kind: "step" }>;
 const step = (id: string, name: string, over: Partial<Step> = {}): Step => ({ kind: "step", id, name, summary: "", done: true, isError: false, edits: [], tests: null, ...over });
@@ -92,5 +92,42 @@ describe("a turn's end", () => {
     expect(turnLine({ kind: "turn", id: "t", isError: false, result: null, durationMs: 72_000 }).text).toBe("Finished in 1 min 12 s");
     expect(turnLine({ kind: "turn", id: "t", isError: false, result: null, durationMs: null }).text).toBe("Finished");
     expect(turnLine({ kind: "turn", id: "t", isError: true, result: "rate limited", durationMs: 1 })).toEqual({ text: "Stopped with an error: rate limited", bad: true });
+  });
+});
+
+describe("a turn's summary", () => {
+  const turn = (id: string, over: Partial<Extract<Item, { kind: "turn" }>> = {}): Item => ({ kind: "turn", id, isError: false, result: "ok", durationMs: 192_000, ...over });
+  const long = "Done. Here is what changed:\n\n- the gateway checks Auto\n- the window checks again\n- the phone shows it";
+  const worked = (): Item[] => [you("u1", "do it"), step("1", "Read"), step("2", "Edit", { edits: [{ path: "/a.ts", created: false, added: 4, removed: 1 }] }), step("3", "Bash", { summary: "npm test", tests: { passed: 9, failed: 0, skipped: 0 } })];
+
+  it("is the closing message of a turn that did real work and says something, with what the turn did", () => {
+    const items = [...worked(), said("a1", long), turn("t1")];
+    const s = summaryOf(items, 4);
+    expect(s?.durationMs).toBe(192_000);
+    expect(s?.chips.map((c) => c.label)).toEqual(["Edited 1 file +4 −1", "9 tests passed"]);
+    expect(timeline(items).map((r) => r.kind)).toEqual(["user", "steps", "summary", "turn"]);
+  });
+
+  it("is a list too, however short, and a few sentences without one", () => {
+    expect(summaryOf([...worked(), said("a1", "- one\n- two"), turn("t1")], 4)).not.toBeNull();
+    expect(summaryOf([...worked(), said("a1", "x".repeat(170)), turn("t1")], 4)).not.toBeNull();
+  });
+
+  it("is not a short answer, or a turn that did little, or one that is still going or ended in an error", () => {
+    expect(summaryOf([...worked(), said("a1", "Done."), turn("t1")], 4)).toBeNull();
+    expect(summaryOf([you("u1", "hi"), step("1", "Read"), said("a1", long), turn("t1")], 2)).toBeNull();
+    expect(summaryOf([...worked(), said("a1", long, true), turn("t1")], 4)).toBeNull();
+    expect(summaryOf([...worked(), said("a1", long)], 4)).toBeNull();
+    expect(summaryOf([...worked(), said("a1", long), turn("t1", { isError: true })], 4)).toBeNull();
+  });
+
+  it("is only the last message of the turn: what Claude said between its steps stays a message", () => {
+    const items = [you("u1", "do it"), said("a0", long), ...worked().slice(1), said("a1", long), turn("t1")];
+    expect(timeline(items).map((r) => r.kind)).toEqual(["user", "assistant", "steps", "summary", "turn"]);
+  });
+
+  it("counts only its own turn's work, not an earlier turn's", () => {
+    const items: Item[] = [...worked(), turn("t1"), you("u2", "and?"), said("a2", long), turn("t2")];
+    expect(summaryOf(items, 6)).toBeNull();
   });
 });
