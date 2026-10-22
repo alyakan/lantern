@@ -15,6 +15,28 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// since a Mac that doesn't know a request ends the connection.
 pub const FEATURES: &[&str] = &["controls", "close", "workflow"];
 
+/// What a phone says it can read beyond protocol 1 (Hello's `features`): the Mac sends it only what its name allows, since a
+/// phone that doesn't know an event can't show the chat. "extras": the commands, plan and usage events.
+pub const PHONE_EXTRAS: &str = "extras";
+
+/// A slash command or skill the chat's claude offers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteCommand {
+    pub name: String,
+    pub description: String,
+    pub argument_hint: String,
+}
+
+/// One line of the plan Claude keeps. `status`: "pending", "in_progress" or "completed".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteTodo {
+    pub content: String,
+    pub status: String,
+    pub active_form: String,
+}
+
 /// Where the generated TypeScript goes, from ts-rs's export folder (src-tauri/bindings): each type below says it again.
 #[cfg(test)]
 const BINDINGS: &str = "../../mobile/src/protocol/generated/";
@@ -62,7 +84,34 @@ pub enum RemoteEvent {
     SessionEnded { code: Option<i32> },
     Asleep { asleep: bool },
     ConversationReset,
+    /// What the chat's claude offers after a "/" (extras: sent only to a phone that can read it).
+    Commands { commands: Vec<RemoteCommand> },
+    /// The plan Claude keeps, whole each time it changes (extras).
+    Todos { items: Vec<RemoteTodo> },
+    /// The subscription's five-hour window, for the whole account: `used` from 0 to 1, `resets_at` in unix seconds, and the
+    /// CLI's status for it (extras).
+    PlanUsage {
+        used: f64,
+        #[ts(type = "number | null")]
+        resets_at: Option<u64>,
+        status: String,
+    },
 }
+
+impl RemoteEvent {
+    /// Whether only a phone that said "extras" can read it.
+    pub fn is_extra(&self) -> bool {
+        matches!(self, RemoteEvent::Commands { .. } | RemoteEvent::Todos { .. } | RemoteEvent::PlanUsage { .. })
+    }
+}
+
+/// `to_remote`, without what a phone that can't read extras would choke on.
+pub fn to_remote_for(event: &UiEvent, extras: bool) -> Option<RemoteEvent> {
+    to_remote(event).filter(|e| extras || !e.is_extra())
+}
+
+/// The most slash commands a phone is sent, each with its text cut short: a long list of skills is still a short message.
+pub const COMMANDS_MAX: usize = 300;
 
 /// The phone's events for one of Lantern's, or none: subagents' insides, Lantern's bookkeeping and anything a phone
 /// doesn't show stay on the Mac. Every event is named here, so a new one is a compile error until it is decided.
@@ -91,6 +140,12 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         U::SessionEnded { code, .. } => R::SessionEnded { code: *code },
         U::AgentAsleep { asleep } => R::Asleep { asleep: *asleep },
         U::ConversationReset => R::ConversationReset,
+        U::Commands { commands } => {
+            let cut = |s: &str, n: usize| s.chars().take(n).collect::<String>();
+            R::Commands { commands: commands.iter().take(COMMANDS_MAX).map(|c| RemoteCommand { name: cut(&c.name, 80), description: cut(&c.description, 200), argument_hint: cut(&c.argument_hint, 80) }).collect() }
+        }
+        U::Todos { parent: None, items } => R::Todos { items: items.iter().map(|t| RemoteTodo { content: t.content.clone(), status: t.status.clone(), active_form: t.active_form.clone() }).collect() },
+        U::PlanUsage { used, resets_at, status } => R::PlanUsage { used: *used, resets_at: *resets_at, status: status.clone() },
         // A subagent's insides: the phone shows the step that started it, not what it does.
         U::Thinking { parent: Some(_) } | U::TextDelta { parent: Some(_), .. } | U::AssistantText { parent: Some(_), .. } | U::ToolStarted { parent: Some(_), .. } | U::ToolFinished { parent: Some(_), .. } | U::EditApplied { parent: Some(_), .. } | U::TestRun { parent: Some(_), .. } => return None,
         // Lantern's own bookkeeping, and what only the desktop's panes show.
@@ -100,7 +155,6 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         | U::BackgroundTasks { .. }
         | U::TaskStarted { .. }
         | U::TaskEnded { .. }
-        | U::Commands { .. }
         | U::AgentModel { .. }
         | U::AgentStarted { .. }
         | U::AgentProgress { .. }
@@ -123,7 +177,7 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         | U::AgentMode { .. }
         | U::MergeResolved { .. }
         | U::ReviewTarget { .. }
-        | U::PlanUsage { .. }
+        | U::Todos { parent: Some(_), .. }
         | U::Unknown { .. }
         | U::ParseError { .. } => return None,
     })
@@ -439,7 +493,14 @@ pub enum Request {
 #[ts(export, export_to = "../../mobile/src/protocol/generated/")]
 pub enum ClientMessage {
     /// `device_name`: the name the phone goes by on the Mac's device list (its first pairing sets it).
-    Hello { protocol: u32, app_version: String, device_name: String },
+    /// `features`: what the phone can read beyond protocol 1 (see PHONE_EXTRAS); an older phone says nothing.
+    Hello {
+        protocol: u32,
+        app_version: String,
+        device_name: String,
+        #[serde(default)]
+        features: Vec<String>,
+    },
     Request {
         #[ts(type = "number")]
         id: u64,
@@ -525,6 +586,34 @@ mod tests {
         assert_eq!(RemoteChat::from(info(Some("ask"))).permissions, Some(RemotePermissions::Ask));
         assert_eq!(RemoteChat::from(info(Some("bypass"))).permissions, None);
         assert!(serde_json::from_str::<Request>(r#"{"op":"set_permissions","slot":"a","permissions":"bypass"}"#).is_err());
+    }
+
+    #[test]
+    fn the_commands_plan_and_usage_are_sent_to_a_phone_that_can_read_them_and_to_no_other() {
+        let todos = UiEvent::Todos { parent: None, items: vec![crate::ui_event::Todo { content: "a".into(), status: "pending".into(), active_form: "doing a".into() }] };
+        let sent = RemoteEvent::Todos { items: vec![RemoteTodo { content: "a".into(), status: "pending".into(), active_form: "doing a".into() }] };
+        assert_eq!(to_remote_for(&todos, true), Some(sent));
+        assert_eq!(to_remote_for(&todos, false), None);
+        assert_eq!(to_remote_for(&UiEvent::Todos { parent: Some("t".into()), items: vec![] }, true), None, "a subagent's plan stays with it");
+        let usage = UiEvent::PlanUsage { used: 0.5, resets_at: Some(1), status: "allowed".into() };
+        assert_eq!(to_remote_for(&usage, true), Some(RemoteEvent::PlanUsage { used: 0.5, resets_at: Some(1), status: "allowed".into() }));
+        assert_eq!(to_remote_for(&usage, false), None);
+        // What was already sent is sent whatever the phone says.
+        let said = UiEvent::AssistantText { parent: None, block_id: "b".into(), text: "hi".into() };
+        assert!(to_remote_for(&said, false).is_some());
+    }
+
+    #[test]
+    fn a_long_list_of_commands_is_cut_to_a_short_message() {
+        let command = |i: usize| crate::ui_event::SlashCommand { name: format!("c{i}"), description: "d".repeat(500), argument_hint: String::new() };
+        let Some(RemoteEvent::Commands { commands }) = to_remote(&UiEvent::Commands { commands: (0..COMMANDS_MAX + 50).map(command).collect() }) else { panic!("commands") };
+        assert_eq!((commands.len(), commands[0].description.chars().count()), (COMMANDS_MAX, 200));
+    }
+
+    #[test]
+    fn a_hello_with_no_features_still_reads() {
+        let hello: ClientMessage = serde_json::from_str(r#"{"type":"hello","protocol":1,"app_version":"1","device_name":"P"}"#).unwrap();
+        assert!(matches!(hello, ClientMessage::Hello { features, .. } if features.is_empty()));
     }
 
     #[test]

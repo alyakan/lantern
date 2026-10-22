@@ -450,7 +450,12 @@ impl Remote {
 
 /// Whether the window is sent an event: all but the messages it sent itself, which it already shows.
 pub fn for_window(event: &UiEvent) -> bool {
-    !matches!(event, UiEvent::UserText { sent_by: Some(by), .. } if by == SENT_BY_DESKTOP)
+    match event {
+        UiEvent::UserText { sent_by: Some(by), .. } => by != SENT_BY_DESKTOP,
+        // The plan card is the phone's: the window has no use for it.
+        UiEvent::Todos { .. } => false,
+        _ => true,
+    }
 }
 
 #[cfg(test)]

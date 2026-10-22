@@ -312,7 +312,7 @@ impl Gateway {
 
     async fn serve(self: Arc<Self>, mut link: Link) -> Result<(), Refused> {
         let permit = self.handshakes.clone().try_acquire_owned().map_err(|_| Refused::Busy)?;
-        let (device, mut channel) = tokio::time::timeout(HANDSHAKE_WAIT, self.come_in(&mut link)).await.map_err(|_| Refused::TooSlow)??;
+        let (device, mut channel, extras) = tokio::time::timeout(HANDSHAKE_WAIT, self.come_in(&mut link)).await.map_err(|_| Refused::TooSlow)??;
         drop(permit);
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let (kill, mut killed) = watch::channel(false);
@@ -324,7 +324,7 @@ impl Gateway {
         }
         self.store.seen(&device, (self.now)());
         self.changed();
-        let mut session = Session { gw: &self, device: device.clone(), subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
+        let mut session = Session { gw: &self, device: device.clone(), extras, subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
         let _ = session.run(&mut link, &mut channel, &mut killed).await;
         self.conns.lock().unwrap().remove(&id);
         self.store.seen(&device, (self.now)());
@@ -333,7 +333,7 @@ impl Gateway {
     }
 
     /// The handshake, then the phone's hello: who it is, once it has proved it.
-    async fn come_in(&self, link: &mut Link) -> Result<(String, Channel), Refused> {
+    async fn come_in(&self, link: &mut Link) -> Result<(String, Channel, bool), Refused> {
         let mode = recv(link).await.ok_or(Refused::Protocol("closed".into()))?;
         let pairing = match mode.as_slice() {
             [secure::PAIR] => true,
@@ -366,7 +366,7 @@ impl Gateway {
             return Err(Refused::NotPaired);
         }
         let hello = recv_message(link, &mut channel).await.ok_or(Refused::Protocol("no hello".into()))?;
-        let ClientMessage::Hello { protocol: theirs, device_name, .. } = hello else { return Err(Refused::Protocol("no hello".into())) };
+        let ClientMessage::Hello { protocol: theirs, device_name, features, .. } = hello else { return Err(Refused::Protocol("no hello".into())) };
         let welcome = ServerMessage::Welcome { protocol: PROTOCOL_VERSION, app_version: self.host.app_version(), mac_name: self.host.mac_name(), epoch: self.epoch, features: protocol::FEATURES.iter().map(|f| f.to_string()).collect(), hosts: self.host.hosts() };
         send_message(link, &mut channel, &welcome).map_err(Refused::Protocol)?;
         // Told which version this Mac speaks, so the phone can say what to update; it isn't paired or let in.
@@ -377,7 +377,7 @@ impl Gateway {
             Some(d) if !pairing => d,
             _ => self.store.add_device(&key, &device_name, (self.now)()).map_err(Refused::Protocol)?,
         };
-        Ok((device.id, channel))
+        Ok((device.id, channel, features.iter().any(|f| f == protocol::PHONE_EXTRAS)))
     }
 }
 
@@ -425,6 +425,8 @@ async fn send_message_waiting(link: &Link, channel: &mut Channel, msg: &ServerMe
 struct Session<'a> {
     gw: &'a Gateway,
     device: String,
+    /// Whether the phone said it can read the extras events (see protocol::PHONE_EXTRAS).
+    extras: bool,
     /// The chats it subscribed to, with the number of the last event it was sent of each.
     subscribed: HashMap<String, u64>,
     /// Chats it was sent a reset of before the hub knew their session, so before their transcript could be found: they
@@ -540,7 +542,7 @@ impl<'a> Session<'a> {
             return Ok(());
         }
         *last = ev.seq;
-        match protocol::to_remote(&ev.event) {
+        match protocol::to_remote_for(&ev.event, self.extras) {
             Some(event) => send_message(link, channel, &ServerMessage::Event { slot: ev.slot.clone(), seq: ev.seq, event }),
             None => Ok(()),
         }
@@ -568,16 +570,19 @@ impl<'a> Session<'a> {
         }
         let page = self.gw.host.history(slot.to_string(), None).await.unwrap_or(crate::history::Page { events: vec![], hidden: 0 });
         let hidden = page.hidden as u32;
-        let mut events: Vec<RemoteEvent> = page.events.iter().filter_map(protocol::to_remote).collect();
+        let extras = self.extras;
+        let mut events: Vec<RemoteEvent> = page.events.iter().filter_map(|e| protocol::to_remote_for(e, extras)).collect();
         // A turn still going isn't all in the transcript yet: what the hub has of it since its message comes after. A turn
         // waiting on a prompt is still going.
         if self.gw.hub.chat(slot).is_some_and(|c| matches!(c.status, super::hub::ChatStatus::Working | super::hub::ChatStatus::NeedsYou)) {
             if let Some(Since::Events(kept) | Since::TooOld { kept }) = self.gw.hub.since(slot, 0) {
                 let start = kept.iter().rposition(|e| matches!(e.event, UiEvent::UserText { .. })).unwrap_or(0);
-                let live: Vec<RemoteEvent> = kept[start..].iter().filter(|e| e.seq <= seq).filter_map(|e| protocol::to_remote(&e.event)).collect();
+                let live: Vec<RemoteEvent> = kept[start..].iter().filter(|e| e.seq <= seq).filter_map(|e| protocol::to_remote_for(&e.event, extras)).collect();
                 events = merge_current_turn(events, live);
             }
         }
+        // What claude offers after a "/", its plan and the usage: the latest of each, since the kept events may not reach them.
+        events.extend(self.gw.hub.extras(slot).iter().filter_map(|e| protocol::to_remote_for(e, extras)));
         for (page, (events, done)) in pages(events).into_iter().enumerate() {
             send_message_waiting(link, channel, &ServerMessage::Reset { slot: slot.to_string(), seq, page: page as u32, done, hidden, events }).await?;
         }
@@ -603,7 +608,7 @@ impl<'a> Session<'a> {
                     Some(Since::Events(events)) if after > 0 && comparable => {
                         let last = events.last().map_or(after, |e| e.seq);
                         for e in &events {
-                            if let Some(event) = protocol::to_remote(&e.event) {
+                            if let Some(event) = protocol::to_remote_for(&e.event, self.extras) {
                                 send_message(link, channel, &ServerMessage::Event { slot: slot.clone(), seq: e.seq, event })?;
                             }
                         }
@@ -616,7 +621,7 @@ impl<'a> Session<'a> {
             Request::Earlier { slot, hidden } => {
                 self.chat_known(&slot)?;
                 let page = host.history(slot, Some(hidden as usize)).await?;
-                Ok(json(&protocol::EarlierPage { events: page.events.iter().filter_map(protocol::to_remote).collect(), hidden: page.hidden as u32 }))
+                Ok(json(&protocol::EarlierPage { events: page.events.iter().filter_map(|e| protocol::to_remote_for(e, self.extras)).collect(), hidden: page.hidden as u32 }))
             }
             Request::Unsubscribe { slot } => {
                 self.unfollow(&slot);
@@ -941,6 +946,11 @@ pub(crate) mod tests {
 
     /// Runs a phone's side: pairing (with the QR secret) or connecting, then hello. Err: the gateway closed on it.
     pub async fn phone(gw: &Arc<Gateway>, key: &Keypair, secret: Option<[u8; 32]>, protocol: u32) -> Result<Phone, String> {
+        phone_with(gw, key, secret, protocol, &[]).await
+    }
+
+    /// `phone`, saying in its hello what it can read (see protocol::PHONE_EXTRAS).
+    pub async fn phone_with(gw: &Arc<Gateway>, key: &Keypair, secret: Option<[u8; 32]>, protocol: u32, features: &[&str]) -> Result<Phone, String> {
         let (mut mine, theirs) = link_pair();
         gw.accept(theirs);
         let mut hs = match secret {
@@ -959,7 +969,7 @@ pub(crate) mod tests {
         mine.to_peer.send(hs.write()?).await.map_err(|e| e.to_string())?;
         let (_, channel) = hs.finish()?;
         let mut p = Phone { link: mine, channel, next: 0, hosts: Vec::new() };
-        p.send(&ClientMessage::Hello { protocol, app_version: "1.0".into(), device_name: "Test phone".into() });
+        p.send(&ClientMessage::Hello { protocol, app_version: "1.0".into(), device_name: "Test phone".into(), features: features.iter().map(|f| f.to_string()).collect() });
         match p.next().await {
             Some(ServerMessage::Welcome { hosts, .. }) => {
                 p.hosts = hosts;
@@ -1094,6 +1104,45 @@ pub(crate) mod tests {
         let (_, _, before) = p.ask(Request::Subscribe { slot: "a".into(), after: 1, epoch: EPOCH }).await;
         let caught: Vec<u64> = before.iter().filter_map(|m| if let ServerMessage::Event { seq, .. } = m { Some(*seq) } else { None }).collect();
         assert_eq!(caught, vec![2], "only what it missed, and only what a phone is sent");
+    }
+
+    #[tokio::test]
+    async fn a_phone_is_sent_the_commands_plan_and_usage_only_if_it_said_it_can_read_them() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        let todo = |status: &str| crate::ui_event::Todo { content: "Write tests".into(), status: status.into(), active_form: "Writing tests".into() };
+        r.bus.publish("a", UiEvent::Commands { commands: vec![crate::ui_event::SlashCommand { name: "review".into(), description: "Review".into(), argument_hint: String::new() }] });
+        r.bus.publish("a", UiEvent::Todos { parent: None, items: vec![todo("pending")] });
+        r.bus.publish("a", UiEvent::Todos { parent: None, items: vec![todo("completed")] });
+        r.bus.publish("a", UiEvent::PlanUsage { used: 0.4, resets_at: Some(99), status: "allowed".into() });
+        let reset_of = |before: Vec<ServerMessage>| -> Vec<RemoteEvent> { before.into_iter().filter_map(|m| if let ServerMessage::Reset { events, .. } = m { Some(events) } else { None }).flatten().collect() };
+
+        let key = generate_keypair().unwrap();
+        let mut old = phone(&r.gw, &key, Some(offer_secret(&r.store)), PROTOCOL_VERSION).await.unwrap();
+        let (_, _, before) = old.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
+        assert!(reset_of(before).is_empty(), "an older phone is sent none of them");
+
+        let key = generate_keypair().unwrap();
+        let mut new = phone_with(&r.gw, &key, Some(offer_secret(&r.store)), PROTOCOL_VERSION, &[protocol::PHONE_EXTRAS]).await.unwrap();
+        let (_, _, before) = new.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
+        let events = reset_of(before);
+        assert_eq!(events.len(), 3, "the latest of each, however many were said: {events:?}");
+        assert!(matches!(&events[0], RemoteEvent::Commands { commands } if commands[0].name == "review"));
+        assert!(matches!(&events[1], RemoteEvent::Todos { items } if items.len() == 1 && items[0].status == "completed"));
+        assert!(matches!(&events[2], RemoteEvent::PlanUsage { used, resets_at: Some(99), .. } if *used == 0.4));
+
+        // Live, too: one that said it can read them gets a new plan at once; the other doesn't.
+        r.bus.publish("a", UiEvent::Todos { parent: None, items: vec![todo("in_progress")] });
+        r.bus.publish("a", UiEvent::AssistantText { parent: None, block_id: "b".into(), text: "done".into() });
+        async fn next_event(p: &mut Phone) -> RemoteEvent {
+            loop {
+                if let ServerMessage::Event { event, .. } = p.next().await.unwrap() {
+                    return event;
+                }
+            }
+        }
+        assert!(matches!(next_event(&mut new).await, RemoteEvent::Todos { .. }));
+        assert!(matches!(next_event(&mut old).await, RemoteEvent::AssistantText { .. }), "an older phone is sent the text and not the plan");
     }
 
     #[tokio::test]
@@ -1603,7 +1652,7 @@ pub(crate) mod tests {
         mine.to_peer.send(hs.write()?).await.map_err(|e| e.to_string())?;
         let (_, channel) = hs.finish()?;
         let mut p = Phone { link: mine, channel, next: 0, hosts: Vec::new() };
-        p.send(&ClientMessage::Hello { protocol: PROTOCOL_VERSION, app_version: "1.0".into(), device_name: "Wi-Fi phone".into() });
+        p.send(&ClientMessage::Hello { protocol: PROTOCOL_VERSION, app_version: "1.0".into(), device_name: "Wi-Fi phone".into(), features: vec![] });
         matches!(p.next().await, Some(ServerMessage::Welcome { .. })).then_some(p).ok_or("no welcome".into())
     }
 
@@ -1686,7 +1735,7 @@ pub(crate) mod tests {
         mine.to_peer.send(hs.write().unwrap()).await.unwrap();
         let (_, channel) = hs.finish().unwrap();
         let mut p = Phone { link: mine, channel, next: 0, hosts: Vec::new() };
-        p.send(&ClientMessage::Hello { protocol: PROTOCOL_VERSION, app_version: "1".into(), device_name: "Late".into() });
+        p.send(&ClientMessage::Hello { protocol: PROTOCOL_VERSION, app_version: "1".into(), device_name: "Late".into(), features: vec![] });
         assert!(matches!(p.next().await, Some(ServerMessage::Welcome { .. })));
         assert!(p.next().await.is_none(), "closed instead of let in");
         assert!(r.gw.connected().is_empty());
