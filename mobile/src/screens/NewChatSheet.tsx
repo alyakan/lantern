@@ -49,7 +49,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
   const keyboard = useKeyboardUp();
   // A project's colour is the one the Mac's sidebar gives it, known from a chat the Mac has open there.
   const { chats } = useSyncState();
-  const colorOf = (name: string) => projectTint(projectColorOf(chats.find((c) => c.project === name)?.project_color)).fg;
+  const colorOf = (name: string) => projectTint(projectColorOf(chats.find((c) => c.project === name)?.project_color), colors.plainTint).fg;
   const [projects, setProjects] = useState<RemoteProject[] | null>(null);
   const [project, setProject] = useState<string | null>(initialProject ?? null);
   const [text, setText] = useState(initialText);
