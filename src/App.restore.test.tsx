@@ -24,7 +24,7 @@ const lastTime: SavedChat[] = [
 type Call = [string, Record<string, unknown> | undefined];
 
 /** Opens the app with the chats from last time on offer, recording every command it sends to the backend. */
-async function launch(offered = true): Promise<Call[]> {
+async function launch(offered = true, markerFile = false): Promise<Call[]> {
   const { installMockBackend } = await import("./dev/mockBackend");
   installMockBackend();
   const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args?: Record<string, unknown>, options?: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__;
@@ -32,6 +32,8 @@ async function launch(offered = true): Promise<Call[]> {
   const answer = internals.invoke;
   internals.invoke = (cmd, args, options) => {
     calls.push([cmd, args]);
+    // The file a swap script leaves for the next launch (the mock backend says there is none).
+    if (cmd === "take_restore_marker" && markerFile) return Promise.resolve(true);
     return answer(cmd, args, options);
   };
   const { default: App } = await import("./App");
@@ -179,6 +181,15 @@ describe("restoring chats at launch", () => {
     });
     // Used up: a later launch that isn't after an update offers the chats as usual.
     expect(localStorage.getItem("session.restoreAfterUpdate")).toBeNull();
+  });
+
+  it("brings every chat back by itself after a restart that left a marker file instead of marking storage", async () => {
+    const calls = await launch(false, true);
+    await screen.findByText("Should the backoff have jitter so clients don't retry in lockstep?");
+    expect(screen.queryByText(/were open when Lantern closed/)).toBeNull();
+    expect(await screen.findByTitle("Retry transient fetch errors")).toBeInTheDocument();
+    expect(calls.filter(([c]) => c === "open_session").map(([, a]) => a?.sessionId)).toEqual(["3f1c2a"]);
+    expect(calls.filter(([c]) => c === "start_session")).toEqual([]);
   });
 
   it("reopens the last project as usual after a restart to update when there were no chats to bring back", async () => {

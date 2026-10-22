@@ -235,7 +235,18 @@ export default function App() {
   useLayoutEffect(() => chatStore.notify(), [chats.slots, chatStore]);
   const reopened = useRef(false);
   // This launch follows a restart to update, which asked for the chats back: they are restored by themselves, not offered.
+  // The window's own restart marks it in storage; a restart that bypassed the window (a swap script) leaves a file, read once here.
   const [restoringAfterUpdate, setRestoringAfterUpdate] = useState(restoreAfterUpdatePending);
+  const [markerChecked, setMarkerChecked] = useState(false);
+  useEffect(() => {
+    api.takeRestoreMarker().then(
+      (asked) => {
+        if (asked) setRestoringAfterUpdate(true);
+        setMarkerChecked(true);
+      },
+      () => setMarkerChecked(true),
+    );
+  }, []);
   // The offered agents whose worktrees are gone have been left out (nothing to check counts as checked).
   const [goneChecked, setGoneChecked] = useState(false);
   const slotSeq = useRef(1);
@@ -572,7 +583,7 @@ export default function App() {
   // After a restart to update the chats that were open come back by themselves, in place of the last project (which the
   // first of them is, or else the project is reopened as usual). Ahead of that effect, which it then keeps from running.
   useEffect(() => {
-    if (!restoringAfterUpdate || !state.claudePath || !moves || !goneChecked) return;
+    if (!restoringAfterUpdate || !state.claudePath || !moves || !goneChecked || !markerChecked) return;
     clearRestoreAfterUpdate();
     setRestoringAfterUpdate(false);
     // Something was opened meanwhile: nothing is restored over it, and the card is back.
@@ -580,14 +591,14 @@ export default function App() {
       reopened.current = true;
       restoreAll();
     }
-  }, [restoringAfterUpdate, state.claudePath, moves, goneChecked]);
+  }, [restoringAfterUpdate, state.claudePath, moves, goneChecked, markerChecked]);
 
   // Reopen the last project once claude has been found (where it is now, if it moved), unless the chats are coming back instead.
   useEffect(() => {
-    if (restoringAfterUpdate || reopened.current || state.status !== "no_folder" || !state.claudePath || !moves) return;
+    if (!markerChecked || restoringAfterUpdate || reopened.current || state.status !== "no_folder" || !state.claudePath || !moves) return;
     reopened.current = true;
     if (lastFolder) startFresh(here(lastFolder), true);
-  }, [restoringAfterUpdate, state.status, state.claudePath, moves]);
+  }, [markerChecked, restoringAfterUpdate, state.status, state.claudePath, moves]);
 
   const openFolder = async () => {
     const folder = await open({ directory: true, multiple: false });

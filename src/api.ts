@@ -217,6 +217,8 @@ export const api = {
   earlierEvents: (folder: string, sessionId: string, hidden: number) => invoke<HistoryPage>("earlier_events", { folder, sessionId, hidden }),
   /** Which of the folders no longer exist. */
   foldersGone: (folders: string[]) => invoke<string[]>("folders_gone", { folders }),
+  /** Whether a restart that didn't go through the window (a script swapping the app in place) asked for the chats back. */
+  takeRestoreMarker: () => invoke<boolean>("take_restore_marker"),
   /** Where each folder was before it moved, as Lantern recorded it. */
   relocationsList: () => invoke<RelocationEntry[]>("relocations_list"),
   /** The recent folders that are gone, each with the place it probably moved to. */
