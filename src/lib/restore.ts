@@ -163,6 +163,37 @@ export function loadSaved(): SavedChat[] {
   }
 }
 
+const AFTER_UPDATE_KEY = "session.restoreAfterUpdate";
+/** How long a restart to update may take before the mark it left is taken for a stale one. */
+const AFTER_UPDATE_MAX_AGE = 10 * 60_000;
+
+/** A restart to update is about to stop every chat: the next launch brings them back by itself, without the card's click. */
+export function markRestoreAfterUpdate(now = Date.now()) {
+  try {
+    localStorage.setItem(AFTER_UPDATE_KEY, String(now));
+  } catch {
+    // storage unavailable; the chats are offered on the card instead
+  }
+}
+
+/** Whether this launch follows a restart to update that asked for its chats back. Looking doesn't use it up (see `clearRestoreAfterUpdate`). */
+export function restoreAfterUpdatePending(now = Date.now()): boolean {
+  try {
+    const at = Number(localStorage.getItem(AFTER_UPDATE_KEY));
+    return Number.isFinite(at) && at > 0 && now - at <= AFTER_UPDATE_MAX_AGE;
+  } catch {
+    return false;
+  }
+}
+
+export function clearRestoreAfterUpdate() {
+  try {
+    localStorage.removeItem(AFTER_UPDATE_KEY);
+  } catch {
+    // storage unavailable
+  }
+}
+
 export function save(chats: SavedChat[]) {
   try {
     localStorage.setItem(KEY, JSON.stringify(chats));

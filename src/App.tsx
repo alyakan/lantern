@@ -100,7 +100,7 @@ import { usePrChecks } from "./lib/usePrChecks";
 import { SetupScreen } from "./components/SetupScreen";
 import { Welcome } from "./components/Welcome";
 import { RestoreCard } from "./components/RestoreCard";
-import { agentSessionsOf, chatsToSave, currentFolder, loadSaved, restorable, save, savedChatOf, screenFirst, startsNow, sessionModesToSave, toCurrentFolders, withOffered, withoutGone, type SavedChat } from "./lib/restore";
+import { agentSessionsOf, chatsToSave, clearRestoreAfterUpdate, currentFolder, loadSaved, markRestoreAfterUpdate, restoreAfterUpdatePending, restorable, save, savedChatOf, screenFirst, startsNow, sessionModesToSave, toCurrentFolders, withOffered, withoutGone, type SavedChat } from "./lib/restore";
 import { SplitPane } from "./components/SplitPane";
 import { TopBar } from "./components/TopBar";
 import { Canvas, newLayout } from "./components/Canvas";
@@ -234,6 +234,8 @@ export default function App() {
   chatStore.assign(chats.slots);
   useLayoutEffect(() => chatStore.notify(), [chats.slots, chatStore]);
   const reopened = useRef(false);
+  // This launch follows a restart to update, which asked for the chats back: they are restored by themselves, not offered.
+  const [restoringAfterUpdate, setRestoringAfterUpdate] = useState(restoreAfterUpdatePending);
   const slotSeq = useRef(1);
   // Each chat's unsent text, so switching away and back doesn't lose it. A ref: typing needn't re-render the app.
   const drafts = useRef<Record<string, string>>({});
@@ -564,6 +566,18 @@ export default function App() {
     if (model === null && state.model) setDefaultModel(state.model);
     else if (model && state.model?.includes(model) && modelIds[model] !== state.model) setModelIds({ ...modelIds, [model]: state.model });
   }, [model, state.model]);
+
+  // After a restart to update the chats that were open come back by themselves, in place of the last project (which the
+  // first of them is, or else the project is reopened as usual). Ahead of that effect, which it then keeps from running.
+  useEffect(() => {
+    if (!restoringAfterUpdate || reopened.current || state.status !== "no_folder" || !state.claudePath || !moves) return;
+    clearRestoreAfterUpdate();
+    setRestoringAfterUpdate(false);
+    if (offer.length > 0) {
+      reopened.current = true;
+      restoreAll();
+    }
+  }, [restoringAfterUpdate, state.status, state.claudePath, moves]);
 
   // Reopen the last project once claude has been found (where it is now, if it moved).
   useEffect(() => {
@@ -2320,7 +2334,10 @@ export default function App() {
   const restartToUpdate = () => {
     setInstallStarted(true);
     setSettingsAt(null);
+    // The chats are saved as they change: the next launch brings them back by itself.
+    markRestoreAfterUpdate();
     api.restartToUpdate().catch((e) => {
+      clearRestoreAfterUpdate();
       setInstallStarted(false);
       // The attempt used the download up: it has to be fetched again.
       setUpdate(null);
@@ -2476,13 +2493,13 @@ export default function App() {
                   <div className="center muted">Opening {basename(lastFolder!)}…</div>
                 ) : (
                   <Welcome claudePath={state.claudePath ?? ""} loadRecent={loadRecentFolders} skip={[...hiddenFolders, ...relocateMenu.moved.map((m) => m.old)]} onOpenFolder={openFolder} onPick={(path) => startFresh(path)}>
-                    {offeredTop.length > 0 && state.claudePath && <RestoreCard chats={offeredTop} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />}
+                    {offeredTop.length > 0 && state.claudePath && !restoringAfterUpdate && <RestoreCard chats={offeredTop} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />}
                   </Welcome>
                 )
               ) : hero ? (
                 <div className="hero-wrap">
                   <div className="hero-stack">
-                    {offeredTop.length > 0 && state.claudePath && (
+                    {offeredTop.length > 0 && state.claudePath && !restoringAfterUpdate && (
                       <RestoreCard chats={offeredTop} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />
                     )}
                     {chatExtras}

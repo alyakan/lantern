@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { chatsReducer, initialChats } from "../sessions";
 import { initialState, type State } from "../store";
 import type { UiEvent } from "../types";
-import { agentSessionsOf, chatsToSave, currentFolder, isAgentFolder, loadSaved, restorable, save, screenFirst, sessionModesToSave, toCurrentFolders, withOffered, withoutGone, type SavedChat } from "./restore";
+import { agentSessionsOf, chatsToSave, clearRestoreAfterUpdate, currentFolder, isAgentFolder, loadSaved, markRestoreAfterUpdate, restoreAfterUpdatePending, restorable, save, screenFirst, sessionModesToSave, toCurrentFolders, withOffered, withoutGone, type SavedChat } from "./restore";
 
 const chat = (over: Partial<State>): State => ({ ...initialState, status: "idle", ...over });
 const talked = (sessionId: string, folder = "/p"): State => chat({ folder, sessionId, items: [{ type: "user", id: "u1", text: `Fix ${sessionId}` }] });
@@ -238,5 +238,32 @@ describe("chatsToSave, a team's review setting", () => {
 
   it("is not saved when it is off: an older save and a team that never asked look the same", () => {
     expect(chatsToSave(lead({ on: false, tidy: true, checks: ["reviewer"] }), "s1", {}, {})[0].orchestra).toEqual({ role: "main" });
+  });
+});
+
+describe("restoring after an update", () => {
+  beforeEach(() => localStorage.clear());
+
+  it("is not asked for until a restart to update marks it", () => {
+    expect(restoreAfterUpdatePending()).toBe(false);
+  });
+
+  it("stays pending, however often it is looked at, until it is cleared", () => {
+    markRestoreAfterUpdate();
+    expect(restoreAfterUpdatePending()).toBe(true);
+    expect(restoreAfterUpdatePending()).toBe(true);
+    clearRestoreAfterUpdate();
+    expect(restoreAfterUpdatePending()).toBe(false);
+  });
+
+  it("is forgotten when the restart it was for didn't happen (a mark from long ago)", () => {
+    markRestoreAfterUpdate(1_000);
+    expect(restoreAfterUpdatePending(1_000 + 5 * 60_000)).toBe(true);
+    expect(restoreAfterUpdatePending(1_000 + 11 * 60_000)).toBe(false);
+  });
+
+  it("ignores what isn't a time", () => {
+    localStorage.setItem("session.restoreAfterUpdate", "yes");
+    expect(restoreAfterUpdatePending()).toBe(false);
   });
 });
