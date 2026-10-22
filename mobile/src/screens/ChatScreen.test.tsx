@@ -18,7 +18,7 @@ const turn: RemoteEvent[] = [
   { kind: "file_edited", tool_use_id: "t2", path: "/p/Cargo.toml", created: false, added: 1, removed: 1 },
   { kind: "tool_started", tool_use_id: "t3", name: "Bash", summary: "npm test" },
   { kind: "tests_ran", tool_use_id: "t3", command: "npm test", passed: 412, failed: 0, skipped: 0 },
-  { kind: "turn_done", is_error: false, result: "ok", duration_ms: 3100 },
+  { kind: "turn_done", is_error: false, result: "ok", duration_ms: 3100, context_window: null },
 ];
 
 const withSession = async (events: RemoteEvent[], over = {}, answers = {}, chatOver = {}) => {
@@ -52,7 +52,7 @@ describe("a chat", () => {
       { kind: "tool_finished", tool_use_id: "c1", is_error: false },
       { kind: "tool_started", tool_use_id: "c2", name: "Bash", summary: "cargo build" },
       { kind: "tool_finished", tool_use_id: "c2", is_error: true },
-      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1000 },
+      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1000, context_window: null },
     ];
     await withSession(commands);
     expect(screen.queryByText("git status")).toBeNull();
@@ -74,7 +74,7 @@ describe("a chat", () => {
       { kind: "tool_started", tool_use_id: "w3", name: "Bash", summary: "npm test" },
       { kind: "tests_ran", tool_use_id: "w3", command: "npm test", passed: 9, failed: 0, skipped: 0 },
       { kind: "assistant_text", block_id: "f1", text: "All done. What changed:\n\n- the gateway checks Auto\n- the window checks again" },
-      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 192_000 },
+      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 192_000, context_window: null },
     ];
     await withSession(work);
     expect(screen.getByLabelText("Summary of the work")).toBeTruthy();
@@ -89,10 +89,10 @@ describe("a chat", () => {
     const talk: RemoteEvent[] = [
       { kind: "user_text", text: "First question here", at: 1_000_000, sent_by: "desktop" },
       { kind: "assistant_text", block_id: "r1", text: "First answer about the gateway." },
-      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1000 },
+      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1000, context_window: null },
       { kind: "user_text", text: "Second one about the login", at: 1_100_000, sent_by: "desktop" },
       { kind: "assistant_text", block_id: "r2", text: "I changed the login flow.\n\nShould I push the branch?" },
-      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1000 },
+      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1000, context_window: null },
     ];
     const hold = (text: string) => fireEvent(screen.getByLabelText(`You: ${text}`), "longPress");
 
@@ -132,7 +132,7 @@ describe("a chat", () => {
     });
 
     it("offers no quick replies for a question that is not yes or no, or while Claude is working", async () => {
-      await withSession([...talk.slice(0, 4), { kind: "assistant_text", block_id: "r3", text: "Which file should I start with?" }, { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1 }]);
+      await withSession([...talk.slice(0, 4), { kind: "assistant_text", block_id: "r3", text: "Which file should I start with?" }, { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1, context_window: null }]);
       expect(screen.queryByLabelText("Quick replies")).toBeNull();
     });
 

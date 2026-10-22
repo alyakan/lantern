@@ -63,7 +63,7 @@ describe("the Home screen", () => {
     expect(r[1]).toMatchObject({ title: "New chat" });
   });
 
-  it("lists chats under their projects: the project with the latest chat first, those with none last, the most recent chat first in each", () => {
+  it("lists chats under their projects: the projects by name, those with none last, the most recent chat first in each", () => {
     const list = rows(
       [
         chat({ slot: "a1", project: "alpha", active_at: 100 }),
@@ -76,11 +76,18 @@ describe("the Home screen", () => {
     );
     const g = groups(list);
     expect(g.map((x) => [x.project, x.rows.map((r) => r.slot), x.needsYou])).toEqual([
-      ["beta", ["b1", "b2"], 1],
       ["alpha", ["a2", "a1"], 0],
+      ["beta", ["b1", "b2"], 1],
       ["", ["n1"], 0],
     ]);
     expect(groups([])).toEqual([]);
+  });
+
+  it("keeps the projects where they are however the chats move, whatever the case of their names", () => {
+    const at = (a: number, b: number, c: number) => groups(rows([chat({ slot: "1", project: "lantern", active_at: a }), chat({ slot: "2", project: "Zed", active_at: b }), chat({ slot: "3", project: "api", active_at: c })], 9000)).map((x) => x.project);
+    expect(at(1, 2, 3)).toEqual(["api", "lantern", "Zed"]);
+    expect(at(3, 1, 2)).toEqual(["api", "lantern", "Zed"]);
+    expect(at(2, 3, 1)).toEqual(["api", "lantern", "Zed"]);
   });
 
   it("shows a project in the colour the Mac gave it, and in a plain one when it gave none or garbage", () => {

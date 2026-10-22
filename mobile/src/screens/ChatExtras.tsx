@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { PlanUsage } from "../sync/reducer";
-import { progressOf, usageOf } from "../view/plan";
+import { contextOf, progressOf, shortTokens, usageOf } from "../view/plan";
 import { ScrollView, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,7 +11,8 @@ import { Chevron } from "../ui/Chevron";
 import { useKeyboardUp } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
-import { colors, radius, shadow, space } from "../ui/theme";
+import { Dots } from "../ui/skeleton";
+import { colors, fonts, radius, shadow, space } from "../ui/theme";
 import type { Hit } from "../view/chatText";
 
 /** One thing a sheet offers: a row with a name. */
@@ -275,6 +276,101 @@ export function UsageRow({ plan }: { plan: PlanUsage }) {
         </Txt>
       )}
     </View>
+  );
+}
+
+/** How full the chat's context is, as a bar with the tokens it holds. */
+export function ContextRow({ context }: { context: { tokens: number; window: number | null } }) {
+  const c = contextOf(context);
+  const fill = c.tone === "stop" ? colors.stop : c.tone === "warn" ? colors.hi : colors.go;
+  return (
+    <View accessibilityLabel={`Context: ${c.label}`} style={{ backgroundColor: colors.paper, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
+        <Txt variant="body" style={{ fontWeight: "700" }}>
+          Context
+        </Txt>
+        <Txt variant="small" tone={c.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700" }}>
+          {c.label}
+        </Txt>
+      </View>
+      {c.percent !== null && (
+        <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.rule, overflow: "hidden" }}>
+          <View style={{ width: `${Math.max(c.percent, 2)}%`, height: 6, backgroundColor: fill }} />
+        </View>
+      )}
+      <Txt variant="tiny" tone="ink2">
+        {c.percent !== null && context.window ? `${shortTokens(context.tokens)} of ${shortTokens(context.window)} tokens. ` : ""}
+        {c.tone === "ok" ? "Claude forgets the oldest of it when it fills." : "Nearly full: ask for a /compact, or start a new chat."}
+      </Txt>
+    </View>
+  );
+}
+
+/** On Home: how much of the subscription's five-hour window is used, in a line with a thin bar under it. */
+export function UsageStrip({ plan }: { plan: PlanUsage }) {
+  const u = usageOf(plan);
+  const fill = u.tone === "stop" ? colors.stop : u.tone === "warn" ? colors.hi : colors.go;
+  return (
+    <View accessibilityLabel={`Plan usage: ${u.percent} percent of the five-hour window used. ${u.resets}`} accessible style={{ marginHorizontal: space.xl, marginTop: 10, gap: 5 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+        <Txt variant="tiny" tone={u.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700" }}>
+          {u.tone === "stop" ? "Plan limit reached" : `Plan · ${u.percent}% used`}
+        </Txt>
+        {u.resets !== "" && (
+          <Txt variant="tiny" tone="ink3">
+            {u.resets}
+          </Txt>
+        )}
+      </View>
+      <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.rule, overflow: "hidden" }}>
+        <View style={{ width: `${Math.max(u.percent, 2)}%`, height: 4, backgroundColor: fill }} />
+      </View>
+    </View>
+  );
+}
+
+/** What a finished step printed, as a sheet of monospaced text (asked of the Mac when it opens). */
+export function StepOutputSheet({ title, load, onClose }: { title: string; load: () => Promise<string>; onClose: () => void }) {
+  const insets = useSafeAreaInsets();
+  const [state, setState] = useState<{ text: string } | { error: string } | null>(null);
+  useEffect(() => {
+    let live = true;
+    load().then(
+      (text) => live && setState({ text }),
+      (e: Error) => live && setState({ error: e.message || "That didn't come through." }),
+    );
+    return () => {
+      live = false;
+    };
+    // Asked once, when it opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <Sheet onClose={onClose}>
+      {(close) => (
+        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: Math.max(insets.bottom, 16) + 8, gap: 10, maxHeight: "100%" }, shadow.float]}>
+          <Txt variant="heading" accessibilityRole="header" numberOfLines={2}>
+            {title}
+          </Txt>
+          {state === null ? (
+            <View accessibilityLabel="Loading" accessibilityRole="progressbar" accessible style={{ paddingVertical: 16 }}>
+              <Dots />
+            </View>
+          ) : "error" in state ? (
+            <Txt variant="small" tone="ink2">
+              {state.error}
+            </Txt>
+          ) : (
+            <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ paddingBottom: 4 }}>
+              <Text selectable accessibilityLabel="What it printed" style={{ fontFamily: fonts.mono, fontSize: 12, lineHeight: 17, color: colors.ink }}>
+                {state.text.trim() === "" ? "It printed nothing." : state.text}
+              </Text>
+            </ScrollView>
+          )}
+          <Button label="Done" kind="ghost" onPress={close} />
+        </View>
+      )}
+    </Sheet>
   );
 }
 

@@ -324,7 +324,7 @@ impl Gateway {
         }
         self.store.seen(&device, (self.now)());
         self.changed();
-        let mut session = Session { gw: &self, device: device.clone(), extras, subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
+        let mut session = Session { gw: &self, device: device.clone(), extras, last_plan: None, subscribed: HashMap::new(), unnamed: HashSet::new(), last_chats: Vec::new() };
         let _ = session.run(&mut link, &mut channel, &mut killed).await;
         self.conns.lock().unwrap().remove(&id);
         self.store.seen(&device, (self.now)());
@@ -429,6 +429,8 @@ struct Session<'a> {
     extras: bool,
     /// The chats it subscribed to, with the number of the last event it was sent of each.
     subscribed: HashMap<String, u64>,
+    /// The account's usage as it was last sent to this phone (it is sent again only when it changes).
+    last_plan: Option<(f64, Option<u64>, String)>,
     /// Chats it was sent a reset of before the hub knew their session, so before their transcript could be found: they
     /// are reset again once it is known (a chat restored from History is opened on the phone before the window says which
     /// session it is).
@@ -491,6 +493,7 @@ impl<'a> Session<'a> {
         let gw: &'a Gateway = self.gw;
         let mut slow: FuturesUnordered<Slow<'a>> = FuturesUnordered::new();
         self.send_chats(link, channel, true)?;
+        self.send_plan(link, channel)?;
         loop {
             tokio::select! {
                 _ = killed.changed() => return Ok(()),
@@ -527,6 +530,7 @@ impl<'a> Session<'a> {
                 },
                 _ = tick.tick() => {
                     self.send_chats(link, channel, false)?;
+                    self.send_plan(link, channel)?;
                     for slot in self.named_since_reset() {
                         self.reset(link, channel, &slot).await?;
                     }
@@ -546,6 +550,19 @@ impl<'a> Session<'a> {
             Some(event) => send_message(link, channel, &ServerMessage::Event { slot: ev.slot.clone(), seq: ev.seq, event }),
             None => Ok(()),
         }
+    }
+
+    /// The subscription's usage, to a phone that can read it: when it has been said and differs from what this phone was told.
+    fn send_plan(&mut self, link: &Link, channel: &mut Channel) -> Result<(), String> {
+        let plan = self.gw.hub.plan();
+        if !self.extras || plan.is_none() || plan == self.last_plan {
+            return Ok(());
+        }
+        if let Some((used, resets_at, status)) = plan.clone() {
+            send_message(link, channel, &ServerMessage::Plan { used, resets_at, status })?;
+        }
+        self.last_plan = plan;
+        Ok(())
     }
 
     fn send_chats(&mut self, link: &Link, channel: &mut Channel, always: bool) -> Result<(), String> {
@@ -581,8 +598,10 @@ impl<'a> Session<'a> {
                 events = merge_current_turn(events, live);
             }
         }
-        // What claude offers after a "/", its plan and the usage: the latest of each, since the kept events may not reach them.
-        events.extend(self.gw.hub.extras(slot).iter().filter_map(|e| protocol::to_remote_for(e, extras)));
+        // What claude offers after a "/", its plan and the context it holds: the latest of each, since the kept events may not reach them.
+        if extras {
+            events.extend(self.gw.hub.extras(slot));
+        }
         for (page, (events, done)) in pages(events).into_iter().enumerate() {
             send_message_waiting(link, channel, &ServerMessage::Reset { slot: slot.to_string(), seq, page: page as u32, done, hidden, events }).await?;
         }
@@ -705,6 +724,10 @@ impl<'a> Session<'a> {
             Request::Diff { slot, path } => {
                 self.chat_known(&slot)?;
                 host.diff(slot, path).await.map(serde_json::Value::String)
+            }
+            Request::StepOutput { slot, tool_use_id } => {
+                self.chat_known(&slot)?;
+                self.gw.hub.step_output(&slot, &tool_use_id).map(serde_json::Value::String).ok_or_else(|| "That step's output isn't kept any more. It is on your Mac.".to_string())
             }
             Request::Suggest { refresh } => self.gw.suggest(refresh).await,
             Request::PushToken { token } => self.gw.store.set_push_token(&self.device, &token).map(|()| serde_json::Value::Null),
@@ -1107,29 +1130,39 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn a_phone_is_sent_the_commands_plan_and_usage_only_if_it_said_it_can_read_them() {
+    async fn a_phone_is_sent_the_commands_plan_context_and_usage_only_if_it_said_it_can_read_them() {
         let r = rig();
         r.hub.opened("a", "/p");
         let todo = |status: &str| crate::ui_event::Todo { content: "Write tests".into(), status: status.into(), active_form: "Writing tests".into() };
         r.bus.publish("a", UiEvent::Commands { commands: vec![crate::ui_event::SlashCommand { name: "review".into(), description: "Review".into(), argument_hint: String::new() }] });
         r.bus.publish("a", UiEvent::Todos { parent: None, items: vec![todo("pending")] });
         r.bus.publish("a", UiEvent::Todos { parent: None, items: vec![todo("completed")] });
-        r.bus.publish("a", UiEvent::PlanUsage { used: 0.4, resets_at: Some(99), status: "allowed".into() });
+        r.bus.publish("a", UiEvent::ContextUsed { tokens: 90_000 });
+        r.bus.publish("a", UiEvent::TurnDone { is_error: false, result: None, cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: Some(200_000) });
+        r.bus.publish("b", UiEvent::PlanUsage { used: 0.4, resets_at: Some(99), status: "allowed".into() });
         let reset_of = |before: Vec<ServerMessage>| -> Vec<RemoteEvent> { before.into_iter().filter_map(|m| if let ServerMessage::Reset { events, .. } = m { Some(events) } else { None }).flatten().collect() };
 
         let key = generate_keypair().unwrap();
         let mut old = phone(&r.gw, &key, Some(offer_secret(&r.store)), PROTOCOL_VERSION).await.unwrap();
         let (_, _, before) = old.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
-        assert!(reset_of(before).is_empty(), "an older phone is sent none of them");
+        assert!(reset_of(before.to_vec()).iter().all(|e| !e.is_extra()), "an older phone is sent none of them");
+        assert!(!before.iter().any(|m| matches!(m, ServerMessage::Plan { .. })));
 
         let key = generate_keypair().unwrap();
         let mut new = phone_with(&r.gw, &key, Some(offer_secret(&r.store)), PROTOCOL_VERSION, &[protocol::PHONE_EXTRAS]).await.unwrap();
         let (_, _, before) = new.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
-        let events = reset_of(before);
+        let usage = |msgs: &[ServerMessage]| msgs.iter().find_map(|m| if let ServerMessage::Plan { used, resets_at, .. } = m { Some((*used, *resets_at)) } else { None });
+        let mut plan = usage(&before);
+        let events: Vec<RemoteEvent> = reset_of(before).into_iter().filter(|e| e.is_extra()).collect();
         assert_eq!(events.len(), 3, "the latest of each, however many were said: {events:?}");
         assert!(matches!(&events[0], RemoteEvent::Commands { commands } if commands[0].name == "review"));
         assert!(matches!(&events[1], RemoteEvent::Todos { items } if items.len() == 1 && items[0].status == "completed"));
-        assert!(matches!(&events[2], RemoteEvent::PlanUsage { used, resets_at: Some(99), .. } if *used == 0.4));
+        assert_eq!(events[2], RemoteEvent::Context { tokens: 90_000, window: Some(200_000) });
+        // The account's usage comes as a message of its own, once it has been said (by any chat).
+        while plan.is_none() {
+            plan = usage(&[new.next().await.unwrap()]);
+        }
+        assert_eq!(plan, Some((0.4, Some(99))));
 
         // Live, too: one that said it can read them gets a new plan at once; the other doesn't.
         r.bus.publish("a", UiEvent::Todos { parent: None, items: vec![todo("in_progress")] });
@@ -1143,6 +1176,18 @@ pub(crate) mod tests {
         }
         assert!(matches!(next_event(&mut new).await, RemoteEvent::Todos { .. }));
         assert!(matches!(next_event(&mut old).await, RemoteEvent::AssistantText { .. }), "an older phone is sent the text and not the plan");
+    }
+
+    #[tokio::test]
+    async fn a_phone_can_read_what_a_finished_step_printed_while_the_mac_keeps_it() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        r.bus.publish("a", UiEvent::ToolFinished { parent: None, tool_use_id: "t1".into(), is_error: false, output: "3 passed".into() });
+        let (_, mut p) = paired(&r).await;
+        assert_eq!(p.ask(Request::StepOutput { slot: "a".into(), tool_use_id: "t1".into() }).await.0, Some(json!("3 passed")));
+        let (ok, err, _) = p.ask(Request::StepOutput { slot: "a".into(), tool_use_id: "gone".into() }).await;
+        assert!(ok.is_none() && err.unwrap().contains("isn't kept"));
+        assert!(p.ask(Request::StepOutput { slot: "nope".into(), tool_use_id: "t1".into() }).await.1.unwrap().contains("isn't open"));
     }
 
     #[tokio::test]

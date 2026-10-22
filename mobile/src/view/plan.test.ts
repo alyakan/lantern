@@ -1,5 +1,5 @@
 import { matchCommands, slashQuery } from "./slash";
-import { progressOf, untilText, usageOf } from "./plan";
+import { contextOf, progressOf, shortTokens, untilText, usageOf } from "./plan";
 
 const todo = (content: string, status: string, active_form = `${content}…`) => ({ content, status, active_form });
 
@@ -37,6 +37,23 @@ describe("the usage", () => {
     expect(untilText(NOW2 / 1000 + 35 * 60, NOW2)).toBe("35 min");
     expect(untilText(NOW2 / 1000 + 120 * 60, NOW2)).toBe("2 h");
     expect(untilText(NOW2 / 1000 - 5, NOW2)).toBe("soon");
+  });
+});
+
+describe("the context", () => {
+  it("is a share of the window, warning at 75 and 90 as the Mac's meter does", () => {
+    expect(contextOf({ tokens: 62_000, window: 200_000 })).toEqual({ percent: 31, label: "31% of context", tone: "ok" });
+    expect(contextOf({ tokens: 150_000, window: 200_000 }).tone).toBe("warn");
+    expect(contextOf({ tokens: 185_000, window: 200_000 }).tone).toBe("stop");
+  });
+
+  it("is only the tokens while nothing says the window, or when the window is below what is held", () => {
+    expect(contextOf({ tokens: 84_000, window: null })).toEqual({ percent: null, label: "84k tokens", tone: "ok" });
+    expect(contextOf({ tokens: 250_000, window: 200_000 }).percent).toBeNull();
+  });
+
+  it("says a count short", () => {
+    expect([shortTokens(900), shortTokens(84_400), shortTokens(1_200_000), shortTokens(2_000_000)]).toEqual(["900", "84k", "1.2M", "2M"]);
   });
 });
 

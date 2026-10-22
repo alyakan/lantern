@@ -69,7 +69,8 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
     sync.projects().then(
       (list) => {
         if (!live) return;
-        setProjects(list);
+        // Listed by name so the list stays put; the one used last (the Mac's first) is still the one picked.
+        setProjects([...list].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })));
         setProject((now) => (now && list.some((p) => p.id === now) ? now : (list[0]?.id ?? null)));
       },
       (e: Error) => {

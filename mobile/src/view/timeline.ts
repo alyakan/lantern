@@ -12,7 +12,7 @@ export interface StepChip {
   /** The files an edit chip stands for: a tap lists their diffs. */
   files?: string[];
   /** What a grouped chip stands for ("Ran 5 commands"): a tap lists them, one line each. */
-  items?: { text: string; bad: boolean }[];
+  items?: { text: string; bad: boolean; /** The step's id, to ask what it printed. */ id: string }[];
 }
 
 export type Row =
@@ -56,7 +56,7 @@ export function stepChips(steps: Step[]): StepChip[] {
   // opening to its steps.
   const rest = steps.filter((s) => !s.tests && !s.edits.length && !["Read", "Grep", "Glob", "WebSearch", "WebFetch"].includes(s.name));
   const group = (key: string, label: string, of: Step[], line: (s: Step) => string) => {
-    if (of.length) chips.push({ key, label, tone: "plain", items: of.map((s) => ({ text: clip(line(s), 200), bad: s.isError })) });
+    if (of.length) chips.push({ key, label, tone: "plain", items: of.map((s) => ({ text: clip(line(s), 200), bad: s.isError, id: s.id })) });
   };
   const commands = rest.filter((s) => s.name === "Bash" || s.name === "BashOutput");
   group("run", `Ran ${plural(commands.length, "command")}`, commands, (s) => s.summary || "a command");

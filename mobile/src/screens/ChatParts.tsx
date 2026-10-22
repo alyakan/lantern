@@ -132,7 +132,7 @@ export const AssistantRow = memo(function AssistantRow({ item, onActions }: { it
   );
 });
 
-export const StepsRow = memo(function StepsRow({ chips, onFiles }: { chips: StepChip[]; onFiles: (files: string[]) => void }) {
+export const StepsRow = memo(function StepsRow({ chips, onFiles, onOutput }: { chips: StepChip[]; onFiles: (files: string[]) => void; /** Present when the Mac can say what a step printed: a tap on one of a chip's lines asks. */ onOutput?: (step: { id: string; text: string }) => void }) {
   // A grouped chip ("Ran 5 commands") opens to what it stands for, one line each.
   const [open, setOpen] = useState<string | null>(null);
   const opened = chips.find((c) => c.key === open && c.items);
@@ -148,11 +148,20 @@ export const StepsRow = memo(function StepsRow({ chips, onFiles }: { chips: Step
       {opened?.items && (
         <FadeSlideIn>
           <View accessibilityLabel={opened.label} style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: radius.inner, padding: 10, gap: 6 }}>
-            {opened.items.map((it, i) => (
-              <Txt key={i} variant="mono" tone={it.bad ? "stop" : "ink2"} numberOfLines={3} style={{ fontSize: 12, lineHeight: 17 }}>
-                {it.text}
-              </Txt>
-            ))}
+            {opened.items.map((it, i) => {
+              const line = (
+                <Txt variant="mono" tone={it.bad ? "stop" : "ink2"} numberOfLines={3} style={{ fontSize: 12, lineHeight: 17 }}>
+                  {it.text}
+                </Txt>
+              );
+              return onOutput ? (
+                <Pressable key={i} accessibilityRole="button" accessibilityLabel={`${it.text}. See what it printed`} onPress={() => onOutput({ id: it.id, text: it.text })} hitSlop={4}>
+                  {line}
+                </Pressable>
+              ) : (
+                <View key={i}>{line}</View>
+              );
+            })}
           </View>
         </FadeSlideIn>
       )}

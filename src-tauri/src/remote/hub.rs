@@ -84,6 +84,9 @@ struct Log {
     /// told them whatever the kept events no longer reach.
     commands: Option<Vec<crate::ui_event::SlashCommand>>,
     todos: Option<Vec<crate::ui_event::Todo>>,
+    /// The tokens the chat holds, and its model's context size once a turn's result said it.
+    context: Option<u64>,
+    window: Option<u64>,
 }
 
 impl Log {
@@ -126,7 +129,10 @@ impl Log {
                 }
             }
             UiEvent::Thinking { .. } | UiEvent::TextDelta { .. } | UiEvent::ToolStarted { .. } => self.working = true,
-            UiEvent::TurnDone { .. } => self.working = false,
+            UiEvent::TurnDone { context_window, .. } => {
+                self.working = false;
+                self.window = context_window.or(self.window);
+            }
             UiEvent::PermissionRequested { request_id, .. } => {
                 self.pending.insert(request_id.clone());
             }
@@ -146,8 +152,9 @@ impl Log {
             UiEvent::AgentAsleep { asleep } => self.asleep = *asleep,
             UiEvent::ConversationReset => {
                 self.first_prompt = None;
-                self.todos = None;
+                (self.todos, self.context) = (None, None);
             }
+            UiEvent::ContextUsed { tokens } => self.context = Some(*tokens),
             UiEvent::Commands { commands } => self.commands = Some(commands.clone()),
             UiEvent::Todos { parent: None, items } => self.todos = Some(items.clone()),
             _ => {}
@@ -351,20 +358,38 @@ impl SessionHub {
         self.chats.lock().unwrap().get(slot).map(|log| log.info(slot))
     }
 
-    /// What a phone that opens the chat is told besides its events: the commands claude offers there, its plan, and the
-    /// account's usage (each only if it has been said).
-    pub fn extras(&self, slot: &str) -> Vec<UiEvent> {
+    /// What a phone that opens the chat is told besides its events: the commands claude offers there, its plan and the context
+    /// it holds (each only if it has been said), since the kept events may no longer reach them.
+    pub fn extras(&self, slot: &str) -> Vec<super::protocol::RemoteEvent> {
         let chats = self.chats.lock().unwrap();
-        let log = chats.get(slot);
+        let Some(log) = chats.get(slot) else { return Vec::new() };
         let mut out = Vec::new();
-        if let Some(commands) = log.and_then(|l| l.commands.clone()) {
-            out.push(UiEvent::Commands { commands });
-        }
-        if let Some(items) = log.and_then(|l| l.todos.clone()) {
-            out.push(UiEvent::Todos { parent: None, items });
-        }
-        out.extend(self.plan.lock().unwrap().clone());
+        out.extend(log.commands.clone().and_then(|commands| super::protocol::to_remote(&UiEvent::Commands { commands })));
+        out.extend(log.todos.clone().and_then(|items| super::protocol::to_remote(&UiEvent::Todos { parent: None, items })));
+        out.extend(log.context.map(|tokens| super::protocol::RemoteEvent::Context { tokens, window: log.window }));
         out
+    }
+
+    /// The subscription's usage as the last chat to report it said: how much of the window, when it resets, and the status.
+    pub fn plan(&self) -> Option<(f64, Option<u64>, String)> {
+        match self.plan.lock().unwrap().as_ref()? {
+            UiEvent::PlanUsage { used, resets_at, status } => Some((*used, *resets_at, status.clone())),
+            _ => None,
+        }
+    }
+
+    /// What the chat's step printed when it finished, if the hub still keeps it, cut to what a phone is sent.
+    pub fn step_output(&self, slot: &str, tool_use_id: &str) -> Option<String> {
+        let chats = self.chats.lock().unwrap();
+        let output = chats.get(slot)?.entries.iter().rev().find_map(|(e, _)| match &e.event {
+            UiEvent::ToolFinished { parent: None, tool_use_id: id, output, .. } if id == tool_use_id => Some(output.as_str()),
+            _ => None,
+        })?;
+        let mut cut: String = output.chars().take(super::protocol::STEP_OUTPUT_MAX).collect();
+        if output.chars().count() > super::protocol::STEP_OUTPUT_MAX {
+            cut.push_str(super::protocol::CUT);
+        }
+        Some(cut)
     }
 
     /// What came after event `after` of the chat (None: no such chat).
@@ -445,19 +470,39 @@ mod tests {
     }
 
     #[test]
-    fn the_latest_commands_plan_and_usage_are_kept_past_the_events_cap() {
+    fn the_latest_commands_plan_and_context_are_kept_past_the_events_cap() {
         let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
         let todo = |s: &str| crate::ui_event::Todo { content: "a".into(), status: s.into(), active_form: "a".into() };
-        feed(&hub, "a", vec![UiEvent::Todos { parent: None, items: vec![todo("pending")] }, UiEvent::Todos { parent: None, items: vec![todo("completed")] }, UiEvent::PlanUsage { used: 0.2, resets_at: None, status: "allowed".into() }]);
-        feed(&hub, "b", vec![UiEvent::PlanUsage { used: 0.3, resets_at: None, status: "allowed".into() }]);
+        feed(&hub, "a", vec![UiEvent::Todos { parent: None, items: vec![todo("pending")] }, UiEvent::Todos { parent: None, items: vec![todo("completed")] }, UiEvent::ContextUsed { tokens: 50_000 }, UiEvent::PlanUsage { used: 0.2, resets_at: None, status: "allowed".into() }]);
+        feed(&hub, "b", vec![UiEvent::PlanUsage { used: 0.3, resets_at: Some(5), status: "allowed".into() }]);
         // Pushed out of the few events kept, they are still told.
         feed(&hub, "a", (0..4).map(|_| UiEvent::AssistantText { parent: None, block_id: "x".into(), text: "y".repeat(200) }).collect());
+        use super::super::protocol::RemoteEvent as R;
         let told = hub.extras("a");
-        assert!(matches!(&told[0], UiEvent::Todos { items, .. } if items[0].status == "completed"));
-        assert!(matches!(&told[1], UiEvent::PlanUsage { used, .. } if *used == 0.3), "the account's usage is the last one said, by any chat");
+        assert!(matches!(&told[0], R::Todos { items } if items[0].status == "completed"));
+        assert_eq!(told[1], R::Context { tokens: 50_000, window: None });
         assert_eq!(told.len(), 2);
+        assert_eq!(hub.plan(), Some((0.3, Some(5), "allowed".to_string())), "the account's usage is the last one said, by any chat");
+        // A turn's result says the model's context size, and it is told from then on.
+        let mut finished = done();
+        if let UiEvent::TurnDone { context_window, .. } = &mut finished {
+            *context_window = Some(200_000);
+        }
+        feed(&hub, "a", vec![finished]);
+        assert_eq!(hub.extras("a")[1], R::Context { tokens: 50_000, window: Some(200_000) });
         feed(&hub, "a", vec![UiEvent::ConversationReset]);
-        assert_eq!(hub.extras("a").len(), 1, "a new conversation has no plan");
+        assert!(hub.extras("a").is_empty(), "a new conversation has no plan and holds nothing");
+    }
+
+    #[test]
+    fn a_finished_steps_output_is_told_while_it_is_kept_and_cut_when_long() {
+        let hub = hub();
+        let finished = |id: &str, output: String| UiEvent::ToolFinished { parent: None, tool_use_id: id.into(), is_error: false, output };
+        feed(&hub, "a", vec![finished("t1", "ok\n3 passed".into()), finished("t2", "x".repeat(super::super::protocol::STEP_OUTPUT_MAX + 50)), UiEvent::ToolFinished { parent: Some("sub".into()), tool_use_id: "t3".into(), is_error: false, output: "a subagent's".into() }]);
+        assert_eq!(hub.step_output("a", "t1").as_deref(), Some("ok\n3 passed"));
+        let long = hub.step_output("a", "t2").unwrap();
+        assert!(long.ends_with(super::super::protocol::CUT) && long.chars().count() < super::super::protocol::STEP_OUTPUT_MAX + 100);
+        assert_eq!((hub.step_output("a", "t3"), hub.step_output("a", "nope"), hub.step_output("b", "t1")), (None, None, None), "a subagent's step, one never seen, a chat not kept");
     }
 
     #[test]

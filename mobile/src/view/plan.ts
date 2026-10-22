@@ -35,6 +35,30 @@ export function untilText(at: number, now: number): string {
   return m === 0 ? `${h} h` : `${h} h ${m} min`;
 }
 
+/** "190k", "1.2M": a token count short enough for a line. */
+export function shortTokens(n: number): string {
+  if (n < 1_000) return `${n}`;
+  if (n < 1_000_000) return `${Math.round(n / 1_000)}k`;
+  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+}
+
+export interface Context {
+  /** Of the window, whole percent, never over 100; null while nothing says what the window is. */
+  percent: number | null;
+  /** "62% of context" with a window, "84k tokens" without. */
+  label: string;
+  /** Amber and red from the same points the Mac's own meter warns at (75% and 90%). */
+  tone: "ok" | "warn" | "stop";
+}
+
+/** How full a chat's context is. A window below what the chat already holds is wrong, so it isn't believed (as the Mac's meter does). */
+export function contextOf(ctx: { tokens: number; window: number | null }): Context {
+  const window = ctx.window && ctx.window >= ctx.tokens ? ctx.window : null;
+  if (window === null) return { percent: null, label: `${shortTokens(ctx.tokens)} tokens`, tone: "ok" };
+  const percent = Math.round(Math.min(ctx.tokens / window, 1) * 100);
+  return { percent, label: `${percent}% of context`, tone: percent >= 90 ? "stop" : percent >= 75 ? "warn" : "ok" };
+}
+
 export function usageOf(plan: PlanUsage, now = Date.now()): Usage {
   const percent = Math.max(0, Math.min(100, Math.round(plan.used * 100)));
   const stopped = plan.status === "rejected" || percent >= 100;

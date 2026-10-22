@@ -9,4 +9,4 @@ export type Request = { "op": "list_chats" } | { "op": "list_waiting" } | { "op"
 /**
  * Step by step, or else a plain Chat. A team is started on the Mac.
  */
-workflow: RemoteWorkflow | null, } | { "op": "controls" } | { "op": "set_permissions", slot: string, permissions: RemotePermissions, } | { "op": "set_preset", slot: string, preset: string, } | { "op": "set_workflow", slot: string, workflow: RemoteWorkflow, } | { "op": "suggest", refresh: boolean, } | { "op": "diff", slot: string, path: string, } | { "op": "push_token", token: string, };
+workflow: RemoteWorkflow | null, } | { "op": "controls" } | { "op": "set_permissions", slot: string, permissions: RemotePermissions, } | { "op": "set_preset", slot: string, preset: string, } | { "op": "set_workflow", slot: string, workflow: RemoteWorkflow, } | { "op": "suggest", refresh: boolean, } | { "op": "diff", slot: string, path: string, } | { "op": "step_output", slot: string, tool_use_id: string, } | { "op": "push_token", token: string, };

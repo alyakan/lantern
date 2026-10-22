@@ -1,6 +1,6 @@
 import { fireEvent, screen } from "@testing-library/react-native";
 import { renderWith } from "../test/render";
-import { PlanCard, SlashPicker, UsageRow } from "./ChatExtras";
+import { ContextRow, PlanCard, SlashPicker, StepOutputSheet, UsageRow, UsageStrip } from "./ChatExtras";
 
 const todo = (content: string, status: string, active_form = `${content}…`) => ({ content, status, active_form });
 
@@ -54,5 +54,46 @@ describe("the plan usage", () => {
   it("says the limit is reached", async () => {
     await renderWith(<UsageRow plan={{ used: 1, resetsAt: null, status: "rejected" }} />);
     expect(screen.getByText("Limit reached")).toBeTruthy();
+  });
+});
+
+describe("the usage on Home and the context in a chat", () => {
+  it("shows the plan usage as a line with when it resets", async () => {
+    await renderWith(<UsageStrip plan={{ used: 0.3, resetsAt: Date.now() / 1000 + 45 * 60 + 5, status: "allowed" }} />);
+    expect(screen.getByText("Plan · 30% used")).toBeTruthy();
+    expect(screen.getByText("Resets in 45 min")).toBeTruthy();
+  });
+
+  it("shows how full the chat's context is, and what to do when it is nearly full", async () => {
+    await renderWith(<ContextRow context={{ tokens: 62_000, window: 200_000 }} />);
+    expect(screen.getByText("31% of context")).toBeTruthy();
+    expect(screen.getByText(/62k of 200k tokens/)).toBeTruthy();
+    await renderWith(<ContextRow context={{ tokens: 190_000, window: 200_000 }} />);
+    expect(screen.getByText(/ask for a \/compact/i)).toBeTruthy();
+  });
+
+  it("shows only the tokens when the window isn't known", async () => {
+    await renderWith(<ContextRow context={{ tokens: 84_000, window: null }} />);
+    expect(screen.getByText("84k tokens")).toBeTruthy();
+  });
+});
+
+describe("what a step printed", () => {
+  it("is asked for when the sheet opens, and shown as text", async () => {
+    const load = jest.fn(async () => "3 passed\n0 failed");
+    await renderWith(<StepOutputSheet title="npm test" load={load} onClose={jest.fn()} />);
+    expect(await screen.findByLabelText("What it printed")).toBeTruthy();
+    expect(screen.getByText(/3 passed/)).toBeTruthy();
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("says why when the Mac no longer has it", async () => {
+    await renderWith(<StepOutputSheet title="npm test" load={() => Promise.reject(new Error("That step's output isn't kept any more. It is on your Mac."))} onClose={jest.fn()} />);
+    expect(await screen.findByText(/isn't kept any more/)).toBeTruthy();
+  });
+
+  it("says so when it printed nothing", async () => {
+    await renderWith(<StepOutputSheet title="true" load={async () => "  "} onClose={jest.fn()} />);
+    expect(await screen.findByText("It printed nothing.")).toBeTruthy();
   });
 });
