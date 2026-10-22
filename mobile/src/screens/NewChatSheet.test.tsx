@@ -17,6 +17,8 @@ async function open(answers: Parameters<typeof attachSession>[1] = { projects, n
   return { onClose, onStarted, ...session };
 }
 
+/** The line that says what it runs on opens its options. */
+const openOptions = (summary: string | RegExp = /^Runs on/) => fireEvent.press(screen.getByRole("button", { name: summary }));
 const write = (text: string) => fireEvent.changeText(screen.getByLabelText("What to start with"), text);
 
 describe("while the projects are coming", () => {
@@ -157,6 +159,10 @@ describe("choosing what a new chat runs on", () => {
 
   it("starts on Ask with the project's own models unless something else is chosen", async () => {
     const { lastOf } = await openWithControls(true);
+    // Said in a line first; the options are behind it.
+    expect(screen.getByRole("button", { name: "Runs on: Chat · Ask · Project's own" })).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: "Auto" })).toBeNull();
+    await openOptions();
     await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" })).toBeTruthy());
     expect(screen.getByRole("radio", { name: "Ask" }).props.accessibilityState).toMatchObject({ selected: true });
     await write("Fix it");
@@ -166,10 +172,12 @@ describe("choosing what a new chat runs on", () => {
 
   it("starts on Auto with a preset when those are chosen and the Mac lets phones use Auto", async () => {
     const { lastOf } = await openWithControls(true);
+    await openOptions();
     await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: false }));
     await fireEvent.press(screen.getByRole("radio", { name: "Auto" }));
     expect(screen.getByText(/starts on Auto/)).toBeTruthy();
     await fireEvent.press(screen.getByRole("radio", { name: "Max" }));
+    expect(screen.getByRole("button", { name: "Runs on: Chat · Auto · Max" })).toBeTruthy();
     await write("Fix it");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
     await waitFor(() => expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/lantern", text: "Fix it", permissions: "auto", preset: "max", workflow: null }));
@@ -177,6 +185,9 @@ describe("choosing what a new chat runs on", () => {
 
   it("can't pick Auto while the Mac's setting is off, and says where to turn it on", async () => {
     await openWithControls(false);
+    // The note is on the screen before anything is opened.
+    expect(screen.getByText(/Let paired phones use Auto/)).toBeTruthy();
+    await openOptions();
     await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" })).toBeTruthy());
     expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: true });
     expect(screen.getByText(/Let paired phones use Auto/)).toBeTruthy();
@@ -197,10 +208,12 @@ describe("starting a chat as Step by step", () => {
     const { controller } = makeController();
     const session = attachSession(controller, { projects, new_chat: { slot: "s9" }, controls: { allow_auto: false, presets: [] } }, ["controls", "workflow"]);
     await renderWith(<NewChatSheet onClose={jest.fn()} onStarted={jest.fn()} />, { connection: connectedWithControls }, controller);
+    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Runs on: Chat · Ask · Project's own" })).toBeTruthy();
+    await openOptions();
     await waitFor(() => expect(screen.getByRole("radio", { name: "Step by step" })).toBeTruthy());
     expect(screen.getByRole("radio", { name: "Chat" }).props.accessibilityState).toMatchObject({ selected: true });
     await fireEvent.press(screen.getByRole("radio", { name: "Step by step" }));
-    await waitFor(() => expect(screen.getByRole("radio", { name: "lantern" })).toBeTruthy());
     await fireEvent.changeText(screen.getByLabelText("What to start with"), "Build it");
     await fireEvent.press(screen.getByRole("button", { name: "Start the chat" }));
     await waitFor(() => expect(session.lastOf("new_chat")).toMatchObject({ op: "new_chat", workflow: "steps", permissions: "ask" }));

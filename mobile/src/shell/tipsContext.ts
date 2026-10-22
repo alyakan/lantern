@@ -1,7 +1,6 @@
 import { createContext, createElement, useContext, useSyncExternalStore, type ReactNode } from "react";
 import { noMemory, noPlatform, TipJar, type TipState } from "../tips";
 import { AccentContext, EMBER } from "../ui/accent";
-import { colors } from "../ui/theme";
 
 export const TipsContext = createContext<TipJar | null>(null);
 
@@ -21,5 +20,5 @@ export function useTips(): TipState {
 /** Gives everything inside the accent a regular (a running pledge) gets, Ember, and the usual cobalt to everyone else. */
 export function AccentFromPledge({ children }: { children: ReactNode }) {
   const { pledger } = useTips();
-  return createElement(AccentContext.Provider, { value: pledger ? EMBER : colors.cobalt }, children);
+  return createElement(AccentContext.Provider, { value: pledger ? EMBER : null }, children);
 }

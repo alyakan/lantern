@@ -1,7 +1,7 @@
 import { StyleSheet, View } from "react-native";
 import { render, screen } from "@testing-library/react-native";
-import { Bar, ChatSkeleton, DiffSkeleton, Dots, HomeSkeleton, ProjectsSkeleton, Pulse, PULSE_MIN, SHAPE, SHAPE_DARK } from "./skeleton";
-import { colors } from "./theme";
+import { Bar, ChatSkeleton, DiffSkeleton, Dots, HomeSkeleton, ProjectsSkeleton, Pulse, PULSE_MIN } from "./skeleton";
+import { darkColors, lightColors } from "./theme";
 
 /** WCAG's contrast ratio between two #rrggbb colours (1: the same, 21: black on white). */
 function contrast(a: string, b: string) {
@@ -21,17 +21,17 @@ function over(fg: string, bg: string, alpha: number) {
 
 describe("the loading shapes can be seen", () => {
   it("against the page and a white card, even at the faintest of their breathing", () => {
-    for (const [name, shape] of [["light", SHAPE], ["dark", SHAPE_DARK]] as const) {
-      for (const [where, ground] of [["page", colors.paper], ["card", colors.card]] as const) {
-        expect(contrast(over(shape, ground, PULSE_MIN), ground)).toBeGreaterThanOrEqual(name === "light" ? 1.12 : 1.3);
-        void where;
+    for (const palette of [lightColors, darkColors]) {
+      for (const ground of [palette.paper, palette.card]) {
+        expect(contrast(over(palette.shape, ground, PULSE_MIN), ground)).toBeGreaterThanOrEqual(1.12);
+        expect(contrast(over(palette.shapeStrong, ground, PULSE_MIN), ground)).toBeGreaterThanOrEqual(1.3);
       }
     }
   });
 
   it("which the page's own rule colour, used before, did not manage", () => {
     // Under the 1.12 the lightest shape is held to above.
-    expect(contrast(over(colors.rule, colors.paper, 0.45), colors.paper)).toBeLessThan(1.12);
+    expect(contrast(over(lightColors.rule, lightColors.paper, 0.45), lightColors.paper)).toBeLessThan(1.12);
   });
 });
 

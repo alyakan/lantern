@@ -1,7 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Animated, Easing, View, type DimensionValue, type StyleProp, type ViewStyle } from "react-native";
 import { skips } from "./motion";
-import { colors, radius, space } from "./theme";
+import { radius, space, useColors } from "./theme";
 
 /** How faint the shapes get at the bottom of their breathing. */
 export const PULSE_MIN = 0.6;
@@ -34,19 +34,20 @@ export function Pulse({ children, label, delay = 0, style }: { children: ReactNo
 }
 
 /**
- * The greys of the shapes. They have to stand out from the page (`colors.paper`) and from a white card, at the dimmest the
- * breathing makes them: the page's own `colors.rule` is too close to it to be seen.
+ * The greys of the shapes (the palette's `shape` and the stronger `shapeStrong`). They have to stand out from the page and
+ * from a card, at the dimmest the breathing makes them: the page's own `rule` is too close to it to be seen.
  */
-export const SHAPE = "#cdd5de";
-export const SHAPE_DARK = "#aeb9c6";
 
-/** One grey block of the shape being waited for. */
+/** One grey block of the shape being waited for; `dark` is the stronger grey. */
 export function Bar({ w = "100%", h = 12, r, dark, style }: { w?: DimensionValue; h?: number; r?: number; dark?: boolean; style?: StyleProp<ViewStyle> }) {
-  return <View style={[{ width: w, height: h, borderRadius: r ?? h / 2, backgroundColor: dark ? SHAPE_DARK : SHAPE }, style]} />;
+  const colors = useColors();
+  return <View style={[{ width: w, height: h, borderRadius: r ?? h / 2, backgroundColor: dark ? colors.shapeStrong : colors.shape }, style]} />;
 }
 
 /** Three dots that rise and fall in turn: "it is working on it", where there is nothing to draw the shape of. */
-export function Dots({ color = colors.ink3, size = 6 }: { color?: string; size?: number }) {
+export function Dots({ color, size = 6 }: { color?: string; size?: number }) {
+  const colors = useColors();
+  const tint = color ?? colors.ink3;
   const values = useRef([0, 1, 2].map(() => new Animated.Value(0))).current;
   useEffect(() => {
     if (skips()) return;
@@ -66,7 +67,7 @@ export function Dots({ color = colors.ink3, size = 6 }: { color?: string; size?:
   return (
     <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ flexDirection: "row", alignItems: "center", gap: size * 0.7, height: size * 2.2 }}>
       {values.map((v, i) => (
-        <Animated.View key={i} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color, opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] }), transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [0, -size * 0.6] }) }] }} />
+        <Animated.View key={i} style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: tint, opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] }), transform: [{ translateY: v.interpolate({ inputRange: [0, 1], outputRange: [0, -size * 0.6] }) }] }} />
       ))}
     </View>
   );
@@ -128,6 +129,7 @@ export function DiffSkeleton({ label = "Loading the changes" }: { label?: string
 
 /** Home before the Mac has sent its chats and what waits: the headline, a card, and chat rows. */
 export function HomeSkeleton({ label = "Loading your chats" }: { label?: string }) {
+  const colors = useColors();
   return (
     <Pulse label={label}>
       <View style={{ paddingHorizontal: space.xl, paddingTop: 14, paddingBottom: 18, gap: 12 }}>

@@ -13,7 +13,7 @@ import { Button, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
-import { colors, radius, shadow, space } from "../ui/theme";
+import { radius, shadow, space, useColors } from "../ui/theme";
 import { autoNote, MODES, modeLabel, presetName, whyNotNow, WORKFLOWS, workflowLabel } from "../view/controls";
 import { contextOf, usageOf } from "../view/plan";
 
@@ -30,6 +30,7 @@ interface Option {
 
 /** One choice of a few, as a row: its name and what it does, or why it can't be picked now. */
 function OptionRow({ option, selected, onPick }: { option: Option; selected: boolean; onPick: () => void }) {
+  const colors = useColors();
   return (
     <PressScale
       accessibilityRole="radio"
@@ -54,6 +55,7 @@ function OptionRow({ option, selected, onPick }: { option: Option; selected: boo
 
 /** The chat's settings, as a sheet: what it runs on (Ask or Auto) and its models. A switch closes the sheet, and the title bar says "Switching…" until the chat does. */
 function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, presets, onWorkflow, onMode, onPreset, onAskClose, onClose }: { chat: RemoteChat; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; /** What the chat holds of its context, when the Mac has said it. */ context?: { tokens: number; window: number | null } | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   return (
     <Sheet onClose={onClose}>

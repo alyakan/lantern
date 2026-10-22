@@ -4,7 +4,7 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { LockCover } from "../shell/LockCover";
 import { useLockState } from "../shell/lockContext";
 import { run } from "./motion";
-import { colors } from "./theme";
+import { useColors } from "./theme";
 
 /** How much of the screen's height a sheet may take. */
 const MOST = 0.88;
@@ -15,7 +15,9 @@ const MOST = 0.88;
  * which slides it away first and then calls `onClose`. With the keyboard up the sheet rides on top of it, following it
  * frame by frame, and what shows under the sheet at the keyboard's rounded corners is the sheet's own colour, `fill`.
  */
-export function Sheet({ onClose, fill = colors.card, children }: { onClose: () => void; fill?: string; children: (close: () => void) => ReactNode }) {
+export function Sheet({ onClose, fill, children }: { onClose: () => void; fill?: string; children: (close: () => void) => ReactNode }) {
+  const colors = useColors();
+  const under = fill ?? colors.card;
   const { height } = useWindowDimensions();
   // The app lock's cover is drawn in here too: a sheet is a Modal of its own, and where it is on top the lock's isn't.
   const lock = useLockState();
@@ -33,7 +35,7 @@ export function Sheet({ onClose, fill = colors.card, children }: { onClose: () =
   return (
     <Modal animationType="none" transparent statusBarTranslucent onRequestClose={close}>
       <View style={{ flex: 1 }}>
-        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: "#00000066", opacity: p }]}>
+        <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: colors.scrim, opacity: p }]}>
           <Pressable accessibilityLabel="Close" onPress={close} style={StyleSheet.absoluteFill} />
         </Animated.View>
         {/* Taps above the sheet reach the dark behind it. */}
@@ -42,7 +44,7 @@ export function Sheet({ onClose, fill = colors.card, children }: { onClose: () =
           <Animated.View style={{ maxHeight: height * MOST, flexShrink: 1, transform: [{ translateY: p.interpolate({ inputRange: [0, 1], outputRange: [height, 0] }) }] }}>
             {children(close)}
             {/* Under the sheet, where the keyboard's rounded corners are: its colour, so there is no gap to see through. */}
-            <View pointerEvents="none" style={{ position: "absolute", top: "100%", left: 0, right: 0, height: 600, backgroundColor: fill }} />
+            <View pointerEvents="none" style={{ position: "absolute", top: "100%", left: 0, right: 0, height: 600, backgroundColor: under }} />
           </Animated.View>
         </KeyboardAvoidingView>
         {covered && (

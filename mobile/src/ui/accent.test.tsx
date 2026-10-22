@@ -2,12 +2,36 @@ import { StyleSheet } from "react-native";
 import { act, render, screen } from "@testing-library/react-native";
 import { AccentFromPledge, TipsContext } from "../shell/tipsContext";
 import { noMemory, noPlatform, TipJar } from "../tips";
-import { AccentContext, EMBER } from "./accent";
+import { AccentContext, EMBER, EMBER_NIGHT } from "./accent";
 import { Button, Txt } from "./components";
 import { Markdown } from "./Markdown";
-import { colors } from "./theme";
+import { darkColors, lightColors as colors } from "./theme";
+
+// The phone's appearance, which a test sets (the native module that says it is not there).
+let mockScheme: "light" | "dark" = "light";
+jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({ __esModule: true, default: () => mockScheme }));
+afterEach(() => {
+  mockScheme = "light";
+});
 
 const color = (text: string) => StyleSheet.flatten(screen.getByText(text).props.style).color;
+
+describe("the accent on Night", () => {
+  it("is the lighter cobalt, and a lighter Ember for a regular, whose buttons stay Ember with white words", async () => {
+    mockScheme = "dark";
+    await render(<Txt tone="cobalt">accent</Txt>);
+    expect(color("accent")).toBe(darkColors.cobalt);
+    await render(
+      <AccentContext.Provider value={EMBER}>
+        <Txt tone="cobalt">warm</Txt>
+        <Button label="Warm" onPress={() => {}} />
+      </AccentContext.Provider>,
+    );
+    expect(color("warm")).toBe(EMBER_NIGHT);
+    expect(StyleSheet.flatten(screen.getByRole("button", { name: "Warm" }).props.style).backgroundColor).toBe(EMBER);
+    expect(color("Warm")).toBe("#ffffff");
+  });
+});
 
 describe("the accent", () => {
   it("is cobalt, and Ember is a warm orange that is not", () => {

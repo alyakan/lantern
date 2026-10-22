@@ -3,13 +3,14 @@ import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button, Txt } from "../ui/components";
 import { Sheet } from "../ui/Sheet";
-import { colors, radius, shadow, space } from "../ui/theme";
+import { radius, shadow, space, useColors } from "../ui/theme";
 
 /**
  * Closing a chat, asked first: it closes on the Mac too (as closing it in the window's sidebar does), and its conversation
  * stays in History there. `why` is a reason it can't be closed now (Claude is busy): the question is replaced by it.
  */
 export function CloseChatSheet({ title, why, onConfirm, onClose }: { title: string; why: string | null; onConfirm: () => Promise<void>; onClose: () => void }) {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

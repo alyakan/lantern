@@ -7,18 +7,19 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useController } from "../shell/hooks";
 import { Button, Txt } from "../ui/components";
 import { Dots } from "../ui/skeleton";
-import { colors, space } from "../ui/theme";
+import { lightColors, space, useColors } from "../ui/theme";
 
 /** How long a code the camera has seen and refused is ignored, so one bad code isn't refused thirty times a second. */
 const IGNORE_MS = 3000;
 
-const Corner = ({ style }: { style: object }) => <View style={[{ position: "absolute", width: 38, height: 38, borderColor: colors.hi, borderWidth: 4 }, style]} />;
+const Corner = ({ style }: { style: object }) => <View style={[{ position: "absolute", width: 38, height: 38, borderColor: lightColors.hi, borderWidth: 4 }, style]} />;
 
 /**
  * Pairing: the camera reads the code the Mac shows, or the link is pasted. The code is the user's own act (they pointed the
  * camera at it), so it pairs at once; a link that arrives by itself (a deep link) is confirmed first (see ConfirmLink).
  */
 export function PairScreen({ initialPaste = false }: { initialPaste?: boolean }) {
+  const colors = useColors();
   const controller = useController();
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
@@ -118,6 +119,7 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
 
 /** A pairing link that arrived by itself (tapped somewhere): it names a Mac, and nothing pairs until it is confirmed. */
 export function ConfirmLink({ link, onCancel, onDone }: { link: string; onCancel: () => void; onDone: () => void }) {
+  const colors = useColors();
   const controller = useController();
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);

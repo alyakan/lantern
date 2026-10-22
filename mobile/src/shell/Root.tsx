@@ -13,7 +13,7 @@ import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
 import { Button, Txt } from "../ui/components";
 import { FadeSlideIn } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
-import { colors, radius, space } from "../ui/theme";
+import { radius, space, useColors } from "../ui/theme";
 import { rows } from "../view/home";
 import type { Controller } from "./controller";
 import { ControllerContext, useConnectionState, useController, useSyncState } from "./hooks";
@@ -33,6 +33,7 @@ export interface RootProps {
 function ChatPicker({ onPick, onClose }: { onPick: (slot: string) => void; onClose: () => void }) {
   const { chats } = useSyncState();
   const insets = useSafeAreaInsets();
+  const colors = useColors();
   return (
     <Sheet onClose={onClose}>
       {(close) => (
@@ -171,7 +172,7 @@ export function Root({ controller, ...rest }: RootProps) {
   return (
     <SafeAreaProvider>
       <ControllerContext.Provider value={controller}>
-        <StatusBar style="dark" />
+        <StatusBar style="auto" />
         <Screens {...rest} />
       </ControllerContext.Provider>
     </SafeAreaProvider>
