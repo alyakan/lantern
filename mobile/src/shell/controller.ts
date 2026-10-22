@@ -86,6 +86,11 @@ export class Controller {
     this.connection.resume();
   }
 
+  /** Dials an address typed in for the Mac, and keeps it. Resolves to why it was refused, or null. */
+  useAddress(text: string) {
+    return this.connection.useAddress(text);
+  }
+
   /** What a scanned or pasted link would pair with, to confirm first; or why it can't. */
   preview(text: string): Preview | { error: string } {
     const offer = readPairingLink(text, this.now());
