@@ -184,6 +184,9 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
       return { ...view, todos: event.items };
     case "context":
       return { ...view, context: { tokens: event.tokens, window: event.window ?? view.context?.window ?? null } };
+    // An event of a kind this app doesn't know (a newer Mac's): left alone, never a blank chat.
+    default:
+      return view;
   }
 }
 

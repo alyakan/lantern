@@ -257,6 +257,13 @@ describe("the commands, plan, context and usage a Mac with extras sends", () => 
     expect(again.views.a).toMatchObject({ todos: [{ content: "A" }], context: { tokens: 70_000, window: 200_000 } });
   });
 
+  it("leave a chat as it is for an event of a kind this app doesn't know", () => {
+    const s = run([event("a", 1, { kind: "user_text", text: "hi", at: 1, sent_by: null })]);
+    const next = run([event("a", 2, { kind: "from_a_newer_mac" } as unknown as RemoteEvent)], s);
+    expect(items(next)).toEqual(items(s));
+    expect(next.views.a.seq).toBe(2);
+  });
+
   it("make the account's usage the app's, whichever chat is open, and ignore a message it doesn't know", () => {
     const plan: Action = { type: "pushed", msg: { type: "plan", used: 0.4, resets_at: 99, status: "allowed" } };
     expect(run([plan]).plan).toEqual({ used: 0.4, resetsAt: 99, status: "allowed" });

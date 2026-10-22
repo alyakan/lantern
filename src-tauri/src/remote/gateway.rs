@@ -1182,9 +1182,14 @@ pub(crate) mod tests {
     async fn a_phone_can_read_what_a_finished_step_printed_while_the_mac_keeps_it() {
         let r = rig();
         r.hub.opened("a", "/p");
+        r.bus.publish("a", UiEvent::ToolStarted { parent: None, tool_use_id: "t1".into(), name: "Bash".into(), summary: "npm test".into() });
         r.bus.publish("a", UiEvent::ToolFinished { parent: None, tool_use_id: "t1".into(), is_error: false, output: "3 passed".into() });
+        r.bus.publish("a", UiEvent::ToolStarted { parent: None, tool_use_id: "t2".into(), name: "Read".into(), summary: "/p/.env".into() });
+        r.bus.publish("a", UiEvent::ToolFinished { parent: None, tool_use_id: "t2".into(), is_error: false, output: "API_KEY=hunter2".into() });
         let (_, mut p) = paired(&r).await;
         assert_eq!(p.ask(Request::StepOutput { slot: "a".into(), tool_use_id: "t1".into() }).await.0, Some(json!("3 passed")));
+        let (ok, err, _) = p.ask(Request::StepOutput { slot: "a".into(), tool_use_id: "t2".into() }).await;
+        assert!(ok.is_none() && err.is_some(), "what Claude read from a file is not sent to a phone");
         let (ok, err, _) = p.ask(Request::StepOutput { slot: "a".into(), tool_use_id: "gone".into() }).await;
         assert!(ok.is_none() && err.unwrap().contains("isn't kept"));
         assert!(p.ask(Request::StepOutput { slot: "nope".into(), tool_use_id: "t1".into() }).await.1.unwrap().contains("isn't open"));

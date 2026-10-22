@@ -61,7 +61,8 @@ pub enum RemoteEvent {
     TextDelta { block_id: String, text: String },
     AssistantText { block_id: String, text: String },
     ToolStarted { tool_use_id: String, name: String, summary: String },
-    /// The step ended; its output isn't sent (the phone shows steps as a line each).
+    /// The step ended; its output isn't sent with it (the phone shows steps as a line each): only a few kinds of step's output
+    /// is sent, and only when asked for (Request::StepOutput).
     ToolFinished { tool_use_id: String, is_error: bool },
     /// A file the step changed, as counts: its diff is a request of its own.
     FileEdited { tool_use_id: String, path: String, created: bool, added: u32, removed: u32 },
@@ -422,7 +423,7 @@ pub struct Waiting {
     pub at: u64,
 }
 
-/// What a phone may ask. Nothing else is accepted: no commands, no files, no settings.
+/// What a phone may ask. Nothing else is accepted: no commands, no files (not what Claude read from them either), no settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[ts(export, export_to = "../../mobile/src/protocol/generated/")]
@@ -491,9 +492,9 @@ pub enum Request {
     Suggest { refresh: bool },
     /// One file's diff from the chat's start, as unified-diff text.
     Diff { slot: String, path: String },
-    /// What a finished step of the chat printed (a command's output, a search's results), as text, cut to STEP_OUTPUT_MAX.
-    /// Only what the Mac still keeps of the chat: an older step may be gone, which is an error. Only sent to a Mac whose
-    /// Welcome lists "output".
+    /// What a finished step of the chat printed (a command's output, a skill's, a helper's report, an MCP tool's), as text,
+    /// cut to STEP_OUTPUT_MAX. Never what Claude read from a file or the web (hub.rs `output_may_be_read`). Only what the Mac
+    /// still keeps of the chat: an older step may be gone, which is an error. Only sent to a Mac whose Welcome lists "output".
     StepOutput { slot: String, tool_use_id: String },
     /// The token Expo's push service delivers this phone's notifications with.
     PushToken { token: String },

@@ -3,7 +3,7 @@ import type { RemotePermissions } from "./RemotePermissions";
 import type { RemoteWorkflow } from "./RemoteWorkflow";
 
 /**
- * What a phone may ask. Nothing else is accepted: no commands, no files, no settings.
+ * What a phone may ask. Nothing else is accepted: no commands, no files (not what Claude read from them either), no settings.
  */
 export type Request = { "op": "list_chats" } | { "op": "list_waiting" } | { "op": "subscribe", slot: string, after: number, epoch: number, } | { "op": "earlier", slot: string, hidden: number, } | { "op": "unsubscribe", slot: string, } | { "op": "send", slot: string, text: string, client_id: string, } | { "op": "interrupt", slot: string, } | { "op": "answer", slot: string, request_id: string, allow: boolean, message: string | null, answers: { [key in string]?: string } | null, } | { "op": "wake", slot: string, } | { "op": "close", slot: string, } | { "op": "projects" } | { "op": "new_chat", project: string, text: string, permissions: RemotePermissions | null, preset: string | null, 
 /**

@@ -187,6 +187,13 @@ impl Log {
     }
 }
 
+/// Whether a phone may be sent what a step printed: a command's output, a skill's, a helper's report, the advisor's, an MCP
+/// tool's. Not what Claude read from a file or the web (Read, Grep, Glob, WebFetch, WebSearch), nor what it wrote: a phone is
+/// shown those as a line, and the diff of an edit, and no more. Anything else (a tool this list doesn't know) is refused too.
+pub fn output_may_be_read(tool: &str) -> bool {
+    matches!(tool, "Bash" | "BashOutput" | "Skill" | "Agent" | "Task" | "advisor") || tool.strip_prefix("mcp__").and_then(|rest| rest.split_once("__")).is_some_and(|(server, name)| !server.is_empty() && !name.is_empty())
+}
+
 /// The first line of what the user typed, without the notes Lantern puts before it, cut to a title's length.
 pub fn title_from(text: &str) -> Option<String> {
     let typed = without_notes(text);
@@ -378,10 +385,16 @@ impl SessionHub {
         }
     }
 
-    /// What the chat's step printed when it finished, if the hub still keeps it, cut to what a phone is sent.
+    /// What the chat's step printed when it finished, if the hub still keeps it, cut to what a phone is sent. Only for the
+    /// steps whose output a phone is meant to read (see `output_may_be_read`): never what Claude read from a file.
     pub fn step_output(&self, slot: &str, tool_use_id: &str) -> Option<String> {
         let chats = self.chats.lock().unwrap();
-        let output = chats.get(slot)?.entries.iter().rev().find_map(|(e, _)| match &e.event {
+        let log = chats.get(slot)?;
+        let allowed = log.entries.iter().any(|(e, _)| matches!(&e.event, UiEvent::ToolStarted { parent: None, tool_use_id: id, name, .. } if id == tool_use_id && output_may_be_read(name)));
+        if !allowed {
+            return None;
+        }
+        let output = log.entries.iter().rev().find_map(|(e, _)| match &e.event {
             UiEvent::ToolFinished { parent: None, tool_use_id: id, output, .. } if id == tool_use_id => Some(output.as_str()),
             _ => None,
         })?;
@@ -498,11 +511,34 @@ mod tests {
     fn a_finished_steps_output_is_told_while_it_is_kept_and_cut_when_long() {
         let hub = hub();
         let finished = |id: &str, output: String| UiEvent::ToolFinished { parent: None, tool_use_id: id.into(), is_error: false, output };
-        feed(&hub, "a", vec![finished("t1", "ok\n3 passed".into()), finished("t2", "x".repeat(super::super::protocol::STEP_OUTPUT_MAX + 50)), UiEvent::ToolFinished { parent: Some("sub".into()), tool_use_id: "t3".into(), is_error: false, output: "a subagent's".into() }]);
+        let started = |id: &str, name: &str| UiEvent::ToolStarted { parent: None, tool_use_id: id.into(), name: name.into(), summary: String::new() };
+        feed(
+            &hub,
+            "a",
+            vec![
+                started("t1", "Bash"),
+                finished("t1", "ok\n3 passed".into()),
+                started("t2", "mcp__claude_ai_Linear__list_issues"),
+                finished("t2", "x".repeat(super::super::protocol::STEP_OUTPUT_MAX + 50)),
+                UiEvent::ToolStarted { parent: Some("sub".into()), tool_use_id: "t3".into(), name: "Bash".into(), summary: String::new() },
+                UiEvent::ToolFinished { parent: Some("sub".into()), tool_use_id: "t3".into(), is_error: false, output: "a subagent's".into() },
+                started("t4", "Read"),
+                finished("t4", "API_KEY=hunter2".into()),
+                finished("t5", "no start was kept".into()),
+            ],
+        );
         assert_eq!(hub.step_output("a", "t1").as_deref(), Some("ok\n3 passed"));
         let long = hub.step_output("a", "t2").unwrap();
         assert!(long.ends_with(super::super::protocol::CUT) && long.chars().count() < super::super::protocol::STEP_OUTPUT_MAX + 100);
         assert_eq!((hub.step_output("a", "t3"), hub.step_output("a", "nope"), hub.step_output("b", "t1")), (None, None, None), "a subagent's step, one never seen, a chat not kept");
+        // What Claude read from a file stays on the Mac, as does the output of a step whose start isn't kept.
+        assert_eq!((hub.step_output("a", "t4"), hub.step_output("a", "t5")), (None, None));
+        for tool in ["Read", "Grep", "Glob", "WebFetch", "WebSearch", "Edit", "Write", "MultiEdit", "NotebookEdit", "TodoWrite", "mcp__x", "mcp____y", "Bashx", ""] {
+            assert!(!output_may_be_read(tool), "{tool}");
+        }
+        for tool in ["Bash", "BashOutput", "Skill", "Agent", "Task", "advisor", "mcp__github__get_file"] {
+            assert!(output_may_be_read(tool), "{tool}");
+        }
     }
 
     #[test]

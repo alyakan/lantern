@@ -154,7 +154,8 @@ export const StepsRow = memo(function StepsRow({ chips, onFiles, onOutput }: { c
                   {it.text}
                 </Txt>
               );
-              return onOutput ? (
+              // A step's output can be asked for only where the Mac sends it: not for a chip of "other tools".
+              return onOutput && opened.key !== "other" ? (
                 <Pressable key={i} accessibilityRole="button" accessibilityLabel={`${it.text}. See what it printed`} onPress={() => onOutput({ id: it.id, text: it.text })} hitSlop={4}>
                   {line}
                 </Pressable>
