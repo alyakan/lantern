@@ -2338,6 +2338,27 @@ fn folders_gone(folders: Vec<String>) -> Vec<String> {
     folders.into_iter().filter(|f| !std::path::Path::new(f).is_dir()).collect()
 }
 
+/// The file whose presence at launch asks for the open chats to come back by themselves, for a restart that doesn't go through
+/// the window (a script that swaps the app in place `touch`es it before opening Lantern again).
+const RESTORE_MARKER: &str = "restore-on-launch";
+/// How old the marker may be before it is taken for one a restart left behind long ago.
+const RESTORE_MARKER_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// Whether the marker is there and recent, using it up either way so it asks for one launch only.
+fn take_marker(path: &std::path::Path, now: std::time::SystemTime) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else { return false };
+    // Stamped a moment ahead of the clock counts as just now.
+    let fresh = meta.modified().ok().map(|at| now.duration_since(at).unwrap_or_default()).is_some_and(|age| age <= RESTORE_MARKER_MAX_AGE);
+    let _ = std::fs::remove_file(path);
+    fresh
+}
+
+/// Whether this launch follows a restart that asked for the chats back (see `RESTORE_MARKER`).
+#[tauri::command]
+fn take_restore_marker(app: AppHandle) -> bool {
+    app.path().app_data_dir().is_ok_and(|dir| take_marker(&dir.join(RESTORE_MARKER), std::time::SystemTime::now()))
+}
+
 /// Where each folder was before it moved, as Lantern recorded it.
 #[tauri::command]
 fn relocations_list(state: State<'_, AppState>) -> Vec<relocate::Entry> {
@@ -2658,6 +2679,7 @@ pub fn run() {
             open_session,
             relocations_list,
             folders_gone,
+            take_restore_marker,
             moved_folder_candidates,
             old_locations,
             known_folders,
@@ -2710,6 +2732,22 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A swap script's marker brings the chats back once, and one left from long ago (or none) doesn't.
+    #[test]
+    fn the_restore_marker_asks_once_and_only_while_it_is_recent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(RESTORE_MARKER);
+        let now = std::time::SystemTime::now();
+        assert!(!take_marker(&path, now));
+        std::fs::write(&path, "").unwrap();
+        assert!(take_marker(&path, now));
+        assert!(!path.exists());
+        assert!(!take_marker(&path, now));
+        std::fs::write(&path, "").unwrap();
+        assert!(!take_marker(&path, now + RESTORE_MARKER_MAX_AGE + std::time::Duration::from_secs(60)));
+        assert!(!path.exists());
+    }
 
     /// What the window sends comes from what it saved, and a chat saved before there was a choice of provider has none.
     #[test]

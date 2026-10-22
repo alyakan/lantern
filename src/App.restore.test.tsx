@@ -24,7 +24,7 @@ const lastTime: SavedChat[] = [
 type Call = [string, Record<string, unknown> | undefined];
 
 /** Opens the app with the chats from last time on offer, recording every command it sends to the backend. */
-async function launch(): Promise<Call[]> {
+async function launch(offered = true, markerFile = false): Promise<Call[]> {
   const { installMockBackend } = await import("./dev/mockBackend");
   installMockBackend();
   const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args?: Record<string, unknown>, options?: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__;
@@ -32,11 +32,13 @@ async function launch(): Promise<Call[]> {
   const answer = internals.invoke;
   internals.invoke = (cmd, args, options) => {
     calls.push([cmd, args]);
+    // The file a swap script leaves for the next launch (the mock backend says there is none).
+    if (cmd === "take_restore_marker" && markerFile) return Promise.resolve(true);
     return answer(cmd, args, options);
   };
   const { default: App } = await import("./App");
   render(<App />);
-  await screen.findByText(/(chats were|chat was) open when Lantern closed/);
+  if (offered) await screen.findByText(/(chats were|chat was) open when Lantern closed/);
   return calls;
 }
 
@@ -160,6 +162,48 @@ describe("restoring chats at launch", () => {
       const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
       expect(saved.map((c) => c.sessionId)).toEqual(["9b7e01", "3f1c2a"]);
     });
+  });
+
+  it("brings every chat back by itself after a restart to update, without offering them first", async () => {
+    localStorage.setItem("session.restoreAfterUpdate", String(Date.now()));
+    const calls = await launch(false);
+    await screen.findByText("Should the backoff have jitter so clients don't retry in lockstep?");
+    expect(screen.getByRole("textbox")).toHaveValue("and log the state param");
+    expect(screen.queryByText(/were open when Lantern closed/)).toBeNull();
+    // The chat on screen is running again; the other is in the sidebar, asleep, and both stay saved.
+    expect(await screen.findByTitle("Retry transient fetch errors")).toBeInTheDocument();
+    expect(calls.filter(([c]) => c === "open_session").map(([, a]) => a?.sessionId)).toEqual(["3f1c2a"]);
+    // The last project isn't also reopened as a fresh chat beside them.
+    expect(calls.filter(([c]) => c === "start_session")).toEqual([]);
+    await waitFor(() => {
+      const saved: SavedChat[] = JSON.parse(localStorage.getItem("session.openChats") ?? "[]");
+      expect(saved.map((c) => c.sessionId).sort()).toEqual(["3f1c2a", "9b7e01"]);
+    });
+    // Used up: a later launch that isn't after an update offers the chats as usual.
+    expect(localStorage.getItem("session.restoreAfterUpdate")).toBeNull();
+  });
+
+  it("brings every chat back by itself after a restart that left a marker file instead of marking storage", async () => {
+    const calls = await launch(false, true);
+    await screen.findByText("Should the backoff have jitter so clients don't retry in lockstep?");
+    expect(screen.queryByText(/were open when Lantern closed/)).toBeNull();
+    expect(await screen.findByTitle("Retry transient fetch errors")).toBeInTheDocument();
+    expect(calls.filter(([c]) => c === "open_session").map(([, a]) => a?.sessionId)).toEqual(["3f1c2a"]);
+    expect(calls.filter(([c]) => c === "start_session")).toEqual([]);
+  });
+
+  it("reopens the last project as usual after a restart to update when there were no chats to bring back", async () => {
+    localStorage.setItem("session.restoreAfterUpdate", String(Date.now()));
+    localStorage.setItem("session.openChats", "[]");
+    const calls = await launch(false);
+    await waitFor(() => expect(calls.filter(([c]) => c === "start_session").map(([, a]) => a?.folder)).toEqual([FOLDER]));
+    expect(localStorage.getItem("session.restoreAfterUpdate")).toBeNull();
+  });
+
+  it("only offers the chats when the mark of a restart to update is from long ago", async () => {
+    localStorage.setItem("session.restoreAfterUpdate", String(Date.now() - 60 * 60_000));
+    const calls = await launch();
+    expect(calls.filter(([c]) => c === "open_session")).toEqual([]);
   });
 
   it("stops offering them once dismissed", async () => {
