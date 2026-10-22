@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, type ComponentRef } from "react";
 import { Animated, Easing, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
@@ -6,6 +6,7 @@ import * as Clipboard from "expo-clipboard";
 import { useAccent } from "../ui/accent";
 import { Button, Chip, Tag, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
+import { useSeed, type ComposeSeed } from "./ChatExtras";
 import { useListInput } from "../ui/useListInput";
 import { Markdown } from "../ui/Markdown";
 import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
@@ -22,7 +23,7 @@ export const timeOf = (at: number) => new Date(at).toLocaleTimeString([], { hour
 
 type UserItem = Extract<Item, { kind: "user" }>;
 
-export const UserRow = memo(function UserRow({ item }: { item: UserItem }) {
+export const UserRow = memo(function UserRow({ item, onActions }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void }) {
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12, alignItems: "flex-start" }}>
       {item.at !== null && (
@@ -30,10 +31,10 @@ export const UserRow = memo(function UserRow({ item }: { item: UserItem }) {
           {timeOf(item.at)}
         </Txt>
       )}
-      <View accessibilityLabel={`You: ${item.text}`} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomLeftRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "90%", opacity: item.sending ? 0.6 : 1 }}>
+      <Pressable accessibilityLabel={`You: ${item.text}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomLeftRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "90%", opacity: item.sending ? 0.6 : 1 }}>
         {/* Your own message is read as Claude's is: a list you typed is a list, code is code. */}
-        <Markdown text={item.text} tone="white" />
-      </View>
+        <Markdown text={item.text} tone="white" selectable={!onActions} />
+      </Pressable>
       {item.failed && (
         <Txt variant="small" tone="stop" style={{ marginTop: 4, marginLeft: 2 }}>
           Not sent. {item.failed}
@@ -50,7 +51,7 @@ const SUMMARY_COLLAPSED = 230;
  * What a turn did, as a card: the turn's closing message when it did real work (see summaryOf), with how long it took, what
  * it changed and ran as chips (the edits one lists their diffs), a Copy, and a long one clipped to a few lines with Show all.
  */
-export const SummaryRow = memo(function SummaryRow({ row, onFiles }: { row: Extract<Row, { kind: "summary" }>; onFiles: (files: string[]) => void }) {
+export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions }: { row: Extract<Row, { kind: "summary" }>; onFiles: (files: string[]) => void; onActions?: () => void }) {
   const [full, setFull] = useState(false);
   const [height, setHeight] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
@@ -83,9 +84,9 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles }: { row: Extr
               </Txt>
             )}
           </View>
-          <View style={{ maxHeight: clipped ? SUMMARY_COLLAPSED : undefined, overflow: "hidden" }}>
+          <Pressable onLongPress={onActions} delayLongPress={350} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} style={{ maxHeight: clipped ? SUMMARY_COLLAPSED : undefined, overflow: "hidden" }}>
             <View onLayout={(e) => setHeight(e.nativeEvent.layout.height)}>
-              <Markdown text={row.item.text} />
+              <Markdown text={row.item.text} selectable={!onActions} />
             </View>
             {/* The cut is softened: strips of the card's own colour, more and more of it. */}
             {clipped && (
@@ -95,7 +96,7 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles }: { row: Extr
                 ))}
               </View>
             )}
-          </View>
+          </Pressable>
           {long && (
             <PressScale accessibilityRole="button" accessibilityLabel={full ? "Show less" : "Show all"} accessibilityState={{ expanded: full }} onPress={() => setFull(!full)} hitSlop={8} haptic="select" scaleTo={0.96} style={{ alignSelf: "flex-start" }}>
               <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
@@ -121,11 +122,11 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles }: { row: Extr
   );
 });
 
-export const AssistantRow = memo(function AssistantRow({ item }: { item: Extract<Item, { kind: "assistant" }> }) {
+export const AssistantRow = memo(function AssistantRow({ item, onActions }: { item: Extract<Item, { kind: "assistant" }>; onActions?: () => void }) {
   return (
-    <View style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
-      <Markdown text={item.text} />
-    </View>
+    <Pressable accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
+      <Markdown text={item.text} selectable={!onActions} />
+    </Pressable>
   );
 });
 
@@ -386,8 +387,13 @@ export const TurnRow = memo(function TurnRow({ item }: { item: Extract<Item, { k
 });
 
 /** The message box: a capsule with a send button; typing and sending only while connected. */
-export function Composer({ onSend, disabled, placeholder = "Message Claude" }: { onSend: (text: string) => void; disabled?: boolean; placeholder?: string }) {
+export function Composer({ onSend, disabled, placeholder = "Message Claude", seed }: { onSend: (text: string) => void; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed }) {
   const [text, setText] = useState("");
+  const input = useRef<ComponentRef<typeof TextInput>>(null);
+  useSeed(seed, (s) => {
+    setText((t) => (s.mode === "append" && t.trim() ? `${t}\n${s.text}` : s.text));
+    input.current?.focus();
+  });
   const insets = useSafeAreaInsets();
   // With the keyboard up it sits right under the box: the home-indicator space would be a gap.
   const keyboard = useKeyboardUp();
@@ -398,6 +404,7 @@ export function Composer({ onSend, disabled, placeholder = "Message Claude" }: {
     <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 12), backgroundColor: colors.paper }}>
       <View style={[{ flexDirection: "row", alignItems: "flex-end", gap: 8, backgroundColor: colors.card, borderRadius: 26, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }, shadow.float, { shadowOpacity: 0.12 }]}>
         <TextInput
+          ref={input}
           accessibilityLabel="Message"
           value={text}
           {...list}

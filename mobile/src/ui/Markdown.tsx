@@ -130,7 +130,7 @@ function Table({ block, tone }: { block: Extract<Block, { kind: "table" }>; tone
 }
 
 /** Claude's text: headings, paragraphs, lists, tables, quotes, rules and code blocks. Memoised per text, so only a streaming block redraws. */
-export const Markdown = memo(function Markdown({ text, tone = "ink" }: { text: string; tone?: Tone }) {
+export const Markdown = memo(function Markdown({ text, tone = "ink", selectable = true }: { text: string; tone?: Tone; /** False where a long press means something else (a message's actions); code and tables stay selectable. */ selectable?: boolean }) {
   const blocks = useMemo(() => parseMarkdown(text), [text]);
   return (
     <View style={{ gap: 8 }}>
@@ -138,17 +138,17 @@ export const Markdown = memo(function Markdown({ text, tone = "ink" }: { text: s
         switch (b.kind) {
           case "heading":
             return b.level <= 2 ? (
-              <Txt key={i} variant="heading" tone={tone} selectable accessibilityRole="header" style={{ marginTop: 4 }}>
+              <Txt key={i} variant="heading" tone={tone} selectable={selectable} accessibilityRole="header" style={{ marginTop: 4 }}>
                 <Spans spans={b.spans} tone={tone} />
               </Txt>
             ) : (
-              <Txt key={i} variant="body" tone={tone} selectable accessibilityRole="header" style={{ fontWeight: "700", marginTop: 2 }}>
+              <Txt key={i} variant="body" tone={tone} selectable={selectable} accessibilityRole="header" style={{ fontWeight: "700", marginTop: 2 }}>
                 <Spans spans={b.spans} tone={tone} />
               </Txt>
             );
           case "paragraph":
             return (
-              <Txt key={i} variant="body" tone={tone} selectable>
+              <Txt key={i} variant="body" tone={tone} selectable={selectable}>
                 <Spans spans={b.spans} tone={tone} />
               </Txt>
             );
@@ -168,7 +168,7 @@ export const Markdown = memo(function Markdown({ text, tone = "ink" }: { text: s
                           {m.marker}
                         </Txt>
                       )}
-                      <Txt variant="body" tone={m.checked ? "ink3" : tone} selectable style={{ flex: 1, textDecorationLine: m.checked ? "line-through" : "none" }}>
+                      <Txt variant="body" tone={m.checked ? "ink3" : tone} selectable={selectable} style={{ flex: 1, textDecorationLine: m.checked ? "line-through" : "none" }}>
                         <Spans spans={item} tone={tone} />
                       </Txt>
                     </View>
@@ -179,7 +179,7 @@ export const Markdown = memo(function Markdown({ text, tone = "ink" }: { text: s
           case "quote":
             return (
               <View key={i} style={{ borderLeftWidth: 3, borderLeftColor: colors.rule, paddingLeft: 10 }}>
-                <Txt variant="body" tone="ink2" selectable>
+                <Txt variant="body" tone="ink2" selectable={selectable}>
                   <Spans spans={b.spans} tone={tone} />
                 </Txt>
               </View>
