@@ -5,7 +5,7 @@ import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { agentsAtRest, canSleep, membersToSleep, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
-import { checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset } from "./lib/remoteChats";
+import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset } from "./lib/remoteChats";
 import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
@@ -775,6 +775,20 @@ export default function App() {
     const offs = [api.onRemoteSetPermissions((r: RemoteSetPermissions) => remoteSwitchRef.current(r.slot, { permissions: r.permissions })), api.onRemoteSetPreset((r: RemoteSetPreset) => remoteSwitchRef.current(r.slot, { preset: r.preset }))].map((p) => p.catch(() => null));
     return () => {
       offs.forEach((p) => p.then((f) => f?.()));
+    };
+  }, []);
+  // A paired phone asked to close a chat (the backend checked it is listed and not busy): closed as the sidebar closes one, and
+  // nothing is asked of the user, so one with background tasks, or a team's, is left open.
+  const remoteCloseRef = useRef<(slot: string) => void>(() => {});
+  remoteCloseRef.current = (slot) => {
+    const s = chats.slots[slot];
+    const why = checkRemoteClose({ known: !!s, team: !!s && (!!s.orchestrator || !!chats.agents[slot]), busy: !!s && isBusy(s), background: s?.backgroundTasks.length ?? 0 });
+    if (!why) closeChats([slot]);
+  };
+  useEffect(() => {
+    const off = api.onRemoteClose((r) => remoteCloseRef.current(r.slot)).catch(() => null);
+    return () => {
+      off.then((f) => f?.());
     };
   }, []);
   // The presets a phone may choose between, as Settings › Models has them.

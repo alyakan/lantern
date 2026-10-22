@@ -3,7 +3,7 @@ import type { Chats } from "../sessions";
 import { initialState, type State } from "../store";
 import { BUILT_IN } from "./harness";
 import { PROJECT_COLORS } from "./projectColors";
-import { checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, type RemoteContext, type SwitchTarget } from "./remoteChats";
+import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, type RemoteContext, type SwitchTarget } from "./remoteChats";
 import type { ProjectOpen } from "./sidebar";
 
 const chat = (over: Partial<State>): State => ({ ...initialState, folder: "/work/lantern", ...over });
@@ -105,5 +105,20 @@ describe("windowPresets", () => {
     const told = windowPresets(BUILT_IN);
     expect(told[0]).toMatchObject({ id: "default", name: "Standard" });
     expect(told.find((p) => p.id === "balanced")?.summary).toBe("Sonnet · Opus advisor · Haiku subagents");
+  });
+});
+
+describe("checkRemoteClose", () => {
+  const target = { known: true, team: false, busy: false, background: 0 };
+
+  it("lets a chat that is doing nothing be closed", () => {
+    expect(checkRemoteClose(target)).toBeNull();
+  });
+
+  it("refuses a chat that is unknown, a team's, busy, or has background tasks closing would stop, and says why", () => {
+    expect(checkRemoteClose({ ...target, known: false })).toContain("isn't open");
+    expect(checkRemoteClose({ ...target, team: true })).toContain("team");
+    expect(checkRemoteClose({ ...target, busy: true })).toContain("Stop it first");
+    expect(checkRemoteClose({ ...target, background: 1 })).toContain("background tasks");
   });
 });

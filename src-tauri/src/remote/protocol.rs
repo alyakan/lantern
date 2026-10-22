@@ -11,6 +11,10 @@ use ts_rs::TS;
 /// asks for the newer app (or the newer Lantern) instead of breaking.
 pub const PROTOCOL_VERSION: u32 = 1;
 
+/// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
+/// since a Mac that doesn't know a request ends the connection.
+pub const FEATURES: &[&str] = &["controls", "close"];
+
 /// Where the generated TypeScript goes, from ts-rs's export folder (src-tauri/bindings): each type below says it again.
 #[cfg(test)]
 const BINDINGS: &str = "../../mobile/src/protocol/generated/";
@@ -356,6 +360,10 @@ pub enum Request {
         answers: Option<std::collections::BTreeMap<String, String>>,
     },
     Wake { slot: String },
+    /// Closes a chat on the Mac, as closing it in the window's sidebar does (its conversation stays in History). Refused while
+    /// the chat is working or waiting on someone (stop it first), and for a team's Lead or agent (the window decides that).
+    /// Only sent to a Mac whose Welcome lists "close" in `features`: an older Mac ends the connection at a request it doesn't know.
+    Close { slot: String },
     /// The projects a chat may be started in from the phone.
     Projects,
     /// Starts a chat in `project` (one of Projects' ids) with `text` as its first message, without switching what the Mac's

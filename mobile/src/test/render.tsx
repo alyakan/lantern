@@ -37,7 +37,7 @@ export interface Seed {
 }
 
 /** Connected to a Mac that has Controls (Welcome's features), as an up-to-date Lantern is. */
-export const connectedWithControls: ConnectionState = { kind: "connected", host: "192.168.1.20", welcome: { type: "welcome", protocol: 1, app_version: "0.1.54", mac_name: "Aly's MacBook Pro", epoch: 1, features: ["controls"], hosts: ["192.168.1.20"] } };
+export const connectedWithControls: ConnectionState = { kind: "connected", host: "192.168.1.20", welcome: { type: "welcome", protocol: 1, app_version: "0.1.54", mac_name: "Aly's MacBook Pro", epoch: 1, features: ["controls", "close"], hosts: ["192.168.1.20"] } };
 
 export const connected: ConnectionState = { kind: "connected", host: "192.168.1.20", welcome: { type: "welcome", protocol: 1, app_version: "0.1.53", mac_name: "Aly's MacBook Pro", epoch: 1, features: [], hosts: ["192.168.1.20"] } };
 

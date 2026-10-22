@@ -132,7 +132,7 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
         </PressScale>
         {/* The title bar opens the chat's settings (what it runs on, and its models) when the Mac can say what those are. */}
-        <ChatSettings slot={slot} chat={chat} onProblem={setProblem}>
+        <ChatSettings slot={slot} chat={chat} onProblem={setProblem} onClosed={onBack}>
           {(line) => (
             <View style={{ flex: 1 }}>
               <Txt variant="heading" numberOfLines={1} accessibilityRole="header">

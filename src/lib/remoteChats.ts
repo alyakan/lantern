@@ -94,6 +94,31 @@ export interface RemoteSetPreset {
   preset: string;
 }
 
+/** What the backend asks of the window when a phone closes a chat (see remote::CloseRequest). */
+export interface RemoteClose {
+  slot: string;
+}
+
+/** What the window knows of the chat a phone wants to close. */
+export interface CloseTarget {
+  known: boolean;
+  /** A team's Lead or one of its agents: closing it is a decision about the whole team, made at the Mac. */
+  team: boolean;
+  /** Working or waiting on someone: it is stopped first. */
+  busy: boolean;
+  /** Background tasks (a workflow, a subagent, a command) that closing would stop: the sidebar asks the user, and nobody is at the Mac to answer. */
+  background: number;
+}
+
+/** Whether the window closes a chat for a phone, and why not (the backend has checked too; any window can emit what this one listens for). */
+export function checkRemoteClose(t: CloseTarget): string | null {
+  if (!t.known) return "That chat isn't open on your Mac.";
+  if (t.team) return "That chat is part of a team: close it on your Mac.";
+  if (t.busy) return "Claude is busy in this chat. Stop it first, then close it.";
+  if (t.background > 0) return "This chat has background tasks running, which closing would stop.";
+  return null;
+}
+
 /** What the window knows of the chat a phone wants to switch. */
 export interface SwitchTarget {
   /** The window has this chat (and it is not an agent of a team: its Lead sets what it runs on). */

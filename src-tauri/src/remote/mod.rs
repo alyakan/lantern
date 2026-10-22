@@ -84,6 +84,12 @@ pub struct SetPermissionsRequest {
     pub permissions: &'static str,
 }
 
+/// What the window is asked when a phone closes a chat. The gateway has checked it is listed and not busy; the window checks again.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CloseRequest {
+    pub slot: String,
+}
+
 /// What the window is asked when a phone puts a chat on one of the presets.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SetPresetRequest {

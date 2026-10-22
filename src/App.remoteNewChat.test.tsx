@@ -211,3 +211,23 @@ describe("a chat a paired phone switches", () => {
     expect(harnessApplied(calls)).toHaveLength(0);
   });
 });
+
+describe("a chat a paired phone closes", () => {
+  const firstSlot = (calls: Call[]) => String(sessions(calls)[0]?.[1]?.slot);
+  const closed = (calls: Call[]) => calls.filter(([c]) => c === "close_session").map(([, a]) => a?.slot);
+
+  it("is closed as the sidebar closes one", async () => {
+    const calls = await launch();
+    await quiet();
+    await fromPhoneEvent("remote-close-chat", { slot: firstSlot(calls) });
+    await waitFor(() => expect(closed(calls)).toContain(firstSlot(calls)));
+  });
+
+  it("does nothing for a chat it doesn't have", async () => {
+    const calls = await launch();
+    await quiet();
+    await fromPhoneEvent("remote-close-chat", { slot: "nope" });
+    await quiet();
+    expect(closed(calls)).not.toContain("nope");
+  });
+});

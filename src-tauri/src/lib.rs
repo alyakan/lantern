@@ -338,6 +338,10 @@ impl remote::gateway::Host for RemoteHost {
         request_wake(&self.app, &self.app.state::<AppState>(), slot)
     }
 
+    fn close(&self, slot: &str) -> Result<(), String> {
+        self.app.emit("remote-close-chat", remote::CloseRequest { slot: slot.to_string() }).map_err(|e| e.to_string())
+    }
+
     fn projects(&self) -> remote::gateway::BoxFut<Vec<(String, String)>> {
         let app = self.app.clone();
         Box::pin(async move {

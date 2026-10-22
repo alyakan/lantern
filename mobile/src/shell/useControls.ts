@@ -2,6 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import type { Controls } from "../protocol/generated/Controls";
 import { useConnectionState, useController } from "./hooks";
 
+/** Whether the connected Mac says it can do `feature` (Welcome's features): a phone shows only what its Mac can do. */
+export function useMacCan(feature: string): boolean {
+  const connection = useConnectionState();
+  return connection.kind === "connected" && connection.welcome.features?.includes(feature) === true;
+}
+
 /**
  * What this phone may choose for a chat, asked of the Mac each time a screen needs it (it can change in the Mac's Settings
  * meanwhile). `supported` is false for a Mac that can't say (an older Lantern): nothing is offered then, and nothing is asked

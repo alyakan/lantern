@@ -206,6 +206,11 @@ impl Host for FixtureHost {
         Box::pin(async { PROJECTS.iter().map(|(f, n)| (f.to_string(), n.to_string())).collect() })
     }
 
+    fn close(&self, slot: &str) -> Result<(), String> {
+        self.hub.closed(slot);
+        Ok(())
+    }
+
     fn set_permissions(&self, slot: &str, permissions: super::protocol::RemotePermissions) -> Result<(), String> {
         self.hub.controls(slot, permissions.as_str(), None);
         Ok(())

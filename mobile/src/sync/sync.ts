@@ -198,9 +198,19 @@ export class Sync {
     return started.slot;
   }
 
-  /** Whether this Mac can be asked what a phone may choose (Welcome lists "controls"); an older Mac ends the connection at a request it doesn't know. */
+  /** Whether this Mac says it can do `feature` (Welcome's features); an older Mac ends the connection at a request it doesn't know. */
+  has(feature: string): boolean {
+    return this.session?.welcome.features?.includes(feature) === true;
+  }
+
+  /** Whether this Mac can be asked what a phone may choose (Welcome lists "controls"). */
   get hasControls(): boolean {
-    return this.session?.welcome.features?.includes("controls") === true;
+    return this.has("controls");
+  }
+
+  /** Closes a chat on the Mac, as the window's sidebar does; rejects with why not (Claude is busy, a team's chat…). */
+  async close(slot: string): Promise<void> {
+    await this.ask({ op: "close", slot });
   }
 
   /** What may be chosen for a chat: whether Auto is allowed, and the presets. Null for a Mac that can't say. */

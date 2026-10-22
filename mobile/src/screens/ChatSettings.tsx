@@ -4,7 +4,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
 import { useController } from "../shell/hooks";
-import { useControls } from "../shell/useControls";
+import { useControls, useMacCan } from "../shell/useControls";
+import { CloseChatSheet } from "./CloseChat";
 import { Button, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
@@ -48,7 +49,7 @@ function OptionRow({ option, selected, onPick }: { option: Option; selected: boo
 }
 
 /** The chat's settings, as a sheet: what it runs on (Ask or Auto) and its models. A switch closes the sheet, and the title bar says "Switching…" until the chat does. */
-function SettingsSheet({ chat, off, loading, modes, presets, onMode, onPreset, onClose }: { chat: RemoteChat; off: string | null; loading: boolean; modes: Option[]; presets: Option[]; onMode: (v: string) => void; onPreset: (v: string) => void; onClose: () => void }) {
+function SettingsSheet({ chat, off, loading, modes, presets, onMode, onPreset, onAskClose, onClose }: { chat: RemoteChat; off: string | null; loading: boolean; modes: Option[]; presets: Option[]; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   return (
     <Sheet onClose={onClose}>
@@ -101,7 +102,24 @@ function SettingsSheet({ chat, off, loading, modes, presets, onMode, onPreset, o
                 )}
               </>
             )}
-            <Button label="Close" kind="ghost" onPress={close} />
+            {onAskClose && (
+              <PressScale
+                accessibilityRole="button"
+                accessibilityLabel="Close this chat"
+                onPress={() => {
+                  close();
+                  onAskClose();
+                }}
+                haptic="select"
+                scaleTo={0.98}
+                style={{ marginTop: 8, paddingVertical: 12, alignItems: "center" }}
+              >
+                <Txt variant="body" tone="stop" style={{ fontWeight: "700" }}>
+                  Close this chat
+                </Txt>
+              </PressScale>
+            )}
+            <Button label="Done" kind="ghost" onPress={close} />
           </ScrollView>
         </View>
       )}
@@ -116,10 +134,12 @@ function SettingsSheet({ chat, off, loading, modes, presets, onMode, onPreset, o
  * only offered while the chat is doing nothing; "Switching…" stays in the line until the chat says it changed.
  * `children` draws the title and what is under it, given the settings line (null when there is none).
  */
-export function ChatSettings({ slot, chat, onProblem, waitMs = SWITCH_WAIT_MS, children }: { slot: string; chat: RemoteChat | undefined; onProblem: (why: string) => void; waitMs?: number; children: (line: string | null) => ReactNode }) {
+export function ChatSettings({ slot, chat, onProblem, onClosed, waitMs = SWITCH_WAIT_MS, children }: { slot: string; chat: RemoteChat | undefined; onProblem: (why: string) => void; /** The chat was closed on the Mac: the screen has nothing to show any more. */ onClosed?: () => void; waitMs?: number; children: (line: string | null) => ReactNode }) {
   const { sync } = useController();
   const { supported, controls, reload } = useControls();
   const [open, setOpen] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const canClose = useMacCan("close");
   const [switching, setSwitching] = useState<{ kind: "mode" | "preset"; to: string } | null>(null);
 
   // The switch is over once the chat reports it, or has had long enough.
@@ -173,7 +193,16 @@ export function ChatSettings({ slot, chat, onProblem, waitMs = SWITCH_WAIT_MS, c
           presets={(controls?.presets ?? []).map((p) => ({ value: p.id, label: p.name, hint: p.summary, off }))}
           onMode={(v) => v !== chat.permissions && pick("mode", v)}
           onPreset={(v) => v !== chat.preset && pick("preset", v)}
+          onAskClose={canClose ? () => setClosing(true) : undefined}
           onClose={() => setOpen(false)}
+        />
+      )}
+      {closing && (
+        <CloseChatSheet
+          title={chat.title?.trim() || "this chat"}
+          why={chat.status === "working" || chat.status === "needs_you" ? "Claude is busy in this chat. Stop it first, then close it." : null}
+          onConfirm={() => sync.close(slot).then(() => onClosed?.())}
+          onClose={() => setClosing(false)}
         />
       )}
     </>

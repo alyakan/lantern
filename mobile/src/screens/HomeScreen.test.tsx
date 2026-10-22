@@ -1,7 +1,7 @@
 import { Platform, StyleSheet } from "react-native";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
-import { chat, makeController, NOW, renderWith, waiting } from "../test/render";
+import { chat, connected, connectedWithControls, makeController, NOW, renderWith, waiting } from "../test/render";
 import { noMemory, noPlatform, TipJar } from "../tips";
 import { HomeScreen } from "./HomeScreen";
 
@@ -272,5 +272,41 @@ describe("each chat's project, in its colour", () => {
     await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ slot: "a", project: "lantern", project_color: "#5b5bd6" }), chat({ slot: "b", title: "Other", project: "lantern", project_color: "#5b5bd6" })] });
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
     expect(colorOf("lantern")).toBe("#5b5bd6");
+  });
+});
+
+describe("closing a chat from Home", () => {
+  beforeEach(() => {
+    mockRemembered = "recent";
+  });
+
+  async function home(connection = connectedWithControls) {
+    const { controller } = makeController();
+    const session = attachSession(controller, {}, connection === connectedWithControls ? ["controls", "close"] : []);
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ slot: "a", title: "Release" }), chat({ slot: "b", title: "Widget", status: "working" })], connection }, controller);
+    return session;
+  }
+
+  it("is offered when a chat is held down, asks first, and closes it on the Mac", async () => {
+    const { lastOf } = await home();
+    await fireEvent(screen.getByRole("button", { name: "Release, lantern" }), "longPress");
+    await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy());
+    expect(lastOf("close")).toBeUndefined();
+    await fireEvent.press(screen.getByRole("button", { name: "Close chat" }));
+    await waitFor(() => expect(lastOf("close")).toEqual({ op: "close", slot: "a" }));
+  });
+
+  it("says Claude is busy for a chat that is working, instead of asking", async () => {
+    await home();
+    await fireEvent(screen.getByRole("button", { name: "Widget, lantern, working" }), "longPress");
+    await waitFor(() => expect(screen.getByText("Close this chat?")).toBeTruthy());
+    expect(screen.getByText("Claude is busy in this chat. Stop it first, then close it.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Close chat" })).toBeNull();
+  });
+
+  it("offers nothing for a Mac that can't close chats", async () => {
+    await home(connected);
+    await fireEvent(screen.getByRole("button", { name: "Release, lantern" }), "longPress");
+    expect(screen.queryByText("Close this chat?")).toBeNull();
   });
 });

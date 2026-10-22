@@ -63,6 +63,9 @@ pub trait Host: Send + Sync + 'static {
     fn pending(&self, slot: &str) -> Vec<Pending>;
     fn answer(&self, slot: &str, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> Result<(), String>;
     fn wake(&self, slot: &str) -> Result<(), String>;
+    /// Asks the window to close a chat for a phone (the gateway has checked it is listed and idle, asleep or stopped; the window
+    /// checks again, and refuses a team's Lead or agent).
+    fn close(&self, slot: &str) -> Result<(), String>;
     /// The projects a chat may be started in from a phone, as (folder, name): those the user already works in.
     fn projects(&self) -> BoxFut<Vec<(String, String)>>;
     /// Starts a chat in `folder` (the gateway has checked it is one of `projects`) with `text` as its first message, on
@@ -354,7 +357,7 @@ impl Gateway {
         }
         let hello = recv_message(link, &mut channel).await.ok_or(Refused::Protocol("no hello".into()))?;
         let ClientMessage::Hello { protocol: theirs, device_name, .. } = hello else { return Err(Refused::Protocol("no hello".into())) };
-        let welcome = ServerMessage::Welcome { protocol: PROTOCOL_VERSION, app_version: self.host.app_version(), mac_name: self.host.mac_name(), epoch: self.epoch, features: vec!["controls".into()], hosts: self.host.hosts() };
+        let welcome = ServerMessage::Welcome { protocol: PROTOCOL_VERSION, app_version: self.host.app_version(), mac_name: self.host.mac_name(), epoch: self.epoch, features: protocol::FEATURES.iter().map(|f| f.to_string()).collect(), hosts: self.host.hosts() };
         send_message(link, &mut channel, &welcome).map_err(Refused::Protocol)?;
         // Told which version this Mac speaks, so the phone can say what to update; it isn't paired or let in.
         if theirs != PROTOCOL_VERSION {
@@ -639,6 +642,15 @@ impl<'a> Session<'a> {
                 self.chat_known(&slot)?;
                 host.wake(&slot).map(|()| serde_json::Value::Null)
             }
+            Request::Close { slot } => {
+                use super::hub::ChatStatus as S;
+                let chat = self.gw.hub.chat(&slot).ok_or("That chat isn't open on your Mac.")?;
+                // A chat that is doing something is stopped first: closing it would drop the work and the question it asked.
+                if matches!(chat.status, S::Working | S::NeedsYou) {
+                    return Err("Claude is busy in this chat. Stop it first, then close it.".into());
+                }
+                host.close(&slot).map(|()| serde_json::Value::Null)
+            }
             Request::Projects => Ok(json(&host.projects().await.into_iter().map(|(id, name)| protocol::RemoteProject { id, name }).collect::<Vec<_>>())),
             // These two can take long: the connection's loop runs them beside everything else (see `run`); asked here, as a
             // plain request, they are the same thing.
@@ -747,6 +759,7 @@ pub(crate) mod tests {
         pub answered: Mutex<Vec<Answered>>,
         pub pending: Mutex<Vec<Pending>>,
         pub woken: Mutex<Vec<String>>,
+        pub closed: Mutex<Vec<String>>,
         pub history: Mutex<Vec<UiEvent>>,
         /// The projects it offers for starting a chat in, and the chats it was asked to start (folder, text, by).
         pub projects: Mutex<Vec<(String, String)>>,
@@ -780,6 +793,10 @@ pub(crate) mod tests {
         }
         fn wake(&self, slot: &str) -> Result<(), String> {
             self.woken.lock().unwrap().push(slot.into());
+            Ok(())
+        }
+        fn close(&self, slot: &str) -> Result<(), String> {
+            self.closed.lock().unwrap().push(slot.into());
             Ok(())
         }
         fn projects(&self) -> BoxFut<Vec<(String, String)>> {
@@ -1164,6 +1181,34 @@ pub(crate) mod tests {
 
     fn preset(id: &str) -> protocol::RemotePreset {
         protocol::RemotePreset { id: id.into(), name: id.to_uppercase(), summary: format!("{id} does it") }
+    }
+
+    #[tokio::test]
+    async fn a_phone_closes_a_chat_that_is_idle_asleep_or_stopped_and_not_one_that_is_busy() {
+        let r = rig();
+        r.hub.opened("idle", "/p");
+        r.hub.asleep("asleep", "/p", None, None);
+        r.hub.opened("busy", "/p");
+        r.hub.record(&BusEvent { slot: "busy".into(), seq: 1, event: user("go") });
+        r.hub.opened("asks", "/p");
+        r.hub.record(&BusEvent { slot: "asks".into(), seq: 1, event: UiEvent::PermissionRequested { request_id: "q".into(), tool_name: "Bash".into(), input: json!({}) } });
+        let (_, mut p) = paired(&r).await;
+        for slot in ["idle", "asleep"] {
+            assert!(p.ask(Request::Close { slot: slot.into() }).await.1.is_none(), "{slot}");
+        }
+        assert_eq!(*r.host.closed.lock().unwrap(), vec!["idle".to_string(), "asleep".to_string()]);
+        for slot in ["busy", "asks"] {
+            let (_, err, _) = p.ask(Request::Close { slot: slot.into() }).await;
+            assert!(err.is_some_and(|e| e.contains("Stop it first")), "{slot}");
+        }
+        let (_, err, _) = p.ask(Request::Close { slot: "nope".into() }).await;
+        assert!(err.is_some_and(|e| e.contains("isn't open")));
+        assert_eq!(r.host.closed.lock().unwrap().len(), 2, "nothing busy or unknown reached the app");
+    }
+
+    #[test]
+    fn this_mac_says_it_can_close_chats_so_a_phone_may_ask_it_to() {
+        assert!(protocol::FEATURES.contains(&"close") && protocol::FEATURES.contains(&"controls"));
     }
 
     #[tokio::test]
