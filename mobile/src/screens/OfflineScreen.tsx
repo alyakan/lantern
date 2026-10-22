@@ -87,13 +87,18 @@ function AddressField({ onAddress }: { onAddress: (text: string) => Promise<stri
   );
 }
 
-/** Not connected yet: connecting (a moment), or why not and what to check. */
+/**
+ * Not connected yet: connecting (a moment), or why not and what to check. Once a try has failed it stays on why, through
+ * the tries that follow on their own, so the address being typed in isn't swept away by each one.
+ */
 export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: ConnectionState; onRetry: () => void; onUnpair: () => void; /** Dials an address typed in; resolves to why it was refused, or null. */ onAddress?: (text: string) => Promise<string | null> }) {
   const insets = useSafeAreaInsets();
   const connecting = state.kind === "connecting";
+  const [lastReason, setLastReason] = useState<string | null>(state.kind === "offline" ? state.reason : null);
+  if (state.kind === "offline" && state.reason !== lastReason) setLastReason(state.reason);
   return (
     <AboveKeyboard style={{ backgroundColor: colors.paper, alignItems: "center", justifyContent: "center", padding: 30, paddingTop: insets.top }}>
-      {connecting ? (
+      {connecting && lastReason === null ? (
         <View accessibilityLabel="Connecting to your Mac" accessibilityRole="progressbar" accessible style={{ alignItems: "center", gap: 10 }}>
           <LitLantern />
           <Txt variant="heading">Connecting to your Mac</Txt>
@@ -106,8 +111,13 @@ export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: 
             Can't reach your Mac
           </Txt>
           <Txt variant="body" tone="ink2" style={{ textAlign: "center", marginTop: 8, marginBottom: 22 }}>
-            {state.kind === "offline" ? state.reason : "It may be asleep or offline. Away from home, check that Tailscale is on here and on the Mac, and that Remote control is on in Lantern."}
+            {lastReason ?? "It may be asleep or offline. Away from home, check that Tailscale is on here and on the Mac, and that Remote control is on in Lantern."}
           </Txt>
+          {connecting && (
+            <Txt variant="small" tone="ink3" accessibilityLiveRegion="polite" style={{ marginTop: -14, marginBottom: 14 }}>
+              Trying again…
+            </Txt>
+          )}
           <Button label="Try again" onPress={onRetry} style={{ alignSelf: "stretch" }} />
           {onAddress && <AddressField onAddress={onAddress} />}
           <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ alignSelf: "stretch", marginTop: 10, backgroundColor: "transparent" }} />
