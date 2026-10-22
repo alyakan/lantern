@@ -4,8 +4,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
 import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
+import type { PlanUsage } from "../sync/reducer";
 import { useController } from "../shell/hooks";
 import { useControls, useMacCan } from "../shell/useControls";
+import { UsageRow } from "./ChatExtras";
 import { CloseChatSheet } from "./CloseChat";
 import { Button, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
@@ -13,6 +15,7 @@ import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { colors, radius, shadow, space } from "../ui/theme";
 import { autoNote, MODES, modeLabel, presetName, whyNotNow, WORKFLOWS, workflowLabel } from "../view/controls";
+import { usageOf } from "../view/plan";
 
 /** How long "Switching…" waits for the chat to say it changed before it gives up and says so. */
 export const SWITCH_WAIT_MS = 20_000;
@@ -50,7 +53,7 @@ function OptionRow({ option, selected, onPick }: { option: Option; selected: boo
 }
 
 /** The chat's settings, as a sheet: what it runs on (Ask or Auto) and its models. A switch closes the sheet, and the title bar says "Switching…" until the chat does. */
-function SettingsSheet({ chat, off, loading, workflows, modes, presets, onWorkflow, onMode, onPreset, onAskClose, onClose }: { chat: RemoteChat; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
+function SettingsSheet({ chat, plan, off, loading, workflows, modes, presets, onWorkflow, onMode, onPreset, onAskClose, onClose }: { chat: RemoteChat; /** The subscription's usage, when the Mac has said it. */ plan?: PlanUsage | null; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   return (
     <Sheet onClose={onClose}>
@@ -63,6 +66,7 @@ function SettingsSheet({ chat, off, loading, workflows, modes, presets, onWorkfl
             <Txt variant="small" tone="ink2">
               {off ?? "Claude restarts on the same conversation when you change these."}
             </Txt>
+            {plan && <UsageRow plan={plan} />}
             {loading ? (
               <View accessibilityLabel="Loading" accessibilityRole="progressbar" accessible style={{ paddingVertical: 16 }}>
                 <Dots />
@@ -153,7 +157,7 @@ function SettingsSheet({ chat, off, loading, workflows, modes, presets, onWorkfl
  * only offered while the chat is doing nothing; "Switching…" stays in the line until the chat says it changed.
  * `children` draws the title and what is under it, given the settings line (null when there is none).
  */
-export function ChatSettings({ slot, chat, onProblem, onClosed, waitMs = SWITCH_WAIT_MS, children }: { slot: string; chat: RemoteChat | undefined; onProblem: (why: string) => void; /** The chat was closed on the Mac: the screen has nothing to show any more. */ onClosed?: () => void; waitMs?: number; children: (line: string | null) => ReactNode }) {
+export function ChatSettings({ slot, chat, plan, onProblem, onClosed, waitMs = SWITCH_WAIT_MS, children }: { slot: string; chat: RemoteChat | undefined; /** The subscription's usage, when the Mac has said it: shown in the sheet, and in the line once it runs low. */ plan?: PlanUsage | null; onProblem: (why: string) => void; /** The chat was closed on the Mac: the screen has nothing to show any more. */ onClosed?: () => void; waitMs?: number; children: (line: string | null) => ReactNode }) {
   const { sync } = useController();
   const { supported, controls, reload } = useControls();
   const [open, setOpen] = useState(false);
@@ -188,7 +192,9 @@ export function ChatSettings({ slot, chat, onProblem, onClosed, waitMs = SWITCH_
   const preset = switching?.kind === "preset" ? "Switching…" : chat.preset ? presetName(controls, chat.preset) : null;
   // Step by step is said; a plain chat is the usual, and isn't.
   const flow = switching?.kind === "workflow" ? "Switching…" : chat.workflow && chat.workflow !== "chat" ? workflowLabel(chat.workflow) : null;
-  const line = [flow, mode, preset].filter(Boolean).join(" · ");
+  const usage = plan ? usageOf(plan) : null;
+  const low = usage && usage.tone !== "ok" ? (usage.tone === "stop" ? "Limit reached" : `${usage.percent}% used`) : null;
+  const line = [flow, mode, preset, low].filter(Boolean).join(" · ");
 
   return (
     <>
@@ -209,6 +215,7 @@ export function ChatSettings({ slot, chat, onProblem, onClosed, waitMs = SWITCH_
       {open && (
         <SettingsSheet
           chat={chat}
+          plan={plan}
           off={off}
           loading={!controls}
           workflows={canFlow && (chat.workflow === "chat" || chat.workflow === "steps") ? WORKFLOWS.map((w) => ({ value: w.value, label: w.label, hint: w.hint, off })) : []}

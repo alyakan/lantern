@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
+import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
+import type { PlanUsage } from "../sync/reducer";
+import { progressOf, usageOf } from "../view/plan";
 import { ScrollView, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -172,6 +176,104 @@ export function QuickReplies({ replies, onSend }: { replies: string[]; onSend: (
           </PressScale>
         </FadeSlideIn>
       ))}
+    </View>
+  );
+}
+
+/**
+ * The plan Claude is keeping, over the message box: one line (how far, and what it is doing now) that opens to every step.
+ * Gone once every step is done.
+ */
+export function PlanCard({ todos }: { todos: RemoteTodo[] }) {
+  const [open, setOpen] = useState(false);
+  const p = progressOf(todos);
+  if (todos.length === 0 || p.finished) return null;
+  return (
+    <FadeSlideIn from={8} ms={180} style={{ marginHorizontal: 12, marginBottom: 6 }}>
+      <View style={[{ backgroundColor: colors.card, borderRadius: radius.inner, overflow: "hidden" }, shadow.float, { shadowOpacity: 0.08 }]}>
+        <PressScale accessibilityRole="button" accessibilityLabel={`Plan, ${p.done} of ${p.total} done${p.current ? `, now: ${p.current}` : ""}`} accessibilityState={{ expanded: open }} onPress={() => setOpen((o) => !o)} haptic="select" scaleTo={0.99} style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, paddingHorizontal: 12 }}>
+          <View style={{ backgroundColor: colors.paper, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2 }}>
+            <Txt variant="tiny" tone="ink2" style={{ fontWeight: "700" }}>
+              {p.done}/{p.total}
+            </Txt>
+          </View>
+          <Txt variant="small" numberOfLines={1} style={{ flex: 1, fontWeight: "600" }}>
+            {p.current ?? "Plan"}
+          </Txt>
+          <Chevron open={open} />
+        </PressScale>
+        {open && (
+          <ScrollView style={{ maxHeight: 220 }} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 10, gap: 6 }}>
+            {todos.map((t, i) => (
+              <View key={`${i}-${t.content}`} accessibilityLabel={`${t.status === "completed" ? "Done" : t.status === "in_progress" ? "Doing" : "To do"}: ${t.content}`} style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
+                <Txt variant="small" tone={t.status === "completed" ? "go" : t.status === "in_progress" ? "cobalt" : "ink3"} style={{ width: 16, fontWeight: "700" }}>
+                  {t.status === "completed" ? "✓" : t.status === "in_progress" ? "●" : "○"}
+                </Txt>
+                <Txt variant="small" tone={t.status === "completed" ? "ink3" : "ink"} style={{ flex: 1, textDecorationLine: t.status === "completed" ? "line-through" : "none" }}>
+                  {t.status === "in_progress" ? t.active_form : t.content}
+                </Txt>
+              </View>
+            ))}
+          </ScrollView>
+        )}
+      </View>
+    </FadeSlideIn>
+  );
+}
+
+/** What can be typed after the "/": the matching commands and skills, one tap puts one in the message box. */
+export function SlashPicker({ matches, onPick }: { matches: RemoteCommand[]; onPick: (command: RemoteCommand) => void }) {
+  if (matches.length === 0) return null;
+  return (
+    <FadeSlideIn from={6} ms={140} style={{ marginHorizontal: 12, marginBottom: 6 }}>
+      <View accessibilityLabel="Commands" style={[{ backgroundColor: colors.card, borderRadius: radius.inner, overflow: "hidden" }, shadow.float, { shadowOpacity: 0.1 }]}>
+        <ScrollView keyboardShouldPersistTaps="handled" style={{ maxHeight: 232 }}>
+          {matches.map((c, i) => (
+            <PressScale key={c.name} accessibilityRole="button" accessibilityLabel={`/${c.name}${c.description ? `, ${c.description}` : ""}`} onPress={() => onPick(c)} haptic="select" scaleTo={0.99} style={{ paddingVertical: 9, paddingHorizontal: 12, gap: 1, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: colors.rule }}>
+              <Txt variant="small" style={{ fontWeight: "700" }}>
+                /{c.name}
+                {c.argument_hint ? (
+                  <Txt variant="small" tone="ink3">
+                    {" "}
+                    {c.argument_hint}
+                  </Txt>
+                ) : null}
+              </Txt>
+              {c.description ? (
+                <Txt variant="tiny" tone="ink2" numberOfLines={1}>
+                  {c.description}
+                </Txt>
+              ) : null}
+            </PressScale>
+          ))}
+        </ScrollView>
+      </View>
+    </FadeSlideIn>
+  );
+}
+
+/** How much of the subscription's five-hour window is used, as a bar with when it resets. */
+export function UsageRow({ plan }: { plan: PlanUsage }) {
+  const u = usageOf(plan);
+  const fill = u.tone === "stop" ? colors.stop : u.tone === "warn" ? colors.hi : colors.go;
+  return (
+    <View accessibilityLabel={`Plan usage: ${u.percent} percent of the five-hour window used. ${u.resets}`} style={{ backgroundColor: colors.paper, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
+        <Txt variant="body" style={{ fontWeight: "700" }}>
+          Plan usage
+        </Txt>
+        <Txt variant="small" tone={u.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700" }}>
+          {u.tone === "stop" ? "Limit reached" : `${u.percent}% used`}
+        </Txt>
+      </View>
+      <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.rule, overflow: "hidden" }}>
+        <View style={{ width: `${Math.max(u.percent, 2)}%`, height: 6, backgroundColor: fill }} />
+      </View>
+      {u.resets !== "" && (
+        <Txt variant="tiny" tone="ink2">
+          Five-hour window · {u.resets.toLowerCase()}
+        </Txt>
+      )}
     </View>
   );
 }

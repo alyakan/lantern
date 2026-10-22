@@ -225,3 +225,24 @@ describe("the Mac", () => {
     expect(items(s)).toEqual([]);
   });
 });
+
+describe("the commands, plan and usage a Mac with extras sends", () => {
+  const todos: RemoteEvent = { kind: "todos", items: [{ content: "A", status: "pending", active_form: "Doing A" }] };
+  const commands: RemoteEvent = { kind: "commands", commands: [{ name: "review", description: "Review", argument_hint: "" }] };
+  const usage: RemoteEvent = { kind: "plan_usage", used: 0.4, resets_at: 99, status: "allowed" };
+
+  it("are kept on the chat as they were last said, and the plan goes with the conversation", () => {
+    const s = run([event("a", 1, commands), event("a", 2, todos), event("a", 3, usage)]);
+    expect(s.views.a).toMatchObject({ commands: [{ name: "review" }], todos: [{ content: "A" }], plan: { used: 0.4, resetsAt: 99, status: "allowed" } });
+    // They are not messages: nothing is added to the chat's items.
+    expect(items(s)).toEqual([]);
+    expect(run([event("a", 4, { kind: "conversation_reset" })], s).views.a.todos).toEqual([]);
+  });
+
+  it("stay through a catch-up that starts the chat over, and come again with it", () => {
+    const s = run([event("a", 1, commands), event("a", 2, usage), reset("a", 9, [{ kind: "user_text", text: "hi", at: 1, sent_by: null }])]);
+    expect(s.views.a).toMatchObject({ commands: [{ name: "review" }], plan: { used: 0.4 } });
+    const again = run([reset("a", 12, [{ kind: "user_text", text: "hi", at: 1, sent_by: null }, todos, { kind: "plan_usage", used: 0.5, resets_at: null, status: "allowed" }])], s);
+    expect(again.views.a).toMatchObject({ todos: [{ content: "A" }], plan: { used: 0.5, resetsAt: null } });
+  });
+});

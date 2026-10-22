@@ -13,7 +13,7 @@ import { quickReplies, quote, searchRows } from "../view/chatText";
 import { projectColorOf } from "../view/home";
 import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
-import { ChatSearchSheet, distanceFromEnd, JumpToBottom, MessageActionsSheet, QuickReplies, type ComposeSeed } from "./ChatExtras";
+import { ChatSearchSheet, distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, type ComposeSeed } from "./ChatExtras";
 import { ChatSettings } from "./ChatSettings";
 import { AssistantRow, Composer, DesktopRow, DiffSheet, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
 
@@ -160,7 +160,7 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
         </PressScale>
         {/* The title bar opens the chat's settings (what it runs on, and its models) when the Mac can say what those are. */}
-        <ChatSettings slot={slot} chat={chat} onProblem={setProblem} onClosed={onBack}>
+        <ChatSettings slot={slot} chat={chat} plan={view.plan} onProblem={setProblem} onClosed={onBack}>
           {(line) => (
             <View style={{ flex: 1 }}>
               <Txt variant="heading" numberOfLines={1} accessibilityRole="header">
@@ -284,6 +284,7 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
       {away && <JumpToBottom unseen={unseen} onPress={() => list.current?.scrollToEnd({ animated: true })} />}
       </View>
 
+      <PlanCard todos={view.todos} />
       {replies.length > 0 && <QuickReplies replies={replies} onSend={send} />}
       {asleep ? (
         <View style={{ padding: 16, paddingBottom: Math.max(insets.bottom, 16), gap: 6 }}>
@@ -303,7 +304,7 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           />
         </View>
       ) : (
-        <Composer disabled={!online} onSend={(text) => void sync.send(slot, text)} seed={seed} />
+        <Composer disabled={!online} onSend={(text) => void sync.send(slot, text)} seed={seed} commands={view.commands} />
       )}
       {actions && (
         <MessageActionsSheet

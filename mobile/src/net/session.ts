@@ -55,6 +55,9 @@ export interface HandshakeOptions {
   fixedEphemeral?: Uint8Array;
 }
 
+/** What this app can read beyond protocol 1, said in its hello: a Mac sends it nothing it doesn't list ("extras": commands, plan, usage). */
+export const PHONE_FEATURES = ["extras"];
+
 /** Runs the handshake over `link` and says hello: the open channel and the Mac's welcome. Throws on any failure. */
 export async function comeIn(link: Link, device: Keypair, macKey: Uint8Array, o: HandshakeOptions): Promise<{ channel: Channel; welcome: Welcome }> {
   const hs = o.secret ? Handshake.pair(device, macKey, o.secret, o.fixedEphemeral ?? null) : Handshake.connect(device, macKey, o.fixedEphemeral ?? null);
@@ -70,7 +73,7 @@ export async function comeIn(link: Link, device: Keypair, macKey: Uint8Array, o:
   link.send(hs.write());
   const { send, receive } = hs.finish();
   const channel = new Channel(send, receive);
-  sendMessage(link, channel, { type: "hello", protocol: PROTOCOL_VERSION, app_version: o.appVersion, device_name: o.deviceName });
+  sendMessage(link, channel, { type: "hello", protocol: PROTOCOL_VERSION, app_version: o.appVersion, device_name: o.deviceName, features: PHONE_FEATURES });
   const welcome = await nextMessage(link, channel, STEP_WAIT);
   if (!welcome || welcome.type !== "welcome") {
     if (o.secret) throw new (link.isClosed ? Refused : NoAnswer)(NOT_TAKEN);

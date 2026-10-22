@@ -8,6 +8,8 @@
  * (matched by the id the phone gave it).
  */
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
+import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
+import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import type { Waiting } from "../protocol/generated/Waiting";
 import type { Pushed } from "../net/session";
@@ -27,8 +29,22 @@ export type Item =
   | { kind: "desktop"; id: string; what: string }
   | { kind: "turn"; id: string; isError: boolean; result: string | null; durationMs: number | null };
 
+/** The subscription's five-hour window, as the Mac last said it (the account's, the same in every chat). */
+export interface PlanUsage {
+  /** 0 to 1. */
+  used: number;
+  /** Unix seconds. */
+  resetsAt: number | null;
+  status: string;
+}
+
 export interface ChatView {
   items: Item[];
+  /** What claude offers after a "/" in this chat (empty until the Mac says, and for a Mac that can't). */
+  commands: RemoteCommand[];
+  /** The plan Claude keeps, as it last wrote it. */
+  todos: RemoteTodo[];
+  plan: PlanUsage | null;
   /** The number of the last event applied (in `epoch`). */
   seq: number;
   /** Earlier turns not loaded yet (Request::Earlier brings them). */
@@ -57,7 +73,7 @@ export interface State {
 
 export const initialState: State = { chats: [], waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, epoch: null };
 
-export const emptyView: ChatView = { items: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
+export const emptyView: ChatView = { items: [], commands: [], todos: [], plan: null, seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
 
 export type Action =
   | { type: "welcome"; epoch: number }
@@ -153,7 +169,13 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
     case "asleep":
       return view;
     case "conversation_reset":
-      return { ...view, items: [], hidden: 0, thinking: false };
+      return { ...view, items: [], todos: [], hidden: 0, thinking: false };
+    case "commands":
+      return { ...view, commands: event.commands };
+    case "todos":
+      return { ...view, todos: event.items };
+    case "plan_usage":
+      return { ...view, plan: { used: event.used, resetsAt: event.resets_at, status: event.status } };
   }
 }
 
@@ -217,7 +239,7 @@ export function reducer(state: State, action: Action): State {
         case "reset": {
           const view = state.views[msg.slot] ?? emptyView;
           // Page 0 starts the chat over, keeping only messages this phone sent that the Mac hasn't echoed yet.
-          const base: ChatView = msg.page === 0 ? { ...emptyView, items: view.items.filter((it) => it.kind === "user" && it.sending) } : view;
+          const base: ChatView = msg.page === 0 ? { ...emptyView, plan: view.plan, commands: view.commands, items: view.items.filter((it) => it.kind === "user" && it.sending) } : view;
           const next = applyAll(base, msg.events);
           // A chat this phone already followed, started over because it was away too long: say how much it missed.
           const caughtUp = msg.page === 0 ? (view.seq > 0 && msg.seq > view.seq ? msg.seq - view.seq : 0) : view.caughtUp;

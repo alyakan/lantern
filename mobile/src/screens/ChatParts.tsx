@@ -6,7 +6,9 @@ import * as Clipboard from "expo-clipboard";
 import { useAccent } from "../ui/accent";
 import { Button, Chip, Tag, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
-import { useSeed, type ComposeSeed } from "./ChatExtras";
+import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
+import { matchCommands, slashQuery } from "../view/slash";
+import { SlashPicker, useSeed, type ComposeSeed } from "./ChatExtras";
 import { useListInput } from "../ui/useListInput";
 import { Markdown } from "../ui/Markdown";
 import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
@@ -387,7 +389,7 @@ export const TurnRow = memo(function TurnRow({ item }: { item: Extract<Item, { k
 });
 
 /** The message box: a capsule with a send button; typing and sending only while connected. */
-export function Composer({ onSend, disabled, placeholder = "Message Claude", seed }: { onSend: (text: string) => void; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed }) {
+export function Composer({ onSend, disabled, placeholder = "Message Claude", seed, commands = [] }: { onSend: (text: string) => void; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
   const [text, setText] = useState("");
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   useSeed(seed, (s) => {
@@ -400,8 +402,18 @@ export function Composer({ onSend, disabled, placeholder = "Message Claude", see
   const ready = text.trim().length > 0 && !disabled;
   // Return after "1. item" starts "2. ", after "- item" starts "- ".
   const list = useListInput(text, setText);
+  const query = slashQuery(text);
+  const matches = query === null || commands.length === 0 ? [] : matchCommands(commands, query);
   return (
-    <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 12), backgroundColor: colors.paper }}>
+    <View style={{ paddingTop: 8, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 12), backgroundColor: colors.paper }}>
+      <SlashPicker
+        matches={matches}
+        onPick={(c) => {
+          setText(`/${c.name} `);
+          input.current?.focus();
+        }}
+      />
+      <View style={{ paddingHorizontal: 12 }}>
       <View style={[{ flexDirection: "row", alignItems: "flex-end", gap: 8, backgroundColor: colors.card, borderRadius: 26, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }, shadow.float, { shadowOpacity: 0.12 }]}>
         <TextInput
           ref={input}
@@ -421,6 +433,7 @@ export function Composer({ onSend, disabled, placeholder = "Message Claude", see
             setText("");
           }}
         />
+      </View>
       </View>
     </View>
   );
