@@ -12,6 +12,9 @@ jest.mock("../prefs", () => ({
   saveGrouping: jest.fn(async (g: "recent" | "project") => {
     mockRemembered = g;
   }),
+  // The suggestions' own memory: nothing folded away or dismissed.
+  loadSuggestionPrefs: jest.fn(async () => ({ collapsed: false, dismissed: [] as string[] })),
+  saveSuggestionPrefs: jest.fn(async () => {}),
 }));
 
 const handlers = () => ({ onOpenChat: jest.fn(), onReview: jest.fn(), onOpenMac: jest.fn(), onCompose: jest.fn(), onNewChat: jest.fn(), onSupport: jest.fn() });
