@@ -3,22 +3,30 @@ import { Linking, ScrollView, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { parseMarkdown, plainText, type Align, type Block, type Span } from "../view/markdown";
 import { useAccent } from "./accent";
-import { colors, fonts, radius, type as scale } from "./theme";
+import { fonts, radius, type as scale, useColors, type Palette } from "./theme";
 import { Txt } from "./components";
 import { PressScale } from "./motion";
 
-/** The colour of the words: ink on the page, night or white on a dark background (white: your own message). */
-type Tone = "ink" | "night" | "white";
+/** The colour of the words: ink on the page, night or white on a dark background, on-ink on an ink one (your own message). */
+type Tone = "ink" | "night" | "white" | "on-ink";
+
+/** What a tone's surroundings look like: a raised box, a faint wash behind code, a hairline, and the colour of code. */
+function look(tone: Tone, colors: Palette) {
+  if (tone === "ink") return { raised: colors.paper, wash: colors.wash, line: colors.rule, code: colors.ink, label: "ink3" as const };
+  if (tone === "on-ink") return { raised: `${colors.onInk}1f`, wash: `${colors.onInk}1f`, line: `${colors.onInk}30`, code: colors.onInk, label: "on-ink" as const };
+  return { raised: colors.nightRaised, wash: colors.nightRaised, line: colors.nightLine, code: colors.white, label: "night" as const };
+}
 
 function Spans({ spans, tone }: { spans: Span[]; tone: Tone }) {
   const accent = useAccent();
+  const colors = useColors();
   return (
     <>
       {spans.map((s, i) => {
         switch (s.kind) {
           case "code":
             return (
-              <Text key={i} style={{ fontFamily: fonts.mono, fontSize: 13, backgroundColor: tone === "ink" ? "#0000000d" : colors.nightRaised }}>
+              <Text key={i} style={{ fontFamily: fonts.mono, fontSize: 13, backgroundColor: look(tone, colors).wash }}>
                 {s.text}
               </Text>
             );
@@ -56,6 +64,7 @@ function Spans({ spans, tone }: { spans: Span[]; tone: Tone }) {
 
 /** A task box in a list: empty, or filled with a check. */
 function TaskBox({ checked }: { checked: boolean }) {
+  const colors = useColors();
   return (
     <View accessible accessibilityRole="checkbox" accessibilityState={{ checked }} style={{ width: 17, height: 17, marginTop: 2, borderRadius: 5, borderWidth: 1.5, borderColor: checked ? colors.go : colors.ink3, backgroundColor: checked ? colors.go : "transparent", alignItems: "center", justifyContent: "center" }}>
       {checked && <View accessibilityElementsHidden style={{ width: 9, height: 5, marginTop: -2, borderLeftWidth: 2, borderBottomWidth: 2, borderColor: colors.white, transform: [{ rotate: "-45deg" }] }} />}
@@ -74,11 +83,12 @@ function CodeBlock({ lang, text, tone }: { lang: string; text: string; tone: Ton
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => setCopied(false), 1500);
   };
-  const night = tone !== "ink";
+  const colors = useColors();
+  const l = look(tone, colors);
   return (
-    <View style={{ backgroundColor: night ? colors.nightRaised : colors.paper, borderRadius: radius.inner, overflow: "hidden" }}>
+    <View style={{ backgroundColor: l.raised, borderRadius: radius.inner, overflow: "hidden" }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingLeft: 12, paddingRight: 6, minHeight: 30 }}>
-        <Txt variant="tiny" tone={night ? "night" : "ink3"} style={{ fontWeight: "700" }}>
+        <Txt variant="tiny" tone={l.label} style={{ fontWeight: "700" }}>
           {lang}
         </Txt>
         <PressScale accessibilityRole="button" accessibilityLabel={copied ? "Copied" : "Copy code"} onPress={copy} hitSlop={6} haptic="light" scaleTo={0.92} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
@@ -88,7 +98,7 @@ function CodeBlock({ lang, text, tone }: { lang: string; text: string; tone: Ton
         </PressScale>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 12 }}>
-        <Text selectable style={[scale.mono, { color: night ? colors.white : colors.ink }]}>
+        <Text selectable style={[scale.mono, { color: l.code }]}>
           {text}
         </Text>
       </ScrollView>
@@ -106,10 +116,10 @@ const columnWidth = (cells: Span[][]) => Math.round(Math.min(240, Math.max(72, M
 function Table({ block, tone }: { block: Extract<Block, { kind: "table" }>; tone: Tone }) {
   const widths = block.head.map((h, c) => columnWidth([h, ...block.rows.map((r) => r[c] ?? [])]));
   const textAlign = (a: Align) => a;
-  const night = tone !== "ink";
-  const line = night ? "rgba(255,255,255,0.14)" : colors.rule;
+  const colors = useColors();
+  const { raised, line } = look(tone, colors);
   const row = (cells: Span[][], key: string, head: boolean, last: boolean) => (
-    <View key={key} accessibilityRole={head ? "header" : undefined} style={{ flexDirection: "row", backgroundColor: head ? (night ? colors.nightRaised : colors.paper) : "transparent", borderBottomWidth: last ? 0 : 1, borderBottomColor: line }}>
+    <View key={key} accessibilityRole={head ? "header" : undefined} style={{ flexDirection: "row", backgroundColor: head ? raised : "transparent", borderBottomWidth: last ? 0 : 1, borderBottomColor: line }}>
       {cells.map((cell, c) => (
         <View key={c} style={{ width: widths[c], paddingHorizontal: 12, paddingVertical: 8, borderLeftWidth: c === 0 ? 0 : 1, borderLeftColor: line, justifyContent: "center" }}>
           <Txt variant="small" tone={tone} selectable style={{ textAlign: textAlign(block.align[c] ?? "left"), fontWeight: head ? "700" : undefined }}>
@@ -132,6 +142,7 @@ function Table({ block, tone }: { block: Extract<Block, { kind: "table" }>; tone
 /** Claude's text: headings, paragraphs, lists, tables, quotes, rules and code blocks. Memoised per text, so only a streaming block redraws. */
 export const Markdown = memo(function Markdown({ text, tone = "ink", selectable = true }: { text: string; tone?: Tone; /** False where a long press means something else (a message's actions); code and tables stay selectable. */ selectable?: boolean }) {
   const blocks = useMemo(() => parseMarkdown(text), [text]);
+  const colors = useColors();
   return (
     <View style={{ gap: 8 }}>
       {blocks.map((b, i) => {
@@ -187,7 +198,7 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
           case "table":
             return <Table key={i} block={b} tone={tone} />;
           case "rule":
-            return <View key={i} accessibilityElementsHidden style={{ height: 1, backgroundColor: tone === "ink" ? colors.rule : "rgba(255,255,255,0.14)", marginVertical: 6 }} />;
+            return <View key={i} accessibilityElementsHidden style={{ height: 1, backgroundColor: look(tone, colors).line, marginVertical: 6 }} />;
           case "code":
             return <CodeBlock key={i} lang={b.lang} text={b.text} tone={tone} />;
         }

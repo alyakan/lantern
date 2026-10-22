@@ -8,7 +8,7 @@ import { Button, ProjectTag, Txt } from "../ui/components";
 import { AboveKeyboard } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
-import { colors, shadow, space } from "../ui/theme";
+import { shadow, space, useColors } from "../ui/theme";
 import { quickReplies, quote, searchRows } from "../view/chatText";
 import { projectColorOf } from "../view/home";
 import { timeline, type Row } from "../view/timeline";
@@ -32,6 +32,7 @@ export const WAKE_WAIT_MS = 20_000;
 
 /** A chat, as a timeline with a message box under it. */
 export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
+  const colors = useColors();
   const controller = useController();
   const { sync } = controller;
   const { chats, views, plan } = useSyncState();
@@ -191,8 +192,8 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
         {working && (
           <FadeSlideIn from={-6} ms={200}>
             <PressScale accessibilityRole="button" accessibilityLabel="Stop" onPress={() => sync.interrupt(slot).catch(fail)} hitSlop={8} scaleTo={0.92} style={{ height: 40, paddingHorizontal: 14, borderRadius: 20, backgroundColor: colors.ink, flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <View style={{ width: 11, height: 11, borderRadius: 2, backgroundColor: colors.white }} />
-              <Txt variant="small" tone="white" style={{ fontWeight: "700" }}>
+              <View style={{ width: 11, height: 11, borderRadius: 2, backgroundColor: colors.onInk }} />
+              <Txt variant="small" tone="on-ink" style={{ fontWeight: "700" }}>
                 Stop
               </Txt>
             </PressScale>

@@ -2,7 +2,7 @@ import { View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { Button, Txt } from "../ui/components";
 import { DarkLantern } from "../ui/lanterns";
-import { colors, space } from "../ui/theme";
+import { space, useColors } from "../ui/theme";
 import { useAppLock, useLockState } from "./lockContext";
 
 /**
@@ -12,6 +12,7 @@ import { useAppLock, useLockState } from "./lockContext";
  */
 export function LockCover() {
   const lock = useAppLock();
+  const colors = useColors();
   const { ready, locked, authenticating, method, problem } = useLockState();
   const lockedNow = ready && locked;
   return (

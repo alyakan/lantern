@@ -10,10 +10,11 @@ import { DarkLantern } from "../ui/lanterns";
 import { skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
-import { colors, radius, space } from "../ui/theme";
+import { radius, space, useColors } from "../ui/theme";
 
 /** A lantern being lit: its glow swells and settles, over and over, while the phone finds the Mac. */
 function LitLantern() {
+  const colors = useColors();
   // The flame is Ember for a regular.
   const accent = useAccent();
   const flame = accent === EMBER ? EMBER : colors.hi;
@@ -45,6 +46,7 @@ function LitLantern() {
  * that never learned the Mac's Tailscale address. `onAddress` resolves to why one was refused, or null.
  */
 function AddressField({ onAddress }: { onAddress: (text: string) => Promise<string | null> }) {
+  const colors = useColors();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
@@ -92,6 +94,7 @@ function AddressField({ onAddress }: { onAddress: (text: string) => Promise<stri
  * the tries that follow on their own, so the address being typed in isn't swept away by each one.
  */
 export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: ConnectionState; onRetry: () => void; onUnpair: () => void; /** Dials an address typed in; resolves to why it was refused, or null. */ onAddress?: (text: string) => Promise<string | null> }) {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const connecting = state.kind === "connecting";
   const [lastReason, setLastReason] = useState<string | null>(state.kind === "offline" ? state.reason : null);
@@ -129,6 +132,7 @@ export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: 
 
 /** The lock's switch: Face ID (or the phone's passcode) before Lantern shows anything. It asks first, to turn it on or off. */
 function LockRow() {
+  const colors = useColors();
   const lock = useAppLock();
   const { enabled, available, authenticating, method, problem } = useLockState();
   return (
@@ -159,6 +163,7 @@ function LockRow() {
 
 /** The Mac, as a sheet: its name, where the connection stands, and unpairing this phone. */
 export function MacSheet({ state, onClose, onUnpair, onSupport }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the optional tips. */ onSupport?: () => void }) {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const where = state.kind === "connected" ? `Connected through ${state.host}` : state.kind === "offline" ? "Not connected" : state.kind === "connecting" ? "Connecting…" : "Not paired";
   return (

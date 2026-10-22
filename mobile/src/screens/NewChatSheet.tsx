@@ -12,7 +12,7 @@ import { useListInput } from "../ui/useListInput";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { ProjectsSkeleton } from "../ui/skeleton";
-import { colors, radius, shadow, space } from "../ui/theme";
+import { radius, shadow, space, useColors } from "../ui/theme";
 import { autoNote, MODES, WORKFLOWS } from "../view/controls";
 import { projectColorOf, projectTint } from "../view/home";
 
@@ -42,6 +42,7 @@ export interface NewChatProps {
  * offered (the Mac decides, whatever is sent).
  */
 export function NewChatSheet({ initialText = "", initialProject, continueChat, onClose, onStarted }: NewChatProps) {
+  const colors = useColors();
   const { sync } = useController();
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardUp();

@@ -7,7 +7,7 @@ import { Button, Tag, Txt } from "../ui/components";
 import { AboveKeyboard, useKeyboardUp } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
-import { colors, radius, space } from "../ui/theme";
+import { radius, space, useColors } from "../ui/theme";
 import { approvalOf, promptView, type PromptView, type Question } from "../view/prompts";
 import type { Waiting } from "../protocol/generated/Waiting";
 
@@ -36,6 +36,7 @@ export function answersFrom(qs: Question[], picks: Record<string, string[]>, typ
 
 /** One answer to choose: it takes the highlighter colour as it is picked, with a check popping in, and gives under a press. */
 function OptionCard({ on, multi, label, description, onPress }: { on: boolean; multi: boolean; label: string; description?: string; onPress: () => void }) {
+  const colors = useColors();
   const sel = useRef(new Animated.Value(on ? 1 : 0)).current;
   useEffect(() => {
     if (skips()) sel.setValue(on ? 1 : 0);
@@ -79,6 +80,7 @@ function OptionCard({ on, multi, label, description, onPress }: { on: boolean; m
 }
 
 function Options({ q, picks, typed, onPick, onType }: { q: Question; picks: string[]; typed: string; onPick: (label: string) => void; onType: (text: string) => void }) {
+  const colors = useColors();
   return (
     <View style={{ gap: 8 }}>
       {q.header ? (
@@ -108,6 +110,7 @@ function Options({ q, picks, typed, onPick, onType }: { q: Question; picks: stri
 
 /** The decision on its own, full screen: what is asked, where it runs, and a swipe to allow or a tap to deny. */
 export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
+  const colors = useColors();
   const controller = useController();
   const { waiting, chats } = useSyncState();
   const insets = useSafeAreaInsets();

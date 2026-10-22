@@ -47,8 +47,8 @@ export function projectColorOf(color: unknown): string | null {
 }
 
 /** A project's colour as a quiet fill behind its name (the colour at about 15%), and the colour itself for the words; plain ones for a project the Mac gave no colour. */
-export function projectTint(color: string | null): { bg: string; fg: string } {
-  return color ? { bg: `${color}26`, fg: color } : { bg: "#dce2e8", fg: "#566272" };
+export function projectTint(color: string | null, plain: { bg: string; fg: string } = { bg: "#dce2e8", fg: "#566272" }): { bg: string; fg: string } {
+  return color ? { bg: `${color}26`, fg: color } : plain;
 }
 
 export interface Row {

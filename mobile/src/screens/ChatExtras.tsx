@@ -12,11 +12,12 @@ import { useKeyboardUp } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
-import { colors, fonts, radius, shadow, space } from "../ui/theme";
+import { fonts, radius, shadow, space, useColors } from "../ui/theme";
 import type { Hit } from "../view/chatText";
 
 /** One thing a sheet offers: a row with a name. */
 function ActionRow({ label, hint, onPress, tone = "ink" }: { label: string; hint?: string; onPress: () => void; tone?: "ink" | "stop" }) {
+  const colors = useColors();
   return (
     <PressScale accessibilityRole="button" accessibilityLabel={label} onPress={onPress} haptic="select" scaleTo={0.98} style={{ borderRadius: radius.inner, backgroundColor: colors.paper, paddingVertical: 13, paddingHorizontal: 14, gap: 2 }}>
       <Txt variant="body" tone={tone} style={{ fontWeight: "700" }}>
@@ -36,6 +37,7 @@ function ActionRow({ label, hint, onPress, tone = "ink" }: { label: string; hint
  * it and send it again. Each does it and closes the sheet.
  */
 export function MessageActionsSheet({ text, onQuote, onEdit, onClose }: { text: string; onQuote: () => void; /** Only for your own last message. */ onEdit?: () => void; onClose: () => void }) {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const [selecting, setSelecting] = useState(false);
   return (
@@ -93,6 +95,7 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onClose }: { text: 
 
 /** Looking for something in the chat: type, and the messages that say it come, the newest first; one opens where it is. */
 export function ChatSearchSheet({ search, onPick, onClose }: { search: (query: string) => Hit[]; onPick: (hit: Hit) => void; onClose: () => void }) {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardUp();
   const [query, setQuery] = useState("");
@@ -146,11 +149,12 @@ export function ChatSearchSheet({ search, onPick, onClose }: { search: (query: s
 
 /** A round button over the chat that takes it to the latest message, with how many came while it was scrolled away. */
 export function JumpToBottom({ unseen, onPress }: { unseen: number; onPress: () => void }) {
+  const colors = useColors();
   return (
     <FadeSlideIn from={8} ms={160} style={{ position: "absolute", right: 14, bottom: 10, alignItems: "flex-end", gap: 6 }}>
       {unseen > 0 && (
         <View accessibilityElementsHidden style={{ backgroundColor: colors.ink, borderRadius: radius.pill, paddingHorizontal: 9, paddingVertical: 3 }}>
-          <Txt variant="tiny" tone="white" style={{ fontWeight: "700" }}>
+          <Txt variant="tiny" tone="on-ink" style={{ fontWeight: "700" }}>
             {unseen} new
           </Txt>
         </View>
@@ -166,6 +170,7 @@ export function JumpToBottom({ unseen, onPress }: { unseen: number; onPress: () 
 
 /** Answers Claude's yes-or-no question asks for, one press each; they go as a message and are gone. */
 export function QuickReplies({ replies, onSend }: { replies: string[]; onSend: (text: string) => void }) {
+  const colors = useColors();
   return (
     <View accessibilityLabel="Quick replies" style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 6 }}>
       {replies.map((r, i) => (
@@ -186,6 +191,7 @@ export function QuickReplies({ replies, onSend }: { replies: string[]; onSend: (
  * Gone once every step is done.
  */
 export function PlanCard({ todos }: { todos: RemoteTodo[] }) {
+  const colors = useColors();
   const [open, setOpen] = useState(false);
   const p = progressOf(todos);
   if (todos.length === 0 || p.finished) return null;
@@ -224,6 +230,7 @@ export function PlanCard({ todos }: { todos: RemoteTodo[] }) {
 
 /** What can be typed after the "/": the matching commands and skills, one tap puts one in the message box. */
 export function SlashPicker({ matches, onPick }: { matches: RemoteCommand[]; onPick: (command: RemoteCommand) => void }) {
+  const colors = useColors();
   if (matches.length === 0) return null;
   return (
     <FadeSlideIn from={6} ms={140} style={{ marginHorizontal: 12, marginBottom: 6 }}>
@@ -255,6 +262,7 @@ export function SlashPicker({ matches, onPick }: { matches: RemoteCommand[]; onP
 
 /** How much of the subscription's five-hour window is used, as a bar with when it resets. */
 export function UsageRow({ plan }: { plan: PlanUsage }) {
+  const colors = useColors();
   const u = usageOf(plan);
   const fill = u.tone === "stop" ? colors.stop : u.tone === "warn" ? colors.hi : colors.go;
   return (
@@ -281,6 +289,7 @@ export function UsageRow({ plan }: { plan: PlanUsage }) {
 
 /** How full the chat's context is, as a bar with the tokens it holds. */
 export function ContextRow({ context }: { context: { tokens: number; window: number | null } }) {
+  const colors = useColors();
   const c = contextOf(context);
   const fill = c.tone === "stop" ? colors.stop : c.tone === "warn" ? colors.hi : colors.go;
   return (
@@ -308,6 +317,7 @@ export function ContextRow({ context }: { context: { tokens: number; window: num
 
 /** On Home: how much of the subscription's five-hour window is used, in a line with a thin bar under it. */
 export function UsageStrip({ plan }: { plan: PlanUsage }) {
+  const colors = useColors();
   const u = usageOf(plan);
   const fill = u.tone === "stop" ? colors.stop : u.tone === "warn" ? colors.hi : colors.go;
   return (
@@ -331,6 +341,7 @@ export function UsageStrip({ plan }: { plan: PlanUsage }) {
 
 /** What a finished step printed, as a sheet of monospaced text (asked of the Mac when it opens). */
 export function StepOutputSheet({ title, load, onClose }: { title: string; load: () => Promise<string>; onClose: () => void }) {
+  const colors = useColors();
   const insets = useSafeAreaInsets();
   const [state, setState] = useState<{ text: string } | { error: string } | null>(null);
   useEffect(() => {

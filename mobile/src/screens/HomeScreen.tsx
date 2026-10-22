@@ -10,7 +10,7 @@ import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
 import { useAccent } from "../ui/accent";
 import { Chevron } from "../ui/Chevron";
 import { Dots, HomeSkeleton } from "../ui/skeleton";
-import { colors, radius, shadow, space } from "../ui/theme";
+import { radius, shadow, space, useColors } from "../ui/theme";
 import { cards, groups, headline, projectTint, rows, type Card, type Grouping, type Group, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
 import { UsageStrip } from "./ChatExtras";
@@ -33,6 +33,7 @@ export interface HomeProps {
 
 /** A thin bar that slides while a chat is working. */
 function Working() {
+  const colors = useColors();
   const accent = useAccent();
   const x = useRef(new Animated.Value(-1)).current;
   useEffect(() => {
@@ -48,6 +49,7 @@ function Working() {
 }
 
 function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomeProps["onOpenChat"]; onReview: HomeProps["onReview"] }) {
+  const colors = useColors();
   const front = list[0];
   const behind = Math.min(2, list.length - 1);
   return (
@@ -80,6 +82,7 @@ function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomePr
 }
 
 function ChatRow({ row, index, onPress, onLongPress, showProject = true }: { row: Row; index: number; onPress: () => void; onLongPress?: () => void; showProject?: boolean }) {
+  const colors = useColors();
   // The tile is the chat's project's colour (the desktop sidebar's), so a chat is placed by it before it is read.
   const { bg, fg } = projectTint(row.projectColor);
   const status = row.status === "needs_you" ? ", needs you" : row.status === "working" ? ", working" : row.status === "asleep" ? ", asleep" : row.status === "ended" ? ", stopped" : "";
@@ -115,9 +118,10 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true }: { row
 
 /** How the chats are listed: most recent first, or under their projects. */
 function GroupingSwitch({ value, onChange }: { value: Grouping; onChange: (g: Grouping) => void }) {
+  const colors = useColors();
   const option = (g: Grouping, label: string) => (
     <PressScale key={g} accessibilityRole="button" accessibilityLabel={`${label}${value === g ? ", selected" : ""}`} accessibilityState={{ selected: value === g }} onPress={() => onChange(g)} scaleTo={0.95} haptic="select" style={{ paddingHorizontal: 12, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: value === g ? colors.ink : "transparent" }}>
-      <Txt variant="small" tone={value === g ? "white" : "ink2"} style={{ fontWeight: "700" }}>
+      <Txt variant="small" tone={value === g ? "on-ink" : "ink2"} style={{ fontWeight: "700" }}>
         {label}
       </Txt>
     </PressScale>
@@ -127,6 +131,7 @@ function GroupingSwitch({ value, onChange }: { value: Grouping; onChange: (g: Gr
 
 /** One project's chats under its name, which folds them away when pressed. */
 function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose }: { group: Group; open: boolean; onToggle: () => void; onOpenChat: HomeProps["onOpenChat"]; onAskClose?: (r: Row) => void }) {
+  const colors = useColors();
   const name = group.project || "No project";
   return (
     <View>
@@ -148,6 +153,7 @@ function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose }: { group
 
 /** A quiet way in to the tip jar, under the chats: a tip is optional and nothing is locked behind it. Once there has been one this month it says thanks instead. */
 function SupportCard({ onPress }: { onPress: () => void }) {
+  const colors = useColors();
   const jar = useTipJar();
   const { pledger } = useTips();
   const tipped = jar.hasTippedThisMonth() || pledger;
@@ -175,6 +181,7 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 
 /** Home: what waits on you, as a headline and a stack, then your chats. */
 export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport }: HomeProps) {
+  const colors = useColors();
   const controller = useController();
   const { chats, waiting, chatsLoaded, waitingLoaded, plan } = useSyncState();
   const loading = !chatsLoaded || !waitingLoaded;
@@ -290,7 +297,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
       )}
       {Platform.OS === "android" && list.length > 0 && (
         <PressScale accessibilityRole="button" accessibilityLabel="Message a chat" onPress={onCompose} scaleTo={0.92} style={[{ position: "absolute", right: 18, bottom: insets.bottom + 18, backgroundColor: colors.ink, borderRadius: 18, paddingHorizontal: 18, minHeight: 52, flexDirection: "row", alignItems: "center", gap: 8 }, shadow.float]}>
-          <Txt variant="body" tone="white" style={{ fontWeight: "700" }}>
+          <Txt variant="body" tone="on-ink" style={{ fontWeight: "700" }}>
             + Message a chat
           </Txt>
         </PressScale>

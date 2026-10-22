@@ -6,7 +6,7 @@ import { useController, useSyncState } from "../shell/hooks";
 import { Button, Txt } from "../ui/components";
 import { Chevron } from "../ui/Chevron";
 import { FadeSlideIn, PressScale, skips } from "../ui/motion";
-import { colors, radius, shadow, space } from "../ui/theme";
+import { radius, shadow, space, useColors } from "../ui/theme";
 import type { Draft } from "./NewChatSheet";
 
 type State = { status: "loading" | "ready" | "failed"; items: Suggestion[]; error?: string };
@@ -16,6 +16,7 @@ export const suggestionKey = (s: Suggestion) => `${s.title}|${s.message}`.slice(
 
 /** A card's worth of grey, breathing while Claude thinks. */
 function Skeleton({ delay }: { delay: number }) {
+  const colors = useColors();
   const p = useRef(new Animated.Value(0.45)).current;
   useEffect(() => {
     if (skips()) return;
@@ -44,6 +45,7 @@ function Skeleton({ delay }: { delay: number }) {
  * usage, so they are asked for when this appears and again only when you ask.
  */
 export function Suggestions({ onPick }: { onPick: (draft: Draft) => void }) {
+  const colors = useColors();
   const { sync } = useController();
   const { chats } = useSyncState();
   const [state, setState] = useState<State>({ status: "loading", items: [] });

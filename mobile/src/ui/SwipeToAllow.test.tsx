@@ -1,7 +1,7 @@
 import { Animated } from "react-native";
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
 import { SwipeToAllow } from "./SwipeToAllow";
-import { colors } from "./theme";
+import { lightColors as colors } from "./theme";
 
 const BAR = 300;
 // The bar is 300 wide, the knob 52 with 5 around it: it travels 238.

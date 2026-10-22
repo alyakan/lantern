@@ -6,7 +6,7 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
       "bundleIdentifier": "com.alyakan.lantern",
       "supportsTablet": false,
@@ -56,7 +56,11 @@
         {
           "image": "./assets/splash-icon.png",
           "imageWidth": 180,
-          "backgroundColor": "#EEF1F4"
+          "backgroundColor": "#EEF1F4",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#161E27"
+          }
         }
       ],
       "expo-iap",

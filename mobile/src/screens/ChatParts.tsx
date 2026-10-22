@@ -15,7 +15,7 @@ import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motio
 import { Sheet } from "../ui/Sheet";
 import { DiffSkeleton } from "../ui/skeleton";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
-import { colors, fonts, radius, shadow, space } from "../ui/theme";
+import { fonts, radius, shadow, space, useColors } from "../ui/theme";
 import { approvalOf, promptView } from "../view/prompts";
 import { turnLine, type Row, type StepChip } from "../view/timeline";
 import type { PageAction } from "../view/pages";
@@ -26,6 +26,7 @@ export const timeOf = (at: number) => new Date(at).toLocaleTimeString([], { hour
 type UserItem = Extract<Item, { kind: "user" }>;
 
 export const UserRow = memo(function UserRow({ item, onActions }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void }) {
+  const colors = useColors();
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12, alignItems: "flex-start" }}>
       {item.at !== null && (
@@ -35,7 +36,7 @@ export const UserRow = memo(function UserRow({ item, onActions }: { item: UserIt
       )}
       <Pressable accessibilityLabel={`You: ${item.text}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomLeftRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "90%", opacity: item.sending ? 0.6 : 1 }}>
         {/* Your own message is read as Claude's is: a list you typed is a list, code is code. */}
-        <Markdown text={item.text} tone="white" selectable={!onActions} />
+        <Markdown text={item.text} tone="on-ink" selectable={!onActions} />
       </Pressable>
       {item.failed && (
         <Txt variant="small" tone="stop" style={{ marginTop: 4, marginLeft: 2 }}>
@@ -54,6 +55,7 @@ const SUMMARY_COLLAPSED = 230;
  * it changed and ran as chips (the edits one lists their diffs), a Copy, and a long one clipped to a few lines with Show all.
  */
 export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions }: { row: Extract<Row, { kind: "summary" }>; onFiles: (files: string[]) => void; onActions?: () => void }) {
+  const colors = useColors();
   const [full, setFull] = useState(false);
   const [height, setHeight] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
@@ -94,7 +96,7 @@ export const SummaryRow = memo(function SummaryRow({ row, onFiles, onActions }: 
             {clipped && (
               <View pointerEvents="none" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 44 }}>
                 {[0.25, 0.5, 0.75, 0.95].map((a) => (
-                  <View key={a} style={{ flex: 1, backgroundColor: `rgba(255,255,255,${a})` }} />
+                  <View key={a} style={{ flex: 1, backgroundColor: `${colors.card}${Math.round(a * 255).toString(16).padStart(2, "0")}` }} />
                 ))}
               </View>
             )}
@@ -133,6 +135,7 @@ export const AssistantRow = memo(function AssistantRow({ item, onActions }: { it
 });
 
 export const StepsRow = memo(function StepsRow({ chips, onFiles, onOutput }: { chips: StepChip[]; onFiles: (files: string[]) => void; /** Present when the Mac can say what a step printed: a tap on one of a chip's lines asks. */ onOutput?: (step: { id: string; text: string }) => void }) {
+  const colors = useColors();
   // A grouped chip ("Ran 5 commands") opens to what it stands for, one line each.
   const [open, setOpen] = useState<string | null>(null);
   const opened = chips.find((c) => c.key === open && c.items);
@@ -172,6 +175,7 @@ export const StepsRow = memo(function StepsRow({ chips, onFiles, onOutput }: { c
 
 /** A Step-by-step page: its heading as a card, the start of it, and (while it is the live one) its buttons. */
 export const PageRow = memo(function PageRow({ row, answered, onAction }: { row: Extract<Row, { kind: "page" }>; answered: boolean; onAction: (a: PageAction) => void }) {
+  const colors = useColors();
   const [open, setOpen] = useState(false);
   const { page } = row;
   const body = open || page.body.length < 260 ? page.body : `${page.body.slice(0, 240).trimEnd()}…`;
@@ -212,6 +216,7 @@ export function answeredBy(by: string | null, me: string | null): string {
 
 /** The small card a decision leaves behind: a mark in its colour, what was asked, and how it went. */
 function DecisionCard({ title, status, mark }: { title: string; status: string; mark: "check" | "cross" | "dash" }) {
+  const colors = useColors();
   const color = mark === "check" ? colors.go : mark === "cross" ? colors.stop : colors.ink3;
   return (
     <View style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 10 }}>
@@ -243,6 +248,7 @@ const SETTLE_WAIT_MS = 600;
  * does, so the swipe's check circle doesn't vanish); one that was already decided when the chat loaded is just the small card.
  */
 export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, onSwiping }: { item: Extract<Item, { kind: "prompt" }>; me: string | null; onReview: () => void; onAllow?: () => Promise<void>; /** Told when the swipe is being dragged: the chat holds still meanwhile. */ onSwiping?: (swiping: boolean) => void }) {
+  const colors = useColors();
   const view = promptView(item.toolName, item.input);
   const [tries, setTries] = useState(0);
   const openHeight = useRef(0);
@@ -373,6 +379,7 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
 });
 
 export const DesktopRow = memo(function DesktopRow({ item }: { item: Extract<Item, { kind: "desktop" }> }) {
+  const colors = useColors();
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12 }}>
       <View style={{ backgroundColor: colors.card, borderColor: colors.rule, borderWidth: 1, borderRadius: 14, padding: 12, gap: 2 }}>
@@ -400,6 +407,7 @@ export const TurnRow = memo(function TurnRow({ item }: { item: Extract<Item, { k
 
 /** The message box: a capsule with a send button; typing and sending only while connected. */
 export function Composer({ onSend, disabled, placeholder = "Message Claude", seed, commands = [] }: { onSend: (text: string) => void; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
+  const colors = useColors();
   const [text, setText] = useState("");
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   useSeed(seed, (s) => {
@@ -454,6 +462,7 @@ export function Composer({ onSend, disabled, placeholder = "Message Claude", see
  * sends the arrow up and out, and a fresh one rises into place.
  */
 function SendButton({ ready, onPress }: { ready: boolean; onPress: () => void }) {
+  const colors = useColors();
   const accent = useAccent();
   const tint = useRef(new Animated.Value(ready ? 1 : 0)).current;
   const spring = useRef(new Animated.Value(1)).current;
@@ -485,7 +494,7 @@ function SendButton({ ready, onPress }: { ready: boolean; onPress: () => void })
       <PressScale accessibilityRole="button" accessibilityLabel="Send" accessibilityState={{ disabled: !ready }} disabled={!ready} onPress={send} haptic="none" scaleTo={0.88} style={{ width: 40, height: 40, borderRadius: 20, overflow: "hidden" }}>
         <Animated.View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: tint.interpolate({ inputRange: [0, 1], outputRange: [colors.rule, accent] }) }}>
           <Animated.View style={{ opacity: fly.interpolate({ inputRange: [-1, 0, 1], outputRange: [0, 1, 0] }), transform: [{ translateY: fly.interpolate({ inputRange: [-1, 0, 1], outputRange: [22, 0, -22] }) }] }}>
-            <Txt variant="heading" tone="white">
+            <Txt variant="heading" tone={colors.isDark ? "on-ink" : "white"}>
               ↑
             </Txt>
           </Animated.View>
@@ -497,6 +506,7 @@ function SendButton({ ready, onPress }: { ready: boolean; onPress: () => void })
 
 /** A file's diff, as a sheet: pick one of the files an edit chip stands for, and read its lines. */
 export function DiffSheet({ files, load, onClose }: { files: string[]; load: (path: string) => Promise<string>; onClose: () => void }) {
+  const colors = useColors();
   const [path, setPath] = useState(files[0]);
   const [text, setText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

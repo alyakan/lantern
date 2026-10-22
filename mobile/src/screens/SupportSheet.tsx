@@ -7,7 +7,7 @@ import { Button, Txt } from "../ui/components";
 import { buzz, FadeSlideIn, PopIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Bar, Dots, Pulse } from "../ui/skeleton";
-import { colors, radius, shadow, space } from "../ui/theme";
+import { radius, shadow, space, useColors } from "../ui/theme";
 
 /** How long the thank-you stays before the sheet goes. */
 export const THANKS_MS = 2400;
@@ -20,6 +20,7 @@ const MARKS = ["☕", "💛", "✨"];
 
 /** The tips and pledges before the store has said which there are: rows. */
 function TipsSkeleton() {
+  const colors = useColors();
   const row = (w: number, i: number) => (
     <View key={`${w}-${i}`} style={{ flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: colors.paper, borderRadius: radius.inner + 2, padding: 14 }}>
       <Bar w={30} h={30} r={15} />
@@ -73,6 +74,7 @@ export function SupportSheet({ onClose }: { onClose: () => void }) {
 }
 
 function Content({ close, bottom, thanked, onThanksSeen }: { close: () => void; bottom: number; thanked: boolean; onThanksSeen: () => void }) {
+  const colors = useColors();
   const jar = useTipJar();
   const tips = useTips();
   const busy = tips.phase === "purchasing";

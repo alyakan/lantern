@@ -5,7 +5,7 @@ import { noMemory, noPlatform, TipJar } from "../tips";
 import { AccentContext, EMBER } from "./accent";
 import { Button, Txt } from "./components";
 import { Markdown } from "./Markdown";
-import { colors } from "./theme";
+import { lightColors as colors } from "./theme";
 
 const color = (text: string) => StyleSheet.flatten(screen.getByText(text).props.style).color;
 

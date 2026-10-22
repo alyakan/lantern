@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Animated, Easing, PanResponder, Pressable, StyleSheet, View, type AccessibilityActionEvent } from "react-native";
 import * as Haptics from "expo-haptics";
 import { allows } from "../view/swipe";
-import { colors } from "./theme";
+import { useColors } from "./theme";
 import { Txt } from "./components";
 import { buzz, FadeSlideIn, PopIn, skips } from "./motion";
 
@@ -21,6 +21,7 @@ const sizes = (compact: boolean) => {
  */
 export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLabel = "Allowed", compact = false, progress, onDrag }: { onAllow: () => void; /** Told when a drag of the knob starts and ends (a screen holds still while it is going). */ onDrag?: (dragging: boolean) => void; /** Once allowed, the circle can be pressed: this is what it does. */ onDone?: () => void; label?: string; doneLabel?: string; /** A smaller bar, for sitting inside a card. */ compact?: boolean; /** The knob's position, for a test to move it (a drag can't be made in one). */ progress?: Animated.Value }) {
   const { KNOB, INSET, BAR } = sizes(compact);
+  const colors = useColors();
   const [width, setWidth] = useState(0);
   const [completed, setCompleted] = useState(false);
   const own = useRef(new Animated.Value(0)).current;
@@ -90,7 +91,7 @@ export function SwipeToAllow({ onAllow, onDone, label = "Swipe to allow", doneLa
           accessibilityState={button ? undefined : { disabled: completed }}
           accessibilityActions={completed ? [] : [{ name: "activate", label: "Allow" }]}
           onAccessibilityAction={(e: AccessibilityActionEvent) => e.nativeEvent.actionName === "activate" && allow()}
-          style={{ alignSelf: "flex-end", height: BAR, width: completed ? shrink.interpolate({ inputRange: [0, 1], outputRange: [Math.max(BAR, width), BAR] }) : "100%", borderRadius: 999, backgroundColor: compact ? colors.ink : colors.nightRaised, overflow: "hidden" }}
+          style={{ alignSelf: "flex-end", height: BAR, width: completed ? shrink.interpolate({ inputRange: [0, 1], outputRange: [Math.max(BAR, width), BAR] }) : "100%", borderRadius: 999, backgroundColor: compact ? (colors.isDark ? colors.shapeStrong : colors.ink) : colors.nightRaised, overflow: "hidden" }}
         >
           {/* Everything is held to the right edge, so the bar closes in on the knob and the rest is clipped. */}
           <View style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: width || "100%", justifyContent: "center", alignItems: "center", paddingLeft: compact ? KNOB + INSET * 2 : 0 }}>

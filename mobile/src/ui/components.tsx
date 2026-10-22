@@ -1,16 +1,17 @@
 import type { ReactNode } from "react";
 import { Text, View, type StyleProp, type TextProps, type ViewStyle } from "react-native";
-import { EMBER, useAccent } from "./accent";
+import { EMBER, useAccent, useRegular } from "./accent";
 import { Chevron } from "./Chevron";
 import { PressScale } from "./motion";
 import { projectTint } from "../view/home";
-import { colors, MIN_TARGET, radius, space, type as scale, type Variant } from "./theme";
+import { MIN_TARGET, radius, space, type as scale, useColors, type Variant } from "./theme";
 
-/** Text in the type scale. Ink by default; `tone` picks another of the palette's. */
-export function Txt({ variant = "body", tone = "ink", style, ...rest }: TextProps & { variant?: Variant; tone?: "ink" | "ink2" | "ink3" | "white" | "night" | "go" | "stop" | "cobalt" | "night-stop" }) {
+/** Text in the type scale. Ink by default; `tone` picks another of the palette's. "white" is always white (on night, go and stop); "on-ink" is what is written on an ink fill. */
+export function Txt({ variant = "body", tone = "ink", style, ...rest }: TextProps & { variant?: Variant; tone?: "ink" | "ink2" | "ink3" | "white" | "on-ink" | "on-hi" | "night" | "go" | "stop" | "cobalt" | "night-stop" }) {
   // "cobalt" is the accent: another colour for someone who is a regular.
   const accent = useAccent();
-  const color = { ink: colors.ink, ink2: colors.ink2, ink3: colors.ink3, white: colors.white, night: colors.nightText, go: colors.go, stop: colors.stop, cobalt: accent, "night-stop": colors.nightStop }[tone];
+  const colors = useColors();
+  const color = { ink: colors.ink, ink2: colors.ink2, ink3: colors.ink3, white: colors.white, "on-ink": colors.onInk, "on-hi": colors.onHi, night: colors.nightText, go: colors.go, stop: colors.stop, cobalt: accent, "night-stop": colors.nightStop }[tone];
   return <Text {...rest} style={[scale[variant], { color }, style]} />;
 }
 
@@ -20,9 +21,11 @@ type ButtonKind = "ink" | "ghost" | "go" | "hi" | "night-stop" | "night-ghost";
 export function Button({ label, onPress, kind = "ink", disabled, style, accessibilityHint }: { label: string; onPress: () => void; kind?: ButtonKind; disabled?: boolean; style?: StyleProp<ViewStyle>; accessibilityHint?: string }) {
   // "hi" is the highlighter: dark words on yellow (white ones can't be read on it).
   // A regular's main buttons are Ember too.
-  const accent = useAccent();
-  const bg = { ink: accent === EMBER ? EMBER : colors.ink, ghost: colors.paper, go: colors.go, hi: colors.hi, "night-stop": "transparent", "night-ghost": colors.nightRaised }[kind];
-  const fg = kind === "ink" || kind === "go" ? "white" : kind === "night-stop" ? "night-stop" : kind === "night-ghost" ? "white" : "ink";
+  const regular = useRegular();
+  const colors = useColors();
+  const bg = { ink: regular ? EMBER : colors.ink, ghost: colors.paper, go: colors.go, hi: colors.hi, "night-stop": "transparent", "night-ghost": colors.nightRaised }[kind];
+  // On "hi" the words are dark in either appearance: they are on yellow.
+  const fg = kind === "go" || (kind === "ink" && regular) ? "white" : kind === "ink" ? "on-ink" : kind === "night-stop" ? "night-stop" : kind === "night-ghost" ? "white" : kind === "hi" ? "on-hi" : "ink";
   return (
     <PressScale
       accessibilityRole="button"
@@ -43,9 +46,10 @@ export function Button({ label, onPress, kind = "ink", disabled, style, accessib
 
 /** The highlighter pill: what sort of thing is waiting. */
 export function Tag({ children }: { children: string }) {
+  const colors = useColors();
   return (
     <View style={{ alignSelf: "flex-start", backgroundColor: colors.hi, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 3 }}>
-      <Txt variant="tiny" style={{ fontWeight: "700" }}>
+      <Txt variant="tiny" tone="on-hi" style={{ fontWeight: "700" }}>
         {children}
       </Txt>
     </View>
@@ -54,7 +58,8 @@ export function Tag({ children }: { children: string }) {
 
 /** One small fact, as the timeline folds a turn's steps into a row of them. */
 export function Chip({ children, tone = "plain", onPress, chevron }: { children: ReactNode; tone?: "plain" | "ok" | "bad"; onPress?: () => void; /** A chip that opens something: a small chevron after the words, turned down while it is open. */ chevron?: "open" | "closed" }) {
-  const border = tone === "ok" ? "#1f9d5555" : tone === "bad" ? "#d93b3b55" : colors.rule;
+  const colors = useColors();
+  const border = tone === "ok" ? `${colors.go}55` : tone === "bad" ? `${colors.stop}55` : colors.rule;
   const content = (
     <View style={{ backgroundColor: colors.card, borderColor: border, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
@@ -78,7 +83,7 @@ export function Chip({ children, tone = "plain", onPress, chevron }: { children:
  * words and in a dot, so which project a chat belongs to reads at a glance. A project the Mac gave no colour is a plain grey tag.
  */
 export function ProjectTag({ name, color }: { name: string; color: string | null }) {
-  const { bg, fg } = projectTint(color);
+  const { bg, fg } = projectTint(color, useColors().plainTint);
   return (
     <View style={{ alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: bg, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 2, maxWidth: "100%" }}>
       <View accessibilityElementsHidden style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fg }} />
