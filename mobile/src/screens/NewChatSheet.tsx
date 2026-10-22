@@ -7,6 +7,7 @@ import { useController, useSyncState } from "../shell/hooks";
 import { useControls } from "../shell/useControls";
 import { Button, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
+import { useListInput } from "../ui/useListInput";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { ProjectsSkeleton } from "../ui/skeleton";
@@ -49,6 +50,8 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
   const [projects, setProjects] = useState<RemoteProject[] | null>(null);
   const [project, setProject] = useState<string | null>(initialProject ?? null);
   const [text, setText] = useState(initialText);
+  // Return after "1. item" starts "2. ", after "- item" starts "- ".
+  const list = useListInput(text, setText);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // What it runs on: Ask unless chosen, and the project's own models unless a preset is.
@@ -182,7 +185,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
           <TextInput
             accessibilityLabel="What to start with"
             value={text}
-            onChangeText={setText}
+            {...list}
             placeholder="What should Claude start with?"
             placeholderTextColor={colors.ink3}
             multiline

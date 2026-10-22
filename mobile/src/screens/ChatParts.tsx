@@ -5,6 +5,7 @@ import type { Item } from "../sync/reducer";
 import { useAccent } from "../ui/accent";
 import { Button, Chip, Tag, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
+import { useListInput } from "../ui/useListInput";
 import { Markdown } from "../ui/Markdown";
 import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
@@ -29,9 +30,8 @@ export const UserRow = memo(function UserRow({ item }: { item: UserItem }) {
         </Txt>
       )}
       <View accessibilityLabel={`You: ${item.text}`} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomLeftRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "90%", opacity: item.sending ? 0.6 : 1 }}>
-        <Txt variant="body" tone="white">
-          {item.text}
-        </Txt>
+        {/* Your own message is read as Claude's is: a list you typed is a list, code is code. */}
+        <Markdown text={item.text} tone="white" />
       </View>
       {item.failed && (
         <Txt variant="small" tone="stop" style={{ marginTop: 4, marginLeft: 2 }}>
@@ -58,8 +58,8 @@ export const StepsRow = memo(function StepsRow({ chips, onFiles }: { chips: Step
     <View style={{ paddingHorizontal: space.lg, paddingTop: 10, gap: 8 }}>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
         {chips.map((c) => (
-          <Chip key={c.key} tone={c.tone} onPress={c.files ? () => onFiles(c.files!) : c.items ? () => setOpen(open === c.key ? null : c.key) : undefined}>
-            {c.items ? `${c.label} ${open === c.key ? "▴" : "▾"}` : c.label}
+          <Chip key={c.key} tone={c.tone} chevron={c.items ? (open === c.key ? "open" : "closed") : undefined} onPress={c.files ? () => onFiles(c.files!) : c.items ? () => setOpen(open === c.key ? null : c.key) : undefined}>
+            {c.label}
           </Chip>
         ))}
       </View>
@@ -313,13 +313,15 @@ export function Composer({ onSend, disabled, placeholder = "Message Claude" }: {
   // With the keyboard up it sits right under the box: the home-indicator space would be a gap.
   const keyboard = useKeyboardUp();
   const ready = text.trim().length > 0 && !disabled;
+  // Return after "1. item" starts "2. ", after "- item" starts "- ".
+  const list = useListInput(text, setText);
   return (
     <View style={{ paddingHorizontal: 12, paddingTop: 8, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 12), backgroundColor: colors.paper }}>
       <View style={[{ flexDirection: "row", alignItems: "flex-end", gap: 8, backgroundColor: colors.card, borderRadius: 26, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }, shadow.float, { shadowOpacity: 0.12 }]}>
         <TextInput
           accessibilityLabel="Message"
           value={text}
-          onChangeText={setText}
+          {...list}
           placeholder={placeholder}
           placeholderTextColor={colors.ink3}
           multiline

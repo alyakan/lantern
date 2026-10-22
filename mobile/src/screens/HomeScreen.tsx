@@ -7,6 +7,7 @@ import { useTipJar, useTips } from "../shell/tipsContext";
 import { Button, ProjectTag, Tag, Tile, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
 import { useAccent } from "../ui/accent";
+import { Chevron } from "../ui/Chevron";
 import { Dots, HomeSkeleton } from "../ui/skeleton";
 import { colors, radius, shadow, space } from "../ui/theme";
 import { cards, groups, headline, projectTint, rows, type Card, type Grouping, type Group, type Row } from "../view/home";
@@ -127,9 +128,7 @@ function ProjectGroup({ group, open, onToggle, onOpenChat }: { group: Group; ope
   return (
     <View>
       <PressScale accessibilityRole="button" accessibilityLabel={`${name}, ${group.rows.length === 1 ? "1 chat" : `${group.rows.length} chats`}${group.needsYou ? `, ${group.needsYou} need you` : ""}`} accessibilityState={{ expanded: open }} onPress={onToggle} haptic="select" scaleTo={0.985} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: space.xl, paddingTop: 16, paddingBottom: 4, minHeight: 40 }}>
-        <Txt variant="small" tone="ink3" accessibilityElementsHidden style={{ width: 12 }}>
-          {open ? "▾" : "▸"}
-        </Txt>
+        <Chevron open={open} />
         <View accessibilityElementsHidden style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: projectTint(group.rows[0]?.projectColor ?? null).fg }} />
         <Txt variant="small" style={{ fontWeight: "700", flexShrink: 1, color: projectTint(group.rows[0]?.projectColor ?? null).fg }} numberOfLines={1}>
           {name}

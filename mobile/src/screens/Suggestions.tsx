@@ -4,6 +4,7 @@ import type { Suggestion } from "../protocol/generated/Suggestion";
 import { loadSuggestionPrefs, saveSuggestionPrefs, type SuggestionPrefs } from "../prefs";
 import { useController, useSyncState } from "../shell/hooks";
 import { Button, Txt } from "../ui/components";
+import { Chevron } from "../ui/Chevron";
 import { FadeSlideIn, PressScale, skips } from "../ui/motion";
 import { colors, radius, shadow, space } from "../ui/theme";
 import type { Draft } from "./NewChatSheet";
@@ -88,9 +89,7 @@ export function Suggestions({ onPick }: { onPick: (draft: Draft) => void }) {
     <View style={{ paddingHorizontal: space.xl, paddingTop: 4, gap: 10 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
         <PressScale accessibilityRole="button" accessibilityLabel={collapsed ? "Show suggestions" : "Hide suggestions"} accessibilityState={{ expanded: !collapsed }} onPress={() => change({ collapsed: !collapsed, dismissed })} hitSlop={8} scaleTo={0.96} haptic="select" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <Txt variant="small" tone="ink3" accessibilityElementsHidden style={{ width: 10 }}>
-            {collapsed ? "▸" : "▾"}
-          </Txt>
+          <Chevron open={!collapsed} />
           <Txt variant="small" style={{ fontWeight: "700" }}>
             Claude suggests
           </Txt>

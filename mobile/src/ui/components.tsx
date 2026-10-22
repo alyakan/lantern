@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Text, View, type StyleProp, type TextProps, type ViewStyle } from "react-native";
 import { EMBER, useAccent } from "./accent";
+import { Chevron } from "./Chevron";
 import { PressScale } from "./motion";
 import { projectTint } from "../view/home";
 import { colors, MIN_TARGET, radius, space, type as scale, type Variant } from "./theme";
@@ -52,18 +53,21 @@ export function Tag({ children }: { children: string }) {
 }
 
 /** One small fact, as the timeline folds a turn's steps into a row of them. */
-export function Chip({ children, tone = "plain", onPress }: { children: ReactNode; tone?: "plain" | "ok" | "bad"; onPress?: () => void }) {
+export function Chip({ children, tone = "plain", onPress, chevron }: { children: ReactNode; tone?: "plain" | "ok" | "bad"; onPress?: () => void; /** A chip that opens something: a small chevron after the words, turned down while it is open. */ chevron?: "open" | "closed" }) {
   const border = tone === "ok" ? "#1f9d5555" : tone === "bad" ? "#d93b3b55" : colors.rule;
   const content = (
     <View style={{ backgroundColor: colors.card, borderColor: border, borderWidth: 1, borderRadius: radius.pill, paddingHorizontal: 10, paddingVertical: 4 }}>
-      <Txt variant="small" tone={tone === "ok" ? "go" : tone === "bad" ? "stop" : "ink2"}>
-        {children}
-      </Txt>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <Txt variant="small" tone={tone === "ok" ? "go" : tone === "bad" ? "stop" : "ink2"}>
+          {children}
+        </Txt>
+        {chevron && <Chevron open={chevron === "open"} size={6} />}
+      </View>
     </View>
   );
   if (!onPress) return content;
   return (
-    <PressScale accessibilityRole="button" onPress={onPress} hitSlop={8} haptic="select" scaleTo={0.93}>
+    <PressScale accessibilityRole="button" accessibilityState={chevron ? { expanded: chevron === "open" } : undefined} onPress={onPress} hitSlop={8} haptic="select" scaleTo={0.93}>
       {content}
     </PressScale>
   );
