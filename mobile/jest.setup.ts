@@ -8,6 +8,11 @@ jest.mock("expo-local-authentication", () => ({
   supportedAuthenticationTypesAsync: jest.fn(async () => []),
   authenticateAsync: jest.fn(async () => ({ success: false, error: "not_available" })),
 }));
+// No Liquid Glass on Node: the screens draw their solid look, and a test that wants glass turns it on.
+jest.mock("expo-glass-effect", () => {
+  const { View } = require("react-native");
+  return { GlassView: View, GlassContainer: View, isLiquidGlassAvailable: jest.fn(() => false), isGlassEffectAPIAvailable: jest.fn(() => false) };
+});
 jest.mock("expo-clipboard", () => ({ getStringAsync: jest.fn(async () => ""), setStringAsync: jest.fn(async () => true) }));
 jest.mock("expo-haptics", () => ({
   notificationAsync: jest.fn(async () => {}),

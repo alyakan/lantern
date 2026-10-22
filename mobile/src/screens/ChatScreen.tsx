@@ -8,7 +8,8 @@ import { Button, ProjectTag, Txt } from "../ui/components";
 import { AboveKeyboard } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
-import { shadow, space, useColors } from "../ui/theme";
+import { Glass } from "../ui/Glass";
+import { space, useColors } from "../ui/theme";
 import { quickReplies, quote, searchRows } from "../view/chatText";
 import { projectColorOf } from "../view/home";
 import { timeline, type Row } from "../view/timeline";
@@ -160,8 +161,10 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
   return (
     <AboveKeyboard style={{ backgroundColor: colors.paper }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + 6, paddingHorizontal: 16, paddingBottom: 10 }}>
-        <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={8} scaleTo={0.88} style={[{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }, shadow.float, { shadowOpacity: 0.08 }]}>
-          <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
+        <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={8} scaleTo={0.88}>
+          <Glass style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+            <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
+          </Glass>
         </PressScale>
         {/* The title bar opens the chat's settings (what it runs on, and its models) when the Mac can say what those are. */}
         <ChatSettings slot={slot} chat={chat} plan={plan} context={view.context} onProblem={setProblem} onClosed={onBack}>
@@ -183,11 +186,13 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           )}
         </ChatSettings>
         {/* Looking for something said in this chat. */}
-        <PressScale accessibilityRole="button" accessibilityLabel="Search this chat" onPress={() => setSearching(true)} hitSlop={8} scaleTo={0.88} style={[{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }, shadow.float, { shadowOpacity: 0.08 }]}>
-          <View accessibilityElementsHidden style={{ width: 20, height: 20 }}>
-            <View style={{ width: 13, height: 13, borderRadius: 7, borderWidth: 2, borderColor: colors.ink }} />
-            <View style={{ position: "absolute", left: 11, top: 12, width: 8, height: 2.5, borderRadius: 2, backgroundColor: colors.ink, transform: [{ rotate: "45deg" }] }} />
-          </View>
+        <PressScale accessibilityRole="button" accessibilityLabel="Search this chat" onPress={() => setSearching(true)} hitSlop={8} scaleTo={0.88}>
+          <Glass style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+            <View accessibilityElementsHidden style={{ width: 20, height: 20 }}>
+              <View style={{ width: 13, height: 13, borderRadius: 7, borderWidth: 2, borderColor: colors.ink }} />
+              <View style={{ position: "absolute", left: 11, top: 12, width: 8, height: 2.5, borderRadius: 2, backgroundColor: colors.ink, transform: [{ rotate: "45deg" }] }} />
+            </View>
+          </Glass>
         </PressScale>
         {working && (
           <FadeSlideIn from={-6} ms={200}>
