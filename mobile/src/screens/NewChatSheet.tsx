@@ -3,8 +3,9 @@ import { ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
+import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import { useController, useSyncState } from "../shell/hooks";
-import { useControls } from "../shell/useControls";
+import { useControls, useMacCan } from "../shell/useControls";
 import { Button, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
 import { useListInput } from "../ui/useListInput";
@@ -12,7 +13,7 @@ import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { ProjectsSkeleton } from "../ui/skeleton";
 import { colors, radius, shadow, space } from "../ui/theme";
-import { autoNote, MODES } from "../view/controls";
+import { autoNote, MODES, WORKFLOWS } from "../view/controls";
 import { projectColorOf, projectTint } from "../view/home";
 
 /** What the sheet starts from: a suggestion's draft, the project it names, or the chat it carries on. */
@@ -58,6 +59,8 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
   const { supported, controls } = useControls();
   const [permissions, setPermissions] = useState<RemotePermissions>("ask");
   const [preset, setPreset] = useState<string | null>(null);
+  const canFlow = useMacCan("workflow");
+  const [workflow, setWorkflow] = useState<Exclude<RemoteWorkflow, "team">>("chat");
 
   useEffect(() => {
     // Carrying on a chat needs no project.
@@ -93,7 +96,7 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
     setError(null);
     try {
       // Only what was chosen is sent, and only to a Mac that can take it.
-      onStarted(await sync.newChat(project, text.trim(), supported ? { permissions, ...(preset ? { preset } : {}) } : {}));
+      onStarted(await sync.newChat(project, text.trim(), supported ? { permissions, ...(preset ? { preset } : {}), ...(canFlow && workflow === "steps" ? { workflow } : {}) } : {}));
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
@@ -147,6 +150,20 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
               <Txt variant="small" style={{ fontWeight: "700", marginBottom: 6 }}>
                 Runs on
               </Txt>
+              {canFlow && (
+                <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                  {WORKFLOWS.map((w) => {
+                    const on = w.value === workflow;
+                    return (
+                      <PressScale key={w.value} accessibilityRole="radio" accessibilityLabel={w.label} accessibilityHint={w.hint} accessibilityState={{ selected: on, checked: on }} onPress={() => setWorkflow(w.value)} haptic="select" scaleTo={0.94} style={{ backgroundColor: on ? colors.ink : colors.paper, borderRadius: radius.pill, paddingHorizontal: 14, paddingVertical: 9, borderWidth: 1, borderColor: on ? colors.ink : colors.rule }}>
+                        <Txt variant="small" tone={on ? "white" : "ink"} style={{ fontWeight: "700" }}>
+                          {w.label}
+                        </Txt>
+                      </PressScale>
+                    );
+                  })}
+                </View>
+              )}
               <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                 {MODES.map((m) => {
                   const on = m.value === permissions;

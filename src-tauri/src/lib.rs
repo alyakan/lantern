@@ -355,9 +355,13 @@ impl remote::gateway::Host for RemoteHost {
         })
     }
 
-    fn new_chat(&self, folder: String, text: String, _by: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>) -> remote::gateway::BoxFut<Result<String, String>> {
+    fn new_chat(&self, folder: String, text: String, _by: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow) -> remote::gateway::BoxFut<Result<String, String>> {
         let app = self.app.clone();
-        Box::pin(async move { request_new_chat(&app, folder, text, permissions, preset).await })
+        Box::pin(async move { request_new_chat(&app, folder, text, permissions, preset, workflow).await })
+    }
+
+    fn set_workflow(&self, slot: &str, workflow: remote::protocol::RemoteWorkflow) -> Result<(), String> {
+        self.app.emit("remote-set-workflow", remote::SetWorkflowRequest { slot: slot.to_string(), workflow: workflow.as_str() }).map_err(|e| e.to_string())
     }
 
     fn set_permissions(&self, slot: &str, permissions: remote::protocol::RemotePermissions) -> Result<(), String> {
@@ -1832,10 +1836,10 @@ const NEW_CHAT_LISTED_WAIT: std::time::Duration = std::time::Duration::from_secs
 
 /// Asks the window to start a chat for a paired phone, and says which slot it made once the chat is listed where the phone
 /// can follow it. The window does it (it owns chats and what they start with), on Ask, without switching what it shows.
-async fn request_new_chat(app: &AppHandle, folder: String, text: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>) -> Result<String, String> {
+async fn request_new_chat(app: &AppHandle, folder: String, text: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow) -> Result<String, String> {
     let state = app.state::<AppState>();
     let (id, answer) = state.remote.expect_new_chat();
-    let request = remote::NewChatRequest { id: id.clone(), folder, text, permissions: permissions.as_str(), preset };
+    let request = remote::NewChatRequest { id: id.clone(), folder, text, permissions: permissions.as_str(), preset, workflow: workflow.as_str() };
     if let Err(e) = app.emit("remote-new-chat", &request) {
         state.remote.forget_new_chat(&id);
         return Err(e.to_string());

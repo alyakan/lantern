@@ -14,8 +14,8 @@ describe("windowChats", () => {
     const chats: Chats = { active: "a", agents: {}, slots: { a: chat({ status: "running", sessionId: "s-a" }), b: chat({ status: "asleep", sessionId: "s-b" }) } };
     const open = { "/work/lantern": project([{ slot: "a", title: "Release 0.1.53" }, { slot: "b", title: "Network tab filters" }]) };
     expect(windowChats(chats, open)).toEqual([
-      { slot: "a", folder: "/work/lantern", title: "Release 0.1.53", asleep: false, session_id: "s-a", permissions: "ask", preset: null, color: null },
-      { slot: "b", folder: "/work/lantern", title: "Network tab filters", asleep: true, session_id: "s-b", permissions: "ask", preset: null, color: null },
+      { slot: "a", folder: "/work/lantern", title: "Release 0.1.53", asleep: false, session_id: "s-a", permissions: "ask", preset: null, color: null, workflow: "chat" },
+      { slot: "b", folder: "/work/lantern", title: "Network tab filters", asleep: true, session_id: "s-b", permissions: "ask", preset: null, color: null, workflow: "chat" },
     ]);
   });
 
@@ -36,7 +36,7 @@ describe("windowChats", () => {
 
   it("uses the project's folder for a chat the store doesn't have yet", () => {
     const chats: Chats = { active: "a", agents: {}, slots: {} };
-    expect(windowChats(chats, { "/p": project([{ slot: "x", title: "New chat" }]) })).toEqual([{ slot: "x", folder: "/p", title: "New chat", asleep: false, session_id: null, permissions: null, preset: null, color: null }]);
+    expect(windowChats(chats, { "/p": project([{ slot: "x", title: "New chat" }]) })).toEqual([{ slot: "x", folder: "/p", title: "New chat", asleep: false, session_id: null, permissions: null, preset: null, color: null, workflow: null }]);
   });
 });
 
@@ -120,5 +120,31 @@ describe("checkRemoteClose", () => {
     expect(checkRemoteClose({ ...target, team: true })).toContain("team");
     expect(checkRemoteClose({ ...target, busy: true })).toContain("Stop it first");
     expect(checkRemoteClose({ ...target, background: 1 })).toContain("background tasks");
+  });
+});
+
+describe("the workflow", () => {
+  it("is told to the hub for each chat", () => {
+    const chats: Chats = { active: "a", agents: {}, slots: { a: chat({ status: "idle", mode: "steps" }), b: chat({ status: "idle", orchestrator: true }), c: chat({ status: "idle" }) } };
+    const open = { "/work/lantern": project([{ slot: "a", title: "A" }, { slot: "b", title: "B" }, { slot: "c", title: "C" }, { slot: "d", title: "D" }]) };
+    expect(windowChats(chats, open).map((c) => [c.slot, c.workflow])).toEqual([["a", "steps"], ["b", "team"], ["c", "chat"], ["d", null]]);
+  });
+
+  it("is Chat or Step by step for a chat a phone starts, never a team, whatever else is right", () => {
+    const base = { id: "r", folder: "/p", text: "hi", permissions: "ask" };
+    expect(checkRemoteNewChat({ ...base, workflow: "steps" }, true, true)).toBeNull();
+    expect(checkRemoteNewChat({ ...base, workflow: "chat" }, true, true)).toBeNull();
+    expect(checkRemoteNewChat(base, true, true)).toBeNull();
+    for (const workflow of ["team", "Steps", "", "orchestra"]) expect(checkRemoteNewChat({ ...base, workflow }, true, true)).toContain("only start a chat or Step by step");
+  });
+
+  it("is switched to Chat or Step by step, and never onto Team", () => {
+    const ctx = { allowAuto: false, presetIds: [] };
+    const target = { known: true, idle: true, asleep: false, background: 0 };
+    expect(checkRemoteSwitch({ workflow: "steps" }, target, ctx)).toBeNull();
+    expect(checkRemoteSwitch({ workflow: "chat" }, target, ctx)).toBeNull();
+    expect(checkRemoteSwitch({ workflow: "team" }, target, ctx)).toContain("only start a chat or Step by step");
+    expect(checkRemoteSwitch({ workflow: "steps" }, { ...target, idle: false }, ctx)).toContain("busy");
+    expect(checkRemoteSwitch({ workflow: "steps" }, { ...target, known: false }, ctx)).toContain("isn't open");
   });
 });

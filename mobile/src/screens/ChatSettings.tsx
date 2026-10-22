@@ -3,6 +3,7 @@ import { ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
+import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import { useController } from "../shell/hooks";
 import { useControls, useMacCan } from "../shell/useControls";
 import { CloseChatSheet } from "./CloseChat";
@@ -11,7 +12,7 @@ import { PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { colors, radius, shadow, space } from "../ui/theme";
-import { autoNote, MODES, modeLabel, presetName, whyNotNow } from "../view/controls";
+import { autoNote, MODES, modeLabel, presetName, whyNotNow, WORKFLOWS, workflowLabel } from "../view/controls";
 
 /** How long "Switching…" waits for the chat to say it changed before it gives up and says so. */
 export const SWITCH_WAIT_MS = 20_000;
@@ -49,7 +50,7 @@ function OptionRow({ option, selected, onPick }: { option: Option; selected: boo
 }
 
 /** The chat's settings, as a sheet: what it runs on (Ask or Auto) and its models. A switch closes the sheet, and the title bar says "Switching…" until the chat does. */
-function SettingsSheet({ chat, off, loading, modes, presets, onMode, onPreset, onAskClose, onClose }: { chat: RemoteChat; off: string | null; loading: boolean; modes: Option[]; presets: Option[]; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
+function SettingsSheet({ chat, off, loading, workflows, modes, presets, onWorkflow, onMode, onPreset, onAskClose, onClose }: { chat: RemoteChat; off: string | null; loading: boolean; /** Empty when this Mac can't switch it, or the chat leads a team. */ workflows: Option[]; modes: Option[]; presets: Option[]; onWorkflow: (v: string) => void; onMode: (v: string) => void; onPreset: (v: string) => void; /** Present when this Mac can close chats. */ onAskClose?: () => void; onClose: () => void }) {
   const insets = useSafeAreaInsets();
   return (
     <Sheet onClose={onClose}>
@@ -68,6 +69,24 @@ function SettingsSheet({ chat, off, loading, modes, presets, onMode, onPreset, o
               </View>
             ) : (
               <>
+                {workflows.length > 0 && (
+                  <>
+                    <Txt variant="small" style={{ fontWeight: "700", marginTop: 8 }} accessibilityRole="header">
+                      Workflow
+                    </Txt>
+                    {workflows.map((o) => (
+                      <OptionRow
+                        key={o.value}
+                        option={o}
+                        selected={o.value === chat.workflow}
+                        onPick={() => {
+                          onWorkflow(o.value);
+                          close();
+                        }}
+                      />
+                    ))}
+                  </>
+                )}
                 <Txt variant="small" style={{ fontWeight: "700", marginTop: 8 }} accessibilityRole="header">
                   Permissions
                 </Txt>
@@ -140,10 +159,11 @@ export function ChatSettings({ slot, chat, onProblem, onClosed, waitMs = SWITCH_
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const canClose = useMacCan("close");
-  const [switching, setSwitching] = useState<{ kind: "mode" | "preset"; to: string } | null>(null);
+  const canFlow = useMacCan("workflow");
+  const [switching, setSwitching] = useState<{ kind: "mode" | "preset" | "workflow"; to: string } | null>(null);
 
   // The switch is over once the chat reports it, or has had long enough.
-  const reported = switching && (switching.kind === "mode" ? chat?.permissions === switching.to : chat?.preset === switching.to);
+  const reported = switching && (switching.kind === "mode" ? chat?.permissions === switching.to : switching.kind === "workflow" ? chat?.workflow === switching.to : chat?.preset === switching.to);
   useEffect(() => {
     if (!switching) return;
     if (reported) return setSwitching(null);
@@ -156,9 +176,9 @@ export function ChatSettings({ slot, chat, onProblem, onClosed, waitMs = SWITCH_
 
   if (!supported || !chat?.permissions) return <View style={{ flex: 1 }}>{children(null)}</View>;
   const off = whyNotNow(chat);
-  const pick = (kind: "mode" | "preset", to: string) => {
+  const pick = (kind: "mode" | "preset" | "workflow", to: string) => {
     setSwitching({ kind, to });
-    const sent = kind === "mode" ? sync.setPermissions(slot, to as RemotePermissions) : sync.setPreset(slot, to);
+    const sent = kind === "mode" ? sync.setPermissions(slot, to as RemotePermissions) : kind === "workflow" ? sync.setWorkflow(slot, to as Exclude<RemoteWorkflow, "team">) : sync.setPreset(slot, to);
     sent.catch((e: Error) => {
       setSwitching(null);
       onProblem(e.message);
@@ -166,7 +186,9 @@ export function ChatSettings({ slot, chat, onProblem, onClosed, waitMs = SWITCH_
   };
   const mode = switching?.kind === "mode" ? "Switching…" : modeLabel(chat.permissions);
   const preset = switching?.kind === "preset" ? "Switching…" : chat.preset ? presetName(controls, chat.preset) : null;
-  const line = [mode, preset].filter(Boolean).join(" · ");
+  // Step by step is said; a plain chat is the usual, and isn't.
+  const flow = switching?.kind === "workflow" ? "Switching…" : chat.workflow && chat.workflow !== "chat" ? workflowLabel(chat.workflow) : null;
+  const line = [flow, mode, preset].filter(Boolean).join(" · ");
 
   return (
     <>
@@ -189,6 +211,8 @@ export function ChatSettings({ slot, chat, onProblem, onClosed, waitMs = SWITCH_
           chat={chat}
           off={off}
           loading={!controls}
+          workflows={canFlow && (chat.workflow === "chat" || chat.workflow === "steps") ? WORKFLOWS.map((w) => ({ value: w.value, label: w.label, hint: w.hint, off })) : []}
+          onWorkflow={(v) => v !== chat.workflow && pick("workflow", v)}
           modes={MODES.map((m) => ({ value: m.value, label: m.label, hint: m.hint, off: off ?? (m.value === "auto" ? autoNote(controls) : null) }))}
           presets={(controls?.presets ?? []).map((p) => ({ value: p.id, label: p.name, hint: p.summary, off }))}
           onMode={(v) => v !== chat.permissions && pick("mode", v)}

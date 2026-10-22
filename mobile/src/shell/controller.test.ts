@@ -43,7 +43,7 @@ describe("the app's controller", () => {
     expect(await controller.pair(link(k))).toBeNull();
     expect(controller.getConnection()).toMatchObject({ kind: "connected" });
     expect(store.mac?.macKey).toBe(toBase64Url(k.macKey));
-    mac.push({ type: "chats", chats: [{ slot: "a", title: "Release", project: "lantern", status: "idle", last_seq: 1, active_at: 1, permissions: null, preset: null, project_color: null }] });
+    mac.push({ type: "chats", chats: [{ slot: "a", title: "Release", project: "lantern", status: "idle", last_seq: 1, active_at: 1, permissions: null, preset: null, project_color: null, workflow: null }] });
     await flush();
     await flush();
     controller.sync.flush();

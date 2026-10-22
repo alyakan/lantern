@@ -2,11 +2,20 @@
 import type { Controls } from "../protocol/generated/Controls";
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
 import type { RemotePermissions } from "../protocol/generated/RemotePermissions";
+import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 
 export const MODES: { value: RemotePermissions; label: string; hint: string }[] = [
   { value: "ask", label: "Ask", hint: "Edits apply; commands and other actions ask you first" },
   { value: "auto", label: "Auto", hint: "A classifier approves most actions; you're rarely asked" },
 ];
+
+/** What a phone may put a chat on: Chat or Step by step (a team is started and led on the Mac). */
+export const WORKFLOWS: { value: Exclude<RemoteWorkflow, "team">; label: string; hint: string }[] = [
+  { value: "chat", label: "Chat", hint: "A plain conversation: Claude works as you ask" },
+  { value: "steps", label: "Step by step", hint: "One page at a time: Claude suggests whether to build, review, debug or design, and you start it" },
+];
+
+export const workflowLabel = (w: RemoteWorkflow) => (w === "team" ? "Team" : (WORKFLOWS.find((x) => x.value === w)?.label ?? w));
 
 export const modeLabel = (m: RemotePermissions) => MODES.find((x) => x.value === m)?.label ?? m;
 

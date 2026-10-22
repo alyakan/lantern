@@ -3,7 +3,7 @@ import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
 import type { Role } from "./lib/roles";
-import type { RemoteClose, RemoteNewChat, RemoteSetPermissions, RemoteSetPreset, WindowChat, WindowPreset } from "./lib/remoteChats";
+import type { RemoteClose, RemoteNewChat, RemoteSetPermissions, RemoteSetPreset, RemoteSetWorkflow, WindowChat, WindowPreset } from "./lib/remoteChats";
 import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
 import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, OldLocation, OpenedSession, OpenPr, ProviderInfo, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
@@ -353,6 +353,8 @@ export const api = {
   onRemoteSetPermissions: (cb: (r: RemoteSetPermissions) => void): Promise<UnlistenFn> => listen<RemoteSetPermissions>("remote-set-permissions", (e) => cb(e.payload)),
   /** A paired phone asked to close a chat: the window checks it and closes it as the sidebar does. */
   onRemoteClose: (cb: (r: RemoteClose) => void): Promise<UnlistenFn> => listen<RemoteClose>("remote-close-chat", (e) => cb(e.payload)),
+  /** A paired phone asked to put a chat on Chat or Step by step. */
+  onRemoteSetWorkflow: (cb: (r: RemoteSetWorkflow) => void): Promise<UnlistenFn> => listen<RemoteSetWorkflow>("remote-set-workflow", (e) => cb(e.payload)),
   /** A paired phone asked to put a chat on one of the presets. */
   onRemoteSetPreset: (cb: (r: RemoteSetPreset) => void): Promise<UnlistenFn> => listen<RemoteSetPreset>("remote-set-preset", (e) => cb(e.payload)),
   /** Where this window found claude, for the calls the backend makes itself (what Claude suggests on a phone). */

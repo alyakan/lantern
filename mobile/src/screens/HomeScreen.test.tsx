@@ -263,7 +263,7 @@ describe("each chat's project, in its colour", () => {
   });
 
   it("is a plain grey tag for a project the Mac gave no colour, and for garbage", async () => {
-    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ slot: "a", project: "lantern", project_color: null }), chat({ slot: "b", title: "Other", project: "site", project_color: "url(evil)" })] });
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ slot: "a", project: "lantern", project_color: null, workflow: null }), chat({ slot: "b", title: "Other", project: "site", project_color: "url(evil)" })] });
     expect(colorOf("lantern")).toBe("#566272");
     expect(colorOf("site")).toBe("#566272");
   });

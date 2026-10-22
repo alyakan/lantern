@@ -104,7 +104,7 @@ describe("starting a chat from Home", () => {
     await fireEvent.changeText(screen.getByLabelText("What to start with"), "Fix the login bug");
     await press("Start the chat");
     await waitFor(() => expect(screen.getByRole("button", { name: "Back" })).toBeTruthy());
-    expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/lantern", text: "Fix the login bug", permissions: null, preset: null });
+    expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/lantern", text: "Fix the login bug", permissions: null, preset: null, workflow: null });
     // The sheet is gone, and it is the new chat that is open (its events are followed).
     expect(screen.queryByText("Start the chat")).toBeNull();
     expect(lastOf("subscribe")).toMatchObject({ slot: "s9" });
@@ -132,7 +132,7 @@ describe("starting a chat from Home", () => {
     await press("Check the footer. Quick tidy.");
     await waitFor(() => expect(screen.getByRole("radio", { name: "site" }).props.accessibilityState).toMatchObject({ selected: true }));
     await press("Start the chat");
-    await waitFor(() => expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/site", text: "Fix the footer links.", permissions: null, preset: null }));
+    await waitFor(() => expect(lastOf("new_chat")).toEqual({ op: "new_chat", project: "/Users/me/site", text: "Fix the footer links.", permissions: null, preset: null, workflow: null }));
   });
 
   it("closes the sheet with the system's back button before it leaves anything else", async () => {
