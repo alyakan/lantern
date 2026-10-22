@@ -13,6 +13,14 @@ pub struct SlashCommand {
     pub argument_hint: String,
 }
 
+/// One line of the plan Claude keeps with TodoWrite. `status`: "pending", "in_progress" or "completed".
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Todo {
+    pub content: String,
+    pub status: String,
+    pub active_form: String,
+}
+
 /// One check (a Reviewer, a QA tester…) in a `ReviewUpdate`. `state`: "waiting" (for a free slot), "running", "done", "failed"
 /// (it stopped before reporting) or "skipped" (the setting was switched off before it started). `findings` and `passed`
 /// come from the report's last line (`RESULT: pass` or `RESULT: issues 3`), and are None when it has none.
@@ -214,6 +222,8 @@ pub enum UiEvent {
     /// The subscription's five-hour window: `used` from 0 to 1, when it resets (unix seconds), and the CLI's status for it
     /// ("allowed", "allowed_warning", "rejected"). For the whole account, so every chat reports the same.
     PlanUsage { used: f64, resets_at: Option<u64>, status: String },
+    /// The plan Claude keeps with TodoWrite, whole each time it changes. Only the phone shows it, so the window isn't sent it.
+    Todos { parent: Option<String>, items: Vec<Todo> },
     Unknown { raw: Value },
     ParseError { line: String },
 }

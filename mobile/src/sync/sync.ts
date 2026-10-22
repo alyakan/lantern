@@ -242,6 +242,11 @@ export class Sync {
     return this.ask<string>({ op: "diff", slot, path });
   }
 
+  /** What a finished step printed, if the Mac still keeps it (rejects with why not). Only for a Mac that lists "output". */
+  stepOutput(slot: string, toolUseId: string) {
+    return this.ask<string>({ op: "step_output", slot, tool_use_id: toolUseId });
+  }
+
   async loadEarlier(slot: string) {
     const hidden = this.state.views[slot]?.hidden ?? 0;
     if (hidden === 0) return;

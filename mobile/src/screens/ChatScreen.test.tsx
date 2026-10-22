@@ -18,7 +18,7 @@ const turn: RemoteEvent[] = [
   { kind: "file_edited", tool_use_id: "t2", path: "/p/Cargo.toml", created: false, added: 1, removed: 1 },
   { kind: "tool_started", tool_use_id: "t3", name: "Bash", summary: "npm test" },
   { kind: "tests_ran", tool_use_id: "t3", command: "npm test", passed: 412, failed: 0, skipped: 0 },
-  { kind: "turn_done", is_error: false, result: "ok", duration_ms: 3100 },
+  { kind: "turn_done", is_error: false, result: "ok", duration_ms: 3100, context_window: null },
 ];
 
 const withSession = async (events: RemoteEvent[], over = {}, answers = {}, chatOver = {}) => {
@@ -52,7 +52,7 @@ describe("a chat", () => {
       { kind: "tool_finished", tool_use_id: "c1", is_error: false },
       { kind: "tool_started", tool_use_id: "c2", name: "Bash", summary: "cargo build" },
       { kind: "tool_finished", tool_use_id: "c2", is_error: true },
-      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1000 },
+      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1000, context_window: null },
     ];
     await withSession(commands);
     expect(screen.queryByText("git status")).toBeNull();
@@ -74,7 +74,7 @@ describe("a chat", () => {
       { kind: "tool_started", tool_use_id: "w3", name: "Bash", summary: "npm test" },
       { kind: "tests_ran", tool_use_id: "w3", command: "npm test", passed: 9, failed: 0, skipped: 0 },
       { kind: "assistant_text", block_id: "f1", text: "All done. What changed:\n\n- the gateway checks Auto\n- the window checks again" },
-      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 192_000 },
+      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 192_000, context_window: null },
     ];
     await withSession(work);
     expect(screen.getByLabelText("Summary of the work")).toBeTruthy();
@@ -83,6 +83,79 @@ describe("a chat", () => {
     expect(screen.getByText("the gateway checks Auto")).toBeTruthy();
     expect(screen.getAllByText("Edited 1 file +4 −1").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Copy summary" })).toBeTruthy();
+  });
+
+  describe("holding a message, searching, jumping and quick replies", () => {
+    const talk: RemoteEvent[] = [
+      { kind: "user_text", text: "First question here", at: 1_000_000, sent_by: "desktop" },
+      { kind: "assistant_text", block_id: "r1", text: "First answer about the gateway." },
+      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1000, context_window: null },
+      { kind: "user_text", text: "Second one about the login", at: 1_100_000, sent_by: "desktop" },
+      { kind: "assistant_text", block_id: "r2", text: "I changed the login flow.\n\nShould I push the branch?" },
+      { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1000, context_window: null },
+    ];
+    const hold = (text: string) => fireEvent(screen.getByLabelText(`You: ${text}`), "longPress");
+
+    it("offers copy, quote and select on a message held down, and edit only on your last one", async () => {
+      await withSession(talk);
+      await hold("First question here");
+      await waitFor(() => expect(screen.getByRole("button", { name: "Quote in a reply" })).toBeTruthy());
+      expect(screen.queryByRole("button", { name: "Edit and send again" })).toBeNull();
+      await fireEvent.press(screen.getByRole("button", { name: "Cancel" }));
+      await hold("Second one about the login");
+      await waitFor(() => expect(screen.getByRole("button", { name: "Edit and send again" })).toBeTruthy());
+    });
+
+    it("quotes a message into the box, under what is already typed", async () => {
+      await withSession(talk);
+      await fireEvent.changeText(screen.getByLabelText("Message"), "About this:");
+      await hold("First question here");
+      await waitFor(() => screen.getByRole("button", { name: "Quote in a reply" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Quote in a reply" }));
+      await waitFor(() => expect(screen.getByLabelText("Message").props.value).toBe("About this:\n> First question here\n\n"));
+    });
+
+    it("puts your last message back in the box to edit and send again", async () => {
+      await withSession(talk);
+      await hold("Second one about the login");
+      await waitFor(() => screen.getByRole("button", { name: "Edit and send again" }));
+      await fireEvent.press(screen.getByRole("button", { name: "Edit and send again" }));
+      await waitFor(() => expect(screen.getByLabelText("Message").props.value).toBe("Second one about the login"));
+    });
+
+    it("offers Yes and No under a yes-or-no question, sends the one pressed, and takes them away", async () => {
+      const { lastOf } = await withSession(talk);
+      expect(screen.getByLabelText("Quick replies")).toBeTruthy();
+      await fireEvent.press(screen.getByRole("button", { name: "Reply: Yes" }));
+      await waitFor(() => expect(lastOf("send")).toMatchObject({ op: "send", slot: "a", text: "Yes" }));
+      expect(screen.queryByLabelText("Quick replies")).toBeNull();
+    });
+
+    it("offers no quick replies for a question that is not yes or no, or while Claude is working", async () => {
+      await withSession([...talk.slice(0, 4), { kind: "assistant_text", block_id: "r3", text: "Which file should I start with?" }, { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1, context_window: null }]);
+      expect(screen.queryByLabelText("Quick replies")).toBeNull();
+    });
+
+    it("searches the messages loaded, newest first, and closes the sheet on one", async () => {
+      await withSession(talk);
+      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      await fireEvent.changeText(screen.getByLabelText("Search"), "login");
+      await waitFor(() => expect(screen.getAllByRole("button", { name: /login/ }).length).toBe(2));
+      await fireEvent.press(screen.getAllByRole("button", { name: /^Claude: I changed the login/ })[0]);
+      await waitFor(() => expect(screen.queryByLabelText("Search")).toBeNull());
+    });
+
+    it("offers a way back to the latest when scrolled away, with how many came since", async () => {
+      const { controller } = await withSession(talk);
+      const list = screen.getByTestId("chat-list");
+      expect(screen.queryByRole("button", { name: /Jump to the latest/ })).toBeNull();
+      await fireEvent.scroll(list, { nativeEvent: { contentOffset: { y: 0 }, contentSize: { height: 3000 }, layoutMeasurement: { height: 600 } } });
+      await waitFor(() => expect(screen.getByRole("button", { name: "Jump to the latest" })).toBeTruthy());
+      await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "event", slot: "a", seq: 99, event: { kind: "user_text", text: "A new one", at: 2_000_000, sent_by: "desktop" } } }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Jump to the latest, 1 new" })).toBeTruthy());
+      await fireEvent.scroll(list, { nativeEvent: { contentOffset: { y: 2380 }, contentSize: { height: 3000 }, layoutMeasurement: { height: 600 } } });
+      await waitFor(() => expect(screen.queryByRole("button", { name: /Jump to the latest/ })).toBeNull());
+    });
   });
 
   it("follows the chat while it is open and lets go when it closes", async () => {

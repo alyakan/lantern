@@ -38,9 +38,9 @@ describe("a run of steps as chips", () => {
     ]);
     expect(chips.map((c) => c.label)).toEqual(["Ran 3 commands", "Used 1 skill", "Ran 1 helper", "Used Linear 2 times", "Used 1 other tool", "1 step failed"]);
     expect(chips[0].items).toEqual([
-      { text: "git push origin release/0.1.53 --force-with-lease", bad: false },
-      { text: "ls", bad: true },
-      { text: "a command", bad: false },
+      { text: "git push origin release/0.1.53 --force-with-lease", bad: false, id: "1" },
+      { text: "ls", bad: true, id: "4" },
+      { text: "a command", bad: false, id: "6" },
     ]);
     expect(chips[3].items?.map((i) => i.text)).toEqual(["list issues mine", "get issue"]);
     expect(chips.at(-1)?.tone).toBe("bad");

@@ -8,6 +8,8 @@
  * (matched by the id the phone gave it).
  */
 import type { RemoteChat } from "../protocol/generated/RemoteChat";
+import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
+import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import type { Waiting } from "../protocol/generated/Waiting";
 import type { Pushed } from "../net/session";
@@ -27,8 +29,23 @@ export type Item =
   | { kind: "desktop"; id: string; what: string }
   | { kind: "turn"; id: string; isError: boolean; result: string | null; durationMs: number | null };
 
+/** The subscription's five-hour window, as the Mac last said it (the account's, the same in every chat). */
+export interface PlanUsage {
+  /** 0 to 1. */
+  used: number;
+  /** Unix seconds. */
+  resetsAt: number | null;
+  status: string;
+}
+
 export interface ChatView {
   items: Item[];
+  /** What claude offers after a "/" in this chat (empty until the Mac says, and for a Mac that can't). */
+  commands: RemoteCommand[];
+  /** The plan Claude keeps, as it last wrote it. */
+  todos: RemoteTodo[];
+  /** The tokens the chat holds, and its model's context size when the Mac has said it. */
+  context: { tokens: number; window: number | null } | null;
   /** The number of the last event applied (in `epoch`). */
   seq: number;
   /** Earlier turns not loaded yet (Request::Earlier brings them). */
@@ -51,13 +68,15 @@ export interface State {
   chatsLoaded: boolean;
   waitingLoaded: boolean;
   views: Record<string, ChatView>;
+  /** The subscription's usage, once a Mac that can say has said it. */
+  plan: PlanUsage | null;
   /** The Mac's run the numbers in `views` belong to (its Welcome's). */
   epoch: number | null;
 }
 
-export const initialState: State = { chats: [], waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, epoch: null };
+export const initialState: State = { chats: [], waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, epoch: null };
 
-export const emptyView: ChatView = { items: [], seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
+export const emptyView: ChatView = { items: [], commands: [], todos: [], context: null, seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
 
 export type Action =
   | { type: "welcome"; epoch: number }
@@ -136,7 +155,12 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
       // A turn is named for the message that began it, so the same end applied twice is one end.
       const began = [...items].reverse().find((it) => it.kind === "user");
       const done: Item = { kind: "turn", id: `turn-${began?.id ?? "start"}`, isError: event.is_error, result: event.result, durationMs: event.duration_ms };
-      return { ...view, thinking: false, items: upsert(items.map((it) => (it.kind === "assistant" && it.streaming ? { ...it, streaming: false } : it)), done) };
+      return {
+        ...view,
+        thinking: false,
+        context: view.context && event.context_window ? { ...view.context, window: event.context_window } : view.context,
+        items: upsert(items.map((it) => (it.kind === "assistant" && it.streaming ? { ...it, streaming: false } : it)), done),
+      };
     }
     case "permission_requested":
       return { ...view, items: upsert(items, { kind: "prompt", id: event.request_id, toolName: event.tool_name, input: event.input, state: "open", by: null }, (old) => old) };
@@ -153,7 +177,16 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
     case "asleep":
       return view;
     case "conversation_reset":
-      return { ...view, items: [], hidden: 0, thinking: false };
+      return { ...view, items: [], todos: [], context: null, hidden: 0, thinking: false };
+    case "commands":
+      return { ...view, commands: event.commands };
+    case "todos":
+      return { ...view, todos: event.items };
+    case "context":
+      return { ...view, context: { tokens: event.tokens, window: event.window ?? view.context?.window ?? null } };
+    // An event of a kind this app doesn't know (a newer Mac's): left alone, never a blank chat.
+    default:
+      return view;
   }
 }
 
@@ -208,6 +241,11 @@ export function reducer(state: State, action: Action): State {
       switch (msg.type) {
         case "chats":
           return { ...state, chatsLoaded: true, chats: msg.chats };
+        case "plan":
+          return { ...state, plan: { used: msg.used, resetsAt: msg.resets_at, status: msg.status } };
+        // A message of a kind this app doesn't know (a newer Mac's): left alone.
+        default:
+          return state;
         case "event": {
           const view = state.views[msg.slot] ?? emptyView;
           const waiting = settleWaiting(state.waiting, msg.slot, msg.event);
@@ -217,7 +255,7 @@ export function reducer(state: State, action: Action): State {
         case "reset": {
           const view = state.views[msg.slot] ?? emptyView;
           // Page 0 starts the chat over, keeping only messages this phone sent that the Mac hasn't echoed yet.
-          const base: ChatView = msg.page === 0 ? { ...emptyView, items: view.items.filter((it) => it.kind === "user" && it.sending) } : view;
+          const base: ChatView = msg.page === 0 ? { ...emptyView, commands: view.commands, items: view.items.filter((it) => it.kind === "user" && it.sending) } : view;
           const next = applyAll(base, msg.events);
           // A chat this phone already followed, started over because it was away too long: say how much it missed.
           const caughtUp = msg.page === 0 ? (view.seq > 0 && msg.seq > view.seq ? msg.seq - view.seq : 0) : view.caughtUp;

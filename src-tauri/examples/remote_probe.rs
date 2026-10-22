@@ -54,7 +54,7 @@ async fn connect(addr: &str, say: Option<&str>) {
             link.to_peer.try_send(f).unwrap();
         }
     };
-    send(&mut channel, &ClientMessage::Hello { protocol: PROTOCOL_VERSION, app_version: "probe".into(), device_name: "Remote probe".into() });
+    send(&mut channel, &ClientMessage::Hello { protocol: PROTOCOL_VERSION, app_version: "probe".into(), device_name: "Remote probe".into(), features: vec![] });
     send(&mut channel, &ClientMessage::Request { id: 1, request: Request::ListChats });
     send(&mut channel, &ClientMessage::Request { id: 2, request: Request::ListWaiting });
     let mut epoch = 0;

@@ -270,6 +270,7 @@ impl StreamParser {
                         description: str_of(input, "description"),
                         model: input["model"].as_str().map(String::from),
                     });
+                    let todos = (name == "TodoWrite").then(|| todos_of(input)).flatten().map(|items| UiEvent::Todos { parent: parent.clone(), items });
                     out.push(UiEvent::ToolStarted {
                         parent: parent.clone(),
                         tool_use_id: id,
@@ -277,6 +278,7 @@ impl StreamParser {
                         name,
                     });
                     out.extend(agent);
+                    out.extend(todos);
                 }
                 "server_tool_use" | "advisor_tool_result" => out.extend(self.advisor_block(block, parent.clone())),
                 _ => {}
@@ -533,6 +535,30 @@ fn str_of(v: &Value, key: &str) -> String {
     v.get(key).and_then(Value::as_str).unwrap_or("").to_string()
 }
 
+/// The plan a TodoWrite call carries (its `todos`), at most 50 lines of 200 characters each; None when it has no list.
+/// A line with no words is left out, and a status Claude doesn't use becomes "pending".
+fn todos_of(input: &Value) -> Option<Vec<crate::ui_event::Todo>> {
+    let list = input.get("todos")?.as_array()?;
+    Some(
+        list.iter()
+            .filter_map(|t| {
+                let content = truncate(str_of(t, "content").trim(), 200);
+                if content.is_empty() {
+                    return None;
+                }
+                let status = match str_of(t, "status").as_str() {
+                    s @ ("in_progress" | "completed") => s.to_string(),
+                    _ => "pending".to_string(),
+                };
+                let form = str_of(t, "activeForm");
+                let active_form = if form.trim().is_empty() { content.clone() } else { truncate(form.trim(), 200) };
+                Some(crate::ui_event::Todo { content, status, active_form })
+            })
+            .take(50)
+            .collect(),
+    )
+}
+
 /// Cuts `s` to `max` characters, appending `…` when anything was removed.
 pub fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
@@ -554,6 +580,26 @@ mod tests {
     fn parse_all(text: &str) -> Vec<UiEvent> {
         let mut p = StreamParser::default();
         text.lines().flat_map(|l| p.parse_line(l)).collect()
+    }
+
+    #[test]
+    fn a_todowrite_call_makes_a_plan_event_with_clean_lines() {
+        let line = serde_json::json!({"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"TodoWrite","input":{"todos":[
+            {"content":"Write tests","status":"in_progress","activeForm":"Writing tests"},
+            {"content":"  ","status":"pending","activeForm":"x"},
+            {"content":"Ship it","status":"weird"}
+        ]}}]}})
+        .to_string();
+        let events = parse_all(&line);
+        let plan: Vec<_> = events.iter().filter_map(|e| if let UiEvent::Todos { parent, items } = e { Some((parent.clone(), items.clone())) } else { None }).collect();
+        assert_eq!(plan.len(), 1);
+        let (parent, items) = &plan[0];
+        assert_eq!(parent, &None);
+        assert_eq!(items.iter().map(|t| (t.content.as_str(), t.status.as_str(), t.active_form.as_str())).collect::<Vec<_>>(), vec![("Write tests", "in_progress", "Writing tests"), ("Ship it", "pending", "Ship it")], "a blank line goes, an unknown status is pending, a missing activeForm is the line");
+        assert!(events.iter().any(|e| matches!(e, UiEvent::ToolStarted { name, .. } if name == "TodoWrite")), "the step is still there");
+        // Another tool's input with a `todos` field, or a TodoWrite with none, is no plan.
+        let other = serde_json::json!({"type":"assistant","message":{"id":"m2","content":[{"type":"tool_use","id":"t2","name":"Other","input":{"todos":[{"content":"a"}]}},{"type":"tool_use","id":"t3","name":"TodoWrite","input":{}}]}}).to_string();
+        assert!(!parse_all(&other).iter().any(|e| matches!(e, UiEvent::Todos { .. })));
     }
 
     /// Shapes from a real CLI 2.1.293 run with --advisor and an Explore subagent (trimmed, paths changed).

@@ -19,7 +19,7 @@ const turn: RemoteEvent[] = [
   { kind: "tool_started", tool_use_id: "t2", name: "Bash", summary: "npm test" },
   { kind: "tests_ran", tool_use_id: "t2", command: "npm test", passed: 412, failed: 0, skipped: 2 },
   { kind: "tool_finished", tool_use_id: "t2", is_error: false },
-  { kind: "turn_done", is_error: false, result: "done", duration_ms: 3000 },
+  { kind: "turn_done", is_error: false, result: "done", duration_ms: 3000, context_window: null },
 ];
 
 describe("whether the chat list and what waits have come", () => {
@@ -123,8 +123,8 @@ describe("a chat, built from its events", () => {
 
 describe("turns", () => {
   it("a turn's end applied twice is one end, and each turn has its own", () => {
-    const first: RemoteEvent[] = [{ kind: "user_text", text: "one", at: 1, sent_by: null }, { kind: "turn_done", is_error: false, result: "a", duration_ms: 1 }];
-    const second: RemoteEvent[] = [{ kind: "user_text", text: "two", at: 2, sent_by: null }, { kind: "turn_done", is_error: false, result: "b", duration_ms: 1 }];
+    const first: RemoteEvent[] = [{ kind: "user_text", text: "one", at: 1, sent_by: null }, { kind: "turn_done", is_error: false, result: "a", duration_ms: 1, context_window: null }];
+    const second: RemoteEvent[] = [{ kind: "user_text", text: "two", at: 2, sent_by: null }, { kind: "turn_done", is_error: false, result: "b", duration_ms: 1, context_window: null }];
     let s = run([...first, ...first, ...second, ...second].map((e, i) => ({ type: "pushed", msg: { type: "event", slot: "a", seq: i + 1, event: e } }) as Action));
     expect(items(s).filter((it) => it.kind === "turn")).toHaveLength(2);
     // A catch-up of the same turns on top changes nothing either.
@@ -223,5 +223,52 @@ describe("the Mac", () => {
   it("a conversation cleared on the Mac is cleared here", () => {
     const s = run([event("a", 1, { kind: "user_text", text: "x", at: 1, sent_by: null }), event("a", 2, { kind: "conversation_reset" })]);
     expect(items(s)).toEqual([]);
+  });
+});
+
+describe("the commands, plan, context and usage a Mac with extras sends", () => {
+  const todos: RemoteEvent = { kind: "todos", items: [{ content: "A", status: "pending", active_form: "Doing A" }] };
+  const commands: RemoteEvent = { kind: "commands", commands: [{ name: "review", description: "Review", argument_hint: "" }] };
+  const context = (tokens: number, window: number | null): RemoteEvent => ({ kind: "context", tokens, window });
+  const done = (context_window: number | null): RemoteEvent => ({ kind: "turn_done", is_error: false, result: null, duration_ms: 1, context_window });
+
+  it("are kept on the chat as they were last said, and the plan and context go with the conversation", () => {
+    const s = run([event("a", 1, commands), event("a", 2, todos), event("a", 3, context(50_000, 200_000))]);
+    expect(s.views.a).toMatchObject({ commands: [{ name: "review" }], todos: [{ content: "A" }], context: { tokens: 50_000, window: 200_000 } });
+    // They are not messages: nothing is added to the chat's items.
+    expect(items(s)).toEqual([]);
+    expect(run([event("a", 4, { kind: "conversation_reset" })], s).views.a).toMatchObject({ todos: [], context: null });
+  });
+
+  it("keep the window the chat was last told when an event doesn't say it, and take the one a turn's result says", () => {
+    let s = run([event("a", 1, context(50_000, 200_000)), event("a", 2, context(60_000, null))]);
+    expect(s.views.a.context).toEqual({ tokens: 60_000, window: 200_000 });
+    s = run([event("a", 3, done(1_000_000))], s);
+    expect(s.views.a.context).toEqual({ tokens: 60_000, window: 1_000_000 });
+    // A result before any context was said leaves it unsaid.
+    expect(run([event("b", 1, done(200_000))]).views.b.context).toBeNull();
+  });
+
+  it("stay through a catch-up that starts the chat over, and come again with it", () => {
+    const hi: RemoteEvent = { kind: "user_text", text: "hi", at: 1, sent_by: null };
+    const s = run([event("a", 1, commands), reset("a", 9, [hi])]);
+    expect(s.views.a.commands).toEqual([expect.objectContaining({ name: "review" })]);
+    const again = run([reset("a", 12, [hi, todos, context(70_000, 200_000)])], s);
+    expect(again.views.a).toMatchObject({ todos: [{ content: "A" }], context: { tokens: 70_000, window: 200_000 } });
+  });
+
+  it("leave a chat as it is for an event of a kind this app doesn't know", () => {
+    const s = run([event("a", 1, { kind: "user_text", text: "hi", at: 1, sent_by: null })]);
+    const next = run([event("a", 2, { kind: "from_a_newer_mac" } as unknown as RemoteEvent)], s);
+    expect(items(next)).toEqual(items(s));
+    expect(next.views.a.seq).toBe(2);
+  });
+
+  it("make the account's usage the app's, whichever chat is open, and ignore a message it doesn't know", () => {
+    const plan: Action = { type: "pushed", msg: { type: "plan", used: 0.4, resets_at: 99, status: "allowed" } };
+    expect(run([plan]).plan).toEqual({ used: 0.4, resetsAt: 99, status: "allowed" });
+    const unknown = { type: "from_a_newer_mac" } as unknown as Action extends { msg: infer M } ? M : never;
+    const before = run([plan]);
+    expect(reducer(before, { type: "pushed", msg: unknown } as Action)).toEqual(before);
   });
 });

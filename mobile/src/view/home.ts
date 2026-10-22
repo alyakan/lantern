@@ -96,13 +96,14 @@ export interface Group {
 }
 
 /**
- * The rows under their projects: the project with the most recently active chat first (chats with no project last), and
- * in each the most recent chat first. Projects are told apart by name, which is all a phone is told of a folder.
+ * The rows under their projects: the projects by name (chats with no project last) so they stay where they are however
+ * the chats move, and in each the most recent chat first. Projects are told apart by name, which is all a phone is told of
+ * a folder.
  */
 export function groups(list: Row[]): Group[] {
   const byProject = new Map<string, Row[]>();
   for (const r of list) byProject.set(r.project, [...(byProject.get(r.project) ?? []), r]);
   return [...byProject]
     .map(([project, rs]) => ({ project, rows: [...rs].sort((a, b) => b.activeAt - a.activeAt), needsYou: rs.filter((r) => r.status === "needs_you").length }))
-    .sort((a, b) => (a.project === "" ? 1 : b.project === "" ? -1 : b.rows[0].activeAt - a.rows[0].activeAt));
+    .sort((a, b) => (a.project === "" ? 1 : b.project === "" ? -1 : a.project.localeCompare(b.project, undefined, { sensitivity: "base" }) || (a.project < b.project ? -1 : a.project > b.project ? 1 : 0)));
 }

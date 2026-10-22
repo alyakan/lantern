@@ -13,6 +13,7 @@ import { Dots, HomeSkeleton } from "../ui/skeleton";
 import { colors, radius, shadow, space } from "../ui/theme";
 import { cards, groups, headline, projectTint, rows, type Card, type Grouping, type Group, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
+import { UsageStrip } from "./ChatExtras";
 import { CloseChatSheet } from "./CloseChat";
 import { Suggestions } from "./Suggestions";
 
@@ -175,7 +176,7 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 /** Home: what waits on you, as a headline and a stack, then your chats. */
 export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport }: HomeProps) {
   const controller = useController();
-  const { chats, waiting, chatsLoaded, waitingLoaded } = useSyncState();
+  const { chats, waiting, chatsLoaded, waitingLoaded, plan } = useSyncState();
   const loading = !chatsLoaded || !waitingLoaded;
   const connection = useConnectionState();
   const insets = useSafeAreaInsets();
@@ -233,6 +234,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             </View>
           )}
         </View>
+        {plan && <UsageStrip plan={plan} />}
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}
         {loading ? (
           <HomeSkeleton />

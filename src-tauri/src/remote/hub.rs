@@ -80,6 +80,13 @@ struct Log {
     preset: Option<String>,
     color: Option<String>,
     workflow: Option<String>,
+    /// What the chat's claude last said it offers after a "/", and the plan it last kept: a phone that opens the chat is
+    /// told them whatever the kept events no longer reach.
+    commands: Option<Vec<crate::ui_event::SlashCommand>>,
+    todos: Option<Vec<crate::ui_event::Todo>>,
+    /// The tokens the chat holds, and its model's context size once a turn's result said it.
+    context: Option<u64>,
+    window: Option<u64>,
 }
 
 impl Log {
@@ -122,7 +129,10 @@ impl Log {
                 }
             }
             UiEvent::Thinking { .. } | UiEvent::TextDelta { .. } | UiEvent::ToolStarted { .. } => self.working = true,
-            UiEvent::TurnDone { .. } => self.working = false,
+            UiEvent::TurnDone { context_window, .. } => {
+                self.working = false;
+                self.window = context_window.or(self.window);
+            }
             UiEvent::PermissionRequested { request_id, .. } => {
                 self.pending.insert(request_id.clone());
             }
@@ -140,7 +150,13 @@ impl Log {
                 self.pending.clear();
             }
             UiEvent::AgentAsleep { asleep } => self.asleep = *asleep,
-            UiEvent::ConversationReset => self.first_prompt = None,
+            UiEvent::ConversationReset => {
+                self.first_prompt = None;
+                (self.todos, self.context) = (None, None);
+            }
+            UiEvent::ContextUsed { tokens } => self.context = Some(*tokens),
+            UiEvent::Commands { commands } => self.commands = Some(commands.clone()),
+            UiEvent::Todos { parent: None, items } => self.todos = Some(items.clone()),
             _ => {}
         }
     }
@@ -169,6 +185,13 @@ impl Log {
             }
         }
     }
+}
+
+/// Whether a phone may be sent what a step printed: a command's output, a skill's, a helper's report, the advisor's, an MCP
+/// tool's. Not what Claude read from a file or the web (Read, Grep, Glob, WebFetch, WebSearch), nor what it wrote: a phone is
+/// shown those as a line, and the diff of an edit, and no more. Anything else (a tool this list doesn't know) is refused too.
+pub fn output_may_be_read(tool: &str) -> bool {
+    matches!(tool, "Bash" | "BashOutput" | "Skill" | "Agent" | "Task" | "advisor") || tool.strip_prefix("mcp__").and_then(|rest| rest.split_once("__")).is_some_and(|(server, name)| !server.is_empty() && !name.is_empty())
 }
 
 /// The first line of what the user typed, without the notes Lantern puts before it, cut to a title's length.
@@ -208,6 +231,8 @@ pub struct SessionHub {
     chats: Mutex<HashMap<String, Log>>,
     /// The presets the window offers (Settings › Models), as it last said.
     presets: Mutex<Vec<RemotePreset>>,
+    /// The subscription's usage as the last chat to report it said (it is the account's, the same in every chat).
+    plan: Mutex<Option<UiEvent>>,
     cap: usize,
     now: fn() -> u64,
 }
@@ -224,11 +249,14 @@ impl Default for SessionHub {
 
 impl SessionHub {
     pub fn with_cap(cap: usize) -> Self {
-        Self { chats: Mutex::default(), presets: Mutex::default(), cap, now: now_ms }
+        Self { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap, now: now_ms }
     }
 
     /// Keeps an event the bus numbered, and what it says about where its chat stands.
     pub fn record(&self, ev: &BusEvent) {
+        if matches!(ev.event, UiEvent::PlanUsage { .. }) {
+            *self.plan.lock().unwrap() = Some(ev.event.clone());
+        }
         let mut chats = self.chats.lock().unwrap();
         let log = chats.entry(ev.slot.clone()).or_default();
         log.note(&ev.event);
@@ -337,6 +365,46 @@ impl SessionHub {
         self.chats.lock().unwrap().get(slot).map(|log| log.info(slot))
     }
 
+    /// What a phone that opens the chat is told besides its events: the commands claude offers there, its plan and the context
+    /// it holds (each only if it has been said), since the kept events may no longer reach them.
+    pub fn extras(&self, slot: &str) -> Vec<super::protocol::RemoteEvent> {
+        let chats = self.chats.lock().unwrap();
+        let Some(log) = chats.get(slot) else { return Vec::new() };
+        let mut out = Vec::new();
+        out.extend(log.commands.clone().and_then(|commands| super::protocol::to_remote(&UiEvent::Commands { commands })));
+        out.extend(log.todos.clone().and_then(|items| super::protocol::to_remote(&UiEvent::Todos { parent: None, items })));
+        out.extend(log.context.map(|tokens| super::protocol::RemoteEvent::Context { tokens, window: log.window }));
+        out
+    }
+
+    /// The subscription's usage as the last chat to report it said: how much of the window, when it resets, and the status.
+    pub fn plan(&self) -> Option<(f64, Option<u64>, String)> {
+        match self.plan.lock().unwrap().as_ref()? {
+            UiEvent::PlanUsage { used, resets_at, status } => Some((*used, *resets_at, status.clone())),
+            _ => None,
+        }
+    }
+
+    /// What the chat's step printed when it finished, if the hub still keeps it, cut to what a phone is sent. Only for the
+    /// steps whose output a phone is meant to read (see `output_may_be_read`): never what Claude read from a file.
+    pub fn step_output(&self, slot: &str, tool_use_id: &str) -> Option<String> {
+        let chats = self.chats.lock().unwrap();
+        let log = chats.get(slot)?;
+        let allowed = log.entries.iter().any(|(e, _)| matches!(&e.event, UiEvent::ToolStarted { parent: None, tool_use_id: id, name, .. } if id == tool_use_id && output_may_be_read(name)));
+        if !allowed {
+            return None;
+        }
+        let output = log.entries.iter().rev().find_map(|(e, _)| match &e.event {
+            UiEvent::ToolFinished { parent: None, tool_use_id: id, output, .. } if id == tool_use_id => Some(output.as_str()),
+            _ => None,
+        })?;
+        let mut cut: String = output.chars().take(super::protocol::STEP_OUTPUT_MAX).collect();
+        if output.chars().count() > super::protocol::STEP_OUTPUT_MAX {
+            cut.push_str(super::protocol::CUT);
+        }
+        Some(cut)
+    }
+
     /// What came after event `after` of the chat (None: no such chat).
     pub fn since(&self, slot: &str, after: u64) -> Option<Since> {
         let chats = self.chats.lock().unwrap();
@@ -351,7 +419,7 @@ mod tests {
     use super::*;
 
     fn hub() -> SessionHub {
-        SessionHub { chats: Mutex::default(), presets: Mutex::default(), cap: CHAT_CAP, now: || 1000 }
+        SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: CHAT_CAP, now: || 1000 }
     }
 
     fn feed(hub: &SessionHub, slot: &str, events: Vec<UiEvent>) {
@@ -396,7 +464,7 @@ mod tests {
 
     #[test]
     fn a_chat_keeps_no_more_than_its_cap_and_a_client_too_far_behind_starts_again() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), cap: 400, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: 400, now: || 1 };
         let long = "x".repeat(150);
         feed(&hub, "a", (0..6).map(|_| UiEvent::AssistantText { parent: None, block_id: "b".into(), text: long.clone() }).collect());
         let Some(Since::TooOld { kept }) = hub.since("a", 0) else { panic!("events 1.. are gone") };
@@ -409,9 +477,68 @@ mod tests {
 
     #[test]
     fn the_newest_event_is_kept_even_when_it_is_bigger_than_the_cap() {
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), cap: 10, now: || 1 };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
         feed(&hub, "a", vec![user("a long message, longer than the cap")]);
         assert_eq!(events(hub.since("a", 0).unwrap()).len(), 1);
+    }
+
+    #[test]
+    fn the_latest_commands_plan_and_context_are_kept_past_the_events_cap() {
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
+        let todo = |s: &str| crate::ui_event::Todo { content: "a".into(), status: s.into(), active_form: "a".into() };
+        feed(&hub, "a", vec![UiEvent::Todos { parent: None, items: vec![todo("pending")] }, UiEvent::Todos { parent: None, items: vec![todo("completed")] }, UiEvent::ContextUsed { tokens: 50_000 }, UiEvent::PlanUsage { used: 0.2, resets_at: None, status: "allowed".into() }]);
+        feed(&hub, "b", vec![UiEvent::PlanUsage { used: 0.3, resets_at: Some(5), status: "allowed".into() }]);
+        // Pushed out of the few events kept, they are still told.
+        feed(&hub, "a", (0..4).map(|_| UiEvent::AssistantText { parent: None, block_id: "x".into(), text: "y".repeat(200) }).collect());
+        use super::super::protocol::RemoteEvent as R;
+        let told = hub.extras("a");
+        assert!(matches!(&told[0], R::Todos { items } if items[0].status == "completed"));
+        assert_eq!(told[1], R::Context { tokens: 50_000, window: None });
+        assert_eq!(told.len(), 2);
+        assert_eq!(hub.plan(), Some((0.3, Some(5), "allowed".to_string())), "the account's usage is the last one said, by any chat");
+        // A turn's result says the model's context size, and it is told from then on.
+        let mut finished = done();
+        if let UiEvent::TurnDone { context_window, .. } = &mut finished {
+            *context_window = Some(200_000);
+        }
+        feed(&hub, "a", vec![finished]);
+        assert_eq!(hub.extras("a")[1], R::Context { tokens: 50_000, window: Some(200_000) });
+        feed(&hub, "a", vec![UiEvent::ConversationReset]);
+        assert!(hub.extras("a").is_empty(), "a new conversation has no plan and holds nothing");
+    }
+
+    #[test]
+    fn a_finished_steps_output_is_told_while_it_is_kept_and_cut_when_long() {
+        let hub = hub();
+        let finished = |id: &str, output: String| UiEvent::ToolFinished { parent: None, tool_use_id: id.into(), is_error: false, output };
+        let started = |id: &str, name: &str| UiEvent::ToolStarted { parent: None, tool_use_id: id.into(), name: name.into(), summary: String::new() };
+        feed(
+            &hub,
+            "a",
+            vec![
+                started("t1", "Bash"),
+                finished("t1", "ok\n3 passed".into()),
+                started("t2", "mcp__claude_ai_Linear__list_issues"),
+                finished("t2", "x".repeat(super::super::protocol::STEP_OUTPUT_MAX + 50)),
+                UiEvent::ToolStarted { parent: Some("sub".into()), tool_use_id: "t3".into(), name: "Bash".into(), summary: String::new() },
+                UiEvent::ToolFinished { parent: Some("sub".into()), tool_use_id: "t3".into(), is_error: false, output: "a subagent's".into() },
+                started("t4", "Read"),
+                finished("t4", "API_KEY=hunter2".into()),
+                finished("t5", "no start was kept".into()),
+            ],
+        );
+        assert_eq!(hub.step_output("a", "t1").as_deref(), Some("ok\n3 passed"));
+        let long = hub.step_output("a", "t2").unwrap();
+        assert!(long.ends_with(super::super::protocol::CUT) && long.chars().count() < super::super::protocol::STEP_OUTPUT_MAX + 100);
+        assert_eq!((hub.step_output("a", "t3"), hub.step_output("a", "nope"), hub.step_output("b", "t1")), (None, None, None), "a subagent's step, one never seen, a chat not kept");
+        // What Claude read from a file stays on the Mac, as does the output of a step whose start isn't kept.
+        assert_eq!((hub.step_output("a", "t4"), hub.step_output("a", "t5")), (None, None));
+        for tool in ["Read", "Grep", "Glob", "WebFetch", "WebSearch", "Edit", "Write", "MultiEdit", "NotebookEdit", "TodoWrite", "mcp__x", "mcp____y", "Bashx", ""] {
+            assert!(!output_may_be_read(tool), "{tool}");
+        }
+        for tool in ["Bash", "BashOutput", "Skill", "Agent", "Task", "advisor", "mcp__github__get_file"] {
+            assert!(output_may_be_read(tool), "{tool}");
+        }
     }
 
     #[test]
@@ -546,7 +673,7 @@ mod tests {
     #[test]
     fn chats_are_listed_most_recently_active_first() {
         static TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), cap: CHAT_CAP, now: || TICK.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: CHAT_CAP, now: || TICK.fetch_add(1, std::sync::atomic::Ordering::SeqCst) };
         hub.opened("old", "/p");
         hub.opened("new", "/p");
         feed(&hub, "old", vec![user("again")]);

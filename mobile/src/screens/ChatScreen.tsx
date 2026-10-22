@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
-import { FlashList } from "@shopify/flash-list";
+import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
@@ -9,9 +9,12 @@ import { AboveKeyboard } from "../ui/keyboard";
 import { FadeSlideIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { colors, shadow, space } from "../ui/theme";
+import { quickReplies, quote, searchRows } from "../view/chatText";
 import { projectColorOf } from "../view/home";
 import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
+import { ChatSearchSheet, distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
+import { useMacCan } from "../shell/useControls";
 import { ChatSettings } from "./ChatSettings";
 import { AssistantRow, Composer, DesktopRow, DiffSheet, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
 
@@ -31,7 +34,9 @@ export const WAKE_WAIT_MS = 20_000;
 export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
   const controller = useController();
   const { sync } = controller;
-  const { chats, views } = useSyncState();
+  const { chats, views, plan } = useSyncState();
+  const canOutput = useMacCan("output");
+  const [output, setOutput] = useState<{ id: string; text: string } | null>(null);
   const connection = useConnectionState();
   const me = useDeviceId();
   const insets = useSafeAreaInsets();
@@ -46,6 +51,14 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
   const [swiping, setSwiping] = useState(false);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // Holding a message down (what can be done with it), searching the chat, being scrolled away from its end, and words put in
+  // the message box (a quote, an edit).
+  const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean } | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [away, setAway] = useState<{ since: number } | null>(null);
+  const [seed, setSeed] = useState<ComposeSeed | undefined>(undefined);
+  const [repliedTo, setRepliedTo] = useState<string | null>(null);
+  const list = useRef<FlashListRef<Row>>(null);
 
   // The chat's events come for as long as this screen is open.
   useEffect(() => {
@@ -86,19 +99,35 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
   if (known.current === null && !view.resetting && rows.length > 0) known.current = new Set(rows.map((r) => r.key));
   const arrives = (key: string) => known.current !== null && !known.current.has(key);
 
+  // Your last message can be edited and sent again; what Claude's last message asks, if it is a yes or no, can be answered at once.
+  const lastUser = [...rows].reverse().find((r) => r.kind === "user")?.key;
+  const lastWords = [...rows].reverse().find((r) => r.kind !== "turn" && r.kind !== "steps");
+  const open = chat?.status === "needs_you";
+  const replies = lastWords && (lastWords.kind === "assistant" || lastWords.kind === "summary") && !working && !open && !asleep && repliedTo !== lastWords.key ? quickReplies(lastWords.item.text) : [];
+  const send = (text: string) => {
+    if (lastWords) setRepliedTo(lastWords.key);
+    void sync.send(slot, text);
+  };
+  // How far scrolled from the latest, and what came since: a button takes you back, with how many new rows.
+  const onScroll = (e: Parameters<typeof distanceFromEnd>[0]) => {
+    const far = distanceFromEnd(e) > 260;
+    setAway((a) => (far ? (a ?? { since: rows.length }) : null));
+  };
+  const unseen = away ? Math.max(0, rows.length - away.since) : 0;
+
   const renderRow = ({ item: row }: { item: Row }) => {
     const body = (() => {
       switch (row.kind) {
         case "user":
-          return <UserRow item={row.item} />;
+          return <UserRow item={row.item} onActions={() => setActions({ text: row.item.text, own: true, last: row.key === lastUser })} />;
         case "assistant":
-          return <AssistantRow item={row.item} />;
+          return <AssistantRow item={row.item} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
         case "summary":
-          return <SummaryRow row={row} onFiles={setFiles} />;
+          return <SummaryRow row={row} onFiles={setFiles} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
         case "page":
           return <PageRow row={row} answered={answered.has(row.item.id)} onAction={(a) => reply(row.item.id, a)} />;
         case "steps":
-          return <StepsRow chips={row.chips} onFiles={setFiles} />;
+          return <StepsRow chips={row.chips} onFiles={setFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "prompt":
           return (
             <PromptRow
@@ -134,7 +163,7 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
         </PressScale>
         {/* The title bar opens the chat's settings (what it runs on, and its models) when the Mac can say what those are. */}
-        <ChatSettings slot={slot} chat={chat} onProblem={setProblem} onClosed={onBack}>
+        <ChatSettings slot={slot} chat={chat} plan={plan} context={view.context} onProblem={setProblem} onClosed={onBack}>
           {(line) => (
             <View style={{ flex: 1 }}>
               <Txt variant="heading" numberOfLines={1} accessibilityRole="header">
@@ -152,6 +181,13 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
             </View>
           )}
         </ChatSettings>
+        {/* Looking for something said in this chat. */}
+        <PressScale accessibilityRole="button" accessibilityLabel="Search this chat" onPress={() => setSearching(true)} hitSlop={8} scaleTo={0.88} style={[{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.card, alignItems: "center", justifyContent: "center" }, shadow.float, { shadowOpacity: 0.08 }]}>
+          <View accessibilityElementsHidden style={{ width: 20, height: 20 }}>
+            <View style={{ width: 13, height: 13, borderRadius: 7, borderWidth: 2, borderColor: colors.ink }} />
+            <View style={{ position: "absolute", left: 11, top: 12, width: 8, height: 2.5, borderRadius: 2, backgroundColor: colors.ink, transform: [{ rotate: "45deg" }] }} />
+          </View>
+        </PressScale>
         {working && (
           <FadeSlideIn from={-6} ms={200}>
             <PressScale accessibilityRole="button" accessibilityLabel="Stop" onPress={() => sync.interrupt(slot).catch(fail)} hitSlop={8} scaleTo={0.92} style={{ height: 40, paddingHorizontal: 14, borderRadius: 20, backgroundColor: colors.ink, flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -187,7 +223,12 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
         </Pressable>
       )}
 
+      <View style={{ flex: 1 }}>
       <FlashList
+        testID="chat-list"
+        ref={list}
+        onScroll={onScroll}
+        scrollEventThrottle={64}
         data={rows}
         renderItem={renderRow}
         keyExtractor={(r) => r.key}
@@ -243,6 +284,11 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
         }
       />
 
+      {away && <JumpToBottom unseen={unseen} onPress={() => list.current?.scrollToEnd({ animated: true })} />}
+      </View>
+
+      <PlanCard todos={view.todos} />
+      {replies.length > 0 && <QuickReplies replies={replies} onSend={send} />}
       {asleep ? (
         <View style={{ padding: 16, paddingBottom: Math.max(insets.bottom, 16), gap: 6 }}>
           <Txt variant="small" tone="ink2">
@@ -261,9 +307,27 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           />
         </View>
       ) : (
-        <Composer disabled={!online} onSend={(text) => void sync.send(slot, text)} />
+        <Composer disabled={!online} onSend={(text) => void sync.send(slot, text)} seed={seed} commands={view.commands} />
+      )}
+      {actions && (
+        <MessageActionsSheet
+          text={actions.text}
+          onQuote={() => setSeed({ id: Date.now(), text: quote(actions.text), mode: "append" })}
+          onEdit={actions.own && actions.last ? () => setSeed({ id: Date.now(), text: actions.text, mode: "replace" }) : undefined}
+          onClose={() => setActions(null)}
+        />
+      )}
+      {searching && (
+        <ChatSearchSheet
+          search={(q) => searchRows(rows, q)}
+          onPick={(hit) => {
+            list.current?.scrollToIndex({ index: hit.index, animated: true, viewPosition: 0.3 });
+          }}
+          onClose={() => setSearching(false)}
+        />
       )}
       {files && <DiffSheet files={files} load={loadDiff} onClose={() => setFiles(null)} />}
+      {output && <StepOutputSheet title={output.text} load={() => sync.stepOutput(slot, output.id)} onClose={() => setOutput(null)} />}
     </AboveKeyboard>
   );
 }

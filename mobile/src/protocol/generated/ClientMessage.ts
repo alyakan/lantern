@@ -4,4 +4,4 @@ import type { Request } from "./Request";
 /**
  * A phone's message.
  */
-export type ClientMessage = { "type": "hello", protocol: number, app_version: string, device_name: string, } | { "type": "request", id: number, request: Request, };
+export type ClientMessage = { "type": "hello", protocol: number, app_version: string, device_name: string, features: Array<string>, } | { "type": "request", id: number, request: Request, };

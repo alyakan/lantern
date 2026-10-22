@@ -15,4 +15,4 @@ hosts: Array<string>,
  * What this Mac can do beyond protocol 1, by name ("controls": Request::Controls and what goes with it). A Mac that
  * is older says nothing, and a phone doesn't ask it for what it hasn't got.
  */
-features: Array<string>, } | { "type": "response", id: number, ok: unknown, error: string | null, } | { "type": "event", slot: string, seq: number, event: RemoteEvent, } | { "type": "reset", slot: string, seq: number, page: number, done: boolean, hidden: number, events: Array<RemoteEvent>, } | { "type": "chats", chats: Array<RemoteChat>, };
+features: Array<string>, } | { "type": "response", id: number, ok: unknown, error: string | null, } | { "type": "event", slot: string, seq: number, event: RemoteEvent, } | { "type": "reset", slot: string, seq: number, page: number, done: boolean, hidden: number, events: Array<RemoteEvent>, } | { "type": "chats", chats: Array<RemoteChat>, } | { "type": "plan", used: number, resets_at: number | null, status: string, };

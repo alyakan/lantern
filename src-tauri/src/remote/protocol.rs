@@ -13,7 +13,32 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow"];
+pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output"];
+
+/// The longest output of a step a phone is sent, in characters (the parser already keeps only the start of a huge one).
+pub const STEP_OUTPUT_MAX: usize = 20_000;
+
+/// What a phone says it can read beyond protocol 1 (Hello's `features`): the Mac sends it only what its name allows, since a
+/// phone that doesn't know an event can't show the chat. "extras": the commands, plan and context events, and the plan usage.
+pub const PHONE_EXTRAS: &str = "extras";
+
+/// A slash command or skill the chat's claude offers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteCommand {
+    pub name: String,
+    pub description: String,
+    pub argument_hint: String,
+}
+
+/// One line of the plan Claude keeps. `status`: "pending", "in_progress" or "completed".
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteTodo {
+    pub content: String,
+    pub status: String,
+    pub active_form: String,
+}
 
 /// Where the generated TypeScript goes, from ts-rs's export folder (src-tauri/bindings): each type below says it again.
 #[cfg(test)]
@@ -36,7 +61,8 @@ pub enum RemoteEvent {
     TextDelta { block_id: String, text: String },
     AssistantText { block_id: String, text: String },
     ToolStarted { tool_use_id: String, name: String, summary: String },
-    /// The step ended; its output isn't sent (the phone shows steps as a line each).
+    /// The step ended; its output isn't sent with it (the phone shows steps as a line each): only a few kinds of step's output
+    /// is sent, and only when asked for (Request::StepOutput).
     ToolFinished { tool_use_id: String, is_error: bool },
     /// A file the step changed, as counts: its diff is a request of its own.
     FileEdited { tool_use_id: String, path: String, created: bool, added: u32, removed: u32 },
@@ -46,6 +72,10 @@ pub enum RemoteEvent {
         result: Option<String>,
         #[ts(type = "number | null")]
         duration_ms: Option<u64>,
+        /// The model's context size in tokens, when this turn's result said (what "context used" is a share of).
+        #[serde(default)]
+        #[ts(type = "number | null")]
+        context_window: Option<u64>,
     },
     /// Something waits for the user's answer: Allow or Deny, an approval, or a question (AskUserQuestion's input).
     PermissionRequested {
@@ -62,7 +92,34 @@ pub enum RemoteEvent {
     SessionEnded { code: Option<i32> },
     Asleep { asleep: bool },
     ConversationReset,
+    /// What the chat's claude offers after a "/" (extras: sent only to a phone that can read it).
+    Commands { commands: Vec<RemoteCommand> },
+    /// The plan Claude keeps, whole each time it changes (extras).
+    Todos { items: Vec<RemoteTodo> },
+    /// How much of the model's context the chat holds, in tokens (extras). `window`: its size, when the Mac knows it (else the
+    /// phone keeps the last it was told).
+    Context {
+        #[ts(type = "number")]
+        tokens: u64,
+        #[ts(type = "number | null")]
+        window: Option<u64>,
+    },
 }
+
+impl RemoteEvent {
+    /// Whether only a phone that said "extras" can read it.
+    pub fn is_extra(&self) -> bool {
+        matches!(self, RemoteEvent::Commands { .. } | RemoteEvent::Todos { .. } | RemoteEvent::Context { .. })
+    }
+}
+
+/// `to_remote`, without what a phone that can't read extras would choke on.
+pub fn to_remote_for(event: &UiEvent, extras: bool) -> Option<RemoteEvent> {
+    to_remote(event).filter(|e| extras || !e.is_extra())
+}
+
+/// The most slash commands a phone is sent, each with its text cut short: a long list of skills is still a short message.
+pub const COMMANDS_MAX: usize = 300;
 
 /// The phone's events for one of Lantern's, or none: subagents' insides, Lantern's bookkeeping and anything a phone
 /// doesn't show stay on the Mac. Every event is named here, so a new one is a compile error until it is decided.
@@ -81,7 +138,7 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
             R::FileEdited { tool_use_id: tool_use_id.clone(), path: path.clone(), created: *created, added: count('+'), removed: count('-') }
         }
         U::TestRun { parent: None, tool_use_id, command, run } => R::TestsRan { tool_use_id: tool_use_id.clone(), command: command.clone(), passed: run.passed, failed: run.failed, skipped: run.skipped },
-        U::TurnDone { is_error, result, duration_ms, .. } => R::TurnDone { is_error: *is_error, result: result.clone(), duration_ms: *duration_ms },
+        U::TurnDone { is_error, result, duration_ms, context_window, .. } => R::TurnDone { is_error: *is_error, result: result.clone(), duration_ms: *duration_ms, context_window: *context_window },
         U::PermissionRequested { request_id, tool_name, input } => R::PermissionRequested { request_id: request_id.clone(), tool_name: tool_name.clone(), input: trimmed(input) },
         U::PermissionWithdrawn { request_id } => R::PermissionWithdrawn { request_id: request_id.clone() },
         U::PermissionResolved { request_id, allow, by } => R::PermissionResolved { request_id: request_id.clone(), allow: *allow, by: by.clone() },
@@ -91,16 +148,20 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         U::SessionEnded { code, .. } => R::SessionEnded { code: *code },
         U::AgentAsleep { asleep } => R::Asleep { asleep: *asleep },
         U::ConversationReset => R::ConversationReset,
+        U::Commands { commands } => {
+            let cut = |s: &str, n: usize| s.chars().take(n).collect::<String>();
+            R::Commands { commands: commands.iter().take(COMMANDS_MAX).map(|c| RemoteCommand { name: cut(&c.name, 80), description: cut(&c.description, 200), argument_hint: cut(&c.argument_hint, 80) }).collect() }
+        }
+        U::Todos { parent: None, items } => R::Todos { items: items.iter().map(|t| RemoteTodo { content: t.content.clone(), status: t.status.clone(), active_form: t.active_form.clone() }).collect() },
+        U::ContextUsed { tokens } => R::Context { tokens: *tokens, window: None },
         // A subagent's insides: the phone shows the step that started it, not what it does.
         U::Thinking { parent: Some(_) } | U::TextDelta { parent: Some(_), .. } | U::AssistantText { parent: Some(_), .. } | U::ToolStarted { parent: Some(_), .. } | U::ToolFinished { parent: Some(_), .. } | U::EditApplied { parent: Some(_), .. } | U::TestRun { parent: Some(_), .. } => return None,
         // Lantern's own bookkeeping, and what only the desktop's panes show.
         U::AgentSetup { .. }
         | U::Retrying { .. }
-        | U::ContextUsed { .. }
         | U::BackgroundTasks { .. }
         | U::TaskStarted { .. }
         | U::TaskEnded { .. }
-        | U::Commands { .. }
         | U::AgentModel { .. }
         | U::AgentStarted { .. }
         | U::AgentProgress { .. }
@@ -123,6 +184,8 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         | U::AgentMode { .. }
         | U::MergeResolved { .. }
         | U::ReviewTarget { .. }
+        | U::Todos { parent: Some(_), .. }
+        // The account's usage goes to the phone as a message of its own (ServerMessage::Plan), not as a chat's event.
         | U::PlanUsage { .. }
         | U::Unknown { .. }
         | U::ParseError { .. } => return None,
@@ -360,7 +423,7 @@ pub struct Waiting {
     pub at: u64,
 }
 
-/// What a phone may ask. Nothing else is accepted: no commands, no files, no settings.
+/// What a phone may ask. Nothing else is accepted: no commands, no files (not what Claude read from them either), no settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[ts(export, export_to = "../../mobile/src/protocol/generated/")]
@@ -429,6 +492,10 @@ pub enum Request {
     Suggest { refresh: bool },
     /// One file's diff from the chat's start, as unified-diff text.
     Diff { slot: String, path: String },
+    /// What a finished step of the chat printed (a command's output, a skill's, a helper's report, an MCP tool's), as text,
+    /// cut to STEP_OUTPUT_MAX. Never what Claude read from a file or the web (hub.rs `output_may_be_read`). Only what the Mac
+    /// still keeps of the chat: an older step may be gone, which is an error. Only sent to a Mac whose Welcome lists "output".
+    StepOutput { slot: String, tool_use_id: String },
     /// The token Expo's push service delivers this phone's notifications with.
     PushToken { token: String },
 }
@@ -439,7 +506,14 @@ pub enum Request {
 #[ts(export, export_to = "../../mobile/src/protocol/generated/")]
 pub enum ClientMessage {
     /// `device_name`: the name the phone goes by on the Mac's device list (its first pairing sets it).
-    Hello { protocol: u32, app_version: String, device_name: String },
+    /// `features`: what the phone can read beyond protocol 1 (see PHONE_EXTRAS); an older phone says nothing.
+    Hello {
+        protocol: u32,
+        app_version: String,
+        device_name: String,
+        #[serde(default)]
+        features: Vec<String>,
+    },
     Request {
         #[ts(type = "number")]
         id: u64,
@@ -498,6 +572,15 @@ pub enum ServerMessage {
     },
     /// The chat list changed (a chat opened, closed, or moved on).
     Chats { chats: Vec<RemoteChat> },
+    /// The subscription's five-hour window, for the whole account: `used` from 0 to 1, `resets_at` in unix seconds, and the
+    /// CLI's status for it ("allowed", "allowed_warning", "rejected"). Sent when it first connects and when it changes, and
+    /// only to a phone that said "extras".
+    Plan {
+        used: f64,
+        #[ts(type = "number | null")]
+        resets_at: Option<u64>,
+        status: String,
+    },
 }
 
 #[cfg(test)]
@@ -525,6 +608,36 @@ mod tests {
         assert_eq!(RemoteChat::from(info(Some("ask"))).permissions, Some(RemotePermissions::Ask));
         assert_eq!(RemoteChat::from(info(Some("bypass"))).permissions, None);
         assert!(serde_json::from_str::<Request>(r#"{"op":"set_permissions","slot":"a","permissions":"bypass"}"#).is_err());
+    }
+
+    #[test]
+    fn the_commands_plan_and_usage_are_sent_to_a_phone_that_can_read_them_and_to_no_other() {
+        let todos = UiEvent::Todos { parent: None, items: vec![crate::ui_event::Todo { content: "a".into(), status: "pending".into(), active_form: "doing a".into() }] };
+        let sent = RemoteEvent::Todos { items: vec![RemoteTodo { content: "a".into(), status: "pending".into(), active_form: "doing a".into() }] };
+        assert_eq!(to_remote_for(&todos, true), Some(sent));
+        assert_eq!(to_remote_for(&todos, false), None);
+        assert_eq!(to_remote_for(&UiEvent::Todos { parent: Some("t".into()), items: vec![] }, true), None, "a subagent's plan stays with it");
+        let context = UiEvent::ContextUsed { tokens: 90_000 };
+        assert_eq!(to_remote_for(&context, true), Some(RemoteEvent::Context { tokens: 90_000, window: None }));
+        assert_eq!(to_remote_for(&context, false), None);
+        // The account's usage is a message of its own, never a chat's event.
+        assert_eq!(to_remote_for(&UiEvent::PlanUsage { used: 0.5, resets_at: Some(1), status: "allowed".into() }, true), None);
+        // What was already sent is sent whatever the phone says.
+        let said = UiEvent::AssistantText { parent: None, block_id: "b".into(), text: "hi".into() };
+        assert!(to_remote_for(&said, false).is_some());
+    }
+
+    #[test]
+    fn a_long_list_of_commands_is_cut_to_a_short_message() {
+        let command = |i: usize| crate::ui_event::SlashCommand { name: format!("c{i}"), description: "d".repeat(500), argument_hint: String::new() };
+        let Some(RemoteEvent::Commands { commands }) = to_remote(&UiEvent::Commands { commands: (0..COMMANDS_MAX + 50).map(command).collect() }) else { panic!("commands") };
+        assert_eq!((commands.len(), commands[0].description.chars().count()), (COMMANDS_MAX, 200));
+    }
+
+    #[test]
+    fn a_hello_with_no_features_still_reads() {
+        let hello: ClientMessage = serde_json::from_str(r#"{"type":"hello","protocol":1,"app_version":"1","device_name":"P"}"#).unwrap();
+        assert!(matches!(hello, ClientMessage::Hello { features, .. } if features.is_empty()));
     }
 
     #[test]
@@ -560,7 +673,7 @@ mod tests {
     fn what_only_the_desktop_can_answer_is_said_so_and_lanterns_bookkeeping_stays_home() {
         let merge = UiEvent::MergeProposed { worker: "w".into(), name: "Builder".into(), branch: "b".into(), into: "main".into(), summary: "s".into(), commits: 1, files: vec![], uncommitted: 0, loose: vec![] };
         assert_eq!(to_remote(&merge), Some(RemoteEvent::NeedsDesktop { what: "Builder wants to merge its branch.".into() }));
-        assert_eq!(to_remote(&UiEvent::ContextUsed { tokens: 5 }), None);
+        assert_eq!(to_remote_for(&UiEvent::ContextUsed { tokens: 5 }, false), None, "to a phone that can't read it");
         assert_eq!(to_remote(&UiEvent::ShellOutput { id: "s".into(), text: "secret".into() }), None);
         assert_eq!(to_remote(&UiEvent::Unknown { raw: serde_json::json!({}) }), None);
     }
