@@ -172,7 +172,7 @@ describe("deciding", () => {
     expect(screen.getByLabelText("Swipe to allow")).toBeTruthy();
     // The Mac had the answer after all: the prompt leaves its list.
     await act(async () => controller.sync.apply({ type: "waiting", list: [] }));
-    expect(screen.getByText("Answered.")).toBeTruthy();
+    expect(screen.getByText("It isn't waiting any more.")).toBeTruthy();
     expect(screen.queryByLabelText("Swipe to allow")).toBeNull();
     expect(screen.queryByText("No reply from your Mac.")).toBeNull();
     await waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: CLOSE_AFTER_MS + 1500 });
@@ -189,9 +189,9 @@ describe("deciding", () => {
     await renderWith(<DecideScreen slot="a" requestId="p1" onClose={jest.fn()} />, { chats: [chat()], waiting: [push] }, controller);
     await act(async () => activate());
     await act(async () => controller.sync.apply({ type: "waiting", list: [] }));
-    expect(screen.getByText("Answered.")).toBeTruthy();
+    expect(screen.getByText("It isn't waiting any more.")).toBeTruthy();
     await act(async () => fail(new Error("No reply from your Mac.")));
-    expect(screen.getByText("Answered.")).toBeTruthy();
+    expect(screen.getByText("It isn't waiting any more.")).toBeTruthy();
     expect(screen.queryByLabelText("Swipe to allow")).toBeNull();
   });
 

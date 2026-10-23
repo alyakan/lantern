@@ -238,7 +238,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
       )}
       {outcome.kind === "elsewhere" && (
         <Txt variant="small" tone="night" style={{ marginBottom: 12 }} accessibilityRole="alert">
-          {outcome.ours ? "Answered." : "Answered on your Mac."}
+          {outcome.ours ? "It isn't waiting any more." : "Answered on your Mac."}
         </Txt>
       )}
       {outcome.kind === "done" && (
