@@ -177,6 +177,29 @@ describe("with two providers", () => {
     expect(started()[1].settings.provider).toBeUndefined();
   });
 
+  it("shows Team off for a Codex chat, with why: a team's Lead runs on Claude Code", async () => {
+    localStorage.setItem("settings.providerByFolder", JSON.stringify({ [FOLDER]: "codex" }));
+    await launch(true, "Ask Codex…");
+    fireEvent.click(screen.getByRole("button", { name: /^Workflow: Chat/ }));
+    const team = screen.getByRole("menuitemradio", { name: /^Team/ });
+    expect(team).toBeDisabled();
+    expect(team).toHaveTextContent("Codex can't lead a team yet");
+  });
+
+  it("starts a new team's Lead on Claude Code in a project whose chats are on Codex", async () => {
+    localStorage.setItem("settings.providerByFolder", JSON.stringify({ [FOLDER]: "codex" }));
+    await launch(true, "Ask Codex…");
+    fireEvent.click(screen.getByRole("button", { name: "New" }));
+    // (The first of "Team" and "Team from a template…".)
+    fireEvent.click(screen.getAllByRole("menuitem", { name: /^Team/ })[0]);
+    await waitFor(() => expect(started()).toHaveLength(2));
+    expect(started()[1].claudePath).toBe("/Users/you/.local/bin/claude");
+    expect(started()[1].settings.provider).toBeUndefined();
+    expect(started()[1].settings.orchestrator).toBe(true);
+    // The project's chats stay on Codex: a team is the chat's own.
+    expect(JSON.parse(localStorage.getItem("settings.providerByFolder") ?? "{}")).toEqual({ [FOLDER]: "codex" });
+  });
+
   it("shows no provider chip once the chat has begun, and counts what a Codex turn used in tokens, never dollars", async () => {
     localStorage.setItem("settings.providerByFolder", JSON.stringify({ [FOLDER]: "codex" }));
     await launch(true, "Ask Codex…");

@@ -58,6 +58,23 @@ describe("WorkflowMenu", () => {
     expect(screen.getAllByRole("menuitemradio").map((r) => r.querySelector(".menu-row-title")?.textContent)).toEqual(["Chat", "Step by step"]);
   });
 
+  it("shows Team off, with why, for a provider that can't lead a team, and offers no team from a template", () => {
+    const onChange = vi.fn();
+    render(
+      <TemplateTeamContext.Provider value={() => {}}>
+        <WorkflowMenu workflow="chat" team={false} agentName="Codex" onChange={onChange} />
+      </TemplateTeamContext.Provider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Workflow: Chat/ }));
+    const team = screen.getByRole("menuitemradio", { name: /^Team/ });
+    expect(team).toBeDisabled();
+    expect(team).toHaveTextContent("Codex can't lead a team yet");
+    expect(screen.getByRole("menuitemradio", { name: /^Step by step/ })).toBeEnabled();
+    expect(screen.queryByText("Team from a template…")).toBeNull();
+    fireEvent.click(team);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("moves between the rows with the arrow keys, and gives focus back to its chip when it closes", () => {
     render(<WorkflowMenu workflow="chat" onChange={() => {}} />);
     const chip = screen.getByRole("button", { name: /Workflow: Chat/ });

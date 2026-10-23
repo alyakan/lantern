@@ -551,9 +551,10 @@ export default function App() {
    * `remote`: a chat a paired phone started: on Ask, or on Auto when the Mac's Settings let phones use it (the caller has checked),
    * whatever the project's Permissions are, and on the preset the phone chose (else the project's own); it doesn't become the
    * project to reopen either, and neither the project's Permissions nor its preset are remembered from it.
-   * `providerId`: the agent CLI it runs on, by default the one the project's new chats start on.
+   * `providerId`: the agent CLI it runs on, by default the one the project's new chats start on (a team's Lead is always Claude
+   * Code's: it is the one that has Lantern's tools to start agents with).
    */
-  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote: { permissions: Permissions; preset: string | null; workflow: "chat" | "steps" } | false = false, providerId: string = providerFor(folder)) => {
+  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote: { permissions: Permissions; preset: string | null; workflow: "chat" | "steps" } | false = false, providerId: string = team ? CLAUDE : providerFor(folder)) => {
     const { claudePath } = state;
     if (!claudePath) return;
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
@@ -611,7 +612,8 @@ export default function App() {
     const folder = state.folder;
     if (!folder || id === activeProvider || !isAvailable(id)) return;
     setProviderByFolder({ ...providerByFolder, [folder]: id });
-    startIn(active, folder, false, state.orchestrator, undefined, undefined, undefined, false, id);
+    // A provider that can't lead a team starts it as a plain chat: its Workflow leaves Team.
+    startIn(active, folder, false, state.orchestrator && capabilitiesOf(infoOf(id)).supports_lantern_tools, undefined, undefined, undefined, false, id);
   };
 
   useEffect(() => {
@@ -1352,6 +1354,7 @@ export default function App() {
       const leaving = s.orchestrator && workflow !== "team";
       if (leaving && holdsAgents(slot)) return to(slot)({ type: "notice", text: "This team still has agents. Close them first, then switch its Workflow." });
       const { mode, autoApprove, team } = launchOf(permissions, agent ? workflowOf(s) : workflow);
+      if (team && !agent && !s.orchestrator && !capabilitiesOf(s.provider).supports_lantern_tools) return to(slot)({ type: "notice", text: `${agentName(s.provider)} can't lead a team yet: a team's Lead runs on Claude Code.` });
       const apply = () => {
         if (mode !== "steps") to(slot)({ type: "flavour_picked", flavour: null });
         to(slot)({ type: "mode_changed", mode, autoApprove });
@@ -2078,7 +2081,7 @@ export default function App() {
       .filter((p) => ready && p !== permissionsOf(state) && (p !== "auto" || caps.supports_auto_mode))
       .map((p): PaletteEntry => ({ id: `permissions:${p}`, title: `Permissions: ${PERMISSIONS_LABEL[p]}`, group: "Permissions", shortcut: null, run: () => changePermissions(p) }));
     const workflows = (["chat", "steps", "team"] as const)
-      .filter((w) => ready && w !== workflowOf(state) && !(w === "team" && chats.agents[active]))
+      .filter((w) => ready && w !== workflowOf(state) && !(w === "team" && (chats.agents[active] || !caps.supports_lantern_tools)))
       .map((w): PaletteEntry => ({ id: `workflow:${w}`, title: `Workflow: ${WORKFLOW_LABEL[w]}${w === "steps" ? "…" : ""}`, group: "Workflow", shortcut: null, run: () => changeWorkflow(w) }));
     const harnesses = presets
       .filter((h) => ready && caps.supports_advisor && h.id !== harnessOf(active).id)
