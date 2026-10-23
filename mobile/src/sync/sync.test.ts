@@ -1,19 +1,22 @@
 import type { Request } from "../protocol/generated/Request";
-import type { Pushed, Session } from "../net/session";
+import { ANSWER_WAIT, UPLOAD_WAIT, type Pushed, type Session } from "../net/session";
 import { Sync, SUGGESTIONS_KEPT_MS } from "./sync";
 
 /** A session that records what it was asked and answers from a table. */
 function fakeSession(epoch: number, answers: Partial<Record<Request["op"], unknown>> = {}, fail: Partial<Record<Request["op"], string>> = {}, features: string[] = []) {
   const asked: Request[] = [];
+  /** How long each request said it would wait for its answer (undefined: the usual). */
+  const waits: (number | undefined)[] = [];
   const session = {
     welcome: { type: "welcome", protocol: 1, app_version: "t", mac_name: "Mac", epoch, features },
-    ask: async (r: Request) => {
+    ask: async (r: Request, wait?: number) => {
       asked.push(r);
+      waits.push(wait);
       if (fail[r.op]) throw new Error(fail[r.op]);
       return answers[r.op] ?? null;
     },
   } as unknown as Session;
-  return { session, asked };
+  return { session, asked, waits };
 }
 
 const settle = async () => {
@@ -76,6 +79,41 @@ describe("the phone's sync", () => {
     expect(s.asked).toContainEqual({ op: "send", slot: "a", text: "ship it", client_id: "m-1" });
     frame();
     expect(sync.getState().views.a.items[0]).toMatchObject({ text: "ship it", failed: "That chat isn't open on your Mac." });
+  });
+
+  it("sends a message's photos only to a Mac that takes them, as the JPEGs they are, and shows them at once", async () => {
+    const photo = (n: number) => ({ id: `i${n}`, uri: `file:///p${n}.jpg`, data: `DATA${n}`, mediaType: "image/jpeg" as const, width: 10, height: 10 });
+    const { sync, frame } = rig();
+    const takes = fakeSession(7, {}, {}, ["images"]);
+    sync.onSession(takes.session);
+    await sync.send("a", "what is this?", [photo(1), photo(2)]);
+    expect(takes.asked).toContainEqual({ op: "send", slot: "a", text: "what is this?", client_id: "m-1", images: [{ media_type: "image/jpeg", data: "DATA1" }, { media_type: "image/jpeg", data: "DATA2" }] });
+    frame();
+    expect(sync.getState().views.a.items[0]).toMatchObject({ images: 2, thumbs: ["file:///p1.jpg", "file:///p2.jpg"], sending: true });
+    // A message with none says nothing of them, so an older Mac reads it as it always did.
+    await sync.send("a", "no photos");
+    expect(takes.asked.at(-1)).toEqual({ op: "send", slot: "a", text: "no photos", client_id: "m-1" });
+  });
+
+  it("gives a send with photos long to be answered, since they are megabytes to get across, and words the usual wait", async () => {
+    const { sync } = rig();
+    const takes = fakeSession(7, {}, {}, ["images"]);
+    sync.onSession(takes.session);
+    const sends = () => takes.asked.flatMap((r, i) => (r.op === "send" ? [takes.waits[i]] : []));
+    await sync.send("a", "words");
+    await sync.send("a", "look", [{ id: "i1", uri: "file:///p1.jpg", data: "DATA1", mediaType: "image/jpeg", width: 10, height: 10 }]);
+    expect(sends()).toEqual([undefined, UPLOAD_WAIT]);
+    expect(UPLOAD_WAIT).toBeGreaterThan(ANSWER_WAIT * 4);
+  });
+
+  it("doesn't send photos to a Mac that can't take them: it says so instead of sending the words alone", async () => {
+    const { sync, frame } = rig();
+    const old = fakeSession(7);
+    sync.onSession(old.session);
+    await sync.send("a", "what is this?", [{ id: "i1", uri: "file:///p1.jpg", data: "DATA1", mediaType: "image/jpeg", width: 10, height: 10 }]);
+    expect(old.asked.filter((r) => r.op === "send")).toEqual([]);
+    frame();
+    expect(sync.getState().views.a.items[0]).toMatchObject({ failed: expect.stringMatching(/can't take photos/) });
   });
 
   it("refreshes what waits on you when the chat list moves on, and after answering", async () => {

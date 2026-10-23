@@ -57,7 +57,7 @@ fn title_of(text: &str) -> String {
 }
 
 fn user(text: &str, at: u64) -> UiEvent {
-    UiEvent::UserText { text: text.into(), at: Some(at), sent_by: None }
+    UiEvent::UserText { text: text.into(), at: Some(at), sent_by: None, images: 0 }
 }
 
 /// What Claude says once what it asked is answered, as a person would say it (not the answers' JSON).
@@ -127,13 +127,13 @@ impl FixtureHost {
         }
 
         // Design: working.
-        bus.publish(DESIGN, UiEvent::UserText { text: "Keep going.".into(), at: Some(now_ms()), sent_by: Some("desktop".into()) });
+        bus.publish(DESIGN, UiEvent::UserText { text: "Keep going.".into(), at: Some(now_ms()), sent_by: Some("desktop".into()), images: 0 });
         bus.publish(DESIGN, UiEvent::Thinking { parent: None });
         host
     }
 
     fn wait_on_release(bus: &Arc<EventBus>, host: &Arc<Self>) {
-        bus.publish(RELEASE, UiEvent::UserText { text: "Go ahead and push it.".into(), at: Some(now_ms()), sent_by: Some("desktop".into()) });
+        bus.publish(RELEASE, UiEvent::UserText { text: "Go ahead and push it.".into(), at: Some(now_ms()), sent_by: Some("desktop".into()), images: 0 });
         let push = Pending { request_id: PUSH_PROMPT.into(), tool_name: "Bash".into(), input: serde_json::json!({"command": "git push origin release/0.1.53", "description": "Push the release branch"}), at: now_ms() };
         let question = Pending {
             request_id: QUESTION_PROMPT.into(),
@@ -166,8 +166,8 @@ impl FixtureHost {
 }
 
 impl Host for FixtureHost {
-    fn send(&self, slot: String, text: String, by: String) -> BoxFut<Result<(), String>> {
-        self.bus.publish(&slot, UiEvent::UserText { text: text.clone(), at: Some(now_ms()), sent_by: Some(by) });
+    fn send(&self, slot: String, text: String, by: String, images: Vec<super::protocol::RemoteImage>) -> BoxFut<Result<(), String>> {
+        self.bus.publish(&slot, UiEvent::UserText { text: text.clone(), at: Some(now_ms()), sent_by: Some(by), images: images.len() as u32 });
         self.reply(&slot, text);
         Box::pin(async { Ok(()) })
     }
@@ -265,7 +265,7 @@ impl Host for FixtureHost {
         self.hub.controls(&slot, permissions.as_str(), preset.as_deref());
         self.hub.flow(&slot, workflow.as_str());
         self.hub.titled(&slot, &title_of(&text));
-        self.bus.publish(&slot, UiEvent::UserText { text: text.clone(), at: Some(now_ms()), sent_by: Some(by) });
+        self.bus.publish(&slot, UiEvent::UserText { text: text.clone(), at: Some(now_ms()), sent_by: Some(by), images: 0 });
         self.reply(&slot, text);
         Box::pin(async move { Ok(slot) })
     }

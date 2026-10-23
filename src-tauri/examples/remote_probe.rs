@@ -76,7 +76,7 @@ async fn connect(addr: &str, say: Option<&str>) {
                     println!("following {slot}");
                     send(&mut channel, &ClientMessage::Request { id: 3, request: Request::Subscribe { slot: slot.into(), after: 0, epoch } });
                     if let Some(text) = say {
-                        send(&mut channel, &ClientMessage::Request { id: 4, request: Request::Send { slot: slot.into(), text: text.into(), client_id: "probe-1".into() } });
+                        send(&mut channel, &ClientMessage::Request { id: 4, request: Request::Send { slot: slot.into(), text: text.into(), client_id: "probe-1".into(), images: None } });
                     }
                 }
             }

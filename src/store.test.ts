@@ -236,6 +236,16 @@ describe("reducer", () => {
     expect(ev({ ...initialState, status: "idle" }, { kind: "user_text", text: "old" }).status).toBe("idle");
   });
 
+  it("a phone's message with photos says how many, and photos alone are still a message", () => {
+    const s = ev({ ...initialState, status: "idle" }, { kind: "user_text", text: "what is this?", at: 5, sent_by: "phone-1", images: 2 });
+    expect(s.items[0]).toMatchObject({ type: "user", text: "what is this?", images: 2 });
+    const alone = ev({ ...initialState, status: "idle" }, { kind: "user_text", text: "", at: 6, sent_by: "phone-1", images: 1 });
+    expect(alone.items[0]).toMatchObject({ type: "user", text: "", images: 1 });
+    expect(alone).toMatchObject({ status: "running", thinking: true });
+    // A message with none carries no count.
+    expect(ev(initialState, { kind: "user_text", text: "hi", sent_by: "phone-1" }).items[0]).not.toHaveProperty("images");
+  });
+
   it("a prompt answered on a phone first closes its card here with that answer, and one answered here stays as it was", () => {
     let s = ev(initialState, { kind: "permission_requested", request_id: "p1", tool_name: "Bash", input: {} });
     s = ev(s, { kind: "permission_resolved", request_id: "p1", allow: false, by: "phone-1" });

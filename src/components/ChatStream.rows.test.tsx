@@ -23,6 +23,18 @@ const tool = (id: string, status: "running" | "done" = "done"): ToolItem => ({ t
 const handlers = { onDecide: () => {}, onOpenFile: () => {} };
 
 describe("ChatStream rows", () => {
+  it("says under a phone's message how many photos came with it, and nothing when none did", () => {
+    const items: ChatItem[] = [
+      { type: "user", id: "u1", text: "What is this?", images: 2 },
+      { type: "user", id: "u2", text: "And this?", images: 1 },
+      { type: "user", id: "u3", text: "Plain words" },
+    ];
+    render(<ChatStream items={items} folder={null} {...handlers} />);
+    expect(screen.getByText("2 photos from your phone")).toBeInTheDocument();
+    expect(screen.getByText("1 photo from your phone")).toBeInTheDocument();
+    expect(screen.getAllByRole("note")).toHaveLength(2);
+  });
+
   it("draws again only the message that is streaming, not the ones before it or the turn's finished work", () => {
     drawn.clear();
     const before: ChatItem[] = [

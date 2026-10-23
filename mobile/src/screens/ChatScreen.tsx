@@ -46,6 +46,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   const { chats, views, plan } = useSyncState();
   const canOutput = useMacCan("output");
   const canShell = useMacCan("shell");
+  const canImages = useMacCan("images");
   const lock = useAppLock();
   const [output, setOutput] = useState<{ id: string; text: string } | null>(null);
   // A command typed in the terminal, shown back to be run by a swipe: `resolve` says whether it was run.
@@ -344,7 +345,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
           />
         </View>
       ) : (
-        <Composer disabled={!online} onSend={(text) => void sync.send(slot, text)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} />
+        <Composer disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} />
       )}
     </>
   );

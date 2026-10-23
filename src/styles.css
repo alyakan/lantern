@@ -940,6 +940,8 @@ textarea, input, .msg, .step-output, .permission-detail, .finding-text, .review-
 .msg.user { display: var(--user-display); gap: 1ch; background: var(--bg-user); border: var(--user-border); border-radius: var(--radius-inner); padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg.user::before { content: var(--user-mark); flex: none; color: var(--accent); }
 .msg.user > * { min-width: 0; }
+/* Under a message: what went with it that isn't words (a phone's photos). */
+.msg-note { margin: 2px 12px 0; font-size: calc(12px * var(--font-scale)); color: var(--muted-text); }
 /* What you sent, at most three lines until Show more. */
 .collapsible-wrap { flex: 1; min-width: 0; }
 .collapsible.clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--clamp-lines, 3); overflow: hidden; }
