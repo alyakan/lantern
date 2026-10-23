@@ -1,0 +1,1617 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`single provider: a team's canvas > the + Agent form 1`] = `
+<form
+  aria-label="New agent"
+  class="new-agent canvas-overlay"
+  id="_r_a_"
+  role="dialog"
+>
+  <label>
+    Role
+    <select>
+      <option
+        value=""
+      >
+        No role · a blank brief
+      </option>
+      <optgroup
+        label="Built in"
+      >
+        <option
+          value="builder"
+        >
+          Builder
+        </option>
+        <option
+          value="reviewer"
+        >
+          Reviewer
+        </option>
+        <option
+          value="qa"
+        >
+          QA / tester
+        </option>
+        <option
+          value="docs"
+        >
+          Docs
+        </option>
+        <option
+          value="security"
+        >
+          Security auditor
+        </option>
+      </optgroup>
+    </select>
+  </label>
+  <label>
+    Task
+    <textarea
+      aria-invalid="false"
+      aria-required="true"
+      autocapitalize="off"
+      autocorrect="off"
+      placeholder="What should it do? This is the brief it starts from."
+      rows="4"
+      spellcheck="false"
+    />
+  </label>
+  <label>
+    Name 
+    <span
+      class="new-agent-optional"
+    >
+      optional
+    </span>
+    <input
+      maxlength="60"
+      placeholder="Named from the task"
+      value=""
+    />
+  </label>
+  <fieldset>
+    <legend>
+      Where it works
+    </legend>
+    <label
+      class="new-agent-choice"
+    >
+      <input
+        checked=""
+        name="isolation"
+        type="radio"
+      />
+      Own worktree
+    </label>
+    <label
+      class="new-agent-choice"
+    >
+      <input
+        name="isolation"
+        type="radio"
+      />
+      Shared folder
+    </label>
+    <p
+      class="new-agent-hint"
+    >
+      Shared is for work that writes nothing: it reads your folder as it is.
+    </p>
+  </fieldset>
+  <label>
+    Model
+    <select>
+      <option
+        value=""
+      >
+        Default
+         · 
+        Claude Code's setting
+      </option>
+      <option
+        value="opus"
+      >
+        Opus
+         · 
+        Most capable
+      </option>
+      <option
+        value="sonnet"
+      >
+        Sonnet
+         · 
+        Fast and capable
+      </option>
+      <option
+        value="haiku"
+      >
+        Haiku
+         · 
+        Fastest
+      </option>
+    </select>
+  </label>
+  <div
+    class="new-agent-roles"
+  >
+    <button
+      class="link-button"
+      type="button"
+    >
+      Save as a role…
+    </button>
+  </div>
+  <div
+    class="new-agent-actions"
+  >
+    <button
+      type="button"
+    >
+      Cancel
+    </button>
+    <button
+      class="primary"
+      type="submit"
+    >
+      Start agent
+    </button>
+  </div>
+</form>
+`;
+
+exports[`single provider: a team's canvas > the cards' meta lines and the team list > meta 1`] = `
+[
+  "Runs the team · $0.42 · 9k tok",
+  "login-form · $0.10 · 9k tok",
+]
+`;
+
+exports[`single provider: a team's canvas > the cards' meta lines and the team list > team list 1`] = `
+<div
+  aria-label="Team"
+  class="canvas-team-list"
+  id="_r_3_"
+  role="dialog"
+>
+  <ul>
+    <li>
+      <button>
+        <span
+          aria-hidden="true"
+          class="node-dot idle"
+        />
+        <span
+          class="team-text"
+        >
+          <span
+            class="team-name"
+          >
+            Lead
+             
+          </span>
+          <span
+            class="team-line"
+          >
+            Waiting to start
+          </span>
+        </span>
+        <span
+          class="team-state"
+        >
+          Ready
+          <span
+            class="team-cost"
+          >
+            $0.42 · 9k tok
+          </span>
+        </span>
+      </button>
+    </li>
+    <li>
+      <button>
+        <span
+          aria-hidden="true"
+          class="node-dot idle"
+        />
+        <span
+          class="team-text"
+        >
+          <span
+            class="team-name"
+          >
+            Login form
+             
+          </span>
+          <span
+            class="team-line"
+          >
+            Build it
+          </span>
+        </span>
+        <span
+          class="team-state"
+        >
+          Done
+          <span
+            class="team-cost"
+          >
+            $0.10 · 9k tok
+          </span>
+        </span>
+      </button>
+    </li>
+  </ul>
+  <button
+    class="team-ask"
+    title="The Lead writes up where everything stands, in plain language"
+  >
+    Ask the Lead for an update
+  </button>
+</div>
+`;
+
+exports[`single provider: the chat box > the footer and meta line 1`] = `
+<div>
+  <div
+    class="composer"
+  >
+    <div
+      class="composer-box"
+      style=""
+    >
+      <div
+        class="composer-line"
+      >
+        <textarea
+          aria-label="Message to Claude"
+          autocapitalize="off"
+          autocorrect="off"
+          placeholder="Ask Claude…"
+          rows="1"
+          spellcheck="true"
+          style="height: 0px;"
+        />
+      </div>
+      <div
+        class="composer-footer"
+      >
+        <div
+          class="model-picker"
+        >
+          <button
+            aria-expanded="false"
+            aria-haspopup="menu"
+            class="composer-item model-button"
+            title="Models: Standard · Your model and effort, Claude Code's own settings · Effort High"
+          >
+            <svg
+              aria-hidden="true"
+              fill="none"
+              height="12"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="1.3"
+              viewBox="0 0 12 12"
+              width="12"
+            >
+              <path
+                d="M5.3 3Q5.9 6.7 9.8 7.3Q5.9 7.9 5.3 11.3Q4.7 7.9 0.8 7.3Q4.7 6.7 5.3 3Z"
+              />
+              <path
+                d="M9.6 1Q9.8 2.1 11 2.3Q9.8 2.5 9.6 3.6Q9.4 2.5 8.2 2.3Q9.4 2.1 9.6 1Z"
+              />
+            </svg>
+            Standard · Opus 5.5
+            <span
+              aria-hidden="true"
+              class="chev down"
+            />
+          </button>
+        </div>
+        <div
+          class="spacer"
+        />
+        <span
+          class="context-meter"
+          title="61,480 of 200,000 tokens of context used
+Last turn took 8.2s
+This chat so far: $0.90 · 400k tokens"
+        >
+          <button
+            aria-expanded="false"
+            aria-label="31% of context used"
+            class="context-used"
+            type="button"
+          >
+            <span>
+              31%
+            </span>
+          </button>
+        </span>
+        <button
+          aria-label="Send"
+          class="send"
+          disabled=""
+          title="Send (Enter)"
+        >
+          <svg
+            aria-hidden="true"
+            fill="none"
+            height="12"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="1.6"
+            viewBox="0 0 12 12"
+            width="12"
+          >
+            <path
+              d="M6 10V2M2.5 5.5 6 2l3.5 3.5"
+            />
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div
+      class="composer-meta"
+    >
+      <div
+        class="model-picker mode-menu-anchor"
+      >
+        <button
+          aria-expanded="false"
+          aria-haspopup="menu"
+          aria-label="Permissions: Ask"
+          class="meta-item mode-chip"
+          title="Permissions: Edits apply; commands and other actions ask you first"
+        >
+          <svg
+            aria-hidden="true"
+            fill="none"
+            height="13"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="1.3"
+            viewBox="0 0 12 13"
+            width="12"
+          >
+            <path
+              d="M6 1 1.5 2.8v3.4c0 2.8 1.9 4.9 4.5 5.8 2.6-.9 4.5-3 4.5-5.8V2.8z"
+            />
+          </svg>
+          Ask
+          <span
+            aria-hidden="true"
+            class="chev down"
+          />
+        </button>
+      </div>
+      <div
+        class="model-picker mode-menu-anchor"
+      >
+        <button
+          aria-expanded="false"
+          aria-haspopup="menu"
+          aria-label="Workflow: Chat"
+          class="meta-item mode-chip"
+          title="Workflow: A plain conversation: Claude works as you ask"
+        >
+          <svg
+            aria-hidden="true"
+            fill="none"
+            height="12"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="1.3"
+            viewBox="0 0 12 12"
+            width="12"
+          >
+            <path
+              d="M5.3 3Q5.9 6.7 9.8 7.3Q5.9 7.9 5.3 11.3Q4.7 7.9 0.8 7.3Q4.7 6.7 5.3 3Z"
+            />
+            <path
+              d="M9.6 1Q9.8 2.1 11 2.3Q9.8 2.5 9.6 3.6Q9.4 2.5 8.2 2.3Q9.4 2.1 9.6 1Z"
+            />
+          </svg>
+          Chat
+          <span
+            aria-hidden="true"
+            class="chev down"
+          />
+        </button>
+      </div>
+      <div
+        class="spacer"
+      />
+      <span
+        class="meta-item static"
+        title="Git branch"
+      >
+        <svg
+          aria-hidden="true"
+          fill="none"
+          height="13"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="1.3"
+          viewBox="0 0 11 13"
+          width="11"
+        >
+          <circle
+            cx="2.5"
+            cy="2.5"
+            r="1.5"
+          />
+          <circle
+            cx="2.5"
+            cy="10.5"
+            r="1.5"
+          />
+          <circle
+            cx="8.5"
+            cy="4.5"
+            r="1.5"
+          />
+          <path
+            d="M2.5 4v5M8.5 6c0 2-2 2.5-6 3"
+          />
+        </svg>
+        main
+      </span>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`single provider: the chat box > the slash menu lists Claude's commands 1`] = `
+<ul
+  aria-label="Commands"
+  class="slash-list"
+  role="listbox"
+>
+  <li
+    role="presentation"
+  >
+    <ul
+      class="slash-section-items"
+      role="presentation"
+    >
+      <li
+        aria-selected="true"
+        data-index="0"
+        role="option"
+      >
+        <button
+          class="menu-row current"
+        >
+          <span
+            class="slash-name"
+          >
+            /
+            compact
+          </span>
+          <span
+            class="slash-desc"
+          >
+            Clear conversation history but keep a summary
+          </span>
+          <span
+            class="slash-source"
+          >
+            Built-in
+          </span>
+        </button>
+      </li>
+    </ul>
+  </li>
+</ul>
+`;
+
+exports[`single provider: the chat box > what the box says in each state 1`] = `
+[
+  [
+    "Open a folder to start",
+    "Message to Claude",
+  ],
+  [
+    "Starting Claude…",
+    "Message to Claude",
+  ],
+  [
+    "Claude stopped — restart to continue",
+    "Message to Claude",
+  ],
+  [
+    "Queue a message…",
+    "Message to Claude",
+  ],
+  [
+    "Ask Claude…",
+    "Message to Claude",
+  ],
+]
+`;
+
+exports[`single provider: the menus > models, with Claude's list and with the built-in short list > built-in open 1`] = `
+<div>
+  <div
+    class="model-picker"
+  >
+    <button
+      aria-expanded="true"
+      aria-haspopup="menu"
+      class="composer-item model-button"
+      title="Model: Sonnet 5.5"
+    >
+      <svg
+        aria-hidden="true"
+        fill="none"
+        height="12"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.3"
+        viewBox="0 0 12 12"
+        width="12"
+      >
+        <path
+          d="M5.3 3Q5.9 6.7 9.8 7.3Q5.9 7.9 5.3 11.3Q4.7 7.9 0.8 7.3Q4.7 6.7 5.3 3Z"
+        />
+        <path
+          d="M9.6 1Q9.8 2.1 11 2.3Q9.8 2.5 9.6 3.6Q9.4 2.5 8.2 2.3Q9.4 2.1 9.6 1Z"
+        />
+      </svg>
+      Sonnet 5.5
+      <span
+        aria-hidden="true"
+        class="chev down"
+      />
+    </button>
+    <div
+      aria-label="Customize models"
+      class="menu model-menu customize-menu"
+      role="menu"
+      style="max-width: 0; transform: translateX(8px); top: calc(100% + 6px); bottom: auto; max-height: 750px;"
+    >
+      <div
+        class="menu-heading"
+      >
+        Model
+      </div>
+      <button
+        aria-checked="false"
+        class="menu-row"
+        role="menuitemradio"
+      >
+        <span
+          class="menu-row-title"
+        >
+          Default (Opus 5.5)
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          Claude Code's setting
+        </span>
+      </button>
+      <button
+        aria-checked="false"
+        class="menu-row"
+        role="menuitemradio"
+      >
+        <span
+          class="menu-row-title"
+        >
+          Opus 5.5
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          Most capable
+        </span>
+      </button>
+      <button
+        aria-checked="true"
+        class="menu-row current"
+        role="menuitemradio"
+      >
+        <span
+          class="menu-row-title"
+        >
+          Sonnet 5.5
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          Fast and capable
+        </span>
+      </button>
+      <button
+        aria-checked="false"
+        class="menu-row"
+        role="menuitemradio"
+      >
+        <span
+          class="menu-row-title"
+        >
+          Haiku 4.5
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          Fastest
+        </span>
+      </button>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`single provider: the menus > models, with Claude's list and with the built-in short list > closed 1`] = `
+<div>
+  <div
+    class="model-picker"
+  >
+    <button
+      aria-expanded="false"
+      aria-haspopup="menu"
+      class="composer-item model-button"
+      title="Models: Standard · Your model and effort, Claude Code's own settings · Effort High"
+    >
+      <svg
+        aria-hidden="true"
+        fill="none"
+        height="12"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.3"
+        viewBox="0 0 12 12"
+        width="12"
+      >
+        <path
+          d="M5.3 3Q5.9 6.7 9.8 7.3Q5.9 7.9 5.3 11.3Q4.7 7.9 0.8 7.3Q4.7 6.7 5.3 3Z"
+        />
+        <path
+          d="M9.6 1Q9.8 2.1 11 2.3Q9.8 2.5 9.6 3.6Q9.4 2.5 8.2 2.3Q9.4 2.1 9.6 1Z"
+        />
+      </svg>
+      Standard · Opus 5.5
+      <span
+        aria-hidden="true"
+        class="chev down"
+      />
+    </button>
+  </div>
+</div>
+`;
+
+exports[`single provider: the menus > models, with Claude's list and with the built-in short list > customize 1`] = `
+<div>
+  <div
+    class="model-picker"
+  >
+    <button
+      aria-expanded="true"
+      aria-haspopup="menu"
+      class="composer-item model-button"
+      title="Models: Standard · Your model and effort, Claude Code's own settings · Effort High"
+    >
+      <svg
+        aria-hidden="true"
+        fill="none"
+        height="12"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.3"
+        viewBox="0 0 12 12"
+        width="12"
+      >
+        <path
+          d="M5.3 3Q5.9 6.7 9.8 7.3Q5.9 7.9 5.3 11.3Q4.7 7.9 0.8 7.3Q4.7 6.7 5.3 3Z"
+        />
+        <path
+          d="M9.6 1Q9.8 2.1 11 2.3Q9.8 2.5 9.6 3.6Q9.4 2.5 8.2 2.3Q9.4 2.1 9.6 1Z"
+        />
+      </svg>
+      Standard · Opus 5.5
+      <span
+        aria-hidden="true"
+        class="chev down"
+      />
+    </button>
+    <div
+      aria-label="Customize models"
+      class="menu model-menu customize-menu"
+      role="menu"
+      style="max-width: 0; transform: translateX(8px); top: calc(100% + 6px); bottom: auto; max-height: 750px;"
+    >
+      <button
+        class="menu-heading menu-toggle"
+        role="menuitem"
+      >
+        <span
+          aria-hidden="true"
+          class="chev back"
+        />
+        Presets
+      </button>
+      <div
+        class="menu-heading"
+      >
+        Model
+      </div>
+      <button
+        aria-checked="true"
+        class="menu-row current"
+        role="menuitemradio"
+      >
+        <span
+          class="menu-row-title"
+        >
+          Default (Opus 5.5)
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          Claude Code's setting
+        </span>
+      </button>
+      <button
+        aria-checked="false"
+        class="menu-row"
+        role="menuitemradio"
+      >
+        <span
+          class="menu-row-title"
+        >
+          Opus 5.5
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          For complex work and everyday tasks
+        </span>
+      </button>
+      <button
+        aria-checked="false"
+        class="menu-row"
+        role="menuitemradio"
+      >
+        <span
+          class="menu-row-title"
+        >
+          Sonnet 5.5
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          Most efficient for simpler tasks
+        </span>
+      </button>
+      <div
+        class="menu-heading"
+      >
+        Thinking effort
+      </div>
+      <button
+        aria-checked="false"
+        class="menu-row effort-row"
+        role="menuitemradio"
+      >
+        <svg
+          aria-hidden="true"
+          class="effort-bars"
+          height="11"
+          viewBox="0 0 13 11"
+          width="13"
+        >
+          <rect
+            fill="currentColor"
+            height="2"
+            opacity="0.28"
+            rx="0.6"
+            width="1.6"
+            x="0"
+            y="9"
+          />
+          <rect
+            fill="currentColor"
+            height="4"
+            opacity="0.28"
+            rx="0.6"
+            width="1.6"
+            x="2.6"
+            y="7"
+          />
+          <rect
+            fill="currentColor"
+            height="6"
+            opacity="0.28"
+            rx="0.6"
+            width="1.6"
+            x="5.2"
+            y="5"
+          />
+          <rect
+            fill="currentColor"
+            height="8"
+            opacity="0.28"
+            rx="0.6"
+            width="1.6"
+            x="7.800000000000001"
+            y="3"
+          />
+          <rect
+            fill="currentColor"
+            height="10"
+            opacity="0.28"
+            rx="0.6"
+            width="1.6"
+            x="10.4"
+            y="1"
+          />
+        </svg>
+        <span
+          class="menu-row-title"
+        >
+          Default
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          Claude Code's setting
+        </span>
+      </button>
+      <button
+        aria-checked="false"
+        class="menu-row effort-row"
+        role="menuitemradio"
+      >
+        <svg
+          aria-hidden="true"
+          class="effort-bars"
+          height="11"
+          viewBox="0 0 13 11"
+          width="13"
+        >
+          <rect
+            fill="currentColor"
+            height="2"
+            opacity="1"
+            rx="0.6"
+            width="1.6"
+            x="0"
+            y="9"
+          />
+          <rect
+            fill="currentColor"
+            height="4"
+            opacity="0.28"
+            rx="0.6"
+            width="1.6"
+            x="2.6"
+            y="7"
+          />
+          <rect
+            fill="currentColor"
+            height="6"
+            opacity="0.28"
+            rx="0.6"
+            width="1.6"
+            x="5.2"
+            y="5"
+          />
+          <rect
+            fill="currentColor"
+            height="8"
+            opacity="0.28"
+            rx="0.6"
+            width="1.6"
+            x="7.800000000000001"
+            y="3"
+          />
+          <rect
+            fill="currentColor"
+            height="10"
+            opacity="0.28"
+            rx="0.6"
+            width="1.6"
+            x="10.4"
+            y="1"
+          />
+        </svg>
+        <span
+          class="menu-row-title"
+        >
+          Low
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          Fastest, least thinking
+        </span>
+      </button>
+      <button
+        aria-checked="true"
+        class="menu-row effort-row current"
+        role="menuitemradio"
+      >
+        <svg
+          aria-hidden="true"
+          class="effort-bars"
+          height="11"
+          viewBox="0 0 13 11"
+          width="13"
+        >
+          <rect
+            fill="currentColor"
+            height="2"
+            opacity="1"
+            rx="0.6"
+            width="1.6"
+            x="0"
+            y="9"
+          />
+          <rect
+            fill="currentColor"
+            height="4"
+            opacity="1"
+            rx="0.6"
+            width="1.6"
+            x="2.6"
+            y="7"
+          />
+          <rect
+            fill="currentColor"
+            height="6"
+            opacity="1"
+            rx="0.6"
+            width="1.6"
+            x="5.2"
+            y="5"
+          />
+          <rect
+            fill="currentColor"
+            height="8"
+            opacity="0.28"
+            rx="0.6"
+            width="1.6"
+            x="7.800000000000001"
+            y="3"
+          />
+          <rect
+            fill="currentColor"
+            height="10"
+            opacity="0.28"
+            rx="0.6"
+            width="1.6"
+            x="10.4"
+            y="1"
+          />
+        </svg>
+        <span
+          class="menu-row-title"
+        >
+          High
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          Thorough reasoning
+        </span>
+      </button>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`single provider: the menus > models, with Claude's list and with the built-in short list > presets 1`] = `
+<div>
+  <div
+    class="model-picker"
+  >
+    <button
+      aria-expanded="true"
+      aria-haspopup="menu"
+      class="composer-item model-button"
+      title="Models: Standard · Your model and effort, Claude Code's own settings · Effort High"
+    >
+      <svg
+        aria-hidden="true"
+        fill="none"
+        height="12"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.3"
+        viewBox="0 0 12 12"
+        width="12"
+      >
+        <path
+          d="M5.3 3Q5.9 6.7 9.8 7.3Q5.9 7.9 5.3 11.3Q4.7 7.9 0.8 7.3Q4.7 6.7 5.3 3Z"
+        />
+        <path
+          d="M9.6 1Q9.8 2.1 11 2.3Q9.8 2.5 9.6 3.6Q9.4 2.5 8.2 2.3Q9.4 2.1 9.6 1Z"
+        />
+      </svg>
+      Standard · Opus 5.5
+      <span
+        aria-hidden="true"
+        class="chev down"
+      />
+    </button>
+    <div
+      aria-label="Models"
+      class="menu model-menu harness-menu"
+      role="menu"
+      style="max-width: 0; transform: translateX(8px); top: calc(100% + 6px); bottom: auto; max-height: 750px;"
+    >
+      <div
+        class="menu-heading"
+      >
+        Models: who does what
+      </div>
+      <button
+        aria-checked="true"
+        class="menu-row current"
+        role="menuitemradio"
+      >
+        <span
+          class="menu-row-title"
+        >
+          Standard
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          Your model and effort, Claude Code's own settings
+        </span>
+      </button>
+      <button
+        aria-checked="false"
+        class="menu-row"
+        role="menuitemradio"
+      >
+        <span
+          class="menu-row-title"
+        >
+          Balanced
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          Sonnet · Opus advisor · Haiku subagents
+        </span>
+      </button>
+      <button
+        aria-checked="false"
+        class="menu-row"
+        role="menuitemradio"
+      >
+        <span
+          class="menu-row-title"
+        >
+          Thrifty
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          Haiku · Opus advisor · Haiku subagents
+        </span>
+      </button>
+      <button
+        aria-checked="false"
+        class="menu-row"
+        role="menuitemradio"
+      >
+        <span
+          class="menu-row-title"
+        >
+          Max
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          Opus · Fable advisor · Sonnet subagents
+        </span>
+      </button>
+      <button
+        class="menu-row harness-edit"
+        role="menuitem"
+      >
+        <span
+          class="menu-row-title"
+        >
+          Customize…
+        </span>
+        <span
+          class="menu-row-meta"
+        >
+          Pick the model and thinking effort
+        </span>
+      </button>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`single provider: the menus > permissions and workflow > closed 1`] = `
+<div>
+  <div
+    class="model-picker mode-menu-anchor"
+  >
+    <button
+      aria-expanded="false"
+      aria-haspopup="menu"
+      aria-label="Permissions: Ask"
+      class="meta-item mode-chip"
+      title="Permissions: Edits apply; commands and other actions ask you first"
+    >
+      <svg
+        aria-hidden="true"
+        fill="none"
+        height="13"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.3"
+        viewBox="0 0 12 13"
+        width="12"
+      >
+        <path
+          d="M6 1 1.5 2.8v3.4c0 2.8 1.9 4.9 4.5 5.8 2.6-.9 4.5-3 4.5-5.8V2.8z"
+        />
+      </svg>
+      Ask
+      <span
+        aria-hidden="true"
+        class="chev down"
+      />
+    </button>
+  </div>
+  <div
+    class="model-picker mode-menu-anchor"
+  >
+    <button
+      aria-expanded="false"
+      aria-haspopup="menu"
+      aria-label="Workflow: Chat"
+      class="meta-item mode-chip"
+      title="Workflow: A plain conversation: Claude works as you ask"
+    >
+      <svg
+        aria-hidden="true"
+        fill="none"
+        height="12"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.3"
+        viewBox="0 0 12 12"
+        width="12"
+      >
+        <path
+          d="M5.3 3Q5.9 6.7 9.8 7.3Q5.9 7.9 5.3 11.3Q4.7 7.9 0.8 7.3Q4.7 6.7 5.3 3Z"
+        />
+        <path
+          d="M9.6 1Q9.8 2.1 11 2.3Q9.8 2.5 9.6 3.6Q9.4 2.5 8.2 2.3Q9.4 2.1 9.6 1Z"
+        />
+      </svg>
+      Chat
+      <span
+        aria-hidden="true"
+        class="chev down"
+      />
+    </button>
+  </div>
+</div>
+`;
+
+exports[`single provider: the menus > permissions and workflow > permissions open 1`] = `
+<div>
+  <div
+    class="model-picker mode-menu-anchor"
+  >
+    <button
+      aria-expanded="true"
+      aria-haspopup="menu"
+      aria-label="Permissions: Ask"
+      class="meta-item mode-chip"
+      title="Permissions: Edits apply; commands and other actions ask you first"
+    >
+      <svg
+        aria-hidden="true"
+        fill="none"
+        height="13"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.3"
+        viewBox="0 0 12 13"
+        width="12"
+      >
+        <path
+          d="M6 1 1.5 2.8v3.4c0 2.8 1.9 4.9 4.5 5.8 2.6-.9 4.5-3 4.5-5.8V2.8z"
+        />
+      </svg>
+      Ask
+      <span
+        aria-hidden="true"
+        class="chev down"
+      />
+    </button>
+    <div
+      aria-label="Permissions"
+      class="menu model-menu mode-menu"
+      role="menu"
+      style="max-width: 0; transform: translateX(8px); top: calc(100% + 6px); bottom: auto; max-height: 750px;"
+    >
+      <button
+        aria-checked="true"
+        class="menu-row current"
+        role="menuitemradio"
+      >
+        <span
+          class="mode-icon"
+        >
+          <svg
+            aria-hidden="true"
+            fill="none"
+            height="13"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="1.3"
+            viewBox="0 0 12 13"
+            width="12"
+          >
+            <path
+              d="M6 1 1.5 2.8v3.4c0 2.8 1.9 4.9 4.5 5.8 2.6-.9 4.5-3 4.5-5.8V2.8z"
+            />
+          </svg>
+        </span>
+        <span
+          class="mode-text"
+        >
+          <span
+            class="menu-row-title"
+          >
+            Ask
+          </span>
+          <span
+            class="mode-hint"
+          >
+            Edits apply; commands and other actions ask you first
+          </span>
+        </span>
+      </button>
+      <button
+        aria-checked="false"
+        class="menu-row"
+        role="menuitemradio"
+      >
+        <span
+          class="mode-icon"
+        >
+          <svg
+            aria-hidden="true"
+            fill="none"
+            height="13"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="1.3"
+            viewBox="0 0 11 13"
+            width="11"
+          >
+            <path
+              d="M6.5 1 1.5 7.2h4L4.5 12l5-6.2h-4z"
+            />
+          </svg>
+        </span>
+        <span
+          class="mode-text"
+        >
+          <span
+            class="menu-row-title"
+          >
+            Auto
+          </span>
+          <span
+            class="mode-hint"
+          >
+            A classifier approves most actions; you're rarely asked
+          </span>
+        </span>
+      </button>
+    </div>
+  </div>
+  <div
+    class="model-picker mode-menu-anchor"
+  >
+    <button
+      aria-expanded="false"
+      aria-haspopup="menu"
+      aria-label="Workflow: Chat"
+      class="meta-item mode-chip"
+      title="Workflow: A plain conversation: Claude works as you ask"
+    >
+      <svg
+        aria-hidden="true"
+        fill="none"
+        height="12"
+        stroke="currentColor"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.3"
+        viewBox="0 0 12 12"
+        width="12"
+      >
+        <path
+          d="M5.3 3Q5.9 6.7 9.8 7.3Q5.9 7.9 5.3 11.3Q4.7 7.9 0.8 7.3Q4.7 6.7 5.3 3Z"
+        />
+        <path
+          d="M9.6 1Q9.8 2.1 11 2.3Q9.8 2.5 9.6 3.6Q9.4 2.5 8.2 2.3Q9.4 2.1 9.6 1Z"
+        />
+      </svg>
+      Chat
+      <span
+        aria-hidden="true"
+        class="chev down"
+      />
+    </button>
+  </div>
+</div>
+`;
+
+exports[`single provider: the whole window > the empty chat's box, and what a turn leaves > composer 1`] = `
+<div
+  class="composer hero"
+>
+  <div
+    class="composer-pills"
+  >
+    <div
+      class="pill-anchor"
+    >
+      <button
+        aria-expanded="false"
+        aria-haspopup="menu"
+        class="pill"
+        title="/Users/you/projects/acme-api"
+      >
+        <svg
+          aria-hidden="true"
+          fill="none"
+          height="12"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="1.3"
+          viewBox="0 0 15 12"
+          width="14"
+        >
+          <path
+            d="M1 2.2c0-.66.54-1.2 1.2-1.2h3.3l1.4 1.6h5.9c.66 0 1.2.54 1.2 1.2v6.5c0 .66-.54 1.2-1.2 1.2H2.2c-.66 0-1.2-.54-1.2-1.2z"
+          />
+        </svg>
+        <span>
+          acme-api
+        </span>
+        <span
+          aria-hidden="true"
+          class="chev down"
+        />
+      </button>
+    </div>
+    <div
+      class="pill-anchor"
+    >
+      <button
+        aria-expanded="false"
+        aria-haspopup="dialog"
+        class="pill"
+        title="Continue a past chat"
+      >
+        <svg
+          aria-hidden="true"
+          fill="none"
+          height="14"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="1.3"
+          viewBox="0 0 14 14"
+          width="14"
+        >
+          <circle
+            cx="7"
+            cy="7"
+            r="5.6"
+          />
+          <path
+            d="M7 4v3.2l2.1 1.3"
+          />
+        </svg>
+        <span>
+          New chat
+        </span>
+        <span
+          aria-hidden="true"
+          class="chev down"
+        />
+      </button>
+    </div>
+  </div>
+  <div
+    class="composer-box"
+    style=""
+  >
+    <div
+      class="composer-line"
+    >
+      <textarea
+        aria-label="Message to Claude"
+        autocapitalize="off"
+        autocorrect="off"
+        placeholder="Ask Claude…"
+        rows="2"
+        spellcheck="true"
+        style="height: 0px;"
+      />
+    </div>
+    <div
+      class="composer-footer"
+    >
+      <div
+        class="model-picker"
+      >
+        <button
+          aria-expanded="false"
+          aria-haspopup="menu"
+          class="composer-item model-button"
+          title="Models: Standard · Your model and effort, Claude Code's own settings · Effort Default"
+        >
+          <svg
+            aria-hidden="true"
+            fill="none"
+            height="12"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="1.3"
+            viewBox="0 0 12 12"
+            width="12"
+          >
+            <path
+              d="M5.3 3Q5.9 6.7 9.8 7.3Q5.9 7.9 5.3 11.3Q4.7 7.9 0.8 7.3Q4.7 6.7 5.3 3Z"
+            />
+            <path
+              d="M9.6 1Q9.8 2.1 11 2.3Q9.8 2.5 9.6 3.6Q9.4 2.5 8.2 2.3Q9.4 2.1 9.6 1Z"
+            />
+          </svg>
+          Standard · Default
+          <span
+            aria-hidden="true"
+            class="chev down"
+          />
+        </button>
+      </div>
+      <div
+        class="spacer"
+      />
+      <button
+        aria-label="Send"
+        class="send"
+        disabled=""
+        title="Send (Enter)"
+      >
+        <svg
+          aria-hidden="true"
+          fill="none"
+          height="12"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="1.6"
+          viewBox="0 0 12 12"
+          width="12"
+        >
+          <path
+            d="M6 10V2M2.5 5.5 6 2l3.5 3.5"
+          />
+        </svg>
+      </button>
+    </div>
+  </div>
+  <div
+    class="composer-meta"
+  >
+    <div
+      class="model-picker mode-menu-anchor"
+    >
+      <button
+        aria-expanded="false"
+        aria-haspopup="menu"
+        aria-label="Permissions: Ask"
+        class="meta-item mode-chip"
+        title="Permissions: Edits apply; commands and other actions ask you first"
+      >
+        <svg
+          aria-hidden="true"
+          fill="none"
+          height="13"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="1.3"
+          viewBox="0 0 12 13"
+          width="12"
+        >
+          <path
+            d="M6 1 1.5 2.8v3.4c0 2.8 1.9 4.9 4.5 5.8 2.6-.9 4.5-3 4.5-5.8V2.8z"
+          />
+        </svg>
+        Ask
+        <span
+          aria-hidden="true"
+          class="chev down"
+        />
+      </button>
+    </div>
+    <div
+      class="model-picker mode-menu-anchor"
+    >
+      <button
+        aria-expanded="false"
+        aria-haspopup="menu"
+        aria-label="Workflow: Chat"
+        class="meta-item mode-chip"
+        title="Workflow: A plain conversation: Claude works as you ask"
+      >
+        <svg
+          aria-hidden="true"
+          fill="none"
+          height="12"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="1.3"
+          viewBox="0 0 12 12"
+          width="12"
+        >
+          <path
+            d="M5.3 3Q5.9 6.7 9.8 7.3Q5.9 7.9 5.3 11.3Q4.7 7.9 0.8 7.3Q4.7 6.7 5.3 3Z"
+          />
+          <path
+            d="M9.6 1Q9.8 2.1 11 2.3Q9.8 2.5 9.6 3.6Q9.4 2.5 8.2 2.3Q9.4 2.1 9.6 1Z"
+          />
+        </svg>
+        Chat
+        <span
+          aria-hidden="true"
+          class="chev down"
+        />
+      </button>
+    </div>
+    <div
+      class="spacer"
+    />
+  </div>
+</div>
+`;
+
+exports[`single provider: the whole window > the empty chat's box, and what a turn leaves > meter 1`] = `
+"61,480 of 200,000 tokens of context used
+Last turn took 8.2s"
+`;
+
+exports[`single provider: the whole window > the empty chat's box, and what a turn leaves > turn note 1`] = `null`;
