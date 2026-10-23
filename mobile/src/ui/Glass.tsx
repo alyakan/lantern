@@ -36,6 +36,9 @@ export function useGlass(): boolean {
   return available() && !reduced;
 }
 
+/** How much of the card's colour (hex alpha, about 15%) the surface keeps under its glass. */
+export const GLASS_FILL = "26";
+
 /**
  * A surface that floats over the page: Liquid Glass on iOS 26, and everywhere else today's solid card with its shadow
  * (`lift` is how strong the shadow is). `style` is only its shape and layout (size, radius, padding, how it lays out its
@@ -47,10 +50,12 @@ export function Glass({ style, lift = 0.08, solid = false, children, ...rest }: 
   if (glass && !solid) {
     // The glass is a layer behind the children. The surface itself has a faint fill of the card's colour and a hairline, which
     // don't depend on it: a glass view that mounts late (a chat's message box when the chat wakes) has sometimes drawn nothing,
-    // and over a plain page there was then no edge at all.
+    // and over a plain page there was then no edge at all. The fill is under the glass, so what the glass blurs includes it: a
+    // strong one (it was over half the card's colour) leaves nothing behind the box to see through, and the glass looks like a
+    // flat card. It is only a tint, enough for an edge.
     const radius = StyleSheet.flatten(style)?.borderRadius;
     return (
-      <View style={[{ backgroundColor: `${colors.card}8c`, borderWidth: StyleSheet.hairlineWidth * 2, borderColor: colors.rule }, style]} {...rest}>
+      <View style={[{ backgroundColor: `${colors.card}${GLASS_FILL}`, borderWidth: StyleSheet.hairlineWidth * 2, borderColor: colors.rule }, style]} {...rest}>
         <GlassView pointerEvents="none" glassEffectStyle="regular" style={[StyleSheet.absoluteFill, radius === undefined ? null : { borderRadius: radius }]} />
         {children}
       </View>

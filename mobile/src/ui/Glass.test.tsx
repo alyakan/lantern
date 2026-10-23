@@ -5,7 +5,7 @@ import { lightColors } from "./theme";
 
 // The module asks the phone about reduced transparency as it loads, and listens for the setting changing: watch for that.
 const subscribe = jest.spyOn(AccessibilityInfo, "addEventListener");
-const { Glass } = require("./Glass") as typeof import("./Glass");
+const { Glass, GLASS_FILL } = require("./Glass") as typeof import("./Glass");
 const reduce = (on: boolean) => act(async () => void (subscribe.mock.calls.find((c) => c[0] === "reduceTransparencyChanged")![1] as (on: boolean) => void)(on));
 
 const available = isLiquidGlassAvailable as jest.Mock;
@@ -33,9 +33,15 @@ describe("a glass surface", () => {
     // The glass is the layer behind the children, held in the surface's corners. The surface has a faint fill and a hairline of
     // its own, so it still has an edge if the glass draws nothing.
     expect(StyleSheet.flatten(layerOf()!.props.style).borderRadius).toBe(20);
-    expect(fill()).toBe(`${lightColors.card}8c`);
+    expect(fill()).toBe(`${lightColors.card}${GLASS_FILL}`);
     expect(StyleSheet.flatten(surface().props.style).borderColor).toBe(lightColors.rule);
     expect(screen.getByText("inside")).toBeTruthy();
+  });
+
+  it("keeps only a tint of the card under its glass, so the glass has the page behind it to blur and not a flat card", () => {
+    // What the glass blurs includes the surface's own fill: past about a quarter opaque, the box reads as a solid card.
+    expect(parseInt(GLASS_FILL, 16) / 255).toBeLessThanOrEqual(0.25);
+    expect(parseInt(GLASS_FILL, 16)).toBeGreaterThan(0);
   });
 
   it("is today's solid card, with its shadow, where it doesn't", async () => {
