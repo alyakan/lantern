@@ -1,5 +1,5 @@
 import { Platform, StyleSheet } from "react-native";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
 import { chat, connected, connectedWithControls, makeController, NOW, renderWith, waiting } from "../test/render";
 import { noMemory, noPlatform, TipJar } from "../tips";
@@ -215,6 +215,33 @@ describe("Home's chats by project", () => {
     expect(screen.getByRole("button", { name: "lantern, 2 chats, 1 need you" })).toBeTruthy();
     // The project is in the heading, not repeated under every chat.
     expect(screen.getByRole("button", { name: "Release" })).toBeTruthy();
+  });
+
+  it("puts each project and its chats in a card of their own, its header tinted in the project's colour", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, {
+      chats: [chat({ slot: "a", title: "Release", project: "lantern", project_color: "#5b5bd6" }), chat({ slot: "b", title: "Prayers widget", project: "prayers", project_color: "#0f8a7e" }), chat({ slot: "c", title: "Fix sync", project: "lantern", project_color: "#5b5bd6" })],
+    });
+    await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
+    const lantern = within(screen.getByTestId("project-card-lantern"));
+    const prayers = within(screen.getByTestId("project-card-prayers"));
+    // Each card holds its project's header and its chats, and nobody else's.
+    expect(lantern.getByRole("button", { name: "lantern, 2 chats" })).toBeTruthy();
+    expect(lantern.getByRole("button", { name: "Release" })).toBeTruthy();
+    expect(lantern.getByRole("button", { name: "Fix sync" })).toBeTruthy();
+    expect(lantern.queryByRole("button", { name: "Prayers widget" })).toBeNull();
+    expect(prayers.getByRole("button", { name: "Prayers widget" })).toBeTruthy();
+    // The header is a band of the project's colour at about 15%.
+    expect(StyleSheet.flatten(lantern.getByRole("button", { name: "lantern, 2 chats" }).props.style).backgroundColor).toBe("#5b5bd626");
+    expect(StyleSheet.flatten(prayers.getByRole("button", { name: "prayers, 1 chat" }).props.style).backgroundColor).toBe("#0f8a7e26");
+  });
+
+  it("keeps a folded project's header in its card, with the chats gone from it", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats });
+    await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
+    await fireEvent.press(screen.getByRole("button", { name: "lantern, 2 chats, 1 need you" }));
+    const lantern = within(screen.getByTestId("project-card-lantern"));
+    expect(lantern.getByRole("button", { name: "lantern, 2 chats, 1 need you" })).toBeTruthy();
+    expect(lantern.queryByRole("button", { name: "Release" })).toBeNull();
   });
 
   it("folds a project away and opens it again", async () => {
