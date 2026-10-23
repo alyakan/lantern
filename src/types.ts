@@ -54,7 +54,7 @@ export interface ProviderInfo {
 
 export type UiEvent =
   | { kind: "session_started"; session_id: string; model: string; cwd: string; permission_mode: string; claude_version: string }
-  | { kind: "user_text"; text: string; at?: number; sent_by?: string }
+  | { kind: "user_text"; text: string; at?: number; sent_by?: string; images?: number }
   | { kind: "thinking"; parent: string | null }
   | { kind: "text_delta"; parent: string | null; block_id: string; text: string }
   | { kind: "assistant_text"; parent: string | null; block_id: string; text: string }

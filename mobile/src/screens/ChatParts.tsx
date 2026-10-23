@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type ComponentRef } from "react";
-import { Animated, Easing, Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Animated, Easing, Image, Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
 import * as Clipboard from "expo-clipboard";
@@ -13,6 +13,9 @@ import { term } from "../ui/terminal";
 import { SlashPicker, useSeed, type ComposeSeed } from "./ChatExtras";
 import { useListInput } from "../ui/useListInput";
 import { useDictation } from "../ui/useDictation";
+import { useAttachments } from "../ui/useAttachments";
+import type { ImageSource } from "../platformImages";
+import { MAX_IMAGES, photos, type PickedImage } from "../view/attachments";
 import { Markdown } from "../ui/Markdown";
 import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
@@ -38,9 +41,22 @@ export const UserRow = memo(function UserRow({ item, onActions }: { item: UserIt
           {timeOf(item.at)}
         </Txt>
       )}
-      <Pressable accessibilityLabel={`You: ${item.text}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomLeftRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "90%", opacity: item.sending ? 0.6 : 1 }}>
+      <Pressable accessibilityLabel={`You: ${item.text}${item.images ? ` (${photos(item.images)})` : ""}`} accessibilityHint={onActions ? "Hold for copy, quote and more" : undefined} onLongPress={onActions} delayLongPress={350} style={{ backgroundColor: colors.ink, borderRadius: 18, borderBottomLeftRadius: 6, paddingHorizontal: 13, paddingVertical: 9, maxWidth: "90%", opacity: item.sending ? 0.6 : 1 }}>
+        {/* The pictures themselves are only here on the phone that sent them (they went to Claude, not back): another time it is just how many. */}
+        {!!item.thumbs?.length && (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: item.text ? 8 : 0 }}>
+            {item.thumbs.map((uri, i) => (
+              <Image key={uri} accessibilityLabel={`Photo ${i + 1} you sent`} source={{ uri }} style={{ width: 88, height: 88, borderRadius: 10 }} />
+            ))}
+          </View>
+        )}
+        {!item.thumbs?.length && !!item.images && (
+          <Txt variant="small" tone="on-ink" style={{ opacity: 0.8, marginBottom: item.text ? 6 : 0 }}>
+            {photos(item.images)} sent
+          </Txt>
+        )}
         {/* Your own message is read as Claude's is: a list you typed is a list, code is code. */}
-        <Markdown text={item.text} tone="on-ink" selectable={!onActions} />
+        {!!item.text && <Markdown text={item.text} tone="on-ink" selectable={!onActions} />}
       </Pressable>
       {item.failed && (
         <Txt variant="small" tone="stop" style={{ marginTop: 4, marginLeft: 2 }}>
@@ -414,7 +430,7 @@ export const TurnRow = memo(function TurnRow({ item }: { item: Extract<Item, { k
  * turns it into a terminal, as on the Mac: the "!" goes, a prompt takes its place, and what is typed is a command for the
  * Mac to run. `onRun` says whether it ran (it asks first); the box is only emptied when it did.
  */
-export function Composer({ onSend, onRun, disabled, placeholder = "Message Claude", seed, commands = [] }: { onSend: (text: string) => void; onRun?: (command: string) => Promise<boolean>; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
+export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [] }: { /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
   const colors = useColors();
   // Over a list that runs under it, the box has no ground of its own.
   const glass = useGlass();
@@ -427,6 +443,17 @@ export function Composer({ onSend, onRun, disabled, placeholder = "Message Claud
   const [running, setRunning] = useState(false);
   const wasTerminal = useRef(false);
   const dictation = useDictation(text, setText);
+  const attach = useAttachments();
+  // The picker is a screen of its own: it is launched once the sheet that offered it has gone (iOS can't show one over the other).
+  const [choosing, setChoosing] = useState(false);
+  const chosen = useRef<ImageSource | null>(null);
+  useEffect(() => {
+    if (choosing || !chosen.current) return;
+    const source = chosen.current;
+    chosen.current = null;
+    const t = setTimeout(() => void attach.add(source), 350);
+    return () => clearTimeout(t);
+  }, [choosing, attach.add]);
   // A "!" that begins the box (typed, or a quote) makes it a terminal, and the microphone has no place in one; nor does
   // a box that can't be used (the Mac went away): its button is gone, so nothing could stop it.
   useEffect(() => {
@@ -456,7 +483,8 @@ export function Composer({ onSend, onRun, disabled, placeholder = "Message Claud
   const insets = useSafeAreaInsets();
   // With the keyboard up it sits right under the box: the home-indicator space would be a gap.
   const keyboard = useKeyboardUp();
-  const ready = text.trim().length > 0 && !disabled;
+  const ready = (text.trim().length > 0 || attach.images.length > 0) && !disabled && !attach.busy;
+  const problem = dictation.problem ?? attach.problem;
   // Return after "1. item" starts "2. ", after "- item" starts "- ".
   const list = useListInput(text, setText);
   const query = slashQuery(text);
@@ -519,26 +547,38 @@ export function Composer({ onSend, onRun, disabled, placeholder = "Message Claud
         </>
       ) : (
       <>
-      {dictation.problem && (
+      {problem && (
         <View accessibilityRole="alert" style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6, marginHorizontal: 8 }}>
           <Txt variant="tiny" tone="stop" style={{ flex: 1 }}>
-            {dictation.problem.words}
+            {problem.words}
           </Txt>
-          {dictation.problem.settings && (
+          {problem.settings && (
             <PressScale accessibilityRole="button" accessibilityLabel="Open Settings" onPress={() => void Linking.openSettings()} hitSlop={8} haptic="select" scaleTo={0.94}>
               <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
                 Open Settings
               </Txt>
             </PressScale>
           )}
-          <PressScale accessibilityRole="button" accessibilityLabel="Dismiss" onPress={dictation.dismiss} hitSlop={8} haptic="none" scaleTo={0.9}>
+          <PressScale
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss"
+            onPress={() => {
+              dictation.dismiss();
+              attach.dismiss();
+            }}
+            hitSlop={8}
+            haptic="none"
+            scaleTo={0.9}
+          >
             <Txt variant="small" tone="ink3">
               ×
             </Txt>
           </PressScale>
         </View>
       )}
-      <Glass lift={0.12} fill={COMPOSER_FILL} style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }}>
+      {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} />}
+      <Glass lift={0.12} fill={COMPOSER_FILL} style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: canAttach ? 4 : 16, paddingRight: 6, paddingVertical: 6 }}>
+        {canAttach && <PlusButton busy={attach.busy} full={attach.full} onPress={() => setChoosing(true)} />}
         <TextInput
           ref={input}
           accessibilityLabel="Message"
@@ -560,11 +600,20 @@ export function Composer({ onSend, onRun, disabled, placeholder = "Message Claud
           ready={ready}
           onPress={() => {
             dictation.cancel();
-            onSend(text.trim());
+            onSend(text.trim(), attach.images.length > 0 ? attach.images : undefined);
+            attach.clear();
             setText("");
           }}
         />
       </Glass>
+      {choosing && (
+        <AttachSheet
+          onClose={() => setChoosing(false)}
+          onPick={(source) => {
+            chosen.current = source;
+          }}
+        />
+      )}
       </>
       )}
       </View>
@@ -656,6 +705,83 @@ function MicButton({ listening, onPress }: { listening: boolean; onPress: () => 
         )}
       </View>
     </PressScale>
+  );
+}
+
+/** The + beside the message box: it offers pictures to attach, and is dimmed while one is being fetched or when no more fit. */
+function PlusButton({ busy, full, onPress }: { busy: boolean; full: boolean; onPress: () => void }) {
+  const colors = useColors();
+  const off = busy || full;
+  return (
+    <PressScale
+      accessibilityRole="button"
+      accessibilityLabel="Attach photos"
+      accessibilityHint={full ? `A message holds ${MAX_IMAGES} photos at most` : undefined}
+      accessibilityState={{ disabled: off, busy }}
+      disabled={off}
+      onPress={onPress}
+      haptic="light"
+      scaleTo={0.88}
+      opacity={off ? 0.4 : 1}
+      style={{ width: 40, height: 40, alignItems: "center", justifyContent: "center" }}
+    >
+      <View accessibilityElementsHidden style={{ width: 28, height: 28, borderRadius: 14, borderWidth: 1.5, borderColor: colors.ink2, alignItems: "center", justifyContent: "center" }}>
+        <View style={{ position: "absolute", width: 12, height: 2, borderRadius: 1, backgroundColor: colors.ink2 }} />
+        <View style={{ position: "absolute", width: 2, height: 12, borderRadius: 1, backgroundColor: colors.ink2 }} />
+      </View>
+    </PressScale>
+  );
+}
+
+/** The pictures attached so far, as small squares above the box, each with a × that takes it off. */
+function Thumbnails({ images, onRemove }: { images: PickedImage[]; onRemove: (id: string) => void }) {
+  const colors = useColors();
+  return (
+    <ScrollView horizontal accessibilityLabel="Attached photos" showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 8, paddingTop: 8, paddingBottom: 10 }} style={{ flexGrow: 0 }}>
+      {images.map((image, i) => (
+        <View key={image.id} style={{ width: 64, height: 64 }}>
+          <Image accessibilityLabel={`Photo ${i + 1}`} source={{ uri: image.uri }} style={{ width: 64, height: 64, borderRadius: 12, backgroundColor: colors.rule }} />
+          <PressScale accessibilityRole="button" accessibilityLabel={`Remove photo ${i + 1}`} onPress={() => onRemove(image.id)} hitSlop={8} haptic="light" scaleTo={0.9} style={{ position: "absolute", top: -7, right: -7, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" }}>
+            <Txt variant="small" tone="on-ink" style={{ fontWeight: "800", lineHeight: 16 }}>
+              ×
+            </Txt>
+          </PressScale>
+        </View>
+      ))}
+    </ScrollView>
+  );
+}
+
+/** Where to get the pictures from. Choosing closes the sheet; the Composer then opens the picker (see its `choosing`). */
+function AttachSheet({ onClose, onPick }: { onClose: () => void; onPick: (source: ImageSource) => void }) {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  return (
+    <Sheet onClose={onClose}>
+      {(close) => (
+        <View style={{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.lg, paddingBottom: insets.bottom + space.lg, gap: 10 }}>
+          <Txt variant="heading">Add photos</Txt>
+          <Txt variant="small" tone="ink2">
+            They go to Claude with your message, up to {MAX_IMAGES}.
+          </Txt>
+          <Button
+            label="Photo library"
+            onPress={() => {
+              onPick("library");
+              close();
+            }}
+          />
+          <Button
+            label="Take a photo"
+            onPress={() => {
+              onPick("camera");
+              close();
+            }}
+          />
+          <Button label="Cancel" kind="ghost" onPress={close} />
+        </View>
+      )}
+    </Sheet>
   );
 }
 

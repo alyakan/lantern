@@ -72,6 +72,13 @@ impl Session {
         }
     }
 
+    /// Says `text` to the agent, with `images` (the provider's own blocks for pictures) before it.
+    pub async fn send_with(&mut self, text: &str, images: Vec<serde_json::Value>) -> Result<(), String> {
+        match self {
+            Session::Claude(s) => s.send_with(text, images).await,
+        }
+    }
+
     /// Ends the current turn; the agent keeps running.
     pub async fn interrupt(&mut self) {
         match self {

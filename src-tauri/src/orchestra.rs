@@ -2232,7 +2232,7 @@ mod tests {
         spawn(&o, "login").await;
         assert!(call(&o, "read_agent", json!({"id": "w1"})).await.unwrap_err().contains("hasn't started"));
         o.observe("w1", &UiEvent::SessionStarted { session_id: "sess".into(), model: "m".into(), cwd: "/".into(), permission_mode: "auto".into(), claude_version: "1".into() });
-        let mut events = vec![UiEvent::UserText { text: "Do the thing".into(), at: None, sent_by: None }, UiEvent::UserText { text: "[From the main agent] and mind the tests".into(), at: None, sent_by: None }];
+        let mut events = vec![UiEvent::UserText { text: "Do the thing".into(), at: None, sent_by: None, images: 0 }, UiEvent::UserText { text: "[From the main agent] and mind the tests".into(), at: None, sent_by: None, images: 0 }];
         for i in 0..6 {
             events.push(UiEvent::AssistantText { parent: None, block_id: format!("b{i}"), text: format!("step {i}") });
             events.push(UiEvent::AssistantText { parent: Some("sub".into()), block_id: format!("c{i}"), text: "a subagent's".into() });
