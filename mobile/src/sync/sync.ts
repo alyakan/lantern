@@ -10,6 +10,7 @@ import type { RemotePermissions } from "../protocol/generated/RemotePermissions"
 import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { StartedChat } from "../protocol/generated/StartedChat";
+import type { PairOffer } from "../protocol/generated/PairOffer";
 import type { Suggestions } from "../protocol/generated/Suggestions";
 import type { Waiting } from "../protocol/generated/Waiting";
 import { UPLOAD_WAIT, type Pushed, type Session } from "../net/session";
@@ -267,6 +268,15 @@ export class Sync {
 
   diff(slot: string, path: string) {
     return this.ask<string>({ op: "diff", slot, path });
+  }
+
+  /**
+   * A new one-time pairing code to show another device (rejects with why not). Any code the Mac's window is showing stops
+   * working. Only for a Mac that lists "pair": an older one ends the connection at a request it doesn't know. The answer is
+   * secret until it is used or expires: it isn't kept here, and the screen that shows it lets go of it.
+   */
+  pairOffer() {
+    return this.ask<PairOffer>({ op: "pair_offer" });
   }
 
   /** What a finished step printed, if the Mac still keeps it (rejects with why not). Only for a Mac that lists "output". */

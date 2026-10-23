@@ -808,6 +808,14 @@ impl<'a> Session<'a> {
                 self.chat_known(&slot)?;
                 self.gw.hub.step_output(&slot, &tool_use_id).map(serde_json::Value::String).ok_or_else(|| "That step's output isn't kept any more. It is on your Mac.".to_string())
             }
+            // The same code as the Mac's own "Show a pairing code" (Remote::pair), made for a phone that is already paired and
+            // shows it to a second device. Whoever holds the phone and can pass its Face ID check can make one: the phone is the
+            // only place that is checked, as for the terminal. The link is never logged.
+            Request::PairOffer => {
+                let offer = self.gw.store.start_offer(super::now_ms())?;
+                let link = super::pairing::pairing_link(&self.gw.mac.public, &offer, &host.hosts(), super::port(), &host.mac_name());
+                Ok(json(&protocol::PairOffer { modules: super::pairing::qr_modules(&link)?, link, expires_at: offer.expires_at }))
+            }
             Request::Shell { slot, id, command } => {
                 use super::hub::ChatStatus as S;
                 let chat = self.gw.hub.chat(&slot).ok_or("That chat isn't open on your Mac.")?;
@@ -1625,6 +1633,63 @@ pub(crate) mod tests {
     #[test]
     fn this_mac_says_it_can_close_chats_so_a_phone_may_ask_it_to() {
         assert!(["close", "controls", "workflow"].iter().all(|f| protocol::FEATURES.contains(f)));
+    }
+
+    /// The secret in a pairing link (its `s`).
+    fn secret_in(link: &str) -> [u8; 32] {
+        use base64::Engine as _;
+        let s = link.split(&['?', '&'][..]).find_map(|part| part.strip_prefix("s=")).expect("a secret in the link");
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(s).unwrap().try_into().unwrap()
+    }
+
+    #[test]
+    fn this_mac_says_it_can_make_a_pairing_code_for_a_phone_to_show() {
+        assert!(protocol::FEATURES.contains(&"pair"));
+    }
+
+    #[tokio::test]
+    async fn a_paired_phone_can_get_a_pairing_code_that_pairs_a_second_device_once() {
+        let r = rig();
+        let (_, mut first) = paired(&r).await;
+        let (ok, err, _) = first.ask(Request::PairOffer).await;
+        assert!(err.is_none(), "{err:?}");
+        let offer: protocol::PairOffer = serde_json::from_value(ok.unwrap()).unwrap();
+        assert!(offer.link.starts_with("lantern://pair?v=1&k="));
+        assert!(offer.expires_at > crate::remote::now_ms(), "it is good for a while");
+        // The second device pairs with it, as its own device.
+        let second = phone(&r.gw, &generate_keypair().unwrap(), Some(secret_in(&offer.link)), PROTOCOL_VERSION).await;
+        assert!(second.is_ok(), "{:?}", second.err());
+        assert_eq!(r.store.saved().devices.len(), 2);
+        // A code is used once.
+        assert!(phone(&r.gw, &generate_keypair().unwrap(), Some(secret_in(&offer.link)), PROTOCOL_VERSION).await.is_err());
+        assert_eq!(r.store.saved().devices.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_code_for_a_phone_to_show_puts_an_earlier_one_out_of_use_and_carries_the_macs_addresses() {
+        let r = rig();
+        let (_, mut p) = paired(&r).await;
+        let windows = offer_secret(&r.store);
+        let (ok, _, _) = p.ask(Request::PairOffer).await;
+        let offer: protocol::PairOffer = serde_json::from_value(ok.unwrap()).unwrap();
+        // The code the Mac's window was showing no longer works, since only one is open at a time.
+        assert!(phone(&r.gw, &generate_keypair().unwrap(), Some(windows), PROTOCOL_VERSION).await.is_err());
+        for host in r.host.hosts() {
+            assert!(offer.link.contains(&host), "{host} is in {}", offer.link);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pairing_code_comes_with_its_squares_for_the_phone_to_draw() {
+        let r = rig();
+        let (_, mut p) = paired(&r).await;
+        let (ok, _, _) = p.ask(Request::PairOffer).await;
+        let offer: protocol::PairOffer = serde_json::from_value(ok.unwrap()).unwrap();
+        let size = offer.modules.len();
+        assert!(size >= 21, "a QR code is at least 21 squares across");
+        assert!(offer.modules.iter().all(|row| row.len() == size && row.chars().all(|c| c == '0' || c == '1')), "square, and only dark or light");
+        // The pattern in the corner every QR code has: a row of seven dark squares.
+        assert!(offer.modules[0].starts_with("1111111"));
     }
 
     #[tokio::test]

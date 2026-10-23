@@ -38,6 +38,14 @@ pub fn qr_svg(link: &str) -> Result<String, String> {
     Ok(code.render::<qrcode::render::svg::Color>().min_dimensions(240, 240).quiet_zone(true).build())
 }
 
+/// The squares of the QR code for `link`, one string per row ("1" dark, "0" light), without the margin: for a phone that draws
+/// it itself.
+pub fn qr_modules(link: &str) -> Result<Vec<String>, String> {
+    let code = qrcode::QrCode::with_error_correction_level(link.as_bytes(), qrcode::EcLevel::M).map_err(|e| e.to_string())?;
+    let width = code.width();
+    Ok(code.to_colors().chunks(width).map(|row| row.iter().map(|c| if *c == qrcode::Color::Dark { '1' } else { '0' }).collect()).collect())
+}
+
 /// A paired phone.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Device {
