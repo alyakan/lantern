@@ -10,6 +10,11 @@ const reduce = (on: boolean) => act(async () => void (subscribe.mock.calls.find(
 
 const available = isLiquidGlassAvailable as jest.Mock;
 const surface = () => screen.getByTestId("surface");
+// The glass layer, when the surface has one: its first child.
+const layerOf = () => {
+  const first = surface().children[0];
+  return typeof first === "object" && first.props.glassEffectStyle === "regular" ? first : null;
+};
 const fill = () => StyleSheet.flatten(surface().props.style).backgroundColor;
 
 afterEach(async () => {
@@ -25,8 +30,11 @@ describe("a glass surface", () => {
         <Text>inside</Text>
       </Glass>,
     );
-    expect(surface().props.glassEffectStyle).toBe("regular");
-    expect(fill()).toBeUndefined();
+    // The glass is the layer behind the children, held in the surface's corners. The surface has a faint fill and a hairline of
+    // its own, so it still has an edge if the glass draws nothing.
+    expect(StyleSheet.flatten(layerOf()!.props.style).borderRadius).toBe(20);
+    expect(fill()).toBe(`${lightColors.card}8c`);
+    expect(StyleSheet.flatten(surface().props.style).borderColor).toBe(lightColors.rule);
     expect(screen.getByText("inside")).toBeTruthy();
   });
 
@@ -36,7 +44,7 @@ describe("a glass surface", () => {
         <Text>inside</Text>
       </Glass>,
     );
-    expect(surface().props.glassEffectStyle).toBeUndefined();
+    expect(layerOf()).toBeNull();
     expect(fill()).toBe(lightColors.card);
     expect(StyleSheet.flatten(surface().props.style).shadowOpacity).toBe(0.16);
     expect(StyleSheet.flatten(surface().props.style).borderRadius).toBe(20);
@@ -45,16 +53,16 @@ describe("a glass surface", () => {
   it("is solid for someone who asked for less transparency, even on iOS 26", async () => {
     available.mockReturnValue(true);
     await render(<Glass testID="surface" />);
-    expect(surface().props.glassEffectStyle).toBe("regular");
+    expect(layerOf()).not.toBeNull();
     await reduce(true);
-    expect(surface().props.glassEffectStyle).toBeUndefined();
+    expect(layerOf()).toBeNull();
     expect(fill()).toBe(lightColors.card);
   });
 
   it("stays the solid card where asked to, even on iOS 26: for words that must read over what is behind", async () => {
     available.mockReturnValue(true);
     await render(<Glass solid testID="surface" />);
-    expect(surface().props.glassEffectStyle).toBeUndefined();
+    expect(layerOf()).toBeNull();
     expect(fill()).toBe(lightColors.card);
   });
 });

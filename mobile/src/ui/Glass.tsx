@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AccessibilityInfo, View, type ViewProps } from "react-native";
+import { AccessibilityInfo, StyleSheet, View, type ViewProps } from "react-native";
 import { GlassView, isLiquidGlassAvailable } from "expo-glass-effect";
 import { shadow, useColors } from "./theme";
 
@@ -45,10 +45,15 @@ export function Glass({ style, lift = 0.08, solid = false, children, ...rest }: 
   const glass = useGlass();
   const colors = useColors();
   if (glass && !solid) {
+    // The glass is a layer behind the children. The surface itself has a faint fill of the card's colour and a hairline, which
+    // don't depend on it: a glass view that mounts late (a chat's message box when the chat wakes) has sometimes drawn nothing,
+    // and over a plain page there was then no edge at all.
+    const radius = StyleSheet.flatten(style)?.borderRadius;
     return (
-      <GlassView glassEffectStyle="regular" style={style} {...rest}>
+      <View style={[{ backgroundColor: `${colors.card}8c`, borderWidth: StyleSheet.hairlineWidth * 2, borderColor: colors.rule }, style]} {...rest}>
+        <GlassView pointerEvents="none" glassEffectStyle="regular" style={[StyleSheet.absoluteFill, radius === undefined ? null : { borderRadius: radius }]} />
         {children}
-      </GlassView>
+      </View>
     );
   }
   return (
