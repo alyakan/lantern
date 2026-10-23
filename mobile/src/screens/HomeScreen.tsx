@@ -29,6 +29,8 @@ export interface HomeProps {
   onNewChat: (draft?: Draft) => void;
   /** Opens the optional tips. */
   onSupport: () => void;
+  /** On a tablet, Home is the side column and the chat open beside it is marked here. */
+  selectedSlot?: string | null;
 }
 
 /** A thin bar that slides while a chat is working. */
@@ -85,7 +87,7 @@ function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomePr
 const CARD_INSET = 16;
 
 /** `inset`: the space on either side of the row (the page's, unless the row sits in a card that has its own). */
-function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset = space.xl }: { row: Row; index: number; onPress: () => void; onLongPress?: () => void; showProject?: boolean; inset?: number }) {
+function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset = space.xl, selected = false }: { row: Row; index: number; onPress: () => void; onLongPress?: () => void; showProject?: boolean; inset?: number; selected?: boolean }) {
   const colors = useColors();
   // The tile is the chat's project's colour (the desktop sidebar's), so a chat is placed by it before it is read.
   const { bg, fg } = projectTint(row.projectColor, colors.plainTint);
@@ -93,7 +95,7 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
   return (
     // The rows come in one after the other when Home opens (and a new chat comes in alone); a press gives under the finger.
     <FadeSlideIn from={14} delay={Math.min(index, 8) * 45 + 120}>
-    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}`} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "Close this chat" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: inset, paddingVertical: 9, minHeight: 56 }}>
+    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}`} accessibilityState={{ selected }} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "Close this chat" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={[{ flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: inset > 8 ? 8 : 0, paddingHorizontal: inset > 8 ? inset - 8 : inset, paddingVertical: 9, minHeight: 56 }, selected ? { backgroundColor: colors.rule, borderRadius: radius.inner } : null]}>
       <Tile letter={row.initial} bg={bg} fg={fg} />
       <View style={{ flex: 1 }}>
         <Txt variant="body" numberOfLines={1} style={{ fontWeight: "600" }}>
@@ -138,7 +140,7 @@ function GroupingSwitch({ value, onChange }: { value: Grouping; onChange: (g: Gr
  * the chats away when pressed, and the chats under it. The shadow is on the outer view, since clipping the corners would
  * clip it too.
  */
-function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose }: { group: Group; open: boolean; onToggle: () => void; onOpenChat: HomeProps["onOpenChat"]; onAskClose?: (r: Row) => void }) {
+function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose, selectedSlot }: { group: Group; open: boolean; onToggle: () => void; onOpenChat: HomeProps["onOpenChat"]; onAskClose?: (r: Row) => void; selectedSlot?: string | null }) {
   const colors = useColors();
   const name = group.project || "No project";
   const { bg, fg } = projectTint(group.rows[0]?.projectColor ?? null, colors.plainTint);
@@ -160,7 +162,7 @@ function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose }: { group
           group.rows.map((r, i) => (
             // Every chat is held in from the card's edges (the row itself has no inset); a hairline goes between one and the next.
             <View key={r.slot} testID={`card-row-${r.slot}`} style={[{ marginHorizontal: CARD_INSET }, i > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.rule } : null]}>
-              <ChatRow row={r} index={i} showProject={false} inset={0} onPress={() => onOpenChat(r.slot)} onLongPress={onAskClose && (() => onAskClose(r))} />
+              <ChatRow row={r} index={i} showProject={false} inset={0} selected={r.slot === selectedSlot} onPress={() => onOpenChat(r.slot)} onLongPress={onAskClose && (() => onAskClose(r))} />
             </View>
           ))}
       </View>
@@ -197,7 +199,7 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 }
 
 /** Home: what waits on you, as a headline and a stack, then your chats. */
-export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport }: HomeProps) {
+export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot }: HomeProps) {
   const colors = useColors();
   const controller = useController();
   const { chats, waiting, chatsLoaded, waitingLoaded, plan } = useSyncState();
@@ -296,9 +298,9 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             No chats are open on your Mac. Start one in Lantern and it shows up here.
           </Txt>
         ) : grouping === "project" ? (
-          groups(list).map((g) => <ProjectGroup key={g.project} group={g} open={!folded.has(g.project)} onToggle={() => toggle(g.project)} onOpenChat={onOpenChat} onAskClose={canClose ? setClosing : undefined} />)
+          groups(list).map((g) => <ProjectGroup key={g.project} group={g} open={!folded.has(g.project)} onToggle={() => toggle(g.project)} onOpenChat={onOpenChat} onAskClose={canClose ? setClosing : undefined} selectedSlot={selectedSlot} />)
         ) : (
-          list.map((r, i) => <ChatRow key={r.slot} row={r} index={i} onPress={() => onOpenChat(r.slot)} onLongPress={canClose ? () => setClosing(r) : undefined} />)
+          list.map((r, i) => <ChatRow key={r.slot} row={r} index={i} selected={r.slot === selectedSlot} onPress={() => onOpenChat(r.slot)} onLongPress={canClose ? () => setClosing(r) : undefined} />)
         )}
         <SupportCard onPress={onSupport} />
           </>

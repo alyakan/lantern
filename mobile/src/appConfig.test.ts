@@ -21,6 +21,15 @@ describe("app.json", () => {
     expect(plist.NSCameraUsageDescription.length).toBeGreaterThan(10);
   });
 
+  it("runs on an iPad in every orientation, while an iPhone stays upright", () => {
+    expect(expo.ios.supportsTablet).toBe(true);
+    // The top-level setting is the phone's: left alone it would turn on rotating for a Pro Max, which is wide enough to be mistaken for a tablet.
+    expect(expo.orientation).toBe("portrait");
+    expect(expo.ios.infoPlist["UISupportedInterfaceOrientations~ipad"]).toEqual(expect.arrayContaining(["UIInterfaceOrientationPortrait", "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"]));
+    // Split View and Slide Over need this off.
+    expect((expo.ios as { requireFullScreen?: boolean }).requireFullScreen).not.toBe(true);
+  });
+
   it("asks Android for the camera and for Wi-Fi multicast (Bonjour)", () => {
     expect(expo.android.permissions).toEqual(expect.arrayContaining(["CAMERA", "ACCESS_WIFI_STATE", "CHANGE_WIFI_MULTICAST_STATE"]));
   });

@@ -9,8 +9,14 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "bundleIdentifier": "com.alyakan.lantern",
-      "supportsTablet": false,
+      "supportsTablet": true,
       "infoPlist": {
+        "UISupportedInterfaceOrientations~ipad": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationPortraitUpsideDown",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight"
+        ],
         "NSLocalNetworkUsageDescription": "Lantern finds your Mac on this Wi-Fi and connects to it.",
         "NSBonjourServices": [
           "_lantern._tcp"
