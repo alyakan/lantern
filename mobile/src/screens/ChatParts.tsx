@@ -21,7 +21,7 @@ import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motio
 import { Sheet } from "../ui/Sheet";
 import { DiffSkeleton } from "../ui/skeleton";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
-import { Glass, useGlass } from "../ui/Glass";
+import { COMPOSER_FILL, Glass, useGlass } from "../ui/Glass";
 import { fonts, radius, shadow, space, useColors } from "../ui/theme";
 import { approvalOf, promptView } from "../view/prompts";
 import { turnLine, type Row, type StepChip } from "../view/timeline";
@@ -577,7 +577,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
         </View>
       )}
       {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} />}
-      <Glass lift={0.12} style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: canAttach ? 4 : 16, paddingRight: 6, paddingVertical: 6 }}>
+      <Glass lift={0.12} fill={COMPOSER_FILL} style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: canAttach ? 4 : 16, paddingRight: 6, paddingVertical: 6 }}>
         {canAttach && <PlusButton busy={attach.busy} full={attach.full} onPress={() => setChoosing(true)} />}
         <TextInput
           ref={input}

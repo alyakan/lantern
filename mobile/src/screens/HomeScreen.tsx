@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Animated, Platform, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { loadGrouping, saveGrouping } from "../prefs";
+import { loadFolded, loadGrouping, saveFolded, saveGrouping } from "../prefs";
+import { settleSeen, useSeen } from "../seen";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
 import { useMacCan } from "../shell/useControls";
 import { useTipJar, useTips } from "../shell/tipsContext";
@@ -91,14 +92,19 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
   const colors = useColors();
   // The tile is the chat's project's colour (the desktop sidebar's), so a chat is placed by it before it is read.
   const { bg, fg } = projectTint(row.projectColor, colors.plainTint);
-  const status = row.status === "needs_you" ? ", needs you" : row.status === "working" ? ", working" : row.status === "asleep" ? ", asleep" : row.status === "ended" ? ", stopped" : "";
+  const accent = useAccent();
+  const status = row.unread ? ", unread" : row.status === "needs_you" ? ", needs you" : row.status === "working" ? ", working" : row.status === "asleep" ? ", asleep" : row.status === "ended" ? ", stopped" : "";
   return (
     // The rows come in one after the other when Home opens (and a new chat comes in alone); a press gives under the finger.
     <FadeSlideIn from={14} delay={Math.min(index, 8) * 45 + 120}>
     <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}`} accessibilityState={{ selected }} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "Close this chat" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={[{ flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: inset > 8 ? 8 : 0, paddingHorizontal: inset > 8 ? inset - 8 : inset, paddingVertical: 9, minHeight: 56 }, selected ? { backgroundColor: colors.rule, borderRadius: radius.inner } : null]}>
-      <Tile letter={row.initial} bg={bg} fg={fg} />
+      <View>
+        <Tile letter={row.initial} bg={bg} fg={fg} />
+        {/* Something new in it: a dot on the tile (cut out from the page behind it), and the title in bold below. */}
+        {row.unread && <View accessibilityElementsHidden testID="unread-dot" style={{ position: "absolute", top: -3, right: -3, width: 14, height: 14, borderRadius: 7, backgroundColor: accent, borderWidth: 2, borderColor: selected ? colors.rule : colors.paper }} />}
+      </View>
       <View style={{ flex: 1 }}>
-        <Txt variant="body" numberOfLines={1} style={{ fontWeight: "600" }}>
+        <Txt variant="body" numberOfLines={1} style={{ fontWeight: row.unread ? "800" : "400" }}>
           {row.title}
         </Txt>
         {showProject && !!row.project && (
@@ -112,7 +118,7 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
       ) : (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
           {row.status === "needs_you" && <PulseDot color={colors.hi} />}
-          <Txt variant="tiny" tone="ink3">
+          <Txt variant="tiny" tone={row.unread ? "ink" : "ink3"} style={row.unread ? { fontWeight: "700" } : undefined}>
             {row.note}
           </Txt>
         </View>
@@ -144,10 +150,11 @@ function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose, selectedS
   const colors = useColors();
   const name = group.project || "No project";
   const { bg, fg } = projectTint(group.rows[0]?.projectColor ?? null, colors.plainTint);
+  const accent = useAccent();
   return (
     <View testID={`project-card-${name}`} style={[{ marginHorizontal: space.lg, marginTop: 12, borderRadius: radius.card, backgroundColor: colors.card }, shadow.card]}>
       <View style={{ borderRadius: radius.card, borderWidth: 1, borderColor: bg, overflow: "hidden" }}>
-        <PressScale accessibilityRole="button" accessibilityLabel={`${name}, ${group.rows.length === 1 ? "1 chat" : `${group.rows.length} chats`}${group.needsYou ? `, ${group.needsYou} need you` : ""}`} accessibilityState={{ expanded: open }} onPress={onToggle} haptic="select" scaleTo={0.985} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: CARD_INSET, backgroundColor: bg, minHeight: 44 }}>
+        <PressScale accessibilityRole="button" accessibilityLabel={`${name}, ${group.rows.length === 1 ? "1 chat" : `${group.rows.length} chats`}${group.needsYou ? `, ${group.needsYou} need you` : ""}${group.unread ? `, ${group.unread} unread` : ""}`} accessibilityState={{ expanded: open }} onPress={onToggle} haptic="select" scaleTo={0.985} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: CARD_INSET, backgroundColor: bg, minHeight: 44 }}>
           <Chevron open={open} />
           <View accessibilityElementsHidden style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: fg }} />
           <Txt variant="small" style={{ fontWeight: "700", flexShrink: 1, color: fg }} numberOfLines={1}>
@@ -157,6 +164,8 @@ function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose, selectedS
             {group.rows.length}
           </Txt>
           {group.needsYou > 0 && <PulseDot color={colors.hi} />}
+          {/* A folded card keeps what is new in it in view. */}
+          {group.unread > 0 && !open && <View accessibilityElementsHidden testID="unread-card-dot" style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: accent }} />}
         </PressScale>
         {open &&
           group.rows.map((r, i) => (
@@ -208,15 +217,17 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   const insets = useSafeAreaInsets();
   const [now, setNow] = useState(Date.now());
   const [refreshing, setRefreshing] = useState(false);
-  // How the chats are listed is remembered on this phone; the projects folded away are only for as long as Home is open.
+  // How the chats are listed, and which project cards are folded away, are remembered on this phone.
   const [grouping, setGrouping] = useState<Grouping>("recent");
-  const [folded, setFolded] = useState<Set<string>>(new Set());
+  const [folded, setFolded] = useState<string[]>([]);
   // Holding a chat down offers to close it (on the Mac too), for a Mac that can.
   const canClose = useMacCan("close");
   const [closing, setClosing] = useState<Row | null>(null);
   useEffect(() => {
     let live = true;
     void loadGrouping().then((g) => live && setGrouping(g));
+    // A card folded before this was read stays folded with the rest.
+    void loadFolded().then((kept) => live && setFolded((now) => [...kept.filter((p) => !now.includes(p)), ...now]));
     return () => {
       live = false;
     };
@@ -225,7 +236,13 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
     setGrouping(g);
     void saveGrouping(g);
   };
-  const toggle = (project: string) => setFolded((f) => new Set(f.has(project) ? [...f].filter((p) => p !== project) : [...f, project]));
+  const toggle = (project: string) => {
+    const next = folded.includes(project) ? folded.filter((p) => p !== project) : [...folded, project];
+    setFolded(next);
+    void saveFolded(next);
+  };
+  const seen = useSeen();
+  useEffect(() => settleSeen(chats), [chats]);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(t);
@@ -233,7 +250,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
 
   const stack = cards(waiting, chats);
   const head = headline(stack.length);
-  const list = rows(chats, now);
+  const list = rows(chats, now, seen);
   const macName = connection.kind === "connected" ? connection.welcome.mac_name : null;
 
   const refresh = async () => {
@@ -298,7 +315,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
             No chats are open on your Mac. Start one in Lantern and it shows up here.
           </Txt>
         ) : grouping === "project" ? (
-          groups(list).map((g) => <ProjectGroup key={g.project} group={g} open={!folded.has(g.project)} onToggle={() => toggle(g.project)} onOpenChat={onOpenChat} onAskClose={canClose ? setClosing : undefined} selectedSlot={selectedSlot} />)
+          groups(list).map((g) => <ProjectGroup key={g.project} group={g} open={!folded.includes(g.project)} onToggle={() => toggle(g.project)} onOpenChat={onOpenChat} onAskClose={canClose ? setClosing : undefined} selectedSlot={selectedSlot} />)
         ) : (
           list.map((r, i) => <ChatRow key={r.slot} row={r} index={i} selected={r.slot === selectedSlot} onPress={() => onOpenChat(r.slot)} onLongPress={canClose ? () => setClosing(r) : undefined} />)
         )}

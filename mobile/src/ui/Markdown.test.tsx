@@ -104,3 +104,15 @@ describe("the rest of the formatting", () => {
     expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
   });
 });
+
+describe("a list in a message that wraps its own width (your bubble)", () => {
+  it("lets a list item's words size their row, not start from nothing: a zero basis collapses a shrink-wrapped bubble to the bullet", async () => {
+    await render(<Markdown text={"- first thing to do\n- second thing to do"} />);
+    const style = StyleSheet.flatten(screen.getByText("first thing to do").props.style);
+    // `flex: 1` is a basis of 0: inside a box that is only as wide as what it holds, that is no width at all.
+    expect(style.flex).toBeUndefined();
+    expect(style.flexBasis).toBeUndefined();
+    expect(style.flexGrow).toBe(1);
+    expect(style.flexShrink).toBe(1);
+  });
+});

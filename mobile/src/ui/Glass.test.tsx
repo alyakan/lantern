@@ -5,7 +5,7 @@ import { lightColors } from "./theme";
 
 // The module asks the phone about reduced transparency as it loads, and listens for the setting changing: watch for that.
 const subscribe = jest.spyOn(AccessibilityInfo, "addEventListener");
-const { Glass, GLASS_FILL } = require("./Glass") as typeof import("./Glass");
+const { Glass, GLASS_FILL, COMPOSER_FILL } = require("./Glass") as typeof import("./Glass");
 const reduce = (on: boolean) => act(async () => void (subscribe.mock.calls.find((c) => c[0] === "reduceTransparencyChanged")![1] as (on: boolean) => void)(on));
 
 const available = isLiquidGlassAvailable as jest.Mock;
@@ -42,6 +42,17 @@ describe("a glass surface", () => {
     // What the glass blurs includes the surface's own fill: past about a quarter opaque, the box reads as a solid card.
     expect(parseInt(GLASS_FILL, 16) / 255).toBeLessThanOrEqual(0.25);
     expect(parseInt(GLASS_FILL, 16)).toBeGreaterThan(0);
+  });
+
+  it("keeps more of the card under it where words are typed, and still not a flat one", async () => {
+    available.mockReturnValue(true);
+    await render(<Glass testID="surface" fill={COMPOSER_FILL} style={{ borderRadius: 20 }} />);
+    expect(fill()).toBe(`${lightColors.card}${COMPOSER_FILL}`);
+    // Enough to read the words over a chat running under the box, and short of opaque so the glass over it still blurs the page.
+    const opacity = parseInt(COMPOSER_FILL, 16) / 255;
+    expect(opacity).toBeGreaterThanOrEqual(0.6);
+    expect(opacity).toBeLessThan(0.85);
+    expect(parseInt(COMPOSER_FILL, 16)).toBeGreaterThan(parseInt(GLASS_FILL, 16));
   });
 
   it("is today's solid card, with its shadow, where it doesn't", async () => {

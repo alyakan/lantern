@@ -64,6 +64,8 @@ export interface Row {
   activeAt: number;
   /** What is said at the right: "Asleep", "4 min", "Needs you", "Stopped"; null while working (a moving bar shows). */
   note: string | null;
+  /** Claude has gone on in it since it was last shown on this phone, and it is waiting (not working, asleep or asking: those say so already). */
+  unread: boolean;
 }
 
 const STATUS_NOTE: Record<RemoteChat["status"], (c: RemoteChat, now: number) => string | null> = {
@@ -74,13 +76,18 @@ const STATUS_NOTE: Record<RemoteChat["status"], (c: RemoteChat, now: number) => 
   ended: () => "Stopped",
 };
 
+/** Whether a chat has something new: it is waiting, and has moved on since `seen` (where this phone last showed it; null while that isn't known). */
+export function isUnread(c: RemoteChat, seen: Record<string, number> | null): boolean {
+  return seen !== null && c.status === "idle" && c.active_at > (seen[c.slot] ?? 0);
+}
+
 /** Every chat as a row, the most recently active first. */
-export function rows(chats: RemoteChat[], now: number): Row[] {
+export function rows(chats: RemoteChat[], now: number, seen: Record<string, number> | null = null): Row[] {
   return [...chats]
     .sort((a, b) => b.active_at - a.active_at)
     .map((c) => {
       const title = c.title?.trim() || "New chat";
-      return { slot: c.slot, title, project: c.project ?? "", projectColor: projectColorOf(c.project_color), initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now) };
+      return { slot: c.slot, title, project: c.project ?? "", projectColor: projectColorOf(c.project_color), initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now), unread: isUnread(c, seen) };
     });
 }
 
@@ -93,6 +100,8 @@ export interface Group {
   rows: Row[];
   /** How many of them need you. */
   needsYou: number;
+  /** How many of them are unread. */
+  unread: number;
 }
 
 /**
@@ -104,6 +113,6 @@ export function groups(list: Row[]): Group[] {
   const byProject = new Map<string, Row[]>();
   for (const r of list) byProject.set(r.project, [...(byProject.get(r.project) ?? []), r]);
   return [...byProject]
-    .map(([project, rs]) => ({ project, rows: [...rs].sort((a, b) => b.activeAt - a.activeAt), needsYou: rs.filter((r) => r.status === "needs_you").length }))
+    .map(([project, rs]) => ({ project, rows: [...rs].sort((a, b) => b.activeAt - a.activeAt), needsYou: rs.filter((r) => r.status === "needs_you").length, unread: rs.filter((r) => r.unread).length }))
     .sort((a, b) => (a.project === "" ? 1 : b.project === "" ? -1 : a.project.localeCompare(b.project, undefined, { sensitivity: "base" }) || (a.project < b.project ? -1 : a.project > b.project ? 1 : 0)));
 }
