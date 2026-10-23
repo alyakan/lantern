@@ -3,6 +3,7 @@ import { Animated, Modal, Pressable, StyleSheet, useWindowDimensions, View } fro
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { LockCover } from "../shell/LockCover";
 import { useLockState } from "../shell/lockContext";
+import { SHEET_MAX } from "../view/layout";
 import { run } from "./motion";
 import { useColors } from "./theme";
 
@@ -39,9 +40,9 @@ export function Sheet({ onClose, fill, children }: { onClose: () => void; fill?:
           <Pressable accessibilityLabel="Close" onPress={close} style={StyleSheet.absoluteFill} />
         </Animated.View>
         {/* Taps above the sheet reach the dark behind it. */}
-        <KeyboardAvoidingView behavior="padding" pointerEvents="box-none" style={{ flex: 1, justifyContent: "flex-end" }}>
-          {/* The most it may take is a number: a percentage of a parent with no height of its own cuts the sheet short. */}
-          <Animated.View style={{ maxHeight: height * MOST, flexShrink: 1, transform: [{ translateY: p.interpolate({ inputRange: [0, 1], outputRange: [height, 0] }) }] }}>
+        <KeyboardAvoidingView behavior="padding" pointerEvents="box-none" style={{ flex: 1, justifyContent: "flex-end", alignItems: "center" }}>
+          {/* The most it may take is a number: a percentage of a parent with no height of its own cuts the sheet short. On a tablet it goes no wider than SHEET_MAX, in the middle. */}
+          <Animated.View style={{ width: "100%", maxWidth: SHEET_MAX, maxHeight: height * MOST, flexShrink: 1, transform: [{ translateY: p.interpolate({ inputRange: [0, 1], outputRange: [height, 0] }) }] }}>
             {children(close)}
             {/* Under the sheet, where the keyboard's rounded corners are: its colour, so there is no gap to see through. */}
             <View pointerEvents="none" style={{ position: "absolute", top: "100%", left: 0, right: 0, height: 600, backgroundColor: under }} />

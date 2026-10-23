@@ -8,6 +8,8 @@ import { Root, type RootProps } from "./Root";
 
 jest.mock("expo-camera", () => ({ CameraView: () => null, useCameraPermissions: () => [{ granted: false, canAskAgain: true }, jest.fn()] }));
 jest.mock("expo-clipboard", () => ({ getStringAsync: jest.fn(async () => "") }));
+// These are the phone's screens; the tablet's are in Root.tablet.test.tsx. (The test window is as wide as a tablet's.)
+jest.mock("./useLayout", () => ({ useLayout: () => "phone" }));
 
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 30))));
 

@@ -9,6 +9,7 @@ import { NewChatSheet, type Draft } from "../screens/NewChatSheet";
 import { MacSheet, OfflineScreen } from "../screens/OfflineScreen";
 import { ConfirmLink, PairScreen } from "../screens/PairScreen";
 import { SupportSheet } from "../screens/SupportSheet";
+import { TabletDetail } from "../screens/TabletDetail";
 import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
 import { Button, Txt } from "../ui/components";
 import { FadeSlideIn } from "../ui/motion";
@@ -17,7 +18,12 @@ import { radius, space, useColors } from "../ui/theme";
 import { rows } from "../view/home";
 import type { Controller } from "./controller";
 import { ControllerContext, useConnectionState, useController, useSyncState } from "./hooks";
-import { atRoot, home, navigate, type NavAction } from "./nav";
+import { atRoot, decision, home, navigate, shownSlot } from "./nav";
+import { TabletShell } from "./TabletShell";
+import { useLayout } from "./useLayout";
+
+/** How wide the pairing and connecting screens are on a tablet. */
+const NARROW_MAX = 560;
 
 export interface RootProps {
   controller: Controller;
@@ -69,6 +75,11 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   const connection = useConnectionState();
   const { chats } = useSyncState();
   const [stack, go] = useReducer(navigate, home);
+  // A tablet shows the chats beside the chat ("split") or slides them in over it ("overlay"); a phone has the stack alone.
+  const colors = useColors();
+  const layout = useLayout();
+  const tablet = layout !== "phone";
+  const [chatsOpen, setChatsOpen] = useState(false);
   const [macSheet, setMacSheet] = useState(false);
   // The optional tips, from Home or from the Mac sheet.
   const [supporting, setSupporting] = useState(false);
@@ -80,8 +91,12 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   useEffect(() => {
     if (!openSlot) return;
     go({ type: "jump_to_chat", slot: openSlot });
+    setChatsOpen(false);
     onOpened?.();
   }, [openSlot, onOpened]);
+
+  // The chats slid in over the chat stay out of the way once the tablet is turned or resized.
+  useEffect(() => setChatsOpen(false), [layout]);
 
   // The system's back button (Android) goes back a screen before it leaves the app.
   useEffect(() => {
@@ -90,14 +105,24 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       if (newChat) return setNewChat(null), true;
       if (picking) return setPicking(false), true;
       if (macSheet) return setMacSheet(false), true;
+      if (chatsOpen) return setChatsOpen(false), true;
       if (atRoot(stack)) return false;
       go({ type: "back" });
       return true;
     });
     return () => sub.remove();
-  }, [stack, macSheet, picking, newChat, supporting]);
+  }, [stack, macSheet, picking, newChat, supporting, chatsOpen]);
 
   const back = () => go({ type: "back" });
+  // A tablet has Home beside the chat all the time, so a chat taken from it replaces the one shown instead of stacking on it.
+  const openChat = (slot: string) => {
+    go({ type: tablet ? "jump_to_chat" : "open_chat", slot });
+    setChatsOpen(false);
+  };
+  const review = (slot: string, requestId: string) => {
+    go({ type: tablet ? "jump_to_review" : "review", slot, requestId });
+    setChatsOpen(false);
+  };
   const unpair = async () => {
     setMacSheet(false);
     go({ type: "home" });
@@ -110,26 +135,46 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       {screen}
     </FadeSlideIn>
   );
-  if (pendingLink) return fade("confirm", <ConfirmLink link={pendingLink} onCancel={() => onClearLink?.()} onDone={() => onClearLink?.()} />);
-  if (connection.kind === "unpaired") return fade("pair", <PairScreen />);
+  // The screens before the chats (pairing, connecting) are made for a phone's width: on a tablet they stay that width, in the middle.
+  const narrow = (screen: ReactNode) =>
+    tablet ? (
+      <View style={{ flex: 1, backgroundColor: colors.paper }}>
+        <View style={{ flex: 1, width: "100%", maxWidth: NARROW_MAX, alignSelf: "center" }}>{screen}</View>
+      </View>
+    ) : (
+      screen
+    );
+  if (pendingLink) return fade("confirm", narrow(<ConfirmLink link={pendingLink} onCancel={() => onClearLink?.()} onDone={() => onClearLink?.()} />));
+  if (connection.kind === "unpaired") return fade("pair", narrow(<PairScreen />));
   if (connection.kind === "connecting" || (connection.kind === "offline" && chats.length === 0)) {
-    return fade("offline", <OfflineScreen state={connection} onRetry={() => controller.resume()} onUnpair={unpair} onAddress={(text) => controller.useAddress(text)} />);
+    return fade("offline", narrow(<OfflineScreen state={connection} onRetry={() => controller.resume()} onUnpair={unpair} onAddress={(text) => controller.useAddress(text)} />));
   }
 
-  const items: StackItem[] = stack.map((route, i) => {
-    switch (route.name) {
-      case "home":
-        return { key: `${i}:home`, kind: "push", element: <HomeScreen onOpenChat={(slot) => go({ type: "open_chat", slot })} onReview={(slot, requestId) => go({ type: "review", slot, requestId })} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} /> };
-      case "chat":
-        return { key: `${i}:chat:${route.slot}`, kind: "push", element: <ChatScreen slot={route.slot} onBack={back} onReview={(requestId) => go({ type: "review", slot: route.slot, requestId })} /> };
-      case "decide":
-        return { key: `${i}:decide:${route.requestId}`, kind: "modal", element: <DecideScreen slot={route.slot} requestId={route.requestId} onClose={back} /> };
-    }
-  });
+  const homeScreen = (selectedSlot?: string | null) => <HomeScreen onOpenChat={openChat} onReview={review} onOpenMac={() => setMacSheet(true)} onCompose={() => setPicking(true)} onNewChat={(draft) => setNewChat(draft ?? { text: "" })} onSupport={() => setSupporting(true)} selectedSlot={selectedSlot} />;
+  const items: StackItem[] = tablet
+    ? []
+    : stack.map((route, i) => {
+        switch (route.name) {
+          case "home":
+            return { key: `${i}:home`, kind: "push", element: homeScreen() };
+          case "chat":
+            return { key: `${i}:chat:${route.slot}`, kind: "push", element: <ChatScreen slot={route.slot} onBack={back} onReview={(requestId) => go({ type: "review", slot: route.slot, requestId })} /> };
+          case "decide":
+            return { key: `${i}:decide:${route.requestId}`, kind: "modal", element: <DecideScreen slot={route.slot} requestId={route.requestId} onClose={back} /> };
+        }
+      });
+  const shown = shownSlot(stack);
+  const deciding = decision(stack);
   return fade(
     "stack",
     <View style={{ flex: 1 }}>
-      <AnimatedStack items={items} />
+      {tablet ? (
+        <TabletShell layout={layout} open={chatsOpen} onOpen={() => setChatsOpen(true)} onClose={() => setChatsOpen(false)} sidebar={homeScreen(shown)}>
+          <TabletDetail slot={shown} decide={deciding} layout={layout} onShowChats={() => setChatsOpen(true)} onBack={back} onReview={review} />
+        </TabletShell>
+      ) : (
+        <AnimatedStack items={items} />
+      )}
       {macSheet && (
         <MacSheet
           state={connection}
@@ -150,7 +195,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
           onClose={() => setNewChat(null)}
           onStarted={(slot) => {
             setNewChat(null);
-            go({ type: "open_chat", slot } satisfies NavAction);
+            openChat(slot);
           }}
         />
       )}
@@ -159,7 +204,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
           onClose={() => setPicking(false)}
           onPick={(slot) => {
             setPicking(false);
-            go({ type: "open_chat", slot } satisfies NavAction);
+            openChat(slot);
           }}
         />
       )}

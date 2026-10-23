@@ -28,6 +28,9 @@ export interface ChatProps {
   onBack: () => void;
   /** Opens the full-screen decision for one of this chat's prompts. */
   onReview: (requestId: string) => void;
+  /** What leads the header: a back button (the phone), the chats' button (a tablet held upright: they slide in), or nothing (they are beside the chat). */
+  lead?: "back" | "sidebar" | "none";
+  onSidebar?: () => void;
 }
 
 /** How long "Caught up on 14 events" stays up. */
@@ -36,7 +39,7 @@ const BANNER_MS = 4000;
 export const WAKE_WAIT_MS = 20_000;
 
 /** A chat, as a timeline with a message box under it. */
-export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
+export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }: ChatProps) {
   const colors = useColors();
   const controller = useController();
   const { sync } = controller;
@@ -220,11 +223,23 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
   const head = (
     <>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: insets.top + 6, paddingHorizontal: 16, paddingBottom: 10 }}>
-        <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={8} scaleTo={0.88}>
-          <Glass style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
-            <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
-          </Glass>
-        </PressScale>
+        {lead === "back" && (
+          <PressScale accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} hitSlop={8} scaleTo={0.88}>
+            <Glass style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+              <View accessibilityElementsHidden style={{ width: 12, height: 12, marginLeft: 4, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: colors.ink, borderRadius: 2, transform: [{ rotate: "45deg" }] }} />
+            </Glass>
+          </PressScale>
+        )}
+        {lead === "sidebar" && (
+          <PressScale accessibilityRole="button" accessibilityLabel="Show chats" onPress={onSidebar} hitSlop={8} scaleTo={0.88}>
+            <Glass style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+              {/* A window with its side panel: the chats. */}
+              <View accessibilityElementsHidden style={{ width: 20, height: 16, borderRadius: 4, borderWidth: 2, borderColor: colors.ink, flexDirection: "row" }}>
+                <View style={{ width: 5, borderRightWidth: 2, borderColor: colors.ink }} />
+              </View>
+            </Glass>
+          </PressScale>
+        )}
         {/* The title bar opens the chat's settings (what it runs on, and its models) when the Mac can say what those are. */}
         <ChatSettings slot={slot} chat={chat} plan={plan} context={view.context} onProblem={setProblem} onClosed={onBack}>
           {(line) => (
