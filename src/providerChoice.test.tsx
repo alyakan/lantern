@@ -200,6 +200,15 @@ describe("with two providers", () => {
     expect(JSON.parse(localStorage.getItem("settings.providerByFolder") ?? "{}")).toEqual({ [FOLDER]: "codex" });
   });
 
+  it("starts a Claude Code team from a Codex chat's Start a team tile, not a notice", async () => {
+    localStorage.setItem("settings.providerByFolder", JSON.stringify({ [FOLDER]: "codex" }));
+    await launch(true, "Ask Codex…");
+    fireEvent.click(await screen.findByRole("button", { name: /Start a team/ }));
+    await waitFor(() => expect(started()).toHaveLength(2));
+    expect(started()[1].claudePath).toBe("/Users/you/.local/bin/claude");
+    expect(started()[1].settings.orchestrator).toBe(true);
+  });
+
   it("shows no provider chip once the chat has begun, and counts what a Codex turn used in tokens, never dollars", async () => {
     localStorage.setItem("settings.providerByFolder", JSON.stringify({ [FOLDER]: "codex" }));
     await launch(true, "Ask Codex…");

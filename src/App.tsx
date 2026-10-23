@@ -2118,7 +2118,8 @@ export default function App() {
       sendIn(pending.slot, pending.text);
     }
   }, [chats.slots]);
-  const startTeam = () => (hero ? changeWorkflow("team") : newOrchestra());
+  // (On a provider that can't lead a team, a new chat is the Lead instead: it is Claude Code's.)
+  const startTeam = () => (hero && caps.supports_lantern_tools ? changeWorkflow("team") : newOrchestra());
   useAction("work-build", () => pickFlavour("build"), workReady);
   useAction("work-review-pr", () => setPrPicker(true), workReady);
   useAction("work-debug", () => pickFlavour("debug"), workReady);
@@ -2635,7 +2636,7 @@ export default function App() {
                       <RestoreCard chats={offeredTop} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />
                     )}
                     {chatExtras}
-                    {state.folder && <StartScreen picked={stepsMode ? state.flavourPick : null} explain={explain} onExplain={(on) => state.flavourPick && pickFlavour(state.flavourPick, on)} team={workflowOf(state) === "team"} onFlavour={pickFlavour} onReview={() => setPrPicker(true)} onTeam={() => changeWorkflow(workflowOf(state) === "team" ? "chat" : "team")} />}
+                    {state.folder && <StartScreen picked={stepsMode ? state.flavourPick : null} explain={explain} onExplain={(on) => state.flavourPick && pickFlavour(state.flavourPick, on)} team={workflowOf(state) === "team"} onFlavour={pickFlavour} onReview={() => setPrPicker(true)} onTeam={() => (workflowOf(state) === "team" ? changeWorkflow("chat") : startTeam())} />}
                     {composer}
                   </div>
                 </div>

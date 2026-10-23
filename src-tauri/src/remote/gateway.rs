@@ -741,7 +741,7 @@ impl<'a> Session<'a> {
             }
             Request::Answer { slot, request_id, allow, message, answers } => {
                 self.chat_known(&slot)?;
-                let asked = host.pending(&slot).into_iter().find(|p| p.request_id == request_id).ok_or("That was answered already, or Claude stopped asking. (A Codex chat's questions can only be answered on your Mac for now.)")?;
+                let asked = host.pending(&slot).into_iter().find(|p| p.request_id == request_id).ok_or("That was answered already, or Claude stopped asking.")?;
                 // On deny there is nothing to run, so no answers matter. Otherwise the tool runs with Claude's own input,
                 // a question's with the answers added (see answers.rs).
                 let updated = match answers {
