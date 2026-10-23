@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, StyleSheet, View } from "react-native";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { markSeen } from "../seen";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
 import { Button, ProjectTag, Txt } from "../ui/components";
@@ -78,6 +79,20 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   const [seed, setSeed] = useState<ComposeSeed | undefined>(undefined);
   const [repliedTo, setRepliedTo] = useState<string | null>(null);
   const list = useRef<FlashListRef<Row>>(null);
+
+  // Whatever the chat did while it is open is seen: it isn't unread on Home. Once more when it closes, for what came as it went.
+  const activeAt = chat?.active_at;
+  const latest = useRef<number | undefined>(activeAt);
+  latest.current = activeAt;
+  useEffect(() => {
+    if (activeAt !== undefined) markSeen(slot, activeAt);
+  }, [slot, activeAt]);
+  useEffect(
+    () => () => {
+      if (latest.current !== undefined) markSeen(slot, latest.current);
+    },
+    [slot],
+  );
 
   // The chat's events come for as long as this screen is open.
   useEffect(() => {

@@ -149,6 +149,52 @@ describe("deciding", () => {
     expect(asked.filter((r) => r.op === "answer")).toEqual([]);
   });
 
+  it("can be minimized at any point, back to the chat, without answering", async () => {
+    const { onClose, asked } = await decide();
+    await fireEvent.press(screen.getByRole("button", { name: "Minimize" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(asked.filter((r) => r.op === "answer")).toEqual([]);
+  });
+
+  it("can be minimized once the answer failed, and for a question", async () => {
+    const { onClose } = await decide(question, { answer: new Error("No reply from your Mac.") });
+    await fireEvent.press(screen.getByText("Stable"));
+    await fireEvent.press(screen.getByRole("button", { name: "Send answer" }));
+    await waitFor(() => expect(screen.getByText("No reply from your Mac.")).toBeTruthy());
+    await fireEvent.press(screen.getByRole("button", { name: "Minimize" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("an answer whose reply was lost (a timeout) is closed once the Mac stops listing it, not left with the swipe up", async () => {
+    const { controller, onClose } = await decide(push, { answer: new Error("No reply from your Mac.") });
+    await act(async () => activate());
+    await waitFor(() => expect(screen.getByText("No reply from your Mac.")).toBeTruthy());
+    expect(screen.getByLabelText("Swipe to allow")).toBeTruthy();
+    // The Mac had the answer after all: the prompt leaves its list.
+    await act(async () => controller.sync.apply({ type: "waiting", list: [] }));
+    expect(screen.getByText("Answered.")).toBeTruthy();
+    expect(screen.queryByLabelText("Swipe to allow")).toBeNull();
+    expect(screen.queryByText("No reply from your Mac.")).toBeNull();
+    await waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: CLOSE_AFTER_MS + 1500 });
+  });
+
+  it("a reply that fails after the prompt is gone doesn't bring the swipe back", async () => {
+    let fail: (e: Error) => void = () => {};
+    const { controller } = makeController();
+    attachSession(controller);
+    // The answer hangs until we say it failed.
+    const live = (controller.sync as unknown as { session: { ask: (r: { op: string }) => Promise<unknown> } }).session;
+    const ask = live.ask;
+    live.ask = (r) => (r.op === "answer" ? new Promise((_, reject) => (fail = reject)) : ask(r));
+    await renderWith(<DecideScreen slot="a" requestId="p1" onClose={jest.fn()} />, { chats: [chat()], waiting: [push] }, controller);
+    await act(async () => activate());
+    await act(async () => controller.sync.apply({ type: "waiting", list: [] }));
+    expect(screen.getByText("Answered.")).toBeTruthy();
+    await act(async () => fail(new Error("No reply from your Mac.")));
+    expect(screen.getByText("Answered.")).toBeTruthy();
+    expect(screen.queryByLabelText("Swipe to allow")).toBeNull();
+  });
+
   it("says a prompt already gone was answered already", async () => {
     const { controller } = makeController();
     const onClose = jest.fn();

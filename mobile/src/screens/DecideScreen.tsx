@@ -6,6 +6,7 @@ import { useController, useSyncState } from "../shell/hooks";
 import { Button, Tag, Txt } from "../ui/components";
 import { AboveKeyboard, useKeyboardUp } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
+import { Chevron } from "../ui/Chevron";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { radius, space, useColors } from "../ui/theme";
 import { approvalOf, promptView, type PromptView, type Question } from "../view/prompts";
@@ -20,7 +21,8 @@ export interface DecideProps {
 /** How long what it came to ("Allowed", "Answered on your Mac") stays before the screen closes by itself. */
 export const CLOSE_AFTER_MS = 2000;
 
-type Outcome = { kind: "none" } | { kind: "sending" } | { kind: "done"; allowed: boolean } | { kind: "elsewhere" } | { kind: "failed"; why: string };
+/** `elsewhere`: it left the Mac's list without this screen's answer coming back (`ours`: this phone had sent one, and it went through even though the reply didn't). */
+type Outcome = { kind: "none" } | { kind: "sending" } | { kind: "done"; allowed: boolean } | { kind: "elsewhere"; ours: boolean } | { kind: "failed"; why: string };
 
 /** What the answers to a prompt's questions come to, one string per question (a multi-select joined with commas). */
 export function answersFrom(qs: Question[], picks: Record<string, string[]>, typed: Record<string, string>): Record<string, string> | null {
@@ -126,10 +128,12 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   const asked = kept.current;
   const chat = chats.find((c) => c.slot === slot);
 
+  // Once the Mac no longer lists it, it is answered, whatever this screen last heard: an answer that went through but whose
+  // reply was lost (a poor connection) lands in "failed" or stays "sending", and would otherwise keep a swipe up for ever.
   const gone = !live && !!asked;
   useEffect(() => {
-    if (!gone || outcome.kind !== "none") return;
-    setOutcome({ kind: "elsewhere" });
+    if (!gone) return;
+    setOutcome((o) => (o.kind === "done" || o.kind === "elsewhere" ? o : { kind: "elsewhere", ours: o.kind !== "none" }));
   }, [gone, outcome.kind]);
   useEffect(() => {
     if (outcome.kind !== "elsewhere" && outcome.kind !== "done") return;
@@ -163,12 +167,13 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
     setOutcome({ kind: "sending" });
     try {
       await controller.sync.answer(slot, requestId, allow, withAnswers);
-      setOutcome({ kind: "done", allowed: allow });
+      // A reply that comes late, after the Mac stopped listing it, doesn't undo that.
+      setOutcome((o) => (o.kind === "elsewhere" ? o : { kind: "done", allowed: allow }));
       // The swipe buzzes for itself; the rest say what it came to.
       if (!allow) buzz("warning");
       else if (withAnswers) buzz("success");
     } catch (e) {
-      setOutcome({ kind: "failed", why: (e as Error).message });
+      setOutcome((o) => (o.kind === "elsewhere" ? o : { kind: "failed", why: (e as Error).message }));
     }
   };
 
@@ -184,6 +189,13 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
     // The keyboard (for "Something else") pushes the buttons up with it, and the list above gets shorter.
     <AboveKeyboard style={{ backgroundColor: colors.night, paddingTop: insets.top + 56, paddingBottom: keyboard ? 12 : Math.max(insets.bottom, 20), paddingHorizontal: 22 }}>
       <StatusBar style="light" />
+      {/* The decision can be put away at any point (it keeps waiting, in the chat and on Home) and come back to with Review. */}
+      <PressScale accessibilityRole="button" accessibilityLabel="Minimize" accessibilityHint="Back to the chat. The decision keeps waiting." onPress={onClose} haptic="select" scaleTo={0.94} hitSlop={10} style={{ position: "absolute", top: insets.top + 8, left: 14, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, minHeight: 40 }}>
+        <Chevron open color={colors.white} />
+        <Txt variant="small" tone="white" style={{ fontWeight: "700" }}>
+          Minimize
+        </Txt>
+      </PressScale>
       <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 12, paddingBottom: 16 }}>
         {/* The parts of the decision arrive one after another as the screen rises. */}
         <FadeSlideIn from={10} delay={80} style={{ alignSelf: "flex-start" }}>
@@ -226,7 +238,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
       )}
       {outcome.kind === "elsewhere" && (
         <Txt variant="small" tone="night" style={{ marginBottom: 12 }} accessibilityRole="alert">
-          Answered on your Mac.
+          {outcome.ours ? "Answered." : "Answered on your Mac."}
         </Txt>
       )}
       {outcome.kind === "done" && (

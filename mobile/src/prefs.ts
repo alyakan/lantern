@@ -50,3 +50,51 @@ export async function saveGrouping(g: Grouping): Promise<void> {
     // Not remembered: Home is as it was chosen until the app closes.
   }
 }
+
+const FOLDED_KEY = "lantern.home-folded";
+/** How many folded projects are remembered (the newest folded): the stored value stays small. */
+export const FOLDED_KEPT = 40;
+
+/** The projects folded away in Home's project cards, by name; none when nothing was folded or it can't be read. */
+export async function loadFolded(): Promise<string[]> {
+  try {
+    const raw: unknown = JSON.parse((await SecureStore.getItemAsync(FOLDED_KEY, OPTIONS)) ?? "[]");
+    return Array.isArray(raw) ? raw.filter((p): p is string => typeof p === "string").slice(-FOLDED_KEPT) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveFolded(projects: string[]): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(FOLDED_KEY, JSON.stringify(projects.slice(-FOLDED_KEPT)), OPTIONS);
+  } catch {
+    // Not remembered: the cards are as they were left until the app closes.
+  }
+}
+
+const SEEN_KEY = "lantern.chats-seen";
+/** How many chats' last-seen marks are kept: the stored value stays small (a chat that is closed has its mark dropped too). */
+export const SEEN_KEPT = 60;
+
+/** Where each chat stood (the Mac's `active_at`) when this phone last showed it; null when nothing was kept yet (the first launch). */
+export async function loadSeen(): Promise<Record<string, number> | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(SEEN_KEY, OPTIONS);
+    if (raw === null) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return Object.fromEntries(Object.entries(parsed).filter((e): e is [string, number] => typeof e[1] === "number"));
+  } catch {
+    return null;
+  }
+}
+
+export async function saveSeen(seen: Record<string, number>): Promise<void> {
+  try {
+    const newest = Object.entries(seen).sort((a, b) => b[1] - a[1]).slice(0, SEEN_KEPT);
+    await SecureStore.setItemAsync(SEEN_KEY, JSON.stringify(Object.fromEntries(newest)), OPTIONS);
+  } catch {
+    // Not remembered: they hold until the app closes.
+  }
+}
