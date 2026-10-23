@@ -20,7 +20,7 @@ import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
 import { ChatSettings } from "./ChatSettings";
 import { AssistantRow, Composer, DesktopRow, DiffSheet, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
-import { RunCommandSheet } from "./RunCommand";
+import { RunCommandCard } from "./RunCommand";
 import { ShellCard } from "./ShellCard";
 
 export interface ChatProps {
@@ -47,7 +47,7 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
   const [output, setOutput] = useState<{ id: string; text: string } | null>(null);
   // A command typed in the terminal, shown back to be run by a swipe: `resolve` says whether it was run.
   const [confirming, setConfirming] = useState<{ command: string; resolve: (ran: boolean) => void } | null>(null);
-  // Whether the swipe happened: the sheet closing after it must not say "not run" before the Mac has answered.
+  // Whether the swipe happened: one swipe is one command, however often the card is touched after it.
   const swiped = useRef(false);
   const connection = useConnectionState();
   const me = useDeviceId();
@@ -293,6 +293,24 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
     <>
       <PlanCard todos={view.todos} />
       {replies.length > 0 && <QuickReplies replies={replies} onSend={send} />}
+      {/* A command typed in the terminal, shown back to be run by a swipe: here in the chat, where the swipe takes a drag. */}
+      {confirming && (
+        <RunCommandCard
+          command={confirming.command}
+          project={chat?.project ?? null}
+          onSwiping={setSwiping}
+          onRun={() => {
+            startCommand();
+            // The card says "Running" for a moment, then goes; the command's own card in the chat takes over.
+            setTimeout(() => setConfirming(null), 450);
+          }}
+          onCancel={() => {
+            // Not run, and the box keeps what was typed.
+            confirming.resolve(false);
+            setConfirming(null);
+          }}
+        />
+      )}
       {asleep ? (
         <View style={{ padding: 16, paddingBottom: Math.max(insets.bottom, 16), gap: 6, backgroundColor: colors.paper }}>
           <Txt variant="small" tone="ink2">
@@ -414,18 +432,6 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           onQuote={() => setSeed({ id: Date.now(), text: quote(actions.text), mode: "append" })}
           onEdit={actions.own && actions.last ? () => setSeed({ id: Date.now(), text: actions.text, mode: "replace" }) : undefined}
           onClose={() => setActions(null)}
-        />
-      )}
-      {confirming && (
-        <RunCommandSheet
-          command={confirming.command}
-          project={chat?.project ?? null}
-          onRun={startCommand}
-          onClose={() => {
-            // Closed without a swipe: not run. After one, the Mac's answer says.
-            if (!swiped.current) confirming.resolve(false);
-            setConfirming(null);
-          }}
         />
       )}
       {searching && (
