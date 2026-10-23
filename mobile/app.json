@@ -69,6 +69,13 @@
         {
           "faceIDPermission": "Lantern asks for Face ID to unlock itself, only if you turn the lock on."
         }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Lantern listens only while dictation is on, to turn your voice into text for the message box.",
+          "speechRecognitionPermission": "Lantern turns your voice into text for the message box. Your phone does this itself where it can; for other languages Apple's speech service does."
+        }
       ]
     ]
   }

@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type ComponentRef } from "react";
-import { Animated, Easing, Pressable, ScrollView, Text, TextInput, View } from "react-native";
+import { Animated, Easing, Linking, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
 import * as Clipboard from "expo-clipboard";
@@ -12,6 +12,7 @@ import { commandOf, isTerminal, plainTyped } from "../view/shell";
 import { term } from "../ui/terminal";
 import { SlashPicker, useSeed, type ComposeSeed } from "./ChatExtras";
 import { useListInput } from "../ui/useListInput";
+import { useDictation } from "../ui/useDictation";
 import { Markdown } from "../ui/Markdown";
 import { bounce, buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
@@ -425,6 +426,12 @@ export function Composer({ onSend, onRun, disabled, placeholder = "Message Claud
   const command = commandOf(text);
   const [running, setRunning] = useState(false);
   const wasTerminal = useRef(false);
+  const dictation = useDictation(text, setText);
+  // A "!" that begins the box (typed, or a quote) makes it a terminal, and the microphone has no place in one; nor does
+  // a box that can't be used (the Mac went away): its button is gone, so nothing could stop it.
+  useEffect(() => {
+    if (terminal || disabled) dictation.cancel();
+  }, [terminal, disabled, dictation.cancel]);
   // The keyboard stays up across the change, in whichever box is there.
   useEffect(() => {
     if (terminal) termInput.current?.focus();
@@ -442,6 +449,7 @@ export function Composer({ onSend, onRun, disabled, placeholder = "Message Claud
     }
   };
   useSeed(seed, (s) => {
+    dictation.cancel();
     setText((t) => (s.mode === "append" && t.trim() ? `${t}\n${s.text}` : s.text));
     input.current?.focus();
   });
@@ -510,26 +518,54 @@ export function Composer({ onSend, onRun, disabled, placeholder = "Message Claud
           </Txt>
         </>
       ) : (
+      <>
+      {dictation.problem && (
+        <View accessibilityRole="alert" style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6, marginHorizontal: 8 }}>
+          <Txt variant="tiny" tone="stop" style={{ flex: 1 }}>
+            {dictation.problem.words}
+          </Txt>
+          {dictation.problem.settings && (
+            <PressScale accessibilityRole="button" accessibilityLabel="Open Settings" onPress={() => void Linking.openSettings()} hitSlop={8} haptic="select" scaleTo={0.94}>
+              <Txt variant="small" tone="cobalt" style={{ fontWeight: "700" }}>
+                Open Settings
+              </Txt>
+            </PressScale>
+          )}
+          <PressScale accessibilityRole="button" accessibilityLabel="Dismiss" onPress={dictation.dismiss} hitSlop={8} haptic="none" scaleTo={0.9}>
+            <Txt variant="small" tone="ink3">
+              ×
+            </Txt>
+          </PressScale>
+        </View>
+      )}
       <Glass lift={0.12} style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }}>
         <TextInput
           ref={input}
           accessibilityLabel="Message"
           value={text}
           {...list}
-          placeholder={placeholder}
+          // Typing by hand takes over from the microphone.
+          onChangeText={(v) => {
+            dictation.edited();
+            list.onChangeText(v);
+          }}
+          placeholder={dictation.listening ? "Listening…" : placeholder}
           placeholderTextColor={colors.ink3}
           multiline
           editable={!disabled}
           style={{ flex: 1, maxHeight: 120, minHeight: 36, fontSize: 15, color: colors.ink, paddingTop: 8, paddingBottom: 8 }}
         />
+        {dictation.available && !disabled && <MicButton listening={dictation.listening} onPress={() => (dictation.listening ? dictation.stop() : void dictation.start())} />}
         <SendButton
           ready={ready}
           onPress={() => {
+            dictation.cancel();
             onSend(text.trim());
             setText("");
           }}
         />
       </Glass>
+      </>
       )}
       </View>
     </View>
@@ -580,6 +616,46 @@ function SendButton({ ready, onPress }: { ready: boolean; onPress: () => void })
         </Animated.View>
       </PressScale>
     </Animated.View>
+  );
+}
+
+/**
+ * The microphone button, beside Send: a drawn microphone; while it listens it is red with a stop square and a halo that
+ * breathes (not for someone who has asked for less motion).
+ */
+function MicButton({ listening, onPress }: { listening: boolean; onPress: () => void }) {
+  const colors = useColors();
+  const breath = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!listening || skips()) {
+      breath.setValue(0);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(breath, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(breath, { toValue: 0, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [listening, breath]);
+  const ink = colors.ink2;
+  return (
+    <PressScale accessibilityRole="button" accessibilityLabel={listening ? "Stop dictating" : "Dictate"} accessibilityState={{ selected: listening }} onPress={onPress} haptic="light" scaleTo={0.88} style={{ width: 40, height: 40, alignItems: "center", justifyContent: "center" }}>
+      {listening && <Animated.View pointerEvents="none" style={{ position: "absolute", width: 40, height: 40, borderRadius: 20, backgroundColor: colors.stop, opacity: breath.interpolate({ inputRange: [0, 1], outputRange: [0.12, 0.32] }) }} />}
+      <View style={{ width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: listening ? colors.stop : "transparent" }}>
+        {listening ? (
+          <View accessibilityElementsHidden style={{ width: 11, height: 11, borderRadius: 3, backgroundColor: colors.white }} />
+        ) : (
+          <View accessibilityElementsHidden style={{ alignItems: "center" }}>
+            <View style={{ width: 9, height: 14, borderRadius: 5, borderWidth: 2, borderColor: ink }} />
+            <View style={{ width: 15, height: 8, marginTop: -6, borderBottomLeftRadius: 8, borderBottomRightRadius: 8, borderWidth: 2, borderTopWidth: 0, borderColor: ink }} />
+            <View style={{ width: 2, height: 3, backgroundColor: ink }} />
+          </View>
+        )}
+      </View>
+    </PressScale>
   );
 }
 

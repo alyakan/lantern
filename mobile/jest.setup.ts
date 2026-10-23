@@ -13,6 +13,32 @@ jest.mock("expo-glass-effect", () => {
   const { View } = require("react-native");
   return { GlassView: View, GlassContainer: View, isLiquidGlassAvailable: jest.fn(() => false), isGlassEffectAPIAvailable: jest.fn(() => false) };
 });
+// No microphone on Node: there is no recognizer unless a test says so, and it can be made to "hear" with __emit.
+jest.mock("expo-speech-recognition", () => {
+  const { useEffect, useRef } = require("react");
+  const listeners = new Map<string, Set<(e: unknown) => void>>();
+  return {
+    ExpoSpeechRecognitionModule: {
+      isRecognitionAvailable: jest.fn(() => false),
+      requestPermissionsAsync: jest.fn(async () => ({ granted: true })),
+      getSupportedLocales: jest.fn(async () => ({ locales: [], installedLocales: [] })),
+      start: jest.fn(),
+      stop: jest.fn(),
+      abort: jest.fn(),
+    },
+    useSpeechRecognitionEvent: (name: string, fn: (e: unknown) => void) => {
+      const latest = useRef(fn);
+      latest.current = fn;
+      useEffect(() => {
+        const on = (e: unknown) => latest.current(e);
+        if (!listeners.has(name)) listeners.set(name, new Set());
+        listeners.get(name)!.add(on);
+        return () => void listeners.get(name)!.delete(on);
+      }, [name]);
+    },
+    __emit: (name: string, e: unknown) => listeners.get(name)?.forEach((on) => on(e)),
+  };
+});
 jest.mock("expo-clipboard", () => ({ getStringAsync: jest.fn(async () => ""), setStringAsync: jest.fn(async () => true) }));
 jest.mock("expo-haptics", () => ({
   notificationAsync: jest.fn(async () => {}),
