@@ -161,6 +161,9 @@ pub enum UiEvent {
     /// A request a rule allowed, with no card: the chat notes it in place of one. `scope` and `rule` say which rule.
     PermissionAutoAllowed { request_id: String, tool_name: String, input: Value, scope: Scope, rule: Rule },
     SessionEnded { code: Option<i32>, stderr_tail: String },
+    /// A command the user started from a paired phone (the window's own are started by the window, which adds its block
+    /// itself): the chat's window adds the block its output lands in, as for a command typed after "!" there.
+    ShellStarted { id: String, command: String },
     /// Output from a command the user ran from the chat box (see shell.rs).
     ShellOutput { id: String, text: String },
     /// That command ended: its exit code (None when a signal ended it), and whether the user stopped it.

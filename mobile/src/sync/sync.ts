@@ -13,6 +13,7 @@ import type { StartedChat } from "../protocol/generated/StartedChat";
 import type { Suggestions } from "../protocol/generated/Suggestions";
 import type { Waiting } from "../protocol/generated/Waiting";
 import type { Pushed, Session } from "../net/session";
+import { newShellId } from "../view/shell";
 import { initialState, reducer, type Action, type State } from "./reducer";
 
 export interface SyncDeps {
@@ -207,6 +208,27 @@ export class Sync {
   /** Whether this Mac can be asked what a phone may choose (Welcome lists "controls"). */
   get hasControls(): boolean {
     return this.has("controls");
+  }
+
+  /**
+   * Runs a command typed after "!" on the Mac, in the chat's folder, as the window's own "!" mode does; the id it was given. Its
+   * card fills in as the Mac's events come. Rejects with why not (the chat is asleep, too long…). Only for a Mac that lists
+   * "shell": an older one ends the connection at a request it doesn't know.
+   */
+  async shellRun(slot: string, command: string): Promise<string> {
+    const id = newShellId(this.now());
+    await this.ask({ op: "shell", slot, id, command });
+    return id;
+  }
+
+  /** Types a reply (a password, a code, y/n) into a running command; rejects with why not (it has ended…). */
+  shellInput(slot: string, id: string, text: string) {
+    return this.ask({ op: "shell_input", slot, id, text });
+  }
+
+  /** Stops a running command, and what it started. */
+  shellStop(slot: string, id: string) {
+    return this.ask({ op: "shell_stop", slot, id });
   }
 
   /** Closes a chat on the Mac, as the window's sidebar does; rejects with why not (Claude is busy, a team's chat…). */

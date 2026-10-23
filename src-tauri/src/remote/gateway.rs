@@ -53,6 +53,33 @@ fn check_new_chat(project: &str, text: &str) -> Result<(), String> {
     }
 }
 
+/// A character that can't be seen, or that changes how the text around it is drawn: a control (a tab is fine), a zero-width or
+/// joining mark, a bidirectional override or isolate, a word joiner, the byte order mark, the soft hyphen. A command with one
+/// can read one way where it is shown to be approved and run another.
+fn hidden(c: char) -> bool {
+    (c.is_control() && c != '\t') || matches!(c, '\u{ad}' | '\u{61c}' | '\u{180e}' | '\u{200b}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{206f}' | '\u{feff}')
+}
+
+/// Whether a phone's request about a command is well formed: the id is one of a phone's own (so a phone can never type into or
+/// stop a command started on the Mac), and a command to run is not empty, not too long, and has nothing in it that can't be seen.
+fn check_shell(id: &str, command: Option<&str>) -> Result<(), String> {
+    if !protocol::phone_shell_id(id) {
+        return Err("That isn't a command id.".into());
+    }
+    if let Some(command) = command {
+        if command.trim().is_empty() {
+            return Err("Type a command to run.".into());
+        }
+        if command.len() > protocol::SHELL_COMMAND_MAX {
+            return Err("That command is too long.".into());
+        }
+        if command.chars().any(hidden) {
+            return Err("That command has a character that can't be seen.".into());
+        }
+    }
+    Ok(())
+}
+
 /// What a phone is told when it asks for Auto and the Mac's setting says no.
 /// What a phone is told when it asks for a team.
 const TEAM_ON_MAC: &str = "A team is started on your Mac.";
@@ -69,6 +96,14 @@ pub trait Host: Send + Sync + 'static {
     /// Asks the window to close a chat for a phone (the gateway has checked it is listed and idle, asleep or stopped; the window
     /// checks again, and refuses a team's Lead or agent).
     fn close(&self, slot: &str) -> Result<(), String>;
+    /// Runs a command a phone typed after "!" in the chat's folder, in a terminal of its own, as the window's own "!" mode does
+    /// (the gateway has checked the chat is open and awake, and that the id and the command are well formed). Its output comes
+    /// back as the chat's events.
+    fn shell_run(&self, slot: String, id: String, command: String) -> BoxFut<Result<(), String>>;
+    /// Types `text` and Enter into a command a phone started (the gateway has checked the id is one of a phone's).
+    fn shell_input(&self, slot: String, id: String, text: String) -> BoxFut<Result<(), String>>;
+    /// Stops a command a phone started, and what it started (the gateway has checked the id is one of a phone's).
+    fn shell_stop(&self, slot: &str, id: &str) -> Result<(), String>;
     /// The projects a chat may be started in from a phone, as (folder, name): those the user already works in.
     fn projects(&self) -> BoxFut<Vec<(String, String)>>;
     /// Starts a chat in `folder` (the gateway has checked it is one of `projects`) with `text` as its first message, on
@@ -129,6 +164,36 @@ pub struct Gateway {
     started: Mutex<HashMap<String, Vec<u64>>>,
     /// What Claude suggests next, kept and shared by every phone.
     suggester: super::suggest::Suggester,
+    /// Which phone started each command, so only that phone answers or stops it.
+    shells: Mutex<ShellOwners>,
+}
+
+/// How many commands' owners are remembered: the oldest is forgotten first, and its command ended long ago.
+const SHELL_OWNERS_MAX: usize = 512;
+
+/// The phone (its device id) that started each command, by chat and command id.
+#[derive(Default)]
+struct ShellOwners {
+    by: HashMap<(String, String), String>,
+    order: std::collections::VecDeque<(String, String)>,
+}
+
+impl ShellOwners {
+    fn claim(&mut self, slot: &str, id: &str, device: &str) {
+        let key = (slot.to_string(), id.to_string());
+        if self.by.insert(key.clone(), device.to_string()).is_none() {
+            self.order.push_back(key);
+            if self.order.len() > SHELL_OWNERS_MAX {
+                if let Some(old) = self.order.pop_front() {
+                    self.by.remove(&old);
+                }
+            }
+        }
+    }
+
+    fn owns(&self, slot: &str, id: &str, device: &str) -> bool {
+        self.by.get(&(slot.to_string(), id.to_string())).is_some_and(|d| d == device)
+    }
 }
 
 /// Why a connection ended before it was in (for tests and logs; the phone just sees it close).
@@ -161,6 +226,7 @@ impl Gateway {
             on_open: Mutex::new(None),
             started: Mutex::default(),
             suggester: Default::default(),
+            shells: Mutex::default(),
         })
     }
 
@@ -609,6 +675,15 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
+    /// Whether this phone started the command: another phone's can't be answered (it may be reading a password) or stopped.
+    fn owns_shell(&self, slot: &str, id: &str) -> Result<(), String> {
+        if self.gw.shells.lock().unwrap().owns(slot, id, &self.device) {
+            Ok(())
+        } else {
+            Err("That isn't a command this phone started.".into())
+        }
+    }
+
     fn chat_known(&self, slot: &str) -> Result<(), String> {
         self.gw.hub.chat(slot).map(|_| ()).ok_or_else(|| "That chat isn't open on your Mac.".to_string())
     }
@@ -728,6 +803,34 @@ impl<'a> Session<'a> {
             Request::StepOutput { slot, tool_use_id } => {
                 self.chat_known(&slot)?;
                 self.gw.hub.step_output(&slot, &tool_use_id).map(serde_json::Value::String).ok_or_else(|| "That step's output isn't kept any more. It is on your Mac.".to_string())
+            }
+            Request::Shell { slot, id, command } => {
+                use super::hub::ChatStatus as S;
+                let chat = self.gw.hub.chat(&slot).ok_or("That chat isn't open on your Mac.")?;
+                check_shell(&id, Some(&command))?;
+                if chat.status == S::Asleep {
+                    return Err("This chat is asleep. Wake it first.".into());
+                }
+                host.shell_run(slot.clone(), id.clone(), command).await?;
+                // It is this phone's: no other answers or stops it.
+                self.gw.shells.lock().unwrap().claim(&slot, &id, &self.device);
+                Ok(serde_json::Value::Null)
+            }
+            Request::ShellInput { slot, id, text } => {
+                self.chat_known(&slot)?;
+                check_shell(&id, None)?;
+                self.owns_shell(&slot, &id)?;
+                // Enter is added by the Mac: no control characters (a newline, ⌃D, an escape) come from a phone.
+                if text.len() > protocol::SHELL_INPUT_MAX || text.chars().any(|c| c.is_control()) {
+                    return Err("That reply is too long, or has a character a terminal reads as a key.".into());
+                }
+                host.shell_input(slot, id, text).await.map(|()| serde_json::Value::Null)
+            }
+            Request::ShellStop { slot, id } => {
+                self.chat_known(&slot)?;
+                check_shell(&id, None)?;
+                self.owns_shell(&slot, &id)?;
+                host.shell_stop(&slot, &id).map(|()| serde_json::Value::Null)
             }
             Request::Suggest { refresh } => self.gw.suggest(refresh).await,
             Request::PushToken { token } => self.gw.store.set_push_token(&self.device, &token).map(|()| serde_json::Value::Null),
@@ -850,6 +953,18 @@ pub(crate) mod tests {
         }
         fn close(&self, slot: &str) -> Result<(), String> {
             self.closed.lock().unwrap().push(slot.into());
+            Ok(())
+        }
+        fn shell_run(&self, slot: String, id: String, command: String) -> BoxFut<Result<(), String>> {
+            self.switched.lock().unwrap().push(format!("{slot}:shell:{id}:{command}"));
+            Box::pin(async { Ok(()) })
+        }
+        fn shell_input(&self, slot: String, id: String, text: String) -> BoxFut<Result<(), String>> {
+            self.switched.lock().unwrap().push(format!("{slot}:shell-input:{id}:{text}"));
+            Box::pin(async { Ok(()) })
+        }
+        fn shell_stop(&self, slot: &str, id: &str) -> Result<(), String> {
+            self.switched.lock().unwrap().push(format!("{slot}:shell-stop:{id}"));
             Ok(())
         }
         fn projects(&self) -> BoxFut<Vec<(String, String)>> {
@@ -1333,6 +1448,106 @@ pub(crate) mod tests {
         let (_, err, _) = p.ask(Request::Close { slot: "nope".into() }).await;
         assert!(err.is_some_and(|e| e.contains("isn't open")));
         assert_eq!(r.host.closed.lock().unwrap().len(), 2, "nothing busy or unknown reached the app");
+    }
+
+    #[tokio::test]
+    async fn a_phone_runs_a_command_in_an_awake_chat_and_answers_and_stops_only_its_own() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        r.hub.asleep("zzz", "/p", None, None);
+        let (_, mut p) = paired(&r).await;
+        let run = |slot: &str, id: &str, command: &str| Request::Shell { slot: slot.into(), id: id.into(), command: command.into() };
+        assert!(p.ask(run("a", "ph-abcd1234", "git status")).await.1.is_none());
+        assert_eq!(*r.host.switched.lock().unwrap(), vec!["a:shell:ph-abcd1234:git status".to_string()]);
+        // What never reaches the app: an asleep or unknown chat, nothing to run, too much, and an id that isn't a phone's (the
+        // window's own are "sh…" and "run-…").
+        let long = "x".repeat(protocol::SHELL_COMMAND_MAX + 1);
+        for (request, why) in [
+            (run("zzz", "ph-abcd1234", "ls"), "asleep"),
+            (run("nope", "ph-abcd1234", "ls"), "isn't open"),
+            (run("a", "ph-abcd1234", "   "), "Type a command"),
+            (run("a", "ph-abcd1234", &long), "too long"),
+            // What can't be seen, or draws backwards, so a command reads one way where it is approved and runs another.
+            (run("a", "ph-abcd1234", "ls\0"), "can't be seen"),
+            (run("a", "ph-abcd1234", "ls\r# hidden"), "can't be seen"),
+            (run("a", "ph-abcd1234", "ls\n rm -rf ."), "can't be seen"),
+            (run("a", "ph-abcd1234", "echo \u{202e}txt.sh"), "can't be seen"),
+            (run("a", "ph-abcd1234", "echo \u{2066}x"), "can't be seen"),
+            (run("a", "ph-abcd1234", "ec\u{200b}ho x"), "can't be seen"),
+            (run("a", "ph-abcd1234", "\u{feff}ls"), "can't be seen"),
+            (run("a", "sh1", "ls"), "isn't a command id"),
+            (run("a", "run-1", "ls"), "isn't a command id"),
+            (run("a", "ph-ab", "ls"), "isn't a command id"),
+            (run("a", "ph-ab_cd1234", "ls"), "isn't a command id"),
+        ] {
+            let (ok, err, _) = p.ask(request).await;
+            assert!(ok.is_none() && err.as_deref().is_some_and(|e| e.contains(why)), "{why}: {err:?}");
+        }
+        assert_eq!(r.host.switched.lock().unwrap().len(), 1, "only the first reached the app");
+
+        // A reply is a line, and a command's reply or stop is only for a phone's own command.
+        let reply = |id: &str, text: &str| Request::ShellInput { slot: "a".into(), id: id.into(), text: text.into() };
+        assert!(p.ask(reply("ph-abcd1234", "hunter2")).await.1.is_none());
+        assert!(p.ask(Request::ShellStop { slot: "a".into(), id: "ph-abcd1234".into() }).await.1.is_none());
+        assert_eq!(r.host.switched.lock().unwrap()[1..], ["a:shell-input:ph-abcd1234:hunter2".to_string(), "a:shell-stop:ph-abcd1234".to_string()]);
+        for bad in ["a\nb", "a\u{4}", "a\u{1b}[A", &"x".repeat(protocol::SHELL_INPUT_MAX + 1)] {
+            let (_, err, _) = p.ask(reply("ph-abcd1234", bad)).await;
+            assert!(err.is_some(), "{bad:?}");
+        }
+        for id in ["sh1", "run-1"] {
+            assert!(p.ask(reply(id, "x")).await.1.is_some_and(|e| e.contains("isn't a command id")), "{id}");
+            assert!(p.ask(Request::ShellStop { slot: "a".into(), id: id.into() }).await.1.is_some_and(|e| e.contains("isn't a command id")), "{id}");
+        }
+        assert_eq!(r.host.switched.lock().unwrap().len(), 3, "nothing else reached the app");
+    }
+
+    #[tokio::test]
+    async fn a_tab_in_a_command_is_fine_and_so_are_accents_and_other_scripts() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        let (_, mut p) = paired(&r).await;
+        let run = |command: &str| Request::Shell { slot: "a".into(), id: "ph-abcd1234".into(), command: command.into() };
+        for command in ["printf 'a\tb'", "echo café", "echo 日本語 😀"] {
+            assert!(p.ask(run(command)).await.1.is_none(), "{command:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn only_the_phone_that_started_a_command_answers_or_stops_it() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        let (_, mut first) = paired(&r).await;
+        let (_, mut second) = paired(&r).await;
+        let id = "ph-abcd1234";
+        assert!(first.ask(Request::Shell { slot: "a".into(), id: id.into(), command: "sudo true".into() }).await.1.is_none());
+        // The other phone may not type into it (it may be reading a password) or stop it.
+        let (ok, err, _) = second.ask(Request::ShellInput { slot: "a".into(), id: id.into(), text: "hunter2".into() }).await;
+        assert!(ok.is_none() && err.is_some_and(|e| e.contains("isn't a command this phone started")));
+        let (ok, err, _) = second.ask(Request::ShellStop { slot: "a".into(), id: id.into() }).await;
+        assert!(ok.is_none() && err.is_some_and(|e| e.contains("isn't a command this phone started")));
+        // Nor one it never heard of, or one in another chat.
+        r.hub.opened("b", "/p");
+        for (slot, id) in [("a", "ph-neverrun1"), ("b", id)] {
+            assert!(first.ask(Request::ShellStop { slot: slot.into(), id: id.into() }).await.1.is_some(), "{slot} {id}");
+        }
+        assert_eq!(r.host.switched.lock().unwrap().len(), 1, "only the start reached the app");
+        // Its own phone does.
+        assert!(first.ask(Request::ShellInput { slot: "a".into(), id: id.into(), text: "ok".into() }).await.1.is_none());
+        assert!(first.ask(Request::ShellStop { slot: "a".into(), id: id.into() }).await.1.is_none());
+        assert_eq!(r.host.switched.lock().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn the_owners_of_commands_are_remembered_up_to_a_limit_and_the_oldest_goes_first() {
+        let mut owners = ShellOwners::default();
+        owners.claim("a", "ph-0", "d1");
+        assert!(owners.owns("a", "ph-0", "d1") && !owners.owns("a", "ph-0", "d2") && !owners.owns("b", "ph-0", "d1"));
+        for i in 1..=SHELL_OWNERS_MAX {
+            owners.claim("a", &format!("ph-{i}"), "d1");
+        }
+        assert!(!owners.owns("a", "ph-0", "d1"), "the oldest was forgotten");
+        assert!(owners.owns("a", &format!("ph-{SHELL_OWNERS_MAX}"), "d1"));
+        assert_eq!(owners.by.len(), SHELL_OWNERS_MAX);
     }
 
     #[tokio::test]

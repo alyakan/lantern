@@ -211,6 +211,38 @@ impl Host for FixtureHost {
         Ok(())
     }
 
+    /// A scripted terminal: it says it ran the command. One with "password" in it asks for one (a secret prompt) and ends when
+    /// answered; one with "sleep" in it keeps running until stopped.
+    fn shell_run(&self, slot: String, id: String, command: String) -> BoxFut<Result<(), String>> {
+        let (bus, pace) = (self.bus.clone(), self.pace);
+        bus.publish(&slot, UiEvent::ShellStarted { id: id.clone(), command: command.clone() });
+        tokio::spawn(async move {
+            tokio::time::sleep(pace).await;
+            if command.contains("password") {
+                bus.publish(&slot, UiEvent::ShellOutput { id: id.clone(), text: "Password: ".into() });
+                bus.publish(&slot, UiEvent::ShellSecret { id, secret: true });
+            } else if command.contains("sleep") {
+                bus.publish(&slot, UiEvent::ShellOutput { id, text: "waiting…\n".into() });
+            } else {
+                bus.publish(&slot, UiEvent::ShellOutput { id: id.clone(), text: format!("ran: {command}\n") });
+                bus.publish(&slot, UiEvent::ShellDone { id, code: Some(0), stopped: false });
+            }
+        });
+        Box::pin(async { Ok(()) })
+    }
+
+    fn shell_input(&self, slot: String, id: String, _text: String) -> BoxFut<Result<(), String>> {
+        self.bus.publish(&slot, UiEvent::ShellSecret { id: id.clone(), secret: false });
+        self.bus.publish(&slot, UiEvent::ShellOutput { id: id.clone(), text: "\nthanks\n".into() });
+        self.bus.publish(&slot, UiEvent::ShellDone { id, code: Some(0), stopped: false });
+        Box::pin(async { Ok(()) })
+    }
+
+    fn shell_stop(&self, slot: &str, id: &str) -> Result<(), String> {
+        self.bus.publish(slot, UiEvent::ShellDone { id: id.to_string(), code: None, stopped: true });
+        Ok(())
+    }
+
     fn set_permissions(&self, slot: &str, permissions: super::protocol::RemotePermissions) -> Result<(), String> {
         self.hub.controls(slot, permissions.as_str(), None);
         Ok(())

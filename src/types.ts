@@ -83,6 +83,7 @@ export type UiEvent =
   | { kind: "permission_resolved"; request_id: string; allow: boolean; by: string }
   | { kind: "permission_auto_allowed"; request_id: string; tool_name: string; input: unknown; scope: RuleScope; rule: Rule }
   | { kind: "session_ended"; code: number | null; stderr_tail: string }
+  | { kind: "shell_started"; id: string; command: string }
   | { kind: "shell_output"; id: string; text: string }
   | { kind: "shell_done"; id: string; code: number | null; stopped: boolean }
   | { kind: "shell_secret"; id: string; secret: boolean }

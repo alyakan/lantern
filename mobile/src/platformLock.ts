@@ -40,8 +40,9 @@ export const lockPlatform: LockPlatform = {
     if (Platform.OS === "ios") return face ? "Face ID" : finger ? "Touch ID" : "your passcode";
     return face || finger ? "your fingerprint or face" : "your passcode";
   },
-  async authenticate(reason) {
-    const result = await LocalAuthentication.authenticateAsync({ promptMessage: reason, cancelLabel: "Cancel", disableDeviceFallback: false });
+  async authenticate(reason, options) {
+    // The passcode is the way in when Face ID fails, unless what is asked must be Face ID (or Touch ID) and nothing else.
+    const result = await LocalAuthentication.authenticateAsync({ promptMessage: reason, cancelLabel: "Cancel", disableDeviceFallback: options?.biometricOnly === true });
     return result.success ? "ok" : resultOf(result.error);
   },
 };
