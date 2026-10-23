@@ -53,6 +53,23 @@ fn check_new_chat(project: &str, text: &str) -> Result<(), String> {
     }
 }
 
+/// Whether a phone's request about a command is well formed: the id is one of a phone's own (so a phone can never type into or
+/// stop a command started on the Mac), and a command to run is not empty, not too long, and has no NUL.
+fn check_shell(id: &str, command: Option<&str>) -> Result<(), String> {
+    if !protocol::phone_shell_id(id) {
+        return Err("That isn't a command id.".into());
+    }
+    if let Some(command) = command {
+        if command.trim().is_empty() {
+            return Err("Type a command to run.".into());
+        }
+        if command.len() > protocol::SHELL_COMMAND_MAX || command.contains('\0') {
+            return Err("That command is too long.".into());
+        }
+    }
+    Ok(())
+}
+
 /// What a phone is told when it asks for Auto and the Mac's setting says no.
 /// What a phone is told when it asks for a team.
 const TEAM_ON_MAC: &str = "A team is started on your Mac.";
@@ -69,6 +86,14 @@ pub trait Host: Send + Sync + 'static {
     /// Asks the window to close a chat for a phone (the gateway has checked it is listed and idle, asleep or stopped; the window
     /// checks again, and refuses a team's Lead or agent).
     fn close(&self, slot: &str) -> Result<(), String>;
+    /// Runs a command a phone typed after "!" in the chat's folder, in a terminal of its own, as the window's own "!" mode does
+    /// (the gateway has checked the chat is open and awake, and that the id and the command are well formed). Its output comes
+    /// back as the chat's events.
+    fn shell_run(&self, slot: String, id: String, command: String) -> BoxFut<Result<(), String>>;
+    /// Types `text` and Enter into a command a phone started (the gateway has checked the id is one of a phone's).
+    fn shell_input(&self, slot: String, id: String, text: String) -> BoxFut<Result<(), String>>;
+    /// Stops a command a phone started, and what it started (the gateway has checked the id is one of a phone's).
+    fn shell_stop(&self, slot: &str, id: &str) -> Result<(), String>;
     /// The projects a chat may be started in from a phone, as (folder, name): those the user already works in.
     fn projects(&self) -> BoxFut<Vec<(String, String)>>;
     /// Starts a chat in `folder` (the gateway has checked it is one of `projects`) with `text` as its first message, on
@@ -729,6 +754,29 @@ impl<'a> Session<'a> {
                 self.chat_known(&slot)?;
                 self.gw.hub.step_output(&slot, &tool_use_id).map(serde_json::Value::String).ok_or_else(|| "That step's output isn't kept any more. It is on your Mac.".to_string())
             }
+            Request::Shell { slot, id, command } => {
+                use super::hub::ChatStatus as S;
+                let chat = self.gw.hub.chat(&slot).ok_or("That chat isn't open on your Mac.")?;
+                check_shell(&id, Some(&command))?;
+                if chat.status == S::Asleep {
+                    return Err("This chat is asleep. Wake it first.".into());
+                }
+                host.shell_run(slot, id, command).await.map(|()| serde_json::Value::Null)
+            }
+            Request::ShellInput { slot, id, text } => {
+                self.chat_known(&slot)?;
+                check_shell(&id, None)?;
+                // Enter is added by the Mac: no control characters (a newline, ⌃D, an escape) come from a phone.
+                if text.len() > protocol::SHELL_INPUT_MAX || text.chars().any(|c| c.is_control()) {
+                    return Err("That reply is too long, or has a character a terminal reads as a key.".into());
+                }
+                host.shell_input(slot, id, text).await.map(|()| serde_json::Value::Null)
+            }
+            Request::ShellStop { slot, id } => {
+                self.chat_known(&slot)?;
+                check_shell(&id, None)?;
+                host.shell_stop(&slot, &id).map(|()| serde_json::Value::Null)
+            }
             Request::Suggest { refresh } => self.gw.suggest(refresh).await,
             Request::PushToken { token } => self.gw.store.set_push_token(&self.device, &token).map(|()| serde_json::Value::Null),
         }
@@ -850,6 +898,18 @@ pub(crate) mod tests {
         }
         fn close(&self, slot: &str) -> Result<(), String> {
             self.closed.lock().unwrap().push(slot.into());
+            Ok(())
+        }
+        fn shell_run(&self, slot: String, id: String, command: String) -> BoxFut<Result<(), String>> {
+            self.switched.lock().unwrap().push(format!("{slot}:shell:{id}:{command}"));
+            Box::pin(async { Ok(()) })
+        }
+        fn shell_input(&self, slot: String, id: String, text: String) -> BoxFut<Result<(), String>> {
+            self.switched.lock().unwrap().push(format!("{slot}:shell-input:{id}:{text}"));
+            Box::pin(async { Ok(()) })
+        }
+        fn shell_stop(&self, slot: &str, id: &str) -> Result<(), String> {
+            self.switched.lock().unwrap().push(format!("{slot}:shell-stop:{id}"));
             Ok(())
         }
         fn projects(&self) -> BoxFut<Vec<(String, String)>> {
@@ -1333,6 +1393,50 @@ pub(crate) mod tests {
         let (_, err, _) = p.ask(Request::Close { slot: "nope".into() }).await;
         assert!(err.is_some_and(|e| e.contains("isn't open")));
         assert_eq!(r.host.closed.lock().unwrap().len(), 2, "nothing busy or unknown reached the app");
+    }
+
+    #[tokio::test]
+    async fn a_phone_runs_a_command_in_an_awake_chat_and_answers_and_stops_only_its_own() {
+        let r = rig();
+        r.hub.opened("a", "/p");
+        r.hub.asleep("zzz", "/p", None, None);
+        let (_, mut p) = paired(&r).await;
+        let run = |slot: &str, id: &str, command: &str| Request::Shell { slot: slot.into(), id: id.into(), command: command.into() };
+        assert!(p.ask(run("a", "ph-abcd1234", "git status")).await.1.is_none());
+        assert_eq!(*r.host.switched.lock().unwrap(), vec!["a:shell:ph-abcd1234:git status".to_string()]);
+        // What never reaches the app: an asleep or unknown chat, nothing to run, too much, and an id that isn't a phone's (the
+        // window's own are "sh…" and "run-…").
+        let long = "x".repeat(protocol::SHELL_COMMAND_MAX + 1);
+        for (request, why) in [
+            (run("zzz", "ph-abcd1234", "ls"), "asleep"),
+            (run("nope", "ph-abcd1234", "ls"), "isn't open"),
+            (run("a", "ph-abcd1234", "   "), "Type a command"),
+            (run("a", "ph-abcd1234", &long), "too long"),
+            (run("a", "ph-abcd1234", "ls\0"), "too long"),
+            (run("a", "sh1", "ls"), "isn't a command id"),
+            (run("a", "run-1", "ls"), "isn't a command id"),
+            (run("a", "ph-ab", "ls"), "isn't a command id"),
+            (run("a", "ph-ab_cd1234", "ls"), "isn't a command id"),
+        ] {
+            let (ok, err, _) = p.ask(request).await;
+            assert!(ok.is_none() && err.as_deref().is_some_and(|e| e.contains(why)), "{why}: {err:?}");
+        }
+        assert_eq!(r.host.switched.lock().unwrap().len(), 1, "only the first reached the app");
+
+        // A reply is a line, and a command's reply or stop is only for a phone's own command.
+        let reply = |id: &str, text: &str| Request::ShellInput { slot: "a".into(), id: id.into(), text: text.into() };
+        assert!(p.ask(reply("ph-abcd1234", "hunter2")).await.1.is_none());
+        assert!(p.ask(Request::ShellStop { slot: "a".into(), id: "ph-abcd1234".into() }).await.1.is_none());
+        assert_eq!(r.host.switched.lock().unwrap()[1..], ["a:shell-input:ph-abcd1234:hunter2".to_string(), "a:shell-stop:ph-abcd1234".to_string()]);
+        for bad in ["a\nb", "a\u{4}", "a\u{1b}[A", &"x".repeat(protocol::SHELL_INPUT_MAX + 1)] {
+            let (_, err, _) = p.ask(reply("ph-abcd1234", bad)).await;
+            assert!(err.is_some(), "{bad:?}");
+        }
+        for id in ["sh1", "run-1"] {
+            assert!(p.ask(reply(id, "x")).await.1.is_some_and(|e| e.contains("isn't a command id")), "{id}");
+            assert!(p.ask(Request::ShellStop { slot: "a".into(), id: id.into() }).await.1.is_some_and(|e| e.contains("isn't a command id")), "{id}");
+        }
+        assert_eq!(r.host.switched.lock().unwrap().len(), 3, "nothing else reached the app");
     }
 
     #[tokio::test]

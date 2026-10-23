@@ -16,8 +16,11 @@ import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
 import { ChatSearchSheet, distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
 import { useMacCan } from "../shell/useControls";
+import { useAppLock } from "../shell/lockContext";
 import { ChatSettings } from "./ChatSettings";
 import { AssistantRow, Composer, DesktopRow, DiffSheet, PageRow, PromptRow, StepsRow, SummaryRow, TurnRow, UserRow } from "./ChatParts";
+import { RunCommandSheet } from "./RunCommand";
+import { ShellCard } from "./ShellCard";
 
 export interface ChatProps {
   slot: string;
@@ -38,7 +41,13 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
   const { sync } = controller;
   const { chats, views, plan } = useSyncState();
   const canOutput = useMacCan("output");
+  const canShell = useMacCan("shell");
+  const lock = useAppLock();
   const [output, setOutput] = useState<{ id: string; text: string } | null>(null);
+  // A command typed in the terminal, shown back to be run by a swipe: `resolve` says whether it was run.
+  const [confirming, setConfirming] = useState<{ command: string; resolve: (ran: boolean) => void } | null>(null);
+  // Whether the swipe happened: the sheet closing after it must not say "not run" before the Mac has answered.
+  const swiped = useRef(false);
   const connection = useConnectionState();
   const me = useDeviceId();
   const insets = useSafeAreaInsets();
@@ -99,6 +108,39 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
   };
   const fail = (e: unknown) => setProblem((e as Error).message);
 
+  /**
+   * A command typed in the terminal. The phone first checks who is holding it (Face ID or the passcode: every command, and
+   * whether or not the app lock is on; a phone that can't check anyone can't run commands), then shows the command back to be
+   * run by a swipe. Whether it ran: the box keeps what was typed until it did.
+   */
+  const runCommand = async (command: string): Promise<boolean> => {
+    const proof = await lock.verify("Run a command on your Mac");
+    if (proof === "cancelled") return false;
+    if (proof === "unavailable") {
+      setProblem("Running commands needs Face ID or a passcode on this phone, and it has neither. Set one up in the phone's Settings.");
+      return false;
+    }
+    if (proof !== "ok") {
+      setProblem("That didn't work, so nothing was run. Try again.");
+      return false;
+    }
+    swiped.current = false;
+    return new Promise<boolean>((resolve) => setConfirming({ command, resolve }));
+  };
+  // Swiped: it goes to the Mac; a refusal (the chat is asleep, too long…) is said, and the box keeps the command.
+  const startCommand = () => {
+    const c = confirming;
+    if (!c || swiped.current) return;
+    swiped.current = true;
+    sync.shellRun(slot, c.command).then(
+      () => c.resolve(true),
+      (e) => {
+        fail(e);
+        c.resolve(false);
+      },
+    );
+  };
+
   // What was in the chat when it finished loading just is; what comes after (a message sent, Claude's words, a prompt)
   // comes in with a fade and a rise.
   const known = useRef<Set<string> | null>(null);
@@ -153,6 +195,12 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           return <DesktopRow item={row.item} />;
         case "turn":
           return <TurnRow item={row.item} />;
+        case "shell":
+          return (
+            <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>
+              <ShellCard item={row.item} onInput={(text) => sync.shellInput(slot, row.item.id, text).catch(fail)} onStop={() => sync.shellStop(slot, row.item.id).catch(fail)} />
+            </View>
+          );
       }
     })();
     return (
@@ -257,7 +305,7 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           />
         </View>
       ) : (
-        <Composer disabled={!online} onSend={(text) => void sync.send(slot, text)} seed={seed} commands={view.commands} />
+        <Composer disabled={!online} onSend={(text) => void sync.send(slot, text)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} />
       )}
     </>
   );
@@ -360,6 +408,18 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
           onQuote={() => setSeed({ id: Date.now(), text: quote(actions.text), mode: "append" })}
           onEdit={actions.own && actions.last ? () => setSeed({ id: Date.now(), text: actions.text, mode: "replace" }) : undefined}
           onClose={() => setActions(null)}
+        />
+      )}
+      {confirming && (
+        <RunCommandSheet
+          command={confirming.command}
+          project={chat?.project ?? null}
+          onRun={startCommand}
+          onClose={() => {
+            // Closed without a swipe: not run. After one, the Mac's answer says.
+            if (!swiped.current) confirming.resolve(false);
+            setConfirming(null);
+          }}
         />
       )}
       {searching && (

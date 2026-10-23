@@ -13,6 +13,7 @@ import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import type { Waiting } from "../protocol/generated/Waiting";
 import type { Pushed } from "../net/session";
+import { keepEnd } from "../view/shell";
 
 export interface FileEdit {
   path: string;
@@ -27,7 +28,9 @@ export type Item =
   | { kind: "step"; id: string; name: string; summary: string; done: boolean; isError: boolean; edits: FileEdit[]; tests: { passed: number; failed: number; skipped: number } | null }
   | { kind: "prompt"; id: string; toolName: string; input: unknown; state: "open" | "allowed" | "denied" | "withdrawn"; by: string | null; /** What this phone answered a question with. */ answer?: string }
   | { kind: "desktop"; id: string; what: string }
-  | { kind: "turn"; id: string; isError: boolean; result: string | null; durationMs: number | null };
+  | { kind: "turn"; id: string; isError: boolean; result: string | null; durationMs: number | null }
+  /** A command started from this phone's terminal: what it printed (raw, cleaned when shown), and how it stands. */
+  | { kind: "shell"; id: string; command: string; output: string; status: "running" | "done" | "failed" | "stopped"; code: number | null; /** It is reading a secret (a password): what is typed in reply is hidden. */ secret: boolean };
 
 /** The subscription's five-hour window, as the Mac last said it (the account's, the same in every chat). */
 export interface PlanUsage {
@@ -184,6 +187,14 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
       return { ...view, todos: event.items };
     case "context":
       return { ...view, context: { tokens: event.tokens, window: event.window ?? view.context?.window ?? null } };
+    case "shell_started":
+      return { ...view, items: upsert(items, { kind: "shell", id: event.id, command: event.command, output: "", status: "running", code: null, secret: false }, (old) => old) };
+    case "shell_output":
+      return { ...view, items: updateById(items, "shell", event.id, (s) => ({ ...s, output: keepEnd(s.output + event.text) })) };
+    case "shell_secret":
+      return { ...view, items: updateById(items, "shell", event.id, (s) => ({ ...s, secret: event.secret })) };
+    case "shell_done":
+      return { ...view, items: updateById(items, "shell", event.id, (s) => ({ ...s, status: event.stopped ? "stopped" : event.code === 0 ? "done" : "failed", code: event.code, secret: false })) };
     // An event of a kind this app doesn't know (a newer Mac's): left alone, never a blank chat.
     default:
       return view;

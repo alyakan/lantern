@@ -226,6 +226,40 @@ describe("the Mac", () => {
   });
 });
 
+describe("a command started from this phone's terminal", () => {
+  const id = "ph-abcd1234";
+  const started: RemoteEvent = { kind: "shell_started", id, command: "git status" };
+
+  it("is a card that fills with what it prints and ends with its exit code", () => {
+    let s = run([event("a", 1, started), event("a", 2, { kind: "shell_output", id, text: "On branch " }), event("a", 3, { kind: "shell_output", id, text: "main\n" })]);
+    expect(items(s)).toEqual([{ kind: "shell", id, command: "git status", output: "On branch main\n", status: "running", code: null, secret: false }]);
+    s = run([event("a", 4, { kind: "shell_done", id, code: 0, stopped: false })], s);
+    expect(items(s)[0]).toMatchObject({ status: "done", code: 0 });
+    expect(items(run([event("b", 1, started), event("b", 2, { kind: "shell_done", id, code: 2, stopped: false })]), "b")[0]).toMatchObject({ status: "failed", code: 2 });
+    expect(items(run([event("c", 1, started), event("c", 2, { kind: "shell_done", id, code: null, stopped: true })]), "c")[0]).toMatchObject({ status: "stopped" });
+  });
+
+  it("knows when it reads a secret, until it ends", () => {
+    let s = run([event("a", 1, started), event("a", 2, { kind: "shell_secret", id, secret: true })]);
+    expect(items(s)[0]).toMatchObject({ secret: true });
+    s = run([event("a", 3, { kind: "shell_secret", id, secret: false })], s);
+    expect(items(s)[0]).toMatchObject({ secret: false });
+    s = run([event("a", 4, { kind: "shell_secret", id, secret: true }), event("a", 5, { kind: "shell_done", id, code: 0, stopped: false })], s);
+    expect(items(s)[0]).toMatchObject({ secret: false });
+  });
+
+  it("is one card however often it is told of, keeps only the end of a huge output, and ignores output for a command it doesn't have", () => {
+    const big = "x".repeat(70_000);
+    const s = run([event("a", 1, started), event("a", 2, { kind: "shell_output", id, text: big }), event("a", 3, { kind: "shell_output", id, text: "END" }), event("a", 4, { kind: "shell_output", id: "ph-other123", text: "nowhere" })]);
+    expect(items(s)).toHaveLength(1);
+    const out = (items(s)[0] as { output: string }).output;
+    expect(out.length).toBeLessThanOrEqual(60_000);
+    expect(out.endsWith("END")).toBe(true);
+    // A catch-up that has it again doesn't add a second.
+    expect(items(run([reset("a", 9, [started, { kind: "shell_output", id, text: "hi\n" }])], s))).toEqual([expect.objectContaining({ id, output: "hi\n" })]);
+  });
+});
+
 describe("the commands, plan, context and usage a Mac with extras sends", () => {
   const todos: RemoteEvent = { kind: "todos", items: [{ content: "A", status: "pending", active_form: "Doing A" }] };
   const commands: RemoteEvent = { kind: "commands", commands: [{ name: "review", description: "Review", argument_hint: "" }] };

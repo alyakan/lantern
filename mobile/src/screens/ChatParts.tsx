@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState, type ComponentRef } from "react";
-import { Animated, Easing, Pressable, ScrollView, TextInput, View } from "react-native";
+import { Animated, Easing, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { Item } from "../sync/reducer";
 import * as Clipboard from "expo-clipboard";
@@ -8,6 +8,8 @@ import { Button, Chip, Tag, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import { matchCommands, slashQuery } from "../view/slash";
+import { commandOf, isTerminal, plainTyped } from "../view/shell";
+import { term } from "../ui/terminal";
 import { SlashPicker, useSeed, type ComposeSeed } from "./ChatExtras";
 import { useListInput } from "../ui/useListInput";
 import { Markdown } from "../ui/Markdown";
@@ -406,13 +408,39 @@ export const TurnRow = memo(function TurnRow({ item }: { item: Extract<Item, { k
   );
 });
 
-/** The message box: a capsule with a send button; typing and sending only while connected. */
-export function Composer({ onSend, disabled, placeholder = "Message Claude", seed, commands = [] }: { onSend: (text: string) => void; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
+/**
+ * The message box: a capsule with a send button; typing and sending only while connected. With `onRun` a "!" at the start
+ * turns it into a terminal, as on the Mac: the "!" goes, a prompt takes its place, and what is typed is a command for the
+ * Mac to run. `onRun` says whether it ran (it asks first); the box is only emptied when it did.
+ */
+export function Composer({ onSend, onRun, disabled, placeholder = "Message Claude", seed, commands = [] }: { onSend: (text: string) => void; onRun?: (command: string) => Promise<boolean>; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
   const colors = useColors();
   // Over a list that runs under it, the box has no ground of its own.
   const glass = useGlass();
   const [text, setText] = useState("");
   const input = useRef<ComponentRef<typeof TextInput>>(null);
+  const termInput = useRef<ComponentRef<typeof TextInput>>(null);
+  // Terminal mode: the box starts with "!" (the "!" itself isn't shown), and the Mac can run commands.
+  const terminal = !!onRun && isTerminal(text);
+  const command = commandOf(text);
+  const [running, setRunning] = useState(false);
+  const wasTerminal = useRef(false);
+  // The keyboard stays up across the change, in whichever box is there.
+  useEffect(() => {
+    if (terminal) termInput.current?.focus();
+    else if (wasTerminal.current) input.current?.focus();
+    wasTerminal.current = terminal;
+  }, [terminal]);
+  const run = async () => {
+    const typed = command.trim();
+    if (!onRun || !typed || running || disabled) return;
+    setRunning(true);
+    try {
+      if (await onRun(typed)) setText("");
+    } finally {
+      setRunning(false);
+    }
+  };
   useSeed(seed, (s) => {
     setText((t) => (s.mode === "append" && t.trim() ? `${t}\n${s.text}` : s.text));
     input.current?.focus();
@@ -435,6 +463,53 @@ export function Composer({ onSend, disabled, placeholder = "Message Claude", see
         }}
       />
       <View style={{ paddingHorizontal: 12 }}>
+      {terminal ? (
+        <>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 22, borderWidth: 1, borderColor: term.line, backgroundColor: term.bg, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }}>
+            <Text accessibilityElementsHidden style={{ color: term.bright, fontFamily: fonts.mono, fontSize: 16 }}>
+              ›
+            </Text>
+            <TextInput
+              ref={termInput}
+              accessibilityLabel="Shell command"
+              value={command}
+              // The "!" stays in what is kept (it is what says this is a terminal) but is not shown, and the keyboard's smart
+              // punctuation is undone: a shell reads "--" and straight quotes.
+              onChangeText={(v) => setText(`!${plainTyped(v.replace(/\n/g, ""))}`)}
+              onKeyPress={(e) => {
+                // Backspace in an empty terminal leaves it, taking the "!" away.
+                if (e.nativeEvent.key === "Backspace" && command === "") setText("");
+              }}
+              onSubmitEditing={() => void run()}
+              returnKeyType="go"
+              blurOnSubmit={false}
+              autoFocus
+              autoCapitalize="none"
+              autoCorrect={false}
+              spellCheck={false}
+              autoComplete="off"
+              keyboardType="ascii-capable"
+              placeholder="command"
+              placeholderTextColor={term.dim}
+              editable={!disabled && !running}
+              style={{ flex: 1, minHeight: 36, color: term.hi, fontFamily: fonts.mono, fontSize: 15, paddingVertical: 8 }}
+            />
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Run"
+              accessibilityState={{ disabled: !command.trim() || running || !!disabled }}
+              disabled={!command.trim() || running || !!disabled}
+              onPress={() => void run()}
+              style={{ height: 36, paddingHorizontal: 16, borderRadius: radius.pill, backgroundColor: command.trim() && !running && !disabled ? term.bright : term.field, justifyContent: "center" }}
+            >
+              <Text style={{ color: command.trim() && !running && !disabled ? term.bg : term.dim, fontFamily: fonts.mono, fontSize: 13, fontWeight: "700" }}>{running ? "…" : "Run"}</Text>
+            </Pressable>
+          </View>
+          <Txt variant="tiny" tone="ink3" style={{ marginTop: 6, marginLeft: 8, fontFamily: fonts.mono }}>
+            Claude sees the output with your next message · backspace to leave
+          </Txt>
+        </>
+      ) : (
       <Glass lift={0.12} style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }}>
         <TextInput
           ref={input}
@@ -455,6 +530,7 @@ export function Composer({ onSend, disabled, placeholder = "Message Claude", see
           }}
         />
       </Glass>
+      )}
       </View>
     </View>
   );

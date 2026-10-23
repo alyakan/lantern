@@ -559,6 +559,11 @@ function applyEvent(state: State, ev: UiEvent): State {
       const live = ev.sent_by ? { status: "running" as const, thinking: true } : {};
       return { ...state, ...live, seq, items: [...state.items, ...shells, { type: "user", id: `u${seq}`, text, at: ev.at, ...(flavour ? { switchedTo: flavour, ...(explain ? { explained: true } : {}) } : {}) }] };
     }
+    case "shell_started":
+      // A command started from a paired phone: this window didn't start it, so its block is added here. One it already has
+      // (the window's own commands never come this way) isn't added twice.
+      if (state.items.some((it) => it.type === "shell" && it.id === ev.id)) return state;
+      return { ...state, items: [...state.items, { type: "shell", id: ev.id, command: ev.command, output: "", status: "running", code: null, startedAt: Date.now(), shared: false }] };
     case "shell_output":
       if (ev.id.startsWith(RUN_PREFIX)) {
         if (state.run?.id !== ev.id) return state;

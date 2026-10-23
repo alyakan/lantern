@@ -21,6 +21,31 @@ const FLUSH_EVERY: Duration = Duration::from_millis(50);
 /// How often a command's terminal is checked for a secret prompt (echo turned off).
 const SECRET_EVERY: Duration = Duration::from_millis(150);
 
+/// A sink that passes on at most `max` bytes of a command's output (cut at a character, with a note where it stops) and
+/// everything else it says (its secret prompts, its end) as it is: a command that never stops printing can't flood what it is
+/// shown on. One for each command: it counts what it has passed on.
+pub fn capped(sink: Sink, max: usize) -> Sink {
+    let sent = std::sync::atomic::AtomicUsize::new(0);
+    std::sync::Arc::new(move |event| match event {
+        UiEvent::ShellOutput { id, text } => {
+            let before = sent.load(std::sync::atomic::Ordering::Relaxed);
+            if before >= max {
+                return;
+            }
+            let room = max - before;
+            if text.len() <= room {
+                sent.store(before + text.len(), std::sync::atomic::Ordering::Relaxed);
+                sink(UiEvent::ShellOutput { id, text });
+            } else {
+                sent.store(max, std::sync::atomic::Ordering::Relaxed);
+                let cut = text.floor_char_boundary(room);
+                sink(UiEvent::ShellOutput { id, text: format!("{}\n[output cut here: the rest isn't kept]\n", &text[..cut]) });
+            }
+        }
+        other => sink(other),
+    })
+}
+
 struct Running {
     /// Its process group: it leads its own session, so its pid.
     pgid: i32,
@@ -107,6 +132,10 @@ impl Shells {
         if !valid_id(id) {
             return Err(format!("{id:?} is not a command id."));
         }
+        // An id already running would have its entry replaced, and that command could no longer be stopped.
+        if self.running.lock().unwrap().contains_key(id) {
+            return Err(format!("A command with the id {id:?} is running already."));
+        }
         let (master, slave) = open_pty()?;
         let side = |fd: &OwnedFd| fd.try_clone().map(Stdio::from).map_err(|e| e.to_string());
         let mut cmd = Command::new(shell_path());
@@ -184,6 +213,16 @@ impl Shells {
             running.get(id).ok_or("That command has ended.")?.tty.try_clone().map_err(|e| e.to_string())?
         };
         tty.write_all(text.as_bytes()).map_err(|e| format!("Could not type into the command: {e}"))
+    }
+
+    /// How many commands are running now.
+    pub fn running_count(&self) -> usize {
+        self.running.lock().unwrap().len()
+    }
+
+    /// Whether the command `id` is running now.
+    pub fn is_running(&self, id: &str) -> bool {
+        self.running.lock().unwrap().contains_key(id)
     }
 
     /// Stops a running command and everything it started: SIGTERM to its group, SIGKILL if it's still there soon after.
@@ -465,5 +504,49 @@ mod tests {
         assert!(text.contains("length 7"));
         assert!(!text.contains("hunter2"));
         let _ = cleared; // echo comes back on, though the command may end before it's seen
+    }
+
+    #[test]
+    fn output_is_passed_on_up_to_a_cap_with_a_note_where_it_stops_and_the_rest_of_what_a_command_says_is_not_cut() {
+        let seen = std::sync::Arc::new(Mutex::new(Vec::<UiEvent>::new()));
+        let sink: Sink = {
+            let seen = seen.clone();
+            std::sync::Arc::new(move |e| seen.lock().unwrap().push(e))
+        };
+        let out = capped(sink, 10);
+        let say = |text: &str| out(UiEvent::ShellOutput { id: "p".into(), text: text.into() });
+        say("12345");
+        say("67"); // 7 so far
+        say("89é0"); // "é" is two bytes: room for 3, so it is cut after "89"
+        out(UiEvent::ShellSecret { id: "p".into(), secret: true });
+        say("more"); // over the cap: dropped
+        out(UiEvent::ShellDone { id: "p".into(), code: Some(0), stopped: false });
+        let seen = seen.lock().unwrap();
+        let text: Vec<String> = seen.iter().filter_map(|e| if let UiEvent::ShellOutput { text, .. } = e { Some(text.clone()) } else { None }).collect();
+        assert_eq!(text, vec!["12345".to_string(), "67".to_string(), "89\n[output cut here: the rest isn't kept]\n".to_string()]);
+        // Its secret prompt and its end still come.
+        assert!(seen.iter().any(|e| matches!(e, UiEvent::ShellSecret { secret: true, .. })));
+        assert!(seen.iter().any(|e| matches!(e, UiEvent::ShellDone { code: Some(0), .. })));
+    }
+
+    #[tokio::test]
+    async fn an_id_that_is_running_is_not_started_again_so_its_command_can_still_be_stopped() {
+        let dir = tempfile::tempdir().unwrap();
+        let shells = Arc::new(Shells::default());
+        let (sink, mut rx) = collect();
+        shells.run("dup", "sleep 30", dir.path(), None, sink.clone()).unwrap();
+        assert_eq!(shells.running_count(), 1);
+        let again = shells.run("dup", "echo second", dir.path(), None, sink);
+        assert!(again.unwrap_err().contains("running already"));
+        assert_eq!(shells.running_count(), 1, "the first command is still the one held");
+        // It is still the one that is stopped.
+        shells.stop("dup");
+        loop {
+            if let UiEvent::ShellDone { stopped, .. } = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.unwrap().unwrap() {
+                assert!(stopped);
+                break;
+            }
+        }
+        assert_eq!(shells.running_count(), 0);
     }
 }

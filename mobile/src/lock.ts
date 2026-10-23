@@ -140,6 +140,25 @@ export class AppLock {
     else if (result === "unavailable") this.set({ problem: "Couldn't check right now. Try again." });
   }
 
+  /**
+   * Proves it is the phone's owner before something that matters (a command run on the Mac), every time and whether or not
+   * the app lock is on. A phone that has nothing to check anyone with (no passcode, no Face ID) can't: "unavailable", never
+   * a way round it.
+   */
+  async verify(reason: string): Promise<AuthResult> {
+    // A check is already being made: this one is not a second chance.
+    if (this.state.authenticating) return "cancelled";
+    this.set({ authenticating: true, problem: null });
+    try {
+      if ((await this.strength()) === "none") return "unavailable";
+      return await this.platform.authenticate(reason);
+    } catch {
+      return "failed";
+    } finally {
+      this.set({ authenticating: false });
+    }
+  }
+
   /** Turns the lock on, after a check that proves it works (so it can't lock someone out the first time). */
   async enable() {
     if (this.state.authenticating) return;

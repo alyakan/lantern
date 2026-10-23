@@ -309,6 +309,11 @@ struct RemoteHost {
 /// The longest diff a phone is sent.
 const PHONE_DIFF_MAX: usize = 512 << 10;
 
+/// How many commands a chat may be running before a phone's is refused.
+const PHONE_SHELLS_MAX: usize = 4;
+/// How much of one phone-started command's output is kept and sent, in bytes; the rest is cut (see shell::capped).
+const PHONE_SHELL_OUTPUT_MAX: usize = 512 << 10;
+
 impl remote::gateway::Host for RemoteHost {
     fn send(&self, slot: String, text: String, by: String) -> remote::gateway::BoxFut<Result<(), String>> {
         let app = self.app.clone();
@@ -340,6 +345,48 @@ impl remote::gateway::Host for RemoteHost {
 
     fn close(&self, slot: &str) -> Result<(), String> {
         self.app.emit("remote-close-chat", remote::CloseRequest { slot: slot.to_string() }).map_err(|e| e.to_string())
+    }
+
+    fn shell_run(&self, slot: String, id: String, command: String) -> remote::gateway::BoxFut<Result<(), String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let s = state.slots.get(&slot)?;
+            let folder = s.folder()?;
+            // Phones may not fill the Mac with commands: a chat runs a few at once, whoever started them.
+            if s.shells.running_count() >= PHONE_SHELLS_MAX {
+                return Err("This chat is running several commands already. Stop one first.".into());
+            }
+            // Before anything is said about it: refusing a running command's id after announcing it would end that command's card.
+            if s.shells.is_running(&id) {
+                return Err("A command with that id is running already.".into());
+            }
+            let path_env = login_path(&state).await;
+            let sink = slots::tagged(&slot, emitter(&app));
+            // The chat's window adds the block the output lands in before any of it arrives (it didn't start this one itself).
+            sink(ui_event::UiEvent::ShellStarted { id: id.clone(), command: command.clone() });
+            // Its output is cut off after a while: a command that never stops printing can't flood the phone (or the window).
+            if let Err(e) = s.shells.run(&id, &command, &folder, path_env.as_deref(), shell::capped(sink.clone(), PHONE_SHELL_OUTPUT_MAX)) {
+                sink(ui_event::UiEvent::ShellOutput { id: id.clone(), text: format!("{e}\n") });
+                sink(ui_event::UiEvent::ShellDone { id, code: Some(1), stopped: false });
+                return Err(e);
+            }
+            Ok(())
+        })
+    }
+
+    fn shell_input(&self, slot: String, id: String, text: String) -> remote::gateway::BoxFut<Result<(), String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let shells = app.state::<AppState>().slots.get(&slot)?.shells.clone();
+            // Enter is added here: what comes from a phone is a line, never a key.
+            tauri::async_runtime::spawn_blocking(move || shells.input(&id, &format!("{text}\r"))).await.map_err(|e| e.to_string())?
+        })
+    }
+
+    fn shell_stop(&self, slot: &str, id: &str) -> Result<(), String> {
+        self.app.state::<AppState>().slots.get(slot)?.shells.stop(id);
+        Ok(())
     }
 
     fn projects(&self) -> remote::gateway::BoxFut<Vec<(String, String)>> {

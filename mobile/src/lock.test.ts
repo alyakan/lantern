@@ -242,3 +242,49 @@ describe("the app lock", () => {
     expect(lock.getState()).toMatchObject({ enabled: false, problem: "Couldn't save that. Try again." });
   });
 });
+
+describe("proving it is the owner before something that matters", () => {
+  it("asks the phone every time, with the reason, whether or not the app lock is on, and says what it answered", async () => {
+    for (const enabled of [false, true]) {
+      // With the lock on, the first answer is the unlock's own.
+      const { lock, asked } = rig({ enabled, results: enabled ? ["ok", "ok", "failed", "cancelled"] : ["ok", "failed", "cancelled"] });
+      await lock.start();
+      if (enabled) await lock.unlock();
+      asked.length = 0;
+      expect(await lock.verify("Run a command on your Mac")).toBe("ok");
+      expect(await lock.verify("Run a command on your Mac")).toBe("failed");
+      expect(await lock.verify("Run a command on your Mac")).toBe("cancelled");
+      expect(asked).toEqual(Array(3).fill("Run a command on your Mac"));
+      // It locks and unlocks nothing itself, and it is no longer checking.
+      expect(lock.getState()).toMatchObject({ locked: false, authenticating: false });
+    }
+  });
+
+  it("asks even before the lock has read its setting", async () => {
+    const { lock, asked } = rig({ enabled: true });
+    expect(await lock.verify("Run it")).toBe("ok");
+    expect(asked).toEqual(["Run it"]);
+  });
+
+  it("can't be passed by a phone with nothing to check anyone with: it is refused, and nothing is asked", async () => {
+    const { lock, asked } = rig({ enabled: false, strength: "none" });
+    await lock.start();
+    expect(await lock.verify("Run it")).toBe("unavailable");
+    expect(asked).toEqual([]);
+    expect(lock.getState().authenticating).toBe(false);
+  });
+
+  it("counts a check that throws as failed, and a second one asked while one is going as not a second chance", async () => {
+    const throwing = rig({ enabled: false });
+    await throwing.lock.start();
+    (throwing.lock as unknown as { platform: LockPlatform }).platform.authenticate = async () => {
+      throw new Error("sensor");
+    };
+    expect(await throwing.lock.verify("Run it")).toBe("failed");
+    const { lock } = rig({ enabled: false });
+    await lock.start();
+    const first = lock.verify("Run it");
+    expect(await lock.verify("Run it")).toBe("cancelled");
+    await first;
+  });
+});

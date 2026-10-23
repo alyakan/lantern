@@ -71,6 +71,18 @@ describe("reducer and shells", () => {
     expect(reducer(s, { type: "ui_event", event: { kind: "shell_done", id: "s1", code: null, stopped: true } }).items[0]).toMatchObject({ status: "stopped" });
   });
 
+  it("adds the block of a command a paired phone started, once, and its output and end land in it", () => {
+    const started = { type: "ui_event", event: { kind: "shell_started", id: "ph-abcd1234", command: "git status" } } as const;
+    let s = reducer(reducer(idle, started), started);
+    expect(s.items).toHaveLength(1);
+    expect(s.items[0]).toMatchObject({ type: "shell", id: "ph-abcd1234", command: "git status", output: "", status: "running", shared: false });
+    s = reducer(s, { type: "ui_event", event: { kind: "shell_output", id: "ph-abcd1234", text: "On branch main\n" } });
+    s = reducer(s, { type: "ui_event", event: { kind: "shell_done", id: "ph-abcd1234", code: 0, stopped: false } });
+    expect(s.items[0]).toMatchObject({ output: "On branch main\n", status: "done", code: 0 });
+    // Claude sees it with the next message, as with a command typed on the Mac.
+    expect(reducer(s, { type: "user_sent", text: "what's the state?" }).items[0]).toMatchObject({ shared: true });
+  });
+
   it("knows when a command reads a secret, until it's done", () => {
     let s = reducer(idle, { type: "shell_started", id: "s1", command: "sudo true" });
     s = reducer(s, { type: "ui_event", event: { kind: "shell_secret", id: "s1", secret: true } });

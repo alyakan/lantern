@@ -23,7 +23,8 @@ export type Row =
   | { key: string; kind: "steps"; chips: StepChip[] }
   | { key: string; kind: "prompt"; item: Extract<Item, { kind: "prompt" }> }
   | { key: string; kind: "desktop"; item: Extract<Item, { kind: "desktop" }> }
-  | { key: string; kind: "turn"; item: Extract<Item, { kind: "turn" }> };
+  | { key: string; kind: "turn"; item: Extract<Item, { kind: "turn" }> }
+  | { key: string; kind: "shell"; item: Extract<Item, { kind: "shell" }> };
 
 type Step = Extract<Item, { kind: "step" }>;
 
@@ -134,6 +135,8 @@ export function timeline(items: Item[]): Row[] {
         return void rows.push({ key: `d-${item.id}`, kind: "desktop", item });
       case "turn":
         return void rows.push({ key: `t-${item.id}`, kind: "turn", item });
+      case "shell":
+        return void rows.push({ key: `sh-${item.id}`, kind: "shell", item });
     }
   });
   endRun();

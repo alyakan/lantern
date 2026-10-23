@@ -13,7 +13,22 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output"];
+pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell"];
+
+/// What the id of a command started from a phone begins with: the window's own commands are "sh…" and "run-…", so the two
+/// never meet, and only these commands' output is ever sent to a phone (a command typed on the Mac may print anything).
+pub const PHONE_SHELL_PREFIX: &str = "ph-";
+
+/// Whether `id` is a well-formed id for a command started from a phone: the prefix and 4 to 28 letters or digits (the
+/// longest id a command may have is 32 characters, see shell::valid_id).
+pub fn phone_shell_id(id: &str) -> bool {
+    id.strip_prefix(PHONE_SHELL_PREFIX).is_some_and(|rest| (4..=28).contains(&rest.len()) && rest.chars().all(|c| c.is_ascii_alphanumeric()))
+}
+
+/// The longest command a phone may run, in bytes.
+pub const SHELL_COMMAND_MAX: usize = 4096;
+/// The longest reply a phone may type into a running command, in bytes.
+pub const SHELL_INPUT_MAX: usize = 1024;
 
 /// The longest output of a step a phone is sent, in characters (the parser already keeps only the start of a huge one).
 pub const STEP_OUTPUT_MAX: usize = 20_000;
@@ -104,12 +119,23 @@ pub enum RemoteEvent {
         #[ts(type = "number | null")]
         window: Option<u64>,
     },
+    /// A command started from a phone (Request::Shell) is running. Only such commands are sent, never the Mac's own (extras).
+    ShellStarted { id: String, command: String },
+    /// What that command printed, stdout and stderr together, as it comes (extras).
+    ShellOutput { id: String, text: String },
+    /// The command turned echo off to read a secret (a password), or back on: the phone hides what is typed in reply (extras).
+    ShellSecret { id: String, secret: bool },
+    /// The command ended: its exit code (none when a signal ended it), and whether it was stopped (extras).
+    ShellDone { id: String, code: Option<i32>, stopped: bool },
 }
 
 impl RemoteEvent {
     /// Whether only a phone that said "extras" can read it.
     pub fn is_extra(&self) -> bool {
-        matches!(self, RemoteEvent::Commands { .. } | RemoteEvent::Todos { .. } | RemoteEvent::Context { .. })
+        matches!(
+            self,
+            RemoteEvent::Commands { .. } | RemoteEvent::Todos { .. } | RemoteEvent::Context { .. } | RemoteEvent::ShellStarted { .. } | RemoteEvent::ShellOutput { .. } | RemoteEvent::ShellSecret { .. } | RemoteEvent::ShellDone { .. }
+        )
     }
 }
 
@@ -154,6 +180,11 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         }
         U::Todos { parent: None, items } => R::Todos { items: items.iter().map(|t| RemoteTodo { content: t.content.clone(), status: t.status.clone(), active_form: t.active_form.clone() }).collect() },
         U::ContextUsed { tokens } => R::Context { tokens: *tokens, window: None },
+        // Only the commands a phone started: what a command typed on the Mac prints stays there.
+        U::ShellStarted { id, command } if phone_shell_id(id) => R::ShellStarted { id: id.clone(), command: command.clone() },
+        U::ShellOutput { id, text } if phone_shell_id(id) => R::ShellOutput { id: id.clone(), text: text.clone() },
+        U::ShellSecret { id, secret } if phone_shell_id(id) => R::ShellSecret { id: id.clone(), secret: *secret },
+        U::ShellDone { id, code, stopped } if phone_shell_id(id) => R::ShellDone { id: id.clone(), code: *code, stopped: *stopped },
         // A subagent's insides: the phone shows the step that started it, not what it does.
         U::Thinking { parent: Some(_) } | U::TextDelta { parent: Some(_), .. } | U::AssistantText { parent: Some(_), .. } | U::ToolStarted { parent: Some(_), .. } | U::ToolFinished { parent: Some(_), .. } | U::EditApplied { parent: Some(_), .. } | U::TestRun { parent: Some(_), .. } => return None,
         // Lantern's own bookkeeping, and what only the desktop's panes show.
@@ -172,6 +203,7 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         | U::McpTools { .. }
         | U::Models { .. }
         | U::PermissionAutoAllowed { .. }
+        | U::ShellStarted { .. }
         | U::ShellOutput { .. }
         | U::ShellDone { .. }
         | U::ShellSecret { .. }
@@ -496,6 +528,16 @@ pub enum Request {
     /// cut to STEP_OUTPUT_MAX. Never what Claude read from a file or the web (hub.rs `output_may_be_read`). Only what the Mac
     /// still keeps of the chat: an older step may be gone, which is an error. Only sent to a Mac whose Welcome lists "output".
     StepOutput { slot: String, tool_use_id: String },
+    /// Runs `command` (what was typed after "!") in the chat's folder, as the window's own "!" mode does: in a terminal of its
+    /// own, outside claude. `id` is the phone's id for it (see `phone_shell_id`); its output comes back as the chat's
+    /// ShellStarted, ShellOutput, ShellSecret and ShellDone events. The phone asks the user first, with the exact command
+    /// shown: each command is one deliberate swipe. Refused for a chat that is asleep. Only sent to a Mac whose Welcome lists
+    /// "shell" in `features`: an older Mac ends the connection at a request it doesn't know.
+    Shell { slot: String, id: String, command: String },
+    /// Types `text` and Enter into the running command `id`: the reply to what it asked (a password, a code, y/n).
+    ShellInput { slot: String, id: String, text: String },
+    /// Stops the running command `id` and what it started.
+    ShellStop { slot: String, id: String },
     /// The token Expo's push service delivers this phone's notifications with.
     PushToken { token: String },
 }
@@ -608,6 +650,37 @@ mod tests {
         assert_eq!(RemoteChat::from(info(Some("ask"))).permissions, Some(RemotePermissions::Ask));
         assert_eq!(RemoteChat::from(info(Some("bypass"))).permissions, None);
         assert!(serde_json::from_str::<Request>(r#"{"op":"set_permissions","slot":"a","permissions":"bypass"}"#).is_err());
+    }
+
+    #[test]
+    fn only_the_commands_a_phone_started_are_sent_to_a_phone_that_can_read_them() {
+        let events = |id: &str| {
+            [
+                UiEvent::ShellStarted { id: id.into(), command: "ls".into() },
+                UiEvent::ShellOutput { id: id.into(), text: "a\n".into() },
+                UiEvent::ShellSecret { id: id.into(), secret: true },
+                UiEvent::ShellDone { id: id.into(), code: Some(0), stopped: false },
+            ]
+        };
+        let sent = |id: &str| events(id).iter().map(|e| to_remote_for(e, true)).collect::<Vec<_>>();
+        assert_eq!(
+            sent("ph-abcd1234"),
+            vec![
+                Some(RemoteEvent::ShellStarted { id: "ph-abcd1234".into(), command: "ls".into() }),
+                Some(RemoteEvent::ShellOutput { id: "ph-abcd1234".into(), text: "a\n".into() }),
+                Some(RemoteEvent::ShellSecret { id: "ph-abcd1234".into(), secret: true }),
+                Some(RemoteEvent::ShellDone { id: "ph-abcd1234".into(), code: Some(0), stopped: false }),
+            ]
+        );
+        // What a command typed on the Mac prints (it may be anything) stays there, whoever is looking.
+        for id in ["sh1", "run-1", "ph-ab"] {
+            assert!(sent(id).iter().all(Option::is_none), "{id}");
+        }
+        // A phone that can't read extras is sent none of it.
+        assert!(events("ph-abcd1234").iter().all(|e| to_remote_for(e, false).is_none()));
+        assert!(FEATURES.contains(&"shell"));
+        assert!(phone_shell_id("ph-abcd1234") && phone_shell_id(&format!("ph-{}", "a".repeat(28))));
+        assert!(!phone_shell_id(&format!("ph-{}", "a".repeat(29))) && !phone_shell_id("ph-abc") && !phone_shell_id("ph-ab-cd12") && !phone_shell_id(""));
     }
 
     #[test]
