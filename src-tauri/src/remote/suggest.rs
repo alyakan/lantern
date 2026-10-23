@@ -363,9 +363,9 @@ mod tests {
         for (i, slot) in ["a", "b", "c", "d", "e", "f", "g", "h"].iter().enumerate() {
             remote.hub.opened(slot, &format!("/Users/me/proj-{slot}"));
             remote.hub.titled(slot, &format!("Chat {slot}"));
-            remote.bus.publish(slot, UiEvent::UserText { text: format!("first {slot}"), at: Some(i as u64), sent_by: None });
+            remote.bus.publish(slot, UiEvent::UserText { text: format!("first {slot}"), at: Some(i as u64), sent_by: None, images: 0 });
         }
-        remote.bus.publish("c", UiEvent::UserText { text: "second thing\n\n   in c".into(), at: Some(100), sent_by: None });
+        remote.bus.publish("c", UiEvent::UserText { text: "second thing\n\n   in c".into(), at: Some(100), sent_by: None, images: 0 });
         remote.bus.publish("c", UiEvent::AssistantText { parent: None, block_id: "x".into(), text: "reply  in c".into() });
         let got = digests(&remote.hub);
         assert_eq!(got.len(), CHATS, "only the most recent");
@@ -476,7 +476,7 @@ mod tests {
         let remote = crate::remote::Remote::default();
         remote.hub.opened("a", "/Users/me/app");
         remote.hub.titled("a", "Release");
-        remote.bus.publish("a", UiEvent::UserText { text: "Cut the release".into(), at: Some(1), sent_by: None });
+        remote.bus.publish("a", UiEvent::UserText { text: "Cut the release".into(), at: Some(1), sent_by: None, images: 0 });
         let before = digests(&remote.hub);
         for piece in ["Do", "ing ", "it ", "now"] {
             remote.bus.publish("a", UiEvent::TextDelta { parent: None, block_id: "b".into(), text: piece.into() });

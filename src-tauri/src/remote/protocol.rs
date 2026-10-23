@@ -13,7 +13,69 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell"];
+pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images"];
+
+/// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
+/// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteImage {
+    /// "image/jpeg", "image/png", "image/webp" or "image/gif".
+    pub media_type: String,
+    pub data: String,
+}
+
+/// How many pictures one message may carry.
+pub const IMAGES_MAX: usize = 4;
+/// The largest one picture may be, and all of a message's together, in bytes once decoded. Claude takes 5 MB a picture; the
+/// total keeps a message inside what the channel carries (secure::MAX_MESSAGE) with its base64 and JSON around it.
+pub const IMAGE_BYTES_MAX: usize = 3 << 20;
+pub const IMAGES_TOTAL_MAX: usize = 5 << 20;
+
+/// What the first bytes of each kind of picture say it is (WebP is "RIFF", four bytes of size, then "WEBP").
+fn kind_of(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("image/jpeg")
+    } else if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        Some("image/png")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
+}
+
+/// Whether a phone's pictures are fit to hand to Claude: few, not huge, real base64, and each what it says it is (the bytes
+/// are looked at, not the phone's word). Claude is given exactly what was sent, so nothing else about a picture is trusted
+/// or kept: nothing is written to disk.
+pub fn check_images(images: &[RemoteImage]) -> Result<(), String> {
+    use base64::Engine;
+    if images.len() > IMAGES_MAX {
+        return Err(format!("A message can carry {IMAGES_MAX} pictures at most."));
+    }
+    let mut total = 0usize;
+    for image in images {
+        // Looked at before it is decoded: a huge string is refused without the work of reading it.
+        if image.data.len() > IMAGE_BYTES_MAX / 3 * 4 + 4 {
+            return Err("A picture is too big to send. It is shrunk before it goes: try another.".into());
+        }
+        let bytes = base64::engine::general_purpose::STANDARD.decode(&image.data).map_err(|_| "A picture didn't arrive whole.".to_string())?;
+        if bytes.is_empty() || bytes.len() > IMAGE_BYTES_MAX {
+            return Err("A picture is empty or too big to send.".into());
+        }
+        total += bytes.len();
+        if total > IMAGES_TOTAL_MAX {
+            return Err("Those pictures are too big together. Send fewer of them.".into());
+        }
+        match kind_of(&bytes) {
+            Some(kind) if kind == image.media_type => {}
+            Some(_) | None => return Err("A picture isn't the kind of file it says it is: only JPEG, PNG, WebP and GIF are sent.".into()),
+        }
+    }
+    Ok(())
+}
 
 /// What the id of a command started from a phone begins with: the window's own commands are "sh…" and "run-…", so the two
 /// never meet, and only these commands' output is ever sent to a phone (a command typed on the Mac may print anything).
@@ -70,6 +132,10 @@ pub enum RemoteEvent {
         #[ts(type = "number | null")]
         at: Option<u64>,
         sent_by: Option<String>,
+        /// How many pictures went with it, when any did: only the count is ever sent, never the pictures.
+        #[serde(default)]
+        #[ts(optional)]
+        images: Option<u32>,
     },
     /// Claude is thinking (the main thread; a subagent's thinking isn't sent).
     Thinking,
@@ -153,7 +219,7 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
     use RemoteEvent as R;
     use UiEvent as U;
     Some(match event {
-        U::UserText { text, at, sent_by } => R::UserText { text: super::hub::without_notes(text).to_string(), at: *at, sent_by: sent_by.clone() },
+        U::UserText { text, at, sent_by, images } => R::UserText { text: super::hub::without_notes(text).to_string(), at: *at, sent_by: sent_by.clone(), images: (*images > 0).then_some(*images) },
         U::Thinking { parent: None } => R::Thinking,
         U::TextDelta { parent: None, block_id, text } => R::TextDelta { block_id: block_id.clone(), text: text.clone() },
         U::AssistantText { parent: None, block_id, text } => R::AssistantText { block_id: block_id.clone(), text: text.clone() },
@@ -476,7 +542,16 @@ pub enum Request {
     Earlier { slot: String, hidden: u32 },
     Unsubscribe { slot: String },
     /// `client_id`: the phone's own id for the message, so it can match the hub's copy to the one it shows.
-    Send { slot: String, text: String, client_id: String },
+    /// `images`: pictures to go with it (the text may then be empty). Only sent to a Mac whose Welcome lists "images" in
+    /// `features`: an older Mac would send the words without them and say nothing.
+    Send {
+        slot: String,
+        text: String,
+        client_id: String,
+        #[serde(default)]
+        #[ts(optional)]
+        images: Option<Vec<RemoteImage>>,
+    },
     Interrupt { slot: String },
     /// `answers`: a question's answers (AskUserQuestion), by question. A phone never sends a tool's input: Lantern adds
     /// the answers to the input Claude sent (see answers.rs).
@@ -642,6 +717,64 @@ mod tests {
         assert!(matches!(welcome, ServerMessage::Welcome { features, .. } if features.is_empty()));
     }
 
+    fn picture(media_type: &str, bytes: &[u8]) -> RemoteImage {
+        use base64::Engine;
+        RemoteImage { media_type: media_type.into(), data: base64::engine::general_purpose::STANDARD.encode(bytes) }
+    }
+    const JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F'];
+    const PNG: &[u8] = &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0];
+    const WEBP: &[u8] = b"RIFF\x10\0\0\0WEBPVP8 ";
+
+    #[test]
+    fn a_phones_pictures_are_taken_only_when_they_are_what_they_say() {
+        assert!(check_images(&[]).is_ok());
+        assert!(check_images(&[picture("image/jpeg", JPEG), picture("image/png", PNG), picture("image/webp", WEBP), picture("image/gif", b"GIF89a....")]).is_ok());
+        // The bytes are looked at, not the phone's word: a script, or one kind of picture called another, is refused.
+        assert!(check_images(&[picture("image/png", b"#!/bin/sh\nrm -rf ~")]).unwrap_err().contains("isn't the kind"));
+        assert!(check_images(&[picture("image/png", JPEG)]).unwrap_err().contains("isn't the kind"));
+        assert!(check_images(&[picture("image/svg+xml", b"<svg onload=x>")]).is_err());
+        assert!(check_images(&[picture("image/jpeg", WEBP)]).is_err());
+        assert!(check_images(&[picture("image/webp", b"RIFF\x10\0\0\0WAVEfmt ")]).is_err(), "a RIFF that isn't WebP");
+        // Not base64, or not whole, or nothing.
+        for data in ["not base64!!", "/9j/4AAQ\n", "", "A"] {
+            assert!(check_images(&[RemoteImage { media_type: "image/jpeg".into(), data: data.into() }]).is_err(), "{data:?}");
+        }
+    }
+
+    #[test]
+    fn a_phones_pictures_are_few_and_small() {
+        let jpeg = picture("image/jpeg", JPEG);
+        assert!(check_images(&vec![jpeg.clone(); IMAGES_MAX]).is_ok());
+        assert!(check_images(&vec![jpeg.clone(); IMAGES_MAX + 1]).unwrap_err().contains("at most"));
+        let sized = |n: usize| {
+            let mut bytes = JPEG.to_vec();
+            bytes.resize(n, 0);
+            picture("image/jpeg", &bytes)
+        };
+        assert!(check_images(&[sized(IMAGE_BYTES_MAX)]).is_ok());
+        assert!(check_images(&[sized(IMAGE_BYTES_MAX + 1)]).is_err());
+        // Each is fine, together they are not.
+        assert!(check_images(&[sized(IMAGE_BYTES_MAX), sized(IMAGES_TOTAL_MAX - IMAGE_BYTES_MAX)]).is_ok());
+        assert!(check_images(&[sized(IMAGE_BYTES_MAX), sized(IMAGES_TOTAL_MAX - IMAGE_BYTES_MAX + 1)]).unwrap_err().contains("together"));
+        // A huge string is refused before it is decoded.
+        assert!(check_images(&[RemoteImage { media_type: "image/jpeg".into(), data: "A".repeat(IMAGE_BYTES_MAX * 2) }]).unwrap_err().contains("too big"));
+        // The most a message may hold fits the channel with room to spare.
+        const { assert!(IMAGES_TOTAL_MAX / 3 * 4 + (64 << 10) < crate::remote::secure::MAX_MESSAGE) };
+    }
+
+    #[test]
+    fn only_the_count_of_a_messages_pictures_reaches_a_phone_and_old_requests_still_read() {
+        let sent = UiEvent::UserText { text: "look".into(), at: None, sent_by: Some("p".into()), images: 2 };
+        assert!(matches!(to_remote(&sent), Some(RemoteEvent::UserText { images: Some(2), .. })));
+        let json = serde_json::to_string(&to_remote(&sent).unwrap()).unwrap();
+        assert!(!json.contains("base64") && !json.contains("data"), "{json}");
+        assert!(matches!(to_remote(&UiEvent::UserText { text: "x".into(), at: None, sent_by: None, images: 0 }), Some(RemoteEvent::UserText { images: None, .. })));
+        // A phone with no pictures says nothing of them.
+        let old: Request = serde_json::from_str(r#"{"op":"send","slot":"a","text":"hi","client_id":"c1"}"#).unwrap();
+        assert_eq!(old, Request::Send { slot: "a".into(), text: "hi".into(), client_id: "c1".into(), images: None });
+        assert!(FEATURES.contains(&"images"));
+    }
+
     #[test]
     fn a_chat_says_its_mode_and_preset_and_only_the_two_modes_are_taken() {
         let info = |p: Option<&str>| crate::remote::hub::ChatInfo { slot: "a".into(), title: None, folder: None, session_id: None, status: crate::remote::hub::ChatStatus::Idle, last_seq: 0, active_at: 0, permissions: p.map(String::from), preset: Some("max".into()), color: None, workflow: None };
@@ -763,8 +896,8 @@ mod tests {
 
     #[test]
     fn a_message_reaches_the_phone_without_lanterns_notes() {
-        let sent = UiEvent::UserText { text: "[Lantern: this chat switched to Debug. The user picked it.]\n\nit crashes".into(), at: Some(3), sent_by: Some("desktop".into()) };
-        assert_eq!(to_remote(&sent), Some(RemoteEvent::UserText { text: "it crashes".into(), at: Some(3), sent_by: Some("desktop".into()) }));
+        let sent = UiEvent::UserText { text: "[Lantern: this chat switched to Debug. The user picked it.]\n\nit crashes".into(), at: Some(3), sent_by: Some("desktop".into()), images: 0 };
+        assert_eq!(to_remote(&sent), Some(RemoteEvent::UserText { text: "it crashes".into(), at: Some(3), sent_by: Some("desktop".into()), images: None }));
     }
 
     #[test]

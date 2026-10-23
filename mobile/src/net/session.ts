@@ -14,6 +14,8 @@ export const PROTOCOL_VERSION = 1;
 /** How long the Mac has for each step of the handshake, and for each answer. */
 export const STEP_WAIT = 10_000;
 export const ANSWER_WAIT = 15_000;
+/** What a request that carries photos has: they are megabytes to get across, perhaps over a mobile connection. */
+export const UPLOAD_WAIT = 120_000;
 
 export type Welcome = Extract<ServerMessage, { type: "welcome" }>;
 
@@ -103,7 +105,7 @@ export class Session {
   }
 
   /** Asks the Mac; resolves to its answer, rejects with its error (in words for the user). */
-  ask<T = unknown>(request: Request): Promise<T> {
+  ask<T = unknown>(request: Request, wait: number = ANSWER_WAIT): Promise<T> {
     // A connection that is gone answers at once, not after the wait for an answer that can't come.
     if (this.closed) return Promise.reject(new Error("The connection to your Mac closed."));
     const id = this.nextId++;
@@ -111,7 +113,7 @@ export class Session {
       const timer = setTimeout(() => {
         this.answers.delete(id);
         reject(new Error("Your Mac didn't answer in time."));
-      }, ANSWER_WAIT);
+      }, wait);
       this.answers.set(id, { resolve: resolve as (v: unknown) => void, reject, timer });
       try {
         sendMessage(this.link, this.channel, { type: "request", id, request });

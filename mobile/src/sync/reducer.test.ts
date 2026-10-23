@@ -144,6 +144,29 @@ describe("a message sent from this phone", () => {
     expect(items(s)[0]).not.toHaveProperty("sending");
   });
 
+  it("with photos shows them at once, and keeps them where this phone has them when the Mac's copy takes its place", () => {
+    let s = reducer(initialState, { type: "sending", slot: "a", clientId: "m-1", text: "what is this?", at: 5, thumbs: ["file:///a.jpg", "file:///b.jpg"] });
+    expect(items(s)[0]).toMatchObject({ kind: "user", sending: true, images: 2, thumbs: ["file:///a.jpg", "file:///b.jpg"] });
+    s = reducer(s, event("a", 1, { kind: "user_text", text: "what is this?", at: 6, sent_by: "phone-abc:m-1", images: 2 }));
+    expect(items(s)).toHaveLength(1);
+    expect(items(s)[0]).toMatchObject({ at: 6, images: 2, thumbs: ["file:///a.jpg", "file:///b.jpg"] });
+    expect(items(s)[0]).not.toHaveProperty("sending");
+  });
+
+  it("with no pictures carries no count, whether the Mac says none or says nothing", () => {
+    for (const images of [undefined, null as unknown as undefined, 0]) {
+      const s = reducer(initialState, event("a", 1, { kind: "user_text", text: "hi", at: 1, sent_by: "phone-abc:m-9", ...(images === undefined ? {} : { images }) }));
+      expect(items(s)[0]).not.toHaveProperty("images");
+      expect(items(s)[0]).not.toHaveProperty("thumbs");
+    }
+  });
+
+  it("is only a count when it was sent from somewhere else, or before this run", () => {
+    const s = reducer(initialState, event("a", 1, { kind: "user_text", text: "", at: 3, sent_by: "desktop", images: 3 }));
+    expect(items(s)[0]).toMatchObject({ kind: "user", text: "", images: 3 });
+    expect(items(s)[0]).not.toHaveProperty("thumbs");
+  });
+
   it("says why when it didn't go", () => {
     let s = reducer(initialState, { type: "sending", slot: "a", clientId: "m-2", text: "hi", at: 1 });
     s = reducer(s, { type: "send_failed", slot: "a", clientId: "m-2", error: "That chat isn't open on your Mac." });

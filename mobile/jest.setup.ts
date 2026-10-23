@@ -39,6 +39,21 @@ jest.mock("expo-speech-recognition", () => {
     __emit: (name: string, e: unknown) => listeners.get(name)?.forEach((on) => on(e)),
   };
 });
+// No photo library or camera on Node: a test says what the picker gives back, and what shrinking a picture makes.
+jest.mock("expo-image-picker", () => ({
+  requestCameraPermissionsAsync: jest.fn(async () => ({ granted: true })),
+  launchCameraAsync: jest.fn(async () => ({ canceled: true, assets: null })),
+  launchImageLibraryAsync: jest.fn(async () => ({ canceled: true, assets: null })),
+}));
+jest.mock("expo-image-manipulator", () => ({
+  SaveFormat: { JPEG: "jpeg", PNG: "png" },
+  ImageManipulator: {
+    manipulate: jest.fn(() => ({
+      resize: jest.fn(),
+      renderAsync: jest.fn(async () => ({ saveAsync: jest.fn(async () => ({ uri: "file:///small.jpg", width: 10, height: 10, base64: "/9j/4AAQ" })) })),
+    })),
+  },
+}));
 jest.mock("expo-clipboard", () => ({ getStringAsync: jest.fn(async () => ""), setStringAsync: jest.fn(async () => true) }));
 jest.mock("expo-haptics", () => ({
   notificationAsync: jest.fn(async () => {}),

@@ -434,7 +434,7 @@ mod tests {
     }
 
     fn user(t: &str) -> UiEvent {
-        UiEvent::UserText { text: t.into(), at: None, sent_by: None }
+        UiEvent::UserText { text: t.into(), at: None, sent_by: None, images: 0 }
     }
 
     fn done() -> UiEvent {

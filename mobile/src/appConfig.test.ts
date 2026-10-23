@@ -32,6 +32,19 @@ describe("app.json", () => {
     expect(speech?.[1].speechRecognitionPermission?.length).toBeGreaterThan(10);
   });
 
+  it("says in words why attaching photos wants the camera and the library, and keeps the pairing reason in the camera's", () => {
+    const plugins: unknown[] = expo.plugins;
+    type Words = { cameraPermission?: string; photosPermission?: string; microphonePermission?: string };
+    const picker = plugins.find((p) => Array.isArray(p) && p[0] === "expo-image-picker") as [string, Words] | undefined;
+    expect(picker?.[1].cameraPermission).toMatch(/pairing code/);
+    expect(picker?.[1].cameraPermission).toMatch(/photos/);
+    expect(picker?.[1].photosPermission?.length).toBeGreaterThan(10);
+    // The picker's plugin writes the microphone's words too: they must be dictation's, not its own default or nothing.
+    const speech = plugins.find((p) => Array.isArray(p) && p[0] === "expo-speech-recognition") as [string, Words];
+    expect(picker?.[1].microphonePermission).toBe(speech[1].microphonePermission);
+    expect(expo.ios.infoPlist.NSCameraUsageDescription).toBe(picker?.[1].cameraPermission);
+  });
+
   it("opens lantern:// links, which is how a pairing link reaches the app", () => {
     expect(expo.scheme).toBe("lantern");
   });

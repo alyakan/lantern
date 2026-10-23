@@ -12,8 +12,9 @@ import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { StartedChat } from "../protocol/generated/StartedChat";
 import type { Suggestions } from "../protocol/generated/Suggestions";
 import type { Waiting } from "../protocol/generated/Waiting";
-import type { Pushed, Session } from "../net/session";
+import { UPLOAD_WAIT, type Pushed, type Session } from "../net/session";
 import { newShellId } from "../view/shell";
+import type { PickedImage } from "../view/attachments";
 import { initialState, reducer, type Action, type State } from "./reducer";
 
 export interface SyncDeps {
@@ -99,9 +100,9 @@ export class Sync {
     void this.refreshWaiting();
   };
 
-  private ask<T>(request: Request): Promise<T> {
+  private ask<T>(request: Request, wait?: number): Promise<T> {
     if (!this.session) return Promise.reject(new Error("Not connected to your Mac."));
-    return this.session.ask<T>(request);
+    return this.session.ask<T>(request, wait);
   }
 
   private subscribeTo(slot: string) {
@@ -140,12 +141,16 @@ export class Sync {
     void this.ask({ op: "unsubscribe", slot }).catch(() => {});
   }
 
-  /** Sends a message: it shows at once, and says why if it didn't go. */
-  async send(slot: string, text: string) {
+  /** Sends a message (with `images`, when it has some): it shows at once, and says why if it didn't go. */
+  async send(slot: string, text: string, images: PickedImage[] = []) {
     const clientId = this.newId();
-    this.apply({ type: "sending", slot, clientId, text, at: this.now() });
+    this.apply({ type: "sending", slot, clientId, text, at: this.now(), ...(images.length > 0 ? { thumbs: images.map((i) => i.uri) } : {}) });
     try {
-      await this.ask({ op: "send", slot, text, client_id: clientId });
+      // Only to a Mac that says it takes them: an older one would send the words and say nothing of the pictures.
+      if (images.length > 0 && !this.has("images")) throw new Error("This Mac can't take photos yet. Update Lantern on it.");
+      // Photos are megabytes to get across, so the Mac has longer to answer than for words.
+      const request: Request = { op: "send", slot, text, client_id: clientId, ...(images.length > 0 ? { images: images.map((i) => ({ media_type: i.mediaType, data: i.data })) } : {}) };
+      await (images.length > 0 ? this.ask(request, UPLOAD_WAIT) : this.ask(request));
     } catch (e) {
       this.apply({ type: "send_failed", slot, clientId, error: (e as Error).message });
     }

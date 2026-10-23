@@ -15,7 +15,7 @@
         "NSBonjourServices": [
           "_lantern._tcp"
         ],
-        "NSCameraUsageDescription": "Lantern reads the pairing code your Mac shows.",
+        "NSCameraUsageDescription": "Lantern reads the pairing code your Mac shows, and takes the photos you choose to send to Claude.",
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
@@ -75,6 +75,14 @@
         {
           "microphonePermission": "Lantern listens only while dictation is on, to turn your voice into text for the message box.",
           "speechRecognitionPermission": "Lantern turns your voice into text for the message box. Your phone does this itself where it can; for other languages Apple's speech service does."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Lantern reads the pairing code your Mac shows, and takes the photos you choose to send to Claude.",
+          "photosPermission": "Lantern sends the photos you pick to Claude, in the chat you pick them in.",
+          "microphonePermission": "Lantern listens only while dictation is on, to turn your voice into text for the message box."
         }
       ]
     ]

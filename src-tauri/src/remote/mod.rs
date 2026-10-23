@@ -651,7 +651,7 @@ mod tests {
     }
 
     fn user(by: Option<&str>) -> UiEvent {
-        UiEvent::UserText { text: "hi".into(), at: None, sent_by: by.map(str::to_string) }
+        UiEvent::UserText { text: "hi".into(), at: None, sent_by: by.map(str::to_string), images: 0 }
     }
 
     #[test]

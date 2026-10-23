@@ -109,6 +109,8 @@ export type ChatItem =
       draft?: string;
       /** Sent by another agent, not typed here: the main agent's message to a worker, or a worker's brief. */
       from?: string;
+      /** How many pictures a paired phone sent with it (only their count is ever known here; they went to Claude). */
+      images?: number;
     }
   | { type: "assistant"; id: string; text: string }
   | ToolItem
@@ -554,10 +556,10 @@ function applyEvent(state: State, ev: UiEvent): State {
       const at = ev.at ?? 0;
       const shells = sent.shells.map((s, i): ShellItem => ({ type: "shell", id: `sh-u${seq}-${i}`, command: s.command, output: s.output, status: s.stopped ? "stopped" : s.running ? "unknown" : s.code ? "failed" : "done", code: s.code, startedAt: at, endedAt: at, shared: true }));
       // Commands alone (Claude Code's own `!` mode writes them so): no prompt to show after them.
-      if (shells.length > 0 && !text.trim()) return { ...state, seq, items: [...state.items, ...shells] };
+      if (shells.length > 0 && !text.trim() && !ev.images) return { ...state, seq, items: [...state.items, ...shells] };
       // Sent live from a paired phone (the window's own messages never come back as events): Claude is working on it now.
       const live = ev.sent_by ? { status: "running" as const, thinking: true } : {};
-      return { ...state, ...live, seq, items: [...state.items, ...shells, { type: "user", id: `u${seq}`, text, at: ev.at, ...(flavour ? { switchedTo: flavour, ...(explain ? { explained: true } : {}) } : {}) }] };
+      return { ...state, ...live, seq, items: [...state.items, ...shells, { type: "user", id: `u${seq}`, text, at: ev.at, ...(ev.images ? { images: ev.images } : {}), ...(flavour ? { switchedTo: flavour, ...(explain ? { explained: true } : {}) } : {}) }] };
     }
     case "shell_started":
       // A command started from a paired phone: this window didn't start it, so its block is added here. One it already has
