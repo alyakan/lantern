@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Platform, RefreshControl, ScrollView, View } from "react-native";
+import { Animated, Platform, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { loadGrouping, saveGrouping } from "../prefs";
 import { useConnectionState, useController, useSyncState } from "../shell/hooks";
@@ -81,7 +81,11 @@ function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomePr
   );
 }
 
-function ChatRow({ row, index, onPress, onLongPress, showProject = true }: { row: Row; index: number; onPress: () => void; onLongPress?: () => void; showProject?: boolean }) {
+/** How far a project card's header and chats are from its edge. */
+const CARD_INSET = 16;
+
+/** `inset`: the space on either side of the row (the page's, unless the row sits in a card that has its own). */
+function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset = space.xl }: { row: Row; index: number; onPress: () => void; onLongPress?: () => void; showProject?: boolean; inset?: number }) {
   const colors = useColors();
   // The tile is the chat's project's colour (the desktop sidebar's), so a chat is placed by it before it is read.
   const { bg, fg } = projectTint(row.projectColor, colors.plainTint);
@@ -89,7 +93,7 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true }: { row
   return (
     // The rows come in one after the other when Home opens (and a new chat comes in alone); a press gives under the finger.
     <FadeSlideIn from={14} delay={Math.min(index, 8) * 45 + 120}>
-    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}`} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "Close this chat" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: space.xl, paddingVertical: 9, minHeight: 56 }}>
+    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}`} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "Close this chat" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: inset, paddingVertical: 9, minHeight: 56 }}>
       <Tile letter={row.initial} bg={bg} fg={fg} />
       <View style={{ flex: 1 }}>
         <Txt variant="body" numberOfLines={1} style={{ fontWeight: "600" }}>
@@ -129,24 +133,37 @@ function GroupingSwitch({ value, onChange }: { value: Grouping; onChange: (g: Gr
   return <View style={{ flexDirection: "row", gap: 2, padding: 2, borderRadius: radius.pill, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule }}>{[option("recent", "Recent"), option("project", "Projects")]}</View>;
 }
 
-/** One project's chats under its name, which folds them away when pressed. */
+/**
+ * One project and its chats as a card, tinted with the project's colour: its name on a band of that colour, which folds
+ * the chats away when pressed, and the chats under it. The shadow is on the outer view, since clipping the corners would
+ * clip it too.
+ */
 function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose }: { group: Group; open: boolean; onToggle: () => void; onOpenChat: HomeProps["onOpenChat"]; onAskClose?: (r: Row) => void }) {
   const colors = useColors();
   const name = group.project || "No project";
+  const { bg, fg } = projectTint(group.rows[0]?.projectColor ?? null, colors.plainTint);
   return (
-    <View>
-      <PressScale accessibilityRole="button" accessibilityLabel={`${name}, ${group.rows.length === 1 ? "1 chat" : `${group.rows.length} chats`}${group.needsYou ? `, ${group.needsYou} need you` : ""}`} accessibilityState={{ expanded: open }} onPress={onToggle} haptic="select" scaleTo={0.985} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: space.xl, paddingTop: 16, paddingBottom: 4, minHeight: 40 }}>
-        <Chevron open={open} />
-        <View accessibilityElementsHidden style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: projectTint(group.rows[0]?.projectColor ?? null, colors.plainTint).fg }} />
-        <Txt variant="small" style={{ fontWeight: "700", flexShrink: 1, color: projectTint(group.rows[0]?.projectColor ?? null, colors.plainTint).fg }} numberOfLines={1}>
-          {name}
-        </Txt>
-        <Txt variant="small" tone="ink3">
-          {group.rows.length}
-        </Txt>
-        {group.needsYou > 0 && <PulseDot color={colors.hi} />}
-      </PressScale>
-      {open && group.rows.map((r, i) => <ChatRow key={r.slot} row={r} index={i} showProject={false} onPress={() => onOpenChat(r.slot)} onLongPress={onAskClose && (() => onAskClose(r))} />)}
+    <View testID={`project-card-${name}`} style={[{ marginHorizontal: space.lg, marginTop: 12, borderRadius: radius.card, backgroundColor: colors.card }, shadow.card]}>
+      <View style={{ borderRadius: radius.card, borderWidth: 1, borderColor: bg, overflow: "hidden" }}>
+        <PressScale accessibilityRole="button" accessibilityLabel={`${name}, ${group.rows.length === 1 ? "1 chat" : `${group.rows.length} chats`}${group.needsYou ? `, ${group.needsYou} need you` : ""}`} accessibilityState={{ expanded: open }} onPress={onToggle} haptic="select" scaleTo={0.985} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: CARD_INSET, backgroundColor: bg, minHeight: 44 }}>
+          <Chevron open={open} />
+          <View accessibilityElementsHidden style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: fg }} />
+          <Txt variant="small" style={{ fontWeight: "700", flexShrink: 1, color: fg }} numberOfLines={1}>
+            {name}
+          </Txt>
+          <Txt variant="small" tone="ink3">
+            {group.rows.length}
+          </Txt>
+          {group.needsYou > 0 && <PulseDot color={colors.hi} />}
+        </PressScale>
+        {open &&
+          group.rows.map((r, i) => (
+            // A hairline between one chat and the next, in the card's own width.
+            <View key={r.slot} style={i > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.rule, marginHorizontal: CARD_INSET } : undefined}>
+              <ChatRow row={r} index={i} showProject={false} inset={0} onPress={() => onOpenChat(r.slot)} onLongPress={onAskClose && (() => onAskClose(r))} />
+            </View>
+          ))}
+      </View>
     </View>
   );
 }
