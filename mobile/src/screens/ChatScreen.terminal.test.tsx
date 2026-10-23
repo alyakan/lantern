@@ -10,24 +10,26 @@ import { ChatScreen } from "./ChatScreen";
 /** A phone that can check who holds it as `strength` says, and answers each check from `results` (then "ok"). */
 async function phone(strength: Strength, results: AuthResult[] = []) {
   const asked: string[] = [];
+  const options: ({ biometricOnly?: boolean } | undefined)[] = [];
   const platform: LockPlatform = {
     strength: async () => strength,
     method: async () => "Face ID",
-    authenticate: async (reason) => {
+    authenticate: async (reason, o) => {
       asked.push(reason);
+      options.push(o);
       return results.shift() ?? "ok";
     },
   };
   const lock = new AppLock(platform, { load: async () => false, save: async () => {} });
   await lock.start();
-  return { lock, asked };
+  return { lock, asked, options };
 }
 
 async function terminal(over: { features?: string[]; strength?: Strength; results?: AuthResult[]; answers?: Parameters<typeof attachSession>[1]; events?: RemoteEvent[]; chatOver?: Parameters<typeof chat>[0] } = {}) {
   const features = over.features ?? ["shell"];
   const { controller } = makeController();
   const session = attachSession(controller, over.answers ?? {}, features);
-  const { lock, asked } = await phone(over.strength ?? "biometric", over.results);
+  const { lock, asked, options } = await phone(over.strength ?? "biometric", over.results);
   await renderWith(
     <LockContext.Provider value={lock}>
       <ChatScreen slot="a" onBack={jest.fn()} onReview={jest.fn()} />
@@ -36,7 +38,7 @@ async function terminal(over: { features?: string[]; strength?: Strength; result
     controller,
   );
   await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
-  return { ...session, asked, controller };
+  return { ...session, asked, options, controller };
 }
 
 const type = (text: string) => fireEvent.changeText(screen.getByLabelText("Message"), text);
@@ -44,13 +46,15 @@ const typeCommand = (text: string) => fireEvent.changeText(screen.getByLabelText
 const swipe = () => fireEvent(screen.getByLabelText("Swipe to run"), "accessibilityAction", { nativeEvent: { actionName: "activate" } });
 
 describe("the message box as a terminal", () => {
-  it("turns into one when it starts with '!', hiding the '!' and saying what happens to the output", async () => {
+  it("turns into one when it starts with '!', hiding the '!' and saying where it runs", async () => {
     await terminal();
     await type("!ls -la");
     expect(screen.queryByLabelText("Message")).toBeNull();
     expect(screen.getByLabelText("Shell command").props.value).toBe("ls -la");
     expect(screen.getByRole("button", { name: "Run" })).toBeTruthy();
-    expect(screen.getByText(/Claude sees the output with your next message/)).toBeTruthy();
+    // It promises nothing about Claude: a message sent from the phone carries none of the output.
+    expect(screen.getByText(/Runs on your Mac, outside Claude/)).toBeTruthy();
+    expect(screen.queryByText(/Claude sees/)).toBeNull();
   });
 
   it("is an ordinary message box for words, and for a '!' anywhere but the start", async () => {
@@ -97,12 +101,13 @@ describe("the message box as a terminal", () => {
 
 describe("running a command from the phone", () => {
   it("checks who is holding the phone, shows the command back, and runs it only on the swipe, then empties the box", async () => {
-    const { asked, lastOf } = await terminal();
+    const { asked, options, lastOf } = await terminal();
     await type("!git status");
     await fireEvent.press(screen.getByRole("button", { name: "Run" }));
-    // Face ID (or the passcode) first, with the lock off or on: every command.
+    // Face ID first, with the app lock off or on: every command, and never the passcode instead.
     await waitFor(() => expect(screen.getByText("Run on your Mac?")).toBeTruthy());
     expect(asked).toEqual(["Run a command on your Mac"]);
+    expect(options).toEqual([{ biometricOnly: true }]);
     expect(screen.getByLabelText("Command: git status")).toBeTruthy();
     expect(screen.getByText(/in lantern, outside Claude/)).toBeTruthy();
     // Nothing is sent until the swipe.
@@ -140,15 +145,33 @@ describe("running a command from the phone", () => {
     expect(screen.getByLabelText("Shell command").props.value).toBe("rm -rf build");
   });
 
-  it("can't be done at all on a phone with no Face ID or passcode, and says so", async () => {
-    const { asked, lastOf } = await terminal({ strength: "none" });
-    await type("!ls");
-    await fireEvent.press(screen.getByRole("button", { name: "Run" }));
-    await waitFor(() => expect(screen.getByText(/needs Face ID or a passcode/)).toBeTruthy());
+  it("can't be done at all on a phone without Face ID (or a fingerprint), even one with a passcode, and says so", async () => {
+    for (const strength of ["none", "passcode"] as const) {
+      const { asked, lastOf } = await terminal({ strength });
+      await type("!ls");
+      await fireEvent.press(screen.getByRole("button", { name: "Run" }));
+      await waitFor(() => expect(screen.getByText(/needs Face ID \(or Touch ID\) set up/)).toBeTruthy());
+      expect(asked).toEqual([]);
+      expect(screen.queryByText("Run on your Mac?")).toBeNull();
+      expect(lastOf("shell")).toBeUndefined();
+      expect(screen.getByLabelText("Shell command").props.value).toBe("ls");
+      screen.unmount();
+    }
+  });
+
+  it("refuses a command with a character that can't be seen, before anything is asked of the phone or the Mac", async () => {
+    const { asked, lastOf } = await terminal();
+    await type("!");
+    // A right-to-left override, a zero-width space and a carriage return, by their code points (they can't be seen here either).
+    for (const hidden of [String.fromCodePoint(0x202e), String.fromCodePoint(0x200b), "\r"]) {
+      // In the middle: one at the end is trimmed off like any space, and what is shown is what runs.
+      await typeCommand(`echo ${hidden}ok`);
+      await fireEvent.press(screen.getByRole("button", { name: "Run" }));
+      await waitFor(() => expect(screen.getByText(/character that can't be seen/)).toBeTruthy());
+    }
     expect(asked).toEqual([]);
     expect(screen.queryByText("Run on your Mac?")).toBeNull();
     expect(lastOf("shell")).toBeUndefined();
-    expect(screen.getByLabelText("Shell command").props.value).toBe("ls");
   });
 
   it("is not run, and the box keeps the command, when the sheet is closed without the swipe", async () => {

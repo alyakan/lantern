@@ -1,4 +1,4 @@
-import { cleanOutput, commandOf, endLine, isTerminal, keepEnd, KEEP_CHARS, lastLines, newShellId, plainTyped, took } from "./shell";
+import { cleanOutput, commandOf, endLine, isTerminal, keepEnd, KEEP_CHARS, hasHiddenChars, lastLines, newShellId, plainTyped, took } from "./shell";
 
 describe("terminal mode", () => {
   it("starts with a '!', which is not part of the command", () => {
@@ -66,5 +66,18 @@ describe("plainTyped", () => {
     expect(plainTyped("echo “hi” ‘there’")).toBe(`echo "hi" 'there'`);
     expect(plainTyped("wait…")).toBe("wait...");
     expect(plainTyped("plain -- text")).toBe("plain -- text");
+  });
+});
+
+/** Characters built from their code points, so the test says what it tries (they can't be seen in a source file). */
+const chars = (...codes: number[]) => codes.map((c) => String.fromCodePoint(c));
+
+describe("hasHiddenChars", () => {
+  it("finds what can't be seen or draws backwards, and lets a tab and ordinary text through, accents and other scripts too", () => {
+    const bidiAndZeroWidth = chars(0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x2060, 0xfeff, 0xad, 0x61c, 0x2028, 0x2029);
+    const controls = chars(0x00, 0x01, 0x08, 0x0a, 0x0d, 0x1b, 0x7f, 0x85, 0x9f);
+    for (const c of [...bidiAndZeroWidth, ...controls]) expect(hasHiddenChars(`ls ${c} -la`)).toBe(true);
+    expect(hasHiddenChars(`${String.fromCodePoint(0xfeff)}ls`)).toBe(true);
+    for (const fine of ["git status", "printf 'a\tb'", "echo café", "echo 日本語 😀", "ls -la ~/Documents", 'echo "quoted"']) expect(hasHiddenChars(fine)).toBe(false);
   });
 });

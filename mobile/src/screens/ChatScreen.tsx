@@ -12,6 +12,7 @@ import { Glass, useGlass } from "../ui/Glass";
 import { space, useColors } from "../ui/theme";
 import { quickReplies, quote, searchRows } from "../view/chatText";
 import { projectColorOf } from "../view/home";
+import { hasHiddenChars } from "../view/shell";
 import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
 import { ChatSearchSheet, distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
@@ -109,15 +110,20 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
   const fail = (e: unknown) => setProblem((e as Error).message);
 
   /**
-   * A command typed in the terminal. The phone first checks who is holding it (Face ID or the passcode: every command, and
-   * whether or not the app lock is on; a phone that can't check anyone can't run commands), then shows the command back to be
-   * run by a swipe. Whether it ran: the box keeps what was typed until it did.
+   * A command typed in the terminal. The phone first checks who is holding it by Face ID (or Touch ID, never the passcode
+   * instead): every command, and whether or not the app lock is on; a phone that can't do that can't run commands. Then it
+   * shows the command back to be run by a swipe. Whether it ran: the box keeps what was typed until it did.
    */
   const runCommand = async (command: string): Promise<boolean> => {
+    // What can't be seen can't be read back to be approved: a command with such a character in it is not run.
+    if (hasHiddenChars(command)) {
+      setProblem("That command has a character that can't be seen, so it wasn't run. Type it again.");
+      return false;
+    }
     const proof = await lock.verify("Run a command on your Mac");
     if (proof === "cancelled") return false;
     if (proof === "unavailable") {
-      setProblem("Running commands needs Face ID or a passcode on this phone, and it has neither. Set one up in the phone's Settings.");
+      setProblem("Running commands needs Face ID (or Touch ID) set up on this phone, and it isn't. Turn it on in the phone's Settings.");
       return false;
     }
     if (proof !== "ok") {

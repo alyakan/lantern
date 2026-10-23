@@ -16,8 +16,11 @@ export interface LockPlatform {
   strength(): Promise<Strength>;
   /** What to call the check in words: "Face ID", "Touch ID", "your fingerprint or face", "your passcode". */
   method(): Promise<string>;
-  /** Asks the person to prove who they are. The phone's passcode is always an alternative, so nobody is locked out. */
-  authenticate(reason: string): Promise<AuthResult>;
+  /**
+   * Asks the person to prove who they are. The phone's passcode is an alternative unless `biometricOnly`, so nobody is locked out
+   * of the app; for what must be Face ID (or Touch ID) and nothing else, it is not.
+   */
+  authenticate(reason: string, options?: { biometricOnly?: boolean }): Promise<AuthResult>;
 }
 
 /** Whether the lock is switched on, kept on this phone only. */
@@ -141,17 +144,17 @@ export class AppLock {
   }
 
   /**
-   * Proves it is the phone's owner before something that matters (a command run on the Mac), every time and whether or not
-   * the app lock is on. A phone that has nothing to check anyone with (no passcode, no Face ID) can't: "unavailable", never
-   * a way round it.
+   * Proves it is the phone's owner by Face ID (or Touch ID) before something that matters (a command run on the Mac): every
+   * time, whether or not the app lock is on, and never by the passcode instead. A phone that can't do that (no Face ID or
+   * fingerprint set up) can't: "unavailable", never a way round it.
    */
   async verify(reason: string): Promise<AuthResult> {
     // A check is already being made: this one is not a second chance.
     if (this.state.authenticating) return "cancelled";
     this.set({ authenticating: true, problem: null });
     try {
-      if ((await this.strength()) === "none") return "unavailable";
-      return await this.platform.authenticate(reason);
+      if ((await this.strength()) !== "biometric") return "unavailable";
+      return await this.platform.authenticate(reason, { biometricOnly: true });
     } catch {
       return "failed";
     } finally {

@@ -506,7 +506,7 @@ export function Composer({ onSend, onRun, disabled, placeholder = "Message Claud
             </Pressable>
           </View>
           <Txt variant="tiny" tone="ink3" style={{ marginTop: 6, marginLeft: 8, fontFamily: fonts.mono }}>
-            Claude sees the output with your next message · backspace to leave
+            Runs on your Mac, outside Claude · backspace to leave
           </Txt>
         </>
       ) : (

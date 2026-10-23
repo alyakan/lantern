@@ -6,6 +6,8 @@ function rig(opts: { enabled?: boolean; strength?: Strength; results?: AuthResul
   let clock = 1_000_000;
   const saved: boolean[] = [];
   const asked: string[] = [];
+  // What each check was asked with: whether the passcode was allowed instead.
+  const options: ({ biometricOnly?: boolean } | undefined)[] = [];
   const results = [...(opts.results ?? [])];
   const platform: LockPlatform = {
     strength: async () => {
@@ -13,8 +15,9 @@ function rig(opts: { enabled?: boolean; strength?: Strength; results?: AuthResul
       return phone.strength;
     },
     method: async () => "Face ID",
-    authenticate: async (reason) => {
+    authenticate: async (reason, o) => {
       asked.push(reason);
+      options.push(o);
       return results.shift() ?? "ok";
     },
   };
@@ -26,7 +29,7 @@ function rig(opts: { enabled?: boolean; strength?: Strength; results?: AuthResul
     save: async (on) => void saved.push(on),
   };
   const lock = new AppLock(platform, memory, () => clock);
-  return { lock, saved, asked, phone, advance: (ms: number) => void (clock += ms) };
+  return { lock, saved, asked, options, phone, advance: (ms: number) => void (clock += ms) };
 }
 
 describe("the app lock", () => {
@@ -247,14 +250,17 @@ describe("proving it is the owner before something that matters", () => {
   it("asks the phone every time, with the reason, whether or not the app lock is on, and says what it answered", async () => {
     for (const enabled of [false, true]) {
       // With the lock on, the first answer is the unlock's own.
-      const { lock, asked } = rig({ enabled, results: enabled ? ["ok", "ok", "failed", "cancelled"] : ["ok", "failed", "cancelled"] });
+      const { lock, asked, options } = rig({ enabled, results: enabled ? ["ok", "ok", "failed", "cancelled"] : ["ok", "failed", "cancelled"] });
       await lock.start();
       if (enabled) await lock.unlock();
       asked.length = 0;
+      options.length = 0;
       expect(await lock.verify("Run a command on your Mac")).toBe("ok");
       expect(await lock.verify("Run a command on your Mac")).toBe("failed");
       expect(await lock.verify("Run a command on your Mac")).toBe("cancelled");
       expect(asked).toEqual(Array(3).fill("Run a command on your Mac"));
+      // Face ID and nothing else: the passcode is never the way through.
+      expect(options).toEqual(Array(3).fill({ biometricOnly: true }));
       // It locks and unlocks nothing itself, and it is no longer checking.
       expect(lock.getState()).toMatchObject({ locked: false, authenticating: false });
     }
@@ -266,12 +272,14 @@ describe("proving it is the owner before something that matters", () => {
     expect(asked).toEqual(["Run it"]);
   });
 
-  it("can't be passed by a phone with nothing to check anyone with: it is refused, and nothing is asked", async () => {
-    const { lock, asked } = rig({ enabled: false, strength: "none" });
-    await lock.start();
-    expect(await lock.verify("Run it")).toBe("unavailable");
-    expect(asked).toEqual([]);
-    expect(lock.getState().authenticating).toBe(false);
+  it("can't be passed by a phone without Face ID or a fingerprint, even one with a passcode: it is refused, and nothing is asked", async () => {
+    for (const strength of ["none", "passcode"] as const) {
+      const { lock, asked } = rig({ enabled: false, strength });
+      await lock.start();
+      expect(await lock.verify("Run it")).toBe("unavailable");
+      expect(asked).toEqual([]);
+      expect(lock.getState().authenticating).toBe(false);
+    }
   });
 
   it("counts a check that throws as failed, and a second one asked while one is going as not a second chance", async () => {

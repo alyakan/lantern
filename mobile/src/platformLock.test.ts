@@ -24,6 +24,17 @@ describe("the real lock's reading of the phone", () => {
     expect(await lockPlatform.authenticate("Unlock Lantern")).toBe("cancelled");
   });
 
+  it("takes the passcode away as an alternative when it is told it must be Face ID (or a fingerprint)", async () => {
+    const authenticate = LocalAuthentication.authenticateAsync as jest.Mock;
+    authenticate.mockResolvedValueOnce({ success: true });
+    expect(await lockPlatform.authenticate("Run a command", { biometricOnly: true })).toBe("ok");
+    expect(authenticate).toHaveBeenLastCalledWith(expect.objectContaining({ promptMessage: "Run a command", disableDeviceFallback: true }));
+    // Told no, the passcode stays an alternative.
+    authenticate.mockResolvedValueOnce({ success: true });
+    await lockPlatform.authenticate("Unlock", { biometricOnly: false });
+    expect(authenticate).toHaveBeenLastCalledWith(expect.objectContaining({ disableDeviceFallback: false }));
+  });
+
   it("calls the check Face ID on an iPhone that has it", async () => {
     (LocalAuthentication.supportedAuthenticationTypesAsync as jest.Mock).mockResolvedValueOnce([LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION]);
     expect(await lockPlatform.method()).toBe("Face ID");

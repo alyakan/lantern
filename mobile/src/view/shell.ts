@@ -74,3 +74,31 @@ export const plainTyped = (text: string) =>
     .replace(/[“”„]/g, '"')
     .replace(/[‘’‚]/g, "'")
     .replace(/…/g, "...");
+
+// Characters that draw nothing, or draw backwards, so a command can read one way and run another, as code point ranges:
+// controls (a tab is fine), the soft hyphen, the Arabic letter mark, the Mongolian vowel separator, zero-width and joining
+// marks and direction marks, line and paragraph separators and bidirectional overrides, word joiners and invisible operators,
+// bidirectional isolates and the other format controls, and the byte order mark. Numbers, not an escaped regular
+// expression: a line separator in a regular expression would split it.
+const HIDDEN: [number, number][] = [
+  [0x00, 0x08],
+  [0x0a, 0x1f],
+  [0x7f, 0x9f],
+  [0xad, 0xad],
+  [0x61c, 0x61c],
+  [0x180e, 0x180e],
+  [0x200b, 0x200f],
+  [0x2028, 0x202e],
+  [0x2060, 0x2064],
+  [0x2066, 0x206f],
+  [0xfeff, 0xfeff],
+];
+
+/** Whether `text` has a character that can't be seen, or that changes how the text around it is drawn (never in a command to run). */
+export function hasHiddenChars(text: string): boolean {
+  for (const ch of text) {
+    const c = ch.codePointAt(0)!;
+    if (HIDDEN.some(([from, to]) => c >= from && c <= to)) return true;
+  }
+  return false;
+}
