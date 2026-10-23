@@ -546,7 +546,7 @@ pub fn thread_events(cwd: &Path, thread: &Value) -> Vec<UiEvent> {
             if item["type"] == "userMessage" {
                 let text = item["content"].as_array().into_iter().flatten().filter_map(|c| c["text"].as_str()).collect::<Vec<_>>().join("\n");
                 if !text.trim().is_empty() {
-                    out.push(UiEvent::UserText { text, at: None, sent_by: None });
+                    out.push(UiEvent::UserText { text, at: None, sent_by: None, images: 0 });
                 }
             } else {
                 out.extend(mapper.notification("item/completed", &json!({"item": item})).events);

@@ -82,6 +82,9 @@ impl Session {
     pub async fn send_with(&mut self, text: &str, images: Vec<serde_json::Value>) -> Result<(), String> {
         match self {
             Session::Claude(s) => s.send_with(text, images).await,
+            // The blocks are Claude's; Codex takes pictures as files of its own, which nothing here makes yet.
+            Session::Codex(_) if !images.is_empty() => Err("A Codex chat can't take pictures yet. Send the message without them.".into()),
+            Session::Codex(s) => s.send(text).await,
         }
     }
 
