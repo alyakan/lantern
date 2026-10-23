@@ -913,6 +913,9 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
     if !std::path::Path::new(&folder).is_dir() {
         return Err(format!("{folder} no longer exists."));
     }
+    if settings.orchestrator {
+        lead_provider(settings.provider)?;
+    }
     let ceiling = settings.worker.as_ref().map(|w| main_ceiling(state, &w.parent));
     // A worker's folder is a worktree of its Lead's project, so it gets the notes its Lead started with.
     let notes = match &settings.worker {
@@ -1043,6 +1046,16 @@ async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String,
 /// The role a chat has after its Workflow is set to Team (`team` true) or to another (false): a chat becomes the Lead of a
 /// team, or stops being one. A worker keeps its role (its Workflow is its Lead's to set), and `team` None leaves it as it is.
 /// Stopping being a Lead is refused while it has agents, which would be left with nobody to report to.
+/// A team's Lead starts agents with Lantern's tools, so it runs on a provider that has them (Claude Code); the window never
+/// asks for another, and this keeps anything else from.
+fn lead_provider(provider: ProviderId) -> Result<(), String> {
+    if capabilities_of(provider).supports_lantern_tools {
+        Ok(())
+    } else {
+        Err("A team's Lead runs on Claude Code: this chat's agent can't start agents yet.".into())
+    }
+}
+
 fn role_after(role: &Role, team: Option<bool>, agents: usize) -> Result<Role, String> {
     match (role, team) {
         (Role::Worker { .. }, _) | (_, None) => Ok(role.clone()),
@@ -1062,6 +1075,9 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
     let running_id = s.session.lock().await.as_ref().and_then(|x| x.session_id());
     let mut cfg = s.config.lock().unwrap().clone().ok_or("No folder is open")?;
     let role = role_after(&cfg.helper.role, team, state.orchestra.workers_of(&slot).len())?;
+    if matches!(role, Role::Main) {
+        lead_provider(cfg.provider)?;
+    }
     cfg.mode = mode;
     cfg.effort = checked_effort(effort)?;
     if let Some(auto) = auto_approve {
@@ -1367,6 +1383,7 @@ async fn orchestra_setup_answer(state: State<'_, AppState>, worker: String, answ
 
 /// Starts a worker the user asked for from the canvas (the main agent `main` is told). Returns the worker's id.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn orchestra_spawn(state: State<'_, AppState>, main: String, task: String, name: Option<String>, isolation: String, model: Option<String>, role: Option<roles::RoleTag>, provider: Option<String>) -> Result<String, String> {
     state.orchestra.spawn_for_user_on(&main, &task, name.as_deref(), &isolation, model.as_deref(), role, provider.as_deref()).await
 }
@@ -2973,6 +2990,13 @@ mod tests {
         for team in [Some(true), Some(false), None] {
             assert_eq!(role_after(&worker, team, 0), Ok(worker.clone()), "{team:?}");
         }
+    }
+
+    /// A team's Lead starts agents with Lantern's tools, which only Claude Code has: Codex is refused as one.
+    #[test]
+    fn only_a_provider_with_lanterns_tools_can_lead_a_team() {
+        assert!(lead_provider(ProviderId::Claude).is_ok());
+        assert!(lead_provider(ProviderId::Codex).unwrap_err().contains("Lead runs on Claude Code"));
     }
 
     /// Permissions mean the same in every workflow: a team whose Lead is on Auto (in Chat or Step by step terms) lets its

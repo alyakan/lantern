@@ -1079,7 +1079,7 @@ button.edit-toggle:hover:not(:disabled) { color: var(--text); }
 .permission-reason { font-size: calc(12px * var(--font-scale)); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; max-height: 96px; overflow: auto; }
 .permission-reason > span { color: var(--muted-text); }
 .permission-warning { font-size: calc(12px * var(--font-scale)); color: var(--warn); overflow-wrap: anywhere; }
-.permission-kind { margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--bg-active); color: var(--text-2); font-size: calc(11px * var(--font-scale)); font-weight: 400; }
+.permission-kind { margin-left: 8px; padding: 1px 7px; border-radius: var(--radius-pill); background: var(--bg-active); color: var(--text-2); font-size: calc(11px * var(--font-scale)); font-weight: 400; }
 .permission-same { display: inline-flex; align-items: center; gap: 6px; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
 .permission-actions button { height: 24px; padding: 0 12px; font-size: calc(12px * var(--font-scale)); }
 .always-menu { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg-subtle); }

@@ -1558,6 +1558,7 @@ impl Orchestra {
     }
 
     /// As `spawn_for_user`, on the provider `provider` names (None: the main agent's own, as spawn_agent defaults).
+    #[allow(clippy::too_many_arguments)]
     pub async fn spawn_for_user_on(self: &Arc<Self>, main: &str, task: &str, name: Option<&str>, isolation: &str, model: Option<&str>, role: Option<RoleTag>, provider: Option<&str>) -> Result<String, String> {
         if !self.is_main(main) {
             return Err("This chat is not a Team's lead.".into());
