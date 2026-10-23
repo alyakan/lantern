@@ -244,6 +244,18 @@ describe("Home's chats by project", () => {
     expect(lantern.queryByRole("button", { name: "Release" })).toBeNull();
   });
 
+  it("holds every chat in a card in from the card's edges, the first one too, with a hairline only above the ones after it", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ slot: "a", title: "First", project: "lantern", active_at: NOW - 1_000 }), chat({ slot: "b", title: "Second", project: "lantern", active_at: NOW - 2_000 }), chat({ slot: "c", title: "Third", project: "lantern", active_at: NOW - 3_000 })] });
+    await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
+    const rowStyle = (slot: string) => StyleSheet.flatten(screen.getByTestId(`card-row-${slot}`).props.style);
+    for (const slot of ["a", "b", "c"]) expect(rowStyle(slot).marginHorizontal).toBe(16);
+    expect(rowStyle("a").borderTopWidth).toBeUndefined();
+    expect(rowStyle("b").borderTopWidth).toBe(StyleSheet.hairlineWidth);
+    expect(rowStyle("c").borderTopWidth).toBe(StyleSheet.hairlineWidth);
+    // The header is held in by the same amount, so the chats line up under it.
+    expect(StyleSheet.flatten(screen.getByRole("button", { name: "lantern, 3 chats" }).props.style).paddingHorizontal).toBe(16);
+  });
+
   it("folds a project away and opens it again", async () => {
     await renderWith(<HomeScreen {...handlers()} />, { chats });
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
