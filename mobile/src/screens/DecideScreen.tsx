@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, ScrollView, TextInput, View } from "react-native";
+import { Animated, Easing, ScrollView, TextInput, useWindowDimensions, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useController, useSyncState } from "../shell/hooks";
@@ -18,11 +18,19 @@ export interface DecideProps {
   onClose: () => void;
 }
 
-/** How long what it came to ("Allowed", "Answered on your Mac") stays before the screen closes by itself. */
+/** How long what it came to ("Denied", "Answered on your Mac") stays before the screen closes by itself. */
 export const CLOSE_AFTER_MS = 2000;
 
+/** An approval, swiped, closes sooner: the green going out over the screen says it, and there is nothing to read. */
+export const APPROVED_CLOSE_MS = 1000;
+/** The green leaves the circle after the bar has closed in on it, and takes this long to cover the screen. */
+const RIPPLE_DELAY_MS = 250;
+const RIPPLE_MS = 450;
+/** The circle the bar closes in to (its knob, 52, and the space round it, 5 each side): where the green starts from. */
+const CIRCLE = 62;
+
 /** `elsewhere`: it left the Mac's list without this screen's answer coming back (`ours`: this phone had sent one, and it went through even though the reply didn't). */
-type Outcome = { kind: "none" } | { kind: "sending" } | { kind: "done"; allowed: boolean } | { kind: "elsewhere"; ours: boolean } | { kind: "failed"; why: string };
+type Outcome = { kind: "none" } | { kind: "sending" } | { kind: "done"; allowed: boolean; /** Approved with a swipe (not a question's answers): it closes sooner, in green. */ swiped: boolean } | { kind: "elsewhere"; ours: boolean } | { kind: "failed"; why: string };
 
 /** What the answers to a prompt's questions come to, one string per question (a multi-select joined with commas). */
 export function answersFrom(qs: Question[], picks: Record<string, string[]>, typed: Record<string, string>): Record<string, string> | null {
@@ -34,6 +42,21 @@ export function answersFrom(qs: Question[], picks: Record<string, string[]>, typ
     out[q.question] = answer;
   }
   return out;
+}
+
+/** The screen turning green: a circle that grows from where the approved circle is until it covers everything behind the words. */
+function Ripple({ x, y, color }: { x: number; y: number; color: string }) {
+  const grow = useRef(new Animated.Value(0)).current;
+  const { width, height } = useWindowDimensions();
+  // As far as the farthest corner, so it covers all of it.
+  const reach = Math.ceil(Math.hypot(Math.max(x, width - x), Math.max(y, height - y)));
+  useEffect(() => {
+    if (skips()) return grow.setValue(1);
+    const a = Animated.timing(grow, { toValue: 1, duration: RIPPLE_MS, delay: RIPPLE_DELAY_MS, easing: Easing.out(Easing.cubic), useNativeDriver: true });
+    a.start();
+    return () => a.stop();
+  }, [grow]);
+  return <Animated.View testID="approve-ripple" pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ position: "absolute", left: x - reach, top: y - reach, width: reach * 2, height: reach * 2, borderRadius: reach, backgroundColor: color, transform: [{ scale: grow.interpolate({ inputRange: [0, 1], outputRange: [CIRCLE / 2 / reach, 1] }) }] }} />;
 }
 
 /** One answer to choose: it takes the highlighter colour as it is picked, with a check popping in, and gives under a press. */
@@ -120,6 +143,8 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   const [outcome, setOutcome] = useState<Outcome>({ kind: "none" });
   const [picks, setPicks] = useState<Record<string, string[]>>({});
   const [typed, setTyped] = useState<Record<string, string>>({});
+  // Where the approved circle is, once it is laid out, for the green to start from.
+  const [circle, setCircle] = useState<{ x: number; y: number } | null>(null);
 
   // What was asked is kept as it was first seen: once answered it leaves the list, and the screen still says what it was.
   const live = waiting.find((w) => w.request_id === requestId);
@@ -137,9 +162,9 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   }, [gone, outcome.kind]);
   useEffect(() => {
     if (outcome.kind !== "elsewhere" && outcome.kind !== "done") return;
-    const t = setTimeout(onClose, CLOSE_AFTER_MS);
+    const t = setTimeout(onClose, outcome.kind === "done" && outcome.swiped ? APPROVED_CLOSE_MS : CLOSE_AFTER_MS);
     return () => clearTimeout(t);
-  }, [outcome.kind, onClose]);
+  }, [outcome, onClose]);
 
   if (!asked) {
     return (
@@ -168,7 +193,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
     try {
       await controller.sync.answer(slot, requestId, allow, withAnswers);
       // A reply that comes late, after the Mac stopped listing it, doesn't undo that.
-      setOutcome((o) => (o.kind === "elsewhere" ? o : { kind: "done", allowed: allow }));
+      setOutcome((o) => (o.kind === "elsewhere" ? o : { kind: "done", allowed: allow, swiped: allow && !withAnswers }));
       // The swipe buzzes for itself; the rest say what it came to.
       if (!allow) buzz("warning");
       else if (withAnswers) buzz("success");
@@ -187,8 +212,10 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
 
   return (
     // The keyboard (for "Something else") pushes the buttons up with it, and the list above gets shorter.
-    <AboveKeyboard style={{ backgroundColor: colors.night, paddingTop: insets.top + 56, paddingBottom: keyboard ? 12 : Math.max(insets.bottom, 20), paddingHorizontal: 22 }}>
+    <AboveKeyboard style={{ backgroundColor: colors.night, overflow: "hidden", paddingTop: insets.top + 56, paddingBottom: keyboard ? 12 : Math.max(insets.bottom, 20), paddingHorizontal: 22 }}>
       <StatusBar style="light" />
+      {/* Behind everything: the screen goes green from the approved circle outwards. */}
+      {outcome.kind === "done" && outcome.swiped && circle && <Ripple x={circle.x} y={circle.y} color={colors.go} />}
       {/* The decision can be put away at any point (it keeps waiting, in the chat and on Home) and come back to with Review. */}
       <PressScale accessibilityRole="button" accessibilityLabel="Minimize" accessibilityHint="Back to the chat. The decision keeps waiting." onPress={onClose} haptic="select" scaleTo={0.94} hitSlop={10} style={{ position: "absolute", top: insets.top + 8, left: 14, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, minHeight: 40 }}>
         <Chevron open color={colors.white} />
@@ -264,7 +291,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
           </View>
         )
       ) : outcome.kind === "done" && outcome.allowed && view.kind !== "question" ? (
-        <View style={{ gap: 12 }}>
+        <View testID="approved" style={{ gap: 12 }} onLayout={(e) => setCircle({ x: e.nativeEvent.layout.x + e.nativeEvent.layout.width - CIRCLE / 2, y: e.nativeEvent.layout.y + CIRCLE / 2 })}>
           {/* The same bar, now closed in to a circle with the check: it closes this by itself, and a tap on it does so at once. */}
           <SwipeToAllow key="first" label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => {}} onDone={onClose} />
           {/* Deny's place is kept, unseen, so the circle stays where the bar was and isn't pushed down. */}
