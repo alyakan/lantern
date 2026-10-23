@@ -240,7 +240,7 @@ export function ChatScreen({ slot, onBack, onReview }: ChatProps) {
       <PlanCard todos={view.todos} />
       {replies.length > 0 && <QuickReplies replies={replies} onSend={send} />}
       {asleep ? (
-        <View style={{ padding: 16, paddingBottom: Math.max(insets.bottom, 16), gap: 6 }}>
+        <View style={{ padding: 16, paddingBottom: Math.max(insets.bottom, 16), gap: 6, backgroundColor: colors.paper }}>
           <Txt variant="small" tone="ink2">
             This chat is asleep to save memory. It picks up where it left off.
           </Txt>

@@ -1,4 +1,5 @@
 import "@shopify/flash-list/jestSetup";
+import { StyleSheet } from "react-native";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react-native";
 import type { RemoteEvent } from "../protocol/generated/RemoteEvent";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
@@ -7,6 +8,7 @@ import { chat, connected, makeController, renderWith } from "../test/render";
 import { ChatScreen } from "./ChatScreen";
 import { PromptRow } from "./ChatParts";
 import { motion } from "../ui/motion";
+import { lightColors } from "../ui/theme";
 
 const handlers = () => ({ slot: "a", onBack: jest.fn(), onReview: jest.fn() });
 
@@ -592,5 +594,18 @@ describe("a chat on iOS 26, where its header and message box are glass over the 
     await fireEvent.changeText(screen.getByLabelText("Message"), "ship it");
     await fireEvent.press(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(lastOf("send")).toMatchObject({ op: "send", text: "ship it" }));
+  });
+
+  it("has a message box with a surface of its own when the chat wakes, and a ground under the sleeping notice", async () => {
+    const { controller } = await withSession(turn, {}, {}, { status: "asleep" });
+    // Over a list that runs under it, the notice and its button would otherwise sit on bare words.
+    expect(StyleSheet.flatten(screen.getByText(/asleep to save memory/).parent!.props.style).backgroundColor).toBe(lightColors.paper);
+    await fireEvent.press(screen.getByRole("button", { name: "Wake this chat" }));
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [chat({ status: "idle" })] } }));
+    // The surface is the message box's nearest ancestor with the faint fill.
+    let box = screen.getByLabelText("Message").parent;
+    while (box && StyleSheet.flatten(box.props.style)?.backgroundColor !== `${lightColors.card}8c`) box = box.parent;
+    expect(box).toBeTruthy();
+    expect(StyleSheet.flatten(box!.props.style).borderColor).toBe(lightColors.rule);
   });
 });
