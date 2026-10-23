@@ -25,6 +25,13 @@ describe("app.json", () => {
     expect(expo.android.permissions).toEqual(expect.arrayContaining(["CAMERA", "ACCESS_WIFI_STATE", "CHANGE_WIFI_MULTICAST_STATE"]));
   });
 
+  it("says in words why dictation wants the microphone and speech recognition (iOS ends the app without them)", () => {
+    const plugins: unknown[] = expo.plugins;
+    const speech = plugins.find((p) => Array.isArray(p) && p[0] === "expo-speech-recognition") as [string, { microphonePermission?: string; speechRecognitionPermission?: string }] | undefined;
+    expect(speech?.[1].microphonePermission?.length).toBeGreaterThan(10);
+    expect(speech?.[1].speechRecognitionPermission?.length).toBeGreaterThan(10);
+  });
+
   it("opens lantern:// links, which is how a pairing link reaches the app", () => {
     expect(expo.scheme).toBe("lantern");
   });
