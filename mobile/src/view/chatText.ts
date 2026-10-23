@@ -63,11 +63,46 @@ export function quote(text: string): string {
 
 const ASKS = /\b(should i|shall i|do you want|would you like|want me to|ok(?:ay)? (?:to|if)|is that ok(?:ay)?|ready to|go ahead|happy (?:for me )?to|proceed|sound good|does that work)\b/i;
 
+// What Claude asks to be said: "Say "admin merge"", "Reply “go”", "type `ship it`", "say **publish the draft**": a quoted or bold
+// phrase straight after say, reply, type, send, write or answer. The quotes are straight, curly, or backticks, and may be in bold.
+const SAY = /\b(?:say|reply|type|send|write|answer)\b(?:\s+(?:with|me|back))?\s*[:,\-–—]?\s*(?:\*\*|__)?\s*(?:"([^"\n]{2,60})"|“([^”\n]{2,60})”|`([^`\n]{2,60})`)/gi;
+const SAY_BOLD = /\b(?:say|reply|type|send|write|answer)\b(?:\s+(?:with|me|back))?\s*[:,\-–—]?\s*\*\*([^*"“”`\n]{2,60})\*\*/gi;
+/** How many suggestions at most, and how far from the end of the message Claude's asking is looked for (in lines). */
+const SAID_MAX = 4;
+const SAID_LINES = 8;
+
 /**
- * Answers to offer under Claude's last message: Yes and No when it ends on a yes-or-no question, none otherwise. Said by the
- * words alone, so a question that isn't a yes or no (a "which one?") gets none rather than a wrong one.
+ * The exact words Claude asks to be said at the end of its message ("Say "admin merge" and I'll merge it"), in the order it
+ * asks, once each, so one press can say them. Only a phrase straight after a word like say or reply counts, near the end of
+ * the message: a quotation in the middle of the explanation is not an ask.
+ */
+export function saidPhrases(text: string): string[] {
+  const end = text.trim().split("\n").slice(-SAID_LINES).join("\n");
+  const found: { at: number; phrase: string }[] = [];
+  for (const m of end.matchAll(SAY)) found.push({ at: m.index ?? 0, phrase: m[1] ?? m[2] ?? m[3] });
+  for (const m of end.matchAll(SAY_BOLD)) found.push({ at: m.index ?? 0, phrase: m[1] });
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const { phrase } of found.sort((a, b) => a.at - b.at)) {
+    const clean = phrase.trim().replace(/[.,;:!]+$/, "").trim();
+    if (clean.length < 2 || !/[\p{L}\p{N}]/u.test(clean) || seen.has(clean.toLowerCase())) continue;
+    seen.add(clean.toLowerCase());
+    out.push(clean);
+  }
+  return out.slice(0, SAID_MAX);
+}
+
+/**
+ * Answers to offer under Claude's last message: the exact words it asks to be said ("Say "admin merge""), else Yes and No when
+ * it ends on a yes-or-no question, none otherwise. Said by the words alone, so a question that isn't a yes or no (a "which
+ * one?") gets none rather than a wrong one.
  */
 export function quickReplies(text: string): string[] {
+  const said = saidPhrases(text);
+  return said.length > 0 ? said : yesOrNo(text);
+}
+
+function yesOrNo(text: string): string[] {
   const paragraphs = text.trim().split(/\n\s*\n/);
   const last = (paragraphs[paragraphs.length - 1] ?? "").trim();
   const lines = last.split("\n");

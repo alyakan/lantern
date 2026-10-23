@@ -171,11 +171,14 @@ export function JumpToBottom({ unseen, onPress, lift = 0 }: { unseen: number; on
   );
 }
 
-/** Answers Claude's yes-or-no question asks for, one press each; they go as a message and are gone. */
+/**
+ * What Claude's last message asks for, one press each: Yes and No under a yes-or-no question, or the exact words it asked to
+ * be said ("Say "admin merge""). They go as a message and are gone; longer ones wrap to a second line.
+ */
 export function QuickReplies({ replies, onSend }: { replies: string[]; onSend: (text: string) => void }) {
   const colors = useColors();
   return (
-    <View accessibilityLabel="Quick replies" style={{ flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 6 }}>
+    <View accessibilityLabel="Quick replies" style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: 16, paddingBottom: 6 }}>
       {replies.map((r, i) => (
         <FadeSlideIn key={r} from={8} delay={i * 50} ms={180}>
           <PressScale accessibilityRole="button" accessibilityLabel={`Reply: ${r}`} onPress={() => onSend(r)} haptic="select" scaleTo={0.94}>

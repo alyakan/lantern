@@ -53,4 +53,37 @@ describe("quick replies", () => {
   it("are none for a question that isn't yes or no, or for no question at all", () => {
     for (const text of ["Which file should I start with?", "What do you want to call it?", "All done.", "Done. Should I push? I'll wait.", "How should this be named?"]) expect(quickReplies(text)).toEqual([]);
   });
+
+  describe("the words Claude asks to be said", () => {
+    it("are offered as they were asked, whatever the quotes or bold around them", () => {
+      expect(quickReplies('Reply "publish the draft" when you are ready.')).toEqual(["publish the draft"]);
+      expect(quickReplies("Say **\"admin merge\"** and I'll merge it.")).toEqual(["admin merge"]);
+      expect(quickReplies("Type “go” to continue.")).toEqual(["go"]);
+      expect(quickReplies("Send `ship it` and I will.")).toEqual(["ship it"]);
+      expect(quickReplies("Say **upload to TestFlight** and I'll build it.")).toEqual(["upload to TestFlight"]);
+      expect(quickReplies("Reply with “yes, merge both”.")).toEqual(["yes, merge both"]);
+      // A full stop or a comma inside the quotes is not part of the words.
+      expect(quickReplies('Say "admin merge."')).toEqual(["admin merge"]);
+    });
+
+    it("are each offered, in the order asked, from a list", () => {
+      const text = "To try it:\n\n1. Say **\"admin merge\"** and I'll merge #204.\n2. Say **\"upload to TestFlight\"** and I'll build build 10.";
+      expect(quickReplies(text)).toEqual(["admin merge", "upload to TestFlight"]);
+    });
+
+    it("are offered once each, and no more than four", () => {
+      expect(quickReplies('Say "go" now. I mean it: say "GO".')).toEqual(["go"]);
+      expect(quickReplies('Say "one one". Say "two two". Say "three three". Say "four four". Say "five five".')).toEqual(["one one", "two two", "three three", "four four"]);
+    });
+
+    it("come before Yes and No when a message has both", () => {
+      expect(quickReplies('Say "admin merge" and I will. Ready to merge?')).toEqual(["admin merge"]);
+    });
+
+    it("are not found in what only mentions words: a quotation, an error, or something said a long time before the end", () => {
+      for (const text of ['The error was "file not found" in auth.ts.', 'Claude said "hello" to me.', "I'll say it's done.", 'He wrote "x" in the margin.', 'Say "a" now.', 'Say "!!!" now.']) expect(quickReplies(text)).toEqual([]);
+      const early = `Say "admin merge" and it merges.\n${"A line of explanation.\n".repeat(10)}All done.`;
+      expect(quickReplies(early)).toEqual([]);
+    });
+  });
 });
