@@ -7,6 +7,7 @@ import { attachSession } from "../test/fakeSession";
 import { chat, connected, makeController, renderWith } from "../test/render";
 import { ChatScreen } from "./ChatScreen";
 import { PromptRow } from "./ChatParts";
+import { GLASS_FILL } from "../ui/Glass";
 import { motion } from "../ui/motion";
 import { lightColors } from "../ui/theme";
 
@@ -604,7 +605,7 @@ describe("a chat on iOS 26, where its header and message box are glass over the 
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [chat({ status: "idle" })] } }));
     // The surface is the message box's nearest ancestor with the faint fill.
     let box = screen.getByLabelText("Message").parent;
-    while (box && StyleSheet.flatten(box.props.style)?.backgroundColor !== `${lightColors.card}8c`) box = box.parent;
+    while (box && StyleSheet.flatten(box.props.style)?.backgroundColor !== `${lightColors.card}${GLASS_FILL}`) box = box.parent;
     expect(box).toBeTruthy();
     expect(StyleSheet.flatten(box!.props.style).borderColor).toBe(lightColors.rule);
   });
