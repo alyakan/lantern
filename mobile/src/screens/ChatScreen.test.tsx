@@ -135,6 +135,18 @@ describe("a chat", () => {
       expect(screen.queryByLabelText("Quick replies")).toBeNull();
     });
 
+    it("offers the exact words Claude asks to be said, as buttons that send them", async () => {
+      const asked = 'Both are ready.\n\n1. Say **"admin merge"** and I\'ll merge it.\n2. Say **"upload to TestFlight"** and I\'ll build it.';
+      const { lastOf } = await withSession([...talk.slice(0, 4), { kind: "assistant_text", block_id: "r9", text: asked }, { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1, context_window: null }]);
+      expect(screen.getByRole("button", { name: "Reply: admin merge" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Reply: upload to TestFlight" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Reply: Yes" })).toBeNull();
+      await fireEvent.press(screen.getByRole("button", { name: "Reply: upload to TestFlight" }));
+      await waitFor(() => expect(lastOf("send")).toMatchObject({ op: "send", slot: "a", text: "upload to TestFlight" }));
+      // One answer is the answer: they are all gone.
+      expect(screen.queryByLabelText("Quick replies")).toBeNull();
+    });
+
     it("offers no quick replies for a question that is not yes or no, or while Claude is working", async () => {
       await withSession([...talk.slice(0, 4), { kind: "assistant_text", block_id: "r3", text: "Which file should I start with?" }, { kind: "turn_done", is_error: false, result: "ok", duration_ms: 1, context_window: null }]);
       expect(screen.queryByLabelText("Quick replies")).toBeNull();
