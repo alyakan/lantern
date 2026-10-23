@@ -315,11 +315,11 @@ const PHONE_SHELLS_MAX: usize = 4;
 const PHONE_SHELL_OUTPUT_MAX: usize = 512 << 10;
 
 impl remote::gateway::Host for RemoteHost {
-    fn send(&self, slot: String, text: String, by: String) -> remote::gateway::BoxFut<Result<(), String>> {
+    fn send(&self, slot: String, text: String, by: String, images: Vec<remote::protocol::RemoteImage>) -> remote::gateway::BoxFut<Result<(), String>> {
         let app = self.app.clone();
         Box::pin(async move {
             let state = app.state::<AppState>();
-            send_user_message(&app, &state, &slot, &text, &by).await.map(|_| ())
+            send_user_message(&app, &state, &slot, &text, &by, &images).await.map(|_| ())
         })
     }
 
@@ -601,14 +601,14 @@ impl orchestra::Host for AppHost {
             // The main agent's mode may have been lowered while this one started (the mode it was given was read before):
             // checked again now that it runs, so a restart that missed it can't leave it freer than its main agent.
             lower_worker(&self.app, &state, &req.slot, main_ceiling(&state, &parent_slot)).await;
-            send_text(&self.app, &req.slot, &s, &req.brief).await.map(|_| ())
+            send_text(&self.app, &req.slot, &s, &req.brief, Vec::new()).await.map(|_| ())
         })
     }
 
     fn send_to<'a>(&'a self, slot: &'a str, text: String) -> orchestra::Fut<'a, Result<(), String>> {
         Box::pin(async move {
             let s = self.app.state::<AppState>().slots.get(slot)?;
-            send_text(&self.app, slot, &s, &text).await.map(|_| ())
+            send_text(&self.app, slot, &s, &text, Vec::new()).await.map(|_| ())
         })
     }
 
@@ -1199,18 +1199,21 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 #[tauri::command]
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
 async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
-    send_user_message(&app, &state, &slot, &text, remote::SENT_BY_DESKTOP).await
+    send_user_message(&app, &state, &slot, &text, remote::SENT_BY_DESKTOP, &[]).await
 }
 
-/// Sends what the user typed (in the window, or on a paired phone: `sent_by`) to chat `slot`. Every client is told of it
-/// first, so it comes before Claude's answer; the window, which shows its own messages already, isn't.
-async fn send_user_message(app: &AppHandle, state: &AppState, slot: &str, text: &str, sent_by: &str) -> Result<usize, String> {
+/// Sends what the user typed (in the window, or on a paired phone: `sent_by`, with the `images` it attached) to chat `slot`.
+/// Every client is told of it first, so it comes before Claude's answer; the window, which shows its own messages already,
+/// isn't. The pictures go to Claude and nowhere else: clients are told only how many there were.
+async fn send_user_message(app: &AppHandle, state: &AppState, slot: &str, text: &str, sent_by: &str, images: &[remote::protocol::RemoteImage]) -> Result<usize, String> {
     let s = state.slots.get(slot)?;
     // An agent that was put to sleep to save memory wakes for the user's message too.
     state.orchestra.wake_agent(slot).await?;
     let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as u64);
-    state.remote.publish(slot, ui_event::UiEvent::UserText { text: text.to_string(), at, sent_by: Some(sent_by.to_string()) });
-    let turn = send_text(app, slot, &s, text).await?;
+    state.remote.publish(slot, ui_event::UiEvent::UserText { text: text.to_string(), at, sent_by: Some(sent_by.to_string()), images: images.len() as u32 });
+    // Claude's own form of a picture in a message: a block that holds its bytes.
+    let blocks: Vec<serde_json::Value> = images.iter().map(|i| serde_json::json!({"type": "image", "source": {"type": "base64", "media_type": i.media_type, "data": i.data}})).collect();
+    let turn = send_text(app, slot, &s, text, blocks).await?;
     // Said to a worker by the user themselves: its main agent hears of it with its next wake-up.
     state.orchestra.note_user_message(slot, text);
     Ok(turn)
@@ -1239,8 +1242,9 @@ where
     .map_err(|e| e.to_string())?
 }
 
-/// Sends `text` into the chat's claude as a new message and returns the turn's number.
-async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str) -> Result<usize, String> {
+/// Sends `text` (and the `images`, as Claude's own image blocks) into the chat's claude as a new message and returns the
+/// turn's number.
+async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str, images: Vec<serde_json::Value>) -> Result<usize, String> {
     let mut session = s.session.lock().await;
     let claude = session.as_mut().ok_or("No Claude session is running")?;
     // What "Last turn" in the Changes pane compares against. It's taken before the send, so Claude's edits come after it.
@@ -1263,7 +1267,7 @@ async fn send_text(app: &AppHandle, id: &str, s: &Arc<Slot>, text: &str) -> Resu
     // Lead's for an agent). Put back if the message doesn't go, so the next one carries it.
     let note = if carries_settings_note(text) { s.settings_note.lock().unwrap().take() } else { None };
     let noted = note.as_ref().map(|note| format!("{note}\n\n{text}"));
-    if let Err(e) = claude.send(noted.as_deref().unwrap_or(text)).await {
+    if let Err(e) = claude.send_with(noted.as_deref().unwrap_or(text), images).await {
         if let Some(note) = note {
             s.settings_note.lock().unwrap().get_or_insert(note);
         }

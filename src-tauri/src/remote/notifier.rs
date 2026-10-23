@@ -277,7 +277,7 @@ pub(crate) mod tests {
     async fn a_chat_that_needs_you_is_pushed_with_words_that_name_nothing() {
         let r = rig(2);
         r.hub.opened("a", "/p");
-        r.event("a", UiEvent::UserText { text: "SECRET-PROMPT".into(), at: None, sent_by: None }).await;
+        r.event("a", UiEvent::UserText { text: "SECRET-PROMPT".into(), at: None, sent_by: None, images: 0 }).await;
         r.event("a", ask("p1")).await;
         let sent = r.pushed();
         assert_eq!(sent.len(), 2, "one for each phone with a token");
@@ -331,7 +331,7 @@ pub(crate) mod tests {
     async fn a_finished_turn_is_news_again_after_the_next_message() {
         let r = rig(1);
         r.event("a", done(false)).await;
-        r.event("a", UiEvent::UserText { text: "next".into(), at: None, sent_by: None }).await;
+        r.event("a", UiEvent::UserText { text: "next".into(), at: None, sent_by: None, images: 0 }).await;
         r.event("a", done(false)).await;
         assert_eq!(r.pushed().iter().map(|m| m.body.as_str()).collect::<Vec<_>>(), vec!["A chat finished.", "A chat finished."]);
     }

@@ -23,7 +23,7 @@ export interface FileEdit {
 }
 
 export type Item =
-  | { kind: "user"; id: string; text: string; at: number | null; sentBy: string | null; sending?: boolean; failed?: string }
+  | { kind: "user"; id: string; text: string; at: number | null; sentBy: string | null; sending?: boolean; failed?: string; /** How many photos went with it. */ images?: number; /** Where this phone has them, when it sent them in this run (they are not sent back: another time it is only the count). */ thumbs?: string[] }
   | { kind: "assistant"; id: string; text: string; streaming: boolean }
   | { kind: "step"; id: string; name: string; summary: string; done: boolean; isError: boolean; edits: FileEdit[]; tests: { passed: number; failed: number; skipped: number } | null }
   | { kind: "prompt"; id: string; toolName: string; input: unknown; state: "open" | "allowed" | "denied" | "withdrawn"; by: string | null; /** What this phone answered a question with. */ answer?: string }
@@ -85,7 +85,7 @@ export type Action =
   | { type: "welcome"; epoch: number }
   | { type: "pushed"; msg: Pushed }
   | { type: "waiting"; list: Waiting[] }
-  | { type: "sending"; slot: string; clientId: string; text: string; at: number }
+  | { type: "sending"; slot: string; clientId: string; text: string; at: number; /** Where the pictures it carries are (to show them while it goes). */ thumbs?: string[] }
   | { type: "send_failed"; slot: string; clientId: string; error: string }
   /** The chat's history was asked for (again), or the asking failed. */
   | { type: "load_started"; slot: string }
@@ -125,10 +125,14 @@ export function applyEvent(view: ChatView, event: RemoteEvent): ChatView {
       const clientId = clientIdOf(event.sent_by);
       // The Mac's copy of a message this phone sent takes its place.
       const mine = clientId ? items.findIndex((it) => it.kind === "user" && it.id === `local-${clientId}`) : -1;
-      const item: Item = { kind: "user", id: clientId ? `local-${clientId}` : `u-${event.at ?? ""}-${event.text.slice(0, 40)}`, text: event.text, at: event.at, sentBy: event.sent_by };
+      // `images` is null from a Mac that has none to say, and missing from an older one.
+      const images = event.images ?? 0;
+      const item: Item = { kind: "user", id: clientId ? `local-${clientId}` : `u-${event.at ?? ""}-${event.text.slice(0, 40)}`, text: event.text, at: event.at, sentBy: event.sent_by, ...(images > 0 ? { images } : {}) };
       if (mine >= 0) {
         const next = items.slice();
-        next[mine] = item;
+        // The pictures this phone sent are still where it kept them.
+        const kept = items[mine];
+        next[mine] = kept.kind === "user" && kept.thumbs?.length ? { ...item, thumbs: kept.thumbs } : item;
         return { ...view, items: next, thinking: true };
       }
       return { ...view, items: upsert(items, item), thinking: !!event.sent_by };
@@ -220,7 +224,7 @@ export function reducer(state: State, action: Action): State {
       return { ...state, waitingLoaded: true, waiting: [...action.list].sort((a, b) => a.at - b.at) };
     case "sending": {
       const view = state.views[action.slot] ?? emptyView;
-      const item: Item = { kind: "user", id: `local-${action.clientId}`, text: action.text, at: action.at, sentBy: null, sending: true };
+      const item: Item = { kind: "user", id: `local-${action.clientId}`, text: action.text, at: action.at, sentBy: null, sending: true, ...(action.thumbs?.length ? { images: action.thumbs.length, thumbs: action.thumbs } : {}) };
       return { ...state, views: { ...state.views, [action.slot]: { ...view, items: upsert(view.items, item) } } };
     }
     case "load_started": {

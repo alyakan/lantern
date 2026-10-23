@@ -88,7 +88,8 @@ const AUTO_OFF: &str = "Auto from a phone is off. Turn it on in Lantern's Settin
 
 /// What the gateway asks of the app. `by` is who asked: the phone's device id (with its message id for a send).
 pub trait Host: Send + Sync + 'static {
-    fn send(&self, slot: String, text: String, by: String) -> BoxFut<Result<(), String>>;
+    /// Says `text` in the chat, with `images` (the gateway has checked them: see protocol::check_images).
+    fn send(&self, slot: String, text: String, by: String, images: Vec<protocol::RemoteImage>) -> BoxFut<Result<(), String>>;
     fn interrupt(&self, slot: String) -> BoxFut<Result<(), String>>;
     fn pending(&self, slot: &str) -> Vec<Pending>;
     fn answer(&self, slot: &str, request_id: &str, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>, by: &str) -> Result<(), String>;
@@ -721,15 +722,18 @@ impl<'a> Session<'a> {
                 self.unfollow(&slot);
                 Ok(serde_json::Value::Null)
             }
-            Request::Send { slot, text, client_id } => {
+            Request::Send { slot, text, client_id, images } => {
                 self.chat_known(&slot)?;
-                if text.trim().is_empty() || text.len() > TEXT_MAX {
+                let images = images.unwrap_or_default();
+                // Pictures may be all there is to a message.
+                if (text.trim().is_empty() && images.is_empty()) || text.len() > TEXT_MAX {
                     return Err("That message is empty, or too long.".into());
                 }
                 if client_id.is_empty() || client_id.len() > 64 || !client_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
                     return Err("That message has no proper id.".into());
                 }
-                host.send(slot, text, format!("{}:{client_id}", self.device)).await.map(|()| serde_json::Value::Null)
+                protocol::check_images(&images)?;
+                host.send(slot, text, format!("{}:{client_id}", self.device), images).await.map(|()| serde_json::Value::Null)
             }
             Request::Interrupt { slot } => {
                 self.chat_known(&slot)?;
@@ -913,6 +917,8 @@ pub(crate) mod tests {
         pub sent: Mutex<Vec<(String, String, String)>>,
         pub answered: Mutex<Vec<Answered>>,
         pub pending: Mutex<Vec<Pending>>,
+        /// The pictures that went with each message in `sent`.
+        pub sent_images: Mutex<Vec<Vec<protocol::RemoteImage>>>,
         pub woken: Mutex<Vec<String>>,
         pub closed: Mutex<Vec<String>>,
         pub history: Mutex<Vec<UiEvent>>,
@@ -932,8 +938,9 @@ pub(crate) mod tests {
     }
 
     impl Host for FakeHost {
-        fn send(&self, slot: String, text: String, by: String) -> BoxFut<Result<(), String>> {
+        fn send(&self, slot: String, text: String, by: String, images: Vec<protocol::RemoteImage>) -> BoxFut<Result<(), String>> {
             self.sent.lock().unwrap().push((slot, text, by));
+            self.sent_images.lock().unwrap().push(images);
             Box::pin(async { Ok(()) })
         }
         fn interrupt(&self, _: String) -> BoxFut<Result<(), String>> {
@@ -1128,7 +1135,7 @@ pub(crate) mod tests {
     }
 
     fn user(t: &str) -> UiEvent {
-        UiEvent::UserText { text: t.into(), at: None, sent_by: None }
+        UiEvent::UserText { text: t.into(), at: None, sent_by: None, images: 0 }
     }
 
     #[tokio::test]
@@ -1315,13 +1322,13 @@ pub(crate) mod tests {
         let r = rig();
         r.hub.opened("a", "/p");
         let (_, mut p) = paired(&r).await;
-        let (_, err, _) = p.ask(Request::Send { slot: "nope".into(), text: "hi".into(), client_id: "c1".into() }).await;
+        let (_, err, _) = p.ask(Request::Send { slot: "nope".into(), text: "hi".into(), client_id: "c1".into(), images: None }).await;
         assert!(err.unwrap().contains("isn't open"));
-        let (_, err, _) = p.ask(Request::Send { slot: "a".into(), text: "  ".into(), client_id: "c1".into() }).await;
+        let (_, err, _) = p.ask(Request::Send { slot: "a".into(), text: "  ".into(), client_id: "c1".into(), images: None }).await;
         assert!(err.is_some());
-        let (_, err, _) = p.ask(Request::Send { slot: "a".into(), text: "hi".into(), client_id: "../x".into() }).await;
+        let (_, err, _) = p.ask(Request::Send { slot: "a".into(), text: "hi".into(), client_id: "../x".into(), images: None }).await;
         assert!(err.is_some());
-        let (_, err, _) = p.ask(Request::Send { slot: "a".into(), text: "ship it".into(), client_id: "m-1".into() }).await;
+        let (_, err, _) = p.ask(Request::Send { slot: "a".into(), text: "ship it".into(), client_id: "m-1".into(), images: None }).await;
         assert!(err.is_none());
         let device = r.store.saved().devices[0].id.clone();
         assert_eq!(r.host.sent.lock().unwrap()[0], ("a".into(), "ship it".into(), format!("{device}:m-1")));
@@ -1330,6 +1337,30 @@ pub(crate) mod tests {
             p.link.to_peer.try_send(f).unwrap();
         }
         assert!(p.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn pictures_go_with_a_message_only_when_they_check_out() {
+        use base64::Engine;
+        let picture = |media_type: &str, bytes: &[u8]| protocol::RemoteImage { media_type: media_type.into(), data: base64::engine::general_purpose::STANDARD.encode(bytes) };
+        let jpeg = picture("image/jpeg", &[0xFF, 0xD8, 0xFF, 0xE0, 0, 16]);
+        let r = rig();
+        r.hub.opened("a", "/p");
+        let (_, mut p) = paired(&r).await;
+        let send = |text: &str, id: &str, images: Option<Vec<protocol::RemoteImage>>| Request::Send { slot: "a".into(), text: text.into(), client_id: id.into(), images };
+        // Words with a picture, and a picture alone.
+        assert!(p.ask(send("what is this?", "m-1", Some(vec![jpeg.clone()]))).await.1.is_none());
+        assert!(p.ask(send("  ", "m-2", Some(vec![jpeg.clone(), jpeg.clone()]))).await.1.is_none());
+        // No words and no pictures is still empty, and an empty list is no pictures.
+        assert!(p.ask(send(" ", "m-3", Some(vec![]))).await.1.is_some());
+        // A file that isn't a picture, too many, and a bad id with a picture: none of them reaches the chat.
+        assert!(p.ask(send("run it", "m-4", Some(vec![picture("image/jpeg", b"#!/bin/sh\nrm -rf ~")]))).await.1.is_some());
+        assert!(p.ask(send("many", "m-5", Some(vec![jpeg.clone(); protocol::IMAGES_MAX + 1]))).await.1.is_some());
+        assert!(p.ask(send("id", "../x", Some(vec![jpeg.clone()]))).await.1.is_some());
+        let sent = r.host.sent.lock().unwrap().clone();
+        assert_eq!(sent.iter().map(|s| s.1.as_str()).collect::<Vec<_>>(), vec!["what is this?", "  "]);
+        let images = r.host.sent_images.lock().unwrap().clone();
+        assert_eq!(images, vec![vec![jpeg.clone()], vec![jpeg.clone(), jpeg]]);
     }
 
     #[tokio::test]
@@ -1735,7 +1766,7 @@ pub(crate) mod tests {
     fn talked(r: &Rig) {
         r.hub.opened("a", "/Users/me/app");
         r.hub.titled("a", "Release 0.1.53");
-        r.bus.publish("a", UiEvent::UserText { text: "Cut the release".into(), at: Some(1), sent_by: None });
+        r.bus.publish("a", UiEvent::UserText { text: "Cut the release".into(), at: Some(1), sent_by: None, images: 0 });
         r.bus.publish("a", UiEvent::AssistantText { parent: None, block_id: "b".into(), text: "Done: tests pass.".into() });
     }
 
@@ -2092,7 +2123,7 @@ pub(crate) mod tests {
     }
 
     fn said(text: &str, at: Option<u64>) -> RemoteEvent {
-        RemoteEvent::UserText { text: text.into(), at, sent_by: None }
+        RemoteEvent::UserText { text: text.into(), at, sent_by: None, images: None }
     }
 
     #[test]

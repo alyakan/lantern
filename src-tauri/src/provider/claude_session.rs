@@ -184,7 +184,17 @@ impl ClaudeSession {
     }
 
     pub async fn send(&mut self, text: &str) -> Result<(), String> {
-        let msg = serde_json::json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}});
+        self.send_with(text, Vec::new()).await
+    }
+
+    /// Writes a user message: the `images` (Claude's image blocks, which read best before the words) and then `text`, when
+    /// there are any words.
+    pub async fn send_with(&mut self, text: &str, images: Vec<serde_json::Value>) -> Result<(), String> {
+        let mut content = images;
+        if !text.is_empty() || content.is_empty() {
+            content.push(serde_json::json!({"type": "text", "text": text}));
+        }
+        let msg = serde_json::json!({"type": "user", "message": {"role": "user", "content": content}});
         let mut guard = self.stdin.lock().await;
         let stdin = guard.as_mut().ok_or("The Claude session is not running")?;
         stdin.write_all(format!("{msg}\n").as_bytes()).await.map_err(|e| format!("Could not send to claude: {e}"))?;
@@ -550,6 +560,29 @@ done"#,
         })
         .await;
         assert!(!matches!(late, Ok(true)), "stop() must not emit SessionEnded");
+    }
+
+    #[tokio::test]
+    async fn pictures_are_written_as_image_blocks_before_the_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().display();
+        let fake = script(dir.path(), &format!("while IFS= read -r line; do\n  printf '%s\\n' \"$line\" >> {d}/stdin.txt\n  cat '{FIXTURE}'\ndone"));
+        let (sink, mut rx) = channel_sink();
+        let mut s = Session::spawn(&config(fake, dir.path(), None), sink, no_edits()).unwrap();
+        let block = serde_json::json!({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "/9j/4AAQ"}});
+        s.send_with("what is this?", vec![block.clone()]).await.unwrap();
+        next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
+        // A picture alone is a message of one block, with no empty text after it; words alone are as they always were.
+        s.send_with("", vec![block.clone()]).await.unwrap();
+        next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
+        s.send("just words").await.unwrap();
+        next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
+        let stdin = std::fs::read_to_string(dir.path().join("stdin.txt")).unwrap();
+        let sent: Vec<serde_json::Value> = stdin.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(sent[0]["message"]["content"], serde_json::json!([block, {"type": "text", "text": "what is this?"}]));
+        assert_eq!(sent[1]["message"]["content"], serde_json::json!([block]));
+        assert_eq!(sent[2]["message"]["content"], serde_json::json!([{"type": "text", "text": "just words"}]));
+        s.stop().await;
     }
 
     #[tokio::test]

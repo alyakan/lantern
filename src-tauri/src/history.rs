@@ -135,6 +135,24 @@ pub(crate) fn prompt_text(r: &Value) -> Option<String> {
     Some(trimmed.to_string())
 }
 
+/// How many pictures a user record carries: its image blocks (a picture a tool read is inside a tool result, not one of these).
+fn image_blocks(r: &Value) -> u32 {
+    r["message"]["content"].as_array().map_or(0, |blocks| blocks.iter().filter(|b| b["type"] == "image").count() as u32)
+}
+
+/// What a replayed record says the user sent: the words (see prompt_text) and how many pictures went with them. A message of
+/// pictures alone has no words, and is a message all the same: without it the reply that follows would be taken for the
+/// answer to the one before.
+fn replayed_prompt(r: &Value) -> Option<(String, u32)> {
+    let images = image_blocks(r);
+    if let Some(text) = prompt_text(r) {
+        return Some((text, images));
+    }
+    let blocks = r["message"]["content"].as_array()?;
+    let alone = r["type"] == "user" && in_conversation(r) && images > 0 && blocks.iter().all(|b| b["type"] == "image" || (b["type"] == "text" && b["text"].as_str().is_some_and(|t| t.trim().is_empty())));
+    alone.then(|| (String::new(), images))
+}
+
 /// The notes Lantern puts in front of a message it sends (a revert's, a moved folder's): each is a block, then a blank line,
 /// then what the user typed. They aren't part of the prompt, so a replayed chat doesn't show them.
 /// The settings note (see args::settings_note) has blank lines of its own, so it runs to its end mark.
@@ -528,8 +546,8 @@ pub fn replay(path: &Path) -> Replay {
         if !in_conversation(&r) {
             continue;
         }
-        if let Some(text) = prompt_text(&r) {
-            events.push(UiEvent::UserText { text, at: r["timestamp"].as_str().and_then(iso_ms), sent_by: None });
+        if let Some((text, images)) = replayed_prompt(&r) {
+            events.push(UiEvent::UserText { text, at: r["timestamp"].as_str().and_then(iso_ms), sent_by: None, images });
             continue;
         }
         let line = match r["type"].as_str() {
@@ -647,7 +665,7 @@ mod tests {
     fn turns(n: usize) -> Vec<UiEvent> {
         let mut events = vec![UiEvent::ContextUsed { tokens: 1 }];
         for i in 0..n {
-            events.push(UiEvent::UserText { text: format!("u{i}"), at: None, sent_by: None });
+            events.push(UiEvent::UserText { text: format!("u{i}"), at: None, sent_by: None, images: 0 });
             events.push(UiEvent::AssistantText { parent: None, block_id: format!("a{i}"), text: format!("a{i}") });
         }
         events
@@ -921,7 +939,7 @@ mod tests {
         let r = replay(&path);
         let kinds: Vec<String> = r.events.iter().map(|e| serde_json::to_value(e).unwrap()["kind"].as_str().unwrap().to_string()).collect();
         assert_eq!(kinds, vec!["user_text", "assistant_text", "tool_started", "edit_applied", "tool_finished", "assistant_text", "user_text"]);
-        assert_eq!(r.events[0], UiEvent::UserText { text: "Add retries to fetchJson\nfor transient errors".into(), at: None, sent_by: None });
+        assert_eq!(r.events[0], UiEvent::UserText { text: "Add retries to fetchJson\nfor transient errors".into(), at: None, sent_by: None, images: 0 });
         let blocks: Vec<&str> = r.events.iter().filter_map(|e| match e {
             UiEvent::AssistantText { block_id, .. } => Some(block_id.as_str()),
             _ => None,
@@ -974,6 +992,36 @@ mod tests {
         std::fs::write(&path, body).unwrap();
         let texts: Vec<String> = replay(&path).events.into_iter().filter_map(|e| if let UiEvent::UserText { text, .. } = e { Some(text) } else { None }).collect();
         assert_eq!(texts, vec!["first", "second"]);
+    }
+
+    #[test]
+    fn a_message_with_pictures_replays_with_how_many_and_pictures_alone_are_still_a_message() {
+        let img = || json!({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "/9j/4AAQ"}});
+        let user = |content: Value| rec(json!({"type": "user", "cwd": FOLDER, "entrypoint": "cli", "message": {"role": "user", "content": content}}));
+        let assistant = |id: &str, text: &str| rec(json!({"type": "assistant", "uuid": id, "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}));
+        let body = [
+            user(json!([img(), img(), {"type": "text", "text": "what is this?"}])),
+            assistant("a1", "A cat."),
+            user(json!([img()])),
+            assistant("a2", "Another cat."),
+            user(json!("just words")),
+            assistant("a3", "Ok."),
+            // What a tool read is not the user's picture: it sits inside a tool result.
+            user(json!([{"type": "tool_result", "tool_use_id": "t1", "content": [img()]}])),
+            // Pictures in injected meta content aren't the user's either.
+            rec(json!({"type": "user", "cwd": FOLDER, "entrypoint": "cli", "isMeta": true, "message": {"role": "user", "content": [img()]}})),
+        ]
+        .join("\n");
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("s.jsonl");
+        std::fs::write(&path, body).unwrap();
+        let events = replay(&path).events;
+        let prompts: Vec<(String, u32)> = events.iter().filter_map(|e| if let UiEvent::UserText { text, images, .. } = e { Some((text.clone(), *images)) } else { None }).collect();
+        assert_eq!(prompts, vec![("what is this?".to_string(), 2), (String::new(), 1), ("just words".to_string(), 0)]);
+        // Each answer comes after the message it answers, so the turns count right.
+        let order: Vec<&str> = events.iter().filter_map(|e| match e { UiEvent::UserText { .. } => Some("user"), UiEvent::AssistantText { .. } => Some("assistant"), _ => None }).collect();
+        assert_eq!(order, vec!["user", "assistant", "user", "assistant", "user", "assistant"]);
+        assert_eq!(page(events, None, 2).hidden, 1);
     }
 
     #[test]

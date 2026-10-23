@@ -21,6 +21,15 @@ describe("app.json", () => {
     expect(plist.NSCameraUsageDescription.length).toBeGreaterThan(10);
   });
 
+  it("runs on an iPad in every orientation, while an iPhone stays upright", () => {
+    expect(expo.ios.supportsTablet).toBe(true);
+    // The top-level setting is the phone's: left alone it would turn on rotating for a Pro Max, which is wide enough to be mistaken for a tablet.
+    expect(expo.orientation).toBe("portrait");
+    expect(expo.ios.infoPlist["UISupportedInterfaceOrientations~ipad"]).toEqual(expect.arrayContaining(["UIInterfaceOrientationPortrait", "UIInterfaceOrientationLandscapeLeft", "UIInterfaceOrientationLandscapeRight"]));
+    // Split View and Slide Over need this off.
+    expect((expo.ios as { requireFullScreen?: boolean }).requireFullScreen).not.toBe(true);
+  });
+
   it("asks Android for the camera and for Wi-Fi multicast (Bonjour)", () => {
     expect(expo.android.permissions).toEqual(expect.arrayContaining(["CAMERA", "ACCESS_WIFI_STATE", "CHANGE_WIFI_MULTICAST_STATE"]));
   });
@@ -30,6 +39,19 @@ describe("app.json", () => {
     const speech = plugins.find((p) => Array.isArray(p) && p[0] === "expo-speech-recognition") as [string, { microphonePermission?: string; speechRecognitionPermission?: string }] | undefined;
     expect(speech?.[1].microphonePermission?.length).toBeGreaterThan(10);
     expect(speech?.[1].speechRecognitionPermission?.length).toBeGreaterThan(10);
+  });
+
+  it("says in words why attaching photos wants the camera and the library, and keeps the pairing reason in the camera's", () => {
+    const plugins: unknown[] = expo.plugins;
+    type Words = { cameraPermission?: string; photosPermission?: string; microphonePermission?: string };
+    const picker = plugins.find((p) => Array.isArray(p) && p[0] === "expo-image-picker") as [string, Words] | undefined;
+    expect(picker?.[1].cameraPermission).toMatch(/pairing code/);
+    expect(picker?.[1].cameraPermission).toMatch(/photos/);
+    expect(picker?.[1].photosPermission?.length).toBeGreaterThan(10);
+    // The picker's plugin writes the microphone's words too: they must be dictation's, not its own default or nothing.
+    const speech = plugins.find((p) => Array.isArray(p) && p[0] === "expo-speech-recognition") as [string, Words];
+    expect(picker?.[1].microphonePermission).toBe(speech[1].microphonePermission);
+    expect(expo.ios.infoPlist.NSCameraUsageDescription).toBe(picker?.[1].cameraPermission);
   });
 
   it("opens lantern:// links, which is how a pairing link reaches the app", () => {

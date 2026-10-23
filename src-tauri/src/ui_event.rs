@@ -70,6 +70,10 @@ pub struct BackgroundTask {
     pub description: String,
 }
 
+fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum UiEvent {
@@ -83,6 +87,10 @@ pub enum UiEvent {
         at: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
         sent_by: Option<String>,
+        /// How many pictures went with it (from a phone). The pictures themselves are never part of an event: they go to
+        /// Claude and nowhere else, so the window and the phones are only told how many.
+        #[serde(skip_serializing_if = "is_zero")]
+        images: u32,
     },
     Thinking { parent: Option<String> },
     TextDelta { parent: Option<String>, block_id: String, text: String },
