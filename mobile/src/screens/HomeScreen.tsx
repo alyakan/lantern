@@ -158,8 +158,8 @@ function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose }: { group
         </PressScale>
         {open &&
           group.rows.map((r, i) => (
-            // A hairline between one chat and the next, in the card's own width.
-            <View key={r.slot} style={i > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.rule, marginHorizontal: CARD_INSET } : undefined}>
+            // Every chat is held in from the card's edges (the row itself has no inset); a hairline goes between one and the next.
+            <View key={r.slot} testID={`card-row-${r.slot}`} style={[{ marginHorizontal: CARD_INSET }, i > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.rule } : null]}>
               <ChatRow row={r} index={i} showProject={false} inset={0} onPress={() => onOpenChat(r.slot)} onLongPress={onAskClose && (() => onAskClose(r))} />
             </View>
           ))}
