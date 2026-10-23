@@ -8,6 +8,7 @@ export const FOLDER_RECORDS = [
   "settings.subagentsByFolder",
   "settings.promptHistory",
   "settings.harnessByFolder",
+  "settings.providerByFolder",
   "review.collapsedByFolder",
   "settings.pinnedSessions",
   // The command typed for a project's tests, when Lantern can't tell how it is tested (the merge card's Run tests).
@@ -48,6 +49,9 @@ export const NOT_FOLDER_KEYED = [
   "settings.harnessBySession",
   // The conversations of agents (a list of session ids): what the past chats leave out.
   "session.agentIds",
+  // The provider a session runs on (set only for one that isn't Claude's), and each other provider's model and effort.
+  "settings.providerBySession",
+  "settings.providerPrefs",
   "settings.model",
   "settings.effort",
   "settings.defaultModel",

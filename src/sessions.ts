@@ -68,6 +68,7 @@ function spawnWorker(chats: Chats, main: string, ev: Extract<UiEvent, { kind: "a
     ...initialState,
     claudePath: parent.claudePath,
     mode: ev.mode,
+    provider: ev.provider ?? null,
     folder: ev.folder,
     status: "running",
     thinking: true,

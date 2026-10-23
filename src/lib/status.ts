@@ -1,4 +1,5 @@
 import { hasPendingPrompt, type State } from "../store";
+import { agentName } from "./provider";
 
 /** What the title bar's activity viewer says, like Xcode's "Build Succeeded | Today at 10:22". */
 export interface ActivityStatus {
@@ -14,7 +15,7 @@ const clock = (d: Date) => d.toLocaleTimeString([], { hour: "numeric", minute: "
 /** `finishedAt`: when this chat's last turn ended, if it ended while the app was open. */
 export function activityStatus(s: State, finishedAt: Date | null, now = new Date()): ActivityStatus {
   if (!s.folder) return { text: "No folder open", detail: null, working: false };
-  if (s.status === "starting") return { text: "Starting Claude…", detail: null, working: true };
+  if (s.status === "starting") return { text: `Starting ${agentName(s.provider)}…`, detail: null, working: true };
   if (s.status === "ended") return { text: "Stopped", detail: null, working: false };
   if (hasPendingPrompt(s.items)) return { text: "Needs you", detail: null, working: false };
   if (s.status === "running") return { text: "Working", detail: null, working: true };

@@ -152,11 +152,15 @@ interface PermissionsProps {
   onChange: (permissions: Permissions) => void;
   disabled?: boolean;
   compact?: boolean;
+  /** The chat's provider has an auto mode; one that hasn't shows Auto off, with why. */
+  auto?: boolean;
+  /** What the chat's agent is called, in that reason. */
+  agent?: string;
 }
 
-/** Permissions: how much Claude may do without asking (Ask or Auto), the same in every workflow. */
-export function PermissionsMenu({ permissions, onChange, disabled, compact }: PermissionsProps) {
-  const rows = PERMISSION_ROWS.map((r) => ({ ...r, label: PERMISSIONS_LABEL[r.value] }));
+/** Permissions: how much the agent may do without asking (Ask or Auto), the same in every workflow. */
+export function PermissionsMenu({ permissions, onChange, disabled, compact, auto = true, agent = "Claude" }: PermissionsProps) {
+  const rows = PERMISSION_ROWS.map((r) => ({ ...r, label: PERMISSIONS_LABEL[r.value], off: !auto && r.value === "auto" ? `${agent} has no Auto mode: it asks before actions.` : undefined }));
   return <SettingMenu name="Permissions" value={permissions} text={PERMISSIONS_LABEL[permissions]} rows={rows} onChange={onChange} disabled={disabled} compact={compact} guideKey={permissions} />;
 }
 

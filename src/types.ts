@@ -45,11 +45,21 @@ export interface Capabilities {
   supports_skills: boolean;
   supports_effort: boolean;
   model_switchable: boolean;
+  /** Lantern's own tools reach it, so what relies on them (the Network tab's Summarize) is offered. */
+  supports_lantern_tools: boolean;
 }
 
 export interface ProviderInfo {
   id: string;
   capabilities: Capabilities;
+}
+
+/** A provider the window may start a chat on (the backend's `list_providers`): its models, and where its program is. */
+export interface ProviderListing extends ProviderInfo {
+  /** The model names its CLI takes, for the model picker and the "+ Agent" form. */
+  models: string[];
+  /** Its program, for starting a chat on it. Null for Claude Code when the window already found it. */
+  binary: string | null;
 }
 
 export type UiEvent =
@@ -222,6 +232,8 @@ export interface NewWorker {
   model: string | null;
   /** The role it is started in, which is also what is kept of it on its card; absent: none. A read-only one has only the tools that read files: no editing and no commands. */
   role?: AgentRole;
+  /** The provider it runs on, when not its main agent's own (absent: the main agent's, as the backend defaults). `model` is that provider's. */
+  provider?: string;
 }
 
 /**
@@ -317,6 +329,8 @@ export interface ModelOption {
 
 /** How claude runs in a chat. null model or effort = Claude Code's default. */
 export interface Settings {
+  /** Which agent CLI runs the chat (absent: Claude Code, as for chats saved before there was a choice). */
+  provider?: string;
   mode: Mode;
   model: string | null;
   effort: string | null;

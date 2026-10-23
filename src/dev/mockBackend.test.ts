@@ -53,3 +53,27 @@ describe("mock backend", () => {
     await expect(invoke("app_version")).resolves.toBe(version);
   });
 });
+
+describe("mock providers", () => {
+  it("has Claude Code alone, as the real backend does until another CLI is installed", async () => {
+    const list = (await invoke("list_providers")) as { id: string; capabilities: Record<string, boolean>; models: string[]; binary: string | null }[];
+    expect(list.map((p) => p.id)).toEqual(["claude"]);
+    expect(Object.values(list[0].capabilities).every(Boolean)).toBe(true);
+  });
+
+  it("adds a second, fake one with what such a CLI lacks, when asked to", async () => {
+    installMockBackend({ providers: true });
+    const list = (await invoke("list_providers")) as { id: string; capabilities: Record<string, boolean>; models: string[]; binary: string | null }[];
+    expect(list.map((p) => p.id)).toEqual(["claude", "codex"]);
+    expect(list[1].capabilities).toMatchObject({ supports_auto_mode: false, supports_advisor: false, supports_skills: false, reports_cost_usd: false, supports_effort: true });
+    expect(list[1].models.length).toBeGreaterThan(1);
+    expect(list[1].binary).toBeTruthy();
+  });
+
+  it("starts a chat on the provider it is asked, and says which it is", async () => {
+    installMockBackend({ providers: true });
+    const settings = { mode: "ask", model: null, effort: null };
+    await expect(invoke("start_session", { slot: "p1", claudePath: "/bin/claude", folder: "/Users/you/projects/acme-api", settings })).resolves.toBeNull();
+    await expect(invoke("start_session", { slot: "p2", claudePath: "/bin/codex", folder: "/Users/you/projects/acme-api", settings: { ...settings, provider: "codex" } })).resolves.toMatchObject({ id: "codex" });
+  });
+});

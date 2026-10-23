@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { Status } from "../store";
-import type { FoundFile, ModelOption, RecentFolder, SessionSummary, SkillEntry, SlashCommand } from "../types";
+import type { FoundFile, ModelOption, ProviderInfo, RecentFolder, SessionSummary, SkillEntry, SlashCommand } from "../types";
+import { agentName, capabilitiesOf } from "../lib/provider";
 import { basename } from "../lib/diff";
 import { useShortcut } from "../lib/shortcuts";
 import { matchCommands } from "../lib/slash";
@@ -13,6 +14,7 @@ import { ContextMeter } from "./ContextMeter";
 import { EFFORT_LEVELS } from "../lib/effort";
 import { FolderPill, type RelocateMenu } from "./FolderPill";
 import { PermissionsMenu, WorkflowMenu } from "./ModeMenu";
+import { ProviderPicker, type ProviderOption } from "./ProviderPicker";
 import type { Flavour } from "../lib/flavour";
 import type { Permissions, Workflow } from "../lib/workflow";
 import { ModelsPicker } from "./ModelsPicker";
@@ -22,6 +24,8 @@ import { SideChat } from "./SideChat";
 import { UpdateButton } from "./UpdateButton";
 
 const MAX_HEIGHT = 200; // about 8 lines
+// Stable, so a chat whose provider has no commands doesn't hand the menu a new list each render.
+const NO_COMMANDS: SlashCommand[] = [];
 
 
 interface Props {
@@ -81,9 +85,24 @@ interface Props {
   update?: { version: string; busy: number; onRestart: () => void; onLater: () => void };
   /** The folder's sent prompts, oldest first, as encoded drafts: ↑ and ↓ recall them. `remember` adds one when sent. */
   history?: { entries: string[]; remember: (entry: string) => void };
+  /**
+   * The agent CLI the chat runs on, and so what its box offers: no Auto mode, effort level, harness or "/" menu where that
+   * provider has none, and its name in the copy. Absent or unknown: Claude Code's, which has all of it.
+   */
+  provider?: ProviderInfo | null;
+  /** In a new chat, with more than one provider: the agent CLIs to start it on, and how to change it (which starts the chat again). */
+  providers?: { options: ProviderOption[]; chosen: string; onChoose: (id: string) => void };
 }
 
-export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands = [], skillIndex, findFiles, mcpIssues, onOpenSettings, draft, effort, harness, update, history }: Props) {
+export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onStop, onCancelStart, onRun, permissions, workflow, flavour = null, onPermissionsChange, onWorkflowChange, holdsAgents, model, branch, hero, folder, onOpenFolder, sessions, folders, models, usage, queue, commands: allCommands = [], skillIndex: allSkills, findFiles, mcpIssues: allIssues, onOpenSettings, draft, effort: allEffort, harness: allHarness, update, history, provider, providers }: Props) {
+  const caps = capabilitiesOf(provider);
+  const agent = agentName(provider);
+  // What the provider hasn't got isn't offered: its box has no effort, harness or "/" menu to show.
+  const effort = caps.supports_effort ? allEffort : undefined;
+  const harness = caps.supports_advisor ? allHarness : undefined;
+  const commands = caps.supports_skills ? allCommands : NO_COMMANDS;
+  const skillIndex = caps.supports_skills ? allSkills : undefined;
+  const mcpIssues = caps.supports_skills ? allIssues : undefined;
   // A draft with big pastes in it comes back as the box had it: their placeholders, and the text they stand for.
   const [restored] = useState(() => decodeDraft(draft?.initial ?? ""));
   const [text, setTextState] = useState(restored.text);
@@ -112,14 +131,14 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
     status === "no_folder"
       ? "Open a folder to start"
       : status === "starting"
-        ? "Starting Claude…"
+        ? `Starting ${agent}…`
         : status === "ended"
-          ? "Claude stopped — restart to continue"
+          ? `${agent} stopped — restart to continue`
           : terminal
             ? `Run a command in ${folder ? basename(folder) : "the folder"}…`
             : running
               ? "Queue a message…"
-              : (idlePlaceholder ?? "Ask Claude…");
+              : (idlePlaceholder ?? `Ask ${agent}…`);
 
   // A queued message goes out in full (the queue holds the text), but it's remembered as it was in the box: its
   // placeholders, with their pastes kept here so the numbers aren't reused meanwhile. The queue shows and Stop restores that.
@@ -258,7 +277,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
   const [caret, setCaret] = useState(text.length);
   const trigger = canType && !terminal ? triggerAt(text, Math.min(caret, text.length)) : null;
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
-  const open = trigger && dismissedAt !== trigger.start ? trigger : null;
+  const open = trigger && dismissedAt !== trigger.start && (trigger.kind !== "/" || caps.supports_skills) ? trigger : null;
   useEffect(() => {
     if (!trigger) setDismissedAt(null);
   }, [trigger?.start]);
@@ -385,7 +404,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           {folders ? (
             <FolderPill folder={folder ?? null} loadRecent={folders.load} onPick={folders.onPick} onBrowse={onOpenFolder} disabled={busy} relocate={folders.relocate} />
           ) : (
-            <button className="pill" onClick={onOpenFolder} disabled={busy} title={folder ?? "Open a folder for Claude to work in"}>
+            <button className="pill" onClick={onOpenFolder} disabled={busy} title={folder ?? `Open a folder for ${agent} to work in`}>
               <FolderIcon />
               <span>{folder ? basename(folder) : "Open folder"}</span>
             </button>
@@ -401,7 +420,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               <button className="queue-text" title="Edit: takes it back to the box" onClick={() => editQueued(i)}>
                 {queuedBox.current.get(q)?.box ?? q}
               </button>
-              <button className="link-button queue-now" title="Stops Claude's turn and sends this next (anything queued after it goes with it)" onClick={() => sendNow(i)}>
+              <button className="link-button queue-now" title={`Stops ${agent}'s turn and sends this next (anything queued after it goes with it)`} onClick={() => sendNow(i)}>
                 Send now
               </button>
               <button className="icon queue-remove" aria-label="Remove queued message" title="Remove" onClick={() => setQueued(queued.filter((_, j) => j !== i))}>
@@ -439,7 +458,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           )}
           <textarea
             ref={area}
-            aria-label={terminal ? "Shell command" : "Message to Claude"}
+            aria-label={terminal ? "Shell command" : `Message to ${agent}`}
             spellCheck={!terminal}
             // WebKit otherwise applies macOS's "Capitalize words automatically" and autocorrect to what you type.
             autoCapitalize="off"
@@ -538,8 +557,9 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           />
         </div>
         <div className="composer-footer">
+          {!terminal && providers && providers.options.length > 1 && <ProviderPicker options={providers.options} chosen={providers.chosen} onChoose={providers.onChoose} disabled={busy} />}
           {terminal ? (
-            <span className="terminal-hint">Claude sees the output with your next message · backspace to leave</span>
+            <span className="terminal-hint">{agent} sees the output with your next message · backspace to leave</span>
           ) : models ? (
             <ModelsPicker
               running={model ?? null}
@@ -554,6 +574,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               onPreset={harness?.onChoose}
               onEdit={harness?.onEdit}
               disabled={busy}
+              agent={agent}
             />
           ) : (
             model && (
@@ -569,7 +590,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
               <SideChatIcon />
             </button>
           )}
-          {usage && <ContextMeter used={usage.used} window={usage.window} running={running} lastTurnMs={usage.lastTurnMs} actions={usage.actions} session={usage.session} />}
+          {usage && <ContextMeter used={usage.used} window={usage.window} running={running} lastTurnMs={usage.lastTurnMs} actions={caps.supports_skills ? usage.actions : undefined} session={usage.session} />}
           {terminal ? (
             <button className="send run" aria-label="Run" title="Run (Enter)" disabled={!canSend} onClick={submit}>
               <ArrowUpIcon />
@@ -581,7 +602,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
           ) : (
             <>
               {status === "starting" && onCancelStart && (
-                <button className="ghost" title="Stop starting Claude" onClick={onCancelStart}>
+                <button className="ghost" title={`Stop starting ${agent}`} onClick={onCancelStart}>
                   Cancel
                 </button>
               )}
@@ -599,7 +620,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
       </div>
       {(permissions || branch || update) && (
         <div className="composer-meta">
-          {permissions && onPermissionsChange && <PermissionsMenu permissions={permissions} onChange={onPermissionsChange} disabled={busy} />}
+          {permissions && onPermissionsChange && <PermissionsMenu permissions={permissions} onChange={onPermissionsChange} disabled={busy} auto={caps.supports_auto_mode} agent={agent} />}
           {workflow && onWorkflowChange && <WorkflowMenu workflow={workflow} flavour={flavour} onChange={onWorkflowChange} disabled={busy} holdsAgents={holdsAgents} />}
           <div className="spacer" />
           {update && <UpdateButton {...update} />}

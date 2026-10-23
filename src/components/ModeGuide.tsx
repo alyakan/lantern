@@ -175,12 +175,15 @@ interface Props {
   /** Switch the chat to a Permissions setting, a Workflow or Step by step's flavour; absent while it can't be switched (Claude is working). */
   onUse?: (key: GuideKey) => void;
   onClose: () => void;
+  /** The chat's provider has an auto mode; without one its page, and what Step by step says of auto-approve, are left out. */
+  auto?: boolean;
 }
 
-/** How the modes work: Permissions, Workflows and flavours, with what Claude does in each, what you do, and what it's for. */
-export function ModeGuide({ open, permissions, workflow, flavour, explain = false, onUse, onClose }: Props) {
+export function ModeGuide({ open, permissions, workflow, flavour, explain = false, onUse, onClose, auto = true }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [shown, setShown] = useState<GuideKey>(open ?? permissions);
+  const [picked, setShown] = useState<GuideKey>(open ?? permissions);
+  // A provider without Auto has no Auto page to show: its Ask page stands in.
+  const shown = !auto && picked === "auto" ? "ask" : picked;
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -198,6 +201,8 @@ export function ModeGuide({ open, permissions, workflow, flavour, explain = fals
 
   const now = (k: GuideKey) => (k === "explain" ? workflow === "steps" && explain : isFlavour(k) ? workflow === "steps" && flavour === k : isPermissions(k) ? permissions === k : workflow === k);
   const about = GUIDE[shown];
+  // What Step by step says of Auto-approve is about the mode this provider hasn't got.
+  const you = auto ? about.you : about.you.filter((line) => !line.startsWith("Auto-approve"));
   return (
     <dialog ref={ref} className="mode-guide" aria-label="How the modes work" onClose={onClose} onClick={(e) => e.target === e.currentTarget && onClose()}>
       {open && (
@@ -206,7 +211,7 @@ export function ModeGuide({ open, permissions, workflow, flavour, explain = fals
             {GROUPS.map((g) => (
               <div key={g.title} className="mode-guide-group">
                 <div className="mode-guide-group-title">{g.title}</div>
-                {g.keys.map((k) => (
+                {g.keys.filter((k) => auto || k !== "auto").map((k) => (
                   <button key={k} className={`mode-guide-tab${isFlavour(k) ? " flavour" : ""}${k === shown ? " active" : ""}`} aria-current={k === shown ? "page" : undefined} onClick={() => setShown(k)}>
                     <span className="mode-icon">{GUIDE[k].icon}</span>
                     {GUIDE[k].label}
@@ -221,7 +226,7 @@ export function ModeGuide({ open, permissions, workflow, flavour, explain = fals
             <h2 className="mode-guide-title">{about.label}</h2>
             <p className="mode-guide-summary">{about.summary}</p>
             <Section title="What Claude does" items={about.claude} />
-            <Section title="What you do" items={about.you} />
+            <Section title="What you do" items={you} />
             <h3 className="mode-guide-heading">Good for</h3>
             <p className="mode-guide-text">{about.goodFor}</p>
             {about.example && <p className="mode-guide-note">Try: “{about.example}”</p>}

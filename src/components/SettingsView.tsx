@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
-import type { McpServer, McpServerSpec, SkillEntry, SlashCommand } from "../types";
+import type { McpServer, McpServerSpec, ProviderInfo, SkillEntry, SlashCommand } from "../types";
+import { capabilitiesOf } from "../lib/provider";
 import { describeConfig, displayName, groupSkills, iconOf, removable, sourceOf, statusOf, toolsOf, withoutFrontmatter } from "../lib/mcp";
 import { setChime, useChimeOn } from "../lib/chime";
 import { AGENT_LIMIT_MAX, AGENT_LIMIT_MIN, setAgentLimit, useAgentLimit } from "../lib/agentLimit";
@@ -57,12 +58,18 @@ interface Props {
   routines?: RoutinesSettingsProps;
   /** What happens after a pull request's checks run, per project, for the Pull requests page. */
   prChecks?: PrChecksSettingsProps;
+  /** The agent CLI the chat runs on: with no skills, or no advisor to set up a harness for, those pages aren't offered. Absent: Claude Code's. */
+  provider?: ProviderInfo | null;
 }
 
 /** Settings: General (notifications, sound, look), MCP servers (status, log in, add, remove) and skills. */
 export function SettingsView({ open, onClose, harness, updates, general, routines, prChecks, ...page }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [tab, setTab] = useState<SettingsTab>(open ?? "general");
+  const caps = capabilitiesOf(page.provider);
+  const [picked, setTab] = useState<SettingsTab>(open ?? "general");
+  // A page the chat's provider has nothing for (skills, the harness) isn't offered; one asked for anyway opens on General.
+  const offered = (t: SettingsTab) => (t !== "skills" || caps.supports_skills) && (t !== "harness" || caps.supports_advisor);
+  const tab = offered(picked) ? picked : "general";
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -86,7 +93,7 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
             <div className="mode-guide-group">
               <div className="mode-guide-group-title">Settings</div>
               {(["general", "harness", "routines", "mcp", "skills", "permissions", "prs", "remote", "updates"] as const)
-                .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "prs" || prChecks))
+                .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "prs" || prChecks) && offered(t))
                 .map((t) => (
                   <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} onClick={() => setTab(t)}>
                     {TAB_LABEL[t]}

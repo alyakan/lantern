@@ -24,9 +24,9 @@ function firstLine(markdown: string): string {
  * What the user should hear about when the window isn't in front: a turn that just ended, or a permission prompt
  * waiting for an answer. Null when the conversation doesn't need them (e.g. mid-turn, or a replayed session).
  */
-export function attentionFor(items: ChatItem[], folder: string | null, describe: (input: unknown) => string): Attention | null {
+export function attentionFor(items: ChatItem[], folder: string | null, describe: (input: unknown) => string, agent = "Claude"): Attention | null {
   const last = items[items.length - 1];
-  const title = folder ? `Claude · ${basename(folder)}` : "Claude";
+  const title = folder ? `${agent} · ${basename(folder)}` : agent;
   if (last?.type === "permission" && last.decision === null) {
     const input = (last.input ?? {}) as { plan?: string; steps?: string; action?: unknown };
     if (last.toolName === "ExitPlanMode") return { key: last.id, kind: "waiting", title, body: `Plan ready for review: ${firstLine(input.plan ?? "")}` };
