@@ -610,6 +610,9 @@ async fn server_request(ctx: &Ctx, sink: &Sink, mapper: &mut CodexMapper, method
     let ours = ctx.state.lock().unwrap().thread_id.clone();
     let request = match mapper.approval(method, params) {
         Some(Ok(_)) if params["threadId"].as_str().is_none() || params["threadId"].as_str() != ours.as_deref() => Some(Err("it is not about this conversation".to_string())),
+        // A read-only agent shares its Lead's folder: nothing it asks for is allowed, so the user isn't asked (one Allow would
+        // let it write there). Claude's read-only agent has no tool to ask with; this is Codex's way of being the same.
+        Some(Ok(_)) if ctx.read_only => Some(Err("this agent is read-only".to_string())),
         other => other,
     };
     match request {
@@ -1142,6 +1145,36 @@ done
 
     fn answers(dir: &Path) -> Vec<Value> {
         sent(dir).into_iter().filter(|m| m.get("method").is_none() && (m.get("result").is_some() || m.get("error").is_some())).collect()
+    }
+
+    #[tokio::test]
+    async fn a_read_only_agent_is_never_asked_about_its_requests_they_are_all_declined() {
+        let dir = tempfile::tempdir().unwrap();
+        let ask = |id: u32, method: &str, params: &str| format!(r#"printf '%s\n' '{{"id":{id},"method":"{method}","params":{params}}}'"#);
+        let on_turn = [
+            TURN_STARTED.to_string(),
+            ask(900, "item/commandExecution/requestApproval", r#"{"threadId":"thr-1","turnId":"turn-1","itemId":"c1","command":"touch x","startedAtMs":1}"#),
+            r#"read -r answer; printf '%s\n' "$answer" >> "$LOG""#.to_string(),
+            ask(901, "item/permissions/requestApproval", r#"{"threadId":"thr-1","turnId":"turn-1","itemId":"p1","cwd":"/p","permissions":{"network":{"enabled":true}},"startedAtMs":1}"#),
+            r#"read -r answer; printf '%s\n' "$answer" >> "$LOG""#.to_string(),
+            TURN_DONE.to_string(),
+        ]
+        .join("\n");
+        let (sink, mut rx) = channel_sink();
+        let mut cfg = config(Fake::new(&on_turn).script(dir.path()), dir.path(), None);
+        cfg.helper.role = Role::Worker { name: "reader".into(), read_only: true };
+        let mut s = Session::spawn(&cfg, sink, no_edits()).unwrap();
+        s.initialize().await;
+        s.send("go").await.unwrap();
+        let seen = until_turn_done(&mut rx).await;
+        assert!(!seen.iter().any(|e| matches!(e, UiEvent::PermissionRequested { .. })), "a read-only agent's request was put to the user");
+        let got = answers(dir.path());
+        assert_eq!(got[0], json!({"id": 900, "result": {"decision": "decline"}}));
+        assert_eq!(got[1], json!({"id": 901, "result": {"permissions": {}, "scope": "turn"}}));
+        // It ran in Codex's read-only sandbox too.
+        let turn = &requests(dir.path(), "turn/start")[0];
+        assert_eq!(turn["params"]["sandboxPolicy"]["type"], "readOnly");
+        s.stop().await;
     }
 
     #[tokio::test]
