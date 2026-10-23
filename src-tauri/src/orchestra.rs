@@ -153,6 +153,11 @@ pub trait Host: Send + Sync + 'static {
     fn restart<'a>(&'a self, slot: &'a str) -> Fut<'a, Result<(), String>>;
     /// A session's conversation, read from Claude Code's transcript for it. Blocking.
     fn transcript(&self, folder: &Path, session_id: &str) -> Result<Vec<UiEvent>, String>;
+    /// A worker's conversation when it isn't a file `transcript` can read (a Codex worker's is asked of its running
+    /// app-server): Some for such a worker, None to read the transcript file.
+    fn live_transcript<'a>(&'a self, _worker: &'a str) -> Option<Fut<'a, Result<Vec<UiEvent>, String>>> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1064,8 +1069,13 @@ impl Orchestra {
             (w.folder.clone(), w.session_id.clone())
         };
         let session = session.ok_or("It hasn't started working yet, so there is nothing to read.")?;
-        let host = self.host.clone();
-        let events = tokio::task::spawn_blocking(move || host.transcript(&folder, &session)).await.map_err(|e| e.to_string())??;
+        let events = match self.host.live_transcript(&id) {
+            Some(read) => read.await?,
+            None => {
+                let host = self.host.clone();
+                tokio::task::spawn_blocking(move || host.transcript(&folder, &session)).await.map_err(|e| e.to_string())??
+            }
+        };
         let entries = condense(&events);
         if entries.is_empty() {
             return Ok("Nothing recorded yet.".into());
@@ -1544,6 +1554,11 @@ impl Orchestra {
     /// The user started a worker from the canvas: started exactly as the main agent's `spawn_agent` would (the limit, the
     /// worktree, the checks), and the main agent is told it was the user's doing. Returns the worker's id.
     pub async fn spawn_for_user(self: &Arc<Self>, main: &str, task: &str, name: Option<&str>, isolation: &str, model: Option<&str>, role: Option<RoleTag>) -> Result<String, String> {
+        self.spawn_for_user_on(main, task, name, isolation, model, role, None).await
+    }
+
+    /// As `spawn_for_user`, on the provider `provider` names (None: the main agent's own, as spawn_agent defaults).
+    pub async fn spawn_for_user_on(self: &Arc<Self>, main: &str, task: &str, name: Option<&str>, isolation: &str, model: Option<&str>, role: Option<RoleTag>, provider: Option<&str>) -> Result<String, String> {
         if !self.is_main(main) {
             return Err("This chat is not a Team's lead.".into());
         }
@@ -1553,7 +1568,7 @@ impl Orchestra {
         }
         let name = name.map(str::trim).filter(|n| !n.is_empty()).map_or_else(|| clip(&task.split_whitespace().take(5).collect::<Vec<_>>().join(" "), 40), String::from);
         let role = role.map(|r| r.checked()).transpose()?;
-        let args = serde_json::json!({ "name": name, "brief": task, "isolation": isolation, "model": model });
+        let args = serde_json::json!({ "name": name, "brief": task, "isolation": isolation, "model": model, "provider": provider });
         // The limit's message tells the main agent what to do about it; the user closes a worker instead.
         let reply = self.spawn(main, &args, role).await.map_err(|e| e.replace("or stop_agent one.", "or close one."))?;
         let id = reply.strip_prefix("Started agent ").and_then(|r| r.split_whitespace().next()).ok_or("The agent started, but its id couldn't be read.")?.to_string();
@@ -3342,6 +3357,18 @@ mod tests {
         );
         // The worker is the team's like any other.
         assert!(call(&o, "list_agents", json!({})).await.unwrap().contains("w1 \"Add dark mode to the\" — working"));
+    }
+
+    #[tokio::test]
+    async fn a_worker_the_user_starts_can_be_put_on_another_provider_with_a_model_of_its_own() {
+        let (host, o, _r, _w) = setup();
+        *host.installed.lock().unwrap() = vec![ProviderId::Fake];
+        o.spawn_for_user_on("s1", "Read the code", None, "shared", Some("fake-large"), None, Some("fake")).await.unwrap();
+        let spawned = host.spawned.lock().unwrap().clone();
+        assert_eq!((spawned[0].provider, spawned[0].model.as_deref()), (ProviderId::Fake, Some("fake-large")));
+        // One that isn't there is said so in the form, like for the main agent.
+        let err = o.spawn_for_user_on("s1", "x", None, "shared", None, None, Some("codex")).await.unwrap_err();
+        assert!(err.contains("is not an available provider"), "{err}");
     }
 
     #[tokio::test]

@@ -8,6 +8,10 @@
 
 pub mod claude;
 pub mod claude_session;
+pub mod codex;
+pub mod codex_events;
+pub mod codex_prompt;
+pub mod codex_session;
 
 use crate::session::{EditHook, Session, SessionConfig};
 use crate::ui_event::Sink;
@@ -20,6 +24,8 @@ use std::path::PathBuf;
 pub enum ProviderId {
     #[default]
     Claude,
+    /// OpenAI's Codex CLI, driven through `codex app-server`.
+    Codex,
     /// A stand-in with the capabilities of a CLI that has no auto mode, so tests can tell a provider's limits from Claude's.
     #[cfg(test)]
     Fake,
@@ -29,6 +35,7 @@ impl ProviderId {
     pub fn provider(self) -> &'static dyn Provider {
         match self {
             ProviderId::Claude => &claude::ClaudeProvider,
+            ProviderId::Codex => &codex::CodexProvider,
             #[cfg(test)]
             ProviderId::Fake => &FakeProvider,
         }
@@ -37,7 +44,7 @@ impl ProviderId {
     /// Every provider this build knows, whether or not its CLI is installed.
     pub fn all() -> Vec<ProviderId> {
         #[allow(unused_mut)]
-        let mut all = vec![ProviderId::Claude];
+        let mut all = vec![ProviderId::Claude, ProviderId::Codex];
         #[cfg(test)]
         all.push(ProviderId::Fake);
         all
@@ -47,6 +54,7 @@ impl ProviderId {
     pub fn name(self) -> &'static str {
         match self {
             ProviderId::Claude => "claude",
+            ProviderId::Codex => "codex",
             #[cfg(test)]
             ProviderId::Fake => "fake",
         }
@@ -73,6 +81,9 @@ pub struct Capabilities {
     pub supports_effort: bool,
     /// The model can be switched while the session runs; otherwise a change waits for the next start.
     pub model_switchable: bool,
+    /// Lantern's own tools reach it (its MCP server: the Network tab's requests, the orchestra's): a provider without them is
+    /// not asked to use them, and the window offers nothing that relies on them.
+    pub supports_lantern_tools: bool,
 }
 
 /// A provider and what it can do, as the window is told.
@@ -115,7 +126,7 @@ impl Provider for FakeProvider {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true }
+        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: false }
     }
 
     fn models(&self) -> &'static [&'static str] {

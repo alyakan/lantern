@@ -12,7 +12,7 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{ChildStdin, Command};
 use tokio::sync::{watch, Mutex as AsyncMutex};
 
-const STDERR_TAIL_BYTES: usize = 4000;
+pub(super) const STDERR_TAIL_BYTES: usize = 4000;
 
 /// One running `claude` process.
 pub struct ClaudeSession {
@@ -263,12 +263,12 @@ impl ClaudeSession {
 }
 
 /// Signals claude's process group (its pid is the group id, see `process_group` in spawn).
-fn signal_group(pid: u32, sig: libc::c_int) {
+pub(super) fn signal_group(pid: u32, sig: libc::c_int) {
     unsafe { libc::kill(-(pid as libc::pid_t), sig) };
 }
 
 /// Writes one line to claude's stdin. False if it's closed or the write fails.
-async fn write_line(stdin: &AsyncMutex<Option<ChildStdin>>, line: &str) -> bool {
+pub(super) async fn write_line(stdin: &AsyncMutex<Option<ChildStdin>>, line: &str) -> bool {
     let mut guard = stdin.lock().await;
     match guard.as_mut() {
         Some(s) => s.write_all(format!("{line}\n").as_bytes()).await.is_ok() && s.flush().await.is_ok(),
@@ -282,7 +282,7 @@ const READ_ERRORS: u32 = 100;
 /// The next line of a pipe, or None once it's closed. Bytes that aren't UTF-8 are replaced rather than ending the
 /// read: a pipe that stops being drained blocks claude, and the chat would sit "running" forever. A read that fails is
 /// tried again, but a pipe that only ever fails is as good as closed, or this would never end.
-async fn next_line<R: AsyncBufRead + Unpin>(reader: &mut R, buf: &mut Vec<u8>) -> Option<String> {
+pub(super) async fn next_line<R: AsyncBufRead + Unpin>(reader: &mut R, buf: &mut Vec<u8>) -> Option<String> {
     let mut failed = 0;
     loop {
         buf.clear();
@@ -323,7 +323,7 @@ fn offstream_source(tool_use_id: &str, dir: Option<&str>, folder: &std::path::Pa
     Some(crate::offstream::Source::Agent { tool_use_id: tool_use_id.into(), subagents: transcript.with_extension("").join("subagents") })
 }
 
-fn push_tail(tail: &mut String, line: &str) {
+pub(super) fn push_tail(tail: &mut String, line: &str) {
     tail.push_str(line);
     tail.push('\n');
     if tail.len() > STDERR_TAIL_BYTES {
