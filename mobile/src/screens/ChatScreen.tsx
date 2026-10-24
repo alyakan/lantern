@@ -16,6 +16,7 @@ import { projectColorOf } from "../view/home";
 import { hasHiddenChars } from "../view/shell";
 import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
+import { useKeepPlace } from "./useKeepPlace";
 import { ChatSearchSheet, distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
@@ -80,6 +81,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   const [seed, setSeed] = useState<ComposeSeed | undefined>(undefined);
   const [repliedTo, setRepliedTo] = useState<string | null>(null);
   const list = useRef<FlashListRef<Row>>(null);
+  // The reader's place survives the chat getting narrower or wider (the chats pinned beside it, put away, or the tablet turned).
+  const keep = useKeepPlace(list);
 
   // Whatever the chat did while it is open is seen: it isn't unread on Home. Once more when it closes, for what came as it went.
   const activeAt = chat?.active_at;
@@ -195,6 +198,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   // How far scrolled from the latest, and what came since: a button takes you back, with how many new rows.
   const onScroll = (e: Parameters<typeof distanceFromEnd>[0]) => {
     const far = distanceFromEnd(e) > 260;
+    keep.remember(!far);
     setAway((a) => (far ? (a ?? { since: rows.length }) : null));
   };
   const unseen = away ? Math.max(0, rows.length - away.since) : 0;
@@ -436,7 +440,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
     <AboveKeyboard style={{ backgroundColor: colors.paper }}>
       {glass ? (
         <View style={{ flex: 1 }}>
-          <View style={StyleSheet.absoluteFill}>{listEl}</View>
+          <View style={StyleSheet.absoluteFill} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)}>
+            {listEl}
+          </View>
           {jump}
           {/* The header is solid, with the page's colour fading out below it, so the words under it never run into the title. */}
           <View style={{ position: "absolute", top: 0, left: 0, right: 0 }} onLayout={(e) => setTop(e.nativeEvent.layout.height)}>
@@ -454,7 +460,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
       ) : (
         <>
           {head}
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1 }} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)}>
             {listEl}
             {jump}
           </View>
