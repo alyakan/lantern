@@ -75,8 +75,8 @@ function AddressField({ onAddress }: { onAddress: (text: string) => Promise<stri
         autoCorrect={false}
         autoFocus
         keyboardType="numbers-and-punctuation"
-        returnKeyType="go"
-        onSubmitEditing={() => void connect()}
+        // Done closes the keyboard (a one-line field does that on its own); Connect is the button under it.
+        returnKeyType="done"
         style={{ backgroundColor: colors.card, borderRadius: radius.inner, padding: 12, color: colors.ink, fontSize: 16 }}
       />
       {problem && (
@@ -100,7 +100,7 @@ export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: 
   const [lastReason, setLastReason] = useState<string | null>(state.kind === "offline" ? state.reason : null);
   if (state.kind === "offline" && state.reason !== lastReason) setLastReason(state.reason);
   return (
-    <AboveKeyboard style={{ backgroundColor: colors.paper, alignItems: "center", justifyContent: "center", padding: 30, paddingTop: insets.top }}>
+    <AboveKeyboard dismissOnTap style={{ backgroundColor: colors.paper, alignItems: "center", justifyContent: "center", padding: 30, paddingTop: insets.top }}>
       {connecting && lastReason === null ? (
         <View accessibilityLabel="Connecting to your Mac" accessibilityRole="progressbar" accessible style={{ alignItems: "center", gap: 10 }}>
           <LitLantern />

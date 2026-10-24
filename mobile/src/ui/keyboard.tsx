@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Keyboard, Platform, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { Keyboard, Platform, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 
 /** Whether the on-screen keyboard is up (iOS says so as it starts to move, Android once it is there). */
@@ -22,13 +22,20 @@ export function useKeyboardUp() {
  * (the library follows the keyboard itself, on the native side, where JS can't keep pace), so a list above a message box
  * gets shorter and the box stays right on top of the keyboard. The room under what is inside, where the keyboard's rounded
  * corners are, is painted in `style`'s background (else there would be a gap to see through). `style` is on a view inside
- * the avoiding one, which owns the bottom padding.
+ * the avoiding one, which owns the bottom padding. With `dismissOnTap`, a tap on the empty space inside closes the keyboard
+ * (buttons and fields inside still get their taps; to a screen reader it is not a button).
  */
-export function AboveKeyboard({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+export function AboveKeyboard({ children, style, dismissOnTap = false }: { children: ReactNode; style?: StyleProp<ViewStyle>; dismissOnTap?: boolean }) {
   const { backgroundColor } = StyleSheet.flatten(style) ?? {};
   return (
     <KeyboardAvoidingView behavior="padding" style={{ flex: 1, backgroundColor }}>
-      <View style={[{ flex: 1 }, style]}>{children}</View>
+      {dismissOnTap ? (
+        <Pressable testID="dismiss-keyboard" accessible={false} onPress={Keyboard.dismiss} style={[{ flex: 1 }, style]}>
+          {children}
+        </Pressable>
+      ) : (
+        <View style={[{ flex: 1 }, style]}>{children}</View>
+      )}
     </KeyboardAvoidingView>
   );
 }

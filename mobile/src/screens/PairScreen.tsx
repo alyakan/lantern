@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useController } from "../shell/hooks";
 import { useLayout } from "../shell/useLayout";
 import { Button, Txt } from "../ui/components";
+import { AboveKeyboard } from "../ui/keyboard";
 import { Dots } from "../ui/skeleton";
 import { lightColors, space, useColors } from "../ui/theme";
 
@@ -59,7 +60,8 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
   const camera = !paste && permission?.granted;
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.night }}>
+    // Above the keyboard, so the field being typed in isn't covered by it, and a tap on the background closes it.
+    <AboveKeyboard dismissOnTap style={{ backgroundColor: colors.night }}>
       <StatusBar style="light" />
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingTop: insets.top }}>
         {camera ? (
@@ -93,7 +95,7 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
               <Txt variant="body" tone="ink2">
                 On your Mac, open Settings, then Remote control, and copy the pairing link. Paste it here.
               </Txt>
-              <TextInput accessibilityLabel="Pairing link" value={text} onChangeText={setText} placeholder="lantern://pair?…" placeholderTextColor={colors.ink3} autoCapitalize="none" autoCorrect={false} multiline style={{ backgroundColor: colors.card, borderRadius: 14, padding: 12, minHeight: 72, color: colors.ink, fontSize: 14 }} />
+              <TextInput accessibilityLabel="Pairing link" value={text} onChangeText={setText} placeholder="lantern://pair?…" placeholderTextColor={colors.ink3} autoCapitalize="none" autoCorrect={false} multiline returnKeyType="done" submitBehavior="blurAndSubmit" style={{ backgroundColor: colors.card, borderRadius: 14, padding: 12, minHeight: 72, color: colors.ink, fontSize: 14 }} />
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <Button label="Paste" kind="ghost" style={{ flex: 1 }} onPress={() => void Clipboard.getStringAsync().then(setText)} />
                 <Button label="Pair" style={{ flex: 1 }} disabled={busy || !text.trim()} onPress={() => void pair(text)} />
@@ -123,7 +125,7 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
           )}
         </View>
       </View>
-    </View>
+    </AboveKeyboard>
   );
 }
 

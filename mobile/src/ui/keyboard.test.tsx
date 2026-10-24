@@ -1,5 +1,5 @@
 import { Keyboard, Platform, StyleSheet, Text } from "react-native";
-import { act, render, renderHook, screen } from "@testing-library/react-native";
+import { act, fireEvent, render, renderHook, screen } from "@testing-library/react-native";
 import { AboveKeyboard, useKeyboardUp } from "./keyboard";
 
 /** Stands in for the keyboard: keeps what was listened for, so a test can say the keyboard came or went. */
@@ -77,5 +77,28 @@ describe("keyboard", () => {
     expect(StyleSheet.flatten(box.props.style)).toMatchObject({ paddingBottom: 34, paddingTop: 56 });
     // What lifts is outside it, and does not carry that padding itself.
     expect(StyleSheet.flatten(box.parent!.props.style).paddingBottom).not.toBe(34);
+  });
+
+  it("closes the keyboard on a tap on the empty space inside, when asked to, and keeps its own look", async () => {
+    const dismiss = jest.spyOn(Keyboard, "dismiss").mockImplementation(() => {});
+    await render(
+      <AboveKeyboard dismissOnTap style={{ backgroundColor: "red", paddingTop: 56 }}>
+        <Text>Inside</Text>
+      </AboveKeyboard>,
+    );
+    const area = screen.getByTestId("dismiss-keyboard");
+    expect(StyleSheet.flatten(area.props.style)).toMatchObject({ flex: 1, backgroundColor: "red", paddingTop: 56 });
+    await fireEvent.press(area);
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    dismiss.mockRestore();
+  });
+
+  it("is not a tap area unless asked to: a chat's own taps are its own", async () => {
+    await render(
+      <AboveKeyboard style={{ backgroundColor: "red" }}>
+        <Text>Inside</Text>
+      </AboveKeyboard>,
+    );
+    expect(screen.queryByTestId("dismiss-keyboard")).toBeNull();
   });
 });
