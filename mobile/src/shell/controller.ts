@@ -7,6 +7,7 @@ import type { Transport } from "../net/transport";
 import { keypairFrom } from "../noise/noise";
 import { fromBase64Url, readPairingLink, toBase64Url, type PairingOffer } from "../pairing";
 import { Sync, type SyncDeps } from "../sync/sync";
+import { LiveCards, type CardFactory } from "../liveActivity";
 
 export interface ControllerDeps {
   transport: Transport;
@@ -16,6 +17,8 @@ export interface ControllerDeps {
   appVersion: string;
   now?: () => number;
   sync?: SyncDeps;
+  /** The lock-screen card's native side (tests give a fake; the app's own is used when this is left out). */
+  liveFactory?: () => CardFactory | null;
 }
 
 /** The Mac a pairing link names, as the confirmation says it. */
@@ -28,6 +31,8 @@ export interface Preview {
 
 export class Controller {
   readonly sync: Sync;
+  /** The card on the lock screen for the chat last messaged from this phone. */
+  readonly liveCards: LiveCards;
   readonly connection: Connection;
   private state: ConnectionState = { kind: "connecting" };
   private listeners = new Set<() => void>();
@@ -36,6 +41,11 @@ export class Controller {
   constructor(private readonly d: ControllerDeps) {
     this.now = d.now ?? Date.now;
     this.sync = new Sync(d.sync);
+    this.liveCards = new LiveCards({ factory: d.liveFactory, tell: (state) => this.sync.liveActivity(state), now: d.now });
+    this.sync.onSending = (id, slot, project) => void this.liveCards.begin(id, slot, project);
+    this.sync.onSent = (id) => void this.liveCards.confirm(id);
+    this.sync.onFailed = (id) => void this.liveCards.abandon(id);
+    this.sync.onConnected = () => void this.liveCards.connected();
     this.connection = new Connection({
       transport: d.transport,
       store: d.store,

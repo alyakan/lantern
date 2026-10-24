@@ -7,6 +7,7 @@ pub mod bus;
 pub mod fixture;
 pub mod hub;
 pub mod keys;
+pub mod live_activity;
 pub mod notifier;
 pub mod pairing;
 pub mod protocol;
@@ -60,6 +61,8 @@ pub struct Remote {
     /// Keeps the Mac from sleeping from idling while Remote control is on and the user asked for that. Its own hold,
     /// apart from the one that lasts while Claude works (awake.rs), so neither lets go of the other's.
     pub awake: crate::awake::Awake,
+    /// The push key for the lock-screen cards, imported in Settings (see live_activity.rs).
+    pub live: Arc<live_activity::LiveKey>,
 }
 
 /// What the window is asked when a phone starts a chat. The gateway has checked the folder, the text, and Auto against the
@@ -217,6 +220,10 @@ pub struct RemoteView {
     pub listening: bool,
     /// A pairing code is on offer and unused.
     pub pairing: bool,
+    /// The id of the push key imported for the lock-screen cards (None: none yet, so no card is kept up to date).
+    pub live_key: Option<String>,
+    /// What Apple last answered about a card, in words (no token, payload or key).
+    pub live_last: Option<String>,
     /// The last change holds, but couldn't be saved: why (it won't last past a restart).
     pub warning: Option<String>,
 }
@@ -309,7 +316,7 @@ impl Remote {
         bus.tap(Arc::new(move |ev: &BusEvent| keeper.record(ev)));
         let mut e = [0u8; 8];
         let _ = getrandom::fill(&mut e);
-        Self { bus, hub, store: Arc::new(store), keys, running: std::sync::Mutex::new(None), epoch: u64::from_le_bytes(e) & ((1 << 53) - 1), lifecycle: tokio::sync::Mutex::new(()), claude: Default::default(), new_chats: Default::default(), awake: Default::default() }
+        Self { bus, hub, store: Arc::new(store), keys, running: std::sync::Mutex::new(None), epoch: u64::from_le_bytes(e) & ((1 << 53) - 1), lifecycle: tokio::sync::Mutex::new(()), claude: Default::default(), new_chats: Default::default(), awake: Default::default(), live: Default::default() }
     }
 
     /// The setting for holding the Mac awake, applied now.
@@ -322,7 +329,7 @@ impl Remote {
     pub fn view(&self) -> RemoteView {
         let saved = self.store.saved();
         let devices = saved.devices.into_iter().map(|d| DeviceView { id: d.id, name: d.name, paired_at: d.paired_at, last_seen: d.last_seen }).collect();
-        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, keep_awake: saved.keep_awake, allow_phone_auto: saved.allow_phone_auto, tailnet: tailnet_addresses(), devices, warning: None, connected: self.connected(), listening: self.is_running(), pairing: self.store.offer_open(now_ms()) }
+        RemoteView { enabled: saved.enabled, show_titles: saved.show_titles, keep_awake: saved.keep_awake, allow_phone_auto: saved.allow_phone_auto, tailnet: tailnet_addresses(), devices, warning: None, connected: self.connected(), listening: self.is_running(), pairing: self.store.offer_open(now_ms()), live_key: self.live.key_id(), live_last: self.store.live.last.lock().unwrap().clone() }
     }
 
     /// The view after a change, with why it couldn't be saved when it couldn't.

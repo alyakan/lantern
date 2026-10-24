@@ -83,12 +83,14 @@ pub struct RemoteStore {
     path: Option<PathBuf>,
     saved: Mutex<Saved>,
     offer: Mutex<Option<Offer>>,
+    /// What each phone says about its lock-screen card: in memory only (see live_activity.rs).
+    pub live: super::live_activity::LiveBook,
 }
 
 impl RemoteStore {
     pub fn load(path: Option<PathBuf>) -> Self {
         let saved = path.as_deref().and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        Self { path, saved: Mutex::new(saved), offer: Mutex::new(None) }
+        Self { path, saved: Mutex::new(saved), offer: Mutex::new(None), live: Default::default() }
     }
 
     pub fn saved(&self) -> Saved {
@@ -173,6 +175,8 @@ impl RemoteStore {
 
     /// Whether a device was removed (it is from memory either way; the error says it couldn't be saved).
     pub fn remove_device(&self, id: &str) -> Result<bool, String> {
+        // A phone that is unpaired is sent nothing more, its card included.
+        self.live.forget(id);
         self.change(|s| {
             let before = s.devices.len();
             s.devices.retain(|d| d.id != id);

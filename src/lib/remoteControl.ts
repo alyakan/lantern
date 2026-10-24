@@ -22,8 +22,21 @@ export interface RemoteView {
   listening: boolean;
   /** A pairing code is on offer and unused. */
   pairing: boolean;
+  /** The id of the push key imported for the lock-screen cards (null: none yet). */
+  live_key?: string | null;
+  /** What Apple last answered about a card, in words (never a token, a payload or the key). */
+  live_last?: string | null;
   /** The last change holds, but couldn't be saved: why (it won't last past a restart). */
   warning?: string | null;
+}
+
+/** The team Lantern's phone app is built under (it is printed on the app's store page, so it isn't a secret). */
+export const LANTERN_TEAM_ID = "2NT5QR24SX";
+
+/** The Key ID in the name Apple gives a push key's file ("AuthKey_ABCDE12345.p8"), or null for any other name. */
+export function keyIdFromFile(path: string): string | null {
+  const m = /(?:^|[\\/])AuthKey_([A-Za-z0-9]{10})\.p8$/.exec(path);
+  return m ? m[1] : null;
 }
 
 /** The QR code a phone pairs with, and when it stops working (ms since the epoch). */

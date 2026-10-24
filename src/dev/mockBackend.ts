@@ -1845,6 +1845,7 @@ export function installMockBackend(options: { providers?: boolean } = {}) {
         case "remote_set_keep_awake":
         case "remote_set_allow_auto":
         case "remote_remove_device":
+        case "remote_set_live_key":
           return { enabled: false, show_titles: false, keep_awake: false, tailnet: [], allow_phone_auto: false, devices: [], connected: [], listening: false, pairing: false };
         case "remote_pair":
           throw "Remote control needs the app.";

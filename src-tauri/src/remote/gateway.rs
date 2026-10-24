@@ -846,6 +846,27 @@ impl<'a> Session<'a> {
             }
             Request::Suggest { refresh } => self.gw.suggest(refresh).await,
             Request::PushToken { token } => self.gw.store.set_push_token(&self.device, &token).map(|()| serde_json::Value::Null),
+            Request::LiveActivity { start_token, card } => {
+                use super::live_activity::{clean_project, valid_token, LiveCard, Status};
+                if start_token.as_deref().is_some_and(|t| !valid_token(t)) {
+                    return Err("That isn't a push token.".into());
+                }
+                let now = (self.gw.now)();
+                let card = match card {
+                    Some(c) => {
+                        self.chat_known(&c.slot)?;
+                        if !valid_token(&c.token) {
+                            return Err("That isn't a push token.".into());
+                        }
+                        // The turn it shows began a moment ago, not in the future or long ago: the card's timer counts from it.
+                        let since = c.since.clamp(now.saturating_sub(60 * 60 * 1000), now);
+                        Some(LiveCard { slot: c.slot, token: c.token, project: clean_project(&c.project), since, status: Status::Working, ended: false, registered_at: now, last_push: now })
+                    }
+                    None => None,
+                };
+                self.gw.store.live.register(&self.device, start_token, card);
+                Ok(serde_json::Value::Null)
+            }
         }
     }
 
@@ -1369,6 +1390,36 @@ pub(crate) mod tests {
         assert_eq!(sent.iter().map(|s| s.1.as_str()).collect::<Vec<_>>(), vec!["what is this?", "  "]);
         let images = r.host.sent_images.lock().unwrap().clone();
         assert_eq!(images, vec![vec![jpeg.clone()], vec![jpeg.clone(), jpeg]]);
+    }
+
+    #[tokio::test]
+    async fn a_phone_registers_its_lock_screen_card_only_with_real_tokens_for_chats_that_exist() {
+        let r = rig();
+        r.hub.opened("a", "/p/lantern");
+        let (_, mut p) = paired(&r).await;
+        let device = r.store.saved().devices[0].id.clone();
+        let token = "ab".repeat(32);
+        let card = |slot: &str, token: &str| Some(protocol::RemoteLiveCard { slot: slot.into(), token: token.into(), project: "lantern\u{7}".into(), since: 1 });
+        let ask = |start_token: Option<String>, card| Request::LiveActivity { start_token, card };
+        assert!(p.ask(ask(Some(token.clone()), card("a", &token))).await.1.is_none());
+        let kept = r.store.live.cards();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].0, device);
+        let c = &kept[0].1;
+        assert_eq!((c.slot.as_str(), c.token.as_str(), c.project.as_str(), c.ended), ("a", token.as_str(), "lantern", false), "the project's name is cleaned of control characters");
+        assert_eq!(r.store.live.state(&device).unwrap().start_token.as_deref(), Some(token.as_str()));
+        // Not a chat that is open, not a token (it goes into a URL), not a start token: none of them changes what is kept.
+        for bad in [ask(None, card("nope", &token)), ask(None, card("a", "../../3/device/x")), ask(None, card("a", &format!("{token}/"))), ask(Some("not hex".into()), None)] {
+            assert!(p.ask(bad).await.1.is_some());
+        }
+        assert_eq!(r.store.live.cards(), kept);
+        // No card any more (the phone cleared it): none is kept, and nothing else is lost.
+        assert!(p.ask(ask(Some(token.clone()), None)).await.1.is_none());
+        assert!(r.store.live.cards().is_empty());
+        // Unpairing the phone forgets all of it.
+        assert!(p.ask(ask(None, card("a", &token))).await.1.is_none());
+        r.store.remove_device(&device).unwrap();
+        assert!(r.store.live.cards().is_empty() && r.store.live.state(&device).is_none());
     }
 
     #[tokio::test]

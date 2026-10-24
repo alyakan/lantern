@@ -1,12 +1,20 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { lastSeen, timeLeft, type RemoteView } from "../lib/remoteControl";
+import { keyIdFromFile, lastSeen, LANTERN_TEAM_ID, timeLeft, type RemoteView } from "../lib/remoteControl";
 
 const calls: { cmd: string; args?: unknown }[] = [];
 let view: RemoteView;
 let changed: () => void = () => {};
+let picked: string | null = null;
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: () => Promise.resolve(picked) }));
 vi.mock("../api", () => ({
   api: {
+    remoteSetLiveKey: (path: string, keyId: string, teamId: string) => {
+      calls.push({ cmd: "livekey", args: [path, keyId, teamId] });
+      if (keyId === "BADKEY0000") return Promise.reject("That isn't a push key: it should be the .p8 file Apple gave you.");
+      view = { ...view, live_key: keyId };
+      return Promise.resolve(view);
+    },
     remoteSettings: () => Promise.resolve(view),
     onRemoteChanged: (cb: () => void) => {
       changed = cb;
@@ -53,6 +61,7 @@ const { RemoteControl } = await import("./RemoteControl");
 
 beforeEach(() => {
   calls.length = 0;
+  picked = null;
   view = { enabled: false, show_titles: false, keep_awake: false, tailnet: [], allow_phone_auto: false, devices: [], connected: [], listening: false, pairing: false };
 });
 
@@ -211,5 +220,58 @@ describe("the words for time", () => {
     expect(lastSeen(0, 5 * 60_000)).toBe("Last connected 5 minutes ago");
     expect(lastSeen(0, 3_600_000)).toBe("Last connected 1 hour ago");
     expect(lastSeen(0, 2 * 86_400_000)).toBe("Last connected 2 days ago");
+  });
+});
+
+describe("Settings › Remote control › lock screen cards", () => {
+  it("reads the Key ID from the name Apple gives the file, and from no other", () => {
+    expect(keyIdFromFile("/Users/me/Downloads/AuthKey_LUF3H7H4S4.p8")).toBe("LUF3H7H4S4");
+    expect(keyIdFromFile("C:\\keys\\AuthKey_LUF3H7H4S4.p8")).toBe("LUF3H7H4S4");
+    for (const other of ["/k/key.p8", "/k/AuthKey_short.p8", "/k/AuthKey_LUF3H7H4S4.p8.txt", "/k/MyAuthKey_LUF3H7H4S4.p8", ""]) expect(keyIdFromFile(other)).toBeNull();
+  });
+
+  it("says there is no key yet, imports the one chosen with its Key ID filled in, and then names it", async () => {
+    render(<RemoteControl now={() => 0} />);
+    expect((await screen.findByText(/No push key yet/)).textContent).toContain("no card is kept up to date");
+    picked = "/Users/me/Downloads/AuthKey_LUF3H7H4S4.p8";
+    fireEvent.click(screen.getByText("Import the push key…"));
+    const keyId = (await screen.findByLabelText("Key ID")) as HTMLInputElement;
+    expect(keyId.value).toBe("LUF3H7H4S4");
+    expect((screen.getByLabelText("Team ID") as HTMLInputElement).value).toBe(LANTERN_TEAM_ID);
+    fireEvent.click(screen.getByText("Import"));
+    await screen.findByText("Push key: LUF3H7H4S4");
+    expect(calls).toContainEqual({ cmd: "livekey", args: ["/Users/me/Downloads/AuthKey_LUF3H7H4S4.p8", "LUF3H7H4S4", LANTERN_TEAM_ID] });
+    expect(screen.queryByLabelText("Key ID")).toBeNull();
+    expect(screen.getByText("Replace the push key…")).toBeTruthy();
+  });
+
+  it("lets the ids be corrected, and says why when the key isn't taken, without importing anything", async () => {
+    render(<RemoteControl now={() => 0} />);
+    picked = "/k/some-name.p8";
+    fireEvent.click(await screen.findByText("Import the push key…"));
+    const keyId = (await screen.findByLabelText("Key ID")) as HTMLInputElement;
+    expect(keyId.value).toBe("");
+    fireEvent.change(keyId, { target: { value: "BADKEY0000" } });
+    fireEvent.click(screen.getByText("Import"));
+    expect((await screen.findByRole("alert")).textContent).toContain("That isn't a push key");
+    expect(screen.queryByText(/Push key: /)).toBeNull();
+  });
+
+  it("does nothing when the file dialog is closed, and cancelling the form changes nothing", async () => {
+    render(<RemoteControl now={() => 0} />);
+    fireEvent.click(await screen.findByText("Import the push key…"));
+    await waitFor(() => expect(screen.queryByLabelText("Key ID")).toBeNull());
+    picked = "/k/AuthKey_LUF3H7H4S4.p8";
+    fireEvent.click(screen.getByText("Import the push key…"));
+    await screen.findByLabelText("Key ID");
+    fireEvent.click(screen.getByText("Cancel"));
+    expect(screen.queryByLabelText("Key ID")).toBeNull();
+    expect(calls.filter((c) => c.cmd === "livekey")).toEqual([]);
+  });
+
+  it("shows what Apple last said, and never anything else about a push", async () => {
+    view = { ...view, live_key: "LUF3H7H4S4", live_last: "Apple answered 403 (InvalidProviderToken)." };
+    render(<RemoteControl now={() => 0} />);
+    expect(await screen.findByText("Apple last said: Apple answered 403 (InvalidProviderToken).")).toBeTruthy();
   });
 });

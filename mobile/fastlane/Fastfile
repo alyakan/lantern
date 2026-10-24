@@ -86,6 +86,15 @@ platform :ios do
     )
   end
 
+  # Xcode signs with the same App Store Connect API key the upload uses (when ASC_KEY_ID and ASC_ISSUER_ID are set), so it needs
+  # no Apple ID signed in to it, and can register what a capability needs (an App ID, an App Group, a profile) on its own.
+  def xcode_auth
+    key_id = ENV["ASC_KEY_ID"].to_s
+    issuer = ENV["ASC_ISSUER_ID"].to_s
+    return "" if key_id.empty? || issuer.empty?
+    "-authenticationKeyPath #{File.expand_path("~/.appstoreconnect/private_keys/AuthKey_#{key_id}.p8")} -authenticationKeyID #{key_id} -authenticationKeyIssuerID #{issuer}"
+  end
+
   desc "Build and sign for the App Store, and upload nothing: the dry run of `beta`, which needs no app in App Store Connect"
   lane :archive do
     refuse_preview_build!
@@ -98,8 +107,8 @@ platform :ios do
       clean: true,
       output_directory: File.join(mobile_dir, "build"),
       output_name: "Lantern.ipa",
-      xcargs: "-allowProvisioningUpdates DEVELOPMENT_TEAM=#{TEAM_ID} CURRENT_PROJECT_VERSION=1",
-      export_xcargs: "-allowProvisioningUpdates",
+      xcargs: "-allowProvisioningUpdates #{xcode_auth} DEVELOPMENT_TEAM=#{TEAM_ID} CURRENT_PROJECT_VERSION=1",
+      export_xcargs: "-allowProvisioningUpdates #{xcode_auth}".strip,
     )
     UI.success("Built and signed mobile/build/Lantern.ipa. Nothing was uploaded.")
   end
@@ -126,8 +135,8 @@ platform :ios do
       clean: true,
       output_directory: File.join(mobile_dir, "build"),
       output_name: "Lantern.ipa",
-      xcargs: "-allowProvisioningUpdates DEVELOPMENT_TEAM=#{TEAM_ID} CURRENT_PROJECT_VERSION=#{build_number}",
-      export_xcargs: "-allowProvisioningUpdates",
+      xcargs: "-allowProvisioningUpdates #{xcode_auth} DEVELOPMENT_TEAM=#{TEAM_ID} CURRENT_PROJECT_VERSION=#{build_number}",
+      export_xcargs: "-allowProvisioningUpdates #{xcode_auth}".strip,
     )
 
     upload_to_testflight(api_key: key, skip_waiting_for_build_processing: true, skip_submission: true)

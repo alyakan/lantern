@@ -12,6 +12,7 @@ import { Root } from "./src/shell/Root";
 import { zeroconfDiscovery } from "./src/net/discovery";
 import { webSocketTransport } from "./src/net/transport";
 import { registerForPush, slotOfNotification } from "./src/notifications";
+import { slotOfLink } from "./src/liveActivity";
 import { AccentFromPledge, TipsContext } from "./src/shell/tipsContext";
 import { iapPlatform, secureTipMemory, startTipListener } from "./src/platformTips";
 import { demoPlatform, TipJar } from "./src/tips";
@@ -66,9 +67,14 @@ export default function App() {
     return () => sub.remove();
   }, [controller]);
 
-  // A pairing link tapped outside the app, or the one the app was opened with: confirmed before it pairs.
+  // A pairing link tapped outside the app, or the one the app was opened with: confirmed before it pairs. A tap on a chat's
+  // card on the lock screen is a link to that chat.
   useEffect(() => {
-    const take = (url: string | null) => url && /^lantern:\/\/pair/i.test(url) && setPendingLink(url);
+    const take = (url: string | null) => {
+      const chat = slotOfLink(url);
+      if (chat) setOpenSlot(chat);
+      else if (url && /^lantern:\/\/pair/i.test(url)) setPendingLink(url);
+    };
     void Linking.getInitialURL().then(take);
     const sub = Linking.addEventListener("url", (e) => take(e.url));
     return () => sub.remove();
