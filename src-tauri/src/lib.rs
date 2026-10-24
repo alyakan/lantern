@@ -471,6 +471,28 @@ impl remote::gateway::Host for RemoteHost {
         })
     }
 
+    fn storage(&self) -> Result<remote::protocol::RemoteStorage, String> {
+        Ok(self.app.state::<AppState>().storage.phone_view().into())
+    }
+
+    fn storage_scan(&self) -> remote::gateway::BoxFut<Result<bool, String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let path_env = login_path(&state).await;
+            Ok(state.storage.start_scan(path_env))
+        })
+    }
+
+    fn storage_clear(&self, ids: Vec<String>) -> remote::gateway::BoxFut<Result<(usize, u64), String>> {
+        let app = self.app.clone();
+        Box::pin(async move {
+            let state = app.state::<AppState>();
+            let path_env = login_path(&state).await;
+            state.storage.phone_clear(&ids, path_env)
+        })
+    }
+
     fn mac_name(&self) -> String {
         self.mac_name.clone()
     }

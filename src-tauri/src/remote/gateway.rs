@@ -84,6 +84,11 @@ fn check_shell(id: &str, command: Option<&str>) -> Result<(), String> {
 /// What a phone is told when it asks for a team.
 const TEAM_ON_MAC: &str = "A team is started on your Mac.";
 
+const NO_STORAGE: &str = "This Mac can't show its storage.";
+
+/// The most ids a phone may name in one clear: a little over what it is ever shown.
+const STORAGE_IDS_MAX: usize = 80;
+
 const AUTO_OFF: &str = "Auto from a phone is off. Turn it on in Lantern's Settings, under Remote control.";
 
 /// What the gateway asks of the app. `by` is who asked: the phone's device id (with its message id for a send).
@@ -125,6 +130,18 @@ pub trait Host: Send + Sync + 'static {
     /// A page of the chat's transcript: its last turns (`before` None), or the turns before the `before` it hasn't
     /// shown yet (see history::page).
     fn history(&self, slot: String, before: Option<usize>) -> BoxFut<Result<crate::history::Page, String>>;
+    /// The Mac's disk and the items of it a phone may clear (see storage/phone.rs). A host with no storage says so.
+    fn storage(&self) -> Result<protocol::RemoteStorage, String> {
+        Err(NO_STORAGE.into())
+    }
+    /// Starts a scan of the Mac's storage in the background; false when one is running already.
+    fn storage_scan(&self) -> BoxFut<Result<bool, String>> {
+        Box::pin(async { Err(NO_STORAGE.to_string()) })
+    }
+    /// Starts clearing these items in the background, those of them the Mac finds safe now: how many, and about how many bytes.
+    fn storage_clear(&self, _ids: Vec<String>) -> BoxFut<Result<(usize, u64), String>> {
+        Box::pin(async { Err(NO_STORAGE.to_string()) })
+    }
     fn mac_name(&self) -> String;
     fn app_version(&self) -> String;
     /// The addresses this Mac can be reached at now (a phone keeps them for next time, see ServerMessage::Welcome).
@@ -816,6 +833,16 @@ impl<'a> Session<'a> {
                 let link = super::pairing::pairing_link(&self.gw.mac.public, &offer, &host.hosts(), super::port(), &host.mac_name());
                 Ok(json(&protocol::PairOffer { modules: super::pairing::qr_modules(&link)?, link, expires_at: offer.expires_at }))
             }
+            Request::Storage => host.storage().map(|v| json(&v)),
+            Request::StorageScan => host.storage_scan().await.map(|started| json(&started)),
+            // The Mac decides what is safe: the ids are only a choice among what it would clear anyway (storage/phone.rs). The
+            // phone has asked Face ID and a swipe; unpairing it is the kill switch, as for the terminal.
+            Request::StorageClear { ids } => {
+                if ids.is_empty() || ids.len() > STORAGE_IDS_MAX || ids.iter().any(|id| id.is_empty() || id.len() > 16 || !id.chars().all(|c| c.is_ascii_hexdigit())) {
+                    return Err("That isn't a list the Mac sent.".into());
+                }
+                host.storage_clear(ids).await.map(|(count, bytes)| json(&serde_json::json!({ "started": count, "bytes": bytes })))
+            }
             Request::Shell { slot, id, command } => {
                 use super::hub::ChatStatus as S;
                 let chat = self.gw.hub.chat(&slot).ok_or("That chat isn't open on your Mac.")?;
@@ -950,6 +977,9 @@ pub(crate) mod tests {
         pub sent_images: Mutex<Vec<Vec<protocol::RemoteImage>>>,
         pub woken: Mutex<Vec<String>>,
         pub closed: Mutex<Vec<String>>,
+        /// What it was asked about storage ("scan", or "clear:" and the ids), and the disk it says it has.
+        pub storage_asked: Mutex<Vec<String>>,
+        pub storage_on: Mutex<bool>,
         pub history: Mutex<Vec<UiEvent>>,
         /// The projects it offers for starting a chat in, and the chats it was asked to start (folder, text, by).
         pub projects: Mutex<Vec<(String, String)>>,
@@ -990,6 +1020,21 @@ pub(crate) mod tests {
         fn close(&self, slot: &str) -> Result<(), String> {
             self.closed.lock().unwrap().push(slot.into());
             Ok(())
+        }
+        fn storage(&self) -> Result<protocol::RemoteStorage, String> {
+            if !*self.storage_on.lock().unwrap() {
+                return Err("This Mac can't show its storage.".into());
+            }
+            Ok(protocol::RemoteStorage { free_bytes: Some(40), total_bytes: Some(100), scanned_at: Some(5), scanning: false, progress: String::new(), deleting: false, items: vec![protocol::RemoteStorageItem { id: "ab12".into(), kind: "cache".into(), name: "Xcode".into(), bytes: 9, to_trash: false, note: "n".into() }], more: 0, report: None })
+        }
+        fn storage_scan(&self) -> BoxFut<Result<bool, String>> {
+            self.storage_asked.lock().unwrap().push("scan".into());
+            Box::pin(async { Ok(true) })
+        }
+        fn storage_clear(&self, ids: Vec<String>) -> BoxFut<Result<(usize, u64), String>> {
+            self.storage_asked.lock().unwrap().push(format!("clear:{}", ids.join(",")));
+            let n = ids.len();
+            Box::pin(async move { Ok((n, 9)) })
         }
         fn shell_run(&self, slot: String, id: String, command: String) -> BoxFut<Result<(), String>> {
             self.switched.lock().unwrap().push(format!("{slot}:shell:{id}:{command}"));
@@ -1714,6 +1759,39 @@ pub(crate) mod tests {
         // A code is used once.
         assert!(phone(&r.gw, &generate_keypair().unwrap(), Some(secret_in(&offer.link)), PROTOCOL_VERSION).await.is_err());
         assert_eq!(r.store.saved().devices.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_phone_sees_the_macs_disk_and_clears_only_with_well_formed_ids() {
+        let r = rig();
+        *r.host.storage_on.lock().unwrap() = true;
+        let (_, mut p) = paired(&r).await;
+        let (ok, err, _) = p.ask(Request::Storage).await;
+        assert!(err.is_none(), "{err:?}");
+        let view: protocol::RemoteStorage = serde_json::from_value(ok.unwrap()).unwrap();
+        assert_eq!((view.free_bytes, view.total_bytes, view.items.len()), (Some(40), Some(100), 1));
+        // The scan and a clear reach the Mac, and a clear says how many and how much it started.
+        let (ok, _, _) = p.ask(Request::StorageScan).await;
+        assert_eq!(ok.unwrap(), serde_json::json!(true));
+        let (ok, err, _) = p.ask(Request::StorageClear { ids: vec!["ab12".into(), "cd34".into()] }).await;
+        assert!(err.is_none(), "{err:?}");
+        assert_eq!(ok.unwrap(), serde_json::json!({"started": 2, "bytes": 9}));
+        assert_eq!(*r.host.storage_asked.lock().unwrap(), ["scan", "clear:ab12,cd34"]);
+        // Nothing but ids the Mac made reaches it: no paths, no empty list, no long list, no odd characters.
+        for ids in [vec![], vec!["/Users/me/Documents".to_string()], vec!["../x".into()], vec!["".into()], vec!["ab12".repeat(5)], (0..81).map(|n| format!("{n:08x}")).collect()] {
+            let (_, err, _) = p.ask(Request::StorageClear { ids }).await;
+            assert!(err.is_some());
+        }
+        assert_eq!(r.host.storage_asked.lock().unwrap().len(), 2, "none of those got through");
+    }
+
+    #[tokio::test]
+    async fn a_mac_with_no_storage_says_so_and_lists_the_feature_only_when_it_has_it() {
+        let r = rig();
+        let (_, mut p) = paired(&r).await;
+        let (_, err, _) = p.ask(Request::Storage).await;
+        assert!(err.unwrap().contains("can't show its storage"));
+        assert!(protocol::FEATURES.contains(&"storage"));
     }
 
     #[tokio::test]
