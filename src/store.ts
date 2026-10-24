@@ -4,6 +4,7 @@ import { agentName, providerIdOf, reportsUsd } from "./lib/provider";
 import { countChanges } from "./lib/diff";
 import { readFlavourNote, readSettingsNote, type Flavour } from "./lib/flavour";
 import { readPageNote } from "./lib/pageNote";
+import { postText } from "./lib/chatHooks";
 import { restoreNoteId, revertSummary, undoOf, undoSummary, type RevertNote, type RevertUndo } from "./lib/revert";
 import { KEEP_CHARS, readShellContext, takesShellContext } from "./lib/shell";
 import { localUrlIn } from "./lib/localUrl";
@@ -563,6 +564,9 @@ function applyEvent(state: State, ev: UiEvent): State {
       return { ...state, model: ev.model, sessionId: ev.session_id, status: state.status === "starting" ? "idle" : state.status, agentAsleep: false };
     case "user_text": {
       const seq = state.seq + 1;
+      // A post-hook is Lantern's own message, sent once Claude has answered (see lib/chatHooks.ts): a note, not a prompt.
+      const hook = postText(ev.text);
+      if (hook !== null) return { ...state, ...(ev.sent_by ? { status: "running" as const, thinking: true } : {}), seq, items: [...state.items, { type: "user", id: `u${seq}`, text: `Post-hook: ${hook}`, at: ev.at, auto: true }] };
       const sent = readShellContext(readSettingsNote(ev.text));
       const read = readFlavourNote(readPageNote(sent.text));
       const { flavour, explain } = read;

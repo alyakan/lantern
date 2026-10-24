@@ -35,6 +35,9 @@ const wrappers: [string, () => unknown, unknown[]][] = [
   ["closeSession", () => api.closeSession("s1"), ["close_session", { slot: "s1" }]],
   ["setModel", () => api.setModel("s1", null), ["set_model", { slot: "s1", model: null }]],
   ["sendMessage", () => api.sendMessage("s1", "hi"), ["send_message", { slot: "s1", text: "hi" }]],
+  // Lantern's own messages (an agents' note to a Lead) say so, so the user's hooks aren't run for them.
+  ["sendMessage by Lantern", () => api.sendMessage("s1", "hi", true), ["send_message", { slot: "s1", text: "hi", auto: true }]],
+  ["setChatHooks", () => api.setChatHooks({ pre: { text: "a", on: true }, post: { text: "", on: false }, projects: {} }), ["set_chat_hooks", { table: { pre: { text: "a", on: true }, post: { text: "", on: false }, projects: {} } }]],
   ["asideAsk", () => api.asideAsk("s1", "a1", "what is x?", "haiku"), ["aside_ask", { slot: "s1", aside: "a1", text: "what is x?", model: "haiku" }]],
   ["asideStop", () => api.asideStop("a1"), ["aside_stop", { aside: "a1" }]],
   ["asideStopAnswering", () => api.asideStopAnswering("a1"), ["aside_stop_answering", { aside: "a1" }]],

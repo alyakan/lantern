@@ -25,11 +25,12 @@ import { UpdatesPage, type UpdatesPageProps } from "./UpdatesPage";
 import { PermissionRules } from "./PermissionRules";
 import { RemoteControl } from "./RemoteControl";
 import { RoutinesSettings, type RoutinesSettingsProps } from "./RoutinesSettings";
+import { HooksSettings, type HooksSettingsProps } from "./HooksSettings";
 
 import { PrChecksSettings, type PrChecksSettingsProps } from "./PrChecksSettings";
 
-export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints";
-export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints" };
+export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints" | "hooks";
+export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints", hooks: "Hooks" };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -59,6 +60,8 @@ interface Props {
   routines?: RoutinesSettingsProps;
   /** What happens after a pull request's checks run, per project, for the Pull requests page. */
   prChecks?: PrChecksSettingsProps;
+  /** The prompts run around the user's messages, for the Hooks page. */
+  hooks?: HooksSettingsProps;
   /** The endpoints a chat can run on besides Anthropic's, for the Endpoints page. */
   endpoints?: EndpointsSettingsProps;
   /** The agent CLI the chat runs on: with no skills, or no advisor to set up a harness for, those pages aren't offered. Absent: Claude Code's. */
@@ -66,7 +69,7 @@ interface Props {
 }
 
 /** Settings: General (notifications, sound, look), MCP servers (status, log in, add, remove) and skills. */
-export function SettingsView({ open, onClose, harness, updates, general, routines, prChecks, endpoints, ...page }: Props) {
+export function SettingsView({ open, onClose, harness, updates, general, routines, prChecks, hooks, endpoints, ...page }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
   const caps = capabilitiesOf(page.provider);
   const [picked, setTab] = useState<SettingsTab>(open ?? "general");
@@ -95,8 +98,8 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
           <nav className="mode-guide-nav" aria-label="Settings">
             <div className="mode-guide-group">
               <div className="mode-guide-group-title">Settings</div>
-              {(["general", "harness", "endpoints", "routines", "mcp", "skills", "permissions", "prs", "remote", "updates"] as const)
-                .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "prs" || prChecks) && offered(t))
+              {(["general", "harness", "endpoints", "routines", "hooks", "mcp", "skills", "permissions", "prs", "remote", "updates"] as const)
+                .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t))
                 .map((t) => (
                   <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} onClick={() => setTab(t)}>
                     {TAB_LABEL[t]}
@@ -113,6 +116,8 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
               <EndpointsSettings {...endpoints} />
             ) : tab === "routines" && routines ? (
               <RoutinesSettings {...routines} />
+            ) : tab === "hooks" && hooks ? (
+              <HooksSettings {...hooks} />
             ) : tab === "updates" && updates ? (
               <UpdatesPage {...updates} />
             ) : tab === "skills" ? (
