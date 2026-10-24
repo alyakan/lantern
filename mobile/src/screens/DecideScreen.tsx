@@ -23,9 +23,9 @@ export const CLOSE_AFTER_MS = 2000;
 
 /** An approval, swiped, closes sooner: the green going out over the screen says it, and there is nothing to read. */
 export const APPROVED_CLOSE_MS = 1000;
-/** The ring leaves the circle after the bar has closed in on it, and takes this long to reach the screen's far corner. */
-const RIPPLE_DELAY_MS = 250;
-const RIPPLE_MS = 450;
+/** The ripple leaves the circle once the bar has closed in on it, and takes this long to reach the screen's far corner and fade out. */
+const RIPPLE_DELAY_MS = 300;
+const RIPPLE_MS = 600;
 /** The circle the bar closes in to (its knob, 52, and the space round it, 5 each side): where the green starts from. */
 const CIRCLE = 62;
 
@@ -44,41 +44,43 @@ export function answersFrom(qs: Question[], picks: Record<string, string[]>, typ
   return out;
 }
 
-/** The green's strength: a soft wash of the colour, not the full one (on the night background that is far too bright). */
-const GREEN_ALPHA = "8c";
-/** How thick the frame is, and how thick the ring is that runs out to it. */
-const FRAME = 5;
-const RING = 3;
+/** How strong the green is where the ripple begins (the colour at about a third), before it fades out. */
+const RIPPLE_ALPHA = 0.32;
 
 /**
- * An approval going out over the screen: a ring that grows from the approved circle to past the screen's far corner, fading as
- * it goes, and a frame of green round the screen's edge that comes in as the ring gets there and stays. The middle is never
- * covered: it stays as it was.
+ * An approval going out over the screen: a soft disc of green that grows from the approved circle past the screen's far
+ * corner and fades away as it goes, leaving nothing. Only the disc's scale and opacity move, which the phone does on its own
+ * (the native driver), so it can't stutter with the bar closing in or with the screen's own work.
  */
 function Ripple({ x, y, color }: { x: number; y: number; color: string }) {
   const grow = useRef(new Animated.Value(0)).current;
   const { width, height } = useWindowDimensions();
-  // As far as the farthest corner, so the ring leaves the screen.
+  // As far as the farthest corner, so the ripple leaves the screen.
   const reach = Math.ceil(Math.hypot(Math.max(x, width - x), Math.max(y, height - y)));
   useEffect(() => {
     if (skips()) return grow.setValue(1);
-    const a = Animated.timing(grow, { toValue: 1, duration: RIPPLE_MS, delay: RIPPLE_DELAY_MS, easing: Easing.out(Easing.cubic), useNativeDriver: false });
+    const a = Animated.timing(grow, { toValue: 1, duration: RIPPLE_MS, delay: RIPPLE_DELAY_MS, easing: Easing.out(Easing.quad), useNativeDriver: true });
     a.start();
     return () => a.stop();
   }, [grow]);
-  const size = grow.interpolate({ inputRange: [0, 1], outputRange: [CIRCLE, reach * 2] });
-  const wash = `${color}${GREEN_ALPHA}`;
   return (
-    <>
-      <Animated.View
-        testID="approve-ripple"
-        pointerEvents="none"
-        accessibilityElementsHidden
-        importantForAccessibility="no-hide-descendants"
-        style={{ position: "absolute", left: grow.interpolate({ inputRange: [0, 1], outputRange: [x - CIRCLE / 2, x - reach] }), top: grow.interpolate({ inputRange: [0, 1], outputRange: [y - CIRCLE / 2, y - reach] }), width: size, height: size, borderRadius: reach, borderWidth: RING, borderColor: wash, opacity: grow.interpolate({ inputRange: [0, 0.7, 1], outputRange: [1, 0.6, 0] }) }}
-      />
-      <Animated.View testID="approve-frame" pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0, borderWidth: FRAME, borderColor: wash, opacity: grow.interpolate({ inputRange: [0, 0.55, 1], outputRange: [0, 0, 1] }) }} />
-    </>
+    <Animated.View
+      testID="approve-ripple"
+      pointerEvents="none"
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={{
+        position: "absolute",
+        left: x - reach,
+        top: y - reach,
+        width: reach * 2,
+        height: reach * 2,
+        borderRadius: reach,
+        backgroundColor: color,
+        opacity: grow.interpolate({ inputRange: [0, 0.25, 1], outputRange: [RIPPLE_ALPHA, RIPPLE_ALPHA * 0.8, 0] }),
+        transform: [{ scale: grow.interpolate({ inputRange: [0, 1], outputRange: [CIRCLE / 2 / reach, 1] }) }],
+      }}
+    />
   );
 }
 
@@ -237,7 +239,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
     // The keyboard (for "Something else") pushes the buttons up with it, and the list above gets shorter.
     <AboveKeyboard style={{ backgroundColor: colors.night, overflow: "hidden", paddingTop: insets.top + 56, paddingBottom: keyboard ? 12 : Math.max(insets.bottom, 20), paddingHorizontal: 22 }}>
       <StatusBar style="light" />
-      {/* Behind everything: a ring goes out from the approved circle, and leaves a frame of green round the screen. */}
+      {/* Behind everything: a soft ripple of green goes out from the approved circle and fades away. */}
       {outcome.kind === "done" && outcome.swiped && circle && <Ripple x={circle.x} y={circle.y} color={colors.go} />}
       {/* The decision can be put away at any point (it keeps waiting, in the chat and on Home) and come back to with Review. */}
       <PressScale accessibilityRole="button" accessibilityLabel="Minimize" accessibilityHint="Back to the chat. The decision keeps waiting." onPress={onClose} haptic="select" scaleTo={0.94} hitSlop={10} style={{ position: "absolute", top: insets.top + 8, left: 14, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, minHeight: 40 }}>
