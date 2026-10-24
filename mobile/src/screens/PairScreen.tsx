@@ -5,12 +5,19 @@ import * as Clipboard from "expo-clipboard";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useController } from "../shell/hooks";
+import { useLayout } from "../shell/useLayout";
 import { Button, Txt } from "../ui/components";
 import { Dots } from "../ui/skeleton";
 import { lightColors, space, useColors } from "../ui/theme";
 
 /** How long a code the camera has seen and refused is ignored, so one bad code isn't refused thirty times a second. */
 const IGNORE_MS = 3000;
+
+/** How big the frame to point at the code is: a tablet's camera fills its screen, so the frame is bigger to match. */
+const FRAME_PHONE = 220;
+const FRAME_TABLET = 360;
+/** How wide the words and buttons under the camera are, on a tablet: the camera has the whole width, the text a readable column. */
+const PANEL_MAX = 560;
 
 const Corner = ({ style }: { style: object }) => <View style={[{ position: "absolute", width: 38, height: 38, borderColor: lightColors.hi, borderWidth: 4 }, style]} />;
 
@@ -22,6 +29,7 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
   const colors = useColors();
   const controller = useController();
   const insets = useSafeAreaInsets();
+  const frame = useLayout() === "phone" ? FRAME_PHONE : FRAME_TABLET;
   const [permission, requestPermission] = useCameraPermissions();
   const [paste, setPaste] = useState(initialPaste);
   const [text, setText] = useState("");
@@ -58,7 +66,7 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
           <CameraView style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} facing="back" barcodeScannerSettings={{ barcodeTypes: ["qr"] }} onBarcodeScanned={scanned} />
         ) : null}
         {camera && (
-          <View accessibilityElementsHidden pointerEvents="none" style={{ width: 220, height: 220 }}>
+          <View testID="pair-frame" accessibilityElementsHidden pointerEvents="none" style={{ width: frame, height: frame }}>
             <Corner style={{ top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 14 }} />
             <Corner style={{ top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 14 }} />
             <Corner style={{ bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 14 }} />
@@ -75,43 +83,45 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
         )}
       </View>
 
-      <View style={{ backgroundColor: colors.paper, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: Math.max(insets.bottom, 24) + 8, gap: 12 }}>
-        <Txt variant="title" accessibilityRole="header">
-          Pair with your Mac
-        </Txt>
-        {paste ? (
-          <>
-            <Txt variant="body" tone="ink2">
-              On your Mac, open Settings, then Remote control, and copy the pairing link. Paste it here.
-            </Txt>
-            <TextInput accessibilityLabel="Pairing link" value={text} onChangeText={setText} placeholder="lantern://pair?…" placeholderTextColor={colors.ink3} autoCapitalize="none" autoCorrect={false} multiline style={{ backgroundColor: colors.card, borderRadius: 14, padding: 12, minHeight: 72, color: colors.ink, fontSize: 14 }} />
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              <Button label="Paste" kind="ghost" style={{ flex: 1 }} onPress={() => void Clipboard.getStringAsync().then(setText)} />
-              <Button label="Pair" style={{ flex: 1 }} disabled={busy || !text.trim()} onPress={() => void pair(text)} />
-            </View>
-            <Button label="Use the camera" kind="ghost" onPress={() => setPaste(false)} />
-          </>
-        ) : (
-          <>
-            <Txt variant="body" tone="ink2">
-              In Lantern on your Mac, open Settings, then Remote control, and turn it on. Then point your camera at the code it shows.
-            </Txt>
-            <Button label="Paste the link instead" kind="ghost" onPress={() => setPaste(true)} />
-          </>
-        )}
-        {busy && (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-            <Dots />
-            <Txt variant="small" tone="ink2">
-              Pairing…
-            </Txt>
-          </View>
-        )}
-        {error && (
-          <Txt variant="small" tone="stop" accessibilityRole="alert">
-            {error}
+      <View style={{ backgroundColor: colors.paper, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: Math.max(insets.bottom, 24) + 8 }}>
+        <View testID="pair-column" style={{ width: "100%", maxWidth: PANEL_MAX, alignSelf: "center", gap: 12 }}>
+          <Txt variant="title" accessibilityRole="header">
+            Pair with your Mac
           </Txt>
-        )}
+          {paste ? (
+            <>
+              <Txt variant="body" tone="ink2">
+                On your Mac, open Settings, then Remote control, and copy the pairing link. Paste it here.
+              </Txt>
+              <TextInput accessibilityLabel="Pairing link" value={text} onChangeText={setText} placeholder="lantern://pair?…" placeholderTextColor={colors.ink3} autoCapitalize="none" autoCorrect={false} multiline style={{ backgroundColor: colors.card, borderRadius: 14, padding: 12, minHeight: 72, color: colors.ink, fontSize: 14 }} />
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <Button label="Paste" kind="ghost" style={{ flex: 1 }} onPress={() => void Clipboard.getStringAsync().then(setText)} />
+                <Button label="Pair" style={{ flex: 1 }} disabled={busy || !text.trim()} onPress={() => void pair(text)} />
+              </View>
+              <Button label="Use the camera" kind="ghost" onPress={() => setPaste(false)} />
+            </>
+          ) : (
+            <>
+              <Txt variant="body" tone="ink2">
+                In Lantern on your Mac, open Settings, then Remote control, and turn it on. Then point your camera at the code it shows.
+              </Txt>
+              <Button label="Paste the link instead" kind="ghost" onPress={() => setPaste(true)} />
+            </>
+          )}
+          {busy && (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <Dots />
+              <Txt variant="small" tone="ink2">
+                Pairing…
+              </Txt>
+            </View>
+          )}
+          {error && (
+            <Txt variant="small" tone="stop" accessibilityRole="alert">
+              {error}
+            </Txt>
+          )}
+        </View>
       </View>
     </View>
   );

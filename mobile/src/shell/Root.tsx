@@ -26,7 +26,7 @@ import { atRoot, decision, home, navigate, shownSlot } from "./nav";
 import { TabletShell } from "./TabletShell";
 import { useLayout } from "./useLayout";
 
-/** How wide the pairing and connecting screens are on a tablet. */
+/** How wide the screens that are words on paper (confirming a link, can't reach the Mac) are on a tablet. */
 const NARROW_MAX = 560;
 
 export interface RootProps {
@@ -173,17 +173,20 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       {screen}
     </FadeSlideIn>
   );
-  // The screens before the chats (pairing, connecting) are made for a phone's width: on a tablet they stay that width, in the middle.
+  // The screens before the chats that are words on paper (confirming a link, can't reach the Mac) keep a readable width on a tablet, in the middle.
   const narrow = (screen: ReactNode) =>
     tablet ? (
       <View style={{ flex: 1, backgroundColor: colors.paper }}>
-        <View style={{ flex: 1, width: "100%", maxWidth: NARROW_MAX, alignSelf: "center" }}>{screen}</View>
+        <View testID="narrow-column" style={{ flex: 1, width: "100%", maxWidth: NARROW_MAX, alignSelf: "center" }}>
+          {screen}
+        </View>
       </View>
     ) : (
       screen
     );
   if (pendingLink) return fade("confirm", narrow(<ConfirmLink link={pendingLink} onCancel={() => onClearLink?.()} onDone={() => onClearLink?.()} />));
-  if (connection.kind === "unpaired") return fade("pair", narrow(<PairScreen />));
+  // The pairing screen is the camera, which has the whole screen on a tablet (it lays out its own words): it is not in the column.
+  if (connection.kind === "unpaired") return fade("pair", <PairScreen />);
   if (connection.kind === "connecting" || (connection.kind === "offline" && chats.length === 0)) {
     return fade("offline", narrow(<OfflineScreen state={connection} onRetry={() => controller.resume()} onUnpair={unpair} onAddress={(text) => controller.useAddress(text)} />));
   }
