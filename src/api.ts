@@ -7,7 +7,7 @@ import type { Role } from "./lib/roles";
 import type { RemoteClose, RemoteNewChat, RemoteSetPermissions, RemoteSetPreset, RemoteSetWorkflow, WindowChat, WindowPreset } from "./lib/remoteChats";
 import type { PairView, RemoteView } from "./lib/remoteControl";
 import type { ReviewSetting } from "./lib/reviewChain";
-import type { AsideEvent, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
+import type { AsideEvent, AuthState, ChatSearchResults, CloseAgreed, CloseCheck, DirEntry, FileDiff, FolderSessions, HistoryPage, FoundFile, GhAccess, McpServerSpec, MemorySnapshot, MenuBarAction, MenuBarChat, MenuBarStats, MergeTestsInfo, MergeTestsReport, Mode, MovedFolder, NetworkDetail, NetworkView, NewRule, NewWorker, Endpoint, EndpointStatus, OldLocation, OpenedSession, OpenPr, ProviderInfo, ProviderListing, PrWatch, RecentFolder, RelocateOptions, RelocateOutcome, RelocationEntry, RelocationPreview, RuleEntry, SessionSummary, Settings, SetupSuggestion, ShipInfo, SkillEntry, StorageOutcome, StorageView, TextQuery, TextResults, UiEvent, UpdateInfo, UpdateState } from "./types";
 
 /** What the Changes pane compares against: the chat's start, the last message sent, or git's last commit. */
 export type ChangeScope = "session" | "turn" | "git" | "pr" | "branch";
@@ -81,7 +81,17 @@ export const api = {
   /** Saves the whole list; rejects, in words, with what to fix. Resolves to what was kept (ids made for new ones). */
   saveEndpoints: (endpoints: Endpoint[]) => invoke<Endpoint[]>("save_endpoints", { endpoints }),
   /** Asks an endpoint what models it serves; rejects, in words, when it can't say (then they are typed). */
-  fetchEndpointModels: (url: string, keyEnv: string | null) => invoke<string[]>("fetch_endpoint_models", { url, keyEnv }),
+  fetchEndpointModels: (url: string, keyEnv: string | null, endpointId: string | null = null) => invoke<string[]>("fetch_endpoint_models", { url, keyEnv, endpointId }),
+  /** Which providers run on an API key and which keys are saved. Never a key. */
+  providerAuthState: () => invoke<AuthState>("provider_auth_state"),
+  /** Saves Claude Code's API key in the Keychain; the key is not sent back. Rejects, in words, for a key that isn't one. */
+  providerClaudeKeySet: (key: string) => invoke<AuthState>("provider_claude_key_set", { key }),
+  providerClaudeKeyClear: () => invoke<AuthState>("provider_claude_key_clear"),
+  /** Claude Code on its API key (true) or its own sign-in. New chats follow it; a running chat keeps what it started with. */
+  providerClaudeUseKey: (on: boolean) => invoke<AuthState>("provider_claude_use_key", { on }),
+  /** Saves an endpoint's key in the Keychain (for an endpoint that is saved); it wins over the variable the endpoint names. */
+  endpointKeySet: (id: string, key: string) => invoke<AuthState>("endpoint_key_set", { id, key }),
+  endpointKeyClear: (id: string) => invoke<AuthState>("endpoint_key_clear", { id }),
   startSession: (slot: string, claudePath: string, folder: string, settings: Settings) => invoke<ProviderInfo | null>("start_session", { slot, claudePath, folder, settings }),
   /** Restarts the chat's claude on the same session with another harness (main model and effort, advisor, subagents). */
   applyHarness: (slot: string, h: { model: string | null; effort: string | null; advisor: string | null; subagent_model: string | null }) =>

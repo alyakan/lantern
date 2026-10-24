@@ -2499,6 +2499,15 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .endpoint-actions, .endpoint-add { display: flex; align-items: center; gap: 8px; }
 .endpoint-add { padding-top: 4px; }
 .endpoint-spacer { flex: 1; }
+/* A key being saved or saved already: its field beside Save key, or the note beside Remove key (on an endpoint's grid, across it). */
+.endpoint-keybox { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.endpoint-keybox input { flex: 1; min-width: 180px; }
+.endpoint-fields > .endpoint-keybox { grid-column: 1 / -1; }
+/* Settings → API keys: one section per provider, with its choices one under the other. */
+.settings-section { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+.settings-subhead { margin: 0; font-size: calc(13px * var(--font-scale)); font-weight: 600; color: var(--text); }
+.settings-choices { display: flex; flex-direction: column; gap: 6px; }
+.settings-choices label { display: flex; align-items: center; gap: 8px; }
 .pane-tabs .ship-it { flex: none; margin-left: 4px; white-space: nowrap; }
 /* A project's notes: the revert dialog's frame around a text box, its limit counter and Clear at the far left. */
 .notes-field { width: 100%; min-height: 140px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: calc(13px * var(--font-scale))/1.5 var(--ui); resize: vertical; outline: none; box-sizing: border-box; }

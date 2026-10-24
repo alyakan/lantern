@@ -84,7 +84,13 @@ fn command(cfg: &SessionConfig) -> Command {
 
 impl ClaudeSession {
     pub fn spawn(cfg: &SessionConfig, sink: Sink, on_edit: EditHook) -> Result<ClaudeSession, String> {
-        Self::start(command(cfg), &cfg.binary, &cfg.folder, cfg.resume.clone(), sink, on_edit)
+        let mut cmd = command(cfg);
+        // On the user's API key when they chose it for Claude Code. A gateway chat has the endpoint's own token and never this
+        // key (it is Anthropic's). If the key is wanted and can't be had the chat doesn't start: never on the sign-in instead.
+        if cfg.endpoint.is_none() {
+            crate::provider_keys::apply_claude_tokio_in(&mut cmd, &cfg.folder)?;
+        }
+        Self::start(cmd, &cfg.binary, &cfg.folder, cfg.resume.clone(), sink, on_edit)
     }
 
     /// Runs `cmd` (a claude command line, already built) as a session: `folder` is where it works and `resume` the session

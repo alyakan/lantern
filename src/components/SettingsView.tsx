@@ -20,6 +20,7 @@ import { ThemePicker } from "./ThemePicker";
 import { Md } from "./Md";
 import { NewSkillForm } from "./SkillForm";
 import { HarnessSettings, type HarnessSettingsProps } from "./HarnessSettings";
+import { ApiKeysSettings } from "./ApiKeysSettings";
 import { EndpointsSettings, type EndpointsSettingsProps } from "./EndpointsSettings";
 import { UpdatesPage, type UpdatesPageProps } from "./UpdatesPage";
 import { PermissionRules } from "./PermissionRules";
@@ -29,8 +30,8 @@ import { HooksSettings, type HooksSettingsProps } from "./HooksSettings";
 
 import { PrChecksSettings, type PrChecksSettingsProps } from "./PrChecksSettings";
 
-export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints" | "hooks";
-export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints", hooks: "Hooks" };
+export type SettingsTab = "general" | "mcp" | "skills" | "harness" | "updates" | "permissions" | "routines" | "prs" | "remote" | "endpoints" | "apikeys" | "hooks";
+export const TAB_LABEL: Record<SettingsTab, string> = { general: "General", mcp: "MCP servers", skills: "Skills", harness: "Models", updates: "Updates", permissions: "Allow rules", routines: "Routines", prs: "Pull requests", remote: "Remote control", endpoints: "Endpoints", apikeys: "API keys", hooks: "Hooks" };
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -98,7 +99,7 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
           <nav className="mode-guide-nav" aria-label="Settings">
             <div className="mode-guide-group">
               <div className="mode-guide-group-title">Settings</div>
-              {(["general", "harness", "endpoints", "routines", "hooks", "mcp", "skills", "permissions", "prs", "remote", "updates"] as const)
+              {(["general", "harness", "endpoints", "apikeys", "routines", "hooks", "mcp", "skills", "permissions", "prs", "remote", "updates"] as const)
                 .filter((t) => (t !== "general" || general) && (t !== "harness" || harness) && (t !== "endpoints" || endpoints) && (t !== "updates" || updates) && (t !== "routines" || routines) && (t !== "hooks" || hooks) && (t !== "prs" || prChecks) && offered(t))
                 .map((t) => (
                   <button key={t} className={`mode-guide-tab${t === tab ? " active" : ""}`} aria-current={t === tab ? "page" : undefined} onClick={() => setTab(t)}>
@@ -114,6 +115,8 @@ export function SettingsView({ open, onClose, harness, updates, general, routine
               <HarnessSettings {...harness} />
             ) : tab === "endpoints" && endpoints ? (
               <EndpointsSettings {...endpoints} />
+            ) : tab === "apikeys" ? (
+              <ApiKeysSettings />
             ) : tab === "routines" && routines ? (
               <RoutinesSettings {...routines} />
             ) : tab === "hooks" && hooks ? (

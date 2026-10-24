@@ -1,6 +1,8 @@
 //! Endpoints: where a gateway chat's Claude Code sends its requests (a LiteLLM or OpenRouter URL, a local Ollama or LM Studio
-//! server), so a chat can run on a model that isn't Anthropic's. An endpoint is a name, a URL, the NAME of an environment
-//! variable that holds its key (never the key: Lantern keeps no secrets) and the model ids it serves.
+//! server), so a chat can run on a model that isn't Anthropic's. An endpoint is a name, a URL, its key and the model ids it
+//! serves. The key is either the NAME of an environment variable (read from the login shell when a chat starts, as it always
+//! was) or one saved in Settings, which is kept in the Keychain and wins (see provider_keys.rs: this reverses an earlier "Lantern
+//! keeps no secrets", at the user's request).
 //!
 //! Claude Code is told to use it through its own environment, and three things about that were checked against a real
 //! `claude` and a listener that logs what arrives (see `gateway_env`):
@@ -75,6 +77,33 @@ pub fn valid_key_env(n: &str) -> bool {
     (1..=64).contains(&n.len()) && n.chars().next().is_some_and(|c| c.is_ascii_uppercase() || c == '_') && n.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
 }
 
+/// Whether a key may be sent to `url`: only over https, or http to this Mac or its own network. A key sent over plain http across the
+/// internet is readable by whoever is on the way.
+pub fn key_allowed_for(url: &str) -> Result<(), String> {
+    let parsed = reqwest::Url::parse(url.trim()).map_err(|_| format!("{:?} isn't a URL.", url.trim()))?;
+    let host = parsed.host_str().ok_or("The URL has no host.")?;
+    if parsed.scheme() == "http" && !loopback_or_local(host) {
+        return Err("A key is only sent over https, or http to this Mac or its own network.".into());
+    }
+    Ok(())
+}
+
+/// The ids, among `keyed` (endpoints with a saved key), whose address is different in `new` than in `old`: their keys are dropped,
+/// since a saved key is only sent to the address it was saved for. (One that isn't in `new` is gone, and goes the other way.)
+pub fn keys_to_drop(old: &[Endpoint], new: &[Endpoint], keyed: &[String]) -> Vec<String> {
+    keyed.iter().filter(|id| old.iter().find(|e| &e.id == *id).zip(new.iter().find(|e| &e.id == *id)).is_some_and(|(was, now)| was.url != now.url)).cloned().collect()
+}
+
+/// A saved key is only ever sent to the address it was saved for: `stored` is the endpoint's saved address (None: it has none, or
+/// isn't saved), `requested` the one a request is about to go to (an address typed in the form and not saved yet is not it).
+pub fn saved_key_address_ok(stored: Option<&str>, requested: &str) -> Result<(), String> {
+    if stored == Some(requested) {
+        Ok(())
+    } else {
+        Err("Save the endpoint's new address first: its saved key is only sent to the address it was saved for.".into())
+    }
+}
+
 fn loopback_or_local(host: &str) -> bool {
     let host = host.trim_start_matches('[').trim_end_matches(']');
     if host == "localhost" || host.ends_with(".local") || host.ends_with(".localhost") {
@@ -99,7 +128,7 @@ pub fn clean(e: Endpoint) -> Result<Endpoint, String> {
     }
     let Some(host) = parsed.host_str() else { return Err("The URL has no host.".into()) };
     if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err("Leave the login out of the URL: a key goes in an environment variable.".into());
+        return Err("Leave the login out of the URL: a key goes in its own field or an environment variable.".into());
     }
     if parsed.query().is_some() || parsed.fragment().is_some() {
         return Err("The URL is where the endpoint is, with no ? or # part.".into());
@@ -388,6 +417,25 @@ mod tests {
     }
 
     /// A key is never sent in the clear across the internet, but a local server (or one on the network) is fine without https.
+    #[test]
+    fn a_key_is_dropped_when_its_endpoint_moves_to_another_address_and_only_then() {
+        let ep = |id: &str, url: &str| Endpoint { id: id.into(), name: id.into(), url: url.into(), key_env: None, models: vec![] };
+        let (old, new) = (vec![ep("a", "https://one.test"), ep("b", "https://two.test"), ep("c", "https://three.test")], vec![ep("a", "https://elsewhere.test"), ep("b", "https://two.test")]);
+        let keyed = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        // a moved; b stayed; c is gone altogether (its key is forgotten with it, elsewhere).
+        assert_eq!(keys_to_drop(&old, &new, &keyed), ["a"]);
+        assert!(keys_to_drop(&old, &old, &keyed).is_empty());
+        assert!(keys_to_drop(&old, &new, &[]).is_empty(), "an endpoint with no saved key has none to drop");
+    }
+
+    #[test]
+    fn a_saved_key_goes_only_to_the_address_it_was_saved_for() {
+        assert!(saved_key_address_ok(Some("https://openrouter.ai/api"), "https://openrouter.ai/api").is_ok());
+        assert!(saved_key_address_ok(Some("https://openrouter.ai/api"), "https://evil.test").is_err());
+        assert!(saved_key_address_ok(None, "https://openrouter.ai/api").is_err(), "an endpoint that isn't saved has no saved address");
+        assert!(saved_key_address_ok(Some("http://localhost:11434"), "http://localhost:11434/").is_err(), "not even the same address with something added");
+    }
+
     #[test]
     fn a_key_goes_over_https_or_to_this_mac_and_its_own_network() {
         let keyed = |url: &str| clean(Endpoint { key_env: Some("K".into()), ..ep("a", url) });
