@@ -557,8 +557,8 @@ impl LiveActivities {
                 _ = beat.tick() => self.heartbeat().await,
                 ev = events.recv() => match ev {
                     Ok(ev) => self.handle(&ev).await,
-                    // Behind: the cards are brought right the next time anything about them happens.
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    // Behind: events were missed (a turn's end among them, perhaps), so the cards are brought right with the chats now.
+                    Err(broadcast::error::RecvError::Lagged(_)) => self.settle().await,
                     Err(broadcast::error::RecvError::Closed) => return,
                 },
                 _ = self.store.live.changed.notified() => self.reconcile().await,
@@ -566,21 +566,24 @@ impl LiveActivities {
         }
     }
 
-    /// The state a chat is in now, when its card is shown for the first time (a quick turn may be over before the phone
-    /// had the card's token to hand over).
+    /// The state a chat is in now: when its card is shown for the first time (a quick turn may be over before the phone had
+    /// the card's token to hand over), and whenever a card may have missed something.
     fn current(&self, slot: &str) -> Option<Next> {
         match self.hub.chat(slot)?.status {
             ChatStatus::NeedsYou => Some(Next::Update(Status::NeedsYou)),
             ChatStatus::Idle | ChatStatus::Asleep => Some(Next::End(Status::Done)),
             ChatStatus::Ended => Some(Next::End(Status::Failed)),
-            // The card was started as Working.
-            ChatStatus::Working => None,
+            // The card was started as Working; a card that says anything else is brought back to it.
+            ChatStatus::Working => Some(Next::Update(Status::Working)),
         }
     }
 
     /// Pushes again to each card that is live and hasn't had one for a while, so it stays fresh while this Mac is awake (and
     /// goes stale on the phone, as it should, when the Mac is not).
     async fn heartbeat(&self) {
+        // Before it is refreshed in the state it is in, a card is checked against its chat: a push that didn't get through, or an
+        // event that was missed, would otherwise be kept up to date as Working for as long as the card lives.
+        self.settle().await;
         let now = (self.now_ms)();
         for (device, card) in self.store.live.cards() {
             if !card.ended && now.saturating_sub(card.last_push) >= REFRESH_AFTER_MS {
@@ -589,15 +592,23 @@ impl LiveActivities {
         }
     }
 
-    async fn reconcile(&self) {
+    /// Brings each live card to the state its chat is in now (nothing is sent to one that already says it).
+    async fn settle(&self) {
+        if !self.store.saved().enabled {
+            return;
+        }
         for (device, card) in self.store.live.cards() {
-            if card.ended || card.status != Status::Working {
+            if card.ended {
                 continue;
             }
             if let Some(next) = self.current(&card.slot) {
                 self.push(&device, next).await;
             }
         }
+    }
+
+    async fn reconcile(&self) {
+        self.settle().await;
     }
 
     fn next_for(&self, slot: &str, ev: &UiEvent) -> Option<Next> {
@@ -1076,6 +1087,37 @@ pub(crate) mod tests {
         });
         r.service.heartbeat().await;
         assert_eq!(r.sent().len(), 1, "a card that is over isn't refreshed");
+    }
+
+    #[tokio::test]
+    async fn a_card_that_missed_its_chats_end_or_answer_is_brought_right_on_the_heartbeat_not_kept_fresh_as_working() {
+        let r = rig();
+        r.hub.opened("a", "/p/lantern");
+        r.event("a", UiEvent::UserText { text: "go".into(), at: None, sent_by: None, images: 0 }).await;
+        r.card("phone-1", "a");
+        // The turn ended, but the card never heard (the bus was behind, or the push didn't get through).
+        r.hub.record(&BusEvent { slot: "a".into(), seq: 100, event: done(false) });
+        r.store.live.edit("phone-1", |c| c.last_push = clock());
+        r.service.heartbeat().await;
+        let sent = r.sent();
+        assert_eq!(sent.len(), 1);
+        assert_eq!((sent[0].1.event, props(&sent[0].1)["status"].clone()), ("end", json!("done")));
+        assert!(r.store.live.cards()[0].1.ended);
+        // A card that says it needs you after the prompt was answered somewhere else is put back to Working.
+        let r = rig();
+        r.hub.opened("a", "/p/lantern");
+        r.event("a", UiEvent::UserText { text: "go".into(), at: None, sent_by: None, images: 0 }).await;
+        r.card("phone-1", "a");
+        r.event("a", asked()).await;
+        assert_eq!(r.sent().len(), 1);
+        r.hub.record(&BusEvent { slot: "a".into(), seq: 101, event: resolved() });
+        r.service.heartbeat().await;
+        let sent = r.sent();
+        assert_eq!(sent.len(), 2);
+        assert_eq!((sent[1].1.event, props(&sent[1].1)["status"].clone()), ("update", json!("working")));
+        // One that is right already is sent nothing.
+        r.service.heartbeat().await;
+        assert_eq!(r.sent().len(), 2);
     }
 
     #[tokio::test]
