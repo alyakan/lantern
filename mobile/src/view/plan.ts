@@ -65,6 +65,8 @@ export function usageOf(plan: PlanUsage, now = Date.now()): Usage {
   return {
     percent,
     resets: plan.resetsAt ? `Resets in ${untilText(plan.resetsAt, now)}` : "",
-    tone: stopped ? "stop" : plan.status === "allowed_warning" || percent >= 80 ? "warn" : "ok",
+    // Yellow from 80% of the window, by the number on the bar: the Mac's own "allowed_warning" says Claude is warning about a
+    // limit (it can be another window than the five-hour one this bar shows), and held the bar yellow at any usage.
+    tone: stopped ? "stop" : percent >= 80 ? "warn" : "ok",
   };
 }
