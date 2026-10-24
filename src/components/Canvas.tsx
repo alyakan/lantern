@@ -31,6 +31,7 @@ import { usePopover } from "../lib/usePopover";
 import { totalCost, totalTokens, type State } from "../store";
 import { isBusy } from "../sessions";
 import { permissionsOf, workflowOf } from "../lib/workflow";
+import { agentName, useProviders } from "../lib/provider";
 import type { CloseAgreed, CloseCheck } from "../types";
 import type { AgentRole } from "../lib/roles";
 import { AgentMenu, type AgentMenuItem } from "./AgentMenu";
@@ -186,6 +187,8 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, agentRole,
   const runCommand = runCommandOf(setups, role === "main" ? state?.folder : owner?.folder);
   const spent = state ? usage(totalCost(state), totalTokens(state)) : "";
   const actions = useNodeActions();
+  // Which agent CLI it runs on, said only when the app has more than one.
+  const provider = useProviders().multi && state ? agentName(state.provider) : null;
   return (
     <section
       className={`canvas-node ${role} ${status}${stuck ? " stuck" : ""}${ready ? " ready" : ""}${focused ? " focused" : ""}${folded ? " folded" : ""}${fresh ? " enter" : ""}`}
@@ -217,8 +220,8 @@ const Frame = memo(function Frame({ slot, parent, role, name, branch, agentRole,
             <ModelChip model={state?.model ?? null} />
             {branch && <BranchIcon />}
             {/* The model chip stays whole; this is what gives way when the card is narrow, and the tooltip has all of it. */}
-            <span className="node-meta-text" title={[role === "main" ? "Runs the team" : (branch ?? "Shared folder"), spent || null].filter(Boolean).join(" · ")}>
-              {[role === "main" ? "Runs the team" : branch ? branch.replace(/^lantern\//, "") : "Shared folder", spent || null].filter(Boolean).join(" · ")}
+            <span className="node-meta-text" title={[role === "main" ? "Runs the team" : (branch ?? "Shared folder"), provider, spent || null].filter(Boolean).join(" · ")}>
+              {[role === "main" ? "Runs the team" : branch ? branch.replace(/^lantern\//, "") : "Shared folder", provider, spent || null].filter(Boolean).join(" · ")}
             </span>
           </span>
         </span>
@@ -300,6 +303,7 @@ export const UPDATE_REQUEST =
 function Team({ nodes, onGoTo, onCloseStopped }: { nodes: OrchestraNode[]; onGoTo: (slot: string) => void; onCloseStopped: () => void }) {
   const [open, setOpen] = useState(false);
   const actions = useNodeActions();
+  const multi = useProviders().multi;
   const states = useChatStates(nodes.map((n) => n.slot));
   const bySlot: Record<string, State> = {};
   nodes.forEach((n, i) => {
@@ -368,6 +372,7 @@ function Team({ nodes, onGoTo, onCloseStopped }: { nodes: OrchestraNode[]; onGoT
                     <span className="team-text">
                       <span className="team-name">
                         {n.name} <ModelChip model={s.model} />
+                        {multi && <span className="team-provider">{agentName(s.provider)}</span>}
                       </span>
                       <span className="team-line">{summaryLine(s, 90)}</span>
                     </span>

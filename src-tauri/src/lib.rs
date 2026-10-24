@@ -669,6 +669,21 @@ impl orchestra::Host for AppHost {
         let path = history::transcript_path(&projects_root()?, folder, session_id)?;
         Ok(history::replay(&path).events)
     }
+
+    fn live_transcript<'a>(&'a self, worker: &'a str) -> Option<orchestra::Fut<'a, Result<Vec<ui_event::UiEvent>, String>>> {
+        let s = self.app.state::<AppState>().slots.get(worker).ok()?;
+        let provider = s.config.lock().unwrap().as_ref().map(|c| c.provider)?;
+        if provider != ProviderId::Codex {
+            return None;
+        }
+        Some(Box::pin(async move {
+            let mut session = s.session.lock().await;
+            match session.as_mut() {
+                Some(x) if x.is_running() => x.transcript().await,
+                _ => Err("This Codex worker isn't running, and its conversation is read from its running Codex: start it again (message_agent or the user) to read it.".into()),
+            }
+        }))
+    }
 }
 
 /// Makes `slot` the main agent of an orchestra (when its role says so): its bridge serves the orchestra tools.
@@ -898,6 +913,9 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
     if !std::path::Path::new(&folder).is_dir() {
         return Err(format!("{folder} no longer exists."));
     }
+    if settings.orchestrator {
+        lead_provider(settings.provider)?;
+    }
     let ceiling = settings.worker.as_ref().map(|w| main_ceiling(state, &w.parent));
     // A worker's folder is a worktree of its Lead's project, so it gets the notes its Lead started with.
     let notes = match &settings.worker {
@@ -979,6 +997,36 @@ async fn claude_login(state: State<'_, AppState>, claude_path: String) -> Result
     .map_err(|e| e.to_string())?
 }
 
+/// An agent CLI the window can offer for a chat: what it can do, the models it takes, and where its program is (always None
+/// for Claude Code, which the window has already found; another provider is listed only when its program is).
+#[derive(serde::Serialize)]
+struct ProviderListing {
+    #[serde(flatten)]
+    info: ProviderInfo,
+    models: Vec<&'static str>,
+    binary: Option<String>,
+}
+
+/// Every provider the window may start a chat on: Claude Code, then each other whose CLI is installed.
+#[tauri::command]
+async fn list_providers() -> Result<Vec<ProviderListing>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        ProviderId::all()
+            .into_iter()
+            .filter_map(|id| {
+                // Claude Code is the one the window found already (where the user may have pointed it): not looked for again.
+                if id == ProviderId::Claude {
+                    return Some(ProviderListing { info: id.info(), models: id.provider().models().to_vec(), binary: None });
+                }
+                let binary = id.provider().locate(None).ok().map(|p| p.display().to_string());
+                binary.is_some().then(|| ProviderListing { info: id.info(), models: id.provider().models().to_vec(), binary })
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String, claude_path: String, folder: String, settings: Settings) -> Result<ProviderInfo, String> {
     let s = slot_for(&app, &state, &slot)?;
@@ -998,6 +1046,16 @@ async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String,
 /// The role a chat has after its Workflow is set to Team (`team` true) or to another (false): a chat becomes the Lead of a
 /// team, or stops being one. A worker keeps its role (its Workflow is its Lead's to set), and `team` None leaves it as it is.
 /// Stopping being a Lead is refused while it has agents, which would be left with nobody to report to.
+/// A team's Lead starts agents with Lantern's tools, so it runs on a provider that has them (Claude Code); the window never
+/// asks for another, and this keeps anything else from.
+fn lead_provider(provider: ProviderId) -> Result<(), String> {
+    if capabilities_of(provider).supports_lantern_tools {
+        Ok(())
+    } else {
+        Err("A team's Lead runs on Claude Code: this chat's agent can't start agents yet.".into())
+    }
+}
+
 fn role_after(role: &Role, team: Option<bool>, agents: usize) -> Result<Role, String> {
     match (role, team) {
         (Role::Worker { .. }, _) | (_, None) => Ok(role.clone()),
@@ -1017,6 +1075,9 @@ async fn restart_session(app: AppHandle, state: State<'_, AppState>, slot: Strin
     let running_id = s.session.lock().await.as_ref().and_then(|x| x.session_id());
     let mut cfg = s.config.lock().unwrap().clone().ok_or("No folder is open")?;
     let role = role_after(&cfg.helper.role, team, state.orchestra.workers_of(&slot).len())?;
+    if matches!(role, Role::Main) {
+        lead_provider(cfg.provider)?;
+    }
     cfg.mode = mode;
     cfg.effort = checked_effort(effort)?;
     if let Some(auto) = auto_approve {
@@ -1322,8 +1383,9 @@ async fn orchestra_setup_answer(state: State<'_, AppState>, worker: String, answ
 
 /// Starts a worker the user asked for from the canvas (the main agent `main` is told). Returns the worker's id.
 #[tauri::command]
-async fn orchestra_spawn(state: State<'_, AppState>, main: String, task: String, name: Option<String>, isolation: String, model: Option<String>, role: Option<roles::RoleTag>) -> Result<String, String> {
-    state.orchestra.spawn_for_user(&main, &task, name.as_deref(), &isolation, model.as_deref(), role).await
+#[allow(clippy::too_many_arguments)]
+async fn orchestra_spawn(state: State<'_, AppState>, main: String, task: String, name: Option<String>, isolation: String, model: Option<String>, role: Option<roles::RoleTag>, provider: Option<String>) -> Result<String, String> {
+    state.orchestra.spawn_for_user_on(&main, &task, name.as_deref(), &isolation, model.as_deref(), role, provider.as_deref()).await
 }
 
 /// Tells a Lead's team the project's own roles (the built-in ones need no telling), so the Lead may ask for one by id.
@@ -1432,6 +1494,7 @@ async fn claude_mcp(state: &AppState, slot: &str, args: Vec<String>) -> Result<S
         // Claude Code's own command: another provider has no `mcp`, so adding one means saying what happens here.
         let binary = match cfg.provider {
             ProviderId::Claude => cfg.binary.clone(),
+            ProviderId::Codex => return Err("MCP servers for Codex are set up in its own config (~/.codex/config.toml), not from here.".into()),
             #[cfg(test)]
             ProviderId::Fake => return Err("The fake CLI has no mcp command.".into()),
         };
@@ -1782,8 +1845,19 @@ async fn change_summary(
 }
 
 #[tauri::command]
-fn respond_permission(state: State<'_, AppState>, slot: String, request_id: String, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>) -> Result<(), String> {
-    answer_prompt(&state, &slot, &request_id, allow, message, updated_input, remote::SENT_BY_DESKTOP)
+async fn respond_permission(state: State<'_, AppState>, slot: String, request_id: String, allow: bool, message: Option<String>, updated_input: Option<serde_json::Value>) -> Result<(), String> {
+    if answer_prompt(&state, &slot, &request_id, allow, message, updated_input, remote::SENT_BY_DESKTOP).is_ok() {
+        return Ok(());
+    }
+    // Not one of the bridge's: a card the agent raised in its own protocol (Codex's), which its session answers.
+    let s = state.slots.get(&slot)?;
+    if let Some(session) = s.session.lock().await.as_mut() {
+        if session.respond_permission(&request_id, allow).await {
+            state.remote.publish(&slot, ui_event::UiEvent::PermissionResolved { request_id, allow, by: remote::SENT_BY_DESKTOP.to_string() });
+            return Ok(());
+        }
+    }
+    Err("That permission request is no longer pending: it was answered already, or the agent stopped asking.".into())
 }
 
 /// What the window offers a phone to choose between: its presets (Settings › Models), by id, name and a line on what each does.
@@ -2641,6 +2715,7 @@ pub fn run() {
             claude_login,
             sidebar_menu,
             keep_awake,
+            list_providers,
             user_name,
             start_session,
             restart_session,
@@ -2917,6 +2992,13 @@ mod tests {
         }
     }
 
+    /// A team's Lead starts agents with Lantern's tools, which only Claude Code has: Codex is refused as one.
+    #[test]
+    fn only_a_provider_with_lanterns_tools_can_lead_a_team() {
+        assert!(lead_provider(ProviderId::Claude).is_ok());
+        assert!(lead_provider(ProviderId::Codex).unwrap_err().contains("Lead runs on Claude Code"));
+    }
+
     /// Permissions mean the same in every workflow: a team whose Lead is on Auto (in Chat or Step by step terms) lets its
     /// agents run on Auto, and one on Ask never does.
     #[test]
@@ -2934,6 +3016,17 @@ mod tests {
         assert_eq!(saved.worker.unwrap().branch.as_deref(), Some("lantern/w"));
         let older: Settings = serde_json::from_str(r#"{"mode":"auto","model":null,"effort":null,"worker":{"name":"w","parent":"s1"}}"#).unwrap();
         assert_eq!(older.worker.unwrap().branch, None);
+    }
+
+    /// The window builds its provider choices, capability hiding and model lists from this shape.
+    #[test]
+    fn a_provider_is_listed_with_its_id_capabilities_models_and_binary() {
+        let listing = ProviderListing { info: ProviderId::Claude.info(), models: ProviderId::Claude.provider().models().to_vec(), binary: None };
+        let v = serde_json::to_value(listing).unwrap();
+        assert_eq!(v["id"], "claude");
+        assert_eq!(v["capabilities"]["supports_auto_mode"], true);
+        assert_eq!(v["models"], serde_json::json!(["opus", "sonnet", "haiku"]));
+        assert!(v["binary"].is_null());
     }
 
     #[test]

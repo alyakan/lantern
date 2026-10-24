@@ -3,6 +3,7 @@
 
 use crate::args::{HelperConfig, Mode};
 use crate::provider::claude_session::ClaudeSession;
+use crate::provider::codex_session::CodexSession;
 use crate::provider::ProviderId;
 use crate::ui_event::Sink;
 use std::path::PathBuf;
@@ -39,6 +40,7 @@ pub struct SessionConfig {
 /// its own state.
 pub enum Session {
     Claude(ClaudeSession),
+    Codex(CodexSession),
 }
 
 impl Session {
@@ -50,6 +52,7 @@ impl Session {
     pub fn session_id(&self) -> Option<String> {
         match self {
             Session::Claude(s) => s.session_id(),
+            Session::Codex(s) => s.session_id(),
         }
     }
 
@@ -57,18 +60,21 @@ impl Session {
     pub fn pid(&self) -> u32 {
         match self {
             Session::Claude(s) => s.pid(),
+            Session::Codex(s) => s.pid(),
         }
     }
 
     pub fn is_running(&self) -> bool {
         match self {
             Session::Claude(s) => s.is_running(),
+            Session::Codex(s) => s.is_running(),
         }
     }
 
     pub async fn send(&mut self, text: &str) -> Result<(), String> {
         match self {
             Session::Claude(s) => s.send(text).await,
+            Session::Codex(s) => s.send(text).await,
         }
     }
 
@@ -76,6 +82,9 @@ impl Session {
     pub async fn send_with(&mut self, text: &str, images: Vec<serde_json::Value>) -> Result<(), String> {
         match self {
             Session::Claude(s) => s.send_with(text, images).await,
+            // The blocks are Claude's; Codex takes pictures as files of its own, which nothing here makes yet.
+            Session::Codex(_) if !images.is_empty() => Err("A Codex chat can't take pictures yet. Send the message without them.".into()),
+            Session::Codex(s) => s.send(text).await,
         }
     }
 
@@ -83,6 +92,7 @@ impl Session {
     pub async fn interrupt(&mut self) {
         match self {
             Session::Claude(s) => s.interrupt().await,
+            Session::Codex(s) => s.interrupt().await,
         }
     }
 
@@ -90,6 +100,7 @@ impl Session {
     pub async fn set_model(&mut self, model: Option<&str>) -> Result<(), String> {
         match self {
             Session::Claude(s) => s.set_model(model).await,
+            Session::Codex(s) => s.set_model(model).await,
         }
     }
 
@@ -97,6 +108,7 @@ impl Session {
     pub async fn initialize(&mut self) {
         match self {
             Session::Claude(s) => s.initialize().await,
+            Session::Codex(s) => s.initialize().await,
         }
     }
 
@@ -104,6 +116,7 @@ impl Session {
     pub async fn stop(self) {
         match self {
             Session::Claude(s) => s.stop().await,
+            Session::Codex(s) => s.stop().await,
         }
     }
 
@@ -114,6 +127,7 @@ impl Session {
     pub async fn stop_task(&mut self, task_id: &str) -> Result<(), String> {
         match self {
             Session::Claude(s) => s.stop_task(task_id).await,
+            Session::Codex(_) => Err("Codex has no background tasks to stop from here.".into()),
         }
     }
 
@@ -121,6 +135,29 @@ impl Session {
     pub async fn request(&mut self, request: serde_json::Value) -> Result<tokio::sync::oneshot::Receiver<Result<serde_json::Value, String>>, String> {
         match self {
             Session::Claude(s) => s.request(request).await,
+            Session::Codex(_) => {
+                let _ = request;
+                Err("This is Claude Code's settings request; a Codex chat is set up in ~/.codex/config.toml.".into())
+            }
+        }
+    }
+
+    /// The conversation so far, for an agent whose transcript isn't a file Lantern can read (Codex's is read from its
+    /// app-server). Claude's is read from its transcript file instead (see history.rs).
+    pub async fn transcript(&mut self) -> Result<Vec<crate::ui_event::UiEvent>, String> {
+        match self {
+            Session::Claude(_) => Err("Claude's conversation is read from its transcript file.".into()),
+            Session::Codex(s) => s.transcript().await,
+        }
+    }
+
+    /// The user's answer to a card the agent raised in its own protocol (Codex asks in a JSON-RPC request, not through the
+    /// permission helper). False when this session has no such card, as it never does for Claude, whose cards go through the
+    /// chat's permission bridge.
+    pub async fn respond_permission(&mut self, request_id: &str, allow: bool) -> bool {
+        match self {
+            Session::Claude(_) => false,
+            Session::Codex(s) => s.respond_permission(request_id, allow).await,
         }
     }
 }

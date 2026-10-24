@@ -24,7 +24,9 @@ import { windowFocused } from "./lib/windowFocus";
 import { initialState, reducer, RUN_PREFIX, type Action, type ChangedFile, type ChatItem, type Status } from "./store";
 import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionActions } from "./lib/sessionActions";
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend } from "./sessions";
-import type { Mode, UiEvent } from "./types";
+import type { Capabilities, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
+import { modelOptionsFor } from "./lib/models";
+import { CLAUDE, ProvidersContext, agentName, capabilitiesOf, choicesOf, modeOn, providerIdOf, providerName } from "./lib/provider";
 import { batchPerFrame } from "./lib/frameBatch";
 import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
@@ -127,13 +129,13 @@ function countFinished(items: ChatItem[], name: string): number {
 }
 
 /** What an empty Step-by-step chat's box asks, for the flavour picked (or none yet). */
-const HERO_PLACEHOLDER: Record<Flavour | "none", string> = {
-  none: "What are you working on? Claude suggests how to go about it",
+const heroPlaceholder = (agent: string): Record<Flavour | "none", string> => ({
+  none: `What are you working on? ${agent} suggests how to go about it`,
   build: "What should we build, step by step?",
   review: "Which change? e.g. Review PR 128, or Review my branch",
   debug: "What's going wrong, and when?",
   architecture: "What should be designed? A feature, a fix, or e.g. PR 128",
-};
+});
 
 /** The chat whose merge cards include `worker`'s: its main agent's, even if the worker's own chat has been closed. */
 function mergeOwner(chats: { slots: Record<string, { proposals: { worker: string }[] }> }, worker: string): string | undefined {
@@ -200,6 +202,12 @@ export default function App() {
   // What each project runs in a new agent's worktree before it starts, and its Run command (see lib/projectSetup.ts).
   const [setupBy, setSetupBy] = usePersistentState<SetupByFolder>("settings.projectSetupByFolder", {});
   const [harnessBySession, setHarnessBySession] = usePersistentState<Record<string, string>>("settings.harnessBySession", {});
+  // Which agent CLI each project's new chats start on (absent: Claude Code, as before there was a choice), and each session's
+  // when it isn't Claude's. The model and effort of every provider but Claude, whose own are the app-wide ones above.
+  const [providerByFolder, setProviderByFolder] = usePersistentState<Record<string, string>>("settings.providerByFolder", {});
+  const [providerBySession, setProviderBySession] = usePersistentState<Record<string, string>>("settings.providerBySession", {});
+  const [providerPrefs, setProviderPrefs] = usePersistentState<Record<string, { model: string | null; effort: string | null }>>("settings.providerPrefs", {});
+  const prefsOf = (id: string) => (id === CLAUDE ? { model, effort } : (providerPrefs[id] ?? { model: null, effort: null }));
   // General: which events are told about (and paused), the theme and the text size.
   const [notifyPrefs, setNotifyPrefs] = usePersistentState<NotifyPrefs>(NOTIFY_KEY, NOTIFY_DEFAULTS);
   // Keep the Mac from idle sleep while anything works (see anythingWorking); anything but off means on.
@@ -405,16 +413,53 @@ export default function App() {
     };
   }, []);
 
-  const harnessOf = (slot: string) => findHarness(presets, harnessBySlot[slot]);
-  /** What a chat runs with: its preset's models, or (Default) the app's model and effort. */
   // The chats routines started, by slot: each runs on the model its routine names (while it is on the standard preset), and is called "Routine: name".
   const routineSlots = useRef<Record<string, { name: string; model: string | null }>>({});
-  const settingsFor = (slot: string, h: Harness = harnessOf(slot)) => settingsOf(h, { model: h.id === DEFAULT_HARNESS && slot in routineSlots.current ? routineSlots.current[slot].model : model, effort });
+  // The agent CLIs a chat can run on: Claude Code, and each other that is installed. Until the backend answers (or when it
+  // can't) there is only Claude Code, which is all a window with one provider ever shows.
+  const [providerList, setProviderList] = useState<ProviderListing[] | null>(null);
+  useEffect(() => {
+    api.listProviders().then(setProviderList, () => setProviderList([]));
+  }, []);
+  const providers = useMemo(() => choicesOf(providerList), [providerList]);
+  /** A provider the chat can start on: Claude Code always (the window has found it), another only while its CLI is installed. */
+  const listingOf = (id: string) => providers.list.find((p) => p.id === id);
+  const isAvailable = (id: string) => id === CLAUDE || !!listingOf(id);
+  /** What a project's new chats run on: its choice, if that provider is still there. */
+  const providerFor = (folder: string | null) => {
+    const id = folder ? providerByFolder[folder] : undefined;
+    return id && isAvailable(id) ? id : CLAUDE;
+  };
+  /** The provider a chat is on and what it can do; Claude Code's until told otherwise. */
+  const infoOf = (id: string): ProviderInfo | null => {
+    const l = listingOf(id);
+    return l ? { id: l.id, capabilities: l.capabilities } : null;
+  };
+  const capsOf = (slot: string) => capabilitiesOf(chats.slots[slot]?.provider);
+  const caps = capabilitiesOf(state.provider);
+  const activeProvider = providerIdOf(state.provider);
+
+  // The harness (which models do what) is Claude Code's: a provider with no advisor runs Standard, its own model and effort.
+  const harnessFor = (c: { supports_advisor: boolean }, id: string | undefined | null) => (c.supports_advisor ? findHarness(presets, id) : BUILT_IN[0]);
+  const harnessOf = (slot: string) => harnessFor(capsOf(slot), harnessBySlot[slot]);
+  /** A launch on a provider with no Auto: Ask, whatever the Permissions asked for (what the backend caps to as well). */
+  const onProvider = (l: { mode: Mode; autoApprove: boolean }, can: Capabilities) => (can.supports_auto_mode ? l : { mode: modeOn(l.mode, can), autoApprove: false });
+  /**
+   * What a chat runs with: its preset's models, or (Default) the model and effort chosen for its provider; a routine's chat on
+   * Claude runs on the model its routine names. `provider`: the chat's, when it isn't in `chats` yet (it is being started). A
+   * provider with no effort level is given none.
+   */
+  const settingsFor = (slot: string, h: Harness = harnessOf(slot), provider: ProviderInfo | null = chats.slots[slot]?.provider ?? null) => {
+    const id = providerIdOf(provider);
+    const prefs = id === CLAUDE && h.id === DEFAULT_HARNESS && slot in routineSlots.current ? { model: routineSlots.current[slot].model, effort } : prefsOf(id);
+    const s = settingsOf(h, prefs);
+    return capabilitiesOf(provider).supports_effort ? s : { ...s, effort: null };
+  };
 
   /** `change`: Step by step's Permissions and Workflow Team, when this restart is what sets them (see `launchOf`); else the chat keeps its own. */
   const restart = (slot: string, mode: Mode, withEffort: string | null = settingsFor(slot).effort, change: { autoApprove?: boolean; team?: boolean } = {}) => {
     to(slot)({ type: "restarting" });
-    api.restartSession(slot, mode, withEffort, change.autoApprove ?? chats.slots[slot]?.autoApprove ?? false, change.team ?? null).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+    api.restartSession(slot, mode, withEffort, (change.autoApprove ?? chats.slots[slot]?.autoApprove ?? false) && capsOf(slot).supports_auto_mode, change.team ?? null).then(() => to(slot)({ type: "session_ready" })).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
   };
 
   // If Stop made claude exit instead of just ending the turn, resume the session.
@@ -445,7 +490,7 @@ export default function App() {
   const cancelStart = (slot: string) => {
     startGen.current[slot] = (startGen.current[slot] ?? 0) + 1;
     api.closeSession(slot).catch(() => {});
-    to(slot)({ type: "failed", text: "Claude didn't start." });
+    to(slot)({ type: "failed", text: `${agentName(chats.slots[slot]?.provider)} didn't start.` });
   };
 
   /**
@@ -506,29 +551,39 @@ export default function App() {
    * `remote`: a chat a paired phone started: on Ask, or on Auto when the Mac's Settings let phones use it (the caller has checked),
    * whatever the project's Permissions are, and on the preset the phone chose (else the project's own); it doesn't become the
    * project to reopen either, and neither the project's Permissions nor its preset are remembered from it.
+   * `providerId`: the agent CLI it runs on, by default the one the project's new chats start on (a team's Lead is always Claude
+   * Code's: it is the one that has Lantern's tools to start agents with).
    */
-  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote: { permissions: Permissions; preset: string | null; workflow: "chat" | "steps" } | false = false) => {
+  const startIn = (slot: string, folder: string, quiet = false, team = false, first?: string, routine?: Routine, review?: ReviewSetting, remote: { permissions: Permissions; preset: string | null; workflow: "chat" | "steps" } | false = false, providerId: string = team ? CLAUDE : providerFor(folder)) => {
     const { claudePath } = state;
     if (!claudePath) return;
     // A chat opened before the last project was reopened (that waits on the moves): it isn't reopened over it later.
     reopened.current = true;
     // A team's Lead runs on the project's last Permissions, which its agents never exceed; Team is not remembered as the
     // project's Workflow (see the effect below).
-    const { mode, autoApprove } = remote ? launchOf(remote.permissions, remote.workflow) : routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team);
+    const info = infoOf(providerId);
+    const binary = providerId === CLAUDE ? claudePath : listingOf(providerId)?.binary;
+    const can = capabilitiesOf(info);
+    // A provider with no Auto runs on Ask.
+    const { mode, autoApprove } = onProvider(remote ? launchOf(remote.permissions, remote.workflow) : routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team), can);
     const orchestrator = team;
-    const h = routine ? BUILT_IN[0] : findHarness(presets, remote && remote.preset ? remote.preset : harnessByFolder[folder]);
+    const h = routine ? BUILT_IN[0] : harnessFor(can, remote && remote.preset ? remote.preset : harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)({ type: "folder_opened", folder });
+    // Known before the start answers, so what the provider lacks is never shown, even for a moment.
+    if (info) to(slot)({ type: "provider_set", provider: info });
     to(slot)({ type: "mode_changed", mode, autoApprove });
     to(slot)({ type: "orchestrator_set", on: orchestrator });
-    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first, routine, review, remote);
+    if (!binary) return to(slot)({ type: "failed", text: `${providerName(providerId)} isn't installed.` });
+    if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first, routine, review, remote, providerId);
     // The notes the chat starts with: what is saved now, which a later change doesn't reach.
     const notes = notesOf(notesBy, folder);
     to(slot)({ type: "notes_applied", text: notes || null });
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
-    api.startSession(slot, claudePath, folder, { mode, ...settingsFor(slot, h), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}), ...(notes ? { project_notes: notes } : {}) }).then(
-      () => {
+    api.startSession(slot, binary, folder, { ...(providerId !== CLAUDE ? { provider: providerId } : {}), mode, ...settingsFor(slot, h, info), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}), ...(notes ? { project_notes: notes } : {}) }).then(
+      (provider) => {
         if (startGen.current[slot] !== gen) return;
+        if (provider) to(slot)({ type: "provider_set", provider });
         delete relaunch.current[slot];
         if (orchestrator) {
           startSubagents(slot, folder);
@@ -549,6 +604,18 @@ export default function App() {
     );
   };
 
+  /**
+   * An empty chat is moved to another provider: it is the project's new choice (its next chats start there too), and the chat
+   * starts again on it, which replaces the CLI that was running with nothing said to it yet.
+   */
+  const chooseProvider = (id: string) => {
+    const folder = state.folder;
+    if (!folder || id === activeProvider || !isAvailable(id)) return;
+    setProviderByFolder({ ...providerByFolder, [folder]: id });
+    // A provider that can't lead a team starts it as a plain chat: its Workflow leaves Team.
+    startIn(active, folder, false, state.orchestrator && capabilitiesOf(infoOf(id)).supports_lantern_tools, undefined, undefined, undefined, false, id);
+  };
+
   useEffect(() => {
     // Not a worker's: its folder is a worktree that's gone with it, and its Permissions are capped by its Lead. Nor a routine's:
     // looking at one must not make the project's next chat start on its Permissions.
@@ -557,7 +624,10 @@ export default function App() {
     const permissions = permissionsOf(state);
     // A phone's switch isn't the project's next default: nobody chose it at the Mac (a change here forgets it, and counts).
     const fromPhone = phoneMode.current[active] === permissions;
-    if (!fromPhone && permissionsBy[state.folder] !== permissions) setPermissionsBy({ ...permissionsBy, [state.folder]: permissions });
+    // A chat on a provider with no Auto runs on Ask where the project's Permissions are Auto: that is the provider's limit, not
+    // the user's choice, so it doesn't replace what the project is set to.
+    const capped = !caps.supports_auto_mode && permissions === "ask" && permissionsBy[state.folder] === "auto";
+    if (!fromPhone && !capped && permissionsBy[state.folder] !== permissions) setPermissionsBy({ ...permissionsBy, [state.folder]: permissions });
     // A Team is the chat's own: the project's next chat starts as a chat (or in Step by step, if that is where it was).
     const workflow = workflowOf(state);
     if (workflow !== "team" && phoneFlow.current[active] !== workflow && workflowBy[state.folder] !== workflow) setWorkflowBy({ ...workflowBy, [state.folder]: workflow });
@@ -575,15 +645,24 @@ export default function App() {
 
   // With no model chosen, whatever claude runs is Claude Code's default: remember it so the menu can name it.
   // And for an alias, the version it currently resolves to.
+  // (Claude's: the model another provider's chat runs is not Claude Code's default.)
   useEffect(() => {
+    if (activeProvider !== CLAUDE) return;
     if (model === null && state.model) setDefaultModel(state.model);
     else if (model && state.model?.includes(model) && modelIds[model] !== state.model) setModelIds({ ...modelIds, [model]: state.model });
-  }, [model, state.model]);
+  }, [model, state.model, activeProvider]);
+  // A session on a provider other than Claude is remembered as such, so reopening it from History starts that provider's CLI.
+  useEffect(() => {
+    const news = Object.values(chats.slots).filter((s) => s.sessionId && providerIdOf(s.provider) !== CLAUDE && providerBySession[s.sessionId] !== providerIdOf(s.provider));
+    if (news.length) setProviderBySession({ ...providerBySession, ...Object.fromEntries(news.map((s) => [s.sessionId!, providerIdOf(s.provider)])) });
+  }, [chats.slots]);
 
+  // Chats on another provider than Claude come back once the providers are known (with Claude alone there is nothing to wait for).
+  const waitsForProviders = providerList === null && [...Object.values(providerBySession), ...Object.values(providerByFolder)].some((p) => p !== CLAUDE);
   // After a restart to update the chats that were open come back by themselves, in place of the last project (which the
   // first of them is, or else the project is reopened as usual). Ahead of that effect, which it then keeps from running.
   useEffect(() => {
-    if (!restoringAfterUpdate || !state.claudePath || !moves || !goneChecked || !markerChecked) return;
+    if (!restoringAfterUpdate || !state.claudePath || !moves || !goneChecked || !markerChecked || waitsForProviders) return;
     clearRestoreAfterUpdate();
     setRestoringAfterUpdate(false);
     // Something was opened meanwhile: nothing is restored over it, and the card is back.
@@ -591,14 +670,14 @@ export default function App() {
       reopened.current = true;
       restoreAll();
     }
-  }, [restoringAfterUpdate, state.claudePath, moves, goneChecked, markerChecked]);
+  }, [restoringAfterUpdate, state.claudePath, moves, goneChecked, markerChecked, waitsForProviders]);
 
   // Reopen the last project once claude has been found (where it is now, if it moved), unless the chats are coming back instead.
   useEffect(() => {
-    if (!markerChecked || restoringAfterUpdate || reopened.current || state.status !== "no_folder" || !state.claudePath || !moves) return;
+    if (!markerChecked || restoringAfterUpdate || reopened.current || state.status !== "no_folder" || !state.claudePath || !moves || waitsForProviders) return;
     reopened.current = true;
     if (lastFolder) startFresh(here(lastFolder), true);
-  }, [markerChecked, restoringAfterUpdate, state.status, state.claudePath, moves]);
+  }, [markerChecked, restoringAfterUpdate, state.status, state.claudePath, moves, waitsForProviders]);
 
   const openFolder = async () => {
     const folder = await open({ directory: true, multiple: false });
@@ -640,17 +719,28 @@ export default function App() {
     const { claudePath } = state;
     if (!claudePath) return Promise.resolve(false);
     reopened.current = true;
+    // The provider it ran on: Claude's unless it was saved as another's (a session from before there was a choice is Claude's).
+    const providerId = providerBySession[sessionId] ?? CLAUDE;
+    const info = infoOf(providerId);
+    const binary = providerId === CLAUDE ? claudePath : listingOf(providerId)?.binary;
+    const can = capabilitiesOf(info);
     // The mode it was last in (and for an older Debug, Teach or Review session, that flavour of Step by step); one from
     // before modes were kept per session reopens as a plain chat, not as whatever this folder's newest chat is doing.
     const saved = savedMode(sessionModes[sessionId]);
-    const { mode, flavour: flavourStart, explain: explainStart } = saved;
-    // Step by step's Permissions: as the session saved them, else (an older save) the project's.
-    const autoApprove = mode === "steps" && (saved.autoApprove ?? permissionsFor(folder) === "auto");
+    const { flavour: flavourStart, explain: explainStart } = saved;
+    // Step by step's Permissions: as the session saved them, else (an older save) the project's. A provider with no Auto
+    // reopens it on Ask.
+    const { mode, autoApprove } = onProvider({ mode: saved.mode, autoApprove: saved.mode === "steps" && (saved.autoApprove ?? permissionsFor(folder) === "auto") }, can);
     // The preset it last ran with, else the folder's.
-    const h = findHarness(presets, harnessBySession[sessionId] ?? harnessByFolder[folder]);
+    const h = harnessFor(can, harnessBySession[sessionId] ?? harnessByFolder[folder]);
     setHarnessBySlot((all) => ({ ...all, [slot]: h.id }));
     to(slot)(reuse ? { type: "restarting" } : { type: "folder_opened", folder });
+    if (info) to(slot)({ type: "provider_set", provider: info });
     to(slot)({ type: "mode_changed", mode, autoApprove, flavourStart, explainStart });
+    if (!binary) {
+      to(slot)({ type: "failed", text: `${providerName(providerId)} isn't installed, so this chat can't be reopened.` });
+      return Promise.resolve(false);
+    }
     to(slot)({ type: "orchestrator_set", on: team?.role === "main" });
     // A worker is part of its team from the start, not only once it has opened: until then it would be an ordinary chat in the sidebar.
     if (team?.role === "worker") dispatchChats({ type: "adopt", slot, meta: { parent: team.parent, name: team.name, brief: "", folder, branch: team.branch, base: team.base, isolation: team.isolation, ...(team.agentRole ? { role: team.agentRole } : {}), ...(team.hidden ? { hidden: true } : {}) } });
@@ -663,10 +753,10 @@ export default function App() {
     const open = (as: TeamRole | undefined) =>
       api.openSession(
         slot,
-        claudePath,
+        binary,
         folder,
-        // An agent comes back on the model it had (or Sonnet, the agents' default), not on its project's own model.
-        { mode, ...settingsFor(slot, h), ...(as?.role === "worker" ? { model: as.model ?? AGENT_MODEL } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(notes ? { project_notes: notes } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared", read_only: !!as.agentRole?.read_only, ...(as.agentRole ? { role: as.agentRole } : {}) } } : {}) },
+        // An agent comes back on the model it had (or, on Claude, Sonnet, the agents' default), not on its project's own model.
+        { ...(providerId !== CLAUDE ? { provider: providerId } : {}), mode, ...settingsFor(slot, h, info), ...(as?.role === "worker" ? { model: as.model ?? (providerId === CLAUDE ? AGENT_MODEL : null) } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(notes ? { project_notes: notes } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared", read_only: !!as.agentRole?.read_only, ...(as.agentRole ? { role: as.agentRole } : {}) } } : {}) },
         sessionId,
       );
     // A worker waits for its main agent: if that one didn't open, this one stays closed too, under it, where Retry can try again.
@@ -675,6 +765,7 @@ export default function App() {
       .then((as) => open(as).then((opened) => ({ opened, as })))
       .then(({ opened, as }) => {
         if (startGen.current[slot] !== gen) return false;
+        if (opened.provider) to(slot)({ type: "provider_set", provider: opened.provider });
         // Not resumed (its copy into this folder failed): the transcript is shown, and Retry copies it again.
         if (opened.read_only) {
           to(slot)({ type: "history_loaded", sessionId, events: opened.events, earlier: opened.earlier });
@@ -1036,7 +1127,7 @@ export default function App() {
   const [mcpIssues, setMcpIssues] = useState<Record<string, McpIssue[]>>({});
   const mcpCheckedAt = useRef<Record<string, number>>({});
   useEffect(() => {
-    if (state.status !== "idle" || !state.folder || Date.now() - (mcpCheckedAt.current[active] ?? 0) < 30_000) return;
+    if (!caps.supports_skills || state.status !== "idle" || !state.folder || Date.now() - (mcpCheckedAt.current[active] ?? 0) < 30_000) return;
     mcpCheckedAt.current[active] = Date.now();
     const slot = active;
     api.claudeRequest<{ mcpServers?: McpServer[] }>(slot, { subtype: "mcp_status" }).then(
@@ -1166,8 +1257,9 @@ export default function App() {
     const n = chats.slots[slot]?.backgroundTasks.length ?? 0;
     if (n > 0) {
       const them = n === 1 ? "it" : "them";
-      const sure = await ask(`${n === 1 ? "A background task is" : `${n} background tasks are`} running in this chat (a workflow, a subagent or a command). Changing this restarts Claude, which stops ${them}.`, {
-        title: "Restart Claude?",
+      const agent = agentName(chats.slots[slot]?.provider);
+      const sure = await ask(`${n === 1 ? "A background task is" : `${n} background tasks are`} running in this chat (a workflow, a subagent or a command). Changing this restarts ${agent}, which stops ${them}.`, {
+        title: `Restart ${agent}?`,
         kind: "warning",
         okLabel: "Restart anyway",
         cancelLabel: "Keep running",
@@ -1262,6 +1354,7 @@ export default function App() {
       const leaving = s.orchestrator && workflow !== "team";
       if (leaving && holdsAgents(slot)) return to(slot)({ type: "notice", text: "This team still has agents. Close them first, then switch its Workflow." });
       const { mode, autoApprove, team } = launchOf(permissions, agent ? workflowOf(s) : workflow);
+      if (team && !agent && !s.orchestrator && !capabilitiesOf(s.provider).supports_lantern_tools) return to(slot)({ type: "notice", text: `${agentName(s.provider)} can't lead a team yet: a team's Lead runs on Claude Code.` });
       const apply = () => {
         if (mode !== "steps") to(slot)({ type: "flavour_picked", flavour: null });
         to(slot)({ type: "mode_changed", mode, autoApprove });
@@ -1348,21 +1441,24 @@ export default function App() {
   const presetOn = harnessOf(active).id !== DEFAULT_HARNESS;
 
   // Effort is a launch flag, so the chat's claude restarts on the same session to pick it up (like the mode).
+  // The effort and model are each provider's own: Claude's are the app-wide ones, another provider's are kept beside them.
   const changeEffort = (next: string | null) => {
     if (presetOn) return customize({ effort: next });
     unlessBackground(active, () => {
-      setEffort(next);
+      if (activeProvider === CLAUDE) setEffort(next);
+      else setProviderPrefs({ ...providerPrefs, [activeProvider]: { ...prefsOf(activeProvider), effort: next } });
       if (state.folder) restart(active, state.mode, next);
     });
   };
 
-  // App-wide: applies in-band from each open chat's next message, and to new chats and restarts. Chats on a preset
-  // keep the preset's model.
+  // For every open chat on the same provider: applies in-band from each one's next message (or, for a provider whose model
+  // is fixed while it runs, from its next start), and to new chats and restarts. Chats on a preset keep the preset's model.
   const chooseModel = (next: string | null) => {
     if (presetOn) return customize({ model: next });
-    setModel(next);
+    if (activeProvider === CLAUDE) setModel(next);
+    else setProviderPrefs({ ...providerPrefs, [activeProvider]: { ...prefsOf(activeProvider), model: next } });
     for (const slot of Object.keys(chats.slots)) {
-      if (harnessOf(slot).id === DEFAULT_HARNESS) api.setModel(slot, next).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
+      if (providerIdOf(chats.slots[slot].provider) === activeProvider && harnessOf(slot).id === DEFAULT_HARNESS) api.setModel(slot, next).catch((e) => to(slot)({ type: "failed", text: errText(e) }));
     }
   };
 
@@ -1728,7 +1824,8 @@ export default function App() {
     for (const [slot, s] of Object.entries(chats.slots)) {
       const prompt = firstPrompt(s);
       const id = s.sessionId;
-      if (!id || !prompt || !s.folder || !s.claudePath || titles[id] || titling.current.has(id)) continue;
+      // (Titles are made with Claude Code from a session's first prompt: another provider's chat is called by that prompt.)
+      if (!id || !prompt || !s.folder || !s.claudePath || providerIdOf(s.provider) !== CLAUDE || titles[id] || titling.current.has(id)) continue;
       titling.current.add(id);
       // A routine's chat is called after the routine, not after what its prompt says (also when it is reopened later).
       const own = routineSlots.current[slot];
@@ -1807,7 +1904,7 @@ export default function App() {
   }, [active]);
   useEffect(() => {
     for (const [slot, s] of Object.entries(chats.slots)) {
-      const a = attentionFor(s.items, s.folder, describeInput);
+      const a = attentionFor(s.items, s.folder, describeInput, agentName(s.provider));
       const key = a && `${s.sessionId}:${a.key}`;
       if (!a || !key || key === announced.current[slot]) continue;
       announced.current[slot] = key;
@@ -1981,16 +2078,16 @@ export default function App() {
   const paletteEntries = (): PaletteEntry[] => {
     const ready = !!state.folder && !isBusy(state);
     const permissions = (["ask", "auto"] as const)
-      .filter((p) => ready && p !== permissionsOf(state))
+      .filter((p) => ready && p !== permissionsOf(state) && (p !== "auto" || caps.supports_auto_mode))
       .map((p): PaletteEntry => ({ id: `permissions:${p}`, title: `Permissions: ${PERMISSIONS_LABEL[p]}`, group: "Permissions", shortcut: null, run: () => changePermissions(p) }));
     const workflows = (["chat", "steps", "team"] as const)
-      .filter((w) => ready && w !== workflowOf(state) && !(w === "team" && chats.agents[active]))
+      .filter((w) => ready && w !== workflowOf(state) && !(w === "team" && (chats.agents[active] || !caps.supports_lantern_tools)))
       .map((w): PaletteEntry => ({ id: `workflow:${w}`, title: `Workflow: ${WORKFLOW_LABEL[w]}${w === "steps" ? "…" : ""}`, group: "Workflow", shortcut: null, run: () => changeWorkflow(w) }));
     const harnesses = presets
-      .filter((h) => ready && h.id !== harnessOf(active).id)
+      .filter((h) => ready && caps.supports_advisor && h.id !== harnessOf(active).id)
       .map((h): PaletteEntry => ({ id: `harness:${h.id}`, title: `Models: ${h.name}`, group: "Models", shortcut: null, run: () => switchHarness(h) }));
     const tabs = (["general", "harness", "mcp", "skills", "permissions", "prs", "updates"] as SettingsTab[])
-      .filter((t) => t !== "harness" || !!state.folder)
+      .filter((t) => (t !== "harness" || (!!state.folder && caps.supports_advisor)) && (t !== "skills" || caps.supports_skills))
       .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
     const routinesEntry: PaletteEntry = { id: "routines", title: "Routines…", group: "Routines", shortcut: null, run: () => setSettingsAt("routines") };
     const themes = THEMES.filter((t) => t.id !== theme && t.id !== "custom").map((t): PaletteEntry => ({ id: `theme:${t.id}`, title: `Theme: ${t.label}`, group: "Theme", shortcut: null, run: () => setTheme(t.id) }));
@@ -2021,7 +2118,8 @@ export default function App() {
       sendIn(pending.slot, pending.text);
     }
   }, [chats.slots]);
-  const startTeam = () => (hero ? changeWorkflow("team") : newOrchestra());
+  // (On a provider that can't lead a team, a new chat is the Lead instead: it is Claude Code's.)
+  const startTeam = () => (hero && caps.supports_lantern_tools ? changeWorkflow("team") : newOrchestra());
   useAction("work-build", () => pickFlavour("build"), workReady);
   useAction("work-review-pr", () => setPrPicker(true), workReady);
   useAction("work-debug", () => pickFlavour("debug"), workReady);
@@ -2092,6 +2190,8 @@ export default function App() {
     if (prompts) setPromptsBy(prompts);
     const harness = take<Record<string, string>>("settings.harnessByFolder");
     if (harness) setHarnessByFolder(harness);
+    const provider = take<Record<string, string>>("settings.providerByFolder");
+    if (provider) setProviderByFolder(provider);
     const collapsed = take<Record<string, boolean>>("review.collapsedByFolder");
     if (collapsed) setCollapsedBy(collapsed);
     const pinned = take<Record<string, string[]>>("settings.pinnedSessions");
@@ -2371,6 +2471,9 @@ export default function App() {
     <MessageInput
       key={`input-${active}-${composerEpoch}`}
       status={state.status}
+      provider={state.provider}
+      // (Not for a main agent that already has workers: starting it again on another provider would pull it out from under them.)
+      providers={providers.multi && hero && state.folder && !Object.values(chats.agents).some((a) => a.parent === active) ? { options: providers.list.map((l) => ({ id: l.id, name: providerName(l.id), capabilities: l.capabilities })), chosen: activeProvider, onChoose: chooseProvider } : undefined}
       onSend={(text, draft) => {
         // Starting something new instead: the chats from last time aren't offered any more.
         if (hero) setOffer([]);
@@ -2389,14 +2492,22 @@ export default function App() {
       onWorkflowChange={(w) => changeWorkflow(w)}
       holdsAgents={holdsAgents(active)}
       model={state.model}
-      idlePlaceholder={stepsView ? (flavour === "review" ? "Ask about this file…" : "Ask about this page or change it…") : stepsMode && hero ? explain && flavour === "build" ? "What do you want to learn, and what for?" : HERO_PLACEHOLDER[flavour ?? "none"] : undefined}
+      idlePlaceholder={stepsView ? (flavour === "review" ? "Ask about this file…" : "Ask about this page or change it…") : stepsMode && hero ? explain && flavour === "build" ? "What do you want to learn, and what for?" : heroPlaceholder(agentName(state.provider))[flavour ?? "none"] : undefined}
       sendAndNext={stepsView ? (text) => sendIn(active, andNext(text)) : undefined}
       hero={hero}
       folder={state.folder}
       onOpenFolder={openFolder}
       sessions={{ load: loadSessions, exclude: openChatIds, onOpen: (id) => openSession(id) }}
       folders={{ load: loadRecentFolders, onPick: (path) => startFresh(path), relocate: relocateMenu }}
-      models={{ chosen: settingsFor(active).model, onChoose: chooseModel, defaultModel, ids: modelIds, options: state.models }}
+      models={{
+        chosen: settingsFor(active).model,
+        onChoose: chooseModel,
+        // The defaults and versions seen are Claude's; another provider's chat lists its own models.
+        defaultModel: activeProvider === CLAUDE ? defaultModel : null,
+        ids: activeProvider === CLAUDE ? modelIds : undefined,
+        // Another provider's, until its session lists them: the names its CLI takes (Claude's built-in list would be wrong for it).
+        options: activeProvider === CLAUDE || state.models.length > 0 ? state.models : modelOptionsFor(listingOf(activeProvider)?.models ?? [], providerName(activeProvider)),
+      }}
       effort={{ chosen: settingsFor(active).effort, onChoose: changeEffort }}
       harness={state.folder ? { presets, chosen: harnessOf(active).id, onChoose: (id) => switchHarness(findHarness(presets, id)), onEdit: () => setSettingsAt("harness") } : undefined}
       usage={{ used: state.contextUsed, window: contextWindow, lastTurnMs, session: { cost: state.sessionCost, tokens: state.sessionTokens }, actions: state.folder && !stepsMode ? { onCompact: () => sendIn(active, "/compact"), onClear: () => clearChat(active) } : undefined }}
@@ -2448,7 +2559,7 @@ export default function App() {
   if (state.status === "setup") return <SetupScreen error={state.setupError} onCheck={locate} />;
 
   return (
-    <ProjectSetupContext.Provider value={setupBy}><SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}><KnownWindowsContext.Provider value={windows}><RoleStoreProvider store={roleStore}><TemplateTeamContext.Provider value={state.folder ? startTemplate : null}>
+    <ProvidersContext.Provider value={providers}><ProjectSetupContext.Provider value={setupBy}><SlotContext.Provider value={active}><ModeGuideContext.Provider value={setGuideAt}><SessionActionsContext.Provider value={sessionActions}><KnownWindowsContext.Provider value={windows}><RoleStoreProvider store={roleStore}><TemplateTeamContext.Provider value={state.folder ? startTemplate : null}>
       <div className="app">
         <TopBar
           folder={titleFolder}
@@ -2525,7 +2636,7 @@ export default function App() {
                       <RestoreCard chats={offeredTop} folder={state.folder} onRestoreAll={restoreAll} onRestore={restoreOne} onDismiss={() => setOffer([])} />
                     )}
                     {chatExtras}
-                    {state.folder && <StartScreen picked={stepsMode ? state.flavourPick : null} explain={explain} onExplain={(on) => state.flavourPick && pickFlavour(state.flavourPick, on)} team={workflowOf(state) === "team"} onFlavour={pickFlavour} onReview={() => setPrPicker(true)} onTeam={() => changeWorkflow(workflowOf(state) === "team" ? "chat" : "team")} />}
+                    {state.folder && <StartScreen picked={stepsMode ? state.flavourPick : null} explain={explain} onExplain={(on) => state.flavourPick && pickFlavour(state.flavourPick, on)} team={workflowOf(state) === "team"} onFlavour={pickFlavour} onReview={() => setPrPicker(true)} onTeam={() => (workflowOf(state) === "team" ? changeWorkflow("chat") : startTeam())} />}
                     {composer}
                   </div>
                 </div>
@@ -2617,6 +2728,7 @@ export default function App() {
         </div>
         <SettingsView
           open={settingsAt}
+          provider={state.provider}
           onClose={() => setSettingsAt(null)}
           slot={state.folder ? active : null}
           live={state.status === "idle" || state.status === "running"}
@@ -2740,6 +2852,7 @@ export default function App() {
           open={guideAt}
           permissions={permissionsOf(state)}
           workflow={workflowOf(state)}
+          auto={caps.supports_auto_mode}
           flavour={flavour}
           explain={explain}
           onUse={state.folder && !isBusy(state) ? (key) => {
@@ -2752,6 +2865,6 @@ export default function App() {
           onClose={() => setGuideAt(null)}
         />
       </div>
-    </TemplateTeamContext.Provider></RoleStoreProvider></KnownWindowsContext.Provider></SessionActionsContext.Provider></ModeGuideContext.Provider></SlotContext.Provider></ProjectSetupContext.Provider>
+    </TemplateTeamContext.Provider></RoleStoreProvider></KnownWindowsContext.Provider></SessionActionsContext.Provider></ModeGuideContext.Provider></SlotContext.Provider></ProjectSetupContext.Provider></ProvidersContext.Provider>
   );
 }

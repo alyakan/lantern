@@ -1,5 +1,7 @@
 // Dev-only fake backend so the UI can be designed in a plain browser: `npm run dev`, then open /?mock.
 // It answers the app's Tauri commands and plays a scripted Claude turn. Never imported in production builds.
+// Address flags: ?mock (no folder), ?mock=ready (a folder, empty chat), ?mock=demo (a scripted turn), &more, &bgend, &allow, and
+// &providers: a second, fake agent CLI ("Codex", without Auto mode, advisor, skills or dollar cost) beside Claude Code.
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { emit } from "@tauri-apps/api/event";
 import type { McpServer, NetworkDetail, NetworkItem, NetworkTx, NetworkView, SkillEntry, UiEvent } from "../types";
@@ -13,6 +15,27 @@ const NEXT_VERSION = APP_VERSION.replace(/\d+$/, (patch) => String(Number(patch)
 
 // With &project=name the project folder has that name (a long one, to see the title bar cope).
 const FOLDER = `/Users/you/projects/${new URLSearchParams(typeof location === "undefined" ? "" : location.search).get("project") ?? "acme-api"}`;
+
+// With &providers a second, fake agent CLI ("Codex") is installed beside Claude Code, with what such a CLI lacks: no Auto
+// mode, no advisor, no skills, no dollar cost. It is for seeing the provider pickers and everything a provider hides.
+// Without it the app has Claude Code alone, as the real one does until another CLI is installed.
+let SECOND_PROVIDER = new URLSearchParams(typeof location === "undefined" ? "" : location.search).has("providers");
+const CLAUDE_INFO = { id: "claude", capabilities: { supports_auto_mode: true, supports_advisor: true, reports_cost_usd: true, supports_skills: true, supports_effort: true, model_switchable: true, supports_lantern_tools: true } };
+const CODEX_INFO = { id: "codex", capabilities: { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: false, supports_lantern_tools: false } };
+const CODEX_MODELS = ["gpt-5-codex", "gpt-5", "o3"];
+const providerInfo = (id: unknown) => (id === "codex" ? CODEX_INFO : CLAUDE_INFO);
+/** Which provider each chat runs on (absent: Claude). */
+const slotProvider: Record<string, string> = {};
+const modelOf = (slot: string) => (slotProvider[slot] === "codex" ? "gpt-5-codex" : "claude-opus-5-5");
+/** What a turn reports of its use: Claude Code a price too (in the demo of two providers), Codex only tokens. */
+const usedBy = (slot: string, tokens: number) =>
+  slotProvider[slot] === "codex"
+    ? { cost_usd: null, tokens, session_cost_usd: null, session_tokens: tokens }
+    : SECOND_PROVIDER
+      ? { cost_usd: 0.04, tokens, session_cost_usd: 0.04, session_tokens: tokens }
+      : { cost_usd: null, tokens: null, session_cost_usd: null, session_tokens: 0 };
+/** The model list Codex reports, as `models` events do. */
+const CODEX_MODEL_OPTIONS = [{ value: "default", resolved_model: "gpt-5-codex", display_name: "Default", description: "Codex's setting", effort_levels: ["low", "medium", "high"] }, ...CODEX_MODELS.map((value) => ({ value, resolved_model: value, display_name: value, description: "", effort_levels: ["low", "medium", "high"] }))];
 const FILE = `${FOLDER}/src/client/retry.ts`;
 // With &hot the Lead's context is well used (a 200k window at 64%) and so is a started agent's: for the Context list and Compact.
 const HOT = typeof location !== "undefined" && new URLSearchParams(location.search).has("hot");
@@ -568,8 +591,11 @@ async function playOrchestraTurn(slot: string) {
     const id = `spawn-${w.id}`;
     await send({ kind: "tool_started", parent: null, tool_use_id: id, name: "mcp__lantern__spawn_agent", summary: w.name });
     await sleep(350);
+    // With a second provider the read-only audit runs on it, so the team is mixed.
+    slotProvider[w.id] = SECOND_PROVIDER && w.id === "w3" ? "codex" : "claude";
     await send({
       kind: "agent_spawned",
+      provider: providerInfo(slotProvider[w.id]),
       worker: w.id,
       name: w.name,
       brief: w.brief,
@@ -627,7 +653,7 @@ async function playWorker(main: string, w: (typeof MOCK_WORKERS)[number]) {
   const send = sendTo(w.id);
   await sleep(500 + Number(w.id.slice(1)) * 400);
   // Signup validation drifts to Opus, which its card shows in amber.
-  await send({ kind: "session_started", session_id: `mock-${w.id}`, model: w.id === "w2" ? "claude-opus-5-5" : "claude-sonnet-5-5", cwd: FOLDER, permission_mode: "auto", claude_version: "2.1.284" });
+  await send({ kind: "session_started", session_id: `mock-${w.id}`, model: slotProvider[w.id] === "codex" ? "gpt-5-codex" : w.id === "w2" ? "claude-opus-5-5" : "claude-sonnet-5-5", cwd: FOLDER, permission_mode: "auto", claude_version: "2.1.284" });
   await send({ kind: "thinking", parent: null });
   await sleep(700);
   await streamText(send, `${w.id}:0`, `Starting on this. First I'll read what's already there.`);
@@ -653,6 +679,10 @@ async function playWorker(main: string, w: (typeof MOCK_WORKERS)[number]) {
     await new Promise<boolean>((resolve) => (pendingPermission[w.id] = resolve));
   }
   await streamText(send, `${w.id}:1`, w.final);
+  if (slotProvider[w.id] === "codex") {
+    await send({ kind: "turn_done", is_error: false, result: w.final, cost_usd: null, tokens: 9_400, session_cost_usd: null, session_tokens: 9_400, duration_ms: 9000, auth_hint: false, denied: 0, context_window: 200_000 });
+    return;
+  }
   // How much of its 200k window each has used by now (one is getting full).
   await send({ kind: "context_used", tokens: ({ w1: 38_000, w2: 164_000, w3: 96_000 } as Record<string, number>)[w.id] ?? 50_000 });
   const own: Record<string, [string, number, number]> = { w1: ["claude-sonnet-5-5", 0.18, 240_000], w2: ["claude-opus-5-5", 1.45, 310_000], w3: ["claude-haiku-5-5", 0.05, 90_000] };
@@ -780,7 +810,7 @@ async function playAside(aside: string, text: string) {
 
 async function playTurn(slot: string) {
   const send = sendTo(slot);
-  await send({ kind: "session_started", session_id: `mock-${slot}`, model: "claude-opus-5-5", cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
+  await send({ kind: "session_started", session_id: `mock-${slot}`, model: modelOf(slot), cwd: FOLDER, permission_mode: "acceptEdits", claude_version: "2.1.284" });
   await send({ kind: "thinking", parent: null });
   await sleep(600);
   await streamText(send, "m1:0", "I'll add retries with exponential backoff to `fetchJson`, limited to status codes that are safe to retry.");
@@ -873,6 +903,10 @@ async function playTurn(slot: string) {
   const watch = { id: "bwatch", task_type: "local_bash", description: "npx vitest --watch src/client" };
   mockTasks[slot] = [dev, watch];
   await send({ kind: "background_tasks", tasks: [dev, watch] });
+  if (slotProvider[slot] === "codex") {
+    await send({ kind: "turn_done", is_error: false, result: "ok", ...usedBy(slot, 18_300), duration_ms: 8200, auth_hint: false, denied: allowed ? 0 : 1, context_window: 200_000 });
+    return;
+  }
   // Each chat has used a different amount.
   const more = 1 + (Number(slot.replace(/\D/g, "")) % 4) * 0.7;
   await reportUsage(send, [["claude-opus-5-5", 1.62 * more, 380_000 * more], ["claude-sonnet-5-5", 0.31, 90_000]]);
@@ -1400,7 +1434,9 @@ async function stressDrive() {
   (window as unknown as { __stress: unknown }).__stress = { chats: stressStarted.length, agents: agents.length };
 }
 
-export function installMockBackend() {
+/** `providers`: installs the second, fake provider whatever the address says (the address's `&providers` otherwise). */
+export function installMockBackend(options: { providers?: boolean } = {}) {
+  SECOND_PROVIDER = options.providers ?? new URLSearchParams(location.search).has("providers");
   // In the browser console: `mockEmit("check-for-updates")` fires a backend event, as the app menu's item does.
   (globalThis as unknown as { mockEmit: (event: string, payload?: unknown) => Promise<void> }).mockEmit = (event, payload) => emit(event, payload);
   // In the browser console: `claudeEdits("/path", "text")` simulates a change to a file behind the editor's back.
@@ -1431,6 +1467,11 @@ export function installMockBackend() {
           return new URLSearchParams(location.search).get("claude") === "missing" ? Promise.reject("Could not find the `claude` CLI. Install Claude Code, or enter its path.") : "/Users/you/.local/bin/claude";
         case "claude_login":
           return new URLSearchParams(location.search).get("login") === "out" ? { logged_in: false, account: null } : { logged_in: true, account: "sam@acme.dev" };
+        case "list_providers":
+          return [
+            { ...CLAUDE_INFO, models: ["opus", "sonnet", "haiku"], binary: null },
+            ...(SECOND_PROVIDER ? [{ ...CODEX_INFO, models: CODEX_MODELS, binary: "/Users/you/.local/bin/codex" }] : []),
+          ];
         case "user_name":
           return "Sam Rivera";
         case "work_folder":
@@ -1473,13 +1514,17 @@ export function installMockBackend() {
             stressStarted.push({ slot: String(a.slot), folder: String(a.folder), team });
           } else if (a.folder !== FOLDER && a.folder !== "/Users/you/projects/web-dashboard") return Promise.reject(`${String(a.folder)} no longer exists.`);
           slotMode[String(a.slot)] = String((a.settings as { mode?: string } | undefined)?.mode ?? "ask");
+          slotProvider[String(a.slot)] = (a.settings as { provider?: string } | undefined)?.provider ?? "claude";
           if ((a.settings as { orchestrator?: boolean } | undefined)?.orchestrator) mockMain = String(a.slot);
           setTimeout(() => {
-            sendTo(String(a.slot))({ kind: "commands", commands: COMMANDS });
-            sendTo(String(a.slot))({ kind: "models", models: MODELS });
-            sendTo(String(a.slot))({ kind: "mcp_tools", tools: MCP_TOOLS });
+            // Codex has no skills or slash commands, and models of its own.
+            const codex = slotProvider[String(a.slot)] === "codex";
+            sendTo(String(a.slot))({ kind: "commands", commands: codex ? [] : COMMANDS });
+            sendTo(String(a.slot))({ kind: "models", models: codex ? CODEX_MODEL_OPTIONS : MODELS });
+            sendTo(String(a.slot))({ kind: "mcp_tools", tools: codex ? [] : MCP_TOOLS });
           }, 50);
-          return null;
+          // Like the backend, it says which provider the chat is on and what that can do (null for Claude Code, as before).
+          return slotProvider[String(a.slot)] === "claude" ? null : providerInfo(slotProvider[String(a.slot)]);
         case "restart_session": {
           const slot = String(a.slot);
           slotMode[slot] = String(a.mode);
@@ -1497,6 +1542,7 @@ export function installMockBackend() {
           return null;
         case "close_session":
           delete slotMode[String(a.slot)];
+          delete slotProvider[String(a.slot)];
           return null;
         case "interrupt":
           pendingInterrupt[String(a.slot)]?.();
@@ -1570,7 +1616,9 @@ export function installMockBackend() {
           const id = `w${++mockSpawned}`;
           const worktree = a.isolation === "worktree";
           const name = String(a.name ?? "").trim() || String(a.task).split(/\s+/).slice(0, 5).join(" ");
-          void sendTo(String(a.main))({ kind: "agent_spawned", worker: id, name, brief: String(a.task), folder: worktree ? `/Users/you/Library/Application Support/lantern/worktrees/web-app/${id}` : FOLDER, branch: worktree ? `lantern/${id}` : null, base: worktree ? "main" : null, isolation: worktree ? "worktree" : "shared", mode: slotMode[String(a.main)] === "auto" ? "auto" : "ask", ...(a.role ? { role: a.role as { id: string; label: string; read_only: boolean } } : {}) });
+          // The Lead's own provider unless one was named, as the backend does.
+          slotProvider[id] = typeof a.provider === "string" ? a.provider : (slotProvider[String(a.main)] ?? "claude");
+          void sendTo(String(a.main))({ kind: "agent_spawned", provider: providerInfo(slotProvider[id]), worker: id, name, brief: String(a.task), folder: worktree ? `/Users/you/Library/Application Support/lantern/worktrees/web-app/${id}` : FOLDER, branch: worktree ? `lantern/${id}` : null, base: worktree ? "main" : null, isolation: worktree ? "worktree" : "shared", mode: slotMode[String(a.main)] === "auto" ? "auto" : "ask", ...(a.role ? { role: a.role as { id: string; label: string; read_only: boolean } } : {}) });
           // It starts thinking, which is also its first word: a card that then says nothing for minutes shows as quiet.
           const setupHow = new URLSearchParams(location.search).get("setup");
           if (worktree && setupHow) {
@@ -1826,8 +1874,9 @@ export function installMockBackend() {
         case "session_events":
           return REPLAY;
         case "open_session":
+          slotProvider[String(a.slot)] = (a.settings as { provider?: string } | undefined)?.provider ?? "claude";
           // ?earlier opens it as a long session would: its last turns, with one earlier turn still on disk.
-          return { events: REPLAY, earlier: new URLSearchParams(location.search).has("earlier") ? 1 : 0, moved_from: null, read_only: null };
+          return { events: REPLAY, earlier: new URLSearchParams(location.search).has("earlier") ? 1 : 0, moved_from: null, read_only: null, provider: providerInfo(slotProvider[String(a.slot)]) };
         case "earlier_events":
           return {
             events: [

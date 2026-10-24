@@ -44,7 +44,12 @@ const VERSION_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 /// The Claude Code version the CLI at `claude_path` reports, e.g. "2.1.284 (Claude Code)". `path_env` is the PATH a
 /// login shell gives, which the CLI's own launcher may need (it runs node). Gives up after VERSION_WAIT.
 pub fn claude_version(claude_path: &str, path_env: Option<&str>) -> Option<String> {
-    let mut command = Command::new(claude_path);
+    cli_version(claude_path, path_env)
+}
+
+/// The first line `<cli> --version` prints, for any agent CLI (Claude Code's and Codex's both answer so).
+pub fn cli_version(cli_path: &str, path_env: Option<&str>) -> Option<String> {
+    let mut command = Command::new(cli_path);
     command.arg("--version").stdout(Stdio::piped()).stderr(Stdio::null());
     if let Some(path) = path_env {
         command.env("PATH", path);

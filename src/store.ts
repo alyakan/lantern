@@ -1,5 +1,6 @@
 import type { RevertOutcome } from "./api";
-import type { Hunk, ModelCost, ModelOption, Mode, Rule, RuleScope, SlashCommand, UiEvent, TestRun } from "./types";
+import type { Hunk, ModelCost, ModelOption, Mode, ProviderInfo, Rule, RuleScope, SlashCommand, UiEvent, TestRun } from "./types";
+import { agentName, providerIdOf, reportsUsd } from "./lib/provider";
 import { countChanges } from "./lib/diff";
 import { readFlavourNote, readSettingsNote, type Flavour } from "./lib/flavour";
 import { readPageNote } from "./lib/pageNote";
@@ -116,7 +117,7 @@ export type ChatItem =
   | ToolItem
   | ShellItem
   /** `autoRule`: a rule allowed it with no card (decision is then "allowed"); `scope` is where that rule applies. */
-  | { type: "permission"; id: string; toolName: string; input: unknown; decision: "allowed" | "denied" | null; note?: string; at?: number; autoRule?: { scope: RuleScope; rule: Rule } }
+  | { type: "permission"; id: string; toolName: string; input: unknown; decision: "allowed" | "denied" | null; note?: string; at?: number; autoRule?: { scope: RuleScope; rule: Rule }; provider?: string }
   /** What the turn cost and used (see lib/cost.ts): each null when not known. */
   | { type: "turn"; id: string; isError: boolean; stopped: boolean; result: string | null; durationMs: number | null; denied: number; cost?: number | null; tokens?: number | null };
 
@@ -279,6 +280,8 @@ export interface State {
   asleepSaved: SavedChat | null;
   /** How many turns before the first message shown are on disk and not loaded: a long session opens with its last turns. */
   earlierTurns: number;
+  /** The agent CLI this chat runs on and what it can do; null while unknown, which counts as Claude Code (see lib/provider.ts). */
+  provider: ProviderInfo | null;
 }
 
 export interface BackgroundRun {
@@ -301,6 +304,14 @@ export interface BackgroundTask {
 export const totalCost = (s: Pick<State, "costBase" | "costSeen">) => s.costBase + s.costSeen;
 /** Every token this chat's claude processes have read and written, its advisor's calls included. */
 export const totalTokens = (s: Pick<State, "tokenBase" | "sessionTokens">) => s.tokenBase + s.sessionTokens;
+
+/** What to do when the chat's agent isn't signed in: the command is the agent's own, run in a terminal (Lantern never signs in for it). */
+const signInText = (p: ProviderInfo | null): string => {
+  const id = providerIdOf(p);
+  if (id === "claude") return "Claude isn't logged in. Run `claude /login` in a terminal, then send your message again.";
+  if (id === "codex") return "Codex isn't signed in. Run `codex login` in a terminal, then send your message again.";
+  return `${agentName(p)} isn't logged in. Log in with its own CLI in a terminal, then send your message again.`;
+};
 
 export const initialState: State = {
   status: "locating",
@@ -365,6 +376,7 @@ export const initialState: State = {
   asleepSaved: null,
   agentAsleep: false,
   earlierTurns: 0,
+  provider: null,
 };
 
 const pendingIn = new WeakMap<ChatItem[], boolean>();
@@ -396,6 +408,8 @@ export type Action =
   | { type: "sleep"; folder: string; sessionId: string; title: string; saved?: SavedChat }
   /** The chat started with the project's notes: what it was told (after the chat opened, so the open doesn't clear it). */
   | { type: "notes_applied"; text: string | null }
+  /** The chat runs on this provider (chosen, or told by the backend): what it can't do is hidden from now on. */
+  | { type: "provider_set"; provider: ProviderInfo }
   /** `auto`: sent by Lantern from agents' notes, not typed by the user. */
   | { type: "user_sent"; text: string; switchedTo?: Flavour; explained?: boolean; draft?: string; auto?: boolean }
   | { type: "wakes_taken" }
@@ -525,7 +539,7 @@ function freshSession(state: State, folder: string | null): State {
 function wake(state: State): State {
   if (state.status !== "idle") return state;
   const seq = state.seq + 1;
-  const text = state.lastEndedTask ? `After ${state.lastEndedTask} ended` : "Claude followed up on its own";
+  const text = state.lastEndedTask ? `After ${state.lastEndedTask} ended` : `${agentName(state.provider)} followed up on its own`;
   return { ...state, status: "running", seq, lastEndedTask: null, items: [...state.items, { type: "user", id: `u${seq}`, text, at: Date.now(), auto: true }] };
 }
 
@@ -666,13 +680,15 @@ function applyEvent(state: State, ev: UiEvent): State {
       return { ...state, items: [], sessionId: null, contextUsed: null, thinking: false, cleared: true, reviewTarget: null, earlierTurns: 0 };
     case "turn_done": {
       const banner: Banner | null = ev.auth_hint
-        ? { kind: "auth", text: "Claude isn't logged in. Run `claude /login` in a terminal, then send your message again.", action: null }
+        ? { kind: "auth", text: signInText(state.provider), action: null }
         : state.banner?.kind === "info"
           ? null
           : state.banner;
       const seq = state.seq + 1;
       // A total lower than the last one is a claude that started over (a restart): what the earlier one cost is kept.
-      const reported = ev.cost_usd;
+      // A provider that doesn't report dollars has none to count: only its tokens are known.
+      const usd = reportsUsd(state.provider);
+      const reported = usd ? ev.cost_usd : null;
       const restarted = reported !== null && reported < state.costSeen;
       const tokens = ev.session_tokens ?? state.sessionTokens;
       return {
@@ -686,14 +702,18 @@ function applyEvent(state: State, ev: UiEvent): State {
         contextWindow: ev.context_window ?? state.contextWindow,
         // The turn that ran /clear ends in an empty conversation; a marker alone would leave a blank chat, not the start screen.
         cleared: false,
-        items: state.cleared ? state.items : [...state.items, { type: "turn", id: `t${seq}`, isError: ev.is_error && !state.stopRequested, stopped: state.stopRequested, result: ev.is_error ? ev.result : null, durationMs: ev.duration_ms, denied: ev.denied, cost: ev.cost_usd, tokens: ev.tokens ?? null }],
-        ...(ev.session_cost_usd != null ? { sessionCost: ev.session_cost_usd } : {}),
+        items: state.cleared ? state.items : [...state.items, { type: "turn", id: `t${seq}`, isError: ev.is_error && !state.stopRequested, stopped: state.stopRequested, result: ev.is_error ? ev.result : null, durationMs: ev.duration_ms, denied: ev.denied, cost: reported, tokens: ev.tokens ?? null }],
+        ...(usd && ev.session_cost_usd != null ? { sessionCost: ev.session_cost_usd } : {}),
         sessionTokens: tokens,
         tokenBase: tokens < state.sessionTokens ? state.tokenBase + state.sessionTokens : state.tokenBase,
       };
     }
-    case "permission_requested":
-      return { ...state, items: [...state.items, { type: "permission", id: ev.request_id, toolName: ev.tool_name, input: ev.input, decision: null, at: Date.now() }] };
+    case "permission_requested": {
+      // Which agent asked is the chat's own provider, never a word in the request: only a chat on another provider than Claude
+      // Code gets its kind of card (see PermissionCard).
+      const provider = providerIdOf(state.provider);
+      return { ...state, items: [...state.items, { type: "permission", id: ev.request_id, toolName: ev.tool_name, input: ev.input, decision: null, at: Date.now(), ...(provider === "claude" ? {} : { provider }) }] };
+    }
     case "permission_auto_allowed":
       return {
         ...state,
@@ -713,7 +733,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       };
     case "session_ended": {
       const detail = lastLine(ev.stderr_tail);
-      const text = `Claude stopped unexpectedly${ev.code === null ? "" : ` (exit code ${ev.code})`}.${detail ? ` ${detail}` : ""}`;
+      const text = `${agentName(state.provider)} stopped unexpectedly${ev.code === null ? "" : ` (exit code ${ev.code})`}.${detail ? ` ${detail}` : ""}`;
       return {
         ...state,
         status: "ended",
@@ -852,6 +872,14 @@ export function reducer(state: State, action: Action): State {
       return state.notesApplied === action.text ? state : { ...state, notesApplied: action.text };
     case "session_ready":
       return state.status === "starting" ? { ...state, status: "idle" } : state;
+    case "provider_set": {
+      const next = action.provider;
+      // Another provider's models, commands and tools are not this one's: they come again from its own session.
+      const moved = providerIdOf(state.provider) !== next.id ? { models: [], commands: [], mcpTools: [], modelUsage: [], model: null } : {};
+      // Dollars it can't report are taken away, so nothing shown for this chat is a price it never had (a provider told late).
+      const unpriced = reportsUsd(next) ? {} : { costBase: 0, costSeen: 0, sessionCost: null, items: state.items.map((it): ChatItem => (it.type === "turn" && it.cost ? { ...it, cost: null } : it)) };
+      return { ...state, ...moved, ...unpriced, provider: next };
+    }
     case "user_sent": {
       const seq = state.seq + 1;
       const item: ChatItem = { type: "user", id: `u${seq}`, text: action.text, at: Date.now(), ...(action.auto ? { auto: true } : {}), ...(action.switchedTo ? { switchedTo: action.switchedTo, ...(action.explained ? { explained: true } : {}) } : {}), ...(action.draft ? { draft: action.draft } : {}) };

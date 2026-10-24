@@ -152,11 +152,15 @@ interface PermissionsProps {
   onChange: (permissions: Permissions) => void;
   disabled?: boolean;
   compact?: boolean;
+  /** The chat's provider has an auto mode; one that hasn't shows Auto off, with why. */
+  auto?: boolean;
+  /** What the chat's agent is called, in that reason. */
+  agent?: string;
 }
 
-/** Permissions: how much Claude may do without asking (Ask or Auto), the same in every workflow. */
-export function PermissionsMenu({ permissions, onChange, disabled, compact }: PermissionsProps) {
-  const rows = PERMISSION_ROWS.map((r) => ({ ...r, label: PERMISSIONS_LABEL[r.value] }));
+/** Permissions: how much the agent may do without asking (Ask or Auto), the same in every workflow. */
+export function PermissionsMenu({ permissions, onChange, disabled, compact, auto = true, agent = "Claude" }: PermissionsProps) {
+  const rows = PERMISSION_ROWS.map((r) => ({ ...r, label: PERMISSIONS_LABEL[r.value], off: !auto && r.value === "auto" ? `${agent} has no Auto mode: it asks before actions.` : undefined }));
   return <SettingMenu name="Permissions" value={permissions} text={PERMISSIONS_LABEL[permissions]} rows={rows} onChange={onChange} disabled={disabled} compact={compact} guideKey={permissions} />;
 }
 
@@ -171,14 +175,19 @@ interface WorkflowProps {
   agent?: boolean;
   /** A Lead that still has agents: it stays in Team until they are closed. */
   holdsAgents?: boolean;
+  /** The chat's provider can lead a team (it has Lantern's tools); one that can't shows Team off, with why. */
+  team?: boolean;
+  /** What the chat's agent is called, in that reason. */
+  agentName?: string;
 }
 
 /** Workflow: how the work is shaped (Chat, Step by step or Team). */
-export function WorkflowMenu({ workflow, flavour = null, onChange, disabled, compact, agent, holdsAgents }: WorkflowProps) {
+export function WorkflowMenu({ workflow, flavour = null, onChange, disabled, compact, agent, holdsAgents, team = true, agentName = "Claude" }: WorkflowProps) {
   const held = holdsAgents ? "This team still has agents. Close them first." : undefined;
-  const rows: Row<Workflow>[] = WORKFLOW_ROWS.filter((r) => !(agent && r.value === "team")).map((r) => ({ ...r, label: WORKFLOW_LABEL[r.value], off: r.value !== "team" ? held : undefined }));
+  const noTeam = team ? undefined : `${agentName} can't lead a team yet: a team's Lead runs on Claude Code.`;
+  const rows: Row<Workflow>[] = WORKFLOW_ROWS.filter((r) => !(agent && r.value === "team")).map((r) => ({ ...r, label: WORKFLOW_LABEL[r.value], off: r.value !== "team" ? held : noTeam }));
   // A new team from a template is offered where a team could be started: not on an agent, a title bar, or a team that has agents.
   const startTemplate = useContext(TemplateTeamContext);
-  const extra = startTemplate && !agent && !compact && !holdsAgents ? { label: "Team from a template…", hint: "Start a team with its agents already chosen: a builder and a reviewer, say", icon: <OrchestraIcon />, run: startTemplate } : undefined;
+  const extra = startTemplate && !agent && !compact && !holdsAgents && team ? { label: "Team from a template…", hint: "Start a team with its agents already chosen: a builder and a reviewer, say", icon: <OrchestraIcon />, run: startTemplate } : undefined;
   return <SettingMenu name="Workflow" value={workflow} text={workflowName(workflow, flavour)} rows={rows} onChange={onChange} disabled={disabled} compact={compact} guideKey={workflow === "steps" && flavour ? flavour : workflow} extra={extra} />;
 }

@@ -50,13 +50,15 @@ interface Props {
   /** Opens Settings → Harness, to edit presets or make one. */
   onEdit?: () => void;
   disabled?: boolean;
+  /** What the chat's agent is called: whose setting "Default" is. Claude's unless said. */
+  agent?: string;
 }
 
 // The one chip under the box for who does the work: the harness preset and the main model ("Balanced · Sonnet 5.5").
 // Its menu lists the presets; Customize… opens the model and effort choices. A change applies from the next message
 // (effort and presets restart the chat's claude on the same session). On a preset, picking a model or effort makes the
 // chat Custom, which the chip and the note in that view say.
-export function ModelsPicker({ running, chosen, onChoose, defaultModel = null, ids = {}, options = [], effort, presets, preset, onPreset, onEdit, disabled }: Props) {
+export function ModelsPicker({ running, chosen, onChoose, defaultModel = null, ids = {}, options = [], effort, presets, preset, onPreset, onEdit, disabled, agent = "Claude" }: Props) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"presets" | "customize">("presets");
   const [showOlder, setShowOlder] = useState(false);
@@ -93,7 +95,7 @@ export function ModelsPicker({ running, chosen, onChoose, defaultModel = null, i
   const rows: Row[] = options.length
     ? options.map((o) =>
         o.value === "default"
-          ? { value: null, name: choiceName(null, resolvedDefault), hint: "Claude Code's setting" }
+          ? { value: null, name: choiceName(null, resolvedDefault), hint: `${agent === "Claude" ? "Claude Code" : agent}'s setting` }
           : { value: o.value, name: o.display_name || modelLabel(o.value), hint: o.description },
       )
     : MODEL_CHOICES.map((c) => ({ value: c.value, name: choiceName(c.value, resolvedDefault, ids), hint: c.hint }));

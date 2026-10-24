@@ -19,6 +19,8 @@ export const APPROVAL_TOOL = "Approval";
 type Decide = (id: string, allow: boolean, note?: string, answered?: Record<string, unknown>, remember?: NewRule) => void;
 
 export function PermissionCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }) {
+  // Its own kind of card for a chat on another agent than Claude Code, chosen by which agent the chat runs, not by the request.
+  if (item.provider && item.provider !== "claude") return <ProviderCard item={item} onDecide={onDecide} />;
   if (item.toolName === PLAN_TOOL) return <PlanCard item={item} onDecide={onDecide} />;
   if (item.toolName === REPRODUCE_TOOL) return <ReproduceCard item={item} onDecide={onDecide} />;
   if (item.toolName === APPROVAL_TOOL) return <ApprovalCard item={item} onDecide={onDecide} />;
@@ -79,6 +81,86 @@ function ToolCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** A card whose main text is longer than this is shown cut, says how much is hidden, and can't be allowed until it is all shown. */
+const CLIP_LINES = 12;
+const CLIP_CHARS = 1500;
+
+const field = (o: Record<string, unknown>, key: string) => (typeof o[key] === "string" ? (o[key] as string) : "");
+
+/** `s` up to its first line, with how many more there are. */
+const firstLine = (s: string) => {
+  const lines = s.split("\n");
+  return lines.length > 1 ? `${lines[0]} (+${lines.length - 1} more lines)` : lines[0] ?? "";
+};
+
+// A request from another agent (Codex), as its backend wrote it out: every character that could hide or fake something is
+// already an escape, and what it will do is in labelled parts, never one string that could pose as another. Allow stays off
+// until all of it has been shown; there is no Always allow…, since a rule here would be one for Claude's tools, not this agent's.
+function ProviderCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }) {
+  const [all, setAll] = useState(false);
+  const o = (item.input && typeof item.input === "object" ? item.input : {}) as Record<string, unknown>;
+  const main = field(o, "command") || field(o, "file_path") || field(o, "permissions");
+  const action = field(o, "action");
+  if (item.decision !== null) {
+    const allowed = item.decision === "allowed";
+    return (
+      <div className={`permission-done ${item.decision}`}>
+        <span className="decision">{allowed ? "✓ Allowed" : "✕ Denied"}</span> {item.toolName}
+        <span className="permission-done-detail"> · {firstLine(main || action)}</span>
+      </div>
+    );
+  }
+  const lines = main.split("\n");
+  const clipped = lines.length > CLIP_LINES || main.length > CLIP_CHARS;
+  const shown = clipped && !all ? lines.slice(0, CLIP_LINES).join("\n").slice(0, CLIP_CHARS) : main;
+  const unreadable = !main && !action;
+  const facts: [string, string][] = [["Runs in", field(o, "cwd")], ["Network", field(o, "network")]];
+  const warnings = Array.isArray(o.warnings) ? o.warnings.filter((w): w is string => typeof w === "string") : [];
+  const reason = field(o, "description");
+  return (
+    <div className="permission">
+      <div className="permission-title">
+        Allow <strong>{item.toolName}</strong>?
+      </div>
+      {action && <div className="permission-action">{action}</div>}
+      {main && <pre className="permission-detail open">{shown}</pre>}
+      {clipped && !all && (
+        <div className="permission-clipped">
+          Shown cut: {lines.length} lines, {main.length} characters in all.{" "}
+          <button className="link-button" onClick={() => setAll(true)}>
+            Show all
+          </button>
+        </div>
+      )}
+      {unreadable && <div className="permission-warning">Codex didn't say what this would do. Deny it.</div>}
+      <dl className="permission-facts">
+        {facts.filter(([, v]) => v).map(([k, v]) => (
+          <div key={k}>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
+          </div>
+        ))}
+      </dl>
+      {reason && (
+        <div className="permission-reason">
+          <span>Codex says, and Lantern doesn't check:</span> {reason}
+        </div>
+      )}
+      {warnings.map((w) => (
+        <div key={w} className="permission-warning">
+          ⚠ {w}
+        </div>
+      ))}
+      <div className="permission-actions">
+        <button className="primary" disabled={unreadable || (clipped && !all)} title={clipped && !all ? "Show all of it first" : undefined} onClick={() => onDecide(item.id, true)}>
+          Allow
+        </button>
+        <button onClick={() => onDecide(item.id, false)}>Deny</button>
+      </div>
     </div>
   );
 }

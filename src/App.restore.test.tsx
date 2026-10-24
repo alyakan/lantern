@@ -24,9 +24,9 @@ const lastTime: SavedChat[] = [
 type Call = [string, Record<string, unknown> | undefined];
 
 /** Opens the app with the chats from last time on offer, recording every command it sends to the backend. */
-async function launch(offered = true, markerFile = false): Promise<Call[]> {
+async function launch(offered = true, markerFile = false, providers = false): Promise<Call[]> {
   const { installMockBackend } = await import("./dev/mockBackend");
-  installMockBackend();
+  installMockBackend({ providers });
   const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args?: Record<string, unknown>, options?: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__;
   const calls: Call[] = [];
   const answer = internals.invoke;
@@ -181,6 +181,21 @@ describe("restoring chats at launch", () => {
     });
     // Used up: a later launch that isn't after an update offers the chats as usual.
     expect(localStorage.getItem("session.restoreAfterUpdate")).toBeNull();
+  });
+
+  it("brings a Codex chat back on Codex after a restart to update, and the Claude chat beside it on Claude", async () => {
+    localStorage.setItem("session.restoreAfterUpdate", String(Date.now()));
+    localStorage.setItem("settings.providerBySession", JSON.stringify({ "3f1c2a": "codex" }));
+    const calls = await launch(false, false, true);
+    await screen.findByPlaceholderText("Ask Codex…");
+    const opened = () => calls.filter(([c]) => c === "open_session").map(([, a]) => a as { sessionId: string; claudePath: string; settings: { provider?: string; mode: string } });
+    expect(opened().map((a) => [a.sessionId, a.claudePath, a.settings.provider, a.settings.mode])).toEqual([["3f1c2a", "/Users/you/.local/bin/codex", "codex", "ask"]]);
+    // Nothing started the project's chat over them, and the other one wakes as Claude's.
+    expect(calls.filter(([c]) => c === "start_session")).toEqual([]);
+    fireEvent.click(await screen.findByTitle("Retry transient fetch errors"));
+    await waitFor(() => expect(opened()).toHaveLength(2));
+    expect(opened()[1]).toMatchObject({ sessionId: "9b7e01", claudePath: "/Users/you/.local/bin/claude" });
+    expect(opened()[1].settings.provider).toBeUndefined();
   });
 
   it("brings every chat back by itself after a restart that left a marker file instead of marking storage", async () => {

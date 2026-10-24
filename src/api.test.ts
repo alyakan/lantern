@@ -22,6 +22,10 @@ const folderRule: RuleEntry = { scope: "folder", folder: "/repo", tool: "Bash", 
 const wrappers: [string, () => unknown, unknown[]][] = [
   ["locateClaude", () => api.locateClaude(null), ["locate_claude", { pathOverride: null }]],
   ["claudeLogin", () => api.claudeLogin("/bin/claude"), ["claude_login", { claudePath: "/bin/claude" }]],
+  ["listProviders", () => api.listProviders(), ["list_providers"]],
+  // A worker on the main agent's own provider sends exactly what it always did; another provider is named.
+  ["spawnWorker", () => api.spawnWorker("s1", { task: "Read it", name: null, isolation: "shared", model: null }), ["orchestra_spawn", { main: "s1", task: "Read it", name: null, isolation: "shared", model: null, role: null }]],
+  ["spawnWorker (another provider)", () => api.spawnWorker("s1", { task: "Read it", name: null, isolation: "shared", model: "o3", provider: "codex" }), ["orchestra_spawn", { main: "s1", task: "Read it", name: null, isolation: "shared", model: "o3", role: null, provider: "codex" }]],
   ["startSession", () => api.startSession("s1", "/bin/claude", "/repo", settings), ["start_session", { slot: "s1", claudePath: "/bin/claude", folder: "/repo", settings }]],
   [
     "applyHarness",

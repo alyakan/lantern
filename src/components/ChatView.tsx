@@ -5,6 +5,7 @@ import { recallScroll, rememberScroll } from "../lib/scrollMemory";
 import { anchorOf, scrollToAnchor, type ChatAnchor } from "../lib/scrollAnchor";
 import type { State } from "../store";
 import { workingVerb } from "../lib/verbs";
+import { agentName } from "../lib/provider";
 import { ChatStream, type ResendHandlers, type StreamHandlers } from "./ChatStream";
 import { RestoreDialog } from "./RestoreDialog";
 import { api, type RestoreResult } from "../api";
@@ -201,10 +202,10 @@ export function ChatView({ state, resend, restore, loadEarlier, ...handlers }: {
             <span className="earlier-count">{state.earlierTurns === 1 ? "1 earlier turn" : `${state.earlierTurns} earlier turns`}</span>
           </button>
         )}
-        {state.items.length === 0 && !state.thinking && <div className="empty">What should Claude work on?</div>}
+        {state.items.length === 0 && !state.thinking && <div className="empty">{`What should ${agentName(state.provider)} work on?`}</div>}
         <ChatStream items={state.items} folder={state.folder} sections live={state.status === "running"} resend={resend} restore={restoreRows} {...handlers} />
         {thinkingLine && (
-          <div className="activity live thinking-line" role="status" aria-label="Claude is thinking">
+          <div className="activity live thinking-line" role="status" aria-label={`${agentName(state.provider)} is thinking`}>
             <span className="activity-line">
               <span className="spinner" aria-hidden />
               <span className="activity-text">{workingVerb(prompt?.id ?? "start")}</span>

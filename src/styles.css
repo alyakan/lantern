@@ -1068,7 +1068,19 @@ button.edit-toggle:hover:not(:disabled) { color: var(--text); }
 /* Permission + turn */
 .permission { border: 1px solid var(--line-strong); border-radius: var(--radius-md); padding: 10px 12px; background: var(--bg-subtle); display: flex; flex-direction: column; gap: 8px; font-size: calc(13px * var(--font-scale)); }
 .permission-detail { margin: 0; padding: 6px 8px; background: var(--code-bg); border-radius: var(--radius-chip); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
+.permission-detail.open { max-height: 50vh; }
 .permission-actions { display: flex; gap: 6px; }
+.permission-action { font-weight: 600; }
+.permission-clipped { font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
+.permission-facts { display: flex; flex-direction: column; gap: 2px; margin: 0; font-size: calc(12px * var(--font-scale)); }
+.permission-facts > div { display: flex; gap: 8px; }
+.permission-facts dt { flex: none; color: var(--muted-text); min-width: 52px; }
+.permission-facts dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; white-space: pre-wrap; user-select: text; }
+.permission-reason { font-size: calc(12px * var(--font-scale)); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; max-height: 96px; overflow: auto; }
+.permission-reason > span { color: var(--muted-text); }
+.permission-warning { font-size: calc(12px * var(--font-scale)); color: var(--warn); overflow-wrap: anywhere; }
+.permission-kind { margin-left: 8px; padding: 1px 7px; border-radius: var(--radius-pill); background: var(--bg-active); color: var(--text-2); font-size: calc(11px * var(--font-scale)); font-weight: 400; }
+.permission-same { display: inline-flex; align-items: center; gap: 6px; font-size: calc(12px * var(--font-scale)); color: var(--muted); }
 .permission-actions button { height: 24px; padding: 0 12px; font-size: calc(12px * var(--font-scale)); }
 .always-menu { display: flex; flex-direction: column; gap: 8px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--bg-subtle); }
 .always-group { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
@@ -2806,6 +2818,8 @@ button.plan-meter:hover { background: var(--bg-hover); }
 .team-state.quiet { color: var(--warn); font-weight: 600; }
 .team-quiet { color: var(--warn); font-weight: 600; }
 .team-ask { width: calc(100% - 12px); margin: 4px 6px 6px; height: var(--pill-m); border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--field); color: var(--text); font-size: calc(12.5px * var(--font-scale)); font-weight: 600; }
+.team-provider { margin-left: 6px; font: 500 calc(11.5px * var(--font-scale)) var(--ui); color: var(--muted-text); }
+.team-note { margin: 6px 10px 2px; color: var(--muted-text); font-size: calc(11.5px * var(--font-scale)); line-height: 1.4; }
 .team-ask:hover { background: var(--bg-hover); }
 
 /* What opens over the canvas (the agent menu, the questions and forms): in the viewport, not in the world that zooms. */
