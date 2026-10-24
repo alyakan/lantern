@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images"];
+pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair"];
 
 /// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
 /// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
@@ -449,6 +449,20 @@ pub struct Controls {
     pub presets: Vec<RemotePreset>,
 }
 
+/// A pairing code made for a phone to show another device (the answer to Request::PairOffer). Secret until it is used or has
+/// expired: it is never logged, and the phone shows it only behind Face ID.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct PairOffer {
+    /// The link the QR code holds (lantern://pair?…), for pasting where a camera can't scan it.
+    pub link: String,
+    /// When it stops working, in milliseconds since 1970.
+    #[ts(type = "number")]
+    pub expires_at: u64,
+    /// The QR code's squares, one string per row: "1" a dark square, "0" a light one. No margin around it.
+    pub modules: Vec<String>,
+}
+
 impl From<super::hub::ChatInfo> for RemoteChat {
     fn from(c: super::hub::ChatInfo) -> Self {
         let project = c.folder.as_deref().and_then(|f| std::path::Path::new(f).file_name()).map(|n| n.to_string_lossy().into_owned());
@@ -613,6 +627,11 @@ pub enum Request {
     ShellInput { slot: String, id: String, text: String },
     /// Stops the running command `id` and what it started.
     ShellStop { slot: String, id: String },
+    /// A new one-time pairing code for another device (the QR code the Mac's own Show a pairing code makes), so a phone that is
+    /// already paired can show it to a second device when the Mac is out of reach. Any code the Mac's window is showing stops
+    /// working. Only sent to a Mac whose Welcome lists "pair" in `features`: an older Mac ends the connection at a request it
+    /// doesn't know.
+    PairOffer,
     /// The token Expo's push service delivers this phone's notifications with.
     PushToken { token: String },
 }

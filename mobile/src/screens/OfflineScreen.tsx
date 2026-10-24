@@ -162,9 +162,10 @@ function LockRow() {
 }
 
 /** The Mac, as a sheet: its name, where the connection stands, and unpairing this phone. */
-export function MacSheet({ state, onClose, onUnpair, onSupport }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the optional tips. */ onSupport?: () => void }) {
+export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the optional tips. */ onSupport?: () => void; /** Shows a pairing code for another device (Face ID first). Offered only to a Mac that lists "pair". */ onPairDevice?: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const canPair = state.kind === "connected" && state.welcome.features?.includes("pair") === true && !!onPairDevice;
   const where = state.kind === "connected" ? `Connected through ${state.host}` : state.kind === "offline" ? "Not connected" : state.kind === "connecting" ? "Connecting…" : "Not paired";
   return (
     <Sheet onClose={onClose}>
@@ -183,7 +184,8 @@ export function MacSheet({ state, onClose, onUnpair, onSupport }: { state: Conne
             Unpairing forgets this Mac on this phone. To stop it for good, also remove this phone in Lantern's Settings, under Remote control.
           </Txt>
           <LockRow />
-          {onSupport && <Button label="Support development" kind="ghost" onPress={onSupport} style={{ marginTop: 6 }} />}
+          {canPair && <Button label="Pair another device" kind="ghost" onPress={() => onPairDevice?.()} accessibilityHint="Shows a code for your iPad or another phone to scan. Asks for Face ID first." />}
+          {onSupport &&<Button label="Support development" kind="ghost" onPress={onSupport} style={{ marginTop: 6 }} />}
           <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ marginTop: onSupport ? 0 : 6 }} />
           <Button label="Close" onPress={close} />
         </View>

@@ -7,6 +7,7 @@ import { DecideScreen } from "../screens/DecideScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { NewChatSheet, type Draft } from "../screens/NewChatSheet";
 import { MacSheet, OfflineScreen } from "../screens/OfflineScreen";
+import { PairDeviceSheet } from "../screens/PairDevice";
 import { ConfirmLink, PairScreen } from "../screens/PairScreen";
 import { SupportSheet } from "../screens/SupportSheet";
 import { TabletDetail } from "../screens/TabletDetail";
@@ -81,6 +82,8 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   const tablet = layout !== "phone";
   const [chatsOpen, setChatsOpen] = useState(false);
   const [macSheet, setMacSheet] = useState(false);
+  // A pairing code for another device, from the Mac sheet.
+  const [pairingDevice, setPairingDevice] = useState(false);
   // The optional tips, from Home or from the Mac sheet.
   const [supporting, setSupporting] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -101,6 +104,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   // The system's back button (Android) goes back a screen before it leaves the app.
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (pairingDevice) return setPairingDevice(false), true;
       if (supporting) return setSupporting(false), true;
       if (newChat) return setNewChat(null), true;
       if (picking) return setPicking(false), true;
@@ -111,7 +115,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       return true;
     });
     return () => sub.remove();
-  }, [stack, macSheet, picking, newChat, supporting, chatsOpen]);
+  }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice]);
 
   const back = () => go({ type: "back" });
   // A tablet has Home beside the chat all the time, so a chat taken from it replaces the one shown instead of stacking on it.
@@ -184,8 +188,13 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
             setMacSheet(false);
             setSupporting(true);
           }}
+          onPairDevice={() => {
+            setMacSheet(false);
+            setPairingDevice(true);
+          }}
         />
       )}
+      {pairingDevice && <PairDeviceSheet onClose={() => setPairingDevice(false)} />}
       {supporting && <SupportSheet onClose={() => setSupporting(false)} />}
       {newChat && (
         <NewChatSheet
