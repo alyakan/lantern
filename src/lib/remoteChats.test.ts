@@ -148,3 +148,13 @@ describe("the workflow", () => {
     expect(checkRemoteSwitch({ workflow: "steps" }, { ...target, known: false }, ctx)).toContain("isn't open");
   });
 });
+
+describe("a chat on another provider than Claude's", () => {
+  it("is said so to the backend, and nothing is said of a chat on Claude", () => {
+    const chats: Chats = { active: "a", agents: {}, slots: { a: chat({ status: "running", sessionId: "s-a" }), b: chat({ status: "asleep", sessionId: "s-b" }) } };
+    const open = { "/work/lantern": project([{ slot: "a", title: "On Claude" }, { slot: "b", title: "On an endpoint" }]) };
+    const told = windowChats(chats, open, {}, {}, (slot) => slot === "b");
+    expect(told.find((c) => c.slot === "b")).toMatchObject({ off_claude: true });
+    expect(told.filter((c) => c.slot !== "b").every((c) => !("off_claude" in c))).toBe(true);
+  });
+});

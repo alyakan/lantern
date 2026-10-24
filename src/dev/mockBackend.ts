@@ -20,16 +20,21 @@ const FOLDER = `/Users/you/projects/${new URLSearchParams(typeof location === "u
 // mode, no advisor, no skills, no dollar cost. It is for seeing the provider pickers and everything a provider hides.
 // Without it the app has Claude Code alone, as the real one does until another CLI is installed.
 let SECOND_PROVIDER = new URLSearchParams(typeof location === "undefined" ? "" : location.search).has("providers");
-const CLAUDE_INFO = { id: "claude", capabilities: { supports_auto_mode: true, supports_advisor: true, reports_cost_usd: true, supports_skills: true, supports_effort: true, model_switchable: true, supports_lantern_tools: true } };
-const CODEX_INFO = { id: "codex", capabilities: { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: false, supports_lantern_tools: false } };
+const CLAUDE_INFO = { id: "claude", capabilities: { supports_auto_mode: true, supports_advisor: true, reports_cost_usd: true, supports_skills: true, supports_effort: true, model_switchable: true, supports_lantern_tools: true, can_lead_team: true } };
+const CODEX_INFO = { id: "codex", capabilities: { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: false, supports_lantern_tools: false, can_lead_team: false } };
+/** An endpoint the user set up: Claude Code sent elsewhere, with its skills and tools but not Anthropic's auto mode, advisor, effort or price. */
+const GATEWAY_INFO = { id: "gateway", capabilities: { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: true, supports_effort: false, model_switchable: true, supports_lantern_tools: true, can_lead_team: false } };
 const CODEX_MODELS = ["gpt-5-codex", "gpt-5", "o3"];
-const providerInfo = (id: unknown) => (id === "codex" ? CODEX_INFO : CLAUDE_INFO);
+const providerInfo = (id: unknown) => (id === "codex" ? CODEX_INFO : id === "gateway" ? GATEWAY_INFO : CLAUDE_INFO);
 /** Which provider each chat runs on (absent: Claude). */
 const slotProvider: Record<string, string> = {};
-const modelOf = (slot: string) => (slotProvider[slot] === "codex" ? "gpt-5-codex" : "claude-opus-5-5");
-/** What a turn reports of its use: Claude Code a price too (in the demo of two providers), Codex only tokens. */
+/** The endpoints saved (with `endpoints`: one to begin with, as Settings → Endpoints lists them). */
+type MockEndpoint = { id: string; name: string; url: string; key_env: string | null; models: string[] };
+let mockEndpoints: MockEndpoint[] = [];
+const modelOf = (slot: string) => (slotProvider[slot] === "codex" ? "gpt-5-codex" : slotProvider[slot] === "gateway" ? (mockEndpoints[0]?.models[0] ?? "qwen3:8b") : "claude-opus-5-5");
+/** What a turn reports of its use: Claude Code a price too (in the demo of two providers), Codex and an endpoint only tokens. */
 const usedBy = (slot: string, tokens: number) =>
-  slotProvider[slot] === "codex"
+  slotProvider[slot] === "codex" || slotProvider[slot] === "gateway"
     ? { cost_usd: null, tokens, session_cost_usd: null, session_tokens: tokens }
     : SECOND_PROVIDER
       ? { cost_usd: 0.04, tokens, session_cost_usd: 0.04, session_tokens: tokens }
@@ -903,7 +908,8 @@ async function playTurn(slot: string) {
   const watch = { id: "bwatch", task_type: "local_bash", description: "npx vitest --watch src/client" };
   mockTasks[slot] = [dev, watch];
   await send({ kind: "background_tasks", tasks: [dev, watch] });
-  if (slotProvider[slot] === "codex") {
+  // (Codex and an endpoint report tokens, no dollars: Claude Code's price for a model it doesn't know is made up.)
+  if (slotProvider[slot] === "codex" || slotProvider[slot] === "gateway") {
     await send({ kind: "turn_done", is_error: false, result: "ok", ...usedBy(slot, 18_300), duration_ms: 8200, auth_hint: false, denied: allowed ? 0 : 1, context_window: 200_000 });
     return;
   }
@@ -1435,8 +1441,9 @@ async function stressDrive() {
 }
 
 /** `providers`: installs the second, fake provider whatever the address says (the address's `&providers` otherwise). */
-export function installMockBackend(options: { providers?: boolean } = {}) {
+export function installMockBackend(options: { providers?: boolean; endpoints?: boolean } = {}) {
   SECOND_PROVIDER = options.providers ?? new URLSearchParams(location.search).has("providers");
+  mockEndpoints = (options.endpoints ?? new URLSearchParams(location.search).has("endpoints")) ? [{ id: "ollama", name: "Ollama", url: "http://localhost:11434", key_env: null, models: ["qwen3:8b", "llama3"] }] : [];
   // In the browser console: `mockEmit("check-for-updates")` fires a backend event, as the app menu's item does.
   (globalThis as unknown as { mockEmit: (event: string, payload?: unknown) => Promise<void> }).mockEmit = (event, payload) => emit(event, payload);
   // In the browser console: `claudeEdits("/path", "text")` simulates a change to a file behind the editor's back.
@@ -1471,7 +1478,20 @@ export function installMockBackend(options: { providers?: boolean } = {}) {
           return [
             { ...CLAUDE_INFO, models: ["opus", "sonnet", "haiku"], binary: null },
             ...(SECOND_PROVIDER ? [{ ...CODEX_INFO, models: CODEX_MODELS, binary: "/Users/you/.local/bin/codex" }] : []),
+            ...mockEndpoints.map((e) => ({ ...GATEWAY_INFO, models: e.models, binary: null, endpoint: { id: e.id, name: e.name } })),
           ];
+        case "list_endpoints":
+          return mockEndpoints.map((e) => ({ ...e, key_set: e.key_env ? e.key_env === "OLLAMA_API_KEY" : null }));
+        // Like the backend: ids made once from the first name; a name given twice is refused, in words.
+        case "save_endpoints": {
+          const wanted = a.endpoints as MockEndpoint[];
+          const names = wanted.map((e) => e.name.trim().toLowerCase());
+          if (new Set(names).size !== names.length) return Promise.reject("Two endpoints are called the same.");
+          mockEndpoints = wanted.map((e) => ({ ...e, id: e.id && mockEndpoints.some((x) => x.id === e.id) ? e.id : e.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "endpoint" }));
+          return mockEndpoints;
+        }
+        case "fetch_endpoint_models":
+          return String(a.url).includes("11434") ? ["qwen3:8b", "llama3", "gpt-oss:20b"] : Promise.reject("Couldn't reach it. Is it running?");
         case "user_name":
           return "Sam Rivera";
         case "work_folder":
@@ -1520,6 +1540,7 @@ export function installMockBackend(options: { providers?: boolean } = {}) {
             // Codex has no skills or slash commands, and models of its own.
             const codex = slotProvider[String(a.slot)] === "codex";
             sendTo(String(a.slot))({ kind: "commands", commands: codex ? [] : COMMANDS });
+            // (An endpoint's chat is told Claude's models by its session too, and the window must not show them: see App's model options.)
             sendTo(String(a.slot))({ kind: "models", models: codex ? CODEX_MODEL_OPTIONS : MODELS });
             sendTo(String(a.slot))({ kind: "mcp_tools", tools: codex ? [] : MCP_TOOLS });
           }, 50);

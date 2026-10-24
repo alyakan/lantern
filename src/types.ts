@@ -47,6 +47,8 @@ export interface Capabilities {
   model_switchable: boolean;
   /** Lantern's own tools reach it, so what relies on them (the Network tab's Summarize) is offered. */
   supports_lantern_tools: boolean;
+  /** It can be the Lead of a team (start agents): for now only Claude Code's. */
+  can_lead_team: boolean;
 }
 
 export interface ProviderInfo {
@@ -60,6 +62,24 @@ export interface ProviderListing extends ProviderInfo {
   models: string[];
   /** Its program, for starting a chat on it. Null for Claude Code when the window already found it. */
   binary: string | null;
+  /** For an endpoint the user set up (run by Claude Code): which one. Null for every CLI. Its `id` here is "gateway:<endpoint id>". */
+  endpoint?: { id: string; name: string } | null;
+}
+
+/** An endpoint the user set up in Settings → Endpoints (the backend's `Endpoint`): where Claude Code sends a chat's requests. */
+export interface Endpoint {
+  /** Made by the backend when it is first saved; empty for one not saved yet. */
+  id: string;
+  name: string;
+  url: string;
+  /** The NAME of the environment variable that holds its key (never the key). */
+  key_env: string | null;
+  models: string[];
+}
+
+/** An endpoint with whether its key variable is set in the login shell (null: it has none). */
+export interface EndpointStatus extends Endpoint {
+  key_set: boolean | null;
 }
 
 export type UiEvent =
@@ -331,6 +351,8 @@ export interface ModelOption {
 export interface Settings {
   /** Which agent CLI runs the chat (absent: Claude Code, as for chats saved before there was a choice). */
   provider?: string;
+  /** For a chat on an endpoint the user set up (`provider` is "gateway"): which one. */
+  endpoint?: string;
   mode: Mode;
   model: string | null;
   effort: string | null;

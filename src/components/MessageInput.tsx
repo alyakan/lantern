@@ -621,7 +621,7 @@ export function MessageInput({ status, idlePlaceholder, sendAndNext, onSend, onS
       {(permissions || branch || update) && (
         <div className="composer-meta">
           {permissions && onPermissionsChange && <PermissionsMenu permissions={permissions} onChange={onPermissionsChange} disabled={busy} auto={caps.supports_auto_mode} agent={agent} />}
-          {workflow && onWorkflowChange && <WorkflowMenu workflow={workflow} flavour={flavour} onChange={onWorkflowChange} disabled={busy} holdsAgents={holdsAgents} team={caps.supports_lantern_tools} agentName={agent} />}
+          {workflow && onWorkflowChange && <WorkflowMenu workflow={workflow} flavour={flavour} onChange={onWorkflowChange} disabled={busy} holdsAgents={holdsAgents} team={caps.can_lead_team} agentName={agent} />}
           <div className="spacer" />
           {update && <UpdateButton {...update} />}
           {branch && (

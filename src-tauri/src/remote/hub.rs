@@ -87,6 +87,9 @@ struct Log {
     /// The tokens the chat holds, and its model's context size once a turn's result said it.
     context: Option<u64>,
     window: Option<u64>,
+    /// The chat runs on another provider than Claude Code (a gateway's model, Codex): what is said in it is never put to Claude
+    /// for the phone's suggestions, which are made on the user's own Claude login.
+    off_claude: bool,
 }
 
 impl Log {
@@ -271,6 +274,19 @@ impl SessionHub {
         let log = chats.entry(slot.to_string()).or_default();
         log.folder = Some(folder.to_string());
         log.active_at = log.active_at.max((self.now)());
+    }
+
+    /// Marks whether the chat runs on a provider other than Claude Code (set each time it starts), so what is said in it stays
+    /// out of anything made on Claude.
+    pub fn set_off_claude(&self, slot: &str, off: bool) {
+        // Only a chat that is listed: this must never make one appear.
+        if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
+            log.off_claude = off;
+        }
+    }
+
+    pub fn is_off_claude(&self, slot: &str) -> bool {
+        self.chats.lock().unwrap().get(slot).is_some_and(|log| log.off_claude)
     }
 
     /// The chat was closed: it is no longer listed, and what was kept of it goes.

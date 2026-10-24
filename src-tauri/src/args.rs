@@ -425,7 +425,7 @@ fn subagent_advisor_hook() -> serde_json::Value {
 
 /// Adds `extra`'s top-level settings to the command line's `--settings`, merging into the one already there (Claude Code
 /// takes one `--settings`, so a second would replace it).
-fn add_settings(args: &mut Vec<String>, extra: serde_json::Value) {
+pub fn add_settings(args: &mut Vec<String>, extra: serde_json::Value) {
     let existing = args.iter().position(|x| x == "--settings");
     let mut merged = existing.and_then(|i| args.get(i + 1)).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()).unwrap_or_else(|| serde_json::json!({}));
     if let (Some(into), Some(from)) = (merged.as_object_mut(), extra.as_object()) {

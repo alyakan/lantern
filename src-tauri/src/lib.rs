@@ -5,6 +5,7 @@ pub mod changes;
 pub mod checks;
 pub mod cli_locator;
 pub mod diagnostics;
+pub mod endpoints;
 pub mod files;
 pub mod git;
 pub mod history;
@@ -44,6 +45,7 @@ pub mod workdir;
 
 use args::{HelperConfig, Mode, Role};
 use changes::FileDiff;
+use endpoints::GatewayLaunch;
 use provider::{ProviderId, ProviderInfo};
 use session::{EditHook, Session, SessionConfig};
 use slots::{Slot, SlotEvent, Slots};
@@ -61,6 +63,8 @@ pub struct AppState {
     renames: Arc<titles::TitleStore>,
     /// "Always allow" rules for folders, saved in app data and shared by every chat.
     folder_rules: Arc<permission::rules::FolderRules>,
+    /// The endpoints chats can run on besides Anthropic's (Settings → Endpoints), saved in app data (see endpoints.rs).
+    endpoints: Arc<endpoints::EndpointStore>,
     /// Where each folder was before it moved (see relocate): its sessions are read from there too.
     relocations: Arc<relocate::Relocations>,
     /// PRs looked up for the Changes pane, by repository and number, with when: fetching them takes a moment.
@@ -859,6 +863,8 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, 
     *session = Some(started);
     if let Some(state) = app.try_state::<AppState>() {
         state.remote.hub.opened(id, &cfg.folder.display().to_string());
+        // A chat on another provider than Claude's isn't part of what the phone's suggestions tell Claude about.
+        state.remote.hub.set_off_claude(id, cfg.provider != ProviderId::Claude);
     }
     *slot.config.lock().unwrap() = Some(cfg);
     Ok(())
@@ -870,6 +876,9 @@ struct Settings {
     /// Which agent CLI runs the chat. Chats saved before there was a choice don't say, and are Claude's.
     #[serde(default)]
     provider: ProviderId,
+    /// For a gateway chat: the endpoint it runs on (its id, see endpoints.rs).
+    #[serde(default)]
+    endpoint: Option<String>,
     mode: Mode,
     model: Option<String>,
     effort: Option<String>,
@@ -920,6 +929,39 @@ fn checked_effort(effort: Option<String>) -> Result<Option<String>, String> {
     }
 }
 
+/// The endpoint a gateway chat runs on and its model: `model` if the window named one, else the endpoint's first. An
+/// endpoint that is gone, or a model it has none of, is an error: such a chat never falls back to Anthropic's.
+fn pick_endpoint(endpoint: Option<endpoints::Endpoint>, model: Option<String>) -> Result<(endpoints::Endpoint, String), String> {
+    let endpoint = endpoint.ok_or("This chat runs on an endpoint that isn't set up any more, so it won't start on Claude instead. Add it back in Settings → Endpoints.")?;
+    let model = match model.or_else(|| endpoint.models.first().cloned()) {
+        Some(m) if endpoints::valid_endpoint_model(&m) => m,
+        Some(m) => return Err(format!("{m:?} is not a model id.")),
+        None => return Err(format!("{} has no models yet: add one in Settings → Endpoints.", endpoint.name)),
+    };
+    Ok((endpoint, model))
+}
+
+/// What a chat on endpoint `id` starts with, and the model it runs: `model` if the window named one, else the endpoint's
+/// first. Never a way to start on Anthropic instead: an endpoint that is gone, a model it has none of, a key that isn't set
+/// in the login shell, or a settings file with a credential of its own that would be sent in the key's place, each is an
+/// error in words.
+async fn gateway_for(state: &AppState, id: Option<&str>, model: Option<String>, folder: &std::path::Path) -> Result<(GatewayLaunch, String), String> {
+    let (endpoint, model) = pick_endpoint(id.and_then(|id| state.endpoints.get(id)), model)?;
+    let (home, project) = (std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default(), folder.to_path_buf());
+    if let Some(why) = endpoints::settings_conflict(&home, &project) {
+        return Err(why);
+    }
+    let key = match &endpoint.key_env {
+        None => None,
+        Some(name) => {
+            let var = name.clone();
+            let value = tauri::async_runtime::spawn_blocking(move || cli_locator::login_shell_var(&var)).await.ok().flatten();
+            Some(endpoints::Secret::new(value.ok_or_else(|| format!("{} needs {name}, which isn't set in your login shell. Set it in ~/.zshrc or ~/.zprofile, then start the chat again.", endpoint.name))?))
+        }
+    };
+    Ok((GatewayLaunch { id: endpoint.id, url: endpoint.url, key }, model))
+}
+
 /// A chat's config from what the window sent. A worker's mode is no freer than its main agent allows now, whatever the
 /// window asked for (see `cap_mode`).
 async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: String, settings: Settings, resume: Option<String>) -> Result<SessionConfig, String> {
@@ -929,6 +971,14 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
     if settings.orchestrator {
         lead_provider(settings.provider)?;
     }
+    // A gateway chat's model is one of its endpoint's, and it has none of Claude's harness (no effort, advisor or subagent model).
+    let gateway = settings.provider == ProviderId::Gateway;
+    let (endpoint, model) = if gateway {
+        let (launch, model) = gateway_for(state, settings.endpoint.as_deref(), settings.model.clone(), std::path::Path::new(&folder)).await?;
+        (Some(launch), Some(model))
+    } else {
+        (None, checked_model(settings.model.clone())?)
+    };
     let ceiling = settings.worker.as_ref().map(|w| main_ceiling(state, &w.parent));
     // A worker's folder is a worktree of its Lead's project, so it gets the notes its Lead started with.
     let notes = match &settings.worker {
@@ -942,10 +992,10 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
         mode: settings.mode,
         auto_approve: settings.auto_approve,
         resume,
-        model: checked_model(settings.model)?,
-        effort: checked_effort(settings.effort)?,
-        advisor: checked_model(settings.advisor)?,
-        subagent_model: checked_model(settings.subagent_model)?,
+        model,
+        effort: if gateway { None } else { checked_effort(settings.effort)? },
+        advisor: if gateway { None } else { checked_model(settings.advisor)? },
+        subagent_model: if gateway { None } else { checked_model(settings.subagent_model)? },
         helper: helper_config(
             slot,
             match (settings.orchestrator, settings.worker) {
@@ -956,6 +1006,7 @@ async fn new_config(state: &AppState, slot: &Slot, claude_path: String, folder: 
             notes,
         )?,
         path_env: login_path(state).await,
+        endpoint,
     };
     cap_mode(&mut cfg, ceiling);
     Ok(cfg)
@@ -1016,28 +1067,86 @@ async fn claude_login(state: State<'_, AppState>, claude_path: String) -> Result
 struct ProviderListing {
     #[serde(flatten)]
     info: ProviderInfo,
-    models: Vec<&'static str>,
+    models: Vec<String>,
     binary: Option<String>,
+    /// For a gateway: the endpoint this is (each one the user set up is its own choice); None for every CLI.
+    endpoint: Option<EndpointRef>,
 }
 
-/// Every provider the window may start a chat on: Claude Code, then each other whose CLI is installed.
+#[derive(serde::Serialize)]
+struct EndpointRef {
+    id: String,
+    name: String,
+}
+
+/// Every provider the window may start a chat on: Claude Code, then each other whose CLI is installed, then each endpoint the
+/// user has set up (run by Claude Code, which the window has found: they have no program of their own to point at).
 #[tauri::command]
-async fn list_providers() -> Result<Vec<ProviderListing>, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        ProviderId::all()
+async fn list_providers(state: State<'_, AppState>) -> Result<Vec<ProviderListing>, String> {
+    let endpoints = state.endpoints.list();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut all: Vec<ProviderListing> = ProviderId::all()
             .into_iter()
             .filter_map(|id| {
+                let models = id.provider().models().iter().map(|m| m.to_string()).collect();
                 // Claude Code is the one the window found already (where the user may have pointed it): not looked for again.
                 if id == ProviderId::Claude {
-                    return Some(ProviderListing { info: id.info(), models: id.provider().models().to_vec(), binary: None });
+                    return Some(ProviderListing { info: id.info(), models, binary: None, endpoint: None });
                 }
                 let binary = id.provider().locate(None).ok().map(|p| p.display().to_string());
-                binary.is_some().then(|| ProviderListing { info: id.info(), models: id.provider().models().to_vec(), binary })
+                binary.is_some().then(|| ProviderListing { info: id.info(), models, binary, endpoint: None })
+            })
+            .collect();
+        all.extend(endpoints.into_iter().map(|e| ProviderListing { info: ProviderId::Gateway.info(), models: e.models, binary: None, endpoint: Some(EndpointRef { id: e.id, name: e.name }) }));
+        all
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// An endpoint as Settings shows it: what was saved, and whether its key variable is set in the login shell (None: it has none).
+#[derive(serde::Serialize)]
+struct EndpointStatus {
+    #[serde(flatten)]
+    endpoint: endpoints::Endpoint,
+    key_set: Option<bool>,
+}
+
+#[tauri::command]
+async fn list_endpoints(state: State<'_, AppState>) -> Result<Vec<EndpointStatus>, String> {
+    let endpoints = state.endpoints.list();
+    tauri::async_runtime::spawn_blocking(move || {
+        endpoints
+            .into_iter()
+            .map(|endpoint| {
+                let key_set = endpoint.key_env.as_deref().map(|name| cli_locator::login_shell_var(name).is_some());
+                EndpointStatus { endpoint, key_set }
             })
             .collect()
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+/// Saves the whole list (see EndpointStore::replace): an error is in words for the form.
+#[tauri::command]
+async fn save_endpoints(state: State<'_, AppState>, endpoints: Vec<endpoints::Endpoint>) -> Result<Vec<endpoints::Endpoint>, String> {
+    state.endpoints.replace(endpoints)
+}
+
+/// Asks an endpoint what models it serves, for the Fetch button: with its key if it names one that is set.
+#[tauri::command]
+async fn fetch_endpoint_models(url: String, key_env: Option<String>) -> Result<Vec<String>, String> {
+    // The same checks as saving it: only an http or https URL, and a key only over https or a local network.
+    let probe = endpoints::clean(endpoints::Endpoint { id: String::new(), name: "probe".into(), url, key_env, models: vec![] })?;
+    let key = match probe.key_env.clone() {
+        None => None,
+        Some(name) => {
+            let value = tauri::async_runtime::spawn_blocking(move || cli_locator::login_shell_var(&name)).await.ok().flatten();
+            Some(endpoints::Secret::new(value.ok_or_else(|| format!("{} isn't set in your login shell.", probe.key_env.as_deref().unwrap_or("The key")))?))
+        }
+    };
+    endpoints::fetch_models(&probe.url, key.as_ref()).await
 }
 
 #[tauri::command]
@@ -1059,13 +1168,13 @@ async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String,
 /// The role a chat has after its Workflow is set to Team (`team` true) or to another (false): a chat becomes the Lead of a
 /// team, or stops being one. A worker keeps its role (its Workflow is its Lead's to set), and `team` None leaves it as it is.
 /// Stopping being a Lead is refused while it has agents, which would be left with nobody to report to.
-/// A team's Lead starts agents with Lantern's tools, so it runs on a provider that has them (Claude Code); the window never
-/// asks for another, and this keeps anything else from.
+/// A team's Lead starts agents with Lantern's tools and the team is built on it, so for now it runs on Claude Code; the window
+/// never asks for another, and this keeps anything else from.
 fn lead_provider(provider: ProviderId) -> Result<(), String> {
-    if capabilities_of(provider).supports_lantern_tools {
+    if capabilities_of(provider).can_lead_team {
         Ok(())
     } else {
-        Err("A team's Lead runs on Claude Code: this chat's agent can't start agents yet.".into())
+        Err("A team's Lead runs on Claude Code: this chat's agent can't lead a team yet.".into())
     }
 }
 
@@ -1132,6 +1241,9 @@ async fn apply_harness(app: AppHandle, state: State<'_, AppState>, slot: String,
     let s = state.slots.get(&slot)?;
     let running_id = s.session.lock().await.as_ref().and_then(|x| x.session_id());
     let mut cfg = s.config.lock().unwrap().clone().ok_or("No folder is open")?;
+    if cfg.provider == ProviderId::Gateway {
+        return Err("A chat on an endpoint has no harness presets: it runs on the model it was started with.".into());
+    }
     cfg.model = checked_model(model)?;
     cfg.effort = checked_effort(effort)?;
     cfg.advisor = checked_model(advisor)?;
@@ -1210,8 +1322,18 @@ fn checked_model(model: Option<String>) -> Result<Option<String>, String> {
 /// Switches the chat's model in-band from its next turn on, and remembers it for restarts. None = Claude Code's default.
 #[tauri::command]
 async fn set_model(state: State<'_, AppState>, slot: String, model: Option<String>) -> Result<(), String> {
-    let model = checked_model(model)?;
-    let Ok(s) = state.slots.get(&slot) else { return Ok(()) };
+    let Ok(s) = state.slots.get(&slot) else { return checked_model(model).map(|_| ()) };
+    // A chat on an endpoint is switched among that endpoint's models by its own ids, and never to "Claude Code's default": that
+    // is a Claude model the endpoint doesn't have.
+    let on_endpoint = s.config.lock().unwrap().as_ref().is_some_and(|c| c.provider == ProviderId::Gateway);
+    let model = if on_endpoint {
+        match model {
+            Some(m) if endpoints::valid_endpoint_model(&m) => Some(m),
+            _ => return Err("A chat on an endpoint always has one of its models.".into()),
+        }
+    } else {
+        checked_model(model)?
+    };
     let mut live = true;
     if let Some(cfg) = s.config.lock().unwrap().as_mut() {
         cfg.model = model.clone();
@@ -1506,7 +1628,8 @@ async fn claude_mcp(state: &AppState, slot: &str, args: Vec<String>) -> Result<S
         let cfg = cfg.as_ref().ok_or("No folder is open")?;
         // Claude Code's own command: another provider has no `mcp`, so adding one means saying what happens here.
         let binary = match cfg.provider {
-            ProviderId::Claude => cfg.binary.clone(),
+            // (A gateway chat is Claude Code too: its MCP servers are the same ones.)
+            ProviderId::Claude | ProviderId::Gateway => cfg.binary.clone(),
             ProviderId::Codex => return Err("MCP servers for Codex are set up in its own config (~/.codex/config.toml), not from here.".into()),
             #[cfg(test)]
             ProviderId::Fake => return Err("The fake CLI has no mcp command.".into()),
@@ -2682,7 +2805,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), relocations: Arc::new(relocations), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), remote: window_remote(app.handle()) });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), remote: window_remote(app.handle()) });
             // Remote control left on: it listens again from launch.
             if app.state::<AppState>().remote.store.saved().enabled {
                 let handle = app.handle().clone();
@@ -2752,6 +2875,9 @@ pub fn run() {
             sidebar_menu,
             keep_awake,
             list_providers,
+            list_endpoints,
+            save_endpoints,
+            fetch_endpoint_models,
             user_name,
             start_session,
             restart_session,
@@ -2955,6 +3081,7 @@ mod tests {
             subagent_model: None,
             helper: HelperConfig { exe: "/Apps/lantern".into(), socket: "/tmp/a.sock".into(), role: Role::Worker { name: "w".into(), read_only: false }, providers: vec![], project_notes: None },
             path_env: None,
+            endpoint: None,
         }
     }
 
@@ -3057,11 +3184,33 @@ mod tests {
     /// The window builds its provider choices, capability hiding and model lists from this shape.
     #[test]
     fn a_provider_is_listed_with_its_id_capabilities_models_and_binary() {
-        let listing = ProviderListing { info: ProviderId::Claude.info(), models: ProviderId::Claude.provider().models().to_vec(), binary: None };
+        let listing = ProviderListing { info: ProviderId::Claude.info(), models: ProviderId::Claude.provider().models().iter().map(|m| m.to_string()).collect(), binary: None, endpoint: None };
         let v = serde_json::to_value(listing).unwrap();
         assert_eq!(v["id"], "claude");
         assert_eq!(v["capabilities"]["supports_auto_mode"], true);
         assert_eq!(v["models"], serde_json::json!(["opus", "sonnet", "haiku"]));
+        assert!(v["binary"].is_null() && v["endpoint"].is_null());
+    }
+
+    #[test]
+    fn a_chat_on_an_endpoint_that_is_gone_or_has_no_model_never_starts_on_claude() {
+        let ep = |models: &[&str]| endpoints::Endpoint { id: "o".into(), name: "Ollama".into(), url: "http://localhost:11434".into(), key_env: None, models: models.iter().map(|m| m.to_string()).collect() };
+        assert!(pick_endpoint(None, Some("opus".into())).unwrap_err().contains("won't start on Claude instead"));
+        assert!(pick_endpoint(Some(ep(&[])), None).unwrap_err().contains("has no models yet"));
+        assert!(pick_endpoint(Some(ep(&["qwen3:8b"])), Some("--bare".into())).unwrap_err().contains("not a model id"));
+        // No model named is the endpoint's first, never "Claude Code's default"; one it is told is used.
+        assert_eq!(pick_endpoint(Some(ep(&["qwen3:8b", "llama3"])), None).unwrap().1, "qwen3:8b");
+        assert_eq!(pick_endpoint(Some(ep(&["qwen3:8b"])), Some("openai/gpt-5".into())).unwrap().1, "openai/gpt-5");
+    }
+
+    /// An endpoint is its own choice in the window: a gateway with the endpoint's id and name, its models, and no program.
+    #[test]
+    fn an_endpoint_is_listed_as_a_gateway_with_its_models_and_what_it_cannot_do() {
+        let listing = ProviderListing { info: ProviderId::Gateway.info(), models: vec!["qwen3:8b".into()], binary: None, endpoint: Some(EndpointRef { id: "ollama".into(), name: "Ollama".into() }) };
+        let v = serde_json::to_value(listing).unwrap();
+        assert_eq!((v["id"].as_str(), v["endpoint"]["id"].as_str(), v["endpoint"]["name"].as_str()), (Some("gateway"), Some("ollama"), Some("Ollama")));
+        assert_eq!(v["models"], serde_json::json!(["qwen3:8b"]));
+        assert_eq!((v["capabilities"]["supports_auto_mode"].as_bool(), v["capabilities"]["can_lead_team"].as_bool(), v["capabilities"]["supports_skills"].as_bool()), (Some(false), Some(false), Some(true)));
         assert!(v["binary"].is_null());
     }
 

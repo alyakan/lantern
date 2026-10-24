@@ -2484,6 +2484,13 @@ button.question-option.on { border-color: var(--text-2); background: var(--bg-ac
 .pr-setting-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .pr-setting-main .settings-row-name { flex: 1; }
 .pr-setting-tries { display: flex; align-items: center; gap: 6px; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
+/* Settings → Endpoints: one form per endpoint, on the MCP form's grid; what spans it is the models, the notes and the buttons. */
+.endpoint-row { border: none; background: none; }
+.endpoint-fields > label.wide, .endpoint-fields > .settings-row-sub, .endpoint-actions { grid-column: 1 / -1; }
+.endpoint-fetch-error { color: var(--text); }
+.endpoint-actions, .endpoint-add { display: flex; align-items: center; gap: 8px; }
+.endpoint-add { padding-top: 4px; }
+.endpoint-spacer { flex: 1; }
 .pane-tabs .ship-it { flex: none; margin-left: 4px; white-space: nowrap; }
 /* A project's notes: the revert dialog's frame around a text box, its limit counter and Clear at the far left. */
 .notes-field { width: 100%; min-height: 140px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-inner); background: var(--field); color: var(--text); font: calc(13px * var(--font-scale))/1.5 var(--ui); resize: vertical; outline: none; box-sizing: border-box; }

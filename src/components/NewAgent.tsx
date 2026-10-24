@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePopover } from "../lib/usePopover";
 import { useChatState, useNodeActions } from "../lib/canvasContext";
 import { modelChoicesFor } from "../lib/models";
-import { providerIdOf, providerName, useProviders } from "../lib/provider";
+import { providerChoicesForAgents, providerIdOf, providerName, useProviders } from "../lib/provider";
 import { useRoleStore } from "../lib/roleStore";
 import { agentName, allRoles, BUILTIN_ROLES, briefFor, roleId, TASK_MARK, type Role } from "../lib/roles";
 import type { NewWorker } from "../types";
@@ -56,7 +56,10 @@ export function NewAgent({ main, shown }: { main: string; shown?: { open: boolea
   const [deleting, setDeleting] = useState(false);
   // With more than one provider the worker can run on another one than its main agent: the provider comes first, and the
   // models listed are that provider's. Its own (the main agent's) is what it runs on if nothing is chosen.
-  const providers = useProviders();
+  // (Not an endpoint the user set up: an agent running on one comes with mixed teams.)
+  const all = useProviders();
+  const agentProviders = providerChoicesForAgents(all.list);
+  const providers = { list: agentProviders, multi: agentProviders.length > 1 };
   const own = providerIdOf(useChatState(main)?.provider);
   const provider = form.provider ?? own;
   const choices = modelChoicesFor(provider, providers.list.find((p) => p.id === provider)?.models ?? [], providerName(provider));

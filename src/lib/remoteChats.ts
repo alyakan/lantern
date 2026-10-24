@@ -23,14 +23,22 @@ export interface WindowChat {
   color: string | null;
   /** "chat", "steps" (Step by step) or "team"; null for a chat the store doesn't have yet. */
   workflow: "chat" | "steps" | "team" | null;
+  /**
+   * The chat runs, or ran, on another provider than Claude Code's (a local model on an endpoint, Codex): what is said in it and its
+   * title are never put to Claude for a phone's suggestions. Said only when true, for a restored chat that isn't open yet too.
+   */
+  off_claude?: true;
 }
 
-/** `presetOf`: the id of the preset each chat's claude was started with. `projectColors`: each folder's colour, an index into PROJECT_COLORS (see assignColors). */
-export function windowChats(chats: Chats, open: Record<string, ProjectOpen>, presetOf: Record<string, string> = {}, projectColors: Record<string, number> = {}): WindowChat[] {
+/**
+ * `presetOf`: the id of the preset each chat's claude was started with. `projectColors`: each folder's colour, an index into
+ * PROJECT_COLORS (see assignColors). `offClaude`: whether a chat is on another provider than Claude Code's.
+ */
+export function windowChats(chats: Chats, open: Record<string, ProjectOpen>, presetOf: Record<string, string> = {}, projectColors: Record<string, number> = {}, offClaude: (slot: string) => boolean = () => false): WindowChat[] {
   return Object.entries(open).flatMap(([folder, project]) =>
     project.items.map((item) => {
       const s = chats.slots[item.slot];
-      return { slot: item.slot, folder: s?.folder ?? folder, title: item.title, asleep: s?.status === "asleep", session_id: s?.sessionId ?? null, permissions: s ? permissionsOf(s) : null, preset: presetOf[item.slot] ?? null, color: PROJECT_COLORS[projectColors[folder]] ?? null, workflow: s ? workflowOf(s) : null };
+      return { slot: item.slot, folder: s?.folder ?? folder, title: item.title, asleep: s?.status === "asleep", session_id: s?.sessionId ?? null, permissions: s ? permissionsOf(s) : null, preset: presetOf[item.slot] ?? null, color: PROJECT_COLORS[projectColors[folder]] ?? null, workflow: s ? workflowOf(s) : null, ...(offClaude(item.slot) ? { off_claude: true as const } : {}) };
     }),
   );
 }

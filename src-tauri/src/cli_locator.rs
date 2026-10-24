@@ -136,6 +136,16 @@ pub fn login_shell_path() -> Option<String> {
     shell_value(&user_shell(), "\"$PATH\"", SHELL_TIMEOUT)
 }
 
+/// An environment variable as the user's terminal would have it (a key in ~/.zshrc, say): GUI apps launched from Finder have
+/// none of it. None when it isn't set or is empty, or `name` isn't a variable's name: it goes into a shell command, so
+/// nothing but capital letters, digits and '_' ever does.
+pub fn login_shell_var(name: &str) -> Option<String> {
+    if !crate::endpoints::valid_key_env(name) {
+        return None;
+    }
+    shell_value(&user_shell(), &format!("\"${{{name}}}\""), SHELL_TIMEOUT)
+}
+
 pub fn is_executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(p).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
@@ -151,6 +161,18 @@ mod tests {
         std::fs::write(&p, "#!/bin/sh\n").unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
         p
+    }
+
+    /// A key is read from the login shell by its name, and a name that isn't one is never put in a shell command.
+    #[test]
+    fn a_login_shell_variable_is_read_by_name_and_only_by_a_name() {
+        unsafe { std::env::set_var("LANTERN_TEST_LOGIN_KEY_7", "sk-test-value") };
+        assert_eq!(login_shell_var("LANTERN_TEST_LOGIN_KEY_7").as_deref(), Some("sk-test-value"));
+        assert_eq!(login_shell_var("LANTERN_TEST_UNSET_KEY_7"), None);
+        for bad in ["", "a", "A;touch /tmp/lantern-injected", "A$(id)", "A B", "A\"B"] {
+            assert_eq!(login_shell_var(bad), None, "{bad:?}");
+        }
+        assert!(!Path::new("/tmp/lantern-injected").exists());
     }
 
     #[test]

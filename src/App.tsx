@@ -26,7 +26,7 @@ import { SessionActionsContext, exportFileName, sessionMarkdown, type SessionAct
 import { chatsReducer, chatState, chatTitle, firstPrompt, initialChats, isBusy, queuesToSend, wakesToSend } from "./sessions";
 import type { Capabilities, Mode, ProviderInfo, ProviderListing, UiEvent } from "./types";
 import { modelOptionsFor } from "./lib/models";
-import { CLAUDE, ProvidersContext, agentName, capabilitiesOf, choicesOf, modeOn, providerIdOf, providerName } from "./lib/provider";
+import { CLAUDE, ProvidersContext, agentName, capabilitiesOf, choicesOf, isGateway, modeOn, providerIdOf, providerName, wireProvider } from "./lib/provider";
 import { batchPerFrame } from "./lib/frameBatch";
 import { attentionFor } from "./lib/attention";
 import { basename } from "./lib/diff";
@@ -207,7 +207,14 @@ export default function App() {
   const [providerByFolder, setProviderByFolder] = usePersistentState<Record<string, string>>("settings.providerByFolder", {});
   const [providerBySession, setProviderBySession] = usePersistentState<Record<string, string>>("settings.providerBySession", {});
   const [providerPrefs, setProviderPrefs] = usePersistentState<Record<string, { model: string | null; effort: string | null }>>("settings.providerPrefs", {});
-  const prefsOf = (id: string) => (id === CLAUDE ? { model, effort } : (providerPrefs[id] ?? { model: null, effort: null }));
+  const prefsOf = (id: string) => {
+    if (id === CLAUDE) return { model, effort };
+    const saved = providerPrefs[id] ?? { model: null, effort: null };
+    if (!isGateway(id)) return saved;
+    // An endpoint has no default model: a chat on it is on the one chosen if it still lists it, else its first.
+    const models = providers.list.find((p) => p.id === id)?.models ?? [];
+    return { model: saved.model && models.includes(saved.model) ? saved.model : (models[0] ?? null), effort: null };
+  };
   // General: which events are told about (and paused), the theme and the text size.
   const [notifyPrefs, setNotifyPrefs] = usePersistentState<NotifyPrefs>(NOTIFY_KEY, NOTIFY_DEFAULTS);
   // Keep the Mac from idle sleep while anything works (see anythingWorking); anything but off means on.
@@ -425,6 +432,12 @@ export default function App() {
   /** A provider the chat can start on: Claude Code always (the window has found it), another only while its CLI is installed. */
   const listingOf = (id: string) => providers.list.find((p) => p.id === id);
   const isAvailable = (id: string) => id === CLAUDE || !!listingOf(id);
+  /**
+   * The program that starts a chat on provider `id`: Claude Code's, which the window found, for Claude and for every endpoint
+   * (an endpoint is Claude Code sent elsewhere), but only while the endpoint is still set up: a chat on one that was deleted
+   * is never started on Claude instead. Another provider's own program otherwise. None when it can't be started.
+   */
+  const binaryOf = (id: string) => (id === CLAUDE ? state.claudePath : isGateway(id) ? (listingOf(id) ? state.claudePath : undefined) : listingOf(id)?.binary);
   /** What a project's new chats run on: its choice, if that provider is still there. */
   const providerFor = (folder: string | null) => {
     const id = folder ? providerByFolder[folder] : undefined;
@@ -562,7 +575,7 @@ export default function App() {
     // A team's Lead runs on the project's last Permissions, which its agents never exceed; Team is not remembered as the
     // project's Workflow (see the effect below).
     const info = infoOf(providerId);
-    const binary = providerId === CLAUDE ? claudePath : listingOf(providerId)?.binary;
+    const binary = binaryOf(providerId);
     const can = capabilitiesOf(info);
     // A provider with no Auto runs on Ask.
     const { mode, autoApprove } = onProvider(remote ? launchOf(remote.permissions, remote.workflow) : routine ? launchOf(routine.permissions, "chat") : launchFor(folder, team), can);
@@ -574,16 +587,17 @@ export default function App() {
     if (info) to(slot)({ type: "provider_set", provider: info });
     to(slot)({ type: "mode_changed", mode, autoApprove });
     to(slot)({ type: "orchestrator_set", on: orchestrator });
-    if (!binary) return to(slot)({ type: "failed", text: `${providerName(providerId)} isn't installed.` });
+    if (!binary) return to(slot)({ type: "failed", text: isGateway(providerId) ? `${providerName(providerId)} isn't set up any more: add it back in Settings → Endpoints.` : `${providerName(providerId)} isn't installed.` });
     if (!quiet) relaunch.current[slot] = () => startIn(slot, folder, false, team, first, routine, review, remote, providerId);
     // The notes the chat starts with: what is saved now, which a later change doesn't reach.
     const notes = notesOf(notesBy, folder);
     to(slot)({ type: "notes_applied", text: notes || null });
     const gen = (startGen.current[slot] = (startGen.current[slot] ?? 0) + 1);
-    api.startSession(slot, binary, folder, { ...(providerId !== CLAUDE ? { provider: providerId } : {}), mode, ...settingsFor(slot, h, info), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}), ...(notes ? { project_notes: notes } : {}) }).then(
+    api.startSession(slot, binary, folder, { ...wireProvider(providerId), mode, ...settingsFor(slot, h, info), auto_approve: autoApprove, ...(orchestrator ? { orchestrator } : {}), ...(notes ? { project_notes: notes } : {}) }).then(
       (provider) => {
         if (startGen.current[slot] !== gen) return;
-        if (provider) to(slot)({ type: "provider_set", provider });
+        // (The backend calls every endpoint "gateway": the chat is known by which one.)
+        if (provider) to(slot)({ type: "provider_set", provider: { ...provider, id: providerId } });
         delete relaunch.current[slot];
         if (orchestrator) {
           startSubagents(slot, folder);
@@ -613,7 +627,7 @@ export default function App() {
     if (!folder || id === activeProvider || !isAvailable(id)) return;
     setProviderByFolder({ ...providerByFolder, [folder]: id });
     // A provider that can't lead a team starts it as a plain chat: its Workflow leaves Team.
-    startIn(active, folder, false, state.orchestrator && capabilitiesOf(infoOf(id)).supports_lantern_tools, undefined, undefined, undefined, false, id);
+    startIn(active, folder, false, state.orchestrator && capabilitiesOf(infoOf(id)).can_lead_team, undefined, undefined, undefined, false, id);
   };
 
   useEffect(() => {
@@ -722,7 +736,7 @@ export default function App() {
     // The provider it ran on: Claude's unless it was saved as another's (a session from before there was a choice is Claude's).
     const providerId = providerBySession[sessionId] ?? CLAUDE;
     const info = infoOf(providerId);
-    const binary = providerId === CLAUDE ? claudePath : listingOf(providerId)?.binary;
+    const binary = binaryOf(providerId);
     const can = capabilitiesOf(info);
     // The mode it was last in (and for an older Debug, Teach or Review session, that flavour of Step by step); one from
     // before modes were kept per session reopens as a plain chat, not as whatever this folder's newest chat is doing.
@@ -738,7 +752,8 @@ export default function App() {
     if (info) to(slot)({ type: "provider_set", provider: info });
     to(slot)({ type: "mode_changed", mode, autoApprove, flavourStart, explainStart });
     if (!binary) {
-      to(slot)({ type: "failed", text: `${providerName(providerId)} isn't installed, so this chat can't be reopened.` });
+      // (An endpoint that is gone is never swapped for Claude: the chat's words would go somewhere its user didn't choose.)
+      to(slot)({ type: "failed", text: isGateway(providerId) ? `${providerName(providerId)} isn't set up any more, so this chat can't be reopened. Add it back in Settings → Endpoints.` : `${providerName(providerId)} isn't installed, so this chat can't be reopened.` });
       return Promise.resolve(false);
     }
     to(slot)({ type: "orchestrator_set", on: team?.role === "main" });
@@ -756,7 +771,7 @@ export default function App() {
         binary,
         folder,
         // An agent comes back on the model it had (or, on Claude, Sonnet, the agents' default), not on its project's own model.
-        { ...(providerId !== CLAUDE ? { provider: providerId } : {}), mode, ...settingsFor(slot, h, info), ...(as?.role === "worker" ? { model: as.model ?? (providerId === CLAUDE ? AGENT_MODEL : null) } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(notes ? { project_notes: notes } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared", read_only: !!as.agentRole?.read_only, ...(as.agentRole ? { role: as.agentRole } : {}) } } : {}) },
+        { ...wireProvider(providerId), mode, ...settingsFor(slot, h, info), ...(as?.role === "worker" ? { model: as.model ?? (providerId === CLAUDE ? AGENT_MODEL : null) } : {}), auto_approve: autoApprove, ...(as?.role === "main" ? { orchestrator: true } : {}), ...(notes ? { project_notes: notes } : {}), ...(as?.role === "worker" ? { worker: { name: as.name, parent: as.parent, branch: as.branch, shared: as.isolation === "shared", read_only: !!as.agentRole?.read_only, ...(as.agentRole ? { role: as.agentRole } : {}) } } : {}) },
         sessionId,
       );
     // A worker waits for its main agent: if that one didn't open, this one stays closed too, under it, where Retry can try again.
@@ -765,7 +780,7 @@ export default function App() {
       .then((as) => open(as).then((opened) => ({ opened, as })))
       .then(({ opened, as }) => {
         if (startGen.current[slot] !== gen) return false;
-        if (opened.provider) to(slot)({ type: "provider_set", provider: opened.provider });
+        if (opened.provider) to(slot)({ type: "provider_set", provider: { ...opened.provider, id: providerId } });
         // Not resumed (its copy into this folder failed): the transcript is shown, and Retry copies it again.
         if (opened.read_only) {
           to(slot)({ type: "history_loaded", sessionId, events: opened.events, earlier: opened.earlier });
@@ -1354,7 +1369,7 @@ export default function App() {
       const leaving = s.orchestrator && workflow !== "team";
       if (leaving && holdsAgents(slot)) return to(slot)({ type: "notice", text: "This team still has agents. Close them first, then switch its Workflow." });
       const { mode, autoApprove, team } = launchOf(permissions, agent ? workflowOf(s) : workflow);
-      if (team && !agent && !s.orchestrator && !capabilitiesOf(s.provider).supports_lantern_tools) return to(slot)({ type: "notice", text: `${agentName(s.provider)} can't lead a team yet: a team's Lead runs on Claude Code.` });
+      if (team && !agent && !s.orchestrator && !capabilitiesOf(s.provider).can_lead_team) return to(slot)({ type: "notice", text: `${agentName(s.provider)} can't lead a team yet: a team's Lead runs on Claude Code.` });
       const apply = () => {
         if (mode !== "steps") to(slot)({ type: "flavour_picked", flavour: null });
         to(slot)({ type: "mode_changed", mode, autoApprove });
@@ -2081,12 +2096,12 @@ export default function App() {
       .filter((p) => ready && p !== permissionsOf(state) && (p !== "auto" || caps.supports_auto_mode))
       .map((p): PaletteEntry => ({ id: `permissions:${p}`, title: `Permissions: ${PERMISSIONS_LABEL[p]}`, group: "Permissions", shortcut: null, run: () => changePermissions(p) }));
     const workflows = (["chat", "steps", "team"] as const)
-      .filter((w) => ready && w !== workflowOf(state) && !(w === "team" && (chats.agents[active] || !caps.supports_lantern_tools)))
+      .filter((w) => ready && w !== workflowOf(state) && !(w === "team" && (chats.agents[active] || !caps.can_lead_team)))
       .map((w): PaletteEntry => ({ id: `workflow:${w}`, title: `Workflow: ${WORKFLOW_LABEL[w]}${w === "steps" ? "…" : ""}`, group: "Workflow", shortcut: null, run: () => changeWorkflow(w) }));
     const harnesses = presets
       .filter((h) => ready && caps.supports_advisor && h.id !== harnessOf(active).id)
       .map((h): PaletteEntry => ({ id: `harness:${h.id}`, title: `Models: ${h.name}`, group: "Models", shortcut: null, run: () => switchHarness(h) }));
-    const tabs = (["general", "harness", "mcp", "skills", "permissions", "prs", "updates"] as SettingsTab[])
+    const tabs = (["general", "harness", "endpoints", "mcp", "skills", "permissions", "prs", "updates"] as SettingsTab[])
       .filter((t) => (t !== "harness" || (!!state.folder && caps.supports_advisor)) && (t !== "skills" || caps.supports_skills))
       .map((t): PaletteEntry => ({ id: `settings:${t}`, title: `Settings: ${TAB_LABEL[t]}`, group: "Settings", shortcut: null, run: () => setSettingsAt(t) }));
     const routinesEntry: PaletteEntry = { id: "routines", title: "Routines…", group: "Routines", shortcut: null, run: () => setSettingsAt("routines") };
@@ -2119,7 +2134,7 @@ export default function App() {
     }
   }, [chats.slots]);
   // (On a provider that can't lead a team, a new chat is the Lead instead: it is Claude Code's.)
-  const startTeam = () => (hero && caps.supports_lantern_tools ? changeWorkflow("team") : newOrchestra());
+  const startTeam = () => (hero && caps.can_lead_team ? changeWorkflow("team") : newOrchestra());
   useAction("work-build", () => pickFlavour("build"), workReady);
   useAction("work-review-pr", () => setPrPicker(true), workReady);
   useAction("work-debug", () => pickFlavour("debug"), workReady);
@@ -2285,7 +2300,14 @@ export default function App() {
   }, []);
   // The backend's session hub knows where each chat stands from its events; what only this window knows (the title it
   // shows, which chats are asleep) it is told when that changes.
-  const hubList = windowChats(chats, openByProject, harnessBySlot, projectColors);
+  // A chat on another provider than Claude's is said so (a restored one that isn't open yet from what was saved of its session),
+  // so nothing said in it is put to Claude for a phone's suggestions.
+  const offClaude = (slot: string) => {
+    const s = chats.slots[slot];
+    const id = s?.provider ? providerIdOf(s.provider) : ((s?.sessionId && providerBySession[s.sessionId]) || CLAUDE);
+    return id !== CLAUDE;
+  };
+  const hubList = windowChats(chats, openByProject, harnessBySlot, projectColors, offClaude);
   const hubKey = JSON.stringify(hubList);
   useEffect(() => {
     void api.remoteWindowChats(hubList).catch(() => {});
@@ -2506,7 +2528,8 @@ export default function App() {
         defaultModel: activeProvider === CLAUDE ? defaultModel : null,
         ids: activeProvider === CLAUDE ? modelIds : undefined,
         // Another provider's, until its session lists them: the names its CLI takes (Claude's built-in list would be wrong for it).
-        options: activeProvider === CLAUDE || state.models.length > 0 ? state.models : modelOptionsFor(listingOf(activeProvider)?.models ?? [], providerName(activeProvider)),
+        // An endpoint's is always its own list from Settings: its session, being Claude Code, reports Claude's, which it hasn't.
+        options: isGateway(activeProvider) ? modelOptionsFor(listingOf(activeProvider)?.models ?? [], providerName(activeProvider), true) : activeProvider === CLAUDE || state.models.length > 0 ? state.models : modelOptionsFor(listingOf(activeProvider)?.models ?? [], providerName(activeProvider)),
       }}
       effort={{ chosen: settingsFor(active).effort, onChoose: changeEffort }}
       harness={state.folder ? { presets, chosen: harnessOf(active).id, onChoose: (id) => switchHarness(findHarness(presets, id)), onEdit: () => setSettingsAt("harness") } : undefined}
@@ -2737,6 +2760,7 @@ export default function App() {
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
           prChecks={{ folders: prFolders, saved: prSettings, onChange: (folder, setting) => setPrSettings({ ...prSettings, [folder]: setting }) }}
+          endpoints={{ onSaved: () => void api.listProviders().then(setProviderList, () => {}) }}
           general={{ keepAwake, onKeepAwake: setKeepAwake, notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize, warnTeams, onWarnTeams: setWarnTeams }}
           routines={{
             ...routines,
