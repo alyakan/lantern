@@ -3,14 +3,32 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react-
 import { attachSession } from "../test/fakeSession";
 import { chat, connected, connectedWithControls, makeController, NOW, renderWith, waiting } from "../test/render";
 import { noMemory, noPlatform, TipJar } from "../tips";
+import { resetSeen } from "../seen";
 import { HomeScreen } from "./HomeScreen";
 
 // What Home remembers about how it lists the chats: kept in memory here, not in the Keychain.
 let mockRemembered: "recent" | "project" = "recent";
+let mockFolded: string[] = [];
+let mockSeen: Record<string, number> | null = null;
+beforeEach(() => {
+  mockRemembered = "recent";
+  mockFolded = [];
+  mockSeen = null;
+  resetSeen();
+});
 jest.mock("../prefs", () => ({
   loadGrouping: jest.fn(async () => mockRemembered),
   saveGrouping: jest.fn(async (g: "recent" | "project") => {
     mockRemembered = g;
+  }),
+  // The project cards folded away, and where each chat stood when it was last shown (null: the first launch).
+  loadFolded: jest.fn(async () => [...mockFolded]),
+  saveFolded: jest.fn(async (f: string[]) => {
+    mockFolded = [...f];
+  }),
+  loadSeen: jest.fn(async () => (mockSeen ? { ...mockSeen } : null)),
+  saveSeen: jest.fn(async (m: Record<string, number>) => {
+    mockSeen = { ...m };
   }),
   // The suggestions' own memory: nothing folded away or dismissed.
   loadSuggestionPrefs: jest.fn(async () => ({ collapsed: false, dismissed: [] as string[] })),
@@ -347,5 +365,83 @@ describe("closing a chat from Home", () => {
     await home(connected);
     await fireEvent(screen.getByRole("button", { name: "Release, lantern" }), "longPress");
     expect(screen.queryByText("Close this chat?")).toBeNull();
+  });
+});
+
+describe("project cards that stay folded", () => {
+  const chats = [chat({ slot: "a", title: "Release", project: "lantern" }), chat({ slot: "b", title: "Prayers widget", project: "prayers" })];
+
+  it("remembers a folded card, and an opened one is forgotten", async () => {
+    const view = await renderWith(<HomeScreen {...handlers()} />, { chats });
+    await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
+    await fireEvent.press(screen.getByRole("button", { name: "lantern, 1 chat" }));
+    await waitFor(() => expect(mockFolded).toEqual(["lantern"]));
+    await fireEvent.press(screen.getByRole("button", { name: "prayers, 1 chat" }));
+    await waitFor(() => expect(mockFolded).toEqual(["lantern", "prayers"]));
+    await fireEvent.press(screen.getByRole("button", { name: "lantern, 1 chat" }));
+    await waitFor(() => expect(mockFolded).toEqual(["prayers"]));
+    void view;
+  });
+
+  it("opens with the cards folded the way they were left", async () => {
+    mockFolded = ["lantern"];
+    await renderWith(<HomeScreen {...handlers()} />, { chats });
+    await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Release" })).toBeNull());
+    expect(screen.getByRole("button", { name: "lantern, 1 chat" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Prayers widget" })).toBeTruthy();
+  });
+});
+
+// The dots are decoration (the row's label says "unread"), so a screen reader skips them; the tests look anyway.
+const HIDDEN = { includeHiddenElements: true };
+const SAVED = { timeout: 2500 };
+
+describe("what is unread", () => {
+  const read = chat({ slot: "a", title: "Seen already", active_at: NOW - 60_000 });
+  const fresh = chat({ slot: "b", title: "Has news", active_at: NOW - 30_000 });
+  const marks = { a: NOW - 60_000, b: NOW - 90_000 };
+
+  it("marks a chat that has moved on since it was shown: a dot, a bold title and a stronger time, while a read one is plain", async () => {
+    mockSeen = marks;
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [read, fresh] });
+    const news = await screen.findByRole("button", { name: "Has news, lantern, unread" });
+    expect(within(news).getByTestId("unread-dot", HIDDEN)).toBeTruthy();
+    expect(StyleSheet.flatten(within(news).getByText("Has news").props.style).fontWeight).toBe("800");
+    const plain = screen.getByRole("button", { name: "Seen already, lantern" });
+    expect(within(plain).queryByTestId("unread-dot", HIDDEN)).toBeNull();
+    expect(StyleSheet.flatten(within(plain).getByText("Seen already").props.style).fontWeight).toBe("400");
+  });
+
+  it("calls nothing unread the first time, when it has no idea what was shown", async () => {
+    mockSeen = null;
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [read, fresh] });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Has news, lantern" })).toBeTruthy());
+    expect(screen.queryByTestId("unread-dot", HIDDEN)).toBeNull();
+    // And from then on, what happens in them does count.
+    await waitFor(() => expect(mockSeen).toEqual({ a: NOW - 60_000, b: NOW - 30_000 }), SAVED);
+  });
+
+  it("is only for a chat that is waiting: not one that is asleep, working or asking", async () => {
+    mockSeen = { a: 0, b: 0, c: 0, d: 0 };
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ slot: "a", title: "One", status: "asleep" }), chat({ slot: "b", title: "Two", status: "working" }), chat({ slot: "c", title: "Three", status: "needs_you" }), chat({ slot: "d", title: "Four", status: "ended" })] });
+    await screen.findByRole("button", { name: /^One/ });
+    expect(screen.queryByTestId("unread-dot", HIDDEN)).toBeNull();
+  });
+
+  it("is dropped for a chat that is closed", async () => {
+    mockSeen = { a: NOW - 60_000, gone: 5 };
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [read] });
+    await waitFor(() => expect(mockSeen).toEqual({ a: NOW - 60_000 }), SAVED);
+  });
+
+  it("is told on a folded card, which keeps a dot and says how many", async () => {
+    mockSeen = marks;
+    mockFolded = ["lantern"];
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [read, fresh] });
+    await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
+    const card = await screen.findByRole("button", { name: "lantern, 2 chats, 1 unread" });
+    expect(within(card).getByTestId("unread-card-dot", HIDDEN)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Has news, lantern, unread" })).toBeNull();
   });
 });

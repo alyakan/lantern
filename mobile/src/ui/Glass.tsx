@@ -40,11 +40,18 @@ export function useGlass(): boolean {
 export const GLASS_FILL = "26";
 
 /**
+ * How much of the card's colour (about 65%) the message box keeps under its glass. The box is where words are typed, over a chat
+ * that runs under it: at a tint it was sometimes all but invisible, and the words were hard to read over what showed through. It
+ * still blurs what is behind it (the glass is over this fill), and is the one surface that is stronger than a tint.
+ */
+export const COMPOSER_FILL = "a6";
+
+/**
  * A surface that floats over the page: Liquid Glass on iOS 26, and everywhere else today's solid card with its shadow
  * (`lift` is how strong the shadow is). `style` is only its shape and layout (size, radius, padding, how it lays out its
  * children), never its colour: that is the surface's own. It takes no touches itself, so it can sit inside a button.
  */
-export function Glass({ style, lift = 0.08, solid = false, children, ...rest }: ViewProps & { /** The solid look's shadow strength. */ lift?: number; /** Always the solid card: for what holds words that must read over whatever is behind it. */ solid?: boolean }) {
+export function Glass({ style, lift = 0.08, solid = false, fill = GLASS_FILL, children, ...rest }: ViewProps & { /** The solid look's shadow strength. */ lift?: number; /** The card colour kept under the glass, as two hex digits of alpha: a tint unless the words on it need more. */ fill?: string; /** Always the solid card: for what holds words that must read over whatever is behind it. */ solid?: boolean }) {
   const glass = useGlass();
   const colors = useColors();
   if (glass && !solid) {
@@ -55,7 +62,7 @@ export function Glass({ style, lift = 0.08, solid = false, children, ...rest }: 
     // flat card. It is only a tint, enough for an edge.
     const radius = StyleSheet.flatten(style)?.borderRadius;
     return (
-      <View style={[{ backgroundColor: `${colors.card}${GLASS_FILL}`, borderWidth: StyleSheet.hairlineWidth * 2, borderColor: colors.rule }, style]} {...rest}>
+      <View style={[{ backgroundColor: `${colors.card}${fill}`, borderWidth: StyleSheet.hairlineWidth * 2, borderColor: colors.rule }, style]} {...rest}>
         <GlassView pointerEvents="none" glassEffectStyle="regular" style={[StyleSheet.absoluteFill, radius === undefined ? null : { borderRadius: radius }]} />
         {children}
       </View>

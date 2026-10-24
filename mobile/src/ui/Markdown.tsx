@@ -179,7 +179,7 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
                           {m.marker}
                         </Txt>
                       )}
-                      <Txt variant="body" tone={m.checked ? "ink3" : tone} selectable={selectable} style={{ flex: 1, textDecorationLine: m.checked ? "line-through" : "none" }}>
+                      <Txt variant="body" tone={m.checked ? "ink3" : tone} selectable={selectable} style={{ flexGrow: 1, flexShrink: 1, textDecorationLine: m.checked ? "line-through" : "none" }}>
                         <Spans spans={item} tone={tone} />
                       </Txt>
                     </View>

@@ -7,9 +7,19 @@ import { attachSession } from "../test/fakeSession";
 import { chat, connected, makeController, renderWith } from "../test/render";
 import { ChatScreen } from "./ChatScreen";
 import { PromptRow } from "./ChatParts";
-import { GLASS_FILL } from "../ui/Glass";
+import { renderHook } from "@testing-library/react-native";
+import { resetSeen, useSeen } from "../seen";
+import { COMPOSER_FILL } from "../ui/Glass";
 import { motion } from "../ui/motion";
 import { lightColors } from "../ui/theme";
+
+// Where each chat was last shown: kept in memory here, not in the Keychain.
+jest.mock("../prefs", () => ({
+  ...jest.requireActual("../prefs"),
+  loadSeen: jest.fn(async () => ({})),
+  saveSeen: jest.fn(async () => {}),
+}));
+beforeEach(() => resetSeen());
 
 const handlers = () => ({ slot: "a", onBack: jest.fn(), onReview: jest.fn() });
 
@@ -615,10 +625,28 @@ describe("a chat on iOS 26, where its header and message box are glass over the 
     expect(StyleSheet.flatten(screen.getByText(/asleep to save memory/).parent!.props.style).backgroundColor).toBe(lightColors.paper);
     await fireEvent.press(screen.getByRole("button", { name: "Wake this chat" }));
     await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [chat({ status: "idle" })] } }));
-    // The surface is the message box's nearest ancestor with the faint fill.
+    // The surface is the message box's nearest ancestor with its fill: enough of the card to type on, not the faint tint of the rest.
     let box = screen.getByLabelText("Message").parent;
-    while (box && StyleSheet.flatten(box.props.style)?.backgroundColor !== `${lightColors.card}${GLASS_FILL}`) box = box.parent;
+    while (box && StyleSheet.flatten(box.props.style)?.backgroundColor !== `${lightColors.card}${COMPOSER_FILL}`) box = box.parent;
     expect(box).toBeTruthy();
     expect(StyleSheet.flatten(box!.props.style).borderColor).toBe(lightColors.rule);
+  });
+});
+
+describe("a chat that is open", () => {
+  it("is seen as far as it has gone, and again as it moves on, so Home doesn't call it unread", async () => {
+    const { controller } = await withSession(turn, {}, {}, { active_at: 5_000 });
+    const seen = await renderHook(() => useSeen());
+    await waitFor(() => expect(seen.result.current).toEqual({ a: 5_000 }));
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [chat({ active_at: 9_000 })] } }));
+    await waitFor(() => expect(seen.result.current).toEqual({ a: 9_000 }));
+  });
+
+  it("is seen as far as it had gone when it was left", async () => {
+    const { unmount, controller } = await withSession(turn, {}, {}, { active_at: 5_000 });
+    const seen = await renderHook(() => useSeen());
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [chat({ active_at: 7_000 })] } }));
+    await unmount();
+    await waitFor(() => expect(seen.result.current).toEqual({ a: 7_000 }));
   });
 });
