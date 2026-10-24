@@ -55,12 +55,45 @@ describe("the Home screen", () => {
     expect(list[1].from).toBe("Other");
   });
 
-  it("lists chats most recent first, with what to say at the right of each", () => {
+  it("lists what needs you first, then what is working, then the rest, with what to say at the right of each", () => {
     const now = 5 * 60_000 + 1000;
     const r = rows([chat({ slot: "old", title: "Network tab", status: "asleep", active_at: 10 }), chat({ slot: "now", title: "release", status: "working", active_at: 1000 }), chat({ slot: "idle", title: null, status: "idle", active_at: 1000 - 1 }), chat({ slot: "n", status: "needs_you", active_at: 500 })], now);
-    expect(r.map((x) => [x.slot, x.note])).toEqual([["now", null], ["idle", "5 min"], ["n", "Needs you"], ["old", "Asleep"]]);
-    expect(r[0]).toMatchObject({ initial: "R", project: "lantern" });
-    expect(r[1]).toMatchObject({ title: "New chat" });
+    expect(r.map((x) => [x.slot, x.note])).toEqual([["n", "Needs you"], ["now", null], ["idle", "5 min"], ["old", "Asleep"]]);
+    expect(r[1]).toMatchObject({ initial: "R", project: "lantern" });
+    expect(r[2]).toMatchObject({ title: "New chat" });
+  });
+
+  it("puts the newest first within each: what needs you most recently, what started working last, the rest by last activity", () => {
+    const r = rows(
+      [
+        chat({ slot: "n1", status: "needs_you", active_at: 100 }),
+        chat({ slot: "n2", status: "needs_you", active_at: 300 }),
+        chat({ slot: "w1", status: "working", active_at: 900 }),
+        chat({ slot: "w2", status: "working", active_at: 500 }),
+        chat({ slot: "s1", status: "asleep", active_at: 50 }),
+        chat({ slot: "s2", status: "asleep", active_at: 80 }),
+        chat({ slot: "i1", status: "idle", active_at: 70 }),
+      ],
+      1000,
+      null,
+      { w1: 400, w2: 450 },
+    );
+    expect(r.map((x) => x.slot)).toEqual(["n2", "n1", "w2", "w1", "s2", "i1", "s1"]);
+  });
+
+  it("keeps the working chats where they are as they work: their events move their activity, not their place", () => {
+    const at = (a1: number, a2: number) => rows([chat({ slot: "w1", status: "working", active_at: a1 }), chat({ slot: "w2", status: "working", active_at: a2 })], 9000, null, { w1: 100, w2: 200 }).map((x) => x.slot);
+    expect(at(300, 250)).toEqual(["w2", "w1"]);
+    expect(at(300, 900)).toEqual(["w2", "w1"]);
+    expect(at(950, 250)).toEqual(["w2", "w1"]);
+  });
+
+  it("falls back to the activity time for a working chat it has no start for, and to the slot on a tie, so the order is always the same", () => {
+    const a = rows([chat({ slot: "b", status: "idle", active_at: 5 }), chat({ slot: "a", status: "idle", active_at: 5 })], 9000).map((x) => x.slot);
+    const b = rows([chat({ slot: "a", status: "idle", active_at: 5 }), chat({ slot: "b", status: "idle", active_at: 5 })], 9000).map((x) => x.slot);
+    expect(a).toEqual(["a", "b"]);
+    expect(b).toEqual(a);
+    expect(rows([chat({ slot: "x", status: "working", active_at: 10 }), chat({ slot: "y", status: "working", active_at: 20 })], 9000).map((r) => r.slot)).toEqual(["y", "x"]);
   });
 
   it("lists chats under their projects: the projects by name, those with none last, the most recent chat first in each", () => {

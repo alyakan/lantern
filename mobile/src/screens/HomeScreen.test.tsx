@@ -164,7 +164,7 @@ describe("Home", () => {
     expect(screen.queryByText(/more after this one/)).toBeNull();
   });
 
-  it("lists the chats most recent first with their state, and opens one", async () => {
+  it("lists the chats with what needs you first, with their state, and opens one", async () => {
     const h = handlers();
     await renderWith(<HomeScreen {...h} />, {
       chats: [chat({ slot: "old", title: "Network tab filters", project: "network-monitor", status: "asleep", active_at: 1 }), chat({ slot: "w", title: "Mobile gateway design", status: "working" }), chat({ slot: "n", title: "Storage audit", status: "needs_you", active_at: 5 })],
@@ -173,7 +173,8 @@ describe("Home", () => {
     expect(screen.getByText("Needs you")).toBeTruthy();
     expect(screen.getByLabelText("Working")).toBeTruthy();
     const names = screen.getAllByRole("button").map((b) => b.props.accessibilityLabel as string).filter((l) => /lantern|network-monitor/.test(l));
-    expect(names[0]).toContain("Mobile gateway design");
+    expect(names[0]).toContain("Storage audit");
+    expect(names[1]).toContain("Mobile gateway design");
     expect(names[names.length - 1]).toContain("Network tab filters");
     await fireEvent.press(screen.getByRole("button", { name: /Network tab filters/ }));
     expect(h.onOpenChat).toHaveBeenCalledWith("old");
@@ -443,5 +444,32 @@ describe("what is unread", () => {
     const card = await screen.findByRole("button", { name: "lantern, 2 chats, 1 unread" });
     expect(within(card).getByTestId("unread-card-dot", HIDDEN)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Has news, lantern, unread" })).toBeNull();
+  });
+});
+
+describe("the order of the chats", () => {
+  const titles = () => screen.getAllByRole("button", { name: /^(Needs|Busy|Rest)/ }).map((b) => b.props.accessibilityLabel.split(",")[0]);
+
+  it("is what needs you, then what is working, then the rest, and holds still while the working chats keep working", async () => {
+    const mk = (over: Record<string, unknown>) => chat({ project: "lantern", ...over });
+    const first = [mk({ slot: "n", title: "Needs one", status: "needs_you", active_at: NOW - 5_000 }), mk({ slot: "w1", title: "Busy one", status: "working", active_at: NOW - 50_000 }), mk({ slot: "w2", title: "Busy two", status: "working", active_at: NOW - 40_000 }), mk({ slot: "s", title: "Rest one", status: "asleep", active_at: NOW - 900_000 })];
+    const { controller } = makeController();
+    await renderWith(<HomeScreen {...handlers()} />, { chats: first }, controller);
+    expect(titles()).toEqual(["Needs one", "Busy two", "Busy one", "Rest one"]);
+    // Both go on working: their events keep moving their activity, the first one's now the latest.
+    for (const [a1, a2] of [[NOW - 10_000, NOW - 30_000], [NOW - 2_000, NOW - 20_000], [NOW - 500, NOW - 10_000]]) {
+      await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: first.map((c) => (c.slot === "w1" ? { ...c, active_at: a1 } : c.slot === "w2" ? { ...c, active_at: a2 } : c)) } }));
+      expect(titles()).toEqual(["Needs one", "Busy two", "Busy one", "Rest one"]);
+    }
+  });
+
+  it("puts a chat that finished at the top of the rest, and a chat that begins to work at the top of the working", async () => {
+    const mk = (over: Record<string, unknown>) => chat({ project: "lantern", ...over });
+    const first = [mk({ slot: "w1", title: "Busy one", status: "working", active_at: NOW - 50_000 }), mk({ slot: "s", title: "Rest one", status: "asleep", active_at: NOW - 900_000 }), mk({ slot: "i", title: "Rest two", status: "idle", active_at: NOW - 600_000 })];
+    const { controller } = makeController();
+    await renderWith(<HomeScreen {...handlers()} />, { chats: first }, controller);
+    expect(titles()).toEqual(["Busy one", "Rest two", "Rest one"]);
+    await act(async () => controller.sync.apply({ type: "pushed", msg: { type: "chats", chats: [{ ...first[0], status: "idle", active_at: NOW - 1_000 }, first[1], { ...first[2], status: "working", active_at: NOW - 400 }] } }));
+    expect(titles()).toEqual(["Rest two", "Busy one", "Rest one"]);
   });
 });

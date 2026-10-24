@@ -139,6 +139,9 @@ function Table({ block, tone }: { block: Extract<Block, { kind: "table" }>; tone
   );
 }
 
+/** How wide the room for a bullet is: the dot and a little over, so the words aren't left a gap after it (a number gets room for two digits, and more if it needs it). */
+const BULLET_WIDTH = 10;
+
 /** Claude's text: headings, paragraphs, lists, tables, quotes, rules and code blocks. Memoised per text, so only a streaming block redraws. */
 export const Markdown = memo(function Markdown({ text, tone = "ink", selectable = true }: { text: string; tone?: Tone; /** False where a long press means something else (a message's actions); code and tables stay selectable. */ selectable?: boolean }) {
   const blocks = useMemo(() => parseMarkdown(text), [text]);
@@ -169,13 +172,13 @@ export const Markdown = memo(function Markdown({ text, tone = "ink", selectable 
                 {b.items.map((item, j) => {
                   const m = b.meta[j];
                   return (
-                    <View key={j} style={{ flexDirection: "row", gap: 8, paddingLeft: m.depth * 18 }}>
+                    <View key={j} style={{ flexDirection: "row", gap: m.checked !== null ? 8 : 6, paddingLeft: m.depth * 18 }}>
                       {m.checked !== null ? (
                         <View style={{ width: 22, alignItems: "flex-start" }}>
                           <TaskBox checked={m.checked} />
                         </View>
                       ) : (
-                        <Txt variant="body" tone={tone} style={{ minWidth: 22 }}>
+                        <Txt variant="body" tone={tone} style={{ minWidth: b.ordered ? 22 : BULLET_WIDTH }}>
                           {m.marker}
                         </Txt>
                       )}

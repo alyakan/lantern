@@ -66,6 +66,11 @@ export interface ChatView {
 
 export interface State {
   chats: RemoteChat[];
+  /**
+   * When each chat that is working started, as the Mac's `active_at` stood when this phone first saw it working. A working chat's
+   * `active_at` moves with every event, so Home orders the working chats by this instead, which holds still while they work.
+   */
+  workingSince: Record<string, number>;
   waiting: Waiting[];
   /** Whether the Mac has sent the chat list, and what waits on this phone, at least once (what tells "none" from "not yet"). */
   chatsLoaded: boolean;
@@ -77,7 +82,15 @@ export interface State {
   epoch: number | null;
 }
 
-export const initialState: State = { chats: [], waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, epoch: null };
+/** Keeps when each working chat was first seen working, and forgets the ones that are not working (their next time is a new start). */
+function workingSince(before: Record<string, number>, chats: RemoteChat[]): Record<string, number> {
+  const next: Record<string, number> = {};
+  for (const c of chats) if (c.status === "working") next[c.slot] = before[c.slot] ?? c.active_at;
+  const same = Object.keys(next).length === Object.keys(before).length && Object.keys(next).every((k) => before[k] === next[k]);
+  return same ? before : next;
+}
+
+export const initialState: State = { chats: [], workingSince: {}, waiting: [], chatsLoaded: false, waitingLoaded: false, views: {}, plan: null, epoch: null };
 
 export const emptyView: ChatView = { items: [], commands: [], todos: [], context: null, seq: 0, hidden: 0, thinking: false, resetting: false, caughtUp: 0, loaded: false, loadError: null };
 
@@ -255,7 +268,7 @@ export function reducer(state: State, action: Action): State {
       const msg = action.msg;
       switch (msg.type) {
         case "chats":
-          return { ...state, chatsLoaded: true, chats: msg.chats };
+          return { ...state, chatsLoaded: true, chats: msg.chats, workingSince: workingSince(state.workingSince, msg.chats) };
         case "plan":
           return { ...state, plan: { used: msg.used, resetsAt: msg.resets_at, status: msg.status } };
         // A message of a kind this app doesn't know (a newer Mac's): left alone.

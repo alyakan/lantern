@@ -38,7 +38,7 @@ export interface RootProps {
 
 /** Android's "Message a chat": pick which. */
 function ChatPicker({ onPick, onClose }: { onPick: (slot: string) => void; onClose: () => void }) {
-  const { chats } = useSyncState();
+  const { chats, workingSince } = useSyncState();
   const insets = useSafeAreaInsets();
   const colors = useColors();
   return (
@@ -49,7 +49,7 @@ function ChatPicker({ onPick, onClose }: { onPick: (slot: string) => void; onClo
             Message which chat?
           </Txt>
           <ScrollView style={{ flexShrink: 1 }}>
-            {rows(chats, Date.now()).map((r) => (
+            {rows(chats, Date.now(), null, workingSince).map((r) => (
               <Pressable key={r.slot} accessibilityRole="button" accessibilityLabel={r.title} onPress={() => onPick(r.slot)} style={{ paddingHorizontal: space.xl, paddingVertical: 12, minHeight: 52, justifyContent: "center" }}>
                 <Txt variant="body" style={{ fontWeight: "600" }}>
                   {r.title}
