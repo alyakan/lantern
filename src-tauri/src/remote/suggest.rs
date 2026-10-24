@@ -99,6 +99,8 @@ pub fn digests(hub: &SessionHub) -> Vec<Digest> {
     chats.sort_by_key(|c| std::cmp::Reverse(c.active_at));
     chats
         .into_iter()
+        // A chat on another model than Claude's (a local one, say) isn't told to Claude: that call is on the user's own login.
+        .filter(|c| !hub.is_off_claude(&c.slot))
         .take(CHATS)
         .map(|c| {
             let kept = match hub.since(&c.slot, 0) {
@@ -375,6 +377,25 @@ mod tests {
         assert_eq!(c.replied.as_deref(), Some("reply in c"));
         assert!(got.iter().all(|d| !d.project.contains('/')), "a project is a name, not a path");
         assert_eq!(got.iter().filter(|d| d.replied.is_none()).count(), got.len() - 1, "only c has been answered");
+    }
+
+    /// The suggestions are made on the user's own Claude login, so what is said in a chat on another model (a local one, say)
+    /// is never put to it: not the words, and not the chat's title either.
+    #[test]
+    fn a_chat_on_another_provider_than_claudes_is_not_told_to_claude() {
+        let remote = crate::remote::Remote::default();
+        for slot in ["claude-chat", "local-chat"] {
+            remote.hub.opened(slot, "/Users/me/app");
+            remote.hub.titled(slot, &format!("Title of {slot}"));
+            remote.bus.publish(slot, UiEvent::UserText { text: format!("private words in {slot}"), at: Some(1), sent_by: None, images: 0 });
+        }
+        remote.hub.set_off_claude("local-chat", true);
+        let got = digests(&remote.hub);
+        assert_eq!(got.iter().map(|d| d.slot.as_str()).collect::<Vec<_>>(), ["claude-chat"]);
+        assert!(!prompt(&got, &projects()).contains("local-chat") && !prompt(&got, &projects()).contains("private words in local"));
+        // Started again on Claude, it is part of them again.
+        remote.hub.set_off_claude("local-chat", false);
+        assert_eq!(digests(&remote.hub).len(), 2);
     }
 
     #[test]

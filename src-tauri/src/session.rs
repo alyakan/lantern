@@ -2,6 +2,7 @@
 //! drives it with. What a session does on the wire is its provider's own (see provider/).
 
 use crate::args::{HelperConfig, Mode};
+use crate::endpoints::GatewayLaunch;
 use crate::provider::claude_session::ClaudeSession;
 use crate::provider::codex_session::CodexSession;
 use crate::provider::ProviderId;
@@ -34,6 +35,8 @@ pub struct SessionConfig {
     pub helper: HelperConfig,
     /// PATH for the child (the user's login-shell PATH); None inherits ours.
     pub path_env: Option<String>,
+    /// A gateway chat's endpoint and key (see endpoints.rs); None for every other chat.
+    pub endpoint: Option<GatewayLaunch>,
 }
 
 /// One running agent process. An enum rather than a trait object: a session's calls are async, and each provider's has

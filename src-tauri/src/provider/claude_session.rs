@@ -1,6 +1,7 @@
 //! A running `claude` process: stream-json lines in and out, and the control requests on the same pipes.
 
-use crate::args::{enabled_plugins, launch_args, Role, ADVISOR_REVIEW_ENV};
+use crate::args::{add_settings, enabled_plugins, launch_args, Role, ADVISOR_REVIEW_ENV};
+use crate::endpoints::gateway_env;
 use crate::session::{EditHook, SessionConfig};
 use crate::stream_parser::StreamParser;
 use crate::ui_event::{Sink, UiEvent};
@@ -49,7 +50,22 @@ fn command(cfg: &SessionConfig) -> Command {
     let worker = matches!(cfg.helper.role, Role::Worker { .. });
     // A worker starts with none of the user's plugins: which those are is read from their settings (see launch_args).
     let plugins = if worker { std::env::var_os("HOME").map(|home| enabled_plugins(std::path::Path::new(&home), &cfg.folder)).unwrap_or_default() } else { vec![] };
-    cmd.args(launch_args(cfg.mode, cfg.auto_approve, cfg.resume.as_deref(), cfg.model.as_deref(), cfg.effort.as_deref(), cfg.advisor.as_deref(), &cfg.helper, &plugins)).current_dir(&cfg.folder);
+    let mut args = launch_args(cfg.mode, cfg.auto_approve, cfg.resume.as_deref(), cfg.model.as_deref(), cfg.effort.as_deref(), cfg.advisor.as_deref(), &cfg.helper, &plugins);
+    // A gateway chat: where to go and on what model in `--settings` (which outranks the user's settings files; the token can't
+    // go there, a command line is readable by any process), and the token and what to take out in the environment.
+    let gateway = cfg.endpoint.as_ref().zip(cfg.model.as_deref()).map(|(g, model)| gateway_env(g, model));
+    if let Some(g) = &gateway {
+        add_settings(&mut args, g.settings.clone());
+    }
+    cmd.args(args).current_dir(&cfg.folder);
+    if let Some(g) = &gateway {
+        for k in g.remove {
+            cmd.env_remove(k);
+        }
+        for (k, v) in &g.set {
+            cmd.env(k, v);
+        }
+    }
     // A chat whose advisor checks its risky changes doesn't also have the security-guidance plugin review every stop and
     // commit on another model.
     if cfg.advisor.is_some() && !worker {
@@ -378,6 +394,7 @@ mod tests {
             subagent_model: None,
             helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None },
             path_env: None,
+            endpoint: None,
         }
     }
 
@@ -454,6 +471,40 @@ mod tests {
         let bare = command(&config("/bin/claude".into(), dir.path(), None));
         assert_eq!(bare.as_std().get_envs().count(), 0);
         assert!(!bare.as_std().get_args().any(|a| a == "--advisor" || a == "--resume"));
+    }
+
+    /// A gateway chat: the token is in the environment and never on the command line (any process of the user reads that),
+    /// and the place to go and every model slot are in the one `--settings`, merged with what a Lead already has there.
+    #[test]
+    fn a_gateway_chat_is_started_with_its_token_in_the_environment_and_its_models_in_settings() {
+        use crate::endpoints::{GatewayLaunch, Secret};
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config("/bin/claude".into(), dir.path(), Some("sess-1"));
+        cfg.provider = crate::provider::ProviderId::Gateway;
+        cfg.model = Some("qwen3-coder:30b".into());
+        cfg.endpoint = Some(GatewayLaunch { id: "ollama".into(), url: "http://localhost:11434".into(), key: Some(Secret::new("sk-secret-value".into())) });
+        let cmd = command(&cfg);
+        let cmd = cmd.as_std();
+        let args: Vec<String> = cmd.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert!(!args.iter().any(|a| a.contains("sk-secret-value")), "no secret on the command line");
+        assert_eq!(args.iter().filter(|a| *a == "--settings").count(), 1, "Claude Code takes one --settings");
+        let settings: serde_json::Value = serde_json::from_str(&args[args.iter().position(|a| a == "--settings").unwrap() + 1]).unwrap();
+        assert_eq!(settings["env"]["ANTHROPIC_BASE_URL"], "http://localhost:11434");
+        assert_eq!(settings["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "qwen3-coder:30b");
+        assert_eq!(args[args.iter().position(|a| a == "--model").unwrap() + 1], "qwen3-coder:30b");
+        let envs: std::collections::HashMap<String, Option<String>> = cmd.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        assert_eq!(envs["ANTHROPIC_AUTH_TOKEN"].as_deref(), Some("sk-secret-value"));
+        // What the user's shell may have set that would redirect it, or send as another credential, is removed (None = removed).
+        for gone in ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK"] {
+            assert_eq!(envs.get(gone), Some(&None), "{gone}");
+        }
+        // A Lead's own settings are kept beside it, not replaced.
+        let mut lead = cfg.clone();
+        lead.helper.role = crate::args::Role::Main;
+        let args: Vec<String> = command(&lead).as_std().get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args.iter().filter(|a| *a == "--settings").count(), 1);
+        let settings: serde_json::Value = serde_json::from_str(&args[args.iter().position(|a| a == "--settings").unwrap() + 1]).unwrap();
+        assert!(settings["permissions"]["ask"].is_array() && settings["env"]["ANTHROPIC_MODEL"] == "qwen3-coder:30b");
     }
 
     #[tokio::test]
