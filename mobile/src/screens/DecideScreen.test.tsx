@@ -4,7 +4,6 @@ import { attachSession } from "../test/fakeSession";
 import { chat, makeController, renderWith, waiting } from "../test/render";
 import { answersFrom, APPROVED_CLOSE_MS, CLOSE_AFTER_MS, DecideScreen, DONE_CLOSE_MS } from "./DecideScreen";
 import { approvalOf } from "../view/prompts";
-import { lightColors } from "../ui/theme";
 
 const push = waiting({ request_id: "p1" });
 const question = waiting({
@@ -78,28 +77,14 @@ describe("deciding", () => {
     expect(Date.now() - allowedAt).toBeLessThan(CLOSE_AFTER_MS);
   });
 
-  it("sends a soft ripple out from the approved circle that fades away, and leaves nothing on the screen", async () => {
+  it("closes in to the check and shows nothing going out over the screen: no ripple, for an approval or anything else", async () => {
     await decide();
     await act(async () => activate());
     await waitFor(() => expect(screen.getByText("Allowed.")).toBeTruthy());
-    // Nothing starts before the circle is laid out: that is where it grows from.
-    expect(screen.queryByTestId("approve-ripple", { includeHiddenElements: true })).toBeNull();
+    // Not even once the circle has been laid out, which is when the ripple used to start.
     await act(async () => fireEvent(screen.getByTestId("approved"), "layout", { nativeEvent: { layout: { x: 22, y: 500, width: 346, height: 110 } } }));
-    const ripple = StyleSheet.flatten(screen.getByTestId("approve-ripple", { includeHiddenElements: true }).props.style);
-    expect(ripple.backgroundColor).toBe(lightColors.go);
-    // Centred on the circle at the bar's right end, and big enough to reach the farthest corner from there.
-    expect(ripple.left + ripple.width / 2).toBe(22 + 346 - 31);
-    expect(ripple.top + ripple.height / 2).toBe(500 + 31);
-    expect(ripple.width / 2).toBeGreaterThanOrEqual(Math.hypot(22 + 346 - 31, 500 + 31));
-    // No frame is left behind.
-    expect(screen.queryByTestId("approve-frame", { includeHiddenElements: true })).toBeNull();
-  });
-
-  it("goes green for an approval only: not a denial, not a question's answers", async () => {
-    await decide();
-    await fireEvent.press(screen.getByRole("button", { name: "Deny" }));
-    await waitFor(() => expect(screen.getByText("Denied.")).toBeTruthy());
     expect(screen.queryByTestId("approve-ripple", { includeHiddenElements: true })).toBeNull();
+    expect(screen.queryByTestId("approve-frame", { includeHiddenElements: true })).toBeNull();
   });
 
   it("an answer to a question, or a denial, closes sooner than an approval does, by itself", async () => {
