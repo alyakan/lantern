@@ -2,7 +2,8 @@
 #
 #   fastlane check             # nothing is built or sent: says what a release would use, and what is missing
 #   fastlane ios archive       # build and sign for the App Store, upload nothing (the dry run of beta)
-#   fastlane ios beta          # build for the App Store and upload to TestFlight
+#   fastlane ios notes         # say what the next build's notes would be (what changed since the last tagged build); sends nothing
+#   fastlane ios beta          # build for the App Store and upload to TestFlight, with those notes as What to Test and in the app
 #   fastlane android beta      # build a signed bundle and upload it to Google Play's internal testing track
 #
 # Nothing secret is in this file or in the repository. Each secret stays on this Mac and is named by a variable:
@@ -48,6 +49,58 @@ end
 def app_version
   require "json"
   JSON.parse(File.read(File.join(mobile_dir, "app.json")))["expo"]["version"]
+end
+
+# Each phone build is tagged with its number, so the next one can say what changed since. (The Mac's releases are the v* tags.)
+BUILD_TAG = "mobile-build-"
+# TestFlight's limit for the "What to Test" text.
+TESTFLIGHT_NOTES_MAX = 4000
+
+# The phone build before this commit, by its tag; nil when none was tagged yet.
+def previous_build_tag
+  tag = `git -C #{mobile_dir} describe --tags --abbrev=0 --match '#{BUILD_TAG}*' HEAD 2>/dev/null`.strip
+  tag.empty? ? nil : tag
+end
+
+# What changed in the phone app since the previous build (scripts/build-notes.sh), one entry per bullet. Nothing when no build
+# was tagged yet: there is nothing to count from, and a guess would put the whole history in the notes.
+def whats_new
+  previous = previous_build_tag
+  unless previous
+    UI.important("No #{BUILD_TAG}* tag yet, so there is nothing to say what is new since. Tag the last build (git tag -a #{BUILD_TAG}<app version>-<number> <commit>).")
+    return []
+  end
+  out = `#{File.join(mobile_dir, "scripts", "build-notes.sh")} #{previous} HEAD`
+  UI.user_error!("scripts/build-notes.sh failed, so the notes can't be made.") unless $?.success?
+  UI.message("Since #{previous}:\n#{out}")
+  out.lines.map { |l| l.strip.sub(/\A- /, "") }.reject(&:empty?)
+end
+
+# The notes as TestFlight's text: bullets, cut at a whole bullet to fit its limit (in bytes: that is how Apple counts).
+def testflight_notes(bullets)
+  lines = bullets.map { |b| "- #{b}\n" }
+  return lines.join if lines.join.bytesize <= TESTFLIGHT_NOTES_MAX
+  kept = []
+  # Room is kept for the line that says how many were left out.
+  lines.each do |line|
+    break if (kept + [line]).join.bytesize > TESTFLIGHT_NOTES_MAX - 60
+    kept << line
+  end
+  kept.join + "…and #{lines.size - kept.size} more changes."
+end
+
+# What the build carries, for the app's own "What's new" (src/releaseNotes.json). Only a release build has anything in it.
+def write_app_notes(build_number, bullets)
+  require "json"
+  File.write(File.join(mobile_dir, "src", "releaseNotes.json"), JSON.pretty_generate({ version: app_version, build: build_number, notes: bullets }) + "\n")
+end
+
+# The same notes as a file beside the .ipa (mobile/build, which git ignores): to read, or to paste where the lane can't reach.
+def write_notes_file(build_number, bullets)
+  out = File.join(mobile_dir, "build")
+  FileUtils.mkdir_p(out)
+  body = bullets.empty? ? "Nothing new to say.\n" : bullets.map { |b| "- #{b}\n" }.join
+  File.write(File.join(out, "RELEASE_NOTES.md"), "# Lantern #{app_version}, build #{build_number}\n\n#{body}")
 end
 
 desc "Say what a release would use and what is missing; nothing is built or sent"
@@ -113,6 +166,12 @@ platform :ios do
     UI.success("Built and signed mobile/build/Lantern.ipa. Nothing was uploaded.")
   end
 
+  desc "Say what the next build's notes would be (what changed since the last tagged build); nothing is built or sent"
+  lane :notes do
+    bullets = whats_new
+    UI.success(bullets.empty? ? "Nothing new to say." : "TestFlight's What to Test would be:\n#{testflight_notes(bullets)}")
+  end
+
   desc "Build for the App Store and upload the build to TestFlight"
   lane :beta do
     refuse_preview_build!
@@ -121,6 +180,22 @@ platform :ios do
     last = latest_testflight_build_number(api_key: key, app_identifier: BUNDLE_ID, version: app_version, initial_build_number: 0)
     build_number = last + 1
     UI.message("Build #{build_number} of #{app_version}")
+    bullets = whats_new
+    notes_file = File.join(mobile_dir, "src", "releaseNotes.json")
+    begin
+      # The notes go into the app (shown once after an update) and are what TestFlight shows testers.
+      write_app_notes(build_number, bullets)
+      beta_build(key, build_number, bullets)
+    ensure
+      # The file in the repository is the empty default: a build's notes are never left in the working tree to be committed.
+      sh("git -C #{mobile_dir} checkout -- #{notes_file}")
+    end
+    tag = "#{BUILD_TAG}#{app_version}-#{build_number}"
+    sh("git -C #{mobile_dir} tag -a #{tag} -m 'Phone build #{build_number} of #{app_version}' HEAD")
+    UI.success("Uploaded build #{build_number}. Tagged #{tag} here: push it (git push origin #{tag}) so the next build counts from it. Add the build to a tester group in App Store Connect (testers inside your team need no review; an outside group needs a short beta review).")
+  end
+
+  def beta_build(key, build_number, bullets)
 
     # The native project is generated from app.json, never kept: every release starts from it.
     sh("cd #{mobile_dir} && npx expo prebuild --platform ios --clean")
@@ -139,8 +214,20 @@ platform :ios do
       export_xcargs: "-allowProvisioningUpdates #{xcode_auth}".strip,
     )
 
-    upload_to_testflight(api_key: key, skip_waiting_for_build_processing: true, skip_submission: true)
-    UI.success("Uploaded build #{build_number}. Add it to a tester group in App Store Connect (testers inside your team need no review; an outside group needs a short beta review).")
+    # With a changelog, fastlane waits only until the build shows up in App Store Connect (to set What to Test), not for processing.
+    # It would wait for ever if the build never showed up, so it gives up after a quarter of an hour.
+    options = { api_key: key, skip_waiting_for_build_processing: true, skip_submission: true, wait_processing_timeout_duration: 900 }
+    options[:changelog] = testflight_notes(bullets) unless bullets.empty?
+    write_notes_file(build_number, bullets)
+    begin
+      upload_to_testflight(**options)
+    rescue StandardError => e
+      # Waiting for the build to show up can fail after the upload went through. Then the build is there (and is tagged, by the
+      # lane), but its What to Test was not set: say so. If it is not there, the upload itself failed.
+      there = latest_testflight_build_number(api_key: key, app_identifier: BUNDLE_ID, version: app_version, initial_build_number: 0) >= build_number
+      raise e unless there
+      UI.important("Build #{build_number} was uploaded, but #{e.message}\nIts What to Test may not be set: it is in mobile/build/RELEASE_NOTES.md, to set in App Store Connect.")
+    end
   end
 end
 
