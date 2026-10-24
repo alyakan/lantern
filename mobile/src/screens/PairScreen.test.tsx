@@ -1,3 +1,4 @@
+import { StyleSheet } from "react-native";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { toBase64Url } from "../pairing";
 import { makeController, renderWith } from "../test/render";
@@ -15,6 +16,9 @@ jest.mock("expo-camera", () => ({
   useCameraPermissions: () => [mockPermission, mockRequest],
 }));
 jest.mock("expo-clipboard", () => ({ getStringAsync: jest.fn(async () => "lantern://pair?v=1&pasted") }));
+// The window's layout, which a test sets (the test window is as wide as a tablet's, so a phone is made).
+let mockLayout: "phone" | "overlay" | "split" = "phone";
+jest.mock("../shell/useLayout", () => ({ useLayout: () => mockLayout }));
 
 const link = `lantern://pair?v=1&k=${toBase64Url(new Uint8Array(32).fill(1))}&s=${toBase64Url(new Uint8Array(32).fill(2))}&h=192.168.1.20&p=47123&n=Aly%27s%20Mac&e=${Date.now() + 60_000}`;
 
@@ -27,7 +31,32 @@ function rig() {
 beforeEach(() => {
   mockCamera = {};
   mockPermission = { granted: true, canAskAgain: true };
+  mockLayout = "phone";
   mockRequest.mockClear();
+});
+
+describe("the pairing screen on a tablet", () => {
+  // The frame is hidden from the screen reader (it is only a picture), so it is asked for as hidden.
+  const style = (id: string) => StyleSheet.flatten(screen.getByTestId(id, { hidden: true }).props.style);
+
+  it("lets the camera have the whole screen, with a bigger frame to point at the code, and keeps its words in a readable column", async () => {
+    mockLayout = "overlay";
+    await renderWith(<PairScreen />, { connection: { kind: "unpaired" } });
+    expect(style("pair-frame")).toMatchObject({ width: 360, height: 360 });
+    expect(style("pair-column")).toMatchObject({ width: "100%", maxWidth: 560, alignSelf: "center" });
+    expect(screen.getByText("Pair with your Mac")).toBeTruthy();
+  });
+
+  it("is the same on a tablet held sideways", async () => {
+    mockLayout = "split";
+    await renderWith(<PairScreen />, { connection: { kind: "unpaired" } });
+    expect(style("pair-frame")).toMatchObject({ width: 360, height: 360 });
+  });
+
+  it("keeps the phone's frame on a phone, and in a narrow Split View pane", async () => {
+    await renderWith(<PairScreen />, { connection: { kind: "unpaired" } });
+    expect(style("pair-frame")).toMatchObject({ width: 220, height: 220 });
+  });
 });
 
 describe("pairing with the camera", () => {

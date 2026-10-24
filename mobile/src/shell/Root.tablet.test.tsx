@@ -39,6 +39,25 @@ const column = () => screen.getByTestId("chats-column", { hidden: true });
 const press = (name: string | RegExp) => fireEvent.press(screen.getByRole("button", { name }));
 const two = [chat({ slot: "a", title: "Release 0.1.53" }), chat({ slot: "b", title: "Fix the footer", project: "site" })];
 
+describe("the screens before the chats, on a tablet", () => {
+  beforeEach(() => {
+    mockLayout = "overlay";
+  });
+
+  it("gives the pairing screen the whole width, the camera and all: it is not in the narrow column", async () => {
+    await open({ connection: { kind: "unpaired" } });
+    expect(screen.getByText("Pair with your Mac")).toBeTruthy();
+    expect(screen.getByTestId("pair-column")).toBeTruthy();
+    expect(screen.queryByTestId("narrow-column")).toBeNull();
+  });
+
+  it("keeps the words-on-paper screens in a readable column in the middle", async () => {
+    await open({ connection: { kind: "offline", reason: "Can't reach Aly's Mac.", retryInMs: 1000 }, chats: [] });
+    expect(screen.getByText("Can't reach your Mac")).toBeTruthy();
+    expect(screen.getByTestId("narrow-column")).toBeTruthy();
+  });
+});
+
 describe("a tablet held sideways", () => {
   beforeEach(() => {
     mockLayout = "split";
