@@ -101,12 +101,16 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
     return () => sync.unfollow(slot);
   }, [sync, slot]);
 
-  // Looking at the chat clears its card on the lock screen: opening it, and coming back to the app while it is open.
+  // Looking at a chat that has stopped clears its card on the lock screen (opening it, and coming back to the app while it is
+  // open). While the chat is still working, or waiting on you, the card stays: you may open the chat and lock the phone again,
+  // and it clears once the chat has stopped, if you are looking at it then.
+  const busy = chat?.status === "working" || chat?.status === "needs_you";
   useEffect(() => {
+    if (busy) return;
     void controller.liveCards.opened(slot);
     const sub = AppState.addEventListener("change", (s) => s === "active" && void controller.liveCards.opened(slot));
     return () => sub.remove();
-  }, [controller, slot]);
+  }, [controller, slot, busy]);
 
   // A catch-up that covered a stretch away says so for a moment.
   useEffect(() => {
