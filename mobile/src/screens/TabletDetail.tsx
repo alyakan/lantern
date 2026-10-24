@@ -17,12 +17,14 @@ export interface TabletDetailProps {
   /** Whether the chats are beside the chat ("split") or slide in over it ("overlay"). */
   layout: "overlay" | "split";
   onShowChats: () => void;
+  /** Takes the chats away from beside the chat, so the chat has the whole width. */
+  onHideChats: () => void;
   onBack: () => void;
   onReview: (slot: string, requestId: string) => void;
 }
 
 /** What a tablet shows beside the chats: the chat they picked, in a column that reads well, or a word to pick one. */
-export function TabletDetail({ slot, decide, layout, onShowChats, onBack, onReview }: TabletDetailProps) {
+export function TabletDetail({ slot, decide, layout, onShowChats, onHideChats, onBack, onReview }: TabletDetailProps) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   if (!slot) {
@@ -40,7 +42,7 @@ export function TabletDetail({ slot, decide, layout, onShowChats, onBack, onRevi
     <View style={{ flex: 1, backgroundColor: colors.paper }}>
       <View style={{ flex: 1, width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center" }}>
         {/* Keyed by the chat: another chat is a new screen, which follows its own events and keeps nothing of the last one's. */}
-        <ChatScreen key={slot} slot={slot} lead={layout === "split" ? "none" : "sidebar"} onSidebar={onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} />
+        <ChatScreen key={slot} slot={slot} lead={layout === "split" ? "hide" : "sidebar"} onSidebar={layout === "split" ? onHideChats : onShowChats} onBack={onBack} onReview={(requestId) => onReview(slot, requestId)} />
       </View>
       {decide && (
         <View testID="decision-pane" style={[StyleSheet.absoluteFill, { backgroundColor: colors.night }]}>

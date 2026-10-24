@@ -29,8 +29,8 @@ export interface ChatProps {
   onBack: () => void;
   /** Opens the full-screen decision for one of this chat's prompts. */
   onReview: (requestId: string) => void;
-  /** What leads the header: a back button (the phone), the chats' button (a tablet held upright: they slide in), or nothing (they are beside the chat). */
-  lead?: "back" | "sidebar" | "none";
+  /** What leads the header: a back button (the phone), the chats' button (a tablet held upright: they slide in), or the button that hides them (they are beside the chat, and this gives the chat the whole width). */
+  lead?: "back" | "sidebar" | "hide";
   onSidebar?: () => void;
 }
 
@@ -257,12 +257,12 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
             </Glass>
           </PressScale>
         )}
-        {lead === "sidebar" && (
-          <PressScale accessibilityRole="button" accessibilityLabel="Show chats" onPress={onSidebar} hitSlop={8} scaleTo={0.88}>
+        {(lead === "sidebar" || lead === "hide") && (
+          <PressScale accessibilityRole="button" accessibilityLabel={lead === "hide" ? "Hide chats" : "Show chats"} onPress={onSidebar} hitSlop={8} scaleTo={0.88}>
             <Glass style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
-              {/* A window with its side panel: the chats. */}
-              <View accessibilityElementsHidden style={{ width: 20, height: 16, borderRadius: 4, borderWidth: 2, borderColor: colors.ink, flexDirection: "row" }}>
-                <View style={{ width: 5, borderRightWidth: 2, borderColor: colors.ink }} />
+              {/* A window with its side panel: the chats (filled in while they are beside the chat). */}
+              <View accessibilityElementsHidden style={{ width: 20, height: 16, borderRadius: 4, borderWidth: 2, borderColor: colors.ink, flexDirection: "row", overflow: "hidden" }}>
+                <View style={{ width: 5, borderRightWidth: 2, borderColor: colors.ink, backgroundColor: lead === "hide" ? colors.ink : "transparent" }} />
               </View>
             </Glass>
           </PressScale>

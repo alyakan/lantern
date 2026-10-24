@@ -134,6 +134,12 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     // Pinned, they are beside the chat. Unpinned from the list itself, they stay slid in until a chat is chosen.
     setChatsOpen(!next);
   };
+  // From the chat's own button: the chats go away entirely, and the chat has the whole width.
+  const hideChats = () => {
+    setPinned(false);
+    void saveSidebarPinned(false);
+    setChatsOpen(false);
+  };
 
   // The notes come up once, with Home, after an update. A phone that was unpaired at some point this session was paired just
   // now (a new install: nothing is new to it), so its notes are only marked as shown.
@@ -271,7 +277,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     <View style={{ flex: 1 }}>
       {tablet ? (
         <TabletShell layout={shellLayout} open={chatsOpen} onOpen={() => setChatsOpen(true)} onClose={() => setChatsOpen(false)} sidebar={homeScreen(shown)}>
-          <TabletDetail slot={shown} decide={deciding} layout={shellLayout} onShowChats={() => setChatsOpen(true)} onBack={back} onReview={review} />
+          <TabletDetail slot={shown} decide={deciding} layout={shellLayout} onShowChats={() => setChatsOpen(true)} onHideChats={hideChats} onBack={back} onReview={review} />
         </TabletShell>
       ) : (
         <AnimatedStack items={items} onBack={back} />
