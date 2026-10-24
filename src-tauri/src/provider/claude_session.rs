@@ -507,6 +507,32 @@ mod tests {
         assert!(settings["permissions"]["ask"].is_array() && settings["env"]["ANTHROPIC_MODEL"] == "qwen3-coder:30b");
     }
 
+    /// Real `claude` against an Anthropic-compatible endpoint, started as a gateway chat is: it answers from that endpoint, on
+    /// the endpoint's model. Run by hand (it needs `claude` and a server, and reads the user's own login without using it):
+    /// `LANTERN_LIVE_GATEWAY_URL=http://127.0.0.1:18083 cargo test live_gateway -- --ignored`; the server's log says who it was.
+    #[tokio::test]
+    #[ignore]
+    async fn live_gateway_chat_answers_from_the_endpoint() {
+        use crate::endpoints::GatewayLaunch;
+        let Ok(url) = std::env::var("LANTERN_LIVE_GATEWAY_URL") else { return };
+        let claude = std::env::var("LANTERN_LIVE_CLAUDE").unwrap_or_else(|_| format!("{}/.local/bin/claude", std::env::var("HOME").unwrap()));
+        let dir = tempfile::tempdir().unwrap();
+        let mut cfg = config(claude.into(), dir.path(), None);
+        cfg.provider = crate::provider::ProviderId::Gateway;
+        cfg.model = Some("fake-model".into());
+        cfg.endpoint = Some(GatewayLaunch { id: "fake".into(), url, key: None });
+        let (sink, mut rx) = channel_sink();
+        let hook: EditHook = Arc::new(|_: &str, _: Option<String>| {});
+        let mut s = Session::spawn(&cfg, sink, hook).unwrap();
+        s.initialize().await;
+        s.send("say hello").await.unwrap();
+        let said = tokio::time::timeout(Duration::from_secs(90), next_matching(&mut rx, |e| matches!(e, UiEvent::AssistantText { .. }))).await.expect("no reply from the endpoint");
+        let UiEvent::AssistantText { text, .. } = said else { unreachable!() };
+        assert!(text.contains("fake gateway"), "{text}");
+        next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
+        s.stop().await;
+    }
+
     #[tokio::test]
     async fn a_request_gets_its_own_reply_and_an_error_comes_back_as_one() {
         let dir = tempfile::tempdir().unwrap();
