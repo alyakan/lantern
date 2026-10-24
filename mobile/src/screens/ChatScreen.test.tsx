@@ -533,6 +533,16 @@ describe("what waits on you, in a chat", () => {
     expect(screen.queryByText(/[{}"]/)).toBeNull();
   });
 
+  it("keeps a long answer inside the chat: the chip can't be wider than the screen, and its words wrap beside the check", async () => {
+    const long = "Use the staged rollout with a ten percent first wave, watch the crash rate for a day, then widen it to everyone if it holds, and keep the old build on hand";
+    const item = { kind: "prompt" as const, id: "q1", toolName: "AskUserQuestion", input: { questions: [{ question: "How should we roll it out?", header: "", options: [{ label: long, description: "" }], multiSelect: false }] }, state: "allowed" as const, by: "phone-x", answer: long };
+    await render(<PromptRow item={item} me="phone-x" onReview={() => {}} />);
+    const chip = screen.getByTestId("answer-chip");
+    expect(StyleSheet.flatten(chip.props.style).maxWidth).toBe("100%");
+    expect(StyleSheet.flatten(chip.parent!.props.style).maxWidth).toBe("100%");
+    expect(StyleSheet.flatten(screen.getByText(long).props.style).flexShrink).toBe(1);
+  });
+
   it("says Claude stopped asking when it withdraws", async () => {
     await withSession([asked, { kind: "permission_withdrawn", request_id: "p1" }]);
     expect(screen.getByText("Push the branch")).toBeTruthy();
