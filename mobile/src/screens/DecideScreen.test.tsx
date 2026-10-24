@@ -77,20 +77,26 @@ describe("deciding", () => {
     expect(Date.now() - allowedAt).toBeLessThan(CLOSE_AFTER_MS - 100);
   });
 
-  it("goes green from the approved circle outwards, behind the words", async () => {
+  it("sends a ring out from the approved circle, and leaves a frame of green round the screen, with the middle as it was", async () => {
     await decide();
     await act(async () => activate());
     await waitFor(() => expect(screen.getByText("Allowed.")).toBeTruthy());
     // Nothing starts before the circle is laid out: that is where it grows from.
     expect(screen.queryByTestId("approve-ripple", { includeHiddenElements: true })).toBeNull();
     await act(async () => fireEvent(screen.getByTestId("approved"), "layout", { nativeEvent: { layout: { x: 22, y: 500, width: 346, height: 110 } } }));
-    const ripple = StyleSheet.flatten(screen.getByTestId("approve-ripple", { includeHiddenElements: true }).props.style);
-    expect(ripple.backgroundColor).toBe(lightColors.go);
-    // Centred on the circle at the bar's right end: its left edge is 62 / 2 in from the bar's.
-    expect(ripple.left + ripple.width / 2).toBe(22 + 346 - 31);
-    expect(ripple.top + ripple.height / 2).toBe(500 + 31);
-    // Big enough to cover the farthest corner of the screen from there.
-    expect(ripple.width / 2).toBeGreaterThanOrEqual(Math.hypot(22 + 346 - 31, 500 + 31));
+    const ring = StyleSheet.flatten(screen.getByTestId("approve-ripple", { includeHiddenElements: true }).props.style);
+    const frame = StyleSheet.flatten(screen.getByTestId("approve-frame", { includeHiddenElements: true }).props.style);
+    // Both are only an outline: nothing fills the middle of the screen, or what is behind the ring.
+    for (const style of [ring, frame]) {
+      expect(style.backgroundColor).toBeUndefined();
+      expect(style.borderWidth).toBeGreaterThan(0);
+      // And the green is the colour at a part of its strength, not all of it.
+      expect(style.borderColor).toMatch(new RegExp(`^${lightColors.go}[0-9a-f]{2}$`));
+      expect(parseInt(style.borderColor.slice(-2), 16) / 255).toBeLessThan(0.7);
+    }
+    // The frame is the screen's edge, a few points thick, and fixed there.
+    expect(frame).toMatchObject({ left: 0, top: 0, right: 0, bottom: 0 });
+    expect(frame.borderWidth).toBeLessThanOrEqual(8);
   });
 
   it("goes green for an approval only: not a denial, not a question's answers", async () => {
@@ -98,6 +104,7 @@ describe("deciding", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Deny" }));
     await waitFor(() => expect(screen.getByText("Denied.")).toBeTruthy());
     expect(screen.queryByTestId("approve-ripple", { includeHiddenElements: true })).toBeNull();
+    expect(screen.queryByTestId("approve-frame", { includeHiddenElements: true })).toBeNull();
   });
 
   it("an answer to a question stays as long as it did", async () => {
