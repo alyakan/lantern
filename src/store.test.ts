@@ -238,13 +238,13 @@ describe("reducer", () => {
 
   it("a post-hook is a note of Lantern's own, not a prompt, whether it was sent now or replayed", () => {
     const sent = ev({ ...initialState, status: "running" }, { kind: "user_text", text: "[Lantern post-hook]\nUpdate the brain if needed", at: 9, sent_by: "lantern" });
-    expect(sent.items[0]).toMatchObject({ type: "user", text: "Post-hook: Update the brain if needed", auto: true, at: 9 });
+    expect(sent.items[0]).toEqual({ type: "hook", id: "h1", text: "Update the brain if needed", at: 9 });
     expect(sent).toMatchObject({ status: "running", thinking: true });
     // Replayed (no sender): shown the same, and it starts nothing.
     const replayed = ev({ ...initialState, status: "idle" }, { kind: "user_text", text: "[Lantern post-hook]\nUpdate the brain if needed" });
-    expect(replayed.items[0]).toMatchObject({ type: "user", text: "Post-hook: Update the brain if needed", auto: true });
+    expect(replayed.items[0]).toMatchObject({ type: "hook", text: "Update the brain if needed" });
     expect(replayed.status).toBe("idle");
-    // It is never a chat's first prompt, so it names nothing.
+    // It is not a prompt: it names no chat.
     expect(firstPrompt(replayed)).toBeNull();
   });
 

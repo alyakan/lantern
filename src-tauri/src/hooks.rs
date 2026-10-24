@@ -377,6 +377,21 @@ mod tests {
     }
 
     #[test]
+    fn a_restart_gives_back_the_turn_held_for_the_post_hook_and_forgets_one_still_to_come() {
+        let h = SlotHooks::default();
+        // Held for a hook that is running: it is given back, once.
+        h.follow_with(Some("save".into()));
+        let held = done(false, Some(0.1), 0.1);
+        h.turn_ended(held.clone());
+        assert_eq!(h.post_failed(), Some(held));
+        // Still to come, for a turn that was cut off: nothing to give back, and it doesn't follow the next turn that ends.
+        h.follow_with(Some("save".into()));
+        assert_eq!(h.post_failed(), None);
+        let next = done(false, None, 0.2);
+        assert_eq!(h.turn_ended(next.clone()), TurnEnd::Publish(Box::new(next)));
+    }
+
+    #[test]
     fn a_message_that_did_not_go_takes_its_post_hook_back() {
         let h = SlotHooks::default();
         h.follow_with(Some("update the brain".into()));

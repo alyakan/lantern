@@ -903,6 +903,11 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, 
         slot.claude_pid.store(0, std::sync::atomic::Ordering::SeqCst);
         slot.bridge.cancel_all();
         old.stop().await;
+        // A turn held back for a post-hook that was going to follow it is over now (the claude doing it is gone), and so is
+        // a post-hook waiting for a turn that won't end: the new claude starts with neither.
+        if let (Some(held), Some(state)) = (slot.hooks.post_failed(), app.try_state::<AppState>()) {
+            sent_out(app, &state, id, held);
+        }
     }
     slot.bridge.set_folder(&cfg.folder);
     // Set (or cleared) at every start of this chat's claude, so a slot that is reused never keeps the last one's scope.

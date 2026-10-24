@@ -115,6 +115,8 @@ export type ChatItem =
       images?: number;
     }
   | { type: "assistant"; id: string; text: string }
+  /** The post-hook (see lib/chatHooks.ts) was sent: what follows it, up to the turn's end, is Claude doing it. `text` is the hook's words. */
+  | { type: "hook"; id: string; text: string; at?: number }
   | ToolItem
   | ShellItem
   /** `autoRule`: a rule allowed it with no card (decision is then "allowed"); `scope` is where that rule applies. */
@@ -566,7 +568,7 @@ function applyEvent(state: State, ev: UiEvent): State {
       const seq = state.seq + 1;
       // A post-hook is Lantern's own message, sent once Claude has answered (see lib/chatHooks.ts): a note, not a prompt.
       const hook = postText(ev.text);
-      if (hook !== null) return { ...state, ...(ev.sent_by ? { status: "running" as const, thinking: true } : {}), seq, items: [...state.items, { type: "user", id: `u${seq}`, text: `Post-hook: ${hook}`, at: ev.at, auto: true }] };
+      if (hook !== null) return { ...state, ...(ev.sent_by ? { status: "running" as const, thinking: true } : {}), seq, items: [...state.items, { type: "hook", id: `h${seq}`, text: hook, at: ev.at }] };
       const sent = readShellContext(readSettingsNote(ev.text));
       const read = readFlavourNote(readPageNote(sent.text));
       const { flavour, explain } = read;
