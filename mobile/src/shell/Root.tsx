@@ -211,7 +211,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
           <TabletDetail slot={shown} decide={deciding} layout={layout} onShowChats={() => setChatsOpen(true)} onBack={back} onReview={review} />
         </TabletShell>
       ) : (
-        <AnimatedStack items={items} />
+        <AnimatedStack items={items} onBack={back} />
       )}
       {macSheet && (
         <MacSheet
