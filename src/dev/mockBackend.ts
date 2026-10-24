@@ -908,7 +908,8 @@ async function playTurn(slot: string) {
   const watch = { id: "bwatch", task_type: "local_bash", description: "npx vitest --watch src/client" };
   mockTasks[slot] = [dev, watch];
   await send({ kind: "background_tasks", tasks: [dev, watch] });
-  if (slotProvider[slot] === "codex") {
+  // (Codex and an endpoint report tokens, no dollars: Claude Code's price for a model it doesn't know is made up.)
+  if (slotProvider[slot] === "codex" || slotProvider[slot] === "gateway") {
     await send({ kind: "turn_done", is_error: false, result: "ok", ...usedBy(slot, 18_300), duration_ms: 8200, auth_hint: false, denied: allowed ? 0 : 1, context_window: 200_000 });
     return;
   }

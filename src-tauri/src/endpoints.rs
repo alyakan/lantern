@@ -152,9 +152,21 @@ pub struct EndpointStore {
 }
 
 impl EndpointStore {
-    /// What is saved at `path`; none (a missing or unreadable file) is no endpoints.
+    /// What is saved at `path`; none (a missing or unreadable file) is no endpoints. Each one is checked again as it is read, and
+    /// one that wouldn't be saved now (a file edited by hand: a key over http to a public host, say) is left out.
     pub fn load(path: Option<PathBuf>) -> EndpointStore {
-        let items = path.as_deref().and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice::<Vec<Endpoint>>(&b).ok()).unwrap_or_default();
+        let items = path
+            .as_deref()
+            .and_then(|p| std::fs::read(p).ok())
+            .and_then(|b| serde_json::from_slice::<Vec<Endpoint>>(&b).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| !e.id.is_empty())
+            .filter_map(|e| {
+                let id = e.id.clone();
+                clean(e).ok().map(|e| Endpoint { id, ..e })
+            })
+            .collect();
         EndpointStore { path, items: Mutex::new(items) }
     }
 
@@ -419,7 +431,19 @@ mod tests {
         // Only the variable's name is written, never a key (there is nowhere for one).
         assert!(!std::fs::read_to_string(&path).unwrap().contains("sk-"));
         std::fs::write(&path, b"{not json").unwrap();
-        assert!(EndpointStore::load(Some(path)).list().is_empty());
+        assert!(EndpointStore::load(Some(path.clone())).list().is_empty());
+        // A hand-edited file is checked as it is read: a key over http to a public host, a bad model id or no id is left out,
+        // and one that is fine stays.
+        std::fs::write(
+            &path,
+            br#"[{"id":"bad","name":"Bad","url":"http://203.0.113.9:4000","key_env":"K","models":[]},
+                 {"id":"flag","name":"Flag","url":"https://x.test","models":["--bare"]},
+                 {"name":"No id","url":"https://x.test"},
+                 {"id":"fine","name":"Fine","url":"http://localhost:11434/","models":["qwen3:8b"]}]"#,
+        )
+        .unwrap();
+        let kept = EndpointStore::load(Some(path)).list();
+        assert_eq!(kept.iter().map(|e| (e.id.as_str(), e.url.as_str())).collect::<Vec<_>>(), [("fine", "http://localhost:11434")]);
         let _ = std::fs::remove_dir_all(dir);
     }
 

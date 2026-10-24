@@ -2300,7 +2300,14 @@ export default function App() {
   }, []);
   // The backend's session hub knows where each chat stands from its events; what only this window knows (the title it
   // shows, which chats are asleep) it is told when that changes.
-  const hubList = windowChats(chats, openByProject, harnessBySlot, projectColors);
+  // A chat on another provider than Claude's is said so (a restored one that isn't open yet from what was saved of its session),
+  // so nothing said in it is put to Claude for a phone's suggestions.
+  const offClaude = (slot: string) => {
+    const s = chats.slots[slot];
+    const id = s?.provider ? providerIdOf(s.provider) : ((s?.sessionId && providerBySession[s.sessionId]) || CLAUDE);
+    return id !== CLAUDE;
+  };
+  const hubList = windowChats(chats, openByProject, harnessBySlot, projectColors, offClaude);
   const hubKey = JSON.stringify(hubList);
   useEffect(() => {
     void api.remoteWindowChats(hubList).catch(() => {});

@@ -97,7 +97,7 @@ impl FixtureHost {
 
     fn build(remote: &Remote, pace: Duration, waiting: bool) -> Arc<Self> {
         let (bus, hub) = (remote.bus.clone(), remote.hub.clone());
-        let chat = |slot: &str, title: &str, asleep: bool| WindowChat { slot: slot.into(), folder: "/Users/you/dev/lantern".into(), title: title.into(), asleep, session_id: Some(format!("session-{slot}")), permissions: None, preset: None, color: None, workflow: None };
+        let chat = |slot: &str, title: &str, asleep: bool| WindowChat { slot: slot.into(), folder: "/Users/you/dev/lantern".into(), title: title.into(), asleep, session_id: Some(format!("session-{slot}")), permissions: None, preset: None, color: None, workflow: None, off_claude: false };
 
         let mut history: HashMap<String, Vec<UiEvent>> = HashMap::new();
         history.insert(

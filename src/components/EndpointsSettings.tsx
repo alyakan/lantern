@@ -101,7 +101,7 @@ export function EndpointsSettings({ onSaved }: EndpointsSettingsProps) {
         <div>
           <h2 className="mode-guide-title">Endpoints</h2>
           <p className="mode-guide-summary">
-            Run a chat on a model that isn't Anthropic's: Claude Code is sent to an endpoint that speaks Anthropic's Messages API (/v1/messages), such as LiteLLM, OpenRouter, Ollama or LM Studio. A chat on an endpoint sends nothing to Anthropic, and has no Auto mode, advisor, effort level or price; skills and Lantern's tools stay. Anthropic doesn't support non-Claude models in Claude Code, so some things may not work on every model.
+            Run a chat on a model that isn't Anthropic's: Claude Code is sent to an endpoint that speaks Anthropic's Messages API (/v1/messages), such as LiteLLM, OpenRouter, Ollama or LM Studio. A chat on an endpoint sends its messages to the endpoint, not to Anthropic, and has no Auto mode, advisor, effort level or price; skills and Lantern's tools stay. Anthropic doesn't support non-Claude models in Claude Code, so some things may not work on every model.
           </p>
         </div>
       </div>

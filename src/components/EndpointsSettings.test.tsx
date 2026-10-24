@@ -40,12 +40,14 @@ describe("Settings → Endpoints", () => {
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 
-  it("says it keeps no keys and that a chat on an endpoint sends nothing to Anthropic", async () => {
+  it("says it keeps no keys, where a chat's messages go, and what Anthropic does and doesn't support", async () => {
     backend();
     render(<EndpointsSettings onSaved={() => {}} />);
     await screen.findByDisplayValue("Ollama");
     expect(screen.getByText(/Lantern keeps no keys/)).toBeInTheDocument();
-    expect(screen.getByText(/sends nothing to Anthropic/)).toBeInTheDocument();
+    // What was checked (its messages go to the endpoint), not a claim about everything Claude Code might ever send anywhere.
+    expect(screen.getByText(/sends its messages to the endpoint, not to Anthropic/)).toBeInTheDocument();
+    expect(screen.queryByText(/sends nothing to Anthropic/)).toBeNull();
     expect(screen.getByText(/Anthropic doesn't support non-Claude models in Claude Code/)).toBeInTheDocument();
   });
 

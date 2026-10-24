@@ -508,29 +508,47 @@ mod tests {
     }
 
     /// Real `claude` against an Anthropic-compatible endpoint, started as a gateway chat is: it answers from that endpoint, on
-    /// the endpoint's model. Run by hand (it needs `claude` and a server, and reads the user's own login without using it):
-    /// `LANTERN_LIVE_GATEWAY_URL=http://127.0.0.1:18083 cargo test live_gateway -- --ignored`; the server's log says who it was.
+    /// the endpoint's model, for two turns, and the server's own log (`LANTERN_LIVE_GATEWAY_LOG`) shows that EVERY request it
+    /// got named the chosen model (a colon-and-slash id, passed through unchanged) and carried no Anthropic credential. Run by
+    /// hand (it needs `claude` and the server in /tmp/gw-probe/bin/fake_gateway.py, and reads the user's own login without using it):
+    /// `LANTERN_LIVE_GATEWAY_URL=http://127.0.0.1:18083 LANTERN_LIVE_GATEWAY_LOG=/tmp/gw-probe/log-d.jsonl cargo test live_gateway -- --ignored`
     #[tokio::test]
     #[ignore]
     async fn live_gateway_chat_answers_from_the_endpoint() {
         use crate::endpoints::GatewayLaunch;
-        let Ok(url) = std::env::var("LANTERN_LIVE_GATEWAY_URL") else { return };
+        let (Ok(url), Ok(log)) = (std::env::var("LANTERN_LIVE_GATEWAY_URL"), std::env::var("LANTERN_LIVE_GATEWAY_LOG")) else { return };
         let claude = std::env::var("LANTERN_LIVE_CLAUDE").unwrap_or_else(|_| format!("{}/.local/bin/claude", std::env::var("HOME").unwrap()));
+        const MODEL: &str = "openai/qwen3-coder:30b";
         let dir = tempfile::tempdir().unwrap();
         let mut cfg = config(claude.into(), dir.path(), None);
         cfg.provider = crate::provider::ProviderId::Gateway;
-        cfg.model = Some("fake-model".into());
+        cfg.model = Some(MODEL.into());
         cfg.endpoint = Some(GatewayLaunch { id: "fake".into(), url, key: None });
         let (sink, mut rx) = channel_sink();
         let hook: EditHook = Arc::new(|_: &str, _: Option<String>| {});
         let mut s = Session::spawn(&cfg, sink, hook).unwrap();
         s.initialize().await;
-        s.send("say hello").await.unwrap();
-        let said = tokio::time::timeout(Duration::from_secs(90), next_matching(&mut rx, |e| matches!(e, UiEvent::AssistantText { .. }))).await.expect("no reply from the endpoint");
-        let UiEvent::AssistantText { text, .. } = said else { unreachable!() };
-        assert!(text.contains("fake gateway"), "{text}");
-        next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
+        let mut tokens = Vec::new();
+        for message in ["say hello", "and say it again"] {
+            s.send(message).await.unwrap();
+            let said = tokio::time::timeout(Duration::from_secs(90), next_matching(&mut rx, |e| matches!(e, UiEvent::AssistantText { .. }))).await.expect("no reply from the endpoint");
+            let UiEvent::AssistantText { text, .. } = said else { unreachable!() };
+            assert!(text.contains("fake gateway"), "{text}");
+            let UiEvent::TurnDone { tokens: used, session_tokens, .. } = next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await else { unreachable!() };
+            tokens.push((used, session_tokens));
+        }
         s.stop().await;
+        // What the window would show of use: tokens, from the result's own usage, for a model Claude Code has no price for.
+        assert!(tokens.iter().all(|(_, session)| *session > 0), "no usage reached the window: {tokens:?}");
+        // Every request the server got, the background ones included, was for the chosen model and not as the user's login.
+        let seen: Vec<serde_json::Value> = std::fs::read_to_string(&log).unwrap().lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let posts: Vec<&serde_json::Value> = seen.iter().filter(|r| r["m"] == "POST" && r["path"].as_str().is_some_and(|p| p.starts_with("/v1/messages"))).collect();
+        assert!(posts.len() >= 2, "{seen:?}");
+        for r in &posts {
+            assert_eq!(r["model"], MODEL, "{r}");
+            assert!(!r["auth"].to_string().contains("sk-ant"), "an Anthropic credential reached the endpoint: {r}");
+        }
+        eprintln!("{} requests, models {:?}, usage {tokens:?}", seen.len(), posts.iter().map(|r| r["model"].as_str().unwrap_or("-")).collect::<std::collections::BTreeSet<_>>());
     }
 
     #[tokio::test]

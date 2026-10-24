@@ -94,9 +94,27 @@ describe("with an endpoint set up", () => {
     fireEvent.click(modelChip());
     await waitFor(() => expect(rows()).toEqual(["qwen3:8b", "llama3"]));
     expect(modelChip().title).not.toMatch(/Opus|Sonnet|Haiku/i);
-    // No effort levels, price or advisor: none of Anthropic's.
-    expect(document.querySelector(".turn-usage .cost, .turn-note")?.textContent ?? "").not.toContain("$");
   });
+
+  /** Claude Code prices a model it doesn't know with a made-up figure (its result says `costBasis: unknown`): a chat on an endpoint shows tokens only. */
+  it("counts what a turn used in tokens, never in dollars", async () => {
+    localStorage.setItem("settings.providerByFolder", JSON.stringify({ [FOLDER]: "gateway:ollama" }));
+    await launch("Ask Ollama…");
+    const box = screen.getByRole("textbox");
+    fireEvent.change(box, { target: { value: "retry on 503" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await screen.findByRole("button", { name: "Stop" });
+    // The chip for who it runs on goes once the chat has begun.
+    expect(document.querySelector(".provider-picker")).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Allow" }, { timeout: 10_000 }));
+    await screen.findByRole("button", { name: "Send" }, { timeout: 20_000 });
+    expect(document.querySelector(".turn-usage")?.textContent).toMatch(/tokens$/);
+    expect(document.querySelector(".turn-usage")?.textContent).not.toContain("$");
+    expect(document.querySelector(".turn-note")?.textContent ?? "").not.toContain("$");
+    fireEvent.mouseEnter(document.querySelector(".context-meter")!);
+    expect(document.querySelector(".context-meter")?.getAttribute("title")).toContain("This chat so far:");
+    expect(document.querySelector(".context-meter")?.getAttribute("title")).not.toContain("$");
+  }, 40_000);
 
   it("switches to another of its models by that model's own id", async () => {
     await launch();

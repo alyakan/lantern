@@ -279,7 +279,10 @@ impl SessionHub {
     /// Marks whether the chat runs on a provider other than Claude Code (set each time it starts), so what is said in it stays
     /// out of anything made on Claude.
     pub fn set_off_claude(&self, slot: &str, off: bool) {
-        self.chats.lock().unwrap().entry(slot.to_string()).or_default().off_claude = off;
+        // Only a chat that is listed: this must never make one appear.
+        if let Some(log) = self.chats.lock().unwrap().get_mut(slot) {
+            log.off_claude = off;
+        }
     }
 
     pub fn is_off_claude(&self, slot: &str) -> bool {
