@@ -224,6 +224,18 @@ describe("a chat a paired phone starts on an endpoint", () => {
     expect(started(calls).settings).toMatchObject({ provider: "gateway", endpoint: "ollama" });
   });
 
+  it("is not put on Auto or a Claude preset from the phone afterwards, whatever Settings let phones do, and nothing restarts", async () => {
+    localStorage.setItem("settings.providerByFolder", JSON.stringify({ [FOLDER]: "gateway:ollama" }));
+    const calls = await launch(settingsSaying(true), both);
+    await quiet();
+    const slot = String(sessions(calls)[0]?.[1]?.slot);
+    await fromPhoneEvent("remote-set-permissions", { slot, permissions: "auto" });
+    await fromPhoneEvent("remote-set-preset", { slot, preset: "max" });
+    await quiet();
+    expect(restarts(calls)).toHaveLength(0);
+    expect(harnessApplied(calls)).toHaveLength(0);
+  });
+
   /** A Codex chat started from a phone would stop at its first question with nobody able to answer: it starts on Claude instead. */
   it("starts on Claude, not Codex, when the project's own is Codex: a phone can't answer its questions", async () => {
     localStorage.setItem("settings.providerByFolder", JSON.stringify({ [FOLDER]: "codex" }));

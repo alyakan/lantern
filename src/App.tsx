@@ -912,7 +912,9 @@ export default function App() {
     const s = chats.slots[slot];
     const team = !!s && (!!s.orchestrator || !!chats.agents[slot]);
     remoteContext().then((ctx) => {
-      const target = { known: !!s && !team, idle: s?.status === "idle", asleep: s?.status === "asleep", background: s?.backgroundTasks.length ?? 0 };
+      // (A chat on another provider than Claude's has no Auto and no Claude presets: the phone is told why, nothing restarts.)
+      const onId = s?.provider ? providerIdOf(s.provider) : CLAUDE;
+      const target = { known: !!s && !team, idle: s?.status === "idle", asleep: s?.status === "asleep", background: s?.backgroundTasks.length ?? 0, provider: onId === CLAUDE ? null : { name: providerName(onId), auto: capabilitiesOf(s?.provider).supports_auto_mode } };
       if (team) return;
       if (checkRemoteSwitch(change, target, ctx)) return;
       if ("permissions" in change) {

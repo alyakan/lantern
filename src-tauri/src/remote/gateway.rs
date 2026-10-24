@@ -826,6 +826,13 @@ impl<'a> Session<'a> {
             Request::SetPermissions { slot, permissions } => {
                 self.gw.check_choice(permissions, None)?;
                 let chat = self.gw.switchable(&slot)?;
+                // A chat on another provider than Claude's has no auto mode (a model approving its own commands is no safety): a phone
+                // that still offers Auto (an older one) is told why, and nothing is restarted. The window and the backend hold the line too.
+                if let (protocol::RemotePermissions::Auto, Some(name)) = (permissions, &chat.provider) {
+                    if !self.gw.hub.providers().iter().find(|p| &p.name == name).is_some_and(|p| p.auto) {
+                        return Err(format!("{name} has no Auto mode: it asks before it acts."));
+                    }
+                }
                 // What it already is is not asked again: each switch restarts claude, and a phone can't make it do so over and over.
                 if chat.permissions.as_deref() == Some(permissions.as_str()) {
                     return Ok(serde_json::Value::Null);
@@ -835,6 +842,10 @@ impl<'a> Session<'a> {
             Request::SetPreset { slot, preset } => {
                 self.gw.check_choice(protocol::RemotePermissions::Ask, Some(&preset))?;
                 let chat = self.gw.switchable(&slot)?;
+                // The Mac's presets are Claude Code's models: a chat on another provider runs on its own.
+                if let Some(name) = &chat.provider {
+                    return Err(format!("{name} runs on its own model: the presets don't apply to it."));
+                }
                 if chat.preset.as_deref() == Some(preset.as_str()) {
                     return Ok(serde_json::Value::Null);
                 }
@@ -1862,6 +1873,35 @@ pub(crate) mod tests {
 
     fn provider(id: &str, name: &str, auto: bool, presets: bool) -> protocol::RemoteProvider {
         protocol::RemoteProvider { id: id.into(), name: name.into(), auto, presets }
+    }
+
+    /// A phone that still offers Auto in a chat's settings (one built before providers were told apart) can't put a chat on another
+    /// provider than Claude's on it, nor on one of Claude's presets: it is told why and nothing is restarted.
+    #[tokio::test]
+    async fn a_chat_on_another_provider_is_not_put_on_auto_or_a_claude_preset_from_a_phone() {
+        let r = rig();
+        r.store.set_allow_phone_auto(true).unwrap();
+        r.hub.set_presets(vec![preset("balanced")]);
+        r.hub.set_providers(vec![provider("claude", "Claude", true, true), provider("gateway:ollama", "Ollama", false, false)]);
+        r.hub.opened("local", "/p");
+        r.hub.set_provider("local", Some("Ollama"));
+        r.hub.opened("codex", "/p");
+        r.hub.set_provider("codex", Some("Codex")); // (a provider the window never listed for phones)
+        r.hub.opened("claude", "/p");
+        let (_, mut p) = paired(&r).await;
+        use protocol::RemotePermissions::{Ask, Auto};
+        for (slot, name) in [("local", "Ollama"), ("codex", "Codex")] {
+            let (ok, err, _) = p.ask(Request::SetPermissions { slot: slot.into(), permissions: Auto }).await;
+            assert!(ok.is_none() && err.is_some_and(|e| e == format!("{name} has no Auto mode: it asks before it acts.")), "{slot}");
+            let (ok, err, _) = p.ask(Request::SetPreset { slot: slot.into(), preset: "balanced".into() }).await;
+            assert!(ok.is_none() && err.is_some_and(|e| e == format!("{name} runs on its own model: the presets don't apply to it.")), "{slot}");
+        }
+        assert!(r.host.switched.lock().unwrap().is_empty(), "nothing reached the app");
+        // Ask is always fine, and a Claude chat is as it was.
+        assert!(p.ask(Request::SetPermissions { slot: "local".into(), permissions: Ask }).await.1.is_none());
+        assert!(p.ask(Request::SetPermissions { slot: "claude".into(), permissions: Auto }).await.1.is_none());
+        assert!(p.ask(Request::SetPreset { slot: "claude".into(), preset: "balanced".into() }).await.1.is_none());
+        assert_eq!(*r.host.switched.lock().unwrap(), vec!["local:ask".to_string(), "claude:auto".to_string(), "claude:preset:balanced".to_string()]);
     }
 
     #[tokio::test]

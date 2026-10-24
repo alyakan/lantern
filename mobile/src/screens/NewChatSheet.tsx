@@ -211,12 +211,12 @@ export function NewChatSheet({ initialText = "", initialProject, continueChat, o
                         <View>
                           <Caption>Provider</Caption>
                           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
-                            {[{ id: null as string | null, name: "Project's own" }, ...providers].map((p) => (
+                            {[{ id: null as string | null, name: "As on your Mac" }, ...providers].map((p) => (
                               <Pill key={p.id ?? "own"} label={p.name} on={p.id === provider} onPress={() => chooseProvider(p.id)} />
                             ))}
                           </ScrollView>
                           <Txt variant="tiny" tone="ink2" style={{ marginTop: 6 }}>
-                            {chosen ? `The chat runs on ${chosen.name}.` : "The project's own is what its chats use on your Mac."}
+                            {chosen ? `The chat runs on ${chosen.name}.` : "As on your Mac is what this project's chats use there (Claude, if that is Codex: a phone can't answer its questions)."}
                           </Txt>
                         </View>
                       )}

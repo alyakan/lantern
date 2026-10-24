@@ -190,6 +190,16 @@ export interface SwitchTarget {
   asleep: boolean;
   /** Background tasks (a workflow, a subagent, a command) that a restart would stop: the window asks the user about that, and nobody is at the Mac to answer. */
   background: number;
+  /** What the chat runs on when that isn't Claude Code, and whether that has an auto mode; none for a chat on Claude. */
+  provider?: { name: string; auto: boolean } | null;
+}
+
+/** Why a chat on another provider than Claude's can't be switched to this, or null: no Auto where there is none, and no Claude preset. */
+function checkProviderSwitch(change: { permissions: string } | { preset: string } | { workflow: string }, provider: SwitchTarget["provider"]): string | null {
+  if (!provider) return null;
+  if ("permissions" in change && change.permissions === "auto" && !provider.auto) return `${provider.name} has no Auto mode: it asks before it acts.`;
+  if ("preset" in change) return `${provider.name} runs on its own model: the presets don't apply to it.`;
+  return null;
 }
 
 /**
@@ -199,6 +209,8 @@ export interface SwitchTarget {
 export function checkRemoteSwitch(change: { permissions: string } | { preset: string } | { workflow: string }, target: SwitchTarget, ctx: RemoteContext): string | null {
   const choice = "permissions" in change ? checkChoice(change.permissions, null, ctx) : "workflow" in change ? checkWorkflow(change.workflow) : checkChoice("ask", change.preset, ctx);
   if (choice) return choice;
+  const onProvider = checkProviderSwitch(change, target.provider);
+  if (onProvider) return onProvider;
   if (!target.known) return "That chat isn't open on your Mac.";
   if (target.asleep) return "This chat is asleep. Wake it first.";
   if (!target.idle) return "Claude is busy in this chat. Change it once it has finished.";
