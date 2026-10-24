@@ -5,7 +5,8 @@
 set -euo pipefail
 
 tag="$1"
-prev=$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null || true)
+# Only the Mac's own tags count: the phone's builds are tagged mobile-build-N, and are not a release of this.
+prev=$(git describe --tags --abbrev=0 --match 'v*' "$tag^" 2>/dev/null || true)
 
 notes=""
 while IFS= read -r subject; do

@@ -232,4 +232,10 @@ describe("the Mac's sheet", () => {
     expect(screen.getByText("Pair with your Mac")).toBeTruthy();
     expect(connected.kind).toBe("connected");
   });
+
+  it("has no What's new when this build carries no notes (a development run)", async () => {
+    await open({ chats: [chat()] });
+    await press("Aly's MacBook Pro, connected");
+    expect(screen.queryByRole("button", { name: "What's new" })).toBeNull();
+  });
 });

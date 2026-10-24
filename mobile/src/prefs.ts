@@ -73,6 +73,31 @@ export async function saveFolded(projects: string[]): Promise<void> {
   }
 }
 
+const NOTES_KEY = "lantern.notes-seen";
+
+/**
+ * The newest build whose "What's new" was shown on this phone; null when none was (nothing kept yet). A value that can't be
+ * read counts as already shown, so a broken store never makes the notes come back at every launch.
+ */
+export async function loadNotesSeen(): Promise<number | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(NOTES_KEY, OPTIONS);
+    if (raw === null) return null;
+    const build = Number(raw);
+    return Number.isInteger(build) && build >= 0 ? build : Number.MAX_SAFE_INTEGER;
+  } catch {
+    return Number.MAX_SAFE_INTEGER;
+  }
+}
+
+export async function saveNotesSeen(build: number): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(NOTES_KEY, String(build), OPTIONS);
+  } catch {
+    // Not remembered: they may show once more at the next launch.
+  }
+}
+
 const SEEN_KEY = "lantern.chats-seen";
 /** How many chats' last-seen marks are kept: the stored value stays small (a chat that is closed has its mark dropped too). */
 export const SEEN_KEPT = 60;

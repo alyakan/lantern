@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState, type ReactNode } from "react";
+import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { BackHandler, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -11,6 +11,9 @@ import { PairDeviceSheet } from "../screens/PairDevice";
 import { ConfirmLink, PairScreen } from "../screens/PairScreen";
 import { SupportSheet } from "../screens/SupportSheet";
 import { TabletDetail } from "../screens/TabletDetail";
+import { WhatsNewSheet } from "../screens/WhatsNewSheet";
+import { loadNotesSeen, saveNotesSeen } from "../prefs";
+import { hasNotes, noteAction, releaseNotes } from "../whatsNew";
 import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
 import { Button, Txt } from "../ui/components";
 import { FadeSlideIn } from "../ui/motion";
@@ -84,6 +87,11 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   const [macSheet, setMacSheet] = useState(false);
   // A pairing code for another device, from the Mac sheet.
   const [pairingDevice, setPairingDevice] = useState(false);
+  // What changed in this build: once after an update, and from the Mac sheet.
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesDue, setNotesDue] = useState(false);
+  const notesChecked = useRef(false);
+  const sawUnpaired = useRef(false);
   // The optional tips, from Home or from the Mac sheet.
   const [supporting, setSupporting] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -101,9 +109,34 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   // The chats slid in over the chat stay out of the way once the tablet is turned or resized.
   useEffect(() => setChatsOpen(false), [layout]);
 
+  // The notes come up once, with Home, after an update. A phone that was unpaired at some point this session was paired just
+  // now (a new install: nothing is new to it), so its notes are only marked as shown.
+  useEffect(() => {
+    if (connection.kind === "unpaired") sawUnpaired.current = true;
+  }, [connection.kind]);
+  const homeUp = !pendingLink && connection.kind !== "unpaired" && connection.kind !== "connecting" && !(connection.kind === "offline" && chats.length === 0);
+  useEffect(() => {
+    if (notesChecked.current || !homeUp) return;
+    notesChecked.current = true;
+    void loadNotesSeen().then((seen) => {
+      const action = noteAction(releaseNotes, seen, sawUnpaired.current);
+      if (action === "mark") void saveNotesSeen(releaseNotes.build);
+      if (action === "show") setNotesDue(true);
+    });
+  }, [homeUp]);
+  // Never over another sheet, a decision, or a screen that isn't Home: it waits until they are gone.
+  const nothingOpen = !macSheet && !pairingDevice && !supporting && !picking && !newChat && !decision(stack);
+  useEffect(() => {
+    if (!notesDue || !homeUp || !nothingOpen) return;
+    setNotesDue(false);
+    setNotesOpen(true);
+    void saveNotesSeen(releaseNotes.build);
+  }, [notesDue, homeUp, nothingOpen]);
+
   // The system's back button (Android) goes back a screen before it leaves the app.
   useEffect(() => {
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (notesOpen) return setNotesOpen(false), true;
       if (pairingDevice) return setPairingDevice(false), true;
       if (supporting) return setSupporting(false), true;
       if (newChat) return setNewChat(null), true;
@@ -115,7 +148,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       return true;
     });
     return () => sub.remove();
-  }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice]);
+  }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice, notesOpen]);
 
   const back = () => go({ type: "back" });
   // A tablet has Home beside the chat all the time, so a chat taken from it replaces the one shown instead of stacking on it.
@@ -192,9 +225,18 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
             setMacSheet(false);
             setPairingDevice(true);
           }}
+          onWhatsNew={
+            hasNotes(releaseNotes)
+              ? () => {
+                  setMacSheet(false);
+                  setNotesOpen(true);
+                }
+              : undefined
+          }
         />
       )}
       {pairingDevice && <PairDeviceSheet onClose={() => setPairingDevice(false)} />}
+      {notesOpen && <WhatsNewSheet notes={releaseNotes} onClose={() => setNotesOpen(false)} />}
       {supporting && <SupportSheet onClose={() => setSupporting(false)} />}
       {newChat && (
         <NewChatSheet
