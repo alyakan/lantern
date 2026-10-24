@@ -14,11 +14,11 @@ import { lightColors, space, useColors } from "../ui/theme";
 /** How long a code the camera has seen and refused is ignored, so one bad code isn't refused thirty times a second. */
 const IGNORE_MS = 3000;
 
-/** How big the frame to point at the code is: a tablet's camera fills its screen, so the frame is bigger to match. */
+/** How big the frame to point at the code is: a tablet's camera is bigger than a phone's, so the frame is bigger to match. */
 const FRAME_PHONE = 220;
-const FRAME_TABLET = 360;
-/** How wide the words and buttons under the camera are, on a tablet: the camera has the whole width, the text a readable column. */
-const PANEL_MAX = 560;
+const FRAME_TABLET = 300;
+/** How wide the screen is, on a tablet: the camera and the words under it share one narrow column in the middle, not the whole width. */
+const PANEL_MAX = 480;
 
 const Corner = ({ style }: { style: object }) => <View style={[{ position: "absolute", width: 38, height: 38, borderColor: lightColors.hi, borderWidth: 4 }, style]} />;
 
@@ -63,6 +63,8 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
     // Above the keyboard, so the field being typed in isn't covered by it, and a tap on the background closes it.
     <AboveKeyboard dismissOnTap style={{ backgroundColor: colors.night }}>
       <StatusBar style="light" />
+      {/* One column in the middle: on a tablet the camera is no wider than the words under it. */}
+      <View testID="pair-screen" style={{ flex: 1, width: "100%", maxWidth: PANEL_MAX, alignSelf: "center" }}>
       <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingTop: insets.top }}>
         {camera ? (
           <CameraView style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} facing="back" barcodeScannerSettings={{ barcodeTypes: ["qr"] }} onBarcodeScanned={scanned} />
@@ -124,6 +126,7 @@ export function PairScreen({ initialPaste = false }: { initialPaste?: boolean })
             </Txt>
           )}
         </View>
+      </View>
       </View>
     </AboveKeyboard>
   );

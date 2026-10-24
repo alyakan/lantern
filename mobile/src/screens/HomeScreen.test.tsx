@@ -276,18 +276,22 @@ describe("Home's chats by project", () => {
     expect(StyleSheet.flatten(screen.getByRole("button", { name: "lantern, 3 chats" }).props.style).paddingHorizontal).toBe(16);
   });
 
-  it("marks the chat that is open with a slim bar of the accent on a faint wash of it, in the list and in a card", async () => {
+  it("marks the chat that is open by underlining it with a line of the accent, and no background, in the list and in a card", async () => {
     const chats = [chat({ slot: "a", title: "First", project: "lantern", active_at: NOW - 1_000 }), chat({ slot: "b", title: "Second", project: "lantern", active_at: NOW - 2_000 })];
     const view = await renderWith(<HomeScreen {...handlers()} selectedSlot="a" />, { chats });
-    const row = (title: string) => StyleSheet.flatten(screen.getByRole("button", { name: new RegExp(`^${title}`) }).props.style);
-    // Only the open one has the bar, and the wash is the accent faintly (not a flat grey block).
-    expect(screen.getAllByTestId("selected-bar", { hidden: true })).toHaveLength(1);
-    expect(within(screen.getByRole("button", { name: /^First/ })).getByTestId("selected-bar", { hidden: true })).toBeTruthy();
-    expect(row("First").backgroundColor).toMatch(/^rgba\(\d+,\d+,\d+,0\.08\)$/);
-    expect(row("Second").backgroundColor).toBeUndefined();
+    const style = (el: { props: { style?: unknown } }) => StyleSheet.flatten(el.props.style as never) as Record<string, unknown>;
+    const first = () => screen.getByRole("button", { name: /^First/ });
+    const underline = () => style(within(first()).getByTestId("selected-underline", { hidden: true }));
+    // Only the open one has the line, along the bottom of the row from where its content starts to where it ends.
+    expect(screen.getAllByTestId("selected-underline", { hidden: true })).toHaveLength(1);
+    expect(underline()).toMatchObject({ position: "absolute", bottom: 0, height: 2, left: style(first()).paddingHorizontal, right: style(first()).paddingHorizontal });
+    expect(underline().backgroundColor).toBeTruthy();
+    // No wash on the row (it did not clip to the row's shape), the open one or any other.
+    expect(style(first()).backgroundColor).toBeUndefined();
+    expect(style(screen.getByRole("button", { name: /^Second/ })).backgroundColor).toBeUndefined();
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
-    expect(screen.getAllByTestId("selected-bar", { hidden: true })).toHaveLength(1);
-    expect(within(screen.getByRole("button", { name: "First" })).getByTestId("selected-bar", { hidden: true })).toBeTruthy();
+    expect(screen.getAllByTestId("selected-underline", { hidden: true })).toHaveLength(1);
+    expect(style(screen.getByRole("button", { name: "First" })).backgroundColor).toBeUndefined();
     await view.unmount();
   });
 

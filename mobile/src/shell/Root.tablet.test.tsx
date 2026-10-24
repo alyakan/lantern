@@ -56,7 +56,7 @@ describe("the screens before the chats, on a tablet", () => {
     mockLayout = "overlay";
   });
 
-  it("gives the pairing screen the whole width, the camera and all: it is not in the narrow column", async () => {
+  it("gives the pairing screen its own narrow column, camera and all, not the words-on-paper column", async () => {
     await open({ connection: { kind: "unpaired" } });
     expect(screen.getByText("Pair with your Mac")).toBeTruthy();
     expect(screen.getByTestId("pair-column")).toBeTruthy();
@@ -150,6 +150,28 @@ describe("a tablet with the chats pinned", () => {
     await press(/Release 0.1.53/);
     await settle();
     expect(column().props.pointerEvents).toBe("none");
+  });
+});
+
+describe("hiding the chats from the chat's own button", () => {
+  beforeEach(() => {
+    mockLayout = "split";
+    mockPinned = true;
+  });
+
+  it("takes the chats away for good, so the chat has the whole width, and Show chats brings them back", async () => {
+    await open({ chats: two });
+    await press(/Release 0.1.53/);
+    await settle();
+    await press("Hide chats");
+    await settle();
+    expect(saveSidebarPinned).toHaveBeenCalledWith(false);
+    expect(column().props.pointerEvents).toBe("none");
+    expect(screen.queryByRole("button", { name: "Hide chats" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Show chats" })).toBeTruthy();
+    await press("Show chats");
+    await settle();
+    expect(column().props.pointerEvents).toBe("auto");
   });
 });
 

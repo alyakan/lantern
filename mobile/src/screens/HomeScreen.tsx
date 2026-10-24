@@ -8,7 +8,7 @@ import { useMacCan } from "../shell/useControls";
 import { useTipJar, useTips } from "../shell/tipsContext";
 import { Button, ProjectTag, Tag, Tile, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
-import { tint, useAccent } from "../ui/accent";
+import { useAccent } from "../ui/accent";
 import { Chevron } from "../ui/Chevron";
 import { Dots, HomeSkeleton } from "../ui/skeleton";
 import { radius, shadow, space, useColors } from "../ui/theme";
@@ -106,13 +106,15 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
   // The tile is the chat's project's colour (the desktop sidebar's), so a chat is placed by it before it is read.
   const { bg, fg } = projectTint(row.projectColor, colors.plainTint);
   const accent = useAccent();
+  // The space between the row's own edge and its content.
+  const pad = inset > 8 ? inset - 8 : inset;
   const status = row.unread ? ", unread" : row.status === "needs_you" ? ", needs you" : row.status === "working" ? ", working" : row.status === "asleep" ? ", asleep" : row.status === "ended" ? ", stopped" : "";
   return (
     // The rows come in one after the other when Home opens (and a new chat comes in alone); a press gives under the finger.
     <FadeSlideIn from={14} delay={Math.min(index, 8) * 45 + 120}>
-    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}`} accessibilityState={{ selected }} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "Close this chat" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={[{ flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: inset > 8 ? 8 : 0, paddingHorizontal: inset > 8 ? inset - 8 : inset, paddingVertical: 9, minHeight: 56 }, selected ? { backgroundColor: tint(accent, 0.08), borderRadius: radius.inner } : null]}>
-      {/* The chat you are in: a slim bar of the accent on the row's leading edge, on a faint wash of it. */}
-      {selected && <View accessibilityElementsHidden testID="selected-bar" style={{ position: "absolute", left: 0, top: 12, bottom: 12, width: 3, borderRadius: 2, backgroundColor: accent }} />}
+    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}`} accessibilityState={{ selected }} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "Close this chat" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={[{ flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: inset > 8 ? 8 : 0, paddingHorizontal: pad, paddingVertical: 9, minHeight: 56 }]}>
+      {/* The chat you are in: underlined with a line of the accent, from where the row's content starts to where it ends. */}
+      {selected && <View accessibilityElementsHidden testID="selected-underline" style={{ position: "absolute", left: pad, right: pad, bottom: 0, height: 2, borderRadius: 1, backgroundColor: accent }} />}
       <View>
         <Tile letter={row.initial} bg={bg} fg={fg} />
         {/* Something new in it: a dot on the tile (cut out from the page behind it), and the title in bold below. */}

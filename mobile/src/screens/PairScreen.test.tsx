@@ -39,18 +39,20 @@ describe("the pairing screen on a tablet", () => {
   // The frame is hidden from the screen reader (it is only a picture), so it is asked for as hidden.
   const style = (id: string) => StyleSheet.flatten(screen.getByTestId(id, { hidden: true }).props.style);
 
-  it("lets the camera have the whole screen, with a bigger frame to point at the code, and keeps its words in a readable column", async () => {
+  it("keeps the camera and its words in one narrow column in the middle, with a bigger frame than the phone's", async () => {
     mockLayout = "overlay";
     await renderWith(<PairScreen />, { connection: { kind: "unpaired" } });
-    expect(style("pair-frame")).toMatchObject({ width: 360, height: 360 });
-    expect(style("pair-column")).toMatchObject({ width: "100%", maxWidth: 560, alignSelf: "center" });
+    expect(style("pair-frame")).toMatchObject({ width: 300, height: 300 });
+    expect(style("pair-screen")).toMatchObject({ width: "100%", maxWidth: 480, alignSelf: "center" });
+    expect(style("pair-column")).toMatchObject({ width: "100%", maxWidth: 480, alignSelf: "center" });
     expect(screen.getByText("Pair with your Mac")).toBeTruthy();
   });
 
   it("is the same on a tablet held sideways", async () => {
     mockLayout = "split";
     await renderWith(<PairScreen />, { connection: { kind: "unpaired" } });
-    expect(style("pair-frame")).toMatchObject({ width: 360, height: 360 });
+    expect(style("pair-frame")).toMatchObject({ width: 300, height: 300 });
+    expect(style("pair-screen")).toMatchObject({ maxWidth: 480 });
   });
 
   it("keeps the phone's frame on a phone, and in a narrow Split View pane", async () => {
