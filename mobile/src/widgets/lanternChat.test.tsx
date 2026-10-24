@@ -11,7 +11,7 @@ jest.mock("@expo/ui/swift-ui", () => ({}));
 jest.mock("@expo/ui/swift-ui/modifiers", () => ({}));
 
 const COMPONENTS = ["HStack", "VStack", "ZStack", "Image", "Text", "ProgressView", "Spacer", "Gauge"];
-const MODIFIERS = ["font", "foregroundStyle", "minimumScaleFactor", "monospacedDigit", "opacity", "padding", "tint", "lineLimit", "bold", "frame"];
+const MODIFIERS = ["font", "foregroundStyle", "minimumScaleFactor", "monospacedDigit", "opacity", "padding", "tint", "lineLimit", "bold", "frame", "fixedSize", "multilineTextAlignment"];
 const source = (require("./lanternChat") as { default: { layout: string } }).default.layout;
 
 const jsx = (type: string, props: Record<string, unknown>): Node => ({ type, props });
@@ -45,6 +45,13 @@ describe("the lock-screen card", () => {
     expect(all(out.banner, "ProgressView")).toHaveLength(0);
     expect(texts(out.banner).some((t) => /steps|Plan/.test(t))).toBe(false);
     expect(texts(out.compactTrailing)).toEqual(["Working"]);
+  });
+
+  it("keeps the timer to its own width, at the right under the state, instead of letting it spread across the card", () => {
+    const timer = all(draw({}).banner, "Text").find((t) => t.props.dateStyle === "timer")!;
+    const names = (timer.props.modifiers as { name: string; args: unknown[] }[]).map((m) => m.name);
+    expect(names).toEqual(expect.arrayContaining(["fixedSize", "multilineTextAlignment"]));
+    expect((timer.props.modifiers as { name: string; args: unknown[] }[]).find((m) => m.name === "multilineTextAlignment")!.args).toEqual(["trailing"]);
   });
 
   it("adds the chat's title under the project", () => {
