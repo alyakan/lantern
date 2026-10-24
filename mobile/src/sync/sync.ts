@@ -174,6 +174,19 @@ export class Sync {
     }
   }
 
+  /** Whether the Mac answers over this connection now (a round trip), which a connection that looks up may not. */
+  alive() {
+    return this.ask({ op: "list_waiting" }, 4000).then(
+      () => true,
+      () => false,
+    );
+  }
+
+  /** Sends a message without showing it as sending (a notification's Reply, with no screen to show it on): rejects with why it didn't go. */
+  sendQuiet(slot: string, text: string) {
+    return this.ask({ op: "send", slot, text, client_id: this.newId() });
+  }
+
   /** Allows or denies a prompt (a question's answers with it); rejects with why (it was answered already…). */
   async answer(slot: string, requestId: string, allow: boolean, answers: Record<string, string> | null = null, message: string | null = null) {
     try {

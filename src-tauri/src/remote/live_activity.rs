@@ -29,6 +29,8 @@ const STANDARD: base64::engine::GeneralPurpose = base64::engine::general_purpose
 pub const APNS_URL: &str = "https://api.push.apple.com/3/device/";
 /// The topic of a Live Activity push: the app's bundle id and this suffix.
 pub const TOPIC: &str = "com.alyakan.lantern.push-type.liveactivity";
+/// The app's bundle id: the topic of an ordinary notification.
+pub const BUNDLE_ID: &str = "com.alyakan.lantern";
 /// The name the phone gives its card's layout (createLiveActivity): what a push says it is updating.
 pub const ACTIVITY_NAME: &str = "LanternChat";
 /// What a push to start a card must say its data is (expo-widgets' own type).
@@ -85,7 +87,7 @@ pub enum Needs {
 }
 
 impl Needs {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Needs::Command => "command",
             Needs::Edit => "edit",
@@ -406,12 +408,12 @@ pub struct Reply {
 }
 
 impl Reply {
-    fn ok(&self) -> bool {
+    pub fn ok(&self) -> bool {
         self.status == 200
     }
 
     /// The card or the phone is gone (Apple answers 410, or 400 BadDeviceToken / 404 for a token it doesn't know).
-    fn gone(&self) -> bool {
+    pub fn gone(&self) -> bool {
         self.status == 410 || self.status == 404 || (self.status == 400 && matches!(self.reason.as_deref(), Some("BadDeviceToken" | "DeviceTokenNotForTopic")))
     }
 
@@ -423,8 +425,16 @@ impl Reply {
     }
 }
 
+/// One ordinary notification (an alert), straight to Apple: its whole body, `aps` and the data the app reads.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Alert {
+    pub body: Value,
+}
+
 pub trait Apns: Send + Sync + 'static {
     fn send(&self, token: &str, push: &Push) -> BoxFut<Result<Reply, String>>;
+    /// A notification for the phone itself (not a card): see notifier.rs.
+    fn alert(&self, token: &str, alert: &Alert) -> BoxFut<Result<Reply, String>>;
 }
 
 /// Apple's push service over HTTP/2.
@@ -447,23 +457,28 @@ fn now_secs() -> u64 {
     super::now_ms() / 1000
 }
 
-impl Apns for ApnsHttp {
-    fn send(&self, token: &str, push: &Push) -> BoxFut<Result<Reply, String>> {
+/// How long Apple keeps an alert it couldn't deliver (a phone that is off): a prompt that waited longer is probably answered.
+const ALERT_KEEP_SECS: u64 = 10 * 60;
+
+impl ApnsHttp {
+    /// One push: `kind` is Apple's push type, `topic` the app's (with the suffix a card's pushes take), and `expiration` when
+    /// Apple may stop trying to deliver it (none: it keeps Apple's default).
+    fn post(&self, token: &str, kind: &'static str, topic: &'static str, priority: u8, expiration: Option<u64>, body: Value) -> BoxFut<Result<Reply, String>> {
         let client = self.client.clone();
         let signer = self.key.signer();
-        let (url, push) = (format!("{APNS_URL}{token}"), push.clone());
+        let url = format!("{APNS_URL}{token}");
         Box::pin(async move {
             let signer = signer?.ok_or("No push key has been imported (Settings > Remote control).")?;
-            let response = client
+            let mut request = client
                 .post(url)
                 .header("authorization", format!("bearer {}", signer.bearer(now_secs())?))
-                .header("apns-push-type", "liveactivity")
-                .header("apns-topic", TOPIC)
-                .header("apns-priority", push.priority.to_string())
-                .json(&push.body)
-                .send()
-                .await
-                .map_err(|e| e.to_string())?;
+                .header("apns-push-type", kind)
+                .header("apns-topic", topic)
+                .header("apns-priority", priority.to_string());
+            if let Some(at) = expiration {
+                request = request.header("apns-expiration", at.to_string());
+            }
+            let response = request.json(&body).send().await.map_err(|e| e.to_string())?;
             let status = response.status().as_u16();
             let reason = response.json::<Value>().await.ok().and_then(|b| b["reason"].as_str().map(str::to_string));
             // A signed token Apple refused isn't used again: the next push makes a new one.
@@ -472,6 +487,16 @@ impl Apns for ApnsHttp {
             }
             Ok(Reply { status, reason })
         })
+    }
+}
+
+impl Apns for ApnsHttp {
+    fn send(&self, token: &str, push: &Push) -> BoxFut<Result<Reply, String>> {
+        self.post(token, "liveactivity", TOPIC, push.priority, None, push.body.clone())
+    }
+
+    fn alert(&self, token: &str, alert: &Alert) -> BoxFut<Result<Reply, String>> {
+        self.post(token, "alert", BUNDLE_ID, 10, Some(now_secs() + ALERT_KEEP_SECS), alert.body.clone())
     }
 }
 
@@ -735,6 +760,10 @@ pub(crate) mod tests {
             self.sent.lock().unwrap().push((token.to_string(), push.clone()));
             let answer = self.answer.lock().unwrap().clone().unwrap_or(Ok(Reply { status: 200, reason: None }));
             Box::pin(async move { answer })
+        }
+
+        fn alert(&self, _token: &str, _alert: &Alert) -> BoxFut<Result<Reply, String>> {
+            Box::pin(async { Ok(Reply { status: 200, reason: None }) })
         }
     }
 

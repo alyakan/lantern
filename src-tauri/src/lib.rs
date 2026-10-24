@@ -607,11 +607,12 @@ async fn start_remote(app: &AppHandle) -> Result<(), String> {
     let bonjour = remote::transport::Bonjour::advertise(port, &name, &id).ok();
     // Pushes to phones that aren't looking at a chat when it needs them or finishes (see remote/notifier.rs).
     let watching = gateway.clone();
-    let notifier = remote::notifier::Notifier::new(r.store.clone(), r.hub.clone(), Arc::new(remote::notifier::ExpoPush::new()?), Arc::new(move |slot| watching.watched(slot)));
+    let apns = Arc::new(remote::live_activity::ApnsHttp::new(r.live.clone())?);
+    let notifier = remote::notifier::Notifier::new(r.store.clone(), r.hub.clone(), Arc::new(remote::notifier::ExpoPush::new()?), apns.clone(), Arc::new(move |slot| watching.watched(slot)));
     let opened = notifier.clone();
     gateway.on_open(Arc::new(move |slot| opened.opened(slot)));
     // The lock-screen cards of phones that registered one, kept right with pushes straight to Apple (see remote/live_activity.rs).
-    let cards = remote::live_activity::LiveActivities::new(r.store.clone(), r.hub.clone(), Arc::new(remote::live_activity::ApnsHttp::new(r.live.clone())?));
+    let cards = remote::live_activity::LiveActivities::new(r.store.clone(), r.hub.clone(), apns);
     let (notifier_bus, cards_bus) = (r.bus.clone(), r.bus.clone());
     // One task for both, so stopping Remote control stops both.
     let task = tokio::spawn(async move {

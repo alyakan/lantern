@@ -12,11 +12,12 @@ import { Root } from "./src/shell/Root";
 import { zeroconfDiscovery } from "./src/net/discovery";
 import { webSocketTransport } from "./src/net/transport";
 import { registerForPush, slotOfNotification } from "./src/notifications";
+import { runButton, TAP } from "./src/notificationActions";
 import { slotOfLink } from "./src/liveActivity";
 import { AccentFromPledge, TipsContext } from "./src/shell/tipsContext";
 import { iapPlatform, secureTipMemory, startTipListener } from "./src/platformTips";
 import { demoPlatform, TipJar } from "./src/tips";
-import { onNotificationTap, pushPlatform, quietInForeground } from "./src/platformPush";
+import { actionHost, onNotificationResponse, pushPlatform, quietInForeground, registerButtons } from "./src/platformPush";
 import { secureMacStore } from "./src/storage";
 import { AppLock } from "./src/lock";
 import { lockPlatform, secureLockMemory } from "./src/platformLock";
@@ -80,11 +81,18 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
-  // Notifications: registered once a Mac is connected, and a tap opens its chat.
+  // Notifications: registered once a Mac is connected, a tap opens its chat, and a button (Allow, Deny, Reply) does its work in the
+  // background, answering for the phone and for its watch.
+  const handled = useRef(new Set<string>());
   useEffect(() => {
     quietInForeground();
-    return onNotificationTap((data) => setOpenSlot(slotOfNotification(data)));
-  }, []);
+    void registerButtons();
+    const host = actionHost(controller, lock);
+    return onNotificationResponse((r) => {
+      if (r.actionIdentifier === TAP) setOpenSlot(slotOfNotification(r.notification.request.content.data));
+      else void runButton(r, host, handled.current);
+    });
+  }, [controller, lock]);
   useEffect(() => {
     const check = () => {
       if (registered.current || controller.getConnection().kind !== "connected") return;
