@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ChangedFile } from "./store";
 import type { FlavourGuide } from "./lib/pageNote";
+import type { HookTable } from "./lib/chatHooks";
 import type { Role } from "./lib/roles";
 import type { RemoteClose, RemoteNewChat, RemoteSetPermissions, RemoteSetPreset, RemoteSetWorkflow, WindowChat, WindowPreset } from "./lib/remoteChats";
 import type { PairView, RemoteView } from "./lib/remoteControl";
@@ -88,7 +89,8 @@ export const api = {
   closeSession: (slot: string) => invoke<void>("close_session", { slot }),
   setModel: (slot: string, model: string | null) => invoke<void>("set_model", { slot, model }),
   /** Resolves to the turn's number (see the Changes pane's per-turn views). */
-  sendMessage: (slot: string, text: string) => invoke<number>("send_message", { slot, text }),
+  /** `auto`: Lantern sends it, not the user (an agents' note to a Lead): the user's hooks aren't run for it. */
+  sendMessage: (slot: string, text: string, auto?: boolean) => invoke<number>("send_message", { slot, text, ...(auto ? { auto } : {}) }),
   /**
    * Asks a side question about the chat (`aside` names the popover's side chat, started by its first question): a read-only copy
    * of the chat's conversation answers it, as aside events. `model` null is the chat's own. Resolves to whether it has the
@@ -123,6 +125,8 @@ export const api = {
   setAgentLimit: (limit: number) => invoke<void>("set_agent_limit", { limit }),
   /** What the user saved for a project (its setup lines, its Run command): the backend runs them from here, never from a file in the project. */
   setProjectSetup: (folder: string, commands: string[], run: string | null) => invoke<void>("set_project_setup", { folder, commands, run }),
+  /** The pre- and post-hooks the user wrote, workspace-wide and per project: the backend applies them where a message goes out and a turn ends. */
+  setChatHooks: (table: HookTable) => invoke<void>("set_chat_hooks", { table }),
   /** What the project's files suggest for its setup and Run command. Only offered: nothing is saved until the user presses Save. */
   suggestSetup: (folder: string) => invoke<SetupSuggestion>("suggest_setup", { folder }),
   /** The user's answer on an agent whose setup failed: "start" it anyway, or run the setup "again"; or "stop" a setup that is running. */

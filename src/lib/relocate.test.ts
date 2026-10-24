@@ -39,9 +39,11 @@ describe("migrateFolderState", () => {
       "settings.projectSetupByFolder": { [OLD]: { commands: ["npm ci"], run: "npm run dev" } },
       "prChecks.byFolder": { [OLD]: { mode: "fix", tries: 4 } },
       "prChecks.loopByFolder": { [OLD]: { "57": { tries: 2, status: "waiting" } } },
+      "settings.chatHooksByFolder": { [OLD]: { pre: { text: "check the brain", on: true } } },
     });
     const changed = migrateFolderState(store, OLD, NEXT);
     expect(Object.keys(changed).sort()).toEqual([...FOLDER_RECORDS].sort());
+    expect(read(store, "settings.chatHooksByFolder")[NEXT]).toEqual({ pre: { text: "check the brain", on: true } });
     expect(read(store, "settings.permissionsByFolder")).toEqual({ [OLD]: "auto", "/other": "ask", [NEXT]: "auto" });
     expect(read(store, "settings.workflowByFolder")).toEqual({ [OLD]: "steps", [NEXT]: "steps" });
     expect(read(store, "settings.subagentsByFolder")).toEqual({ [OLD]: "inline", [NEXT]: "inline" });

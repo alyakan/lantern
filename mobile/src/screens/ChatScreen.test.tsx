@@ -277,10 +277,10 @@ describe("a chat", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Wake this chat" })).toBeTruthy());
   });
 
-  it("says when it isn't connected, and won't take a message", async () => {
+  it("won't take a message when it isn't connected (the app's pill says why)", async () => {
     const { controller } = makeController();
     await renderWith(<ChatScreen {...handlers()} />, { chats: [chat()], events: { a: turn }, connection: { kind: "offline", reason: "x", retryInMs: 1000 } }, controller);
-    expect(screen.getByText(/Not connected to your Mac/)).toBeTruthy();
+    expect(screen.queryByText(/Not connected to your Mac/)).toBeNull();
     expect(screen.getByLabelText("Message").props.editable).toBe(false);
   });
 

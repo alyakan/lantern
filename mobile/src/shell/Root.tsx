@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { BackHandler, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -6,8 +6,9 @@ import { ChatScreen } from "../screens/ChatScreen";
 import { DecideScreen } from "../screens/DecideScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { NewChatSheet, type Draft } from "../screens/NewChatSheet";
-import { MacSheet, OfflineScreen } from "../screens/OfflineScreen";
+import { MacSheet, OfflineScreen, ReconnectPill } from "../screens/OfflineScreen";
 import { PairDeviceSheet } from "../screens/PairDevice";
+import { StorageSheet } from "../screens/StorageSheet";
 import { ConfirmLink, PairScreen } from "../screens/PairScreen";
 import { SupportSheet } from "../screens/SupportSheet";
 import { TabletDetail } from "../screens/TabletDetail";
@@ -15,11 +16,13 @@ import { WhatsNewSheet } from "../screens/WhatsNewSheet";
 import { loadNotesSeen, loadSidebarPinned, saveNotesSeen, saveSidebarPinned } from "../prefs";
 import { hasNotes, noteAction, notesId, releaseNotes } from "../whatsNew";
 import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
+import { ChatToast, type ToastShown } from "../ui/ChatToast";
 import { Button, Txt } from "../ui/components";
 import { FadeSlideIn } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { radius, space, useColors } from "../ui/theme";
 import { rows } from "../view/home";
+import { statusMap, toastIsRedundant, toastNotes, type StatusMap } from "../view/toasts";
 import type { Controller } from "./controller";
 import { ControllerContext, useConnectionState, useController, useSyncState } from "./hooks";
 import { atRoot, decision, home, navigate, shownSlot } from "./nav";
@@ -77,7 +80,7 @@ function ChatPicker({ onPick, onClose }: { onPick: (slot: string) => void; onClo
 function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProps, "controller">) {
   const controller = useController();
   const connection = useConnectionState();
-  const { chats } = useSyncState();
+  const { chats, chatsLoaded } = useSyncState();
   const [stack, go] = useReducer(navigate, home);
   // A tablet shows the chats beside the chat ("split", when they are pinned) or slides them in over it when asked and away once
   // a chat is chosen ("overlay"); a phone has the stack alone.
@@ -92,6 +95,8 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   const [macSheet, setMacSheet] = useState(false);
   // A pairing code for another device, from the Mac sheet.
   const [pairingDevice, setPairingDevice] = useState(false);
+  // The Mac's storage, from the Mac sheet.
+  const [storageOpen, setStorageOpen] = useState(false);
   // What changed in this build: once after an update, and from the Mac sheet.
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesDue, setNotesDue] = useState(false);
@@ -135,7 +140,9 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   useEffect(() => {
     if (connection.kind === "unpaired") sawUnpaired.current = true;
   }, [connection.kind]);
-  const homeUp = !pendingLink && connection.kind !== "unpaired" && connection.kind !== "connecting" && !(connection.kind === "offline" && chats.length === 0);
+  // With chats in hand a lost connection is a pill over them; with none there is nothing to show but the connecting screen.
+  const noMac = chats.length === 0 && (connection.kind === "connecting" || connection.kind === "offline");
+  const homeUp = !pendingLink && connection.kind !== "unpaired" && !noMac;
   // A tablet that opens on no chat, with the chats not pinned, shows them slid in once, rather than an empty screen to tap.
   useEffect(() => {
     if (listedOnce.current || !tablet || pinned === null || !homeUp) return;
@@ -153,7 +160,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   }, [homeUp]);
   // Never over another sheet, a decision, a chat (a tapped notification can open one at launch) or the tablet's chats sliding
   // in: it waits until they are gone. On a tablet the chats are always a tap away, so a chat open doesn't hold it back there.
-  const nothingOpen = !macSheet && !pairingDevice && !supporting && !picking && !newChat && !decision(stack) && !chatsOpen && (tablet || atRoot(stack));
+  const nothingOpen = !macSheet && !pairingDevice && !storageOpen && !supporting && !picking && !newChat && !decision(stack) && !chatsOpen && (tablet || atRoot(stack));
   useEffect(() => {
     if (!notesDue || !homeUp || !nothingOpen) return;
     setNotesDue(false);
@@ -166,6 +173,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       if (notesOpen) return setNotesOpen(false), true;
       if (pairingDevice) return setPairingDevice(false), true;
+      if (storageOpen) return setStorageOpen(false), true;
       if (supporting) return setSupporting(false), true;
       if (newChat) return setNewChat(null), true;
       if (picking) return setPicking(false), true;
@@ -176,7 +184,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       return true;
     });
     return () => sub.remove();
-  }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice, notesOpen]);
+  }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice, storageOpen, notesOpen]);
 
   const back = () => go({ type: "back" });
   // A tablet has Home in its chats column, beside the chat or slid in over it, so a chat taken from it replaces the one shown
@@ -194,6 +202,30 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     go({ type: "home" });
     await controller.unpair();
   };
+
+  // A chat that finishes or needs you, while the chats' own list isn't there to say so: a toast.
+  const [toast, setToast] = useState<ToastShown | null>(null);
+  const seenStatus = useRef<StatusMap | null>(null);
+  const toastId = useRef(0);
+  // The chats' list says so itself when it is beside the chat (pinned) or slid in over it.
+  const columnShown = shellLayout === "split" || chatsOpen;
+  const watch = useRef({ stack, tablet, columnShown, chats });
+  watch.current = { stack, tablet, columnShown, chats };
+  useEffect(() => {
+    if (!chatsLoaded) return;
+    const notes = toastNotes(seenStatus.current, chats).filter((n) => !toastIsRedundant(n.slot, watch.current.stack, watch.current.tablet, watch.current.columnShown));
+    seenStatus.current = statusMap(chats);
+    // Several at once (a catch-up after being away) show the last: the one most recently in need of you.
+    const note = notes[notes.length - 1];
+    if (!note) return;
+    const chat = chats.find((c) => c.slot === note.slot);
+    setToast({ id: ++toastId.current, slot: note.slot, kind: note.kind, title: chat?.title?.trim() || "A chat", project: chat?.project ?? null });
+  }, [chats, chatsLoaded]);
+  // It goes when what it says is on the screen anyway: the chat was opened, or the chats came in.
+  useEffect(() => {
+    if (toast && toastIsRedundant(toast.slot, stack, tablet, columnShown)) setToast(null);
+  }, [toast, stack, tablet, columnShown]);
+  const clearToast = useCallback(() => setToast(null), []);
 
   // A screen that is not part of the stack comes in with a fade, so changing from one to another isn't a cut.
   const fade = (key: string, screen: ReactNode) => (
@@ -215,7 +247,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   if (pendingLink) return fade("confirm", narrow(<ConfirmLink link={pendingLink} onCancel={() => onClearLink?.()} onDone={() => onClearLink?.()} />));
   // The pairing screen is the camera, which has the whole screen on a tablet (it lays out its own words): it is not in the column.
   if (connection.kind === "unpaired") return fade("pair", <PairScreen />);
-  if (connection.kind === "connecting" || (connection.kind === "offline" && chats.length === 0)) {
+  if (noMac) {
     return fade("offline", narrow(<OfflineScreen state={connection} onRetry={() => controller.resume()} onUnpair={unpair} onAddress={(text) => controller.useAddress(text)} />));
   }
 
@@ -257,6 +289,10 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
             setMacSheet(false);
             setPairingDevice(true);
           }}
+          onStorage={() => {
+            setMacSheet(false);
+            setStorageOpen(true);
+          }}
           onWhatsNew={
             hasNotes(releaseNotes)
               ? () => {
@@ -267,7 +303,10 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
           }
         />
       )}
+      <ReconnectPill state={connection} />
+      <ChatToast toast={toast} onOpen={openChat} onDone={clearToast} />
       {pairingDevice && <PairDeviceSheet onClose={() => setPairingDevice(false)} />}
+      {storageOpen && <StorageSheet onClose={() => setStorageOpen(false)} />}
       {notesOpen && <WhatsNewSheet notes={releaseNotes} onClose={() => setNotesOpen(false)} />}
       {supporting && <SupportSheet onClose={() => setSupporting(false)} />}
       {newChat && (

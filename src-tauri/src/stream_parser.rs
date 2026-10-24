@@ -157,6 +157,8 @@ impl StreamParser {
             }],
             "task_started" => vec![UiEvent::TaskStarted { task_id: str_of(v, "task_id"), tool_use_id: str_of(v, "tool_use_id") }],
             "task_notification" => vec![UiEvent::TaskEnded { task_id: str_of(v, "task_id"), tool_use_id: str_of(v, "tool_use_id"), status: str_of(v, "status"), summary: str_of(v, "summary") }],
+            // The conversation was compacted (not microcompact, which only trims old tool output): the chat shows nothing of it.
+            "compact_boundary" => vec![UiEvent::Compacted],
             // hooks, task updates, status, …: session bookkeeping, never conversation content
             _ => vec![],
         }
@@ -844,10 +846,11 @@ mod tests {
 
     #[test]
     fn compaction_lines_are_bookkeeping_the_chat_ignores() {
-        // /compact writes a compact_boundary (or a microcompact one) before its result; neither is a chat event.
+        // /compact writes a compact_boundary (or a microcompact one) before its result. The chat shows neither; a compaction
+        // is told as an event of its own (the chat's hooks use it), a microcompact, which only trims old tool output, is not.
         let mut p = StreamParser::default();
         let boundary = r#"{"type":"system","subtype":"compact_boundary","content":"Conversation compacted","compact_metadata":{"trigger":"manual","pre_tokens":150000}}"#;
-        assert!(p.parse_line(boundary).is_empty());
+        assert_eq!(p.parse_line(boundary), vec![UiEvent::Compacted]);
         assert!(p.parse_line(r#"{"type":"system","subtype":"microcompact_boundary"}"#).is_empty());
         // A compaction with nothing to compact still ends with a result, so the turn ends.
         let done = p.parse_line(r#"{"type":"result","subtype":"success","is_error":false,"result":"","duration_ms":81,"total_cost_usd":0,"modelUsage":{}}"#);

@@ -1618,6 +1618,7 @@ export function installMockBackend(options: { providers?: boolean; endpoints?: b
         }
         case "set_auto_merge_tests":
         case "set_restore_points":
+        case "set_chat_hooks":
           return null;
         // Closing and starting workers from the canvas. Nothing is on disk in the mock: it says there is a little loose work to
         // show the question, except for the one worker that shares the folder.

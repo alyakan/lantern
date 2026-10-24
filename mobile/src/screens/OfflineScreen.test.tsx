@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react-native";
+import { act, fireEvent, render, screen } from "@testing-library/react-native";
 import type { ConnectionState } from "../net/connection";
 import { connected } from "../test/render";
-import { MacSheet, OfflineScreen } from "./OfflineScreen";
+import { MacSheet, OfflineScreen, PILL_DELAY_MS, ReconnectPill } from "./OfflineScreen";
 
 describe("the Offline screen", () => {
   it("says it is connecting, with a lantern being lit rather than a spinner", async () => {
@@ -52,6 +52,33 @@ describe("the Offline screen", () => {
     await view.rerender(<OfflineScreen state={offline} {...props} />);
     expect(screen.getByLabelText("Your Mac's address").props.value).toBe("100.90");
     expect(screen.getByText("Can't reach Aly's Mac.")).toBeTruthy();
+  });
+});
+
+describe("the reconnect pill", () => {
+  beforeEach(() => jest.useFakeTimers());
+  afterEach(() => jest.useRealTimers());
+
+  it("waits a moment before it shows, so a quick reconnect doesn't flash it", async () => {
+    await render(<ReconnectPill state={{ kind: "connecting" }} />);
+    expect(screen.queryByText("Reconnecting to your Mac…")).toBeNull();
+    await act(() => jest.advanceTimersByTime(PILL_DELAY_MS + 10));
+    expect(screen.getByText("Reconnecting to your Mac…")).toBeTruthy();
+  });
+
+  it("never shows once the Mac is back", async () => {
+    const view = await render(<ReconnectPill state={{ kind: "connecting" }} />);
+    await view.rerender(<ReconnectPill state={connected} />);
+    await act(() => jest.advanceTimersByTime(PILL_DELAY_MS * 2));
+    expect(screen.queryByText("Reconnecting to your Mac…")).toBeNull();
+  });
+
+  it("keeps saying it is reconnecting while tries fail, and says why when it has given up", async () => {
+    const view = await render(<ReconnectPill state={{ kind: "offline", reason: "x", retryInMs: 1000 }} />);
+    await act(() => jest.advanceTimersByTime(PILL_DELAY_MS + 10));
+    expect(screen.getByText("Reconnecting to your Mac…")).toBeTruthy();
+    await view.rerender(<ReconnectPill state={{ kind: "offline", reason: "Update Lantern on your Mac.", retryInMs: null }} />);
+    expect(screen.getByText("Update Lantern on your Mac.")).toBeTruthy();
   });
 });
 
