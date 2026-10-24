@@ -22,6 +22,7 @@ pub mod permission;
 pub mod pr;
 pub mod process;
 pub mod provider;
+pub mod provider_keys;
 pub mod read_git;
 pub mod session;
 pub mod setup;
@@ -66,6 +67,9 @@ pub struct AppState {
     folder_rules: Arc<permission::rules::FolderRules>,
     /// The endpoints chats can run on besides Anthropic's (Settings → Endpoints), saved in app data (see endpoints.rs).
     endpoints: Arc<endpoints::EndpointStore>,
+    /// API keys for the agent CLIs, an alternative to their own sign-in (Settings → API keys), kept in the Keychain (see
+    /// provider_keys.rs).
+    provider_keys: Arc<provider_keys::ProviderKeys>,
     /// Where each folder was before it moved (see relocate): its sessions are read from there too.
     relocations: Arc<relocate::Relocations>,
     /// PRs looked up for the Changes pane, by repository and number, with when: fetching them takes a moment.
@@ -1019,6 +1023,18 @@ fn checked_effort(effort: Option<String>) -> Result<Option<String>, String> {
     }
 }
 
+/// The API keys: their switches in app data, the keys themselves in the login Keychain (a dev run, which has its own Remote
+/// control settings, keeps its keys apart too). They are read from the Keychain once, off this thread, and made the ones the
+/// places that start Claude Code ask.
+fn provider_keys_for(app: &AppHandle) -> Arc<provider_keys::ProviderKeys> {
+    let service = if std::env::var_os("LANTERN_REMOTE_FILE").is_some() { "Lantern provider keys (dev)" } else { provider_keys::SERVICE };
+    let keys = provider_keys::ProviderKeys::new(Arc::new(provider_keys::Keychain { service }), app.path().app_data_dir().ok().map(|d| d.join("provider-auth.json")));
+    keys.install();
+    let loading = keys.clone();
+    tauri::async_runtime::spawn_blocking(move || loading.load());
+    keys
+}
+
 /// The endpoint a gateway chat runs on and its model: `model` if the window named one, else the endpoint's first. An
 /// endpoint that is gone, or a model it has none of, is an error: such a chat never falls back to Anthropic's.
 fn pick_endpoint(endpoint: Option<endpoints::Endpoint>, model: Option<String>) -> Result<(endpoints::Endpoint, String), String> {
@@ -1041,9 +1057,15 @@ async fn gateway_for(state: &AppState, id: Option<&str>, model: Option<String>, 
     if let Some(why) = endpoints::settings_conflict(&home, &project) {
         return Err(why);
     }
-    let key = match &endpoint.key_env {
-        None => None,
-        Some(name) => {
+    // A key saved in Settings wins over a variable named there; one that can't be read is an error, never a start without it.
+    let saved = state.provider_keys.endpoint_key(&endpoint.id)?;
+    if saved.is_some() {
+        endpoints::key_allowed_for(&endpoint.url)?;
+    }
+    let key = match (&saved, &endpoint.key_env) {
+        (Some(k), _) => Some(k.clone()),
+        (None, None) => None,
+        (None, Some(name)) => {
             let var = name.clone();
             let value = tauri::async_runtime::spawn_blocking(move || cli_locator::login_shell_var(&var)).await.ok().flatten();
             Some(endpoints::Secret::new(value.ok_or_else(|| format!("{} needs {name}, which isn't set in your login shell. Set it in ~/.zshrc or ~/.zprofile, then start the chat again.", endpoint.name))?))
@@ -1142,6 +1164,10 @@ async fn claude_login(state: State<'_, AppState>, claude_path: String) -> Result
         if let Some(path) = path_env {
             cmd.env("PATH", path);
         }
+        // On the API key there is no login to ask about: it needn't be signed in.
+        if provider_keys::claude_on_key() {
+            return Ok(Login { logged_in: true, account: Some("API key".into()) });
+        }
         let out = cmd.output().map_err(|e| e.to_string())?;
         // A claude that isn't logged in may exit with an error and still say so, in the same JSON.
         let status: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|_| "claude didn't say whether it is logged in.".to_string())?;
@@ -1200,17 +1226,21 @@ struct EndpointStatus {
     #[serde(flatten)]
     endpoint: endpoints::Endpoint,
     key_set: Option<bool>,
+    /// A key is saved for it in Settings (it is never sent back).
+    saved_key: bool,
 }
 
 #[tauri::command]
 async fn list_endpoints(state: State<'_, AppState>) -> Result<Vec<EndpointStatus>, String> {
     let endpoints = state.endpoints.list();
+    let saved: Vec<String> = state.provider_keys.state().endpoint_keys;
     tauri::async_runtime::spawn_blocking(move || {
         endpoints
             .into_iter()
             .map(|endpoint| {
                 let key_set = endpoint.key_env.as_deref().map(|name| cli_locator::login_shell_var(name).is_some());
-                EndpointStatus { endpoint, key_set }
+                let saved_key = saved.contains(&endpoint.id);
+                EndpointStatus { endpoint, key_set, saved_key }
             })
             .collect()
     })
@@ -1221,17 +1251,97 @@ async fn list_endpoints(state: State<'_, AppState>) -> Result<Vec<EndpointStatus
 /// Saves the whole list (see EndpointStore::replace): an error is in words for the form.
 #[tauri::command]
 async fn save_endpoints(state: State<'_, AppState>, endpoints: Vec<endpoints::Endpoint>) -> Result<Vec<endpoints::Endpoint>, String> {
-    state.endpoints.replace(endpoints)
+    let before = state.endpoints.list();
+    let keyed = state.provider_keys.state().endpoint_keys;
+    // A saved key goes only to an address it is allowed to (https, or this Mac's own network).
+    for e in &endpoints {
+        if keyed.contains(&e.id) {
+            endpoints::key_allowed_for(&e.url).map_err(|why| format!("{}: {why} Remove its saved key first, or keep an address a key may go to.", e.name))?;
+        }
+    }
+    let saved = state.endpoints.replace(endpoints)?;
+    // An endpoint that was removed takes its saved key with it (from the Keychain too), and one that moved to another address
+    // loses it: a saved key is only sent to the address it was saved for.
+    let keys = state.provider_keys.clone();
+    let keep: Vec<String> = saved.iter().map(|e| e.id.clone()).collect();
+    let moved = endpoints::keys_to_drop(&before, &saved, &keyed);
+    tauri::async_runtime::spawn_blocking(move || {
+        keys.forget_endpoints_except(&keep);
+        for id in moved {
+            let _ = keys.clear_endpoint_key(&id);
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(saved)
+}
+
+/// What Settings shows of the API keys: which providers run on a key, and which keys exist. Never a key.
+#[tauri::command]
+fn provider_auth_state(state: State<'_, AppState>) -> provider_keys::AuthState {
+    state.provider_keys.state()
+}
+
+/// Saves Claude Code's API key in the Keychain. The key is not sent back.
+#[tauri::command]
+async fn provider_claude_key_set(state: State<'_, AppState>, key: String) -> Result<provider_keys::AuthState, String> {
+    let keys = state.provider_keys.clone();
+    tauri::async_runtime::spawn_blocking(move || keys.set_claude_key(&key)).await.map_err(|e| e.to_string())??;
+    Ok(state.provider_keys.state())
+}
+
+#[tauri::command]
+async fn provider_claude_key_clear(state: State<'_, AppState>) -> Result<provider_keys::AuthState, String> {
+    let keys = state.provider_keys.clone();
+    tauri::async_runtime::spawn_blocking(move || keys.clear_claude_key()).await.map_err(|e| e.to_string())??;
+    Ok(state.provider_keys.state())
+}
+
+/// Claude Code on its API key (true) or its own sign-in. New chats follow it; a running chat keeps what it started with.
+#[tauri::command]
+fn provider_claude_use_key(state: State<'_, AppState>, on: bool) -> Result<provider_keys::AuthState, String> {
+    state.provider_keys.set_claude_use_key(on)?;
+    Ok(state.provider_keys.state())
+}
+
+/// Saves an endpoint's key in the Keychain (it wins over the variable the endpoint names). Only for an endpoint that is saved, and
+/// only over https or to this Mac's own network.
+#[tauri::command]
+async fn endpoint_key_set(state: State<'_, AppState>, id: String, key: String) -> Result<provider_keys::AuthState, String> {
+    let endpoint = state.endpoints.get(&id).ok_or("Save the endpoint first, then its key.")?;
+    endpoints::key_allowed_for(&endpoint.url)?;
+    let keys = state.provider_keys.clone();
+    tauri::async_runtime::spawn_blocking(move || keys.set_endpoint_key(&id, &key)).await.map_err(|e| e.to_string())??;
+    Ok(state.provider_keys.state())
+}
+
+#[tauri::command]
+async fn endpoint_key_clear(state: State<'_, AppState>, id: String) -> Result<provider_keys::AuthState, String> {
+    let keys = state.provider_keys.clone();
+    tauri::async_runtime::spawn_blocking(move || keys.clear_endpoint_key(&id)).await.map_err(|e| e.to_string())??;
+    Ok(state.provider_keys.state())
 }
 
 /// Asks an endpoint what models it serves, for the Fetch button: with its key if it names one that is set.
 #[tauri::command]
-async fn fetch_endpoint_models(url: String, key_env: Option<String>) -> Result<Vec<String>, String> {
+async fn fetch_endpoint_models(state: State<'_, AppState>, url: String, key_env: Option<String>, endpoint_id: Option<String>) -> Result<Vec<String>, String> {
     // The same checks as saving it: only an http or https URL, and a key only over https or a local network.
     let probe = endpoints::clean(endpoints::Endpoint { id: String::new(), name: "probe".into(), url, key_env, models: vec![] })?;
-    let key = match probe.key_env.clone() {
+    // A key saved for the endpoint (by its id) wins over a named variable, as it does when a chat starts.
+    let saved = match endpoint_id.as_deref() {
+        Some(id) => state.provider_keys.endpoint_key(id)?,
         None => None,
-        Some(name) => {
+    };
+    if saved.is_some() {
+        endpoints::key_allowed_for(&probe.url)?;
+        // A saved key is only ever sent to the address it was saved for: an address typed since, not saved yet, is not that one.
+        let stored = endpoint_id.as_deref().and_then(|id| state.endpoints.get(id)).map(|e| e.url);
+        endpoints::saved_key_address_ok(stored.as_deref(), &probe.url)?;
+    }
+    let key = match (saved, probe.key_env.clone()) {
+        (Some(k), _) => Some(k),
+        (None, None) => None,
+        (None, Some(name)) => {
             let value = tauri::async_runtime::spawn_blocking(move || cli_locator::login_shell_var(&name)).await.ok().flatten();
             Some(endpoints::Secret::new(value.ok_or_else(|| format!("{} isn't set in your login shell.", probe.key_env.as_deref().unwrap_or("The key")))?))
         }
@@ -2938,7 +3048,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), provider_keys: provider_keys_for(app.handle()), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
             // Remote control left on: it listens again from launch.
             if app.state::<AppState>().remote.store.saved().enabled {
                 let handle = app.handle().clone();
@@ -3011,6 +3121,12 @@ pub fn run() {
             list_endpoints,
             save_endpoints,
             fetch_endpoint_models,
+            provider_auth_state,
+            provider_claude_key_set,
+            provider_claude_key_clear,
+            provider_claude_use_key,
+            endpoint_key_set,
+            endpoint_key_clear,
             user_name,
             start_session,
             restart_session,

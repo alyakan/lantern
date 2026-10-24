@@ -291,7 +291,10 @@ fn start(aside: &Arc<Aside>, id: &str, launch: &Launch, emit: Emit) -> Result<Cl
     };
     // Nothing a side chat does is an edit of the chat's files, and there is no tool that could make one.
     let no_edits: crate::session::EditHook = Arc::new(|_: &str, _: Option<String>| {});
-    ClaudeSession::start(command(launch), &launch.binary, &launch.folder, None, sink, no_edits)
+    // On the user's API key when they chose it for Claude Code (and never on the sign-in instead if it can't be had).
+    let mut cmd = command(launch);
+    crate::provider_keys::apply_claude_tokio_in(&mut cmd, &launch.folder)?;
+    ClaudeSession::start(cmd, &launch.binary, &launch.folder, None, sink, no_edits)
 }
 
 /// Where Claude Code keeps the chat's conversation, when it has one: a side chat of a chat that hasn't said anything yet

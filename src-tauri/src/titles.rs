@@ -109,6 +109,8 @@ pub async fn generate(claude: &Path, path_env: Option<&str>, prompt: &str) -> Op
     if let Some(path) = path_env {
         cmd.env("PATH", path);
     }
+    // On the user's API key when they chose it for Claude Code; a key that can't be had means no call, not one on the sign-in.
+    crate::provider_keys::apply_claude_tokio(&mut cmd).ok()?;
     let out = tokio::time::timeout(Duration::from_secs(45), cmd.output()).await.ok()?.ok()?;
     if !out.status.success() {
         return None;
