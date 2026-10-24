@@ -47,6 +47,12 @@ const CARD_LIFETIME_MS: u64 = 8 * 60 * 60 * 1000;
 const JWT_REUSE_SECS: u64 = 50 * 60;
 /// The longest a project's name on a card is, in characters.
 const PROJECT_MAX: usize = 40;
+/// The longest a chat's title on a card is, in characters.
+const TITLE_MAX: usize = 60;
+/// How often a card is pushed to for what only moves its numbers (the plan's progress, how much of the usage window is
+/// gone): a push of a status change is always sent at once. Apple limits pushes at low priority, and a number that moves a
+/// few times a minute isn't worth a push each.
+const DETAIL_EVERY_MS: u64 = 45 * 1000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -66,6 +72,61 @@ impl Status {
             Status::Failed => "failed",
         }
     }
+}
+
+/// What a chat that needs you is asking for, in one word: never the command, the file or the question itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Needs {
+    Command,
+    Edit,
+    Question,
+    Approval,
+    Tool,
+}
+
+impl Needs {
+    fn as_str(self) -> &'static str {
+        match self {
+            Needs::Command => "command",
+            Needs::Edit => "edit",
+            Needs::Question => "question",
+            Needs::Approval => "approval",
+            Needs::Tool => "tool",
+        }
+    }
+
+    /// What a prompt for this tool is asking for.
+    pub fn of_tool(tool: &str) -> Self {
+        match tool {
+            "Bash" | "BashOutput" | "KillShell" => Needs::Command,
+            "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => Needs::Edit,
+            "AskUserQuestion" => Needs::Question,
+            "mcp__lantern__request_approval" | "ExitPlanMode" => Needs::Approval,
+            _ => Needs::Tool,
+        }
+    }
+}
+
+/// What a card says besides the project and the state: the chat's title, how far its plan has got, what it is asking for and how
+/// much of the plan's usage window is gone. Every part may be missing (a Mac that has none of it, a chat with no plan), and a
+/// phone's layout copes with each being absent. Never Claude's words, a command, a file or a question: only counts, one word, and
+/// the chat's own title, which the user chose to put on a lock screen.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Detail {
+    pub title: Option<String>,
+    /// Steps done and steps in all, of the plan Claude is keeping.
+    pub steps: Option<(u32, u32)>,
+    pub needs: Option<Needs>,
+    /// How much of the plan's five-hour window is used, 0 to 100.
+    pub plan: Option<u8>,
+}
+
+/// A chat's title as it may appear on a lock screen: one line, no control characters, not long; None when nothing is left.
+pub fn clean_title(title: &str) -> Option<String> {
+    let one_line: String = title.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+    let squeezed = one_line.split_whitespace().collect::<Vec<_>>().join(" ");
+    let cut: String = squeezed.chars().take(TITLE_MAX).collect();
+    (!cut.is_empty()).then_some(cut)
 }
 
 /// Whether `token` could be a push token: hex, of a length Apple's tokens have. (It goes into a URL.)
@@ -94,6 +155,10 @@ pub struct LiveCard {
     pub registered_at: u64,
     /// When the card was last pushed to (ms): after STALE_AFTER_SECS without one, the phone shows it as not updating.
     pub last_push: u64,
+    /// What the chat is asking for now, from the prompt that made it need you.
+    pub needs: Option<Needs>,
+    /// What the card shows besides the project and state, as it was last pushed.
+    pub detail: Detail,
 }
 
 /// What a phone has told the Mac about its Live Activities.
@@ -411,16 +476,35 @@ impl Apns for ApnsHttp {
 }
 
 /// The card's data, as the phone's layout reads it (a JSON string inside the push: `props`).
-fn props_json(project: &str, status: Status, since: u64) -> String {
-    json!({"project": project, "status": status.as_str(), "since": since}).to_string()
+fn props_json(project: &str, status: Status, since: u64, detail: &Detail) -> String {
+    let mut props = json!({"project": project, "status": status.as_str(), "since": since});
+    if let Some(title) = &detail.title {
+        props["title"] = json!(title);
+    }
+    if let Some((done, total)) = detail.steps {
+        props["steps_done"] = json!(done);
+        props["steps_total"] = json!(total);
+    }
+    if let Some(needs) = detail.needs {
+        props["needs"] = json!(needs.as_str());
+    }
+    if let Some(plan) = detail.plan {
+        props["plan"] = json!(plan);
+    }
+    props.to_string()
 }
 
 /// The body of a push to a card: `event` ("update" or "end"), what it shows, and for an end when the phone should clear it.
 pub fn payload(event: &str, status: Status, project: &str, since: u64, now: u64) -> Value {
+    payload_with(event, status, project, since, now, &Detail::default())
+}
+
+/// The same, with what the card shows besides the project and state.
+pub fn payload_with(event: &str, status: Status, project: &str, since: u64, now: u64, detail: &Detail) -> Value {
     let mut aps = json!({
         "timestamp": now,
         "event": event,
-        "content-state": {"name": ACTIVITY_NAME, "props": props_json(project, status, since)},
+        "content-state": {"name": ACTIVITY_NAME, "props": props_json(project, status, since, detail)},
     });
     if event == "end" {
         aps["dismissal-date"] = json!(now + DISMISS_AFTER_SECS);
@@ -449,6 +533,9 @@ enum Next {
     /// The same state again, so the phone doesn't take the card for one that is no longer kept up to date.
     Refresh,
     End(Status),
+    /// Only what the card shows besides its state has moved (the plan's steps, the usage): pushed no more often than
+    /// DETAIL_EVERY_MS, and only if it changed.
+    Detail,
 }
 
 impl LiveActivities {
@@ -521,6 +608,7 @@ impl LiveActivities {
                 (self.hub.chat(slot).is_none_or(|c| c.status != ChatStatus::NeedsYou)).then_some(Next::Update(Status::Working))
             }
             UiEvent::UserText { .. } => Some(Next::Restart),
+            UiEvent::Todos { parent: None, .. } | UiEvent::PlanUsage { .. } => Some(Next::Detail),
             UiEvent::TurnDone { is_error: false, .. } => Some(Next::End(Status::Done)),
             UiEvent::TurnDone { is_error: true, .. } => Some(Next::End(Status::Failed)),
             UiEvent::SessionEnded { code: Some(c), .. } if *c != 0 => Some(Next::End(Status::Failed)),
@@ -534,10 +622,30 @@ impl LiveActivities {
             return;
         }
         let Some(next) = self.next_for(&ev.slot, &ev.event) else { return };
+        // What a prompt asks for is kept on the card, to be said while the chat needs you (one word: never the prompt itself).
+        let asks = match &ev.event {
+            UiEvent::PermissionRequested { tool_name, .. } => Some(Needs::of_tool(tool_name)),
+            UiEvent::MergeProposed { .. } => Some(Needs::Approval),
+            _ => None,
+        };
         for (device, card) in self.store.live.cards() {
             if card.slot == ev.slot {
+                if let Some(needs) = asks {
+                    self.store.live.edit(&device, |c| c.needs = Some(needs));
+                }
                 self.push(&device, next).await;
             }
+        }
+    }
+
+    /// What the card says besides the project and state, from what the hub knows of the chat now. What a chat asks for is said
+    /// only while it needs you; a finished card shows how far the plan got.
+    fn detail_for(&self, card: &LiveCard, status: Status) -> Detail {
+        Detail {
+            title: self.hub.real_title(&card.slot).and_then(|t| clean_title(&t)),
+            steps: self.hub.steps(&card.slot),
+            needs: if status == Status::NeedsYou { card.needs } else { None },
+            plan: self.hub.plan().map(|(used, _, _)| (used * 100.0).round().clamp(0.0, 100.0) as u8),
         }
     }
 
@@ -555,11 +663,18 @@ impl LiveActivities {
         let (event, status, since) = match next {
             Next::Update(s) if s == card.status => return,
             Next::Update(s) => ("update", s, card.since),
-            Next::Refresh => ("update", card.status, card.since),
+            Next::Refresh | Next::Detail => ("update", card.status, card.since),
             Next::Restart => ("update", Status::Working, now),
             Next::End(s) => ("end", s, card.since),
         };
-        let push = Push { event, priority: if status == Status::Working { 5 } else { 10 }, body: payload(event, status, &card.project, since, now / 1000) };
+        let detail = self.detail_for(&card, status);
+        // A number that moved is pushed only if the card would look different, and not within a short while of the last push
+        // (it goes out with the next status change, the end of the turn or the heartbeat otherwise): the plan's progress and the
+        // usage move with nearly every event.
+        if next == Next::Detail && (detail == card.detail || now.saturating_sub(card.last_push) < DETAIL_EVERY_MS) {
+            return;
+        }
+        let push = Push { event, priority: if status == Status::Working { 5 } else { 10 }, body: payload_with(event, status, &card.project, since, now / 1000, &detail) };
         match self.apns.send(&card.token, &push).await {
             Ok(reply) if reply.ok() => {
                 self.store.live.said("Apple accepted the last update.".into());
@@ -568,6 +683,7 @@ impl LiveActivities {
                     c.since = since;
                     c.ended = event == "end";
                     c.last_push = now;
+                    c.detail = detail.clone();
                 });
             }
             Ok(reply) => {
@@ -638,7 +754,7 @@ pub(crate) mod tests {
     impl Rig {
         /// A phone with a card on `slot`, as the gateway registers it.
         fn card(&self, device: &str, slot: &str) {
-            self.store.live.register(device, Some(TOKEN.into()), Some(LiveCard { slot: slot.into(), token: TOKEN.into(), project: "lantern".into(), since: clock() - 5_000, status: Status::Working, ended: false, registered_at: clock() - 5_000, last_push: clock() - 5_000 }));
+            self.store.live.register(device, Some(TOKEN.into()), Some(LiveCard { slot: slot.into(), token: TOKEN.into(), project: "lantern".into(), since: clock() - 5_000, status: Status::Working, ended: false, registered_at: clock() - 5_000, last_push: clock() - 5_000, needs: None, detail: Detail::default() }));
         }
 
         async fn event(&self, slot: &str, event: UiEvent) {
@@ -876,7 +992,7 @@ pub(crate) mod tests {
     async fn two_phones_each_get_their_own_cards_pushes() {
         let r = rig();
         r.card("phone-1", "a");
-        r.store.live.register("phone-2", None, Some(LiveCard { slot: "a".into(), token: "f".repeat(64), project: "lantern".into(), since: 1, status: Status::Working, ended: false, registered_at: clock(), last_push: clock() }));
+        r.store.live.register("phone-2", None, Some(LiveCard { slot: "a".into(), token: "f".repeat(64), project: "lantern".into(), since: 1, status: Status::Working, ended: false, registered_at: clock(), last_push: clock(), needs: None, detail: Detail::default() }));
         r.event("a", asked()).await;
         let tokens: Vec<String> = r.sent().into_iter().map(|(t, _)| t).collect();
         assert_eq!(tokens.len(), 2);
@@ -974,7 +1090,7 @@ pub(crate) mod tests {
         r.event("a", asked()).await;
         assert_eq!(r.sent().len(), 1);
         // A card with a token of its own is a new card.
-        r.store.live.register("phone-1", None, Some(LiveCard { slot: "a".into(), token: "e".repeat(64), project: "lantern".into(), since: 1, status: Status::Working, ended: false, registered_at: clock(), last_push: clock() }));
+        r.store.live.register("phone-1", None, Some(LiveCard { slot: "a".into(), token: "e".repeat(64), project: "lantern".into(), since: 1, status: Status::Working, ended: false, registered_at: clock(), last_push: clock(), needs: None, detail: Detail::default() }));
         assert!(!r.store.live.cards()[0].1.ended);
         r.event("a", asked()).await;
         assert_eq!(r.sent().len(), 2);
@@ -1000,6 +1116,120 @@ pub(crate) mod tests {
         r.event("a", asked()).await;
         r.event("a", asked()).await;
         assert_eq!(r.sent().len(), 1);
+    }
+
+    fn todo(status: &str) -> crate::ui_event::Todo {
+        crate::ui_event::Todo { content: "SECRET-STEP".into(), status: status.into(), active_form: "Doing SECRET-STEP".into() }
+    }
+
+    fn plan(items: Vec<crate::ui_event::Todo>) -> UiEvent {
+        UiEvent::Todos { parent: None, items }
+    }
+
+    fn usage(used: f64) -> UiEvent {
+        UiEvent::PlanUsage { used, resets_at: None, status: "allowed".into() }
+    }
+
+    impl Rig {
+        /// A card whose last push was `age_ms` ago.
+        fn card_aged(&self, device: &str, slot: &str, age_ms: u64) {
+            self.store.live.register(device, Some(TOKEN.into()), Some(LiveCard { slot: slot.into(), token: TOKEN.into(), project: "lantern".into(), since: clock() - 5_000, status: Status::Working, ended: false, registered_at: clock() - age_ms - 5_000, last_push: clock() - age_ms, needs: None, detail: Detail::default() }));
+        }
+    }
+
+    #[test]
+    fn a_push_carries_the_title_the_steps_what_it_needs_and_the_usage_only_when_it_has_them() {
+        let bare = props_json("lantern", Status::Working, 5, &Detail::default());
+        assert_eq!(serde_json::from_str::<Value>(&bare).unwrap(), json!({"project": "lantern", "status": "working", "since": 5}));
+        let all = Detail { title: Some("Release 0.1.63".into()), steps: Some((3, 5)), needs: Some(Needs::Command), plan: Some(43) };
+        let props: Value = serde_json::from_str(&props_json("lantern", Status::NeedsYou, 5, &all)).unwrap();
+        assert_eq!(props, json!({"project": "lantern", "status": "needs_you", "since": 5, "title": "Release 0.1.63", "steps_done": 3, "steps_total": 5, "needs": "command", "plan": 43}));
+        // The whole push stays far below what a Live Activity may carry (4 KB), even with the longest title.
+        let long = Detail { title: Some("é".repeat(TITLE_MAX)), ..all };
+        assert!(payload_with("update", Status::NeedsYou, &"é".repeat(PROJECT_MAX), 1, 1, &long).to_string().len() < 1024);
+    }
+
+    #[test]
+    fn a_title_is_one_clean_short_line_and_nothing_when_nothing_is_left() {
+        assert_eq!(clean_title("  Release\n0.1.63\u{7}\t now  ").as_deref(), Some("Release 0.1.63 now"));
+        assert_eq!(clean_title(&"x".repeat(200)).unwrap().chars().count(), TITLE_MAX);
+        assert_eq!(clean_title(" \n\u{7} "), None);
+        assert_eq!(clean_title(""), None);
+    }
+
+    #[test]
+    fn a_prompt_is_one_word_for_what_it_asks() {
+        for (tool, want) in [("Bash", Needs::Command), ("Edit", Needs::Edit), ("Write", Needs::Edit), ("AskUserQuestion", Needs::Question), ("mcp__lantern__request_approval", Needs::Approval), ("WebFetch", Needs::Tool), ("", Needs::Tool)] {
+            assert_eq!(Needs::of_tool(tool), want, "{tool}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_card_that_needs_you_says_what_for_in_a_word_and_stops_saying_it_when_it_is_answered() {
+        let r = rig();
+        r.card("phone-1", "a");
+        r.event("a", asked()).await;
+        r.event("a", resolved()).await;
+        let sent = r.sent();
+        assert_eq!(props(&sent[0].1)["needs"], "command");
+        assert!(props(&sent[1].1).get("needs").is_none(), "{:?}", props(&sent[1].1));
+        let text = sent.iter().map(|(_, p)| p.body.to_string()).collect::<String>();
+        assert!(!text.contains("rm -rf") && !text.contains("secrets"));
+    }
+
+    #[tokio::test]
+    async fn the_card_says_the_chats_title_but_never_the_stand_in_made_from_the_first_thing_said() {
+        let r = rig();
+        r.card("phone-1", "a");
+        r.event("a", UiEvent::UserText { text: "my password is hunter2".into(), at: None, sent_by: None, images: 0 }).await;
+        r.event("a", asked()).await;
+        assert!(r.sent().iter().all(|(_, p)| props(p).get("title").is_none()), "the first message stood in as a title");
+        r.hub.titled("a", "  Cut the\nrelease  ");
+        r.event("a", resolved()).await;
+        assert_eq!(props(&r.sent().last().unwrap().1)["title"], "Cut the release");
+    }
+
+    #[tokio::test]
+    async fn the_plans_progress_and_the_usage_go_out_when_they_change_not_more_often_than_every_so_often_and_never_as_words() {
+        let r = rig();
+        // A card pushed to a minute ago: a change goes out, once; the same numbers again don't, and nor does a change a moment later.
+        r.card_aged("phone-1", "a", 60_000);
+        r.event("a", UiEvent::UserText { text: "go".into(), at: None, sent_by: None, images: 0 }).await;
+        let before = r.sent().len();
+        r.store.live.edit("phone-1", |c| c.last_push = clock() - 60_000);
+        r.event("a", plan(vec![todo("completed"), todo("in_progress"), todo("pending")])).await;
+        let sent = r.sent();
+        assert_eq!(sent.len(), before + 1);
+        let p = props(&sent.last().unwrap().1);
+        assert_eq!((p["steps_done"].clone(), p["steps_total"].clone()), (json!(1), json!(3)));
+        assert!(!sent.last().unwrap().1.body.to_string().contains("SECRET-STEP"));
+        // Moments later (the card was just pushed to) a further change waits for the next push.
+        r.event("a", plan(vec![todo("completed"), todo("completed"), todo("pending")])).await;
+        r.event("a", usage(0.43)).await;
+        assert_eq!(r.sent().len(), before + 1);
+        // A minute on, it goes out with the new numbers, and the same again changes nothing.
+        r.store.live.edit("phone-1", |c| c.last_push = clock() - 60_000);
+        r.event("a", usage(0.43)).await;
+        let p = props(&r.sent().last().unwrap().1);
+        assert_eq!((p["steps_done"].clone(), p["plan"].clone()), (json!(2), json!(43)));
+        let n = r.sent().len();
+        r.store.live.edit("phone-1", |c| c.last_push = clock() - 60_000);
+        r.event("a", usage(0.43)).await;
+        assert_eq!(r.sent().len(), n, "nothing changed, so nothing was pushed");
+    }
+
+    #[tokio::test]
+    async fn the_end_of_a_turn_says_how_far_the_plan_got_and_nothing_it_needs() {
+        let r = rig();
+        r.card("phone-1", "a");
+        r.event("a", plan(vec![todo("completed"), todo("completed")])).await;
+        r.event("a", asked()).await;
+        r.event("a", done(false)).await;
+        let last = r.sent().last().unwrap().clone();
+        assert_eq!(last.1.event, "end");
+        let p = props(&last.1);
+        assert_eq!((p["steps_done"].clone(), p["steps_total"].clone()), (json!(2), json!(2)));
+        assert!(p.get("needs").is_none());
     }
 
     #[tokio::test]

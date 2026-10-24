@@ -7,7 +7,7 @@ import { EMBER, useRegular } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
 import { AboveKeyboard } from "../ui/keyboard";
 import { DarkLantern } from "../ui/lanterns";
-import { skips } from "../ui/motion";
+import { FadeSlideIn, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { radius, space, useColors } from "../ui/theme";
@@ -130,6 +130,53 @@ export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: 
   );
 }
 
+/** How long a lost connection goes unremarked: waking the phone reconnects in a moment, and a pill for that would only flash. */
+export const PILL_DELAY_MS = 700;
+
+/**
+ * The Mac not being there while there are chats to look at: a small pill at the top with a blinking dot, over whatever is
+ * showing, instead of a screen of its own. It lets touches through to what is under it.
+ */
+export function ReconnectPill({ state }: { state: ConnectionState }) {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const regular = useRegular();
+  const blink = useRef(new Animated.Value(1)).current;
+  const [due, setDue] = useState(false);
+  const waiting = state.kind === "connecting" || state.kind === "offline";
+  useEffect(() => {
+    if (!waiting) return setDue(false);
+    const t = setTimeout(() => setDue(true), PILL_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [waiting]);
+  useEffect(() => {
+    if (!due || skips()) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(blink, { toValue: 0.25, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(blink, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [due, blink]);
+  if (!waiting || !due) return null;
+  // A run that gave up for good (the Mac is too new or too old for this phone) says why; the rest are still trying.
+  const text = state.kind === "offline" && state.retryInMs === null ? state.reason : "Reconnecting to your Mac…";
+  return (
+    <View pointerEvents="none" style={{ position: "absolute", top: insets.top + 6, left: 0, right: 0, alignItems: "center" }}>
+      <FadeSlideIn from={-8} ms={200}>
+        <View accessibilityRole="alert" accessibilityLabel={text} accessible style={{ flexDirection: "row", alignItems: "center", gap: 8, maxWidth: 320, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule, shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 }}>
+          <Animated.View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: regular ? EMBER : colors.hi, opacity: blink }} />
+          <Txt variant="small" tone="ink2" numberOfLines={2}>
+            {text}
+          </Txt>
+        </View>
+      </FadeSlideIn>
+    </View>
+  );
+}
+
 /** The lock's switch: Face ID (or the phone's passcode) before Lantern shows anything. It asks first, to turn it on or off. */
 function LockRow() {
   const colors = useColors();
@@ -162,10 +209,11 @@ function LockRow() {
 }
 
 /** The Mac, as a sheet: its name, where the connection stands, and unpairing this phone. */
-export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice, onWhatsNew }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the optional tips. */ onSupport?: () => void; /** Shows a pairing code for another device (Face ID first). Offered only to a Mac that lists "pair". */ onPairDevice?: () => void; /** Opens what changed in this build; given only when there is something to say. */ onWhatsNew?: () => void }) {
+export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice, onStorage, onWhatsNew }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the optional tips. */ onSupport?: () => void; /** Shows a pairing code for another device (Face ID first). Offered only to a Mac that lists "pair". */ onPairDevice?: () => void; /** Opens the Mac's storage (its disk, and what is safe to clear). Offered only to a Mac that lists "storage". */ onStorage?: () => void; /** Opens what changed in this build; given only when there is something to say. */ onWhatsNew?: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const canPair = state.kind === "connected" && state.welcome.features?.includes("pair") === true && !!onPairDevice;
+  const canStorage = state.kind === "connected" && state.welcome.features?.includes("storage") === true && !!onStorage;
   const where = state.kind === "connected" ? `Connected through ${state.host}` : state.kind === "offline" ? "Not connected" : state.kind === "connecting" ? "Connecting…" : "Not paired";
   return (
     <Sheet onClose={onClose}>
@@ -185,6 +233,7 @@ export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice, on
           </Txt>
           <LockRow />
           {canPair && <Button label="Pair another device" kind="ghost" onPress={() => onPairDevice?.()} accessibilityHint="Shows a code for your iPad or another phone to scan. Asks for Face ID first." />}
+          {canStorage && <Button label="Mac storage" kind="ghost" onPress={() => onStorage?.()} accessibilityHint="Shows how much room your Mac has, and what is safe to clear." />}
           {onWhatsNew && <Button label="What's new" kind="ghost" onPress={onWhatsNew} />}
           {onSupport &&<Button label="Support development" kind="ghost" onPress={onSupport} style={{ marginTop: 6 }} />}
           <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ marginTop: onSupport ? 0 : 6 }} />

@@ -9,25 +9,44 @@ type PermissionItem = Extract<ChatItem, { type: "permission" }>;
 export type Entry = Step | AssistantItem | PermissionItem;
 /** `live`: the turn is still going, so the block shows what is happening now instead of a summary. */
 export type ActivityRow = { type: "activity"; id: string; steps: Step[]; entries: Entry[]; live: boolean };
-export type Row = Exclude<ChatItem, Step> | ActivityRow;
+type HookItem = Extract<ChatItem, { type: "hook" }>;
+/** A post-hook and what Claude did for it, shown folded away (open while something in it waits for the user). `waiting`: a prompt in it has no answer yet. */
+export type HookRow = { type: "hook"; id: string; text: string; rows: Row[]; waiting: boolean };
+export type Row = Exclude<ChatItem, Step | HookItem> | ActivityRow | HookRow;
 
 /**
  * Folds each turn's work (tool calls, the narration between them, answered permissions) into one activity row at
  * the point the work started, like Warp's in-place status. What stays out: the reply (the assistant text after the
  * last tool, or else the last text), permission prompts still waiting for an answer, and the turn's closing note.
- * `live` says whether the stream is still running; only its last turn can be.
+ * `live` says whether the stream is still running; only its last turn can be. What follows a post-hook, up to the turn's
+ * closing note, is folded the same way inside the hook's own row.
  */
 export function groupItems(items: ChatItem[], live = false): Row[] {
   const rows: Row[] = [];
   let turn: ChatItem[] = [];
+  let hook: { item: HookItem; items: ChatItem[] } | null = null;
   const flush = (last: boolean) => {
-    rows.push(...foldTurn(turn, live && last));
+    if (hook) {
+      rows.push({ type: "hook", id: hook.item.id, text: hook.item.text, rows: foldTurn(hook.items, live && last), waiting: hook.items.some((it) => it.type === "permission" && it.decision === null) });
+      hook = null;
+    } else rows.push(...foldTurn(turn, live && last));
     turn = [];
   };
   for (const it of items) {
     if (it.type === "user") {
       flush(false);
       rows.push(it);
+    } else if (it.type === "hook") {
+      // What came before it is the user's turn, as far as it went; the hook's work follows.
+      rows.push(...foldTurn(turn, false));
+      turn = [];
+      hook = { item: it, items: [] };
+    } else if (hook) {
+      // The turn's closing note ends the hook's work (and stays in the conversation, outside the hook's row).
+      if (it.type === "turn") {
+        flush(false);
+        rows.push(it);
+      } else hook.items.push(it);
     } else turn.push(it);
   }
   flush(true);
@@ -41,6 +60,7 @@ export function groupItems(items: ChatItem[], live = false): Row[] {
  */
 export function sameRow(a: Row, b: Row): boolean {
   if (a === b) return true;
+  if (a.type === "hook" && b.type === "hook") return a.id === b.id && a.text === b.text && a.waiting === b.waiting && a.rows.length === b.rows.length && a.rows.every((r, i) => sameRow(r, b.rows[i]));
   if (a.type !== "activity" || b.type !== "activity") return false;
   const same = <T,>(x: T[], y: T[]) => x.length === y.length && x.every((it, i) => it === y[i]);
   return a.id === b.id && a.live === b.live && same(a.steps, b.steps) && same(a.entries, b.entries);

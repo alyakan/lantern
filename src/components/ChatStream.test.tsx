@@ -36,6 +36,32 @@ describe("ChatStream", () => {
     expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
   });
 
+  it("folds a post-hook's work away under one line, which opens to show it", () => {
+    const withHook: ChatItem[] = [...items, { type: "hook", id: "h1", text: "Update the brain if needed" }, { type: "assistant", id: "a3", text: "Nothing to save." }];
+    render(<ChatStream items={withHook} folder={null} sections {...handlers} />);
+    const head = screen.getByRole("button", { name: /Post-hook: Update the brain if needed/ });
+    expect(head).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Nothing to save.")).toBeNull();
+    fireEvent.click(head);
+    expect(head).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Nothing to save.")).toBeInTheDocument();
+    fireEvent.click(head);
+    expect(screen.queryByText("Nothing to save.")).toBeNull();
+  });
+
+  it("opens a post-hook by itself while a prompt in it waits for an answer, so it can't be missed", () => {
+    const ask: ChatItem = { type: "permission", id: "p1", toolName: "Bash", input: { command: "brain add note" }, decision: null };
+    render(<ChatStream items={[...items, { type: "hook", id: "h1", text: "Update the brain if needed" }, ask]} folder={null} sections {...handlers} />);
+    expect(screen.getByRole("button", { name: /Post-hook/ })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText(/brain add note/)).toBeInTheDocument();
+  });
+
+  it("keeps Regenerate on the answer when a post-hook came after it", () => {
+    const resend = { onEdit: () => {}, onResend: () => {} };
+    render(<ChatStream items={[{ type: "user", id: "u1", text: "Fix it", draft: "Fix it" }, { type: "assistant", id: "a1", text: "Fixed." }, { type: "hook", id: "h1", text: "Update the brain" }, { type: "assistant", id: "a2", text: "Nothing to save." }]} folder={null} sections resend={resend} {...handlers} />);
+    expect(screen.getAllByRole("button", { name: "Regenerate" })).toHaveLength(1);
+  });
+
   it("stays flat without sections (e.g. nested subagent streams)", () => {
     const { container } = render(<ChatStream items={items} folder={null} {...handlers} />);
     expect(container.querySelector("section")).toBeNull();

@@ -12,6 +12,13 @@ describe("attentionFor", () => {
     expect(attentionFor(items, "/Users/me/acme-api", describeInput)).toEqual({ key: "t1", kind: "finished", title: "Claude · acme-api", body: "Done: fetchJson now retries 429s" });
   });
 
+  it("quotes the answer, not what Claude said doing a post-hook", () => {
+    const items: ChatItem[] = [user, { type: "assistant", id: "m1", text: "Fixed the retry." }, { type: "hook", id: "h1", text: "Update the brain" }, { type: "assistant", id: "m2", text: "Nothing to save." }, turn()];
+    expect(attentionFor(items, null, describeInput)?.body).toBe("Fixed the retry.");
+    // A turn that ran tools and said nothing before the hook is still "Done", not the hook's words.
+    expect(attentionFor([user, { type: "hook", id: "h1", text: "x" }, { type: "assistant", id: "m2", text: "Nothing to save." }, turn()], null, describeInput)?.body).toBe("Done");
+  });
+
   it("doesn't repeat an earlier turn's reply when this turn only ran tools", () => {
     const items: ChatItem[] = [user, { type: "assistant", id: "m1", text: "Old reply" }, { type: "user", id: "u2", text: "run the tests" }, turn()];
     expect(attentionFor(items, null, describeInput)?.body).toBe("Done");

@@ -8,6 +8,7 @@
 
 mod clean;
 pub mod memory;
+pub mod phone;
 mod scan;
 
 use serde::Serialize;
@@ -182,6 +183,8 @@ struct Inner {
     /// Claude's reasons, by item id.
     suggestions: HashMap<String, String>,
     cancel: Option<Arc<AtomicBool>>,
+    /// How the last clear a phone started went.
+    report: Option<phone::Report>,
 }
 
 pub struct Storage {
@@ -279,12 +282,18 @@ impl Storage {
                 return Err("Wait for the scan or the delete in progress to finish.".into());
             }
             inner.deleting = true;
-            // Worktrees and projects first: what is inside one goes with it.
-            let mut picked: Vec<Item> = ids.iter().filter_map(|id| inner.items.iter().find(|i| &i.id == id).cloned()).collect();
-            picked.sort_by_key(|i| !matches!(i.kind, Kind::Worktree | Kind::Repo));
+            let picked: Vec<Item> = ids.iter().filter_map(|id| inner.items.iter().find(|i| &i.id == id).cloned()).collect();
             picked
         };
         let _clear = Deleting(self);
+        Ok(self.remove_picked(picked, path_env))
+    }
+
+    /// Removes these items (snapshots of what the scan found, each checked again by clean.rs as it goes). The caller has set
+    /// `deleting` and holds the `Deleting` guard that clears it, so no scan or other delete runs meanwhile.
+    fn remove_picked(&self, mut picked: Vec<Item>, path_env: Option<&str>) -> Vec<Outcome> {
+        // Worktrees and projects first: what is inside one goes with it.
+        picked.sort_by_key(|i| !matches!(i.kind, Kind::Worktree | Kind::Repo));
         (self.changed)();
         let env = self.env(path_env.map(String::from));
         let mut outcomes = Vec::new();
@@ -306,7 +315,7 @@ impl Storage {
             inner.items.extend(trash);
             inner.items.sort_by_key(|i| std::cmp::Reverse(i.bytes));
         }
-        Ok(outcomes)
+        outcomes
     }
 
     /// Marks items as Claude's suggestions, replacing the ones it made before. Returns how many were taken.
@@ -380,6 +389,17 @@ pub fn free_bytes(home: &Path) -> Option<u64> {
         return None;
     }
     Some(st.f_bavail as u64 * st.f_frsize as u64)
+}
+
+/// The size of the volume `home` is on.
+pub fn total_bytes(home: &Path) -> Option<u64> {
+    use std::ffi::CString;
+    let path = CString::new(home.as_os_str().as_bytes()).ok()?;
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(path.as_ptr(), &mut st) } != 0 {
+        return None;
+    }
+    Some(st.f_blocks as u64 * st.f_frsize as u64)
 }
 
 pub fn size_text(bytes: u64) -> String {

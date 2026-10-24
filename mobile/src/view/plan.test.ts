@@ -25,9 +25,17 @@ describe("the usage", () => {
     expect(usageOf({ used: 0.1, resetsAt: null, status: "allowed" }, NOW).resets).toBe("");
   });
 
+  it("stays green however Claude words its warning, until the bar itself is at 80%", () => {
+    // Claude's allowed_warning can be about a limit other than the five-hour window the bar shows.
+    expect(usageOf({ used: 0.05, resetsAt: null, status: "allowed_warning" }, NOW).tone).toBe("ok");
+    expect(usageOf({ used: 0.5, resetsAt: null, status: "allowed_warning" }, NOW).tone).toBe("ok");
+    expect(usageOf({ used: 0.8, resetsAt: null, status: "allowed_warning" }, NOW).tone).toBe("warn");
+  });
+
   it("warns near the limit and stops at it", () => {
     expect(usageOf({ used: 0.85, resetsAt: null, status: "allowed" }, NOW).tone).toBe("warn");
-    expect(usageOf({ used: 0.5, resetsAt: null, status: "allowed_warning" }, NOW).tone).toBe("warn");
+    expect(usageOf({ used: 0.8, resetsAt: null, status: "allowed" }, NOW).tone).toBe("warn");
+    expect(usageOf({ used: 0.79, resetsAt: null, status: "allowed" }, NOW).tone).toBe("ok");
     expect(usageOf({ used: 1.2, resetsAt: null, status: "allowed" }, NOW)).toMatchObject({ percent: 100, tone: "stop" });
     expect(usageOf({ used: 0.9, resetsAt: null, status: "rejected" }, NOW).tone).toBe("stop");
   });

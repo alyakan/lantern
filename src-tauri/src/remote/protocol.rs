@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity"];
+pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity", "storage"];
 
 /// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
 /// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
@@ -219,6 +219,8 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
     use RemoteEvent as R;
     use UiEvent as U;
     Some(match event {
+        // A post-hook is Lantern's own message (see hooks.rs): the phone is shown what it does, not that it was sent.
+        U::UserText { text, .. } if crate::hooks::post_text(text).is_some() => return None,
         U::UserText { text, at, sent_by, images } => R::UserText { text: super::hub::without_notes(text).to_string(), at: *at, sent_by: sent_by.clone(), images: (*images > 0).then_some(*images) },
         U::Thinking { parent: None } => R::Thinking,
         U::TextDelta { parent: None, block_id, text } => R::TextDelta { block_id: block_id.clone(), text: text.clone() },
@@ -278,6 +280,7 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         | U::AgentMessage { .. }
         | U::AgentStopped { .. }
         | U::AgentTidied
+        | U::Compacted
         | U::ReviewUpdate { .. }
         | U::AgentMode { .. }
         | U::MergeResolved { .. }
@@ -463,6 +466,79 @@ pub struct PairOffer {
     pub modules: Vec<String>,
 }
 
+/// One item of the Mac's storage a phone may clear, as it is shown: no path, only what the user needs to decide. The phone sends
+/// the ids back to clear them, and the Mac clears only those it still finds safe (see storage/phone.rs).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteStorageItem {
+    pub id: String,
+    /// "worktree", "build_output", "cache" or "simulator".
+    pub kind: String,
+    pub name: String,
+    #[ts(type = "number")]
+    pub bytes: u64,
+    /// It goes to the Trash, so it takes no space back until the Trash is emptied.
+    pub to_trash: bool,
+    /// What it is, and how it comes back if it is cleared.
+    pub note: String,
+}
+
+/// How the last clear a phone started went.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteStorageReport {
+    pub ok: u32,
+    pub failed: u32,
+    #[ts(type = "number")]
+    pub freed: u64,
+    /// When it finished, in milliseconds since 1970.
+    #[ts(type = "number")]
+    pub at: u64,
+}
+
+/// The Mac's disk, and what a phone may clear from it (the answer to Request::Storage).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteStorage {
+    #[ts(type = "number | null")]
+    pub free_bytes: Option<u64>,
+    #[ts(type = "number | null")]
+    pub total_bytes: Option<u64>,
+    /// When the last scan finished (ms since 1970); None before the first.
+    #[ts(type = "number | null")]
+    pub scanned_at: Option<u64>,
+    pub scanning: bool,
+    /// Where a scan has got to, while one runs.
+    pub progress: String,
+    /// A clear is running (the Storage tab's or a phone's).
+    pub deleting: bool,
+    /// The biggest items that are safe to clear.
+    pub items: Vec<RemoteStorageItem>,
+    /// How many more safe items there are than are listed (the Storage tab on the Mac has them).
+    pub more: u32,
+    pub report: Option<RemoteStorageReport>,
+}
+
+impl From<crate::storage::phone::PhoneView> for RemoteStorage {
+    fn from(v: crate::storage::phone::PhoneView) -> Self {
+        Self {
+            free_bytes: v.free_bytes,
+            total_bytes: v.total_bytes,
+            scanned_at: v.scanned_at,
+            scanning: v.scanning,
+            progress: v.progress,
+            deleting: v.deleting,
+            items: v
+                .items
+                .iter()
+                .map(|i| RemoteStorageItem { id: i.id.clone(), kind: crate::storage::phone::kind_name(i.kind).to_string(), name: i.name.clone(), bytes: i.bytes, to_trash: crate::storage::phone::to_trash(i), note: i.note.clone() })
+                .collect(),
+            more: v.more as u32,
+            report: v.report.map(|r| RemoteStorageReport { ok: r.ok as u32, failed: r.failed as u32, freed: r.freed, at: r.at }),
+        }
+    }
+}
+
 impl From<super::hub::ChatInfo> for RemoteChat {
     fn from(c: super::hub::ChatInfo) -> Self {
         let project = c.folder.as_deref().and_then(|f| std::path::Path::new(f).file_name()).map(|n| n.to_string_lossy().into_owned());
@@ -632,6 +708,16 @@ pub enum Request {
     /// working. Only sent to a Mac whose Welcome lists "pair" in `features`: an older Mac ends the connection at a request it
     /// doesn't know.
     PairOffer,
+    /// The Mac's disk and the items of it that are safe to clear (see RemoteStorage). Only sent to a Mac whose Welcome lists
+    /// "storage" in `features`: an older Mac ends the connection at a request it doesn't know.
+    Storage,
+    /// Starts a scan of the Mac's storage, in the background (the answer is at once; ask Storage to see how it goes).
+    StorageScan,
+    /// Clears the items with these ids (ones Storage listed) that are still safe to clear on the Mac now, in the background:
+    /// the answer is how many were started and about how many bytes. The Mac decides what is safe, never the phone, and
+    /// ignores any id that isn't (a Review or Blocked item, a project, the Trash). Refused for a scan older than an hour. The
+    /// phone asks Face ID and a swipe first, with the list shown.
+    StorageClear { ids: Vec<String> },
     /// The token Expo's push service delivers this phone's notifications with.
     PushToken { token: String },
     /// What the phone shows on its lock screen: the card for the chat it last messaged (`card`, None when there is none now)
