@@ -3,6 +3,10 @@ import { act, render, screen } from "@testing-library/react-native";
 import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { lightColors } from "./theme";
 
+// The phone's appearance, which a test sets.
+let mockScheme: "light" | "dark" = "light";
+jest.mock("react-native/Libraries/Utilities/useColorScheme", () => ({ __esModule: true, default: () => mockScheme }));
+
 // The module asks the phone about reduced transparency as it loads, and listens for the setting changing: watch for that.
 const subscribe = jest.spyOn(AccessibilityInfo, "addEventListener");
 const { Glass, GLASS_FILL, COMPOSER_FILL } = require("./Glass") as typeof import("./Glass");
@@ -18,6 +22,7 @@ const layerOf = () => {
 const fill = () => StyleSheet.flatten(surface().props.style).backgroundColor;
 
 afterEach(async () => {
+  mockScheme = "light";
   available.mockReturnValue(false);
   await reduce(false);
 });
@@ -53,6 +58,17 @@ describe("a glass surface", () => {
     expect(opacity).toBeGreaterThanOrEqual(0.6);
     expect(opacity).toBeLessThan(0.85);
     expect(parseInt(COMPOSER_FILL, 16)).toBeGreaterThan(parseInt(GLASS_FILL, 16));
+  });
+
+  it("is told the app's look, and is made again when it changes, rather than left to follow the system by itself", async () => {
+    available.mockReturnValue(true);
+    await render(<Glass testID="surface" />);
+    expect(layerOf()!.props.colorScheme).toBe("light");
+    const before = layerOf();
+    mockScheme = "dark";
+    await screen.rerender(<Glass testID="surface" />);
+    expect(layerOf()!.props.colorScheme).toBe("dark");
+    expect(layerOf()).not.toBe(before);
   });
 
   it("is today's solid card, with its shadow, where it doesn't", async () => {
