@@ -18,8 +18,11 @@ export interface DecideProps {
   onClose: () => void;
 }
 
-/** How long what it came to ("Denied", "Answered on your Mac") stays before the screen closes by itself. */
-export const CLOSE_AFTER_MS = 2000;
+/** How long "Answered on your Mac" (what someone else did) stays before the screen closes by itself: it is news, so it is read. */
+export const CLOSE_AFTER_MS = 1500;
+
+/** How long what this phone just did ("Answer sent", "Denied") stays: it is what was just pressed, so there is little to read. */
+export const DONE_CLOSE_MS = 800;
 
 /** An approval, swiped, closes sooner: the green going out over the screen says it, and there is nothing to read. */
 export const APPROVED_CLOSE_MS = 1000;
@@ -187,7 +190,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   }, [gone, outcome.kind]);
   useEffect(() => {
     if (outcome.kind !== "elsewhere" && outcome.kind !== "done") return;
-    const t = setTimeout(onClose, outcome.kind === "done" && outcome.swiped ? APPROVED_CLOSE_MS : CLOSE_AFTER_MS);
+    const t = setTimeout(onClose, outcome.kind === "done" ? (outcome.swiped ? APPROVED_CLOSE_MS : DONE_CLOSE_MS) : CLOSE_AFTER_MS);
     return () => clearTimeout(t);
   }, [outcome, onClose]);
 
