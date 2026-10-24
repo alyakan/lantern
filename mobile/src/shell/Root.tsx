@@ -13,7 +13,7 @@ import { SupportSheet } from "../screens/SupportSheet";
 import { TabletDetail } from "../screens/TabletDetail";
 import { WhatsNewSheet } from "../screens/WhatsNewSheet";
 import { loadNotesSeen, saveNotesSeen } from "../prefs";
-import { hasNotes, noteAction, releaseNotes } from "../whatsNew";
+import { hasNotes, noteAction, notesId, releaseNotes } from "../whatsNew";
 import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
 import { Button, Txt } from "../ui/components";
 import { FadeSlideIn } from "../ui/motion";
@@ -120,17 +120,18 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     notesChecked.current = true;
     void loadNotesSeen().then((seen) => {
       const action = noteAction(releaseNotes, seen, sawUnpaired.current);
-      if (action === "mark") void saveNotesSeen(releaseNotes.build);
+      if (action === "mark") void saveNotesSeen(notesId(releaseNotes));
       if (action === "show") setNotesDue(true);
     });
   }, [homeUp]);
-  // Never over another sheet, a decision, or a screen that isn't Home: it waits until they are gone.
-  const nothingOpen = !macSheet && !pairingDevice && !supporting && !picking && !newChat && !decision(stack);
+  // Never over another sheet, a decision, a chat (a tapped notification can open one at launch) or the tablet's chats sliding
+  // in: it waits until they are gone. A tablet has Home beside the chat all the time, so a chat doesn't hold it back there.
+  const nothingOpen = !macSheet && !pairingDevice && !supporting && !picking && !newChat && !decision(stack) && !chatsOpen && (tablet || atRoot(stack));
   useEffect(() => {
     if (!notesDue || !homeUp || !nothingOpen) return;
     setNotesDue(false);
     setNotesOpen(true);
-    void saveNotesSeen(releaseNotes.build);
+    void saveNotesSeen(notesId(releaseNotes));
   }, [notesDue, homeUp, nothingOpen]);
 
   // The system's back button (Android) goes back a screen before it leaves the app.

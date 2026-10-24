@@ -1,6 +1,7 @@
 /** What the phone remembers about how Home looks, on this phone only (the Keychain or Keystore, like everything else it keeps). */
 import * as SecureStore from "expo-secure-store";
 import type { Grouping } from "./view/home";
+import { NOTES_UNREADABLE } from "./whatsNew";
 
 const KEY = "lantern.home-grouping";
 const OPTIONS: SecureStore.SecureStoreOptions = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
@@ -76,23 +77,20 @@ export async function saveFolded(projects: string[]): Promise<void> {
 const NOTES_KEY = "lantern.notes-seen";
 
 /**
- * The newest build whose "What's new" was shown on this phone; null when none was (nothing kept yet). A value that can't be
- * read counts as already shown, so a broken store never makes the notes come back at every launch.
+ * The build whose "What's new" was shown last on this phone (its `notesId`: version and build); null when none was (nothing
+ * kept yet). A store that can't be read counts as everything shown, so it never makes the notes come back at every launch.
  */
-export async function loadNotesSeen(): Promise<number | null> {
+export async function loadNotesSeen(): Promise<string | null> {
   try {
-    const raw = await SecureStore.getItemAsync(NOTES_KEY, OPTIONS);
-    if (raw === null) return null;
-    const build = Number(raw);
-    return Number.isInteger(build) && build >= 0 ? build : Number.MAX_SAFE_INTEGER;
+    return await SecureStore.getItemAsync(NOTES_KEY, OPTIONS);
   } catch {
-    return Number.MAX_SAFE_INTEGER;
+    return NOTES_UNREADABLE;
   }
 }
 
-export async function saveNotesSeen(build: number): Promise<void> {
+export async function saveNotesSeen(id: string): Promise<void> {
   try {
-    await SecureStore.setItemAsync(NOTES_KEY, String(build), OPTIONS);
+    await SecureStore.setItemAsync(NOTES_KEY, id, OPTIONS);
   } catch {
     // Not remembered: they may show once more at the next launch.
   }

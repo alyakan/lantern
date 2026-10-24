@@ -76,14 +76,14 @@ def whats_new
   out.lines.map { |l| l.strip.sub(/\A- /, "") }.reject(&:empty?)
 end
 
-# The notes as TestFlight's text: bullets, cut at a whole bullet to fit its limit.
+# The notes as TestFlight's text: bullets, cut at a whole bullet to fit its limit (in bytes: that is how Apple counts).
 def testflight_notes(bullets)
   lines = bullets.map { |b| "- #{b}\n" }
-  return lines.join if lines.join.length <= TESTFLIGHT_NOTES_MAX
+  return lines.join if lines.join.bytesize <= TESTFLIGHT_NOTES_MAX
   kept = []
   # Room is kept for the line that says how many were left out.
   lines.each do |line|
-    break if (kept + [line]).join.length > TESTFLIGHT_NOTES_MAX - 40
+    break if (kept + [line]).join.bytesize > TESTFLIGHT_NOTES_MAX - 60
     kept << line
   end
   kept.join + "…and #{lines.size - kept.size} more changes."
@@ -92,7 +92,15 @@ end
 # What the build carries, for the app's own "What's new" (src/releaseNotes.json). Only a release build has anything in it.
 def write_app_notes(build_number, bullets)
   require "json"
-  File.write(File.join(mobile_dir, "src", "releaseNotes.json"), JSON.pretty_generate({ build: build_number, notes: bullets }) + "\n")
+  File.write(File.join(mobile_dir, "src", "releaseNotes.json"), JSON.pretty_generate({ version: app_version, build: build_number, notes: bullets }) + "\n")
+end
+
+# The same notes as a file beside the .ipa (mobile/build, which git ignores): to read, or to paste where the lane can't reach.
+def write_notes_file(build_number, bullets)
+  out = File.join(mobile_dir, "build")
+  FileUtils.mkdir_p(out)
+  body = bullets.empty? ? "Nothing new to say.\n" : bullets.map { |b| "- #{b}\n" }.join
+  File.write(File.join(out, "RELEASE_NOTES.md"), "# Lantern #{app_version}, build #{build_number}\n\n#{body}")
 end
 
 desc "Say what a release would use and what is missing; nothing is built or sent"
@@ -198,9 +206,19 @@ platform :ios do
     )
 
     # With a changelog, fastlane waits only until the build shows up in App Store Connect (to set What to Test), not for processing.
-    options = { api_key: key, skip_waiting_for_build_processing: true, skip_submission: true }
+    # It would wait for ever if the build never showed up, so it gives up after a quarter of an hour.
+    options = { api_key: key, skip_waiting_for_build_processing: true, skip_submission: true, wait_processing_timeout_duration: 900 }
     options[:changelog] = testflight_notes(bullets) unless bullets.empty?
-    upload_to_testflight(**options)
+    write_notes_file(build_number, bullets)
+    begin
+      upload_to_testflight(**options)
+    rescue StandardError => e
+      # Waiting for the build to show up can fail after the upload went through. Then the build is there (and is tagged, by the
+      # lane), but its What to Test was not set: say so. If it is not there, the upload itself failed.
+      there = latest_testflight_build_number(api_key: key, app_identifier: BUNDLE_ID, version: app_version, initial_build_number: 0) >= build_number
+      raise e unless there
+      UI.important("Build #{build_number} was uploaded, but #{e.message}\nIts What to Test may not be set: it is in mobile/build/RELEASE_NOTES.md, to set in App Store Connect.")
+    end
   end
 end
 
