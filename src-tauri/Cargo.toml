@@ -42,7 +42,8 @@ getrandom = "0.3"
 if-addrs = "0.13"
 tokio-tungstenite = { version = "0.26", default-features = false, features = ["handshake", "connect"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "http2"] }
+ring = "0.17"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 
 

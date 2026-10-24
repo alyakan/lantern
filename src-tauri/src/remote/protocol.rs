@@ -13,7 +13,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// What this Mac says it can do beyond protocol 1 (Welcome's `features`): a phone sends a request only if its name is here,
 /// since a Mac that doesn't know a request ends the connection.
-pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair"];
+pub const FEATURES: &[&str] = &["controls", "close", "workflow", "output", "shell", "images", "pair", "liveactivity"];
 
 /// A picture a phone attaches to a message, as it travels: the phone has already made it small (a JPEG at most 1568 px
 /// on its long side), and `data` is its bytes in base64 (standard alphabet, no line breaks).
@@ -634,6 +634,31 @@ pub enum Request {
     PairOffer,
     /// The token Expo's push service delivers this phone's notifications with.
     PushToken { token: String },
+    /// What the phone shows on its lock screen: the card for the chat it last messaged (`card`, None when there is none now)
+    /// and the token for starting one by push (`start_token`). The whole state each time: it replaces what was said before.
+    /// Only sent to a Mac whose Welcome lists "liveactivity" in `features`.
+    LiveActivity {
+        #[serde(default)]
+        #[ts(optional)]
+        start_token: Option<String>,
+        #[serde(default)]
+        #[ts(optional)]
+        card: Option<RemoteLiveCard>,
+    },
+}
+
+/// A phone's card on its lock screen, which the Mac keeps right with pushes to Apple.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../mobile/src/protocol/generated/")]
+pub struct RemoteLiveCard {
+    pub slot: String,
+    /// The card's own push token, as Apple gave it to the phone (hex).
+    pub token: String,
+    /// The project's name, as the card shows it.
+    pub project: String,
+    /// When the turn it shows began (ms since the epoch).
+    #[ts(type = "number")]
+    pub since: u64,
 }
 
 /// A phone's message.
@@ -792,6 +817,15 @@ mod tests {
         let old: Request = serde_json::from_str(r#"{"op":"send","slot":"a","text":"hi","client_id":"c1"}"#).unwrap();
         assert_eq!(old, Request::Send { slot: "a".into(), text: "hi".into(), client_id: "c1".into(), images: None });
         assert!(FEATURES.contains(&"images"));
+    }
+
+    #[test]
+    fn the_lock_screen_card_request_reads_with_either_part_missing_and_the_feature_is_listed() {
+        let bare: Request = serde_json::from_str(r#"{"op":"live_activity"}"#).unwrap();
+        assert_eq!(bare, Request::LiveActivity { start_token: None, card: None });
+        let card: Request = serde_json::from_str(r#"{"op":"live_activity","card":{"slot":"a","token":"ab","project":"p","since":5}}"#).unwrap();
+        assert_eq!(card, Request::LiveActivity { start_token: None, card: Some(RemoteLiveCard { slot: "a".into(), token: "ab".into(), project: "p".into(), since: 5 }) });
+        assert!(FEATURES.contains(&"liveactivity"));
     }
 
     #[test]

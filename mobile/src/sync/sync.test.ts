@@ -116,6 +116,62 @@ describe("the phone's sync", () => {
     expect(sync.getState().views.a.items[0]).toMatchObject({ failed: expect.stringMatching(/can't take photos/) });
   });
 
+  it("tells its card controller as a message goes out to a Mac that keeps cards, with the chat's project, and whether it was taken", async () => {
+    const chats = [{ slot: "a", title: null, project: "lantern", status: "idle" as const, last_seq: 1, active_at: 1, permissions: null, preset: null, project_color: null, workflow: null }];
+    const { sync, frame } = rig();
+    const told: string[] = [];
+    sync.onSending = (id, slot, project) => void told.push(`sending ${id} ${slot} ${project}`);
+    sync.onSent = (id) => void told.push(`sent ${id}`);
+    sync.onFailed = (id) => void told.push(`failed ${id}`);
+    sync.onPushed({ type: "chats", chats });
+    frame();
+    // A Mac that doesn't keep cards: nothing to start.
+    sync.onSession(fakeSession(7).session);
+    await sync.send("a", "hi");
+    expect(told).toEqual([]);
+    // One that does: told as the message goes (before the Mac answers), then that it was taken.
+    const keeps = fakeSession(7, {}, {}, ["liveactivity"]);
+    sync.onSession(keeps.session);
+    const sending = sync.send("a", "hi");
+    expect(told).toEqual(["sending m-1 a lantern"]);
+    await sending;
+    expect(told).toEqual(["sending m-1 a lantern", "sent m-1"]);
+    await sync.send("unlisted", "hi");
+    expect(told.at(-2)).toBe("sending m-1 unlisted null");
+    // A message the Mac didn't take: the card started for it is given back.
+    told.length = 0;
+    sync.onSession(fakeSession(7, {}, { send: "That chat isn't open on your Mac." }, ["liveactivity"]).session);
+    await sync.send("a", "hi");
+    expect(told).toEqual(["sending m-1 a lantern", "failed m-1"]);
+    // A message that never went (photos to a Mac that can't take them) starts no card.
+    told.length = 0;
+    sync.onSession(fakeSession(7, {}, {}, ["liveactivity"]).session);
+    await sync.send("a", "look", [{ id: "i1", uri: "file:///p.jpg", data: "D", mediaType: "image/jpeg", width: 1, height: 1 }]);
+    expect(told).toEqual([]);
+  });
+
+  it("says what card it shows only to a Mac that keeps them, and clears it with no card", async () => {
+    const { sync } = rig();
+    const old = fakeSession(7);
+    sync.onSession(old.session);
+    await sync.liveActivity({ card: { slot: "a", token: "ab".repeat(32), project: "p", since: 1 } });
+    expect(old.asked.filter((r) => r.op === "live_activity")).toEqual([]);
+    const keeps = fakeSession(7, {}, {}, ["liveactivity"]);
+    sync.onSession(keeps.session);
+    await sync.liveActivity({ card: { slot: "a", token: "ab".repeat(32), project: "p", since: 1 } });
+    await sync.liveActivity({ card: null });
+    expect(keeps.asked.filter((r) => r.op === "live_activity")).toEqual([{ op: "live_activity", card: { slot: "a", token: "ab".repeat(32), project: "p", since: 1 } }, { op: "live_activity" }]);
+  });
+
+  it("says when a connection came up", () => {
+    const { sync } = rig();
+    let up = 0;
+    sync.onConnected = () => void up++;
+    sync.onSession(fakeSession(7).session);
+    sync.onSession(fakeSession(7).session);
+    expect(up).toBe(2);
+  });
+
   it("refreshes what waits on you when the chat list moves on, and after answering", async () => {
     const { sync, frame } = rig();
     const waiting = [{ slot: "a", chat_title: null, request_id: "p1", tool_name: "Bash", input: {}, at: 1 }];

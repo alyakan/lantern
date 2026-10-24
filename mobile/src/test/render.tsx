@@ -1,7 +1,7 @@
 import type { ReactElement } from "react";
 import { render } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { Controller } from "../shell/controller";
+import { Controller, type ControllerDeps } from "../shell/controller";
 import { ControllerContext } from "../shell/hooks";
 import { TipsContext } from "../shell/tipsContext";
 import type { TipJar } from "../tips";
@@ -19,10 +19,11 @@ export const chat = (over: Partial<RemoteChat> = {}): RemoteChat => ({ slot: "a"
 export const waiting = (over: Partial<Waiting> = {}): Waiting => ({ slot: "a", chat_title: null, request_id: "p1", tool_name: "Bash", input: { command: "git push origin release/0.1.53", description: "Push the release branch" }, at: 1, ...over });
 
 /** A controller that goes nowhere (its transport never opens) with frames applied the moment they are queued. */
-export function makeController() {
+export function makeController(over: { liveFactory?: ControllerDeps["liveFactory"] } = {}) {
   const transport: Transport = { open: () => Promise.reject(new Error("no network in tests")) };
   const store = new MemoryStore();
-  const controller = new Controller({ transport, store, deviceName: "Test phone", appVersion: "1.0", now: () => NOW, sync: { schedule: (fn) => fn(), now: () => NOW, newId: () => "m-test" } });
+  // No lock-screen card unless a test gives one: its native side isn't on Node.
+  const controller = new Controller({ transport, store, deviceName: "Test phone", appVersion: "1.0", now: () => NOW, liveFactory: over.liveFactory ?? (() => null), sync: { schedule: (fn) => fn(), now: () => NOW, newId: () => "m-test" } });
   return { controller, store };
 }
 

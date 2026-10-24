@@ -338,6 +338,8 @@ export const api = {
   /** Holds the Mac awake while Remote control is on, so a phone away from home can still reach it. */
   remoteSetKeepAwake: (on: boolean) => invoke<RemoteView>("remote_set_keep_awake", { on }),
   remoteSetAllowAuto: (on: boolean) => invoke<RemoteView>("remote_set_allow_auto", { on }),
+  /** Imports the push key (a .p8 file) for the phones' lock-screen cards: checked, then kept in the Keychain. Rejects, in words, when it isn't one. */
+  remoteSetLiveKey: (path: string, keyId: string, teamId: string) => invoke<RemoteView>("remote_set_live_key", { path, keyId, teamId }),
   /** A QR code a phone pairs with: one try, for five minutes. Rejects while Remote control is off. */
   remotePair: () => invoke<PairView>("remote_pair"),
   remotePairCancel: () => invoke<void>("remote_pair_cancel"),
