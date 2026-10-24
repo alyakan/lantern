@@ -260,8 +260,8 @@ mod tests {
         let v = s.phone_view();
         assert!(!v.deleting);
         let report = v.report.expect("a report");
-        // The path is made up, so removing it fails: one tried, none cleared, and it says so.
-        assert_eq!((report.ok, report.failed), (0, 1));
+        // The path is made up, so there was nothing there to remove: it counts as cleared, as for the tab, and frees nothing.
+        assert_eq!((report.ok, report.failed, report.freed), (1, 0, 0));
     }
 
     #[test]
