@@ -8,7 +8,7 @@ import { useMacCan } from "../shell/useControls";
 import { useTipJar, useTips } from "../shell/tipsContext";
 import { Button, ProjectTag, Tag, Tile, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale, PulseDot } from "../ui/motion";
-import { useAccent } from "../ui/accent";
+import { tint, useAccent } from "../ui/accent";
 import { Chevron } from "../ui/Chevron";
 import { Dots, HomeSkeleton } from "../ui/skeleton";
 import { radius, shadow, space, useColors } from "../ui/theme";
@@ -32,6 +32,19 @@ export interface HomeProps {
   onSupport: () => void;
   /** On a tablet, Home is the side column and the chat open beside it is marked here. */
   selectedSlot?: string | null;
+  /** On a tablet, whether the chats are pinned beside the chat, and the button that pins or unpins them (none on a phone). */
+  pinned?: boolean;
+  onTogglePin?: () => void;
+}
+
+/** The sidebar, drawn: a window with its left third set apart, filled in when the chats are pinned beside the chat. */
+function PinGlyph({ pinned }: { pinned: boolean }) {
+  const colors = useColors();
+  return (
+    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 24, height: 18, borderRadius: 5, borderWidth: 1.5, borderColor: pinned ? colors.ink : colors.ink3, flexDirection: "row", overflow: "hidden" }}>
+      <View style={{ width: 8, backgroundColor: pinned ? colors.ink : "transparent", borderRightWidth: 1.5, borderRightColor: pinned ? colors.ink : colors.ink3 }} />
+    </View>
+  );
 }
 
 /** A thin bar that slides while a chat is working. */
@@ -97,11 +110,13 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
   return (
     // The rows come in one after the other when Home opens (and a new chat comes in alone); a press gives under the finger.
     <FadeSlideIn from={14} delay={Math.min(index, 8) * 45 + 120}>
-    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}`} accessibilityState={{ selected }} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "Close this chat" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={[{ flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: inset > 8 ? 8 : 0, paddingHorizontal: inset > 8 ? inset - 8 : inset, paddingVertical: 9, minHeight: 56 }, selected ? { backgroundColor: colors.rule, borderRadius: radius.inner } : null]}>
+    <PressScale accessibilityRole="button" accessibilityLabel={`${row.title}${showProject && row.project ? `, ${row.project}` : ""}${status}`} accessibilityState={{ selected }} onPress={onPress} onLongPress={onLongPress} accessibilityActions={onLongPress ? [{ name: "longpress", label: "Close this chat" }] : undefined} onAccessibilityAction={(e) => e.nativeEvent.actionName === "longpress" && onLongPress?.()} haptic="none" scaleTo={0.975} opacity={row.status === "asleep" ? 0.7 : 1} style={[{ flexDirection: "row", alignItems: "center", gap: 12, marginHorizontal: inset > 8 ? 8 : 0, paddingHorizontal: inset > 8 ? inset - 8 : inset, paddingVertical: 9, minHeight: 56 }, selected ? { backgroundColor: tint(accent, 0.08), borderRadius: radius.inner } : null]}>
+      {/* The chat you are in: a slim bar of the accent on the row's leading edge, on a faint wash of it. */}
+      {selected && <View accessibilityElementsHidden testID="selected-bar" style={{ position: "absolute", left: 0, top: 12, bottom: 12, width: 3, borderRadius: 2, backgroundColor: accent }} />}
       <View>
         <Tile letter={row.initial} bg={bg} fg={fg} />
         {/* Something new in it: a dot on the tile (cut out from the page behind it), and the title in bold below. */}
-        {row.unread && <View accessibilityElementsHidden testID="unread-dot" style={{ position: "absolute", top: -3, right: -3, width: 14, height: 14, borderRadius: 7, backgroundColor: accent, borderWidth: 2, borderColor: selected ? colors.rule : colors.paper }} />}
+        {row.unread && <View accessibilityElementsHidden testID="unread-dot" style={{ position: "absolute", top: -3, right: -3, width: 14, height: 14, borderRadius: 7, backgroundColor: accent, borderWidth: 2, borderColor: colors.paper }} />}
       </View>
       <View style={{ flex: 1 }}>
         <Txt variant="body" numberOfLines={1} style={{ fontWeight: row.unread ? "800" : "400" }}>
@@ -169,9 +184,10 @@ function ProjectGroup({ group, open, onToggle, onOpenChat, onAskClose, selectedS
         </PressScale>
         {open &&
           group.rows.map((r, i) => (
-            // Every chat is held in from the card's edges (the row itself has no inset); a hairline goes between one and the next.
-            <View key={r.slot} testID={`card-row-${r.slot}`} style={[{ marginHorizontal: CARD_INSET }, i > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.rule } : null]}>
-              <ChatRow row={r} index={i} showProject={false} inset={0} selected={r.slot === selectedSlot} onPress={() => onOpenChat(r.slot)} onLongPress={onAskClose && (() => onAskClose(r))} />
+            // Every chat is held in from the card's edges (the row has 8 of its own inside, so the open chat's wash has room around
+            // what is on it); no lines between one and the next.
+            <View key={r.slot} testID={`card-row-${r.slot}`} style={{ marginHorizontal: CARD_INSET - 8 }}>
+              <ChatRow row={r} index={i} showProject={false} inset={8} selected={r.slot === selectedSlot} onPress={() => onOpenChat(r.slot)} onLongPress={onAskClose && (() => onAskClose(r))} />
             </View>
           ))}
       </View>
@@ -208,7 +224,7 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 }
 
 /** Home: what waits on you, as a headline and a stack, then your chats. */
-export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot }: HomeProps) {
+export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot, pinned = false, onTogglePin }: HomeProps) {
   const colors = useColors();
   const controller = useController();
   const { chats, workingSince, waiting, chatsLoaded, waitingLoaded, plan } = useSyncState();
@@ -271,11 +287,19 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
               {macName ?? "Your Mac"}
             </Txt>
           </PressScale>
-          {refreshing && (
-            <View accessibilityLabel="Refreshing" accessibilityRole="progressbar" accessible>
-              <Dots />
-            </View>
-          )}
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+            {refreshing && (
+              <View accessibilityLabel="Refreshing" accessibilityRole="progressbar" accessible>
+                <Dots />
+              </View>
+            )}
+            {/* A tablet's chats: beside the chat, or slid in when asked and away once a chat is chosen. */}
+            {onTogglePin && (
+              <PressScale accessibilityRole="button" accessibilityLabel={pinned ? "Unpin the chats" : "Pin the chats beside the chat"} accessibilityState={{ selected: pinned }} onPress={onTogglePin} hitSlop={12} haptic="select" scaleTo={0.9} style={{ minHeight: 32, justifyContent: "center" }}>
+                <PinGlyph pinned={pinned} />
+              </PressScale>
+            )}
+          </View>
         </View>
         {plan && <UsageStrip plan={plan} />}
         {/* Until the Mac has sent what it has, the shape of it: "nothing waiting" would be a guess. */}

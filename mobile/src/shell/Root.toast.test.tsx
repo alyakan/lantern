@@ -11,7 +11,10 @@ jest.mock("expo-camera", () => ({ CameraView: () => null, useCameraPermissions: 
 jest.mock("expo-clipboard", () => ({ getStringAsync: jest.fn(async () => "") }));
 
 let mockLayout: Layout = "phone";
+// Whether a tablet keeps the chats pinned beside the chat.
+let mockPinned = false;
 jest.mock("./useLayout", () => ({ useLayout: () => mockLayout }));
+jest.mock("../prefs", () => ({ ...jest.requireActual("../prefs"), loadSidebarPinned: jest.fn(async () => mockPinned), saveSidebarPinned: jest.fn(async () => {}) }));
 
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 30))));
 
@@ -65,15 +68,30 @@ describe("a chat that finishes or needs you", () => {
     jest.useRealTimers();
   });
 
-  it("shows on a tablet while the chats are slid away, and not while they are beside the chat", async () => {
-    mockLayout = "overlay";
+  it("shows on a tablet while the chats are slid away, and not while they are beside the chat (pinned)", async () => {
+    mockLayout = "split";
+    mockPinned = false;
     const away = await open();
+    // In a chat, with the chats slid away.
+    await fireEvent.press(screen.getByRole("button", { name: /Release 0.1.53/ }));
+    await settle();
     await away.mac(finished);
     expect(toast()).toBeTruthy();
     await away.view.unmount();
-    mockLayout = "split";
+    mockPinned = true;
     const beside = await open();
+    await fireEvent.press(screen.getByRole("button", { name: /Release 0.1.53/ }));
+    await settle();
     await beside.mac(finished);
+    expect(toast()).toBeNull();
+  });
+
+  it("says nothing on a tablet while the chats are slid in over the chat: the list says it", async () => {
+    mockLayout = "overlay";
+    mockPinned = false;
+    // Opens on no chat, so the chats slide in by themselves.
+    const { mac } = await open();
+    await mac(finished);
     expect(toast()).toBeNull();
   });
 });
