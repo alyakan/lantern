@@ -115,7 +115,9 @@ pub trait Host: Send + Sync + 'static {
     /// Starts a chat in `folder` (the gateway has checked it is one of `projects`) with `text` as its first message, on
     /// `permissions` (Auto only when the Mac lets phones use it: the gateway has checked, and the window checks again) and
     /// the `preset` (one of the presets listed), without changing what the window shows; the new chat's slot once it is open.
-    fn new_chat(&self, folder: String, text: String, by: String, permissions: protocol::RemotePermissions, preset: Option<String>, workflow: protocol::RemoteWorkflow) -> BoxFut<Result<String, String>>;
+    /// `provider` (one of the providers listed, or None for the project's own) is where it runs.
+    #[allow(clippy::too_many_arguments)]
+    fn new_chat(&self, folder: String, text: String, by: String, permissions: protocol::RemotePermissions, preset: Option<String>, workflow: protocol::RemoteWorkflow, provider: Option<String>) -> BoxFut<Result<String, String>>;
     /// Puts an open chat on Chat or Step by step: its claude restarts on the same session (the gateway has checked it may; never a team).
     fn set_workflow(&self, slot: &str, workflow: protocol::RemoteWorkflow) -> Result<(), String>;
     /// Puts an open chat on Ask or Auto: its claude restarts on the same session (the gateway has checked it may).
@@ -259,7 +261,8 @@ impl Gateway {
 
     /// Starts a chat for `device` in `project` with `text`: the answer to Request::NewChat. The folder must be exactly one
     /// of the projects, and the phone may only start so many.
-    async fn start_chat(&self, device: &str, project: String, text: String, permissions: Option<protocol::RemotePermissions>, preset: Option<String>, workflow: Option<protocol::RemoteWorkflow>) -> Result<serde_json::Value, String> {
+    #[allow(clippy::too_many_arguments)]
+    async fn start_chat(&self, device: &str, project: String, text: String, permissions: Option<protocol::RemotePermissions>, preset: Option<String>, workflow: Option<protocol::RemoteWorkflow>, provider: Option<String>) -> Result<serde_json::Value, String> {
         check_new_chat(&project, &text)?;
         // A plain chat unless Step by step was asked for: a team is started and led on the Mac.
         let workflow = workflow.unwrap_or(protocol::RemoteWorkflow::Chat);
@@ -269,13 +272,30 @@ impl Gateway {
         // Ask unless the phone asked for Auto and the Mac lets phones have it.
         let permissions = permissions.unwrap_or(protocol::RemotePermissions::Ask);
         self.check_choice(permissions, preset.as_deref())?;
+        self.check_provider(provider.as_deref(), permissions, preset.as_deref())?;
         // The phone names a folder; whether it is one of the user's projects is decided here, by exact match.
         if !self.host.projects().await.iter().any(|(folder, _)| *folder == project) {
             return Err("That isn't one of your projects.".into());
         }
         self.allow_new_chat(device)?;
-        let slot = self.host.new_chat(project, text, device.to_string(), permissions, preset, workflow).await?;
+        let slot = self.host.new_chat(project, text, device.to_string(), permissions, preset, workflow, provider).await?;
         serde_json::to_value(protocol::StartedChat { slot }).map_err(|e| e.to_string())
+    }
+
+    /// Whether a phone may start a chat where it asks to: only on a provider the window listed (never a name the phone made up),
+    /// and not on Auto or a Claude preset where that provider has none: the phone's sheet doesn't offer them, and a request that
+    /// does is refused in words rather than quietly run as something else. None is the project's own, whatever that is.
+    fn check_provider(&self, provider: Option<&str>, permissions: protocol::RemotePermissions, preset: Option<&str>) -> Result<(), String> {
+        let Some(id) = provider else { return Ok(()) };
+        let listed = self.hub.providers();
+        let Some(p) = listed.iter().find(|p| p.id == id) else { return Err("That isn't one of your providers.".into()) };
+        if permissions == protocol::RemotePermissions::Auto && !p.auto {
+            return Err(format!("{} has no Auto mode: it asks before it acts.", p.name));
+        }
+        if preset.is_some() && !p.presets {
+            return Err(format!("{} runs on its own model: the presets don't apply to it.", p.name));
+        }
+        Ok(())
     }
 
     /// Whether a phone may choose this for a chat: Auto only when the Mac's setting lets phones use it (read here, from what the
@@ -591,9 +611,9 @@ impl<'a> Session<'a> {
                             respond(link, channel, id, Err("That is one thing at a time: wait for the others to finish first.".into()))?;
                         }
                         Request::Suggest { refresh } => slow.push(Box::pin(async move { (id, gw.suggest(refresh).await) })),
-                        Request::NewChat { project, text, permissions, preset, workflow } => {
+                        Request::NewChat { project, text, permissions, preset, workflow, provider } => {
                             let device = self.device.clone();
-                            slow.push(Box::pin(async move { (id, gw.start_chat(&device, project, text, permissions, preset, workflow).await) }));
+                            slow.push(Box::pin(async move { (id, gw.start_chat(&device, project, text, permissions, preset, workflow, provider).await) }));
                         }
                         request => {
                             let answer = self.handle(link, channel, request).await;
@@ -784,7 +804,7 @@ impl<'a> Session<'a> {
             Request::Projects => Ok(json(&host.projects().await.into_iter().map(|(id, name)| protocol::RemoteProject { id, name }).collect::<Vec<_>>())),
             // These two can take long: the connection's loop runs them beside everything else (see `run`); asked here, as a
             // plain request, they are the same thing.
-            Request::NewChat { project, text, permissions, preset, workflow } => self.gw.start_chat(&self.device, project, text, permissions, preset, workflow).await,
+            Request::NewChat { project, text, permissions, preset, workflow, provider } => self.gw.start_chat(&self.device, project, text, permissions, preset, workflow, provider).await,
             Request::SetWorkflow { slot, workflow } => {
                 if workflow == protocol::RemoteWorkflow::Team {
                     return Err(TEAM_ON_MAC.into());
@@ -799,10 +819,17 @@ impl<'a> Session<'a> {
                 }
                 host.set_workflow(&slot, workflow).map(|()| serde_json::Value::Null)
             }
-            Request::Controls => Ok(json(&protocol::Controls { allow_auto: self.gw.store.saved().allow_phone_auto, presets: self.gw.hub.presets() })),
+            Request::Controls => Ok(json(&protocol::Controls { allow_auto: self.gw.store.saved().allow_phone_auto, presets: self.gw.hub.presets(), providers: Some(self.gw.hub.providers()) })),
             Request::SetPermissions { slot, permissions } => {
                 self.gw.check_choice(permissions, None)?;
                 let chat = self.gw.switchable(&slot)?;
+                // A chat on another provider than Claude's has no auto mode (a model approving its own commands is no safety): a phone
+                // that still offers Auto (an older one) is told why, and nothing is restarted. The window and the backend hold the line too.
+                if let (protocol::RemotePermissions::Auto, Some(name)) = (permissions, &chat.provider) {
+                    if !self.gw.hub.providers().iter().find(|p| &p.name == name).is_some_and(|p| p.auto) {
+                        return Err(format!("{name} has no Auto mode: it asks before it acts."));
+                    }
+                }
                 // What it already is is not asked again: each switch restarts claude, and a phone can't make it do so over and over.
                 if chat.permissions.as_deref() == Some(permissions.as_str()) {
                     return Ok(serde_json::Value::Null);
@@ -812,6 +839,10 @@ impl<'a> Session<'a> {
             Request::SetPreset { slot, preset } => {
                 self.gw.check_choice(protocol::RemotePermissions::Ask, Some(&preset))?;
                 let chat = self.gw.switchable(&slot)?;
+                // The Mac's presets are Claude Code's models: a chat on another provider runs on its own.
+                if let Some(name) = &chat.provider {
+                    return Err(format!("{name} runs on its own model: the presets don't apply to it."));
+                }
                 if chat.preset.as_deref() == Some(preset.as_str()) {
                     return Ok(serde_json::Value::Null);
                 }
@@ -988,6 +1019,8 @@ pub(crate) mod tests {
         pub started_with: Mutex<Vec<(protocol::RemotePermissions, Option<String>)>>,
         pub switched: Mutex<Vec<String>>,
         pub started_flow: Mutex<Vec<protocol::RemoteWorkflow>>,
+        /// Where each chat it was asked to start was to run (None: the project's own).
+        pub started_provider: Mutex<Vec<Option<String>>>,
         /// What the model says next (the first is used first; "[]" when none are left), and what it was asked.
         pub replies: Mutex<Vec<Result<String, String>>>,
         pub prompts: Mutex<Vec<String>>,
@@ -1064,7 +1097,8 @@ pub(crate) mod tests {
             self.switched.lock().unwrap().push(format!("{slot}:workflow:{}", workflow.as_str()));
             Ok(())
         }
-        fn new_chat(&self, folder: String, text: String, by: String, permissions: protocol::RemotePermissions, preset: Option<String>, workflow: protocol::RemoteWorkflow) -> BoxFut<Result<String, String>> {
+        fn new_chat(&self, folder: String, text: String, by: String, permissions: protocol::RemotePermissions, preset: Option<String>, workflow: protocol::RemoteWorkflow, provider: Option<String>) -> BoxFut<Result<String, String>> {
+            self.started_provider.lock().unwrap().push(provider);
             self.started_flow.lock().unwrap().push(workflow);
             self.started_with.lock().unwrap().push((permissions, preset));
             self.started.lock().unwrap().push((folder, text, by));
@@ -1526,7 +1560,7 @@ pub(crate) mod tests {
         let (_, mut p) = paired(&r).await;
         let device = r.store.saved().devices[0].id.clone();
         assert_eq!(p.ask(Request::Projects).await.0, Some(json!([{"id": "/Users/me/app", "name": "app"}, {"id": "/Users/me/site", "name": "site"}])));
-        let (ok, err, _) = p.ask(Request::NewChat { project: "/Users/me/app".into(), text: "Fix the login bug".into(), permissions: None, preset: None, workflow: None }).await;
+        let (ok, err, _) = p.ask(Request::NewChat { project: "/Users/me/app".into(), text: "Fix the login bug".into(), permissions: None, preset: None, workflow: None, provider: None }).await;
         assert_eq!((ok, err), (Some(json!({"slot": "s9"})), None));
         let started = r.host.started.lock().unwrap();
         assert_eq!(started.len(), 1);
@@ -1539,7 +1573,7 @@ pub(crate) mod tests {
         let r = rig();
         *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
         let (_, mut p) = paired(&r).await;
-        let ask = |project: &str, text: &str| Request::NewChat { project: project.into(), text: text.into(), permissions: None, preset: None, workflow: None };
+        let ask = |project: &str, text: &str| Request::NewChat { project: project.into(), text: text.into(), permissions: None, preset: None, workflow: None, provider: None };
         for (project, text, why) in [
             ("/etc", "hi", "isn't one of your projects"),
             ("/Users/me/app/../../..", "hi", "isn't one of your projects"),
@@ -1718,7 +1752,7 @@ pub(crate) mod tests {
         let r = rig();
         *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
         let (_, mut p) = paired(&r).await;
-        let ask = |workflow| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions: None, preset: None, workflow };
+        let ask = |workflow| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions: None, preset: None, workflow, provider: None };
         assert!(p.ask(ask(None)).await.1.is_none());
         assert!(p.ask(ask(Some(Steps))).await.1.is_none());
         let (ok, err, _) = p.ask(ask(Some(Team))).await;
@@ -1827,9 +1861,94 @@ pub(crate) mod tests {
         r.hub.set_presets(vec![preset("balanced"), preset("max")]);
         let (_, mut p) = paired(&r).await;
         let (ok, _, _) = p.ask(Request::Controls).await;
-        assert_eq!(ok, Some(json!({"allow_auto": false, "presets": [{"id": "balanced", "name": "BALANCED", "summary": "balanced does it"}, {"id": "max", "name": "MAX", "summary": "max does it"}]})));
+        // No providers when the Mac has only Claude Code to offer (an older phone reads this as it always did).
+        assert_eq!(ok, Some(json!({"allow_auto": false, "presets": [{"id": "balanced", "name": "BALANCED", "summary": "balanced does it"}, {"id": "max", "name": "MAX", "summary": "max does it"}], "providers": []})));
         r.store.set_allow_phone_auto(true).unwrap();
         assert_eq!(p.ask(Request::Controls).await.0.unwrap()["allow_auto"], json!(true), "the setting is read each time, not remembered");
+    }
+
+    fn provider(id: &str, name: &str, auto: bool, presets: bool) -> protocol::RemoteProvider {
+        protocol::RemoteProvider { id: id.into(), name: name.into(), auto, presets }
+    }
+
+    /// A phone that still offers Auto in a chat's settings (one built before providers were told apart) can't put a chat on another
+    /// provider than Claude's on it, nor on one of Claude's presets: it is told why and nothing is restarted.
+    #[tokio::test]
+    async fn a_chat_on_another_provider_is_not_put_on_auto_or_a_claude_preset_from_a_phone() {
+        let r = rig();
+        r.store.set_allow_phone_auto(true).unwrap();
+        r.hub.set_presets(vec![preset("balanced")]);
+        r.hub.set_providers(vec![provider("claude", "Claude", true, true), provider("gateway:ollama", "Ollama", false, false)]);
+        r.hub.opened("local", "/p");
+        r.hub.set_provider("local", Some("Ollama"));
+        r.hub.opened("codex", "/p");
+        r.hub.set_provider("codex", Some("Codex")); // (a provider the window never listed for phones)
+        r.hub.opened("claude", "/p");
+        let (_, mut p) = paired(&r).await;
+        use protocol::RemotePermissions::{Ask, Auto};
+        for (slot, name) in [("local", "Ollama"), ("codex", "Codex")] {
+            let (ok, err, _) = p.ask(Request::SetPermissions { slot: slot.into(), permissions: Auto }).await;
+            assert!(ok.is_none() && err.is_some_and(|e| e == format!("{name} has no Auto mode: it asks before it acts.")), "{slot}");
+            let (ok, err, _) = p.ask(Request::SetPreset { slot: slot.into(), preset: "balanced".into() }).await;
+            assert!(ok.is_none() && err.is_some_and(|e| e == format!("{name} runs on its own model: the presets don't apply to it.")), "{slot}");
+        }
+        assert!(r.host.switched.lock().unwrap().is_empty(), "nothing reached the app");
+        // Ask is always fine, and a Claude chat is as it was.
+        assert!(p.ask(Request::SetPermissions { slot: "local".into(), permissions: Ask }).await.1.is_none());
+        assert!(p.ask(Request::SetPermissions { slot: "claude".into(), permissions: Auto }).await.1.is_none());
+        assert!(p.ask(Request::SetPreset { slot: "claude".into(), preset: "balanced".into() }).await.1.is_none());
+        assert_eq!(*r.host.switched.lock().unwrap(), vec!["local:ask".to_string(), "claude:auto".to_string(), "claude:preset:balanced".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_phone_is_told_where_a_chat_may_run_when_there_is_more_than_claude() {
+        let r = rig();
+        r.hub.set_providers(vec![provider("claude", "Claude", true, true), provider("gateway:ollama", "Ollama", false, false)]);
+        let (_, mut p) = paired(&r).await;
+        let (ok, _, _) = p.ask(Request::Controls).await;
+        assert_eq!(ok.unwrap()["providers"], json!([{"id": "claude", "name": "Claude", "auto": true, "presets": true}, {"id": "gateway:ollama", "name": "Ollama", "auto": false, "presets": false}]));
+    }
+
+    #[tokio::test]
+    async fn a_chat_starts_where_the_phone_asks_only_if_the_window_listed_it_and_it_can_do_what_was_asked() {
+        let r = rig();
+        *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
+        r.hub.set_presets(vec![preset("balanced")]);
+        r.hub.set_providers(vec![provider("claude", "Claude", true, true), provider("gateway:ollama", "Ollama", false, false)]);
+        r.store.set_allow_phone_auto(true).unwrap();
+        let (_, mut p) = paired(&r).await;
+        use protocol::RemotePermissions::{Ask, Auto};
+        let ask = |provider: Option<&str>, permissions, preset: Option<&str>| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions, preset: preset.map(String::from), workflow: None, provider: provider.map(String::from) };
+        // A name the phone made up, or one the window didn't list: refused, and nothing reaches the app.
+        for made_up in ["codex", "gateway:other", "", "claude "] {
+            let (ok, err, _) = p.ask(ask(Some(made_up), None, None)).await;
+            assert!(ok.is_none() && err.is_some_and(|e| e.contains("isn't one of your providers")), "{made_up:?}");
+        }
+        // Auto, or one of Claude's presets, on a provider that has neither: refused in words, not quietly run as something else.
+        let (_, err, _) = p.ask(ask(Some("gateway:ollama"), Some(Auto), None)).await;
+        assert!(err.is_some_and(|e| e.contains("Ollama has no Auto mode")));
+        let (_, err, _) = p.ask(ask(Some("gateway:ollama"), None, Some("balanced"))).await;
+        assert!(err.is_some_and(|e| e.contains("Ollama runs on its own model")));
+        assert!(r.host.started_provider.lock().unwrap().is_empty());
+        // The ones it can do start there; Claude's own and the project's own are fine too.
+        assert!(p.ask(ask(Some("gateway:ollama"), Some(Ask), None)).await.1.is_none());
+        assert!(p.ask(ask(Some("claude"), Some(Auto), Some("balanced"))).await.1.is_none());
+        assert!(p.ask(ask(None, None, None)).await.1.is_none());
+        assert_eq!(*r.host.started_provider.lock().unwrap(), vec![Some("gateway:ollama".to_string()), Some("claude".to_string()), None]);
+    }
+
+    #[test]
+    fn the_providers_a_phone_may_pick_are_kept_short_unique_and_only_when_there_is_a_choice() {
+        let hub = SessionHub::default();
+        hub.set_providers(vec![provider("claude", "Claude", true, true)]);
+        assert!(hub.providers().is_empty(), "one is no choice");
+        let many: Vec<_> = (0..60).map(|i| provider(&format!("p{}", i % 50), &"n".repeat(200), true, true)).collect();
+        hub.set_providers(many);
+        let kept = hub.providers();
+        assert!(kept.len() <= 40 && kept.iter().all(|p| p.name.chars().count() <= 60));
+        assert_eq!(kept.iter().map(|p| p.id.clone()).collect::<std::collections::BTreeSet<_>>().len(), kept.len(), "an id once");
+        hub.set_providers(vec![provider("", "No id", true, true), provider("x", "X", true, true)]);
+        assert!(hub.providers().is_empty(), "an empty id is dropped, leaving one");
     }
 
     #[tokio::test]
@@ -1838,7 +1957,7 @@ pub(crate) mod tests {
         *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
         r.hub.set_presets(vec![preset("balanced")]);
         let (_, mut p) = paired(&r).await;
-        let ask = |permissions: Option<protocol::RemotePermissions>, preset: Option<&str>| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions, preset: preset.map(String::from), workflow: None };
+        let ask = |permissions: Option<protocol::RemotePermissions>, preset: Option<&str>| Request::NewChat { project: "/Users/me/app".into(), text: "hi".into(), permissions, preset: preset.map(String::from), workflow: None, provider: None };
         use protocol::RemotePermissions::{Ask, Auto};
         // Nothing said: Ask. Auto while the setting is off: refused, and nothing reaches the app.
         assert!(p.ask(ask(None, None)).await.1.is_none());
@@ -1937,9 +2056,9 @@ pub(crate) mod tests {
         *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
         let (_, mut p) = paired(&r).await;
         for i in 0..NEW_CHATS_PER_WINDOW {
-            assert!(p.ask(Request::NewChat { project: "/Users/me/app".into(), text: format!("chat {i}"), permissions: None, preset: None, workflow: None }).await.1.is_none());
+            assert!(p.ask(Request::NewChat { project: "/Users/me/app".into(), text: format!("chat {i}"), permissions: None, preset: None, workflow: None, provider: None }).await.1.is_none());
         }
-        let (ok, err, _) = p.ask(Request::NewChat { project: "/Users/me/app".into(), text: "one more".into(), permissions: None, preset: None, workflow: None }).await;
+        let (ok, err, _) = p.ask(Request::NewChat { project: "/Users/me/app".into(), text: "one more".into(), permissions: None, preset: None, workflow: None, provider: None }).await;
         assert!(ok.is_none() && err.is_some_and(|e| e.contains("a lot of chats")));
         assert_eq!(r.host.started.lock().unwrap().len(), NEW_CHATS_PER_WINDOW);
     }
@@ -2028,7 +2147,7 @@ pub(crate) mod tests {
         *r.host.projects.lock().unwrap() = vec![("/Users/me/app".into(), "app".into())];
         *r.host.new_chat_delay.lock().unwrap() = Duration::from_millis(600);
         let (_, mut p) = paired(&r).await;
-        p.send(&ClientMessage::Request { id: 100, request: Request::NewChat { project: "/Users/me/app".into(), text: "Fix it".into(), permissions: None, preset: None, workflow: None } });
+        p.send(&ClientMessage::Request { id: 100, request: Request::NewChat { project: "/Users/me/app".into(), text: "Fix it".into(), permissions: None, preset: None, workflow: None, provider: None } });
         p.send(&ClientMessage::Request { id: 101, request: Request::ListChats });
         let order = heard_until(&mut p, &[100, 101]).await;
         assert_eq!(order, vec!["answer 101".to_string(), "answer 100".to_string()]);
@@ -2041,7 +2160,7 @@ pub(crate) mod tests {
         *r.host.new_chat_delay.lock().unwrap() = Duration::from_millis(400);
         let (_, mut p) = paired(&r).await;
         for id in 100..110 {
-            p.send(&ClientMessage::Request { id, request: Request::NewChat { project: "/Users/me/app".into(), text: format!("chat {id}"), permissions: None, preset: None, workflow: None } });
+            p.send(&ClientMessage::Request { id, request: Request::NewChat { project: "/Users/me/app".into(), text: format!("chat {id}"), permissions: None, preset: None, workflow: None, provider: None } });
         }
         // All ten arrive before the first of the slow ones finishes: three run, and the rest are refused at once.
         let (mut ran, mut refused) = (0, Vec::new());

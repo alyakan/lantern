@@ -16,9 +16,9 @@ const FOLDER = "/Users/you/projects/acme-api";
 type Call = [string, Record<string, unknown> | undefined];
 
 /** Opens the app on a project with an empty chat, recording every command it sends to the backend. */
-async function launch(over: Record<string, unknown> = {}): Promise<Call[]> {
+async function launch(over: Record<string, unknown> = {}, backend: { providers?: boolean; endpoints?: boolean } = {}): Promise<Call[]> {
   const { installMockBackend } = await import("./dev/mockBackend");
-  installMockBackend();
+  installMockBackend(backend);
   const internals = (window as unknown as { __TAURI_INTERNALS__: { invoke: (cmd: string, args?: Record<string, unknown>, options?: unknown) => Promise<unknown> } }).__TAURI_INTERNALS__;
   const calls: Call[] = [];
   const answer = internals.invoke;
@@ -164,6 +164,87 @@ describe("a chat a paired phone starts on Auto or on a preset", () => {
     const presets = calls.find(([c]) => c === "remote_window_controls")?.[1]?.presets as { id: string; name: string; summary: string }[];
     expect(presets.map((p) => p.id)).toEqual(expect.arrayContaining(["default", "balanced", "thrifty", "max"]));
     expect(presets.find((p) => p.id === "balanced")?.summary).toBe("Sonnet · Opus advisor · Haiku subagents");
+  });
+});
+
+describe("a chat a paired phone starts on an endpoint", () => {
+  const started = (calls: Call[]) => sessions(calls)[sessions(calls).length - 1]?.[1] as { claudePath: string; settings: Record<string, unknown> };
+  /** An endpoint ("Ollama") and Codex beside Claude: a phone is offered the endpoint, not Codex. */
+  const both = { providers: true, endpoints: true };
+
+  it("tells the backend where a phone may start a chat: Claude and the endpoint, not Codex", async () => {
+    const calls = await launch({}, both);
+    await waitFor(() => expect(calls.filter(([c]) => c === "remote_window_controls").some(([, a]) => ((a?.providers as unknown[]) ?? []).length > 1)).toBe(true));
+    const told = calls.filter(([c]) => c === "remote_window_controls").map(([, a]) => a?.providers as { id: string; name: string; auto: boolean; presets: boolean }[]).find((p) => p.length > 1);
+    expect(told).toEqual([
+      { id: "claude", name: "Claude", auto: true, presets: true },
+      { id: "gateway:ollama", name: "Ollama", auto: false, presets: false },
+    ]);
+  });
+
+  it("starts on the endpoint the phone chose, with its first model, on Ask, and doesn't make it the project's", async () => {
+    const calls = await launch({}, both);
+    await waitFor(() => expect(calls.some(([c, a]) => c === "remote_window_controls" && ((a?.providers as unknown[]) ?? []).length > 1)).toBe(true));
+    const before = sessions(calls).length;
+    await fromPhone(ask({ provider: "gateway:ollama" }));
+    await waitFor(() => expect(sessions(calls).length).toBe(before + 1));
+    expect(started(calls).claudePath).toBe("/Users/you/.local/bin/claude");
+    expect(started(calls).settings).toMatchObject({ provider: "gateway", endpoint: "ollama", model: "qwen3:8b", mode: "ask", auto_approve: false });
+    expect(answers(calls)[0]).toMatchObject({ error: null });
+    expect(JSON.parse(localStorage.getItem("settings.providerByFolder") ?? "{}")[FOLDER]).toBeUndefined();
+  });
+
+  it("starts nothing on a provider the window didn't list, Codex included, and says so", async () => {
+    const calls = await launch({}, both);
+    await waitFor(() => expect(calls.some(([c, a]) => c === "remote_window_controls" && ((a?.providers as unknown[]) ?? []).length > 1)).toBe(true));
+    const before = sessions(calls).length;
+    await fromPhone(ask({ id: "a", provider: "codex" }));
+    await fromPhone(ask({ id: "b", provider: "gateway:other" }));
+    await waitFor(() => expect(answers(calls)).toHaveLength(2));
+    expect(sessions(calls).length).toBe(before);
+    for (const a of answers(calls)) expect(a).toMatchObject({ slot: null, error: "That isn't one of your providers." });
+  });
+
+  it("refuses Auto on an endpoint, which has none, rather than quietly asking", async () => {
+    const calls = await launch(settingsSaying(true), both);
+    await waitFor(() => expect(calls.some(([c, a]) => c === "remote_window_controls" && ((a?.providers as unknown[]) ?? []).length > 1)).toBe(true));
+    const before = sessions(calls).length;
+    await fromPhone(ask({ permissions: "auto", provider: "gateway:ollama" }));
+    await waitFor(() => expect(answers(calls)).toHaveLength(1));
+    expect(sessions(calls).length).toBe(before);
+    expect(answers(calls)[0]).toMatchObject({ slot: null, error: "Ollama has no Auto mode: it asks before it acts." });
+  });
+
+  it("starts where the project's own chats are when the phone names nothing: an endpoint stays an endpoint", async () => {
+    localStorage.setItem("settings.providerByFolder", JSON.stringify({ [FOLDER]: "gateway:ollama" }));
+    const calls = await launch({}, both);
+    const before = sessions(calls).length;
+    await fromPhone(ask());
+    await waitFor(() => expect(sessions(calls).length).toBe(before + 1));
+    expect(started(calls).settings).toMatchObject({ provider: "gateway", endpoint: "ollama" });
+  });
+
+  it("is not put on Auto or a Claude preset from the phone afterwards, whatever Settings let phones do, and nothing restarts", async () => {
+    localStorage.setItem("settings.providerByFolder", JSON.stringify({ [FOLDER]: "gateway:ollama" }));
+    const calls = await launch(settingsSaying(true), both);
+    await quiet();
+    const slot = String(sessions(calls)[0]?.[1]?.slot);
+    await fromPhoneEvent("remote-set-permissions", { slot, permissions: "auto" });
+    await fromPhoneEvent("remote-set-preset", { slot, preset: "max" });
+    await quiet();
+    expect(restarts(calls)).toHaveLength(0);
+    expect(harnessApplied(calls)).toHaveLength(0);
+  });
+
+  /** A Codex chat started from a phone would stop at its first question with nobody able to answer: it starts on Claude instead. */
+  it("starts on Claude, not Codex, when the project's own is Codex: a phone can't answer its questions", async () => {
+    localStorage.setItem("settings.providerByFolder", JSON.stringify({ [FOLDER]: "codex" }));
+    const calls = await launch({}, both);
+    const before = sessions(calls).length;
+    await fromPhone(ask());
+    await waitFor(() => expect(sessions(calls).length).toBe(before + 1));
+    expect(started(calls).settings.provider).toBeUndefined();
+    expect(started(calls).claudePath).toBe("/Users/you/.local/bin/claude");
   });
 });
 

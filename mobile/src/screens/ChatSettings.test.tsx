@@ -81,6 +81,28 @@ describe("the settings sheet", () => {
   });
 });
 
+describe("a chat that isn't on Claude", () => {
+  it("says what it runs on first in the title bar's line, and not a Claude preset: the Mac records \"Standard\" for every chat", async () => {
+    await open({ chatOver: { provider: "Ollama", preset: "default" } });
+    await waitFor(() => expect(screen.getByText("under the title: Ollama · Ask")).toBeTruthy());
+    expect(screen.queryByText(/Standard/)).toBeNull();
+  });
+
+  it("leaves a Claude chat's line as it was", async () => {
+    await open({ chatOver: { provider: null } });
+    await waitFor(() => expect(screen.getByText("under the title: Ask · Balanced")).toBeTruthy());
+  });
+
+  it("is not offered Auto, with why, nor the Mac's presets, which are Claude Code's models", async () => {
+    await open({ allowAuto: true, chatOver: { provider: "Ollama", preset: null } });
+    await openSheet();
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Auto" })).toBeTruthy());
+    expect(screen.getByRole("radio", { name: "Auto" }).props.accessibilityState).toMatchObject({ disabled: true });
+    expect(screen.getAllByText("Ollama has no Auto mode: it asks before it acts.").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("radio", { name: "Balanced" })).toBeNull();
+  });
+});
+
 describe("switching Ask or Auto", () => {
   it("puts the chat on Auto when the Mac lets phones, says Switching… until the chat says so, then shows Auto", async () => {
     const { controller, lastOf, c } = await open({ allowAuto: true });

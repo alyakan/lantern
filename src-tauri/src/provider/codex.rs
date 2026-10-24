@@ -27,7 +27,7 @@ impl Provider for CodexProvider {
     /// no advisor, no skills or slash commands of Claude's, and reports tokens but not dollars. Its effort and model are
     /// given with each turn.
     fn capabilities(&self) -> Capabilities {
-        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: false, can_lead_team: false }
+        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: false, can_lead_team: false, phone_approvals: false }
     }
 
     fn models(&self) -> &'static [&'static str] {
