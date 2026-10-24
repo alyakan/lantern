@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from "react";
 import { BackHandler, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -16,11 +16,13 @@ import { WhatsNewSheet } from "../screens/WhatsNewSheet";
 import { loadNotesSeen, saveNotesSeen } from "../prefs";
 import { hasNotes, noteAction, notesId, releaseNotes } from "../whatsNew";
 import { AnimatedStack, type StackItem } from "../ui/AnimatedStack";
+import { ChatToast, type ToastShown } from "../ui/ChatToast";
 import { Button, Txt } from "../ui/components";
 import { FadeSlideIn } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { radius, space, useColors } from "../ui/theme";
 import { rows } from "../view/home";
+import { statusMap, toastIsRedundant, toastNotes, type StatusMap } from "../view/toasts";
 import type { Controller } from "./controller";
 import { ControllerContext, useConnectionState, useController, useSyncState } from "./hooks";
 import { atRoot, decision, home, navigate, shownSlot } from "./nav";
@@ -78,7 +80,7 @@ function ChatPicker({ onPick, onClose }: { onPick: (slot: string) => void; onClo
 function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProps, "controller">) {
   const controller = useController();
   const connection = useConnectionState();
-  const { chats } = useSyncState();
+  const { chats, chatsLoaded } = useSyncState();
   const [stack, go] = useReducer(navigate, home);
   // A tablet shows the chats beside the chat ("split") or slides them in over it ("overlay"); a phone has the stack alone.
   const colors = useColors();
@@ -173,6 +175,29 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     await controller.unpair();
   };
 
+  // A chat that finishes or needs you, while the chats' own list isn't there to say so: a toast.
+  const [toast, setToast] = useState<ToastShown | null>(null);
+  const seenStatus = useRef<StatusMap | null>(null);
+  const toastId = useRef(0);
+  const columnShown = layout === "split" || chatsOpen;
+  const watch = useRef({ stack, tablet, columnShown, chats });
+  watch.current = { stack, tablet, columnShown, chats };
+  useEffect(() => {
+    if (!chatsLoaded) return;
+    const notes = toastNotes(seenStatus.current, chats).filter((n) => !toastIsRedundant(n.slot, watch.current.stack, watch.current.tablet, watch.current.columnShown));
+    seenStatus.current = statusMap(chats);
+    // Several at once (a catch-up after being away) show the last: the one most recently in need of you.
+    const note = notes[notes.length - 1];
+    if (!note) return;
+    const chat = chats.find((c) => c.slot === note.slot);
+    setToast({ id: ++toastId.current, slot: note.slot, kind: note.kind, title: chat?.title?.trim() || "A chat", project: chat?.project ?? null });
+  }, [chats, chatsLoaded]);
+  // It goes when what it says is on the screen anyway: the chat was opened, or the chats came in.
+  useEffect(() => {
+    if (toast && toastIsRedundant(toast.slot, stack, tablet, columnShown)) setToast(null);
+  }, [toast, stack, tablet, columnShown]);
+  const clearToast = useCallback(() => setToast(null), []);
+
   // A screen that is not part of the stack comes in with a fade, so changing from one to another isn't a cut.
   const fade = (key: string, screen: ReactNode) => (
     <FadeSlideIn key={key} from={0} ms={200} style={{ flex: 1 }}>
@@ -250,6 +275,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
         />
       )}
       <ReconnectPill state={connection} />
+      <ChatToast toast={toast} onOpen={openChat} onDone={clearToast} />
       {pairingDevice && <PairDeviceSheet onClose={() => setPairingDevice(false)} />}
       {storageOpen && <StorageSheet onClose={() => setStorageOpen(false)} />}
       {notesOpen && <WhatsNewSheet notes={releaseNotes} onClose={() => setNotesOpen(false)} />}
