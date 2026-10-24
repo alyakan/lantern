@@ -228,11 +228,12 @@ export class Sync {
   /**
    * Starts a chat in a project with a first message: the new chat's slot, once it is open on the Mac. It is on Ask unless
    * `permissions` is Auto (which the Mac allows only if its Settings let phones), with `preset` (one of controls()' ids) or
-   * else the project's own.
+   * else the project's own. `provider` (one of controls()' providers) is where it runs, else the project's own.
    */
-  async newChat(project: string, text: string, choice: { permissions?: RemotePermissions; preset?: string; workflow?: Exclude<RemoteWorkflow, "team"> } = {}): Promise<string> {
-    // Only what was chosen is sent: a Mac that is older doesn't know the fields, and a chat on Ask asks for nothing more.
-    const started = await this.ask<StartedChat>({ op: "new_chat", project, text, permissions: choice.permissions ?? null, preset: choice.preset ?? null, workflow: choice.workflow ?? null });
+  async newChat(project: string, text: string, choice: { permissions?: RemotePermissions; preset?: string; workflow?: Exclude<RemoteWorkflow, "team">; provider?: string } = {}): Promise<string> {
+    // Only what was chosen is sent: a Mac that is older doesn't know the fields, and a chat on Ask asks for nothing more. The provider
+    // is left out altogether, not sent empty, when none was chosen.
+    const started = await this.ask<StartedChat>({ op: "new_chat", project, text, permissions: choice.permissions ?? null, preset: choice.preset ?? null, workflow: choice.workflow ?? null, ...(choice.provider ? { provider: choice.provider } : {}) });
     return started.slot;
   }
 
@@ -278,7 +279,9 @@ export class Sync {
     const c = await this.ask<Controls>({ op: "controls" });
     // Whatever the Mac sends is checked before it is shown.
     if (!c || typeof c.allow_auto !== "boolean" || !Array.isArray(c.presets)) throw new Error("What you can choose didn't come through.");
-    return { allow_auto: c.allow_auto, presets: c.presets.filter((p) => p && typeof p.id === "string" && typeof p.name === "string").map((p) => ({ id: p.id, name: p.name, summary: typeof p.summary === "string" ? p.summary : "" })) };
+    // Where a chat may run is optional (an older Mac leaves it out, and a Mac with only Claude says none): kept only what is well formed.
+    const providers = (Array.isArray(c.providers) ? c.providers : []).filter((p) => p && typeof p.id === "string" && p.id.length > 0 && typeof p.name === "string" && p.name.length > 0).map((p) => ({ id: p.id, name: p.name, auto: p.auto === true, presets: p.presets === true }));
+    return { allow_auto: c.allow_auto, presets: c.presets.filter((p) => p && typeof p.id === "string" && typeof p.name === "string").map((p) => ({ id: p.id, name: p.name, summary: typeof p.summary === "string" ? p.summary : "" })), providers };
   }
 
   /** Puts a chat on Ask or Auto; rejects with why not (Auto is off on the Mac, Claude is busy…). */
