@@ -96,7 +96,7 @@ describe("the Home screen", () => {
     expect(rows([chat({ slot: "x", status: "working", active_at: 10 }), chat({ slot: "y", status: "working", active_at: 20 })], 9000).map((r) => r.slot)).toEqual(["y", "x"]);
   });
 
-  it("lists chats under their projects: the projects by name, those with none last, the most recent chat first in each", () => {
+  it("lists chats under their projects: the one with a chat that needs you first, then the rest by name, those with none last, the chats in the list's order in each", () => {
     const list = rows(
       [
         chat({ slot: "a1", project: "alpha", active_at: 100 }),
@@ -109,11 +109,39 @@ describe("the Home screen", () => {
     );
     const g = groups(list);
     expect(g.map((x) => [x.project, x.rows.map((r) => r.slot), x.needsYou])).toEqual([
-      ["alpha", ["a2", "a1"], 0],
       ["beta", ["b1", "b2"], 1],
+      ["alpha", ["a2", "a1"], 0],
       ["", ["n1"], 0],
     ]);
     expect(groups([])).toEqual([]);
+  });
+
+  it("puts the projects with a chat that needs you first, then those with one working, the newest first, and never lets a quiet one go above them", () => {
+    const list = rows(
+      [
+        chat({ slot: "a", project: "alpha", status: "working", active_at: 900 }),
+        chat({ slot: "b", project: "beta", status: "idle", active_at: 990 }),
+        chat({ slot: "c", project: "charlie", status: "needs_you", active_at: 100 }),
+        chat({ slot: "d", project: "delta", status: "working", active_at: 500 }),
+        chat({ slot: "e", project: "echo", status: "needs_you", active_at: 300 }),
+        chat({ slot: "n", project: null, status: "asleep", active_at: 10 }),
+      ],
+      2000,
+      null,
+      { a: 400, d: 450 },
+    );
+    expect(groups(list).map((x) => x.project)).toEqual(["echo", "charlie", "delta", "alpha", "beta", ""]);
+  });
+
+  it("holds the working projects where they are as their chats work, and moves one up when something in it starts to need you", () => {
+    const at = (aActive: number, status: "idle" | "working" | "needs_you") => groups(rows([chat({ slot: "a", project: "alpha", status: "working", active_at: aActive }), chat({ slot: "z", project: "zed", status, active_at: 50 })], 9000, null, { a: 100, z: 200 })).map((x) => x.project);
+    // Alpha's events move its activity, not its place.
+    expect(at(300, "idle")).toEqual(["alpha", "zed"]);
+    expect(at(900, "idle")).toEqual(["alpha", "zed"]);
+    // Zed's chat starts to need you: it goes above, and when it is answered and idle again it goes back down.
+    expect(at(900, "needs_you")).toEqual(["zed", "alpha"]);
+    // Both working: the one that started last is first.
+    expect(at(900, "working")).toEqual(["zed", "alpha"]);
   });
 
   it("keeps the projects where they are however the chats move, whatever the case of their names", () => {
