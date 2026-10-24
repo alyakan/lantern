@@ -887,7 +887,7 @@ impl<'a> Session<'a> {
                         }
                         // The turn it shows began a moment ago, not in the future or long ago: the card's timer counts from it.
                         let since = c.since.clamp(now.saturating_sub(60 * 60 * 1000), now);
-                        Some(LiveCard { slot: c.slot, token: c.token, project: clean_project(&c.project), since, status: Status::Working, ended: false, registered_at: now, last_push: now })
+                        Some(LiveCard { slot: c.slot, token: c.token, project: clean_project(&c.project), since, status: Status::Working, ended: false, registered_at: now, last_push: now, needs: None, detail: Default::default() })
                     }
                     None => None,
                 };

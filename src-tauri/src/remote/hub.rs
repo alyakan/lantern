@@ -393,6 +393,20 @@ impl SessionHub {
         out
     }
 
+    /// The chat's own title, when it has one: never the stand-in made from the first thing the user said, which would put their
+    /// words on a lock screen.
+    pub fn real_title(&self, slot: &str) -> Option<String> {
+        self.chats.lock().unwrap().get(slot)?.title.clone()
+    }
+
+    /// How far the chat's own plan has got, as steps done and steps in all (None when it keeps none): counts only, never what the
+    /// steps say.
+    pub fn steps(&self, slot: &str) -> Option<(u32, u32)> {
+        let chats = self.chats.lock().unwrap();
+        let todos = chats.get(slot)?.todos.as_ref().filter(|t| !t.is_empty())?;
+        Some((todos.iter().filter(|t| t.status == "completed").count() as u32, todos.len() as u32))
+    }
+
     /// The subscription's usage as the last chat to report it said: how much of the window, when it resets, and the status.
     pub fn plan(&self) -> Option<(f64, Option<u64>, String)> {
         match self.plan.lock().unwrap().as_ref()? {
@@ -496,6 +510,23 @@ mod tests {
         let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
         feed(&hub, "a", vec![user("a long message, longer than the cap")]);
         assert_eq!(events(hub.since("a", 0).unwrap()).len(), 1);
+    }
+
+    #[test]
+    fn a_chats_steps_are_counted_and_its_real_title_is_never_the_stand_in() {
+        let hub = SessionHub { chats: Mutex::default(), presets: Mutex::default(), plan: Mutex::default(), cap: 10, now: || 1 };
+        let todo = |s: &str| crate::ui_event::Todo { content: "secret step".into(), status: s.into(), active_form: "a".into() };
+        feed(&hub, "a", vec![UiEvent::UserText { text: "my first message".into(), at: None, sent_by: None, images: 0 }]);
+        assert_eq!(hub.steps("a"), None, "no plan yet");
+        assert_eq!(hub.chat("a").unwrap().title.as_deref(), Some("my first message"), "the list may stand in the first message");
+        assert_eq!(hub.real_title("a"), None, "but the lock screen never does");
+        feed(&hub, "a", vec![UiEvent::Todos { parent: None, items: vec![todo("completed"), todo("in_progress"), todo("pending")] }]);
+        assert_eq!(hub.steps("a"), Some((1, 3)));
+        feed(&hub, "a", vec![UiEvent::Todos { parent: None, items: vec![] }]);
+        assert_eq!(hub.steps("a"), None, "an empty plan is no plan");
+        hub.titled("a", "Release 0.1.63");
+        assert_eq!(hub.real_title("a").as_deref(), Some("Release 0.1.63"));
+        assert_eq!((hub.steps("nope"), hub.real_title("nope")), (None, None));
     }
 
     #[test]
