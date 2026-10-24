@@ -12,6 +12,7 @@ import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { StartedChat } from "../protocol/generated/StartedChat";
 import type { PairOffer } from "../protocol/generated/PairOffer";
 import type { Suggestions } from "../protocol/generated/Suggestions";
+import type { RemoteLiveCard } from "../protocol/generated/RemoteLiveCard";
 import type { Waiting } from "../protocol/generated/Waiting";
 import { UPLOAD_WAIT, type Pushed, type Session } from "../net/session";
 import { newShellId } from "../view/shell";
@@ -43,6 +44,12 @@ export class Sync {
   private readonly schedule: (fn: () => void) => void;
   private readonly now: () => number;
   private readonly newId: () => string;
+  /** Told as a message goes to a Mac that keeps lock-screen cards (the phone starts the card then), and whether it was taken. */
+  onSending: ((id: string, slot: string, project: string | null) => void) | null = null;
+  onSent: ((id: string) => void) | null = null;
+  onFailed: ((id: string) => void) | null = null;
+  /** Told when a connection to the Mac came up. */
+  onConnected: (() => void) | null = null;
 
   constructor(d: SyncDeps = {}) {
     this.schedule = d.schedule ?? defaultSchedule;
@@ -99,6 +106,7 @@ export class Sync {
     this.flush();
     for (const slot of this.followed) void this.subscribeTo(slot);
     void this.refreshWaiting();
+    this.onConnected?.();
   };
 
   private ask<T>(request: Request, wait?: number): Promise<T> {
@@ -146,13 +154,21 @@ export class Sync {
   async send(slot: string, text: string, images: PickedImage[] = []) {
     const clientId = this.newId();
     this.apply({ type: "sending", slot, clientId, text, at: this.now(), ...(images.length > 0 ? { thumbs: images.map((i) => i.uri) } : {}) });
+    let carded = false;
     try {
       // Only to a Mac that says it takes them: an older one would send the words and say nothing of the pictures.
       if (images.length > 0 && !this.has("images")) throw new Error("This Mac can't take photos yet. Update Lantern on it.");
+      // A Mac that keeps cards: the card starts now, while the app is in front, not when the Mac has answered.
+      if (this.has("liveactivity")) {
+        carded = true;
+        this.onSending?.(clientId, slot, this.state.chats.find((c) => c.slot === slot)?.project ?? null);
+      }
       // Photos are megabytes to get across, so the Mac has longer to answer than for words.
       const request: Request = { op: "send", slot, text, client_id: clientId, ...(images.length > 0 ? { images: images.map((i) => ({ media_type: i.mediaType, data: i.data })) } : {}) };
       await (images.length > 0 ? this.ask(request, UPLOAD_WAIT) : this.ask(request));
+      if (carded) this.onSent?.(clientId);
     } catch (e) {
+      if (carded) this.onFailed?.(clientId);
       this.apply({ type: "send_failed", slot, clientId, error: (e as Error).message });
     }
   }
@@ -293,5 +309,11 @@ export class Sync {
 
   registerPushToken(token: string) {
     return this.ask({ op: "push_token", token });
+  }
+
+  /** Tells the Mac which card this phone shows on its lock screen (null: none now). Only to a Mac that keeps them. */
+  liveActivity(state: { card: RemoteLiveCard | null }) {
+    if (!this.has("liveactivity")) return Promise.resolve();
+    return this.ask({ op: "live_activity", ...(state.card ? { card: state.card } : {}) });
   }
 }

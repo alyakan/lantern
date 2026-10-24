@@ -1,6 +1,7 @@
 /** What the phone remembers about how Home looks, on this phone only (the Keychain or Keystore, like everything else it keeps). */
 import * as SecureStore from "expo-secure-store";
 import type { Grouping } from "./view/home";
+import { NOTES_UNREADABLE } from "./whatsNew";
 
 const KEY = "lantern.home-grouping";
 const OPTIONS: SecureStore.SecureStoreOptions = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
@@ -70,6 +71,28 @@ export async function saveFolded(projects: string[]): Promise<void> {
     await SecureStore.setItemAsync(FOLDED_KEY, JSON.stringify(projects.slice(-FOLDED_KEPT)), OPTIONS);
   } catch {
     // Not remembered: the cards are as they were left until the app closes.
+  }
+}
+
+const NOTES_KEY = "lantern.notes-seen";
+
+/**
+ * The build whose "What's new" was shown last on this phone (its `notesId`: version and build); null when none was (nothing
+ * kept yet). A store that can't be read counts as everything shown, so it never makes the notes come back at every launch.
+ */
+export async function loadNotesSeen(): Promise<string | null> {
+  try {
+    return await SecureStore.getItemAsync(NOTES_KEY, OPTIONS);
+  } catch {
+    return NOTES_UNREADABLE;
+  }
+}
+
+export async function saveNotesSeen(id: string): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(NOTES_KEY, id, OPTIONS);
+  } catch {
+    // Not remembered: they may show once more at the next launch.
   }
 }
 

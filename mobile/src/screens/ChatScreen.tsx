@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { AppState, Pressable, StyleSheet, View } from "react-native";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { markSeen } from "../seen";
@@ -100,6 +100,13 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
     sync.follow(slot);
     return () => sync.unfollow(slot);
   }, [sync, slot]);
+
+  // Looking at the chat clears its card on the lock screen: opening it, and coming back to the app while it is open.
+  useEffect(() => {
+    void controller.liveCards.opened(slot);
+    const sub = AppState.addEventListener("change", (s) => s === "active" && void controller.liveCards.opened(slot));
+    return () => sub.remove();
+  }, [controller, slot]);
 
   // A catch-up that covered a stretch away says so for a moment.
   useEffect(() => {

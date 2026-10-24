@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../api";
-import { lastSeen, timeLeft, type PairView, type RemoteView } from "../lib/remoteControl";
+import { keyIdFromFile, lastSeen, LANTERN_TEAM_ID, timeLeft, type PairView, type RemoteView } from "../lib/remoteControl";
 
 const errText = (e: unknown) => (typeof e === "string" ? e : e instanceof Error ? e.message : JSON.stringify(e));
 
@@ -82,6 +83,27 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
   const cancelPair = () => {
     setPair(null);
     void api.remotePairCancel().catch(() => {});
+  };
+  // The push key for the lock-screen cards: the file is chosen, its Key ID read from its name, then confirmed.
+  const [keyForm, setKeyForm] = useState<{ path: string; keyId: string; teamId: string } | null>(null);
+  const chooseKey = () =>
+    open({ multiple: false, directory: false, filters: [{ name: "Apple push key", extensions: ["p8"] }] }).then(
+      (picked) => {
+        if (typeof picked !== "string") return;
+        setKeyForm({ path: picked, keyId: keyIdFromFile(picked) ?? "", teamId: LANTERN_TEAM_ID });
+      },
+      (e) => setError(errText(e)),
+    );
+  const importKey = () => {
+    if (!keyForm) return;
+    api.remoteSetLiveKey(keyForm.path, keyForm.keyId.trim(), keyForm.teamId.trim()).then(
+      (v) => {
+        setView(v);
+        setError(null);
+        setKeyForm(null);
+      },
+      (e) => setError(errText(e)),
+    );
   };
 
   return (
@@ -204,6 +226,33 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
               <span>Show chat titles in notifications</span>
             </label>
             <span className="settings-muted">Notifications pass through Apple's, Google's and Expo's servers. Off, they only say that a chat needs you or finished.</span>
+          </section>
+          <section className="general-section" aria-labelledby="remote-live">
+            <h3 id="remote-live" className="general-title">
+              Lock screen cards
+            </h3>
+            <span className="settings-muted">
+              A phone can show a card on its lock screen for the chat you last messaged: working, needs you, done. This Mac keeps it right by sending Apple a small update each time, signed with a push key you made at developer.apple.com, so it only updates while this Mac is awake. A card says the project's name and what state it is in, never a chat's title, a command or a file.
+            </span>
+            <p>{view.live_key ? `Push key: ${view.live_key}` : "No push key yet, so no card is kept up to date."}</p>
+            {keyForm ? (
+              <div className="remote-pair-actions">
+                <label>
+                  Key ID
+                  <input aria-label="Key ID" value={keyForm.keyId} maxLength={10} onChange={(e) => setKeyForm({ ...keyForm, keyId: e.target.value })} />
+                </label>
+                <label>
+                  Team ID
+                  <input aria-label="Team ID" value={keyForm.teamId} maxLength={10} onChange={(e) => setKeyForm({ ...keyForm, teamId: e.target.value })} />
+                </label>
+                <button onClick={importKey}>Import</button>
+                <button onClick={() => setKeyForm(null)}>Cancel</button>
+              </div>
+            ) : (
+              <button onClick={chooseKey}>{view.live_key ? "Replace the push key…" : "Import the push key…"}</button>
+            )}
+            <span className="settings-muted">Choose the AuthKey_….p8 file. It is kept in this Mac's Keychain; the file itself is left where it is, so keep your own backup of it.</span>
+            {view.live_last && <span className="settings-muted">Apple last said: {view.live_last}</span>}
           </section>
         </>
       )}

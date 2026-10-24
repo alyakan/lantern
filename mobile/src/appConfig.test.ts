@@ -54,6 +54,14 @@ describe("app.json", () => {
     expect(expo.ios.infoPlist.NSCameraUsageDescription).toBe(picker?.[1].cameraPermission);
   });
 
+  it("turns on the widget extension's push (the Mac updates the lock-screen card with pushes to Apple), and gives it no widgets of its own", () => {
+    const plugins: unknown[] = expo.plugins;
+    const widgets = plugins.find((p) => Array.isArray(p) && p[0] === "expo-widgets") as [string, { enablePushNotifications?: boolean; widgets?: unknown[] }] | undefined;
+    expect(widgets?.[1].enablePushNotifications).toBe(true);
+    // A Live Activity isn't declared as a widget: the package says an entry for it makes an invalid target.
+    expect(widgets?.[1].widgets).toBeUndefined();
+  });
+
   it("opens lantern:// links, which is how a pairing link reaches the app", () => {
     expect(expo.scheme).toBe("lantern");
   });

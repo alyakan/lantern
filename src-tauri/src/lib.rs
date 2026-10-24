@@ -170,8 +170,15 @@ fn window_remote(app: &AppHandle) -> remote::Remote {
     // app's, so trying things out never touches them.
     let dev_file = std::env::var_os("LANTERN_REMOTE_FILE").map(std::path::PathBuf::from);
     let store = remote::pairing::RemoteStore::load(dev_file.clone().or_else(|| app.path().app_data_dir().ok().map(|d| d.join("remote.json"))));
-    let keychain = remote::keys::Keychain { service: if dev_file.is_some() { "Lantern Remote control (dev)" } else { remote::keys::SERVICE } };
-    let remote = remote::Remote::new(store, Box::new(keychain));
+    let service = if dev_file.is_some() { "Lantern Remote control (dev)" } else { remote::keys::SERVICE };
+    let remote = remote::Remote::new(store, Box::new(remote::keys::Keychain { service }));
+    // The push key for the lock-screen cards is kept there too, as an item of its own.
+    remote.live.use_store(Arc::new(remote::live_activity::LiveKeychain { service }));
+    // Read once, off this thread, so that Settings (which asks for the key's id on every refresh) never goes to the Keychain.
+    let live = remote.live.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _ = live.signer();
+    });
     let app = app.clone();
     remote.tap_window(move |ev| {
         let _ = app.emit("ui-event", &ev);
@@ -514,7 +521,13 @@ async fn start_remote(app: &AppHandle) -> Result<(), String> {
     let notifier = remote::notifier::Notifier::new(r.store.clone(), r.hub.clone(), Arc::new(remote::notifier::ExpoPush::new()?), Arc::new(move |slot| watching.watched(slot)));
     let opened = notifier.clone();
     gateway.on_open(Arc::new(move |slot| opened.opened(slot)));
-    let task = tokio::spawn(notifier.run(r.bus.clone()));
+    // The lock-screen cards of phones that registered one, kept right with pushes straight to Apple (see remote/live_activity.rs).
+    let cards = remote::live_activity::LiveActivities::new(r.store.clone(), r.hub.clone(), Arc::new(remote::live_activity::ApnsHttp::new(r.live.clone())?));
+    let (notifier_bus, cards_bus) = (r.bus.clone(), r.bus.clone());
+    // One task for both, so stopping Remote control stops both.
+    let task = tokio::spawn(async move {
+        tokio::join!(notifier.run(notifier_bus), cards.run(cards_bus));
+    });
     state.remote.set_running(remote::Running { gateway, listener, bonjour, notifier: Some(task) });
     Ok(())
 }
@@ -1914,6 +1927,28 @@ fn remote_set_allow_auto(state: State<'_, AppState>, on: bool) -> remote::Remote
     state.remote.view_after(state.remote.store.set_allow_phone_auto(on))
 }
 
+/// The most a push key file may weigh (Apple's are about 250 bytes): anything bigger isn't one, and isn't read.
+const PUSH_KEY_FILE_MAX: u64 = 4096;
+
+/// Imports the push key (a .p8 file) for the lock-screen cards. It is checked (it must parse and sign), then kept in the
+/// Keychain; the file stays where it was, and nothing of it is shown or logged. Off the main thread: the Keychain may ask first.
+#[tauri::command]
+async fn remote_set_live_key(app: AppHandle, path: String, key_id: String, team_id: String) -> Result<remote::RemoteView, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = std::path::Path::new(&path);
+        let meta = std::fs::metadata(path).map_err(|_| "Lantern couldn't open that file.".to_string())?;
+        if !meta.is_file() || meta.len() > PUSH_KEY_FILE_MAX {
+            return Err("That isn't a push key: it should be the .p8 file Apple gave you.".to_string());
+        }
+        let text = std::fs::read_to_string(path).map_err(|_| "That isn't a push key: it should be the .p8 file Apple gave you.".to_string())?;
+        let state = app.state::<AppState>();
+        state.remote.live.import(&key_id, &team_id, &text)?;
+        Ok(state.remote.view())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// A QR code for pairing a phone, good for five minutes and one try. Off the main thread: the Mac's key comes from the
 /// Keychain, which may ask the user first.
 #[tauri::command]
@@ -2705,6 +2740,7 @@ pub fn run() {
             remote_settings,
             remote_set_enabled,
             remote_set_show_titles,
+            remote_set_live_key,
             remote_set_keep_awake,
             remote_set_allow_auto,
             remote_pair,

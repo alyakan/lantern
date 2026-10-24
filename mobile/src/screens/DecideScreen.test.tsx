@@ -2,7 +2,7 @@ import { StyleSheet } from "react-native";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { attachSession } from "../test/fakeSession";
 import { chat, makeController, renderWith, waiting } from "../test/render";
-import { answersFrom, APPROVED_CLOSE_MS, CLOSE_AFTER_MS, DecideScreen } from "./DecideScreen";
+import { answersFrom, APPROVED_CLOSE_MS, CLOSE_AFTER_MS, DecideScreen, DONE_CLOSE_MS } from "./DecideScreen";
 import { approvalOf } from "../view/prompts";
 import { lightColors } from "../ui/theme";
 
@@ -64,9 +64,10 @@ describe("deciding", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("an approval closes by itself after a second, the circle sooner, and anything else after two", async () => {
+  it("an approval closes by itself after a second, the circle sooner, and what else this phone did after less", async () => {
     expect(APPROVED_CLOSE_MS).toBe(1000);
-    expect(CLOSE_AFTER_MS).toBe(2000);
+    expect(DONE_CLOSE_MS).toBeLessThan(APPROVED_CLOSE_MS);
+    expect(CLOSE_AFTER_MS).toBe(1500);
     const { onClose } = await decide();
     await activate();
     await waitFor(() => expect(screen.getByText("Allowed.")).toBeTruthy());
@@ -74,7 +75,7 @@ describe("deciding", () => {
     expect(onClose).not.toHaveBeenCalled();
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), { timeout: APPROVED_CLOSE_MS + 1500 });
     expect(Date.now() - allowedAt).toBeGreaterThanOrEqual(APPROVED_CLOSE_MS - 250);
-    expect(Date.now() - allowedAt).toBeLessThan(CLOSE_AFTER_MS - 100);
+    expect(Date.now() - allowedAt).toBeLessThan(CLOSE_AFTER_MS);
   });
 
   it("sends a soft ripple out from the approved circle that fades away, and leaves nothing on the screen", async () => {
@@ -101,14 +102,14 @@ describe("deciding", () => {
     expect(screen.queryByTestId("approve-ripple", { includeHiddenElements: true })).toBeNull();
   });
 
-  it("an answer to a question stays as long as it did", async () => {
+  it("an answer to a question, or a denial, closes sooner than an approval does, by itself", async () => {
     const { onClose } = await decide(question);
     await fireEvent.press(screen.getByText("Stable"));
     await fireEvent.press(screen.getByRole("button", { name: "Send answer" }));
     await waitFor(() => expect(screen.getByText("Answer sent.")).toBeTruthy());
-    await act(async () => void (await new Promise((r) => setTimeout(r, APPROVED_CLOSE_MS + 300))));
-    expect(onClose).not.toHaveBeenCalled();
-    await waitFor(() => expect(onClose).toHaveBeenCalled(), { timeout: CLOSE_AFTER_MS });
+    const sentAt = Date.now();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), { timeout: APPROVED_CLOSE_MS });
+    expect(Date.now() - sentAt).toBeLessThan(APPROVED_CLOSE_MS);
   });
 
   it("says what it came to in small, regular text, not a line of its own voice", async () => {
