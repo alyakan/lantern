@@ -307,13 +307,6 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         )}
       </View>
 
-      {!online && (
-        <View accessibilityRole="alert" style={{ marginHorizontal: 16, marginBottom: 6, backgroundColor: colors.card, borderRadius: 10, padding: 10 }}>
-          <Txt variant="small" tone="ink2">
-            {connection.kind === "offline" ? "Not connected to your Mac. It reconnects by itself." : "Connecting to your Mac…"}
-          </Txt>
-        </View>
-      )}
       {banner && (
         <View accessibilityRole="alert" style={{ marginHorizontal: 16, marginBottom: 6, backgroundColor: colors.card, borderRadius: 10, padding: 10, flexDirection: "row", alignItems: "center", gap: 8 }}>
           <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.go }} />

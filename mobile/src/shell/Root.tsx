@@ -6,7 +6,7 @@ import { ChatScreen } from "../screens/ChatScreen";
 import { DecideScreen } from "../screens/DecideScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { NewChatSheet, type Draft } from "../screens/NewChatSheet";
-import { MacSheet, OfflineScreen } from "../screens/OfflineScreen";
+import { MacSheet, OfflineScreen, ReconnectPill } from "../screens/OfflineScreen";
 import { PairDeviceSheet } from "../screens/PairDevice";
 import { ConfirmLink, PairScreen } from "../screens/PairScreen";
 import { SupportSheet } from "../screens/SupportSheet";
@@ -114,7 +114,9 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   useEffect(() => {
     if (connection.kind === "unpaired") sawUnpaired.current = true;
   }, [connection.kind]);
-  const homeUp = !pendingLink && connection.kind !== "unpaired" && connection.kind !== "connecting" && !(connection.kind === "offline" && chats.length === 0);
+  // With chats in hand a lost connection is a pill over them; with none there is nothing to show but the connecting screen.
+  const noMac = chats.length === 0 && (connection.kind === "connecting" || connection.kind === "offline");
+  const homeUp = !pendingLink && connection.kind !== "unpaired" && !noMac;
   useEffect(() => {
     if (notesChecked.current || !homeUp) return;
     notesChecked.current = true;
@@ -187,7 +189,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   if (pendingLink) return fade("confirm", narrow(<ConfirmLink link={pendingLink} onCancel={() => onClearLink?.()} onDone={() => onClearLink?.()} />));
   // The pairing screen is the camera, which has the whole screen on a tablet (it lays out its own words): it is not in the column.
   if (connection.kind === "unpaired") return fade("pair", <PairScreen />);
-  if (connection.kind === "connecting" || (connection.kind === "offline" && chats.length === 0)) {
+  if (noMac) {
     return fade("offline", narrow(<OfflineScreen state={connection} onRetry={() => controller.resume()} onUnpair={unpair} onAddress={(text) => controller.useAddress(text)} />));
   }
 
@@ -239,6 +241,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
           }
         />
       )}
+      <ReconnectPill state={connection} />
       {pairingDevice && <PairDeviceSheet onClose={() => setPairingDevice(false)} />}
       {notesOpen && <WhatsNewSheet notes={releaseNotes} onClose={() => setNotesOpen(false)} />}
       {supporting && <SupportSheet onClose={() => setSupporting(false)} />}
