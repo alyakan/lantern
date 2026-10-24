@@ -1,10 +1,13 @@
 /**
- * Notifications on the phone. The Mac sends a push through Expo's service when a chat needs you or finishes: it carries a
- * chat id and a kind (and a title only if you turned that on in Lantern), never code or prompts. This registers the phone
- * for them, and says which chat a tap opens.
+ * Notifications on the phone. The Mac sends a push when a chat needs you or finishes: it carries a chat id and a kind (and a
+ * title only if you turned that on in Lantern), never code or prompts. This registers the phone for them, and says which chat
+ * a tap opens.
  *
- * Expo's push service needs the app's EAS project id, which comes from the user's Expo account (`eas init` writes it to
- * app.json at extra.eas.projectId). Without it nothing is registered, and the app says so instead of failing.
+ * On an iPhone the Mac pushes straight to Apple with the phone's own device token (the way the lock-screen cards are kept
+ * right), which needs no account but the push key the Mac already has, and carries the buttons (see notificationActions.ts).
+ * Elsewhere it goes through Expo's push service, which needs the app's EAS project id, which comes from the user's Expo account
+ * (`eas init` writes it to app.json at extra.eas.projectId). Without it nothing is registered, and the app says so instead of
+ * failing.
  */
 
 export type PushStatus = { kind: "registered"; token: string } | { kind: "no-project" } | { kind: "denied" } | { kind: "not-a-phone" } | { kind: "failed"; why: string };
@@ -15,19 +18,21 @@ export interface PushPlatform {
   getPermission: () => Promise<"granted" | "denied" | "undetermined">;
   requestPermission: () => Promise<"granted" | "denied" | "undetermined">;
   getToken: (projectId: string) => Promise<string>;
+  /** The phone's own device token, where the Mac can push to Apple with it (an iPhone): used instead of Expo's, with no project. */
+  getDeviceToken?: () => Promise<string>;
   /** Android needs a channel before any notification shows. */
   prepareChannel: () => Promise<void>;
 }
 
 export async function registerForPush(platform: PushPlatform, projectId: string | undefined, send: (token: string) => Promise<unknown>): Promise<PushStatus> {
-  if (!projectId) return { kind: "no-project" };
+  if (!projectId && !platform.getDeviceToken) return { kind: "no-project" };
   if (!platform.isDevice) return { kind: "not-a-phone" };
   try {
     await platform.prepareChannel();
     let permission = await platform.getPermission();
     if (permission !== "granted") permission = await platform.requestPermission();
     if (permission !== "granted") return { kind: "denied" };
-    const token = await platform.getToken(projectId);
+    const token = platform.getDeviceToken ? await platform.getDeviceToken() : await platform.getToken(projectId as string);
     await send(token);
     return { kind: "registered", token };
   } catch (e) {

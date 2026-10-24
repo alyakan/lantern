@@ -46,6 +46,11 @@ pub fn qr_modules(link: &str) -> Result<Vec<String>, String> {
     Ok(code.to_colors().chunks(width).map(|row| row.iter().map(|c| if *c == qrcode::Color::Dark { '1' } else { '0' }).collect()).collect())
 }
 
+/// An Apple device token: hex, 32 bytes today (64 digits), and allowed to grow. It goes in a URL, so nothing else is let in.
+pub fn is_apns_token(token: &str) -> bool {
+    (64..=200).contains(&token.len()) && token.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 /// A paired phone.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Device {
@@ -189,10 +194,11 @@ impl RemoteStore {
         let _ = self.change(|s| s.devices.iter_mut().filter(|d| d.id == id).for_each(|d| d.last_seen = Some(now)));
     }
 
-    /// Expo push tokens look like `ExponentPushToken[…]`; anything else is refused.
+    /// Expo push tokens look like `ExponentPushToken[…]`, and Apple's own device tokens are hex (see `is_apns_token`); anything
+    /// else is refused.
     pub fn set_push_token(&self, id: &str, token: &str) -> Result<(), String> {
-        let ok = token.len() <= 200 && token.starts_with("ExponentPushToken[") && token.ends_with(']') && token.chars().all(|c| c.is_ascii_graphic());
-        if !ok {
+        let expo = token.len() <= 200 && token.starts_with("ExponentPushToken[") && token.ends_with(']') && token.chars().all(|c| c.is_ascii_graphic());
+        if !expo && !is_apns_token(token) {
             return Err("That isn't a push token.".into());
         }
         self.change(|s| s.devices.iter_mut().filter(|d| d.id == id).for_each(|d| d.push_token = Some(token.to_string())))
@@ -315,6 +321,13 @@ mod tests {
         assert_eq!(d.name, "Phone");
         assert!(s.set_push_token(&d.id, "ExponentPushToken[abc123]").is_ok());
         assert!(s.set_push_token(&d.id, "https://evil.example/hook").is_err());
+        // Apple's own device token is hex, and only hex: it goes into a URL.
+        let apple = "ab".repeat(32);
+        assert!(s.set_push_token(&d.id, &apple).is_ok());
+        assert!(s.set_push_token(&d.id, &"ab".repeat(31)).is_err());
+        assert!(s.set_push_token(&d.id, &format!("{}/../x", "ab".repeat(32))).is_err());
+        assert!(s.set_push_token(&d.id, &"zz".repeat(32)).is_err());
+        assert!(s.set_push_token(&d.id, "ExponentPushToken[abc123]").is_ok());
         assert!(s.set_push_token(&d.id, "ExponentPushToken[a b]").is_err());
         assert_eq!(s.saved().devices[0].push_token.as_deref(), Some("ExponentPushToken[abc123]"));
     }
