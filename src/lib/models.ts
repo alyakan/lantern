@@ -44,10 +44,13 @@ export type ModelChoice = (typeof MODEL_CHOICES)[number];
  */
 export function modelChoicesFor(providerId: string, models: string[], agent: string): ModelChoice[] {
   if (providerId === "claude") return MODEL_CHOICES;
+  if (providerId.startsWith("gateway:")) return models.map((value) => ({ value, label: value, hint: "" }));
   return [{ value: null, label: "Default", hint: `${agent}'s setting` }, ...models.map((value) => ({ value, label: value, hint: "" }))];
 }
 
 /** Another provider's models as the model picker lists them, before its session reports its own: Default first, then each name its CLI takes. */
-export function modelOptionsFor(models: string[], agent: string): ModelOption[] {
+export function modelOptionsFor(models: string[], agent: string, noDefault = false): ModelOption[] {
+  // An endpoint has no default of its own to start from: a chat on it is always on one of its models (the first, to begin with).
+  if (noDefault) return models.map((value) => ({ value, resolved_model: value, display_name: value, description: "", effort_levels: [] }));
   return [{ value: "default", resolved_model: "", display_name: "Default", description: `${agent}'s setting`, effort_levels: [] }, ...models.map((value) => ({ value, resolved_model: value, display_name: value, description: "", effort_levels: [] }))];
 }

@@ -3,7 +3,7 @@ import { chatsReducer, initialChats } from "../sessions";
 import { initialState, reducer, totalCost, type State } from "../store";
 import type { ProviderInfo, UiEvent } from "../types";
 import { CLAUDE_INFO, CLAUDE_LISTING, PLAIN, PLAIN_LISTING } from "../testProviders";
-import { CLAUDE, CLAUDE_CAPABILITIES, agentName, capabilitiesOf, choicesOf, modeOn, providerIdOf, providerName, reportsUsd } from "./provider";
+import { CLAUDE, CLAUDE_CAPABILITIES, agentName, capabilitiesOf, choicesOf, isGateway, modeOn, providerChoicesForAgents, providerIdOf, providerName, reportsUsd, wireProvider } from "./provider";
 
 const turn = (cost: number | null, tokens: number | null, session?: number): UiEvent => ({ kind: "turn_done", is_error: false, result: null, cost_usd: cost, tokens, session_cost_usd: session ?? cost, session_tokens: tokens ?? 0, duration_ms: 1000, auth_hint: false, denied: 0, context_window: 200_000 });
 const lastItem = (s: State) => s.items[s.items.length - 1];
@@ -115,5 +115,35 @@ describe("a chat's provider in its state", () => {
     // A backend that doesn't say (an older one) is Claude's.
     const silent = chatsReducer(initialChats(main), { type: "in", slot: "s1", action: { type: "ui_event", event: spawned() } });
     expect(silent.slots.w1.provider).toBeNull();
+  });
+});
+
+describe("an endpoint the user set up", () => {
+  const gateway = { ...PLAIN_LISTING, id: "gateway", models: ["qwen3:8b"], binary: null, endpoint: { id: "ollama", name: "Ollama" } };
+
+  it("is a provider of its own, keyed by its endpoint and named as the user named it", () => {
+    const { list, multi } = choicesOf([CLAUDE_LISTING, gateway]);
+    expect(list.map((l) => l.id)).toEqual(["claude", "gateway:ollama"]);
+    expect(multi).toBe(true);
+    expect(providerName("gateway:ollama")).toBe("Ollama");
+    expect(agentName({ id: "gateway:ollama", capabilities: gateway.capabilities })).toBe("Ollama");
+    // An endpoint this window hasn't been told the name of is still readable.
+    expect(providerName("gateway:my-llm")).toBe("My-llm");
+  });
+
+  it("tells the backend the provider and which endpoint, and nothing at all for Claude", () => {
+    expect(wireProvider("gateway:ollama")).toEqual({ provider: "gateway", endpoint: "ollama" });
+    expect(wireProvider("codex")).toEqual({ provider: "codex" });
+    expect(wireProvider("claude")).toEqual({});
+    expect(isGateway("gateway:x") && !isGateway("codex") && !isGateway("claude")).toBe(true);
+  });
+
+  it("is left to Claude alone when no endpoint is set up, so a window with none looks as before", () => {
+    expect(choicesOf([CLAUDE_LISTING])).toEqual({ list: [CLAUDE_LISTING], multi: false });
+    expect(choicesOf(null)).toEqual({ list: [], multi: false });
+  });
+
+  it("is not offered to a team's agents", () => {
+    expect(providerChoicesForAgents(choicesOf([CLAUDE_LISTING, PLAIN_LISTING, gateway]).list).map((l) => l.id)).toEqual(["claude", "codex"]);
   });
 });
