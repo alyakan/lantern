@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, ScrollView, TextInput, useWindowDimensions, View } from "react-native";
+import { Animated, ScrollView, TextInput, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useController, useSyncState } from "../shell/hooks";
@@ -24,13 +24,8 @@ export const CLOSE_AFTER_MS = 1500;
 /** How long what this phone just did ("Answer sent", "Denied") stays: it is what was just pressed, so there is little to read. */
 export const DONE_CLOSE_MS = 800;
 
-/** An approval, swiped, closes sooner: the green going out over the screen says it, and there is nothing to read. */
+/** An approval, swiped, closes sooner: the bar closing in to a check says it, and there is nothing to read. */
 export const APPROVED_CLOSE_MS = 1000;
-/** The ripple leaves the circle once the bar has closed in on it, and takes this long to reach the screen's far corner and fade out. */
-const RIPPLE_DELAY_MS = 300;
-const RIPPLE_MS = 600;
-/** The circle the bar closes in to (its knob, 52, and the space round it, 5 each side): where the green starts from. */
-const CIRCLE = 62;
 
 /** `elsewhere`: it left the Mac's list without this screen's answer coming back (`ours`: this phone had sent one, and it went through even though the reply didn't). */
 type Outcome = { kind: "none" } | { kind: "sending" } | { kind: "done"; allowed: boolean; /** Approved with a swipe (not a question's answers): it closes sooner, in green. */ swiped: boolean } | { kind: "elsewhere"; ours: boolean } | { kind: "failed"; why: string };
@@ -45,46 +40,6 @@ export function answersFrom(qs: Question[], picks: Record<string, string[]>, typ
     out[q.question] = answer;
   }
   return out;
-}
-
-/** How strong the green is where the ripple begins (the colour at about a third), before it fades out. */
-const RIPPLE_ALPHA = 0.32;
-
-/**
- * An approval going out over the screen: a soft disc of green that grows from the approved circle past the screen's far
- * corner and fades away as it goes, leaving nothing. Only the disc's scale and opacity move, which the phone does on its own
- * (the native driver), so it can't stutter with the bar closing in or with the screen's own work.
- */
-function Ripple({ x, y, color }: { x: number; y: number; color: string }) {
-  const grow = useRef(new Animated.Value(0)).current;
-  const { width, height } = useWindowDimensions();
-  // As far as the farthest corner, so the ripple leaves the screen.
-  const reach = Math.ceil(Math.hypot(Math.max(x, width - x), Math.max(y, height - y)));
-  useEffect(() => {
-    if (skips()) return grow.setValue(1);
-    const a = Animated.timing(grow, { toValue: 1, duration: RIPPLE_MS, delay: RIPPLE_DELAY_MS, easing: Easing.out(Easing.quad), useNativeDriver: true });
-    a.start();
-    return () => a.stop();
-  }, [grow]);
-  return (
-    <Animated.View
-      testID="approve-ripple"
-      pointerEvents="none"
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={{
-        position: "absolute",
-        left: x - reach,
-        top: y - reach,
-        width: reach * 2,
-        height: reach * 2,
-        borderRadius: reach,
-        backgroundColor: color,
-        opacity: grow.interpolate({ inputRange: [0, 0.25, 1], outputRange: [RIPPLE_ALPHA, RIPPLE_ALPHA * 0.8, 0] }),
-        transform: [{ scale: grow.interpolate({ inputRange: [0, 1], outputRange: [CIRCLE / 2 / reach, 1] }) }],
-      }}
-    />
-  );
 }
 
 /** One answer to choose: it takes the highlighter colour as it is picked, with a check popping in, and gives under a press. */
@@ -171,8 +126,6 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   const [outcome, setOutcome] = useState<Outcome>({ kind: "none" });
   const [picks, setPicks] = useState<Record<string, string[]>>({});
   const [typed, setTyped] = useState<Record<string, string>>({});
-  // Where the approved circle is, once it is laid out, for the green to start from.
-  const [circle, setCircle] = useState<{ x: number; y: number } | null>(null);
 
   // What was asked is kept as it was first seen: once answered it leaves the list, and the screen still says what it was.
   const live = waiting.find((w) => w.request_id === requestId);
@@ -242,8 +195,6 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
     // The keyboard (for "Something else") pushes the buttons up with it, and the list above gets shorter.
     <AboveKeyboard style={{ backgroundColor: colors.night, overflow: "hidden", paddingTop: insets.top + 56, paddingBottom: keyboard ? 12 : Math.max(insets.bottom, 20), paddingHorizontal: 22 }}>
       <StatusBar style="light" />
-      {/* Behind everything: a soft ripple of green goes out from the approved circle and fades away. */}
-      {outcome.kind === "done" && outcome.swiped && circle && <Ripple x={circle.x} y={circle.y} color={colors.go} />}
       {/* The decision can be put away at any point (it keeps waiting, in the chat and on Home) and come back to with Review. */}
       <PressScale accessibilityRole="button" accessibilityLabel="Minimize" accessibilityHint="Back to the chat. The decision keeps waiting." onPress={onClose} haptic="select" scaleTo={0.94} hitSlop={10} style={{ position: "absolute", top: insets.top + 8, left: 14, flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, minHeight: 40 }}>
         <Chevron open color={colors.white} />
@@ -319,7 +270,7 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
           </View>
         )
       ) : outcome.kind === "done" && outcome.allowed && view.kind !== "question" ? (
-        <View testID="approved" style={{ gap: 12 }} onLayout={(e) => setCircle({ x: e.nativeEvent.layout.x + e.nativeEvent.layout.width - CIRCLE / 2, y: e.nativeEvent.layout.y + CIRCLE / 2 })}>
+        <View testID="approved" style={{ gap: 12 }}>
           {/* The same bar, now closed in to a circle with the check: it closes this by itself, and a tap on it does so at once. */}
           <SwipeToAllow key="first" label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => {}} onDone={onClose} />
           {/* Deny's place is kept, unseen, so the circle stays where the bar was and isn't pushed down. */}
