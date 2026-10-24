@@ -382,10 +382,11 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
         <Txt variant="small" tone="ink2">
           {view.title.replace(/\?$/, "")}
         </Txt>
-        <PopIn>
-          <View style={{ backgroundColor: colors.card, borderColor: colors.go, borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 8 }}>
+        {/* A long answer wraps inside the screen: the chip is never wider than the chat, and its words may shrink to fit beside the check. */}
+        <PopIn style={{ maxWidth: "100%" }}>
+          <View testID="answer-chip" style={{ backgroundColor: colors.card, borderColor: colors.go, borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 8, maxWidth: "100%" }}>
             <View accessibilityElementsHidden style={{ width: 10, height: 6, marginTop: -2, borderLeftWidth: 2, borderBottomWidth: 2, borderColor: colors.go, transform: [{ rotate: "-45deg" }] }} />
-            <Txt variant="small" style={{ fontWeight: "700" }}>
+            <Txt variant="small" style={{ fontWeight: "700", flexShrink: 1 }}>
               {item.answer}
             </Txt>
           </View>
