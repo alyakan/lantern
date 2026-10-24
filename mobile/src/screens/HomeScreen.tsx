@@ -211,7 +211,7 @@ function SupportCard({ onPress }: { onPress: () => void }) {
 export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewChat, onSupport, selectedSlot }: HomeProps) {
   const colors = useColors();
   const controller = useController();
-  const { chats, waiting, chatsLoaded, waitingLoaded, plan } = useSyncState();
+  const { chats, workingSince, waiting, chatsLoaded, waitingLoaded, plan } = useSyncState();
   const loading = !chatsLoaded || !waitingLoaded;
   const connection = useConnectionState();
   const insets = useSafeAreaInsets();
@@ -250,7 +250,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
 
   const stack = cards(waiting, chats);
   const head = headline(stack.length);
-  const list = rows(chats, now, seen);
+  const list = rows(chats, now, seen, workingSince);
   const macName = connection.kind === "connected" ? connection.welcome.mac_name : null;
 
   const refresh = async () => {

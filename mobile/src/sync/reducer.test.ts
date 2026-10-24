@@ -329,3 +329,24 @@ describe("the commands, plan, context and usage a Mac with extras sends", () => 
     expect(reducer(before, { type: "pushed", msg: unknown } as Action)).toEqual(before);
   });
 });
+
+describe("when each working chat started", () => {
+  const chatOf = (slot: string, status: "working" | "idle" | "asleep", active_at: number) => ({ slot, title: null, project: null, status, last_seq: 0, active_at, permissions: null, preset: null, project_color: null, workflow: null });
+  const list = (...chats: ReturnType<typeof chatOf>[]): Action => ({ type: "pushed", msg: { type: "chats", chats } });
+
+  it("is when the chat was first seen working, and holds as its activity moves on", () => {
+    const s = run([list(chatOf("a", "working", 100), chatOf("b", "idle", 50)), list(chatOf("a", "working", 400), chatOf("b", "working", 410)), list(chatOf("a", "working", 900), chatOf("b", "working", 950))]);
+    expect(s.workingSince).toEqual({ a: 100, b: 410 });
+  });
+
+  it("starts again for a chat that stopped and works anew, and forgets one that is no longer listed", () => {
+    const s = run([list(chatOf("a", "working", 100), chatOf("gone", "working", 120)), list(chatOf("a", "idle", 200)), list(chatOf("a", "working", 700))]);
+    expect(s.workingSince).toEqual({ a: 700 });
+  });
+
+  it("keeps the same object when nothing changed, so nothing redraws for it", () => {
+    const first = run([list(chatOf("a", "working", 100))]);
+    const again = reducer(first, list(chatOf("a", "working", 300)));
+    expect(again.workingSince).toBe(first.workingSince);
+  });
+});

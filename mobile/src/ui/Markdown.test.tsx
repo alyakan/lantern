@@ -116,3 +116,19 @@ describe("a list in a message that wraps its own width (your bubble)", () => {
     expect(style.flexShrink).toBe(1);
   });
 });
+
+describe("the room between a list's mark and its words", () => {
+  const markWidth = (mark: string) => StyleSheet.flatten(screen.getAllByText(mark)[0].props.style).minWidth;
+
+  it("is small for a bullet, which is only a dot, so the words aren't left a gap after it", async () => {
+    await render(<Markdown text={"- first\n- second"} />);
+    expect(markWidth("•")).toBeLessThanOrEqual(12);
+    const row = screen.getByText("first").parent!;
+    expect(StyleSheet.flatten(row.props.style).gap).toBeLessThanOrEqual(6);
+  });
+
+  it("keeps room for a number's two digits", async () => {
+    await render(<Markdown text={"1. first\n2. second"} />);
+    expect(markWidth("1.")).toBeGreaterThanOrEqual(22);
+  });
+});

@@ -66,6 +66,10 @@ export interface Row {
   note: string | null;
   /** Claude has gone on in it since it was last shown on this phone, and it is waiting (not working, asleep or asking: those say so already). */
   unread: boolean;
+  /** Where the chat stands in the list: 0 needs you, 1 working, 2 the rest (idle, asleep, stopped). */
+  rank: number;
+  /** What the chat is ordered by within its rank, newest first: when it started (working), else when it was last active. */
+  sortAt: number;
 }
 
 const STATUS_NOTE: Record<RemoteChat["status"], (c: RemoteChat, now: number) => string | null> = {
@@ -81,14 +85,25 @@ export function isUnread(c: RemoteChat, seen: Record<string, number> | null): bo
   return seen !== null && c.status === "idle" && c.active_at > (seen[c.slot] ?? 0);
 }
 
-/** Every chat as a row, the most recently active first. */
-export function rows(chats: RemoteChat[], now: number, seen: Record<string, number> | null = null): Row[] {
-  return [...chats]
-    .sort((a, b) => b.active_at - a.active_at)
-    .map((c) => {
+const RANK: Record<RemoteChat["status"], number> = { needs_you: 0, working: 1, idle: 2, asleep: 2, ended: 2 };
+
+/**
+ * The list's order: what needs you first, then what is working, then the rest, each the newest first. A working chat is
+ * ordered by when it started (`workingSince`), not by its last event, which moves all the time and would shuffle the list
+ * under the finger while several work. Ties fall to the slot, so the order is always the same one.
+ */
+export function byOrder(a: Row, b: Row): number {
+  return a.rank - b.rank || b.sortAt - a.sortAt || (a.slot < b.slot ? -1 : a.slot > b.slot ? 1 : 0);
+}
+
+/** Every chat as a row, in the list's order (see `byOrder`). `workingSince` is when each working chat was first seen working. */
+export function rows(chats: RemoteChat[], now: number, seen: Record<string, number> | null = null, workingSince: Record<string, number> = {}): Row[] {
+  return chats
+    .map((c): Row => {
       const title = c.title?.trim() || "New chat";
-      return { slot: c.slot, title, project: c.project ?? "", projectColor: projectColorOf(c.project_color), initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now), unread: isUnread(c, seen) };
-    });
+      return { rank: RANK[c.status], sortAt: c.status === "working" ? workingSince[c.slot] ?? c.active_at : c.active_at, slot: c.slot, title, project: c.project ?? "", projectColor: projectColorOf(c.project_color), initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now), unread: isUnread(c, seen) };
+    })
+    .sort(byOrder);
 }
 
 /** How Home lists the chats: all of them, the most recent first, or under their project. */
@@ -106,13 +121,13 @@ export interface Group {
 
 /**
  * The rows under their projects: the projects by name (chats with no project last) so they stay where they are however
- * the chats move, and in each the most recent chat first. Projects are told apart by name, which is all a phone is told of
+ * the chats move, and in each the chats in the list's order. Projects are told apart by name, which is all a phone is told of
  * a folder.
  */
 export function groups(list: Row[]): Group[] {
   const byProject = new Map<string, Row[]>();
   for (const r of list) byProject.set(r.project, [...(byProject.get(r.project) ?? []), r]);
   return [...byProject]
-    .map(([project, rs]) => ({ project, rows: [...rs].sort((a, b) => b.activeAt - a.activeAt), needsYou: rs.filter((r) => r.status === "needs_you").length, unread: rs.filter((r) => r.unread).length }))
+    .map(([project, rs]) => ({ project, rows: [...rs].sort(byOrder), needsYou: rs.filter((r) => r.status === "needs_you").length, unread: rs.filter((r) => r.unread).length }))
     .sort((a, b) => (a.project === "" ? 1 : b.project === "" ? -1 : a.project.localeCompare(b.project, undefined, { sensitivity: "base" }) || (a.project < b.project ? -1 : a.project > b.project ? 1 : 0)));
 }
