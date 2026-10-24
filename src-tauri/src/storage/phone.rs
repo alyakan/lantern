@@ -51,7 +51,8 @@ pub struct PhoneView {
 /// The items in `items` a phone may clear: safe and ticked by the scan, of a kind in KINDS, and not inside another such item
 /// (a worktree takes what is inside it along, so it would be counted twice).
 pub fn clearable(items: &[Item]) -> Vec<Item> {
-    let safe: Vec<&Item> = items.iter().filter(|i| i.risk == Risk::Safe && i.ticked && KINDS.contains(&i.kind)).collect();
+    // A simulator's runtime (many GB that Xcode must download again) is never offered, whatever the scan says of it.
+    let safe: Vec<&Item> = items.iter().filter(|i| i.risk == Risk::Safe && i.ticked && KINDS.contains(&i.kind) && i.removal != Removal::SimulatorRuntime).collect();
     let mut out: Vec<Item> = safe.iter().filter(|i| i.within.as_ref().is_none_or(|w| !safe.iter().any(|o| &o.id == w))).map(|i| (*i).clone()).collect();
     out.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.id.cmp(&b.id)));
     out
@@ -141,7 +142,12 @@ impl Storage {
         (self.changed)();
         let (count, bytes) = (picked.len(), picked.iter().map(|i| i.bytes).sum());
         let me = self.clone();
-        std::thread::spawn(move || me.finish_phone_clear(picked, path_env.as_deref()));
+        // A thread the system refuses must not leave the Storage marked as deleting: it is ended here, and the phone is told.
+        if let Err(e) = std::thread::Builder::new().name("storage-phone-clear".into()).spawn(move || me.finish_phone_clear(picked, path_env.as_deref())) {
+            self.lock().deleting = false;
+            (self.changed)();
+            return Err(format!("Your Mac couldn't start the clear: {e}"));
+        }
         Ok((count, bytes))
     }
 }
@@ -168,6 +174,14 @@ mod tests {
         unticked.ticked = false;
         let items = vec![item("small", Kind::Cache, 10), item("big", Kind::BuildOutput, 500), review, blocked, unticked, item("sim", Kind::Simulator, 50), item("tree", Kind::Worktree, 70)];
         assert_eq!(clearable(&items).iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["big", "tree", "sim", "small"]);
+    }
+
+    #[test]
+    fn a_simulators_runtime_is_never_offered_even_if_it_were_ticked_and_safe() {
+        let mut runtime = item("rt", Kind::Simulator, 9000);
+        runtime.removal = Removal::SimulatorRuntime;
+        let device = item("dev", Kind::Simulator, 10);
+        assert_eq!(clearable(&[runtime, device]).iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["dev"]);
     }
 
     #[test]
