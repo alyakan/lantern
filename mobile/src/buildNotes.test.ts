@@ -67,6 +67,32 @@ describe("a phone build's notes", () => {
     expect(notes()).toBe("- A phone fix\n");
   });
 
+  it("leave out what only builds the app: how it is signed, uploaded or noted", () => {
+    commit("fix(mobile): the TestFlight export signs with named profiles (#13)", "mobile/fastlane/Fastfile");
+    commit("fix(mobile): notes leave out build changes (#14)", "mobile/scripts/build-notes.sh");
+    commit("fix: a phone fix (#15)", "mobile/src/g.ts");
+    expect(notes()).toBe("- A phone fix\n");
+  });
+
+  it("keep a change that touched both the app and how it is built", () => {
+    commit("feat: a new screen (#16)", "mobile/src/h.ts");
+    writeFileSync(join(repo, "mobile", "fastlane.txt"), "x");
+    mkdirSync(join(repo, "mobile", "fastlane"), { recursive: true });
+    writeFileSync(join(repo, "mobile", "fastlane", "Fastfile"), `${Math.random()}`);
+    writeFileSync(join(repo, "mobile", "src", "i.ts"), `${Math.random()}`);
+    git("add", "-A");
+    git("commit", "-q", "-m", "feat: a screen and its lane (#17)");
+    expect(notes()).toBe("- A new screen\n- A screen and its lane\n");
+  });
+
+  it("leave out a PR whose Changelog says none, however it is written, and keep its neighbours", () => {
+    writeFileSync(join(bin, "gh"), `#!/bin/bash\nif [ "$3" = "20" ]; then printf '## Changelog\\n- None\\n'; elif [ "$3" = "21" ]; then printf '## Changelog\\n- none.\\n'; else exit 1; fi\n`);
+    commit("fix: an internal change (#20)", "mobile/src/j.ts");
+    commit("fix: another internal change (#21)", "mobile/src/k.ts");
+    commit("fix: a phone fix (#22)", "mobile/src/l.ts");
+    expect(notes()).toBe("- A phone fix\n");
+  });
+
   it("are empty when nothing changed", () => {
     expect(notes()).toBe("");
   });
