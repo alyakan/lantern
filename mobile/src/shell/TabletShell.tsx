@@ -23,8 +23,8 @@ interface Drag {
 const at = (e: GestureResponderEvent) => e.nativeEvent.timestamp ?? Date.now();
 
 /**
- * A tablet's screen: the chats in a column on the left, and the chat (`children`) taking the rest. Held sideways ("split")
- * the column is always there. Held upright ("overlay") the chat has the whole width and the column slides in over it when
+ * A tablet's screen: the chats in a column on the left, and the chat (`children`) taking the rest. Pinned ("split") the
+ * column is always there. Not pinned ("overlay") the chat has the whole width and the column slides in over it when
  * `open`, with the chat dimmed behind: a tap on the dimmed chat, or `onClose`, slides it away. It can also be dragged: from
  * the screen's left edge to the right to bring it in (`onOpen`), and to the left, on the column or on the dimmed chat, to
  * send it away. It follows the finger, and settles in or out from how far it got and how fast the finger went.

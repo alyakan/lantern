@@ -74,6 +74,25 @@ export async function saveFolded(projects: string[]): Promise<void> {
   }
 }
 
+const PINNED_KEY = "lantern.sidebar-pinned";
+
+/** Whether a tablet keeps the chats beside the chat (pinned), or slides them in when asked and away once a chat is chosen. Not pinned until chosen. */
+export async function loadSidebarPinned(): Promise<boolean> {
+  try {
+    return (await SecureStore.getItemAsync(PINNED_KEY, OPTIONS)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export async function saveSidebarPinned(pinned: boolean): Promise<void> {
+  try {
+    await SecureStore.setItemAsync(PINNED_KEY, pinned ? "1" : "0", OPTIONS);
+  } catch {
+    // Not remembered: it holds until the app closes.
+  }
+}
+
 const NOTES_KEY = "lantern.notes-seen";
 
 /**

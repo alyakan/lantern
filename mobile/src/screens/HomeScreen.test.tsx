@@ -263,16 +263,46 @@ describe("Home's chats by project", () => {
     expect(lantern.queryByRole("button", { name: "Release" })).toBeNull();
   });
 
-  it("holds every chat in a card in from the card's edges, the first one too, with a hairline only above the ones after it", async () => {
+  it("holds every chat in a card in from the card's edges, with no lines between them", async () => {
     await renderWith(<HomeScreen {...handlers()} />, { chats: [chat({ slot: "a", title: "First", project: "lantern", active_at: NOW - 1_000 }), chat({ slot: "b", title: "Second", project: "lantern", active_at: NOW - 2_000 }), chat({ slot: "c", title: "Third", project: "lantern", active_at: NOW - 3_000 })] });
     await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
     const rowStyle = (slot: string) => StyleSheet.flatten(screen.getByTestId(`card-row-${slot}`).props.style);
-    for (const slot of ["a", "b", "c"]) expect(rowStyle(slot).marginHorizontal).toBe(16);
-    expect(rowStyle("a").borderTopWidth).toBeUndefined();
-    expect(rowStyle("b").borderTopWidth).toBe(StyleSheet.hairlineWidth);
-    expect(rowStyle("c").borderTopWidth).toBe(StyleSheet.hairlineWidth);
-    // The header is held in by the same amount, so the chats line up under it.
+    // In from the card's edge by 8, and 8 more inside the row (room around the open chat's wash): 16, as the header is.
+    for (const [slot, title] of [["a", "First"], ["b", "Second"], ["c", "Third"]]) {
+      expect(rowStyle(slot).marginHorizontal).toBe(8);
+      expect(rowStyle(slot).borderTopWidth).toBeUndefined();
+      expect(StyleSheet.flatten(screen.getByRole("button", { name: title }).props.style).paddingHorizontal).toBe(8);
+    }
     expect(StyleSheet.flatten(screen.getByRole("button", { name: "lantern, 3 chats" }).props.style).paddingHorizontal).toBe(16);
+  });
+
+  it("marks the chat that is open with a slim bar of the accent on a faint wash of it, in the list and in a card", async () => {
+    const chats = [chat({ slot: "a", title: "First", project: "lantern", active_at: NOW - 1_000 }), chat({ slot: "b", title: "Second", project: "lantern", active_at: NOW - 2_000 })];
+    const view = await renderWith(<HomeScreen {...handlers()} selectedSlot="a" />, { chats });
+    const row = (title: string) => StyleSheet.flatten(screen.getByRole("button", { name: new RegExp(`^${title}`) }).props.style);
+    // Only the open one has the bar, and the wash is the accent faintly (not a flat grey block).
+    expect(screen.getAllByTestId("selected-bar", { hidden: true })).toHaveLength(1);
+    expect(within(screen.getByRole("button", { name: /^First/ })).getByTestId("selected-bar", { hidden: true })).toBeTruthy();
+    expect(row("First").backgroundColor).toMatch(/^rgba\(\d+,\d+,\d+,0\.08\)$/);
+    expect(row("Second").backgroundColor).toBeUndefined();
+    await fireEvent.press(screen.getByRole("button", { name: "Projects" }));
+    expect(screen.getAllByTestId("selected-bar", { hidden: true })).toHaveLength(1);
+    expect(within(screen.getByRole("button", { name: "First" })).getByTestId("selected-bar", { hidden: true })).toBeTruthy();
+    await view.unmount();
+  });
+
+  it("has a pin button for the chats only when it is given one (a tablet), that says which it will do", async () => {
+    const onTogglePin = jest.fn();
+    const first = await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()] });
+    expect(screen.queryByRole("button", { name: /Pin the chats|Unpin the chats/ })).toBeNull();
+    await first.unmount();
+    const second = await renderWith(<HomeScreen {...handlers()} onTogglePin={onTogglePin} />, { chats: [chat()] });
+    await fireEvent.press(screen.getByRole("button", { name: "Pin the chats beside the chat" }));
+    expect(onTogglePin).toHaveBeenCalledTimes(1);
+    await second.unmount();
+    await renderWith(<HomeScreen {...handlers()} pinned onTogglePin={onTogglePin} />, { chats: [chat()] });
+    expect(screen.getByRole("button", { name: "Unpin the chats" }).props.accessibilityState).toMatchObject({ selected: true });
+    expect(screen.queryByRole("button", { name: "Pin the chats beside the chat" })).toBeNull();
   });
 
   it("folds a project away and opens it again", async () => {
