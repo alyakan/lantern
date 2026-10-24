@@ -139,6 +139,8 @@ platform :ios do
     )
   end
 
+  # (gym hands `xcargs` to the export step as well as the archive step, so they are given once there: an `export_xcargs` with the
+  # same key flags makes xcodebuild refuse the export, "-authenticationKeyPath may only be provided once".)
   # Xcode signs with the same App Store Connect API key the upload uses (when ASC_KEY_ID and ASC_ISSUER_ID are set), so it needs
   # no Apple ID signed in to it, and can register what a capability needs (an App ID, an App Group, a profile) on its own.
   def xcode_auth
@@ -161,7 +163,6 @@ platform :ios do
       output_directory: File.join(mobile_dir, "build"),
       output_name: "Lantern.ipa",
       xcargs: "-allowProvisioningUpdates #{xcode_auth} DEVELOPMENT_TEAM=#{TEAM_ID} CURRENT_PROJECT_VERSION=1",
-      export_xcargs: "-allowProvisioningUpdates #{xcode_auth}".strip,
     )
     UI.success("Built and signed mobile/build/Lantern.ipa. Nothing was uploaded.")
   end
@@ -211,7 +212,6 @@ platform :ios do
       output_directory: File.join(mobile_dir, "build"),
       output_name: "Lantern.ipa",
       xcargs: "-allowProvisioningUpdates #{xcode_auth} DEVELOPMENT_TEAM=#{TEAM_ID} CURRENT_PROJECT_VERSION=#{build_number}",
-      export_xcargs: "-allowProvisioningUpdates #{xcode_auth}".strip,
     )
 
     # With a changelog, fastlane waits only until the build shows up in App Store Connect (to set What to Test), not for processing.
