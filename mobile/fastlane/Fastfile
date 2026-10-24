@@ -18,6 +18,8 @@
 default_platform(:ios)
 
 BUNDLE_ID = "com.alyakan.lantern"
+# The Live Activity's widget extension (expo-widgets' default id): it is signed and uploaded inside the app, with a profile of its own.
+WIDGET_ID = "#{BUNDLE_ID}.ExpoWidgetsTarget"
 # A team id is printed on every app in the store: it is not a secret.
 TEAM_ID = ENV["APPLE_TEAM_ID"] || "2NT5QR24SX"
 
@@ -150,19 +152,31 @@ platform :ios do
     "-authenticationKeyPath #{File.expand_path("~/.appstoreconnect/private_keys/AuthKey_#{key_id}.p8")} -authenticationKeyID #{key_id} -authenticationKeyIssuerID #{issuer}"
   end
 
+  # The App Store profiles for the app and its widget, made through the API key when one is missing (an existing one is used),
+  # as { id => profile name }: the export signs with them by name. Needs the Apple Distribution certificate in this Mac's keychain.
+  def app_store_profiles(key)
+    [BUNDLE_ID, WIDGET_ID].each_with_object({}) do |id, names|
+      get_provisioning_profile(app_identifier: id, api_key: key, provisioning_name: "Lantern #{id} App Store", team_id: TEAM_ID)
+      names[id] = lane_context[SharedValues::SIGH_NAME]
+    end
+  end
+
   desc "Build and sign for the App Store, and upload nothing: the dry run of `beta`, which needs no app in App Store Connect"
   lane :archive do
     refuse_preview_build!
+    profiles = app_store_profiles(asc_key)
     sh("cd #{mobile_dir} && npx expo prebuild --platform ios --clean")
     build_app(
       workspace: File.join(mobile_dir, "ios", "Lantern.xcworkspace"),
       scheme: "Lantern",
       configuration: "Release",
       export_method: "app-store",
+      export_options: { provisioningProfiles: profiles },
       clean: true,
       output_directory: File.join(mobile_dir, "build"),
       output_name: "Lantern.ipa",
       xcargs: "-allowProvisioningUpdates #{xcode_auth} DEVELOPMENT_TEAM=#{TEAM_ID} CURRENT_PROJECT_VERSION=1",
+      export_xcargs: "-allowProvisioningUpdates",
     )
     UI.success("Built and signed mobile/build/Lantern.ipa. Nothing was uploaded.")
   end
@@ -177,6 +191,7 @@ platform :ios do
   lane :beta do
     refuse_preview_build!
     key = asc_key
+    profiles = app_store_profiles(key)
     # TestFlight wants each build of a version to have a number above the last one's.
     last = latest_testflight_build_number(api_key: key, app_identifier: BUNDLE_ID, version: app_version, initial_build_number: 0)
     build_number = last + 1
@@ -186,7 +201,7 @@ platform :ios do
     begin
       # The notes go into the app (shown once after an update) and are what TestFlight shows testers.
       write_app_notes(build_number, bullets)
-      beta_build(key, build_number, bullets)
+      beta_build(key, build_number, bullets, profiles)
     ensure
       # The file in the repository is the empty default: a build's notes are never left in the working tree to be committed.
       sh("git -C #{mobile_dir} checkout -- #{notes_file}")
@@ -196,8 +211,7 @@ platform :ios do
     UI.success("Uploaded build #{build_number}. Tagged #{tag} here: push it (git push origin #{tag}) so the next build counts from it. Add the build to a tester group in App Store Connect (testers inside your team need no review; an outside group needs a short beta review).")
   end
 
-  def beta_build(key, build_number, bullets)
-
+  def beta_build(key, build_number, bullets, profiles)
     # The native project is generated from app.json, never kept: every release starts from it.
     sh("cd #{mobile_dir} && npx expo prebuild --platform ios --clean")
     # Expo writes CFBundleVersion into the generated Info.plist as a fixed "1", which no build setting changes: it is set here.
@@ -208,10 +222,12 @@ platform :ios do
       scheme: "Lantern",
       configuration: "Release",
       export_method: "app-store",
+      export_options: { provisioningProfiles: profiles },
       clean: true,
       output_directory: File.join(mobile_dir, "build"),
       output_name: "Lantern.ipa",
       xcargs: "-allowProvisioningUpdates #{xcode_auth} DEVELOPMENT_TEAM=#{TEAM_ID} CURRENT_PROJECT_VERSION=#{build_number}",
+      export_xcargs: "-allowProvisioningUpdates",
     )
 
     # With a changelog, fastlane waits only until the build shows up in App Store Connect (to set What to Test), not for processing.
