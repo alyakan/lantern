@@ -324,11 +324,17 @@ fn carries_settings_note(text: &str) -> bool {
     !text.trim_start().starts_with('/')
 }
 
-/// `cfg`'s mode and auto-approve, no freer than `ceiling` allows (None: no ceiling, the chat is no worker). True when that
-/// lowered them.
+/// `cfg`'s mode and auto-approve, no freer than `ceiling` allows (None: no ceiling, the chat is no worker), and never Auto on a
+/// provider that has no auto mode, worker or not: Claude Code's auto mode on an endpoint's model would have that model approve
+/// its own commands, and a phone's Permissions switch (or an older window) asks for it as easily as any. True when that lowered them.
 fn cap_mode(cfg: &mut SessionConfig, ceiling: Option<Mode>) -> bool {
-    let Some(ceiling) = ceiling else { return false };
-    let (mode, auto) = args::capped_mode(cfg.mode, cfg.auto_approve, ceiling, &capabilities_of(cfg.provider));
+    let caps = capabilities_of(cfg.provider);
+    let (mode, auto) = match ceiling {
+        Some(ceiling) => args::capped_mode(cfg.mode, cfg.auto_approve, ceiling, &caps),
+        // No worker's ceiling: only a provider with no auto mode is held back, and Step by step stays Step by step, without its auto-approve.
+        None if !caps.supports_auto_mode => (if cfg.mode == Mode::Auto { Mode::Ask } else { cfg.mode }, false),
+        None => (cfg.mode, cfg.auto_approve),
+    };
     let lowered = (mode, auto) != (cfg.mode, cfg.auto_approve);
     cfg.mode = mode;
     cfg.auto_approve = auto;
@@ -3435,6 +3441,26 @@ mod tests {
         let mut no_worker = config(Mode::Auto, false);
         assert!(!cap_mode(&mut no_worker, None));
         assert_eq!(no_worker.mode, Mode::Auto);
+    }
+
+    /// A provider with no auto mode never runs Auto, whoever asks: an endpoint's model would approve its own commands. A chat
+    /// that is no worker is capped too, and Claude's own is left as asked.
+    #[test]
+    fn a_chat_on_a_provider_with_no_auto_mode_is_never_left_on_auto() {
+        for provider in [ProviderId::Gateway, ProviderId::Codex] {
+            let mut auto = SessionConfig { provider, ..config(Mode::Auto, false) };
+            assert!(cap_mode(&mut auto, None), "{provider:?}");
+            assert_eq!((auto.mode, auto.auto_approve), (Mode::Ask, false), "{provider:?}");
+            let mut steps = SessionConfig { provider, ..config(Mode::Steps, true) };
+            assert!(cap_mode(&mut steps, None), "{provider:?}");
+            assert_eq!((steps.mode, steps.auto_approve), (Mode::Steps, false), "{provider:?}: Step by step stays, without its auto-approve");
+            // What it was on already isn't "lowered", and asking again changes nothing.
+            let mut ask = SessionConfig { provider, ..config(Mode::Ask, false) };
+            assert!(!cap_mode(&mut ask, None) && ask.mode == Mode::Ask, "{provider:?}");
+        }
+        let mut claude = SessionConfig { provider: ProviderId::Claude, ..config(Mode::Auto, true) };
+        assert!(!cap_mode(&mut claude, None));
+        assert_eq!((claude.mode, claude.auto_approve), (Mode::Auto, true));
     }
 
     /// Workflow Team on a running chat: it becomes the Lead (restart with the Lead's role), and goes back to an ordinary chat

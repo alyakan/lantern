@@ -82,9 +82,10 @@ describe("the settings sheet", () => {
 });
 
 describe("a chat that isn't on Claude", () => {
-  it("says what it runs on first in the title bar's line", async () => {
-    await open({ chatOver: { provider: "Ollama" } });
-    await waitFor(() => expect(screen.getByText("under the title: Ollama · Ask · Balanced")).toBeTruthy());
+  it("says what it runs on first in the title bar's line, and not a Claude preset: the Mac records \"Standard\" for every chat", async () => {
+    await open({ chatOver: { provider: "Ollama", preset: "default" } });
+    await waitFor(() => expect(screen.getByText("under the title: Ollama · Ask")).toBeTruthy());
+    expect(screen.queryByText(/Standard/)).toBeNull();
   });
 
   it("leaves a Claude chat's line as it was", async () => {

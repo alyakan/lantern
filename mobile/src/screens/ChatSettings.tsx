@@ -192,7 +192,8 @@ export function ChatSettings({ slot, chat, plan, context, onProblem, onClosed, w
     });
   };
   const mode = switching?.kind === "mode" ? "Switching…" : modeLabel(chat.permissions);
-  const preset = switching?.kind === "preset" ? "Switching…" : chat.preset ? presetName(controls, chat.preset) : null;
+  // (A chat on another provider than Claude's runs on its own model: the Mac records a preset for every chat, but it isn't one it runs on.)
+  const preset = switching?.kind === "preset" ? "Switching…" : chat.preset && !chat.provider ? presetName(controls, chat.preset) : null;
   // Step by step is said; a plain chat is the usual, and isn't.
   const flow = switching?.kind === "workflow" ? "Switching…" : chat.workflow && chat.workflow !== "chat" ? workflowLabel(chat.workflow) : null;
   const usage = plan ? usageOf(plan) : null;

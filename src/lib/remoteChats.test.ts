@@ -161,6 +161,25 @@ describe("a chat on another provider than Claude's", () => {
   });
 });
 
+describe("switching a chat on another provider than Claude's from a phone", () => {
+  const idle = { known: true, idle: true, asleep: false, background: 0 };
+  const ctx: RemoteContext = { allowAuto: true, presetIds: ["balanced"] };
+  const ollama = { name: "Ollama", auto: false };
+
+  it("refuses Auto where the provider has none, and any Claude preset, saying why", () => {
+    expect(checkRemoteSwitch({ permissions: "auto" }, { ...idle, provider: ollama }, ctx)).toBe("Ollama has no Auto mode: it asks before it acts.");
+    expect(checkRemoteSwitch({ preset: "balanced" }, { ...idle, provider: ollama }, ctx)).toBe("Ollama runs on its own model: the presets don't apply to it.");
+  });
+
+  it("lets it go back to Ask or change its workflow, and leaves a Claude chat as it was", () => {
+    expect(checkRemoteSwitch({ permissions: "ask" }, { ...idle, provider: ollama }, ctx)).toBeNull();
+    expect(checkRemoteSwitch({ workflow: "steps" }, { ...idle, provider: ollama }, ctx)).toBeNull();
+    expect(checkRemoteSwitch({ permissions: "auto" }, { ...idle, provider: null }, ctx)).toBeNull();
+    expect(checkRemoteSwitch({ permissions: "auto" }, idle, ctx)).toBeNull();
+    expect(checkRemoteSwitch({ preset: "balanced" }, idle, ctx)).toBeNull();
+  });
+});
+
 describe("where a phone may start a chat", () => {
   const claude = { id: "claude", capabilities: CLAUDE_CAPABILITIES };
   const codex = PLAIN;

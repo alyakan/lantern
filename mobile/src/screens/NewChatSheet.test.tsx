@@ -226,8 +226,10 @@ describe("choosing where a new chat runs", () => {
     const { lastOf } = await openWith({ allow_auto: true, presets, providers: [claude, ollama] });
     await openOptions();
     await waitFor(() => expect(screen.getByRole("radio", { name: "Ollama" })).toBeTruthy());
-    expect(screen.getAllByRole("radio").map((r) => r.props.accessibilityLabel)).toEqual(expect.arrayContaining(["Project's own", "Claude", "Ollama"]));
-    expect(screen.getByText("The project's own is what its chats use on your Mac.")).toBeTruthy();
+    expect(screen.getAllByRole("radio").map((r) => r.props.accessibilityLabel)).toEqual(expect.arrayContaining(["As on your Mac", "Claude", "Ollama"]));
+    // Not the same name as the Models group's own, which a screen reader would read twice.
+    expect(screen.getAllByRole("radio", { name: "Project's own" })).toHaveLength(1);
+    expect(screen.getByText(/As on your Mac is what this project's chats use there \(Claude, if that is Codex/)).toBeTruthy();
     const sent = (await start(lastOf)) as Record<string, unknown>;
     expect("provider" in sent).toBe(false);
   });
