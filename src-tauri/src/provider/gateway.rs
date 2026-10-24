@@ -19,7 +19,7 @@ impl Provider for GatewayProvider {
     /// the advisor and effort are Anthropic's models, and the dollars Claude Code reports are priced for Claude's. A Lead is
     /// Claude's for now: a team's Lead starting agents on any model comes with mixed presets.
     fn capabilities(&self) -> Capabilities {
-        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: true, supports_effort: false, model_switchable: true, supports_lantern_tools: true, can_lead_team: false }
+        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: true, supports_effort: false, model_switchable: true, supports_lantern_tools: true, can_lead_team: false, phone_approvals: true }
     }
 
     /// An endpoint's models are the user's, on the endpoint (see endpoints.rs), not this provider's.
@@ -52,7 +52,7 @@ mod tests {
     #[test]
     fn a_gateway_keeps_skills_and_lanterns_tools_and_loses_what_is_anthropics() {
         let c = GatewayProvider.capabilities();
-        assert!(c.supports_skills && c.supports_lantern_tools && c.model_switchable);
+        assert!(c.supports_skills && c.supports_lantern_tools && c.model_switchable && c.phone_approvals);
         assert!(!c.supports_auto_mode && !c.supports_advisor && !c.reports_cost_usd && !c.supports_effort && !c.can_lead_team);
         assert!(GatewayProvider.models().is_empty());
     }

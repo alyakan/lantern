@@ -49,6 +49,8 @@ export interface Capabilities {
   supports_lantern_tools: boolean;
   /** It can be the Lead of a team (start agents): for now only Claude Code's. */
   can_lead_team: boolean;
+  /** A paired phone can see and answer its approval cards (they come through Claude Code's permission bridge); Codex's ask in its own protocol. */
+  phone_approvals: boolean;
 }
 
 export interface ProviderInfo {

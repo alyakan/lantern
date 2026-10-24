@@ -404,11 +404,14 @@ mod tests {
     fn a_restored_chat_that_is_not_claudes_is_not_told_to_claude_before_it_is_opened() {
         use crate::remote::WindowChat;
         let remote = crate::remote::Remote::default();
-        let chat = |slot: &str, off_claude: bool| WindowChat { slot: slot.into(), folder: "/Users/me/app".into(), title: format!("Words of {slot}"), asleep: true, session_id: Some(format!("s-{slot}")), permissions: None, preset: None, color: None, workflow: None, off_claude };
-        remote.window_chats(&[chat("on-claude", false), chat("on-ollama", true)]);
+        let chat = |slot: &str, provider: Option<&str>| WindowChat { slot: slot.into(), folder: "/Users/me/app".into(), title: format!("Words of {slot}"), asleep: true, session_id: Some(format!("s-{slot}")), permissions: None, preset: None, color: None, workflow: None, provider: provider.map(String::from) };
+        remote.window_chats(&[chat("on-claude", None), chat("on-ollama", Some("Ollama"))]);
         let got = digests(&remote.hub);
         assert_eq!(got.iter().map(|d| d.slot.as_str()).collect::<Vec<_>>(), ["on-claude"]);
         assert!(!prompt(&got, &projects()).contains("Words of on-ollama"));
+        // A phone is shown what it runs on, and nothing for a chat on Claude.
+        assert_eq!(remote.hub.chat("on-ollama").unwrap().provider.as_deref(), Some("Ollama"));
+        assert_eq!(remote.hub.chat("on-claude").unwrap().provider, None);
         // Setting it for a chat nobody listed makes no chat appear.
         remote.hub.set_off_claude("nobody", true);
         assert!(remote.hub.chat("nobody").is_none());

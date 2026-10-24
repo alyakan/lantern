@@ -79,6 +79,8 @@ pub struct NewChatRequest {
     pub preset: Option<String>,
     /// "chat" or "steps" (a team is started on the Mac).
     pub workflow: &'static str,
+    /// The id of one of the providers the window listed, or None for the project's own.
+    pub provider: Option<String>,
 }
 
 /// What the window is asked when a phone puts a chat on Chat or Step by step. The gateway has checked the chat; the window checks again.
@@ -387,10 +389,11 @@ pub struct WindowChat {
     /// "chat", "steps" or "team".
     #[serde(default)]
     pub workflow: Option<String>,
-    /// The chat runs (or ran, if it is asleep and restored) on another provider than Claude Code's: what is said in it, and its
-    /// title, are never put to Claude for a phone's suggestions. Said by the window, which knows it for a chat not started yet.
+    /// What the chat runs (or ran, if it is asleep and restored) on, when that isn't Claude Code: a name to show ("Codex", an endpoint's).
+    /// A phone is shown it, and what is said in the chat, and its title, are never put to Claude for a phone's suggestions. Said by the
+    /// window, which knows it for a chat not started yet; None for a chat on Claude.
     #[serde(default)]
-    pub off_claude: bool,
+    pub provider: Option<String>,
 }
 
 impl Remote {
@@ -440,10 +443,6 @@ impl Remote {
             }
             if c.asleep {
                 self.hub.asleep(&c.slot, &c.folder, Some(c.title.clone()), c.session_id.clone());
-                // (After it is listed: a chat restored and not opened yet has had no start to say it, and is listed here first.)
-                if c.off_claude {
-                    self.hub.set_off_claude(&c.slot, true);
-                }
             } else {
                 self.hub.titled(&c.slot, &c.title);
                 // The window woke it (or it never slept): the hub hears no start from claude until its first message.
@@ -453,6 +452,13 @@ impl Remote {
                 if let Some(id) = c.session_id.as_deref().filter(|id| crate::history::valid_id(id)) {
                     self.hub.session(&c.slot, id);
                 }
+            }
+            // After it is listed (a chat restored and not opened yet has had no start to say what it runs on, and is listed just
+            // above): the name a phone shows, and that nothing said in it goes to Claude. A chat on Claude clears the name; the
+            // "not for Claude" mark is set here only, and cleared when a chat starts (see `launch`).
+            self.hub.set_provider(&c.slot, c.provider.as_deref());
+            if c.provider.is_some() {
+                self.hub.set_off_claude(&c.slot, true);
             }
         }
     }
@@ -687,7 +693,7 @@ mod tests {
     fn the_window_titles_its_chats_and_lists_the_asleep_ones_which_can_then_be_woken() {
         let remote = Remote::default();
         remote.hub.opened("a", "/p");
-        let chat = |slot: &str, asleep| WindowChat { slot: slot.into(), folder: "/p".into(), title: format!("Chat {slot}"), asleep, session_id: Some(format!("s-{slot}")), permissions: None, preset: None, color: None, workflow: None, off_claude: false };
+        let chat = |slot: &str, asleep| WindowChat { slot: slot.into(), folder: "/p".into(), title: format!("Chat {slot}"), asleep, session_id: Some(format!("s-{slot}")), permissions: None, preset: None, color: None, workflow: None, provider: None };
         remote.window_chats(&[chat("a", false), chat("b", true)]);
         assert_eq!(remote.hub.chat("a").unwrap().title.as_deref(), Some("Chat a"));
         let b = remote.hub.chat("b").unwrap();
@@ -721,7 +727,7 @@ mod tests {
     fn the_window_says_which_workflow_each_chat_is_on() {
         let remote = Remote::default();
         remote.hub.opened("a", "/p");
-        let chat = |workflow: Option<&str>| WindowChat { slot: "a".into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: None, permissions: None, preset: None, color: None, workflow: workflow.map(String::from), off_claude: false };
+        let chat = |workflow: Option<&str>| WindowChat { slot: "a".into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: None, permissions: None, preset: None, color: None, workflow: workflow.map(String::from), provider: None };
         remote.window_chats(&[chat(Some("steps"))]);
         assert_eq!(remote.hub.chat("a").unwrap().workflow.as_deref(), Some("steps"));
         remote.window_chats(&[chat(None)]);
@@ -733,7 +739,7 @@ mod tests {
         let remote = Remote::default();
         remote.hub.opened("a", "/p");
         remote.hub.asleep("b", "/p", None, None);
-        let chat = |slot: &str, asleep: bool, color: Option<&str>| WindowChat { slot: slot.into(), folder: "/p".into(), title: "T".into(), asleep, session_id: None, permissions: None, preset: None, color: color.map(String::from), workflow: None, off_claude: false };
+        let chat = |slot: &str, asleep: bool, color: Option<&str>| WindowChat { slot: slot.into(), folder: "/p".into(), title: "T".into(), asleep, session_id: None, permissions: None, preset: None, color: color.map(String::from), workflow: None, provider: None };
         remote.window_chats(&[chat("a", false, Some("#c2255c")), chat("b", true, Some("#0f8a7e"))]);
         assert_eq!(remote.hub.chat("a").unwrap().color.as_deref(), Some("#c2255c"));
         assert_eq!(remote.hub.chat("b").unwrap().color.as_deref(), Some("#0f8a7e"), "an asleep chat's too");
@@ -744,7 +750,7 @@ mod tests {
         let remote = Remote::default();
         remote.hub.opened("a", "/p");
         remote.hub.opened("b", "/p");
-        let chat = |slot: &str, permissions: Option<&str>, preset: Option<&str>| WindowChat { slot: slot.into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: None, permissions: permissions.map(String::from), preset: preset.map(String::from), color: None, workflow: None, off_claude: false };
+        let chat = |slot: &str, permissions: Option<&str>, preset: Option<&str>| WindowChat { slot: slot.into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: None, permissions: permissions.map(String::from), preset: preset.map(String::from), color: None, workflow: None, provider: None };
         remote.window_chats(&[chat("a", Some("auto"), Some("max")), chat("b", None, None)]);
         let (a, b) = (remote.hub.chat("a").unwrap(), remote.hub.chat("b").unwrap());
         assert_eq!((a.permissions.as_deref(), a.preset.as_deref()), (Some("auto"), Some("max")));
@@ -757,7 +763,7 @@ mod tests {
         // The chat is listed (its claude starts) but hasn't said anything: claude names its session only with its first message.
         remote.hub.opened("a", "/p");
         assert_eq!(remote.hub.chat("a").unwrap().session_id, None);
-        let chat = |id: Option<&str>| WindowChat { slot: "a".into(), folder: "/p".into(), title: "Old chat".into(), asleep: false, session_id: id.map(String::from), permissions: None, preset: None, color: None, workflow: None, off_claude: false };
+        let chat = |id: Option<&str>| WindowChat { slot: "a".into(), folder: "/p".into(), title: "Old chat".into(), asleep: false, session_id: id.map(String::from), permissions: None, preset: None, color: None, workflow: None, provider: None };
         remote.window_chats(&[chat(Some("0a1b2c3d-1111-2222-3333-444455556666"))]);
         let a = remote.hub.chat("a").unwrap();
         assert_eq!((a.status, a.session_id.as_deref()), (hub::ChatStatus::Idle, Some("0a1b2c3d-1111-2222-3333-444455556666")), "it is still awake, and now has its session");
@@ -770,7 +776,7 @@ mod tests {
     fn the_window_only_fills_a_gap_in_the_session_and_never_with_a_name_that_is_not_one() {
         let remote = Remote::default();
         remote.hub.opened("a", "/p");
-        let chat = |id: &str| WindowChat { slot: "a".into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: Some(id.into()), permissions: None, preset: None, color: None, workflow: None, off_claude: false };
+        let chat = |id: &str| WindowChat { slot: "a".into(), folder: "/p".into(), title: "T".into(), asleep: false, session_id: Some(id.into()), permissions: None, preset: None, color: None, workflow: None, provider: None };
         // Not a session id (a path, or something with slashes in it): ignored.
         remote.window_chats(&[chat("../../etc/passwd")]);
         assert_eq!(remote.hub.chat("a").unwrap().session_id, None);
