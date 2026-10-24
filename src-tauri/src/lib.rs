@@ -10,6 +10,7 @@ pub mod files;
 pub mod git;
 pub mod history;
 pub mod history_search;
+pub mod hooks;
 pub mod mcp_config;
 pub mod menu;
 pub mod menu_bar;
@@ -83,6 +84,8 @@ pub struct AppState {
     setups: setup::SetupStore,
     /// "Keep restore points before each message" (Settings → General; the window sends it). On until the user turns it off.
     restore_points: std::sync::atomic::AtomicBool,
+    /// The pre- and post-hooks the user wrote, workspace-wide and per project (the window sends them, see hooks.rs).
+    hooks: std::sync::Mutex<hooks::HookTable>,
     /// Where every chat's events leave from, and what is kept of them for a client joining late (see remote/).
     remote: remote::Remote,
 }
@@ -202,23 +205,83 @@ fn publish(app: &AppHandle, slot: &str, event: ui_event::UiEvent) {
 fn emitter(app: &AppHandle) -> impl Fn(SlotEvent) + Send + Sync + Clone + 'static {
     let app = app.clone();
     move |ev| {
-        publish(&app, &ev.slot, ev.event.clone());
-        if let Some(state) = app.try_state::<AppState>() {
-            // Its claude is gone: the pid it had could be given to some other process, which must not pass for it.
-            if matches!(ev.event, ui_event::UiEvent::SessionEnded { .. }) {
-                if let Ok(slot) = state.slots.get(&ev.slot) {
-                    slot.claude_pid.store(0, std::sync::atomic::Ordering::SeqCst);
-                }
-            }
-            // The turn is over (or its claude is gone): files stop changing, so they can be restored.
-            if matches!(ev.event, ui_event::UiEvent::TurnDone { .. } | ui_event::UiEvent::SessionEnded { .. }) {
-                if let Ok(slot) = state.slots.get(&ev.slot) {
-                    slot.checkpoints.turn_ended();
-                }
-            }
-            state.orchestra.observe(&ev.slot, &ev.event);
+        let Some(state) = app.try_state::<AppState>() else {
+            publish(&app, &ev.slot, ev.event);
+            return;
+        };
+        // A turn that a post-hook follows is not over yet: its end is held back (see hooks.rs).
+        if let Some(event) = hooks_at(&app, &state, &ev.slot, ev.event) {
+            sent_out(&app, &state, &ev.slot, event);
         }
     }
+}
+
+/// Tells everyone of an event of chat `slot`, and what it means for the chat.
+fn sent_out(app: &AppHandle, state: &AppState, slot: &str, event: ui_event::UiEvent) {
+    publish(app, slot, event.clone());
+    // Its claude is gone: the pid it had could be given to some other process, which must not pass for it.
+    if matches!(event, ui_event::UiEvent::SessionEnded { .. }) {
+        if let Ok(s) = state.slots.get(slot) {
+            s.claude_pid.store(0, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    // The turn is over (or its claude is gone): files stop changing, so they can be restored.
+    if matches!(event, ui_event::UiEvent::TurnDone { .. } | ui_event::UiEvent::SessionEnded { .. }) {
+        if let Ok(s) = state.slots.get(slot) {
+            s.checkpoints.turn_ended();
+        }
+    }
+    state.orchestra.observe(slot, &event);
+}
+
+/// What the chat's hooks do with an event (see hooks.rs): a new conversation (a compaction, `/clear`) makes the next message
+/// carry the pre-hook again, and the end of a turn that the post-hook follows is held back, the hook sent in its place. What
+/// is left to tell everyone of is returned.
+fn hooks_at(app: &AppHandle, state: &AppState, slot: &str, event: ui_event::UiEvent) -> Option<ui_event::UiEvent> {
+    let Ok(s) = state.slots.get(slot) else { return Some(event) };
+    let (app, slot) = (app.clone(), slot.to_string());
+    route_hooks(&s, event, move |told| match told {
+        // The end of the turn that was held, which couldn't be followed: it ends as any other does.
+        ui_event::UiEvent::TurnDone { .. } => sent_out(&app, &app.state::<AppState>(), &slot, told),
+        _ => publish(&app, &slot, told),
+    })
+}
+
+/// `hooks_at`, for a chat's slot: `tell` is given what is to be told of later, off this thread (the post-hook's message
+/// once it is sent, and the end of the turn it was to follow if it can't be). What is to be told of now is returned.
+fn route_hooks(s: &Arc<Slot>, event: ui_event::UiEvent, tell: impl Fn(ui_event::UiEvent) + Send + Sync + 'static) -> Option<ui_event::UiEvent> {
+    use ui_event::UiEvent;
+    match event {
+        UiEvent::Compacted | UiEvent::ConversationReset => s.hooks.arm_pre(),
+        UiEvent::SessionEnded { .. } => s.hooks.session_ended(),
+        UiEvent::TurnDone { .. } => {
+            return match s.hooks.turn_ended(event) {
+                hooks::TurnEnd::Publish(end) => Some(*end),
+                hooks::TurnEnd::SendPost(message) => {
+                    let s = s.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let sent = match s.session.lock().await.as_mut() {
+                            Some(claude) => claude.send(&message).await,
+                            None => Err("No Claude session is running".into()),
+                        };
+                        match sent {
+                            // The window shows the hook where it was sent (as a message of Lantern's own, see sent_by).
+                            Ok(()) => tell(UiEvent::UserText { text: message, at: now_ms(), sent_by: Some("lantern".into()), images: 0 }),
+                            // Not sent: the user's turn ends now, as it would have without a post-hook.
+                            Err(_) => {
+                                if let Some(held) = s.hooks.post_failed() {
+                                    tell(held);
+                                }
+                            }
+                        }
+                    });
+                    None
+                }
+            };
+        }
+        _ => {}
+    }
+    Some(event)
 }
 
 /// What a provider can do (see Capabilities).
@@ -330,7 +393,7 @@ impl remote::gateway::Host for RemoteHost {
         let app = self.app.clone();
         Box::pin(async move {
             let state = app.state::<AppState>();
-            send_user_message(&app, &state, &slot, &text, &by, &images).await.map(|_| ())
+            send_user_message(&app, &state, &slot, &text, &by, &images, true).await.map(|_| ())
         })
     }
 
@@ -862,6 +925,11 @@ async fn launch(app: &AppHandle, id: &str, slot: &Slot, mut cfg: SessionConfig, 
         slot.claude_pid.store(0, std::sync::atomic::Ordering::SeqCst);
         slot.bridge.cancel_all();
         old.stop().await;
+        // A turn held back for a post-hook that was going to follow it is over now (the claude doing it is gone), and so is
+        // a post-hook waiting for a turn that won't end: the new claude starts with neither.
+        if let (Some(held), Some(state)) = (slot.hooks.post_failed(), app.try_state::<AppState>()) {
+            sent_out(app, &state, id, held);
+        }
     }
     slot.bridge.set_folder(&cfg.folder);
     // Set (or cleared) at every start of this chat's claude, so a slot that is reused never keeps the last one's scope.
@@ -1180,6 +1248,8 @@ async fn start_session(app: AppHandle, state: State<'_, AppState>, slot: String,
     let provider = cfg.provider.info();
     let lowered = cfg.mode != asked;
     launch(&app, &slot, &s, cfg, true).await?;
+    // A new conversation: its first message carries the pre-hook (see hooks.rs).
+    s.hooks.arm_pre();
     if lowered {
         told_ask(&app, &slot);
     }
@@ -1371,25 +1441,66 @@ async fn set_model(state: State<'_, AppState>, slot: String, model: Option<Strin
 
 #[tauri::command]
 /// Returns the turn's number, which the Changes pane can ask about later (a Step-by-step page's changes).
-async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String) -> Result<usize, String> {
-    send_user_message(&app, &state, &slot, &text, remote::SENT_BY_DESKTOP, &[]).await
+/// `auto`: Lantern sends it, not the user (an agents' note to a Lead): the user's hooks aren't run for it.
+async fn send_message(app: AppHandle, state: State<'_, AppState>, slot: String, text: String, auto: Option<bool>) -> Result<usize, String> {
+    send_user_message(&app, &state, &slot, &text, remote::SENT_BY_DESKTOP, &[], auto != Some(true)).await
 }
 
 /// Sends what the user typed (in the window, or on a paired phone: `sent_by`, with the `images` it attached) to chat `slot`.
 /// Every client is told of it first, so it comes before Claude's answer; the window, which shows its own messages already,
-/// isn't. The pictures go to Claude and nowhere else: clients are told only how many there were.
-async fn send_user_message(app: &AppHandle, state: &AppState, slot: &str, text: &str, sent_by: &str, images: &[remote::protocol::RemoteImage]) -> Result<usize, String> {
+/// isn't. The pictures go to Claude and nowhere else: clients are told only how many there were. `hooks`: the user's hooks
+/// apply to it (not to what Lantern sends in their place).
+async fn send_user_message(app: &AppHandle, state: &AppState, slot: &str, text: &str, sent_by: &str, images: &[remote::protocol::RemoteImage], hooks: bool) -> Result<usize, String> {
     let s = state.slots.get(slot)?;
     // An agent that was put to sleep to save memory wakes for the user's message too.
     state.orchestra.wake_agent(slot).await?;
-    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as u64);
-    state.remote.publish(slot, ui_event::UiEvent::UserText { text: text.to_string(), at, sent_by: Some(sent_by.to_string()), images: images.len() as u32 });
+    state.remote.publish(slot, ui_event::UiEvent::UserText { text: text.to_string(), at: now_ms(), sent_by: Some(sent_by.to_string()), images: images.len() as u32 });
     // Claude's own form of a picture in a message: a block that holds its bytes.
     let blocks: Vec<serde_json::Value> = images.iter().map(|i| serde_json::json!({"type": "image", "source": {"type": "base64", "media_type": i.media_type, "data": i.data}})).collect();
-    let turn = send_text(app, slot, &s, text, blocks).await?;
+    // The user's hooks (see hooks.rs): the pre-hook goes in front of what Claude is sent, not of what the chat shows, and the
+    // post-hook follows the turn. A team's agents have none: they work for their Lead.
+    let own = if hooks { hooks_of(state, slot, &s) } else { hooks::Resolved::default() };
+    let sent = if hooks { s.hooks.carry_pre(text, own.pre.as_deref()) } else { text.to_string() };
+    if hooks {
+        // Its reply is a page in Step by step, which the hook's reply would be read as: no post-hook there. A slash command
+        // (/clear, /compact) isn't followed by one either.
+        let steps = s.config.lock().unwrap().as_ref().is_some_and(|c| c.mode == Mode::Steps);
+        s.hooks.follow_with(own.post.filter(|_| !steps && hooks::carries_note(text)));
+    }
+    let turn = match send_text(app, slot, &s, &sent, blocks).await {
+        Ok(turn) => turn,
+        Err(e) => {
+            if sent != text {
+                s.hooks.arm_pre();
+            }
+            if hooks {
+                s.hooks.forget_post();
+            }
+            return Err(e);
+        }
+    };
     // Said to a worker by the user themselves: its main agent hears of it with its next wake-up.
     state.orchestra.note_user_message(slot, text);
     Ok(turn)
+}
+
+fn now_ms() -> Option<u64> {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as u64)
+}
+
+/// The hooks that apply to chat `slot`: those of its project. A team's agents have none (they work for their Lead).
+fn hooks_of(state: &AppState, slot: &str, s: &Slot) -> hooks::Resolved {
+    if state.orchestra.parent_of(slot).is_some() {
+        return hooks::Resolved::default();
+    }
+    s.folder().map(|f| state.hooks.lock().unwrap().resolve(&f.to_string_lossy())).unwrap_or_default()
+}
+
+/// The user's pre- and post-hooks, as they stand in Settings and in each project (the window sends them at launch and on
+/// every change; see hooks.rs).
+#[tauri::command]
+fn set_chat_hooks(state: State<'_, AppState>, table: hooks::HookTable) {
+    *state.hooks.lock().unwrap() = table;
 }
 
 /// Runs `f` (blocking) with the chat's restore points and the git checkout of its folder: an error says why there is none
@@ -2827,7 +2938,7 @@ pub fn run() {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 following.tick();
             });
-            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), remote: window_remote(app.handle()) });
+            app.manage(AppState { slots: Slots::default(), orchestra, login_path: Arc::new(OnceLock::new()), titles: Arc::new(titles), renames: Arc::new(renames), folder_rules: Arc::new(folder_rules), endpoints: Arc::new(endpoints::EndpointStore::load(app.path().app_data_dir().ok().map(|d| d.join("endpoints.json")))), relocations: Arc::new(relocations), prs: Default::default(), network, storage, agent_limit: DEFAULT_AGENT_LIMIT.into(), chat_search: Default::default(), asides: Default::default(), setups: Default::default(), restore_points: true.into(), hooks: Default::default(), remote: window_remote(app.handle()) });
             // Remote control left on: it listens again from launch.
             if app.state::<AppState>().remote.store.saved().enabled {
                 let handle = app.handle().clone();
@@ -2933,6 +3044,7 @@ pub fn run() {
             merge_tests_split_command,
             set_auto_merge_tests,
             set_restore_points,
+            set_chat_hooks,
             orchestra_discard,
             run_shell,
             claude_request,
@@ -3037,6 +3149,168 @@ pub fn run() {
                 }
             }
         });
+}
+
+#[cfg(test)]
+mod hooks_flow_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    use tokio::sync::mpsc;
+    use ui_event::UiEvent;
+
+    const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/stream/write_create_and_error.jsonl");
+
+    /// A claude that answers every message it is sent with one whole turn (the fixture's), and keeps what it was sent.
+    async fn chat_with_fake_claude(dir: &std::path::Path) -> (Arc<Slot>, mpsc::UnboundedReceiver<UiEvent>) {
+        let d = dir.display();
+        let body = format!("while IFS= read -r line; do\n  printf '%s\\n' \"$line\" >> {d}/stdin.txt\n  cat '{FIXTURE}'\ndone");
+        let fake = dir.join("fake-claude");
+        std::fs::write(&fake, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let slots = Slots::default();
+        let slot = slots.get_or_create("s1", dir, |_| {}, Arc::new(permission::rules::FolderRules::load(None)), |_| Arc::new(|pid| pid == std::process::id())).unwrap();
+        let cfg = session::SessionConfig {
+            provider: ProviderId::Claude,
+            binary: fake,
+            folder: dir.to_path_buf(),
+            mode: Mode::Ask,
+            auto_approve: false,
+            resume: None,
+            model: None,
+            effort: None,
+            advisor: None,
+            subagent_model: None,
+            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role: Default::default(), providers: vec![], project_notes: None },
+            path_env: None,
+            endpoint: None,
+        };
+        // What the window and the phones are told: every event goes through the chat's hooks first, as the emitter does.
+        let (tx, rx) = mpsc::unbounded_channel();
+        let (told, later) = (tx.clone(), tx);
+        let routed = slot.clone();
+        let sink: ui_event::Sink = Arc::new(move |ev| {
+            let later = later.clone();
+            if let Some(now) = route_hooks(&routed, ev, move |ev| {
+                let _ = later.send(ev);
+            }) {
+                let _ = told.send(now);
+            }
+        });
+        let session = Session::spawn(&cfg, sink, Arc::new(|_: &str, _: Option<String>| {})).unwrap();
+        *slot.session.lock().await = Some(session);
+        (slot, rx)
+    }
+
+    async fn until_turn_done(rx: &mut mpsc::UnboundedReceiver<UiEvent>) -> Vec<UiEvent> {
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            let mut seen = vec![];
+            loop {
+                let ev = rx.recv().await.expect("the chat's events");
+                let done = matches!(ev, UiEvent::TurnDone { .. });
+                seen.push(ev);
+                if done {
+                    return seen;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for the turn to end")
+    }
+
+    async fn stop(slot: &Arc<Slot>) {
+        let session = slot.session.lock().await.take();
+        if let Some(s) = session {
+            s.stop().await;
+        }
+    }
+
+    fn sent_to_claude(dir: &std::path::Path) -> Vec<String> {
+        let text = std::fs::read_to_string(dir.join("stdin.txt")).unwrap_or_default();
+        text.lines().map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap()["message"]["content"][0]["text"].as_str().unwrap_or("").to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn the_post_hook_follows_the_users_turn_and_the_two_end_as_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let (slot, mut rx) = chat_with_fake_claude(dir.path()).await;
+        slot.hooks.follow_with(Some("Update the brain if needed".into()));
+        slot.session.lock().await.as_mut().unwrap().send("do it").await.unwrap();
+
+        let seen = until_turn_done(&mut rx).await;
+        // The hook was sent after the user's message, and the window was told where (as a message of Lantern's own).
+        assert_eq!(sent_to_claude(dir.path()), vec!["do it".to_string(), hooks::post_message("Update the brain if needed")]);
+        assert!(seen.iter().any(|e| matches!(e, UiEvent::UserText { text, sent_by: Some(by), .. } if hooks::post_text(text) == Some("Update the brain if needed") && by == "lantern")), "{seen:?}");
+        // Exactly one end for both turns, and it came after the hook's own events (the fixture's turn, twice).
+        assert_eq!(seen.iter().filter(|e| matches!(e, UiEvent::TurnDone { .. })).count(), 1);
+        let first_turn = seen.iter().position(|e| matches!(e, UiEvent::UserText { .. })).unwrap();
+        assert!(seen[..first_turn].iter().any(|e| matches!(e, UiEvent::ToolStarted { .. })), "the user's turn came first");
+        assert!(seen[first_turn..].iter().any(|e| matches!(e, UiEvent::ToolStarted { .. })), "and the hook's after it");
+        // Nothing more follows: it is not sent again.
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(400), rx.recv()).await.is_err(), "a second end");
+        assert_eq!(sent_to_claude(dir.path()).len(), 2);
+        // The next message, with no post-hook now, is one turn.
+        slot.hooks.follow_with(None);
+        slot.session.lock().await.as_mut().unwrap().send("again").await.unwrap();
+        until_turn_done(&mut rx).await;
+        assert_eq!(sent_to_claude(dir.path()).len(), 3);
+        stop(&slot).await;
+    }
+
+    #[tokio::test]
+    async fn a_turn_without_a_post_hook_ends_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let (slot, mut rx) = chat_with_fake_claude(dir.path()).await;
+        slot.session.lock().await.as_mut().unwrap().send("do it").await.unwrap();
+        until_turn_done(&mut rx).await;
+        assert!(tokio::time::timeout(std::time::Duration::from_millis(300), rx.recv()).await.is_err());
+        assert_eq!(sent_to_claude(dir.path()), vec!["do it".to_string()]);
+        stop(&slot).await;
+    }
+
+    #[tokio::test]
+    async fn a_compaction_or_a_clear_brings_the_pre_hook_back_for_the_next_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let (slot, _rx) = chat_with_fake_claude(dir.path()).await;
+        assert_eq!(slot.hooks.carry_pre("hi", Some("check")), "hi", "not due until something arms it");
+        for ev in [UiEvent::Compacted, UiEvent::ConversationReset] {
+            assert!(route_hooks(&slot, ev, |_| {}).is_some(), "they are passed on");
+            assert!(slot.hooks.carry_pre("hi", Some("check")).ends_with("\n\nhi"), "the next message carries it");
+            assert_eq!(slot.hooks.carry_pre("hi", Some("check")), "hi", "and only that one");
+        }
+        stop(&slot).await;
+    }
+
+    #[tokio::test]
+    async fn a_chat_that_ends_while_the_post_hook_runs_forgets_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (slot, _rx) = chat_with_fake_claude(dir.path()).await;
+        slot.hooks.follow_with(Some("save".into()));
+        let done = UiEvent::TurnDone { is_error: false, result: None, cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None };
+        // Held, and the hook is sent into the fake claude, which answers it; but the chat ends first.
+        assert!(route_hooks(&slot, done.clone(), |_| {}).is_none());
+        assert!(route_hooks(&slot, UiEvent::SessionEnded { code: Some(1), stderr_tail: String::new() }, |_| {}).is_some());
+        assert_eq!(slot.hooks.post_failed(), None, "nothing is left waiting for a turn that will not end");
+        stop(&slot).await;
+    }
+
+    #[tokio::test]
+    async fn a_post_hook_that_cannot_be_sent_lets_the_users_turn_end_as_it_would_have() {
+        let dir = tempfile::tempdir().unwrap();
+        let (slot, mut rx) = chat_with_fake_claude(dir.path()).await;
+        // No claude to send it into.
+        let gone = slot.session.lock().await.take().unwrap();
+        gone.stop().await;
+        slot.hooks.follow_with(Some("save".into()));
+        let done = UiEvent::TurnDone { is_error: false, result: None, cost_usd: Some(0.5), tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: None };
+        let (told, mut told_rx) = mpsc::unbounded_channel();
+        assert!(route_hooks(&slot, done.clone(), move |ev| {
+            let _ = told.send(ev);
+        })
+        .is_none());
+        let ended = tokio::time::timeout(std::time::Duration::from_secs(5), told_rx.recv()).await.unwrap().unwrap();
+        assert_eq!(ended, done);
+        assert!(rx.try_recv().is_err());
+    }
 }
 
 #[cfg(test)]

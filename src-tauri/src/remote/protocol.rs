@@ -219,6 +219,8 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
     use RemoteEvent as R;
     use UiEvent as U;
     Some(match event {
+        // A post-hook is Lantern's own message (see hooks.rs): the phone is shown what it does, not that it was sent.
+        U::UserText { text, .. } if crate::hooks::post_text(text).is_some() => return None,
         U::UserText { text, at, sent_by, images } => R::UserText { text: super::hub::without_notes(text).to_string(), at: *at, sent_by: sent_by.clone(), images: (*images > 0).then_some(*images) },
         U::Thinking { parent: None } => R::Thinking,
         U::TextDelta { parent: None, block_id, text } => R::TextDelta { block_id: block_id.clone(), text: text.clone() },
@@ -278,6 +280,7 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         | U::AgentMessage { .. }
         | U::AgentStopped { .. }
         | U::AgentTidied
+        | U::Compacted
         | U::ReviewUpdate { .. }
         | U::AgentMode { .. }
         | U::MergeResolved { .. }

@@ -3,6 +3,7 @@ import { hasPendingPrompt, type ChatItem, type State } from "../store";
 import type { ActivityStatus } from "./status";
 import type { CloseCheck } from "../types";
 import type { AgentRole } from "./roles";
+import { outsideHooks } from "./hookItems";
 
 /** What an agent on the canvas is doing, in the words a product owner would use. */
 export type NodeStatus = "starting" | "working" | "waiting" | "held" | "idle" | "ended" | "failed";
@@ -119,7 +120,7 @@ function lastSaid(items: ChatItem[]): string | null {
 /** What an agent's summary card says: its latest words, else the step it is on, else what it was asked. */
 export function summaryLine(s: State, max = 160): string {
   const clip = (t: string) => (t.length > max ? `${t.slice(0, max).trimEnd()}…` : t);
-  const said = lastSaid(s.items);
+  const said = lastSaid(outsideHooks(s.items));
   if (said) return clip(said);
   const tool = [...s.items].reverse().find((it): it is Extract<ChatItem, { type: "tool" }> => it.type === "tool");
   if (tool) return clip(`${tool.name} ${tool.summary}`.trim());

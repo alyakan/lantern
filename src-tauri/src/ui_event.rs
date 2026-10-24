@@ -160,6 +160,9 @@ pub enum UiEvent {
     Models { models: Vec<ModelOption> },
     /// `/clear` ran: the conversation starts over in the same process.
     ConversationReset,
+    /// The conversation was compacted (by `/compact`, or by Claude Code itself when the context was full): what came before
+    /// is a summary now. The chat shows nothing of it; the backend uses it to bring the pre-hook back (see hooks.rs).
+    Compacted,
     PermissionRequested { request_id: String, tool_name: String, input: Value },
     /// A prompt that can no longer be answered: the helper asking for it went away.
     PermissionWithdrawn { request_id: String },

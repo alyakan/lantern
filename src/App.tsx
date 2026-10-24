@@ -110,6 +110,7 @@ import { ChatStoreContext, createChatStore, KnownWindowsContext, NodeActionsCont
 import { windowOf } from "./lib/contextShare";
 import { lostText, needingYou, orchestraNodes, teamActivity, teamMain, teamNodes } from "./lib/orchestraView";
 import { ProjectSetupContext, pushProjectSetups, runCommandOf, type ProjectSetup, type SetupByFolder } from "./lib/projectSetup";
+import { NO_HOOKS, readHooks, type HookTable, type ProjectHooks } from "./lib/chatHooks";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ProjectSetupDialog } from "./components/ProjectSetupDialog";
 import { RunPanel } from "./components/RunPanel";
@@ -329,6 +330,14 @@ export default function App() {
   useEffect(() => {
     void pushProjectSetups(setupBy);
   }, [setupBy]);
+  // The pre- and post-hook (Settings → Hooks): the same for every project, and a project's own in place of them. The backend
+  // applies them where a message goes out and a turn ends: it learns them from here, at launch and on every change.
+  const [hooksAll, setHooksAll] = usePersistentState<Pick<HookTable, "pre" | "post">>("settings.chatHooks", { pre: NO_HOOKS.pre, post: NO_HOOKS.post });
+  const [hooksBy, setHooksBy] = usePersistentState<Record<string, ProjectHooks>>("settings.chatHooksByFolder", {});
+  const chatHooks = useMemo(() => readHooks({ ...hooksAll, projects: hooksBy }), [hooksAll, hooksBy]);
+  useEffect(() => {
+    api.setChatHooks(chatHooks).catch(() => {});
+  }, [chatHooks]);
   // When each chat's last turn ended, for the title bar's "Done | Today at 19:22".
   const [finishedAt, setFinishedAt] = useState<Record<string, Date>>({});
   // The pop-up shown when the chat on screen finishes a turn.
@@ -1186,7 +1195,7 @@ export default function App() {
     const reverted = withRevertNote(withPageNote([unread, broken].filter(Boolean).join("\n\n") || null, pick ? withFlavourNote(pick, noted, { guide: guides[pick]?.text, explain, explainGuide: guides.explain?.text }) : noted), chats.slots[slot]?.revertNotes ?? []);
     // A chat opened from a place the folder moved from: Claude is told once that the paths in earlier messages are old.
     const moved = withMovedNote(reverted, chats.slots[slot]?.movedFrom ?? null, chats.slots[slot]?.folder ?? null);
-    api.sendMessage(slot, withShellContext(items, moved)).then(
+    api.sendMessage(slot, withShellContext(items, moved), auto).then(
       (turn) => typeof turn === "number" && to(slot)({ type: "turn_numbered", turn }),
       (e) => to(slot)({ type: "turn_failed", text: errText(e) }),
     );
@@ -2218,6 +2227,8 @@ export default function App() {
     if (colors) setProjectColors(colors);
     const setups = take<SetupByFolder>("settings.projectSetupByFolder");
     if (setups) setSetupBy(setups);
+    const hooks = take<Record<string, ProjectHooks>>("settings.chatHooksByFolder");
+    if (hooks) setHooksBy(hooks);
     const order = take<string[]>("sidebar.projectOrder");
     if (order) setProjectOrder(order);
     const prs = take<Record<string, Partial<PrSetting>>>("prChecks.byFolder");
@@ -2760,6 +2771,14 @@ export default function App() {
           onCommands={(commands) => dispatch({ type: "ui_event", event: { kind: "commands", commands } })}
           onRestartChat={() => restart(active, state.mode)}
           prChecks={{ folders: prFolders, saved: prSettings, onChange: (folder, setting) => setPrSettings({ ...prSettings, [folder]: setting }) }}
+          hooks={{
+            folders: prFolders,
+            table: chatHooks,
+            onChange: (t) => {
+              setHooksAll({ pre: t.pre, post: t.post });
+              setHooksBy(t.projects);
+            },
+          }}
           endpoints={{ onSaved: () => void api.listProviders().then(setProviderList, () => {}) }}
           general={{ keepAwake, onKeepAwake: setKeepAwake, notify: notifyPrefs, onNotify: setNotifyPrefs, theme, onTheme: setTheme, customTheme, onCustomTheme: setCustomTheme, textSize, onTextSize: setTextSize, warnTeams, onWarnTeams: setWarnTeams }}
           routines={{

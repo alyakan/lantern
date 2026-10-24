@@ -28,6 +28,44 @@ describe("groupItems", () => {
     expect(rows[2]).toMatchObject({ id: "m2" });
   });
 
+  it("folds a post-hook and what Claude did for it into one row, and leaves the turn's closing note after it", () => {
+    const items: ChatItem[] = [
+      { type: "user", id: "u1", text: "fix it" },
+      tool("t1", "Edit", { edit }),
+      say("m1", "Fixed."),
+      { type: "hook", id: "h1", text: "Update the brain if needed" },
+      tool("t2", "Bash"),
+      say("m2", "Nothing to save."),
+      done,
+    ];
+    const rows = groupItems(items);
+    expect(rows.map((r) => r.type)).toEqual(["user", "activity", "assistant", "hook", "turn"]);
+    const hook = rows[3] as Extract<Row, { type: "hook" }>;
+    expect(hook).toMatchObject({ id: "h1", text: "Update the brain if needed", waiting: false });
+    expect(hook.rows.map((r) => r.type)).toEqual(["activity", "assistant"]);
+    // The user's own answer is still a row of its own, outside the hook.
+    expect(rows[2]).toMatchObject({ id: "m1" });
+  });
+
+  it("says a post-hook is waiting when a prompt in it has no answer, and is live while its turn runs", () => {
+    const ask: ChatItem = { type: "permission", id: "p1", toolName: "Bash", input: { command: "brain add" }, decision: null };
+    const items: ChatItem[] = [{ type: "user", id: "u1", text: "go" }, say("m1", "Done."), { type: "hook", id: "h1", text: "save" }, tool("t2", "Bash", { status: "running" }), ask];
+    const [, , hook] = groupItems(items, true) as [Row, Row, Extract<Row, { type: "hook" }>];
+    expect(hook.waiting).toBe(true);
+    expect(hook.rows.find((r) => r.type === "activity")).toMatchObject({ live: true });
+    // Not live once the stream isn't.
+    const [, , still] = groupItems(items, false) as [Row, Row, Extract<Row, { type: "hook" }>];
+    expect(still.rows.find((r) => r.type === "activity")).toMatchObject({ live: false });
+  });
+
+  it("a hook row is the same row when what it holds is the same, and not when it holds something more", () => {
+    const base: ChatItem[] = [{ type: "user", id: "u1", text: "go" }, { type: "hook", id: "h1", text: "save" }, tool("t2", "Bash")];
+    const a = groupItems(base, true)[1];
+    expect(a).toMatchObject({ type: "hook" });
+    expect(sameRow(a, groupItems(base, true)[1])).toBe(true);
+    expect(sameRow(a, groupItems([...base, tool("t3", "Read")], true)[1])).toBe(false);
+  });
+
   it("keeps the last text visible, where it was said, when the turn ended on a tool", () => {
     const rows = groupItems([{ type: "user", id: "u1", text: "hi" }, say("m1", "Done: the fix is in."), tool("t1", "Bash"), done]);
     expect(rows.map((r) => r.id)).toEqual(["u1", "m1", "a:t1", "end"]);
