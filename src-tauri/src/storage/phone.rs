@@ -87,60 +87,61 @@ impl Storage {
             scanned_at: inner.scanned_at,
             scanning: inner.scanning,
             progress: inner.progress.clone(),
-            deleting: inner.deleting || inner.phone_clearing,
+            deleting: inner.deleting,
             items: all.into_iter().take(MAX_ITEMS).collect(),
             more,
             report: inner.report.clone(),
         }
     }
 
-    /// Starts clearing the items with these ids that are safe to clear now (see `clearable`), in the background: it can take
-    /// minutes (a worktree, a simulator's runtime), so this returns at once with how many and about how much, and the phone
-    /// watches `phone_view`. Refused while a scan or a delete runs, and for a scan older than an hour.
+    /// Takes the items among `ids` that are safe to clear now (see `clearable`) as snapshots, and marks the Storage as deleting, in one
+    /// step under the lock: from here until the clear ends no scan, tab delete or other clear can run, so what is removed is
+    /// exactly what was found safe here, and not whatever a rescan made of the same ids meanwhile. Refused while a scan or a delete
+    /// runs, for a scan older than an hour, and when none of the ids is safe. The caller must remove them (`finish_phone_clear`).
+    fn begin_phone_clear(&self, ids: &[String]) -> Result<Vec<Item>, String> {
+        let mut inner = self.lock();
+        if inner.scanning || inner.deleting {
+            return Err("Your Mac is busy with a scan or a clear. Try again in a moment.".into());
+        }
+        let fresh = inner.scanned_at.is_some_and(|t| (now_secs() as u64 * 1000).saturating_sub(t) <= FRESH_MS);
+        if !fresh {
+            return Err("The scan is old. Scan again, then clear.".into());
+        }
+        let safe = clearable(&inner.items);
+        let mut picked: Vec<Item> = Vec::new();
+        for id in ids {
+            if picked.iter().any(|i| &i.id == id) {
+                continue;
+            }
+            if let Some(item) = safe.iter().find(|i| &i.id == id) {
+                picked.push(item.clone());
+            }
+        }
+        if picked.is_empty() {
+            return Err("Nothing on that list is safe to clear any more. Scan again.".into());
+        }
+        inner.deleting = true;
+        inner.report = None;
+        Ok(picked)
+    }
+
+    /// Removes what `begin_phone_clear` took, writes down how it went (before `deleting` ends, so a phone that sees it end sees the
+    /// report), and ends the clear.
+    fn finish_phone_clear(&self, picked: Vec<Item>, path_env: Option<&str>) {
+        let _clear = super::Deleting(self);
+        let done = self.remove_picked(picked, path_env);
+        let report = Report { ok: done.iter().filter(|o| o.ok).count(), failed: done.iter().filter(|o| !o.ok).count(), freed: done.iter().filter(|o| o.ok).map(|o| o.freed).sum(), at: now_secs() as u64 * 1000 };
+        self.lock().report = Some(report);
+    }
+
+    /// Starts clearing the items with these ids that are safe to clear now, in the background: it can take minutes (a worktree, a
+    /// simulator's runtime), so this returns at once with how many and about how many bytes, and the phone watches `phone_view`.
     pub fn phone_clear(self: &Arc<Self>, ids: &[String], path_env: Option<String>) -> Result<(usize, u64), String> {
-        let (picked, bytes) = {
-            let mut inner = self.lock();
-            if inner.scanning || inner.deleting || inner.phone_clearing {
-                return Err("Your Mac is busy with a scan or a clear. Try again in a moment.".into());
-            }
-            let fresh = inner.scanned_at.is_some_and(|t| (now_secs() as u64 * 1000).saturating_sub(t) <= FRESH_MS);
-            if !fresh {
-                return Err("The scan is old. Scan again, then clear.".into());
-            }
-            let safe = clearable(&inner.items);
-            let mut picked: Vec<String> = Vec::new();
-            let mut bytes = 0;
-            for id in ids {
-                if picked.contains(id) {
-                    continue;
-                }
-                if let Some(item) = safe.iter().find(|i| &i.id == id) {
-                    picked.push(id.clone());
-                    bytes += item.bytes;
-                }
-            }
-            if picked.is_empty() {
-                return Err("Nothing on that list is safe to clear any more. Scan again.".into());
-            }
-            inner.phone_clearing = true;
-            inner.report = None;
-            (picked, bytes)
-        };
+        let picked = self.begin_phone_clear(ids)?;
         (self.changed)();
-        let count = picked.len();
+        let (count, bytes) = (picked.len(), picked.iter().map(|i| i.bytes).sum());
         let me = self.clone();
-        std::thread::spawn(move || {
-            let outcomes = me.delete(&picked, path_env.as_deref());
-            let report = match outcomes {
-                Ok(done) => Report { ok: done.iter().filter(|o| o.ok).count(), failed: done.iter().filter(|o| !o.ok).count(), freed: done.iter().filter(|o| o.ok).map(|o| o.freed).sum(), at: now_secs() as u64 * 1000 },
-                Err(_) => Report { ok: 0, failed: picked.len(), freed: 0, at: now_secs() as u64 * 1000 },
-            };
-            let mut inner = me.lock();
-            inner.phone_clearing = false;
-            inner.report = Some(report);
-            drop(inner);
-            (me.changed)();
-        });
+        std::thread::spawn(move || me.finish_phone_clear(picked, path_env.as_deref()));
         Ok((count, bytes))
     }
 }
@@ -222,6 +223,45 @@ mod tests {
         // The phone names a Review item and a project too: neither is touched, and the count and bytes say so.
         let (count, bytes) = s.phone_clear(&["a".into(), "review".into(), "repo".into(), "a".into()], None).unwrap();
         assert_eq!((count, bytes), (1, 5));
+    }
+
+    #[test]
+    fn once_a_clear_has_taken_its_items_no_scan_other_clear_or_tab_delete_can_start_until_it_ends() {
+        let s = storage_with(vec![item("a", Kind::Cache, 5), item("b", Kind::Cache, 6)], Some(now_ms()));
+        let picked = s.begin_phone_clear(&["a".into()]).unwrap();
+        assert_eq!(picked.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["a"]);
+        assert!(s.phone_view().deleting);
+        // A rescan (the tab's, Claude's, another phone's), another clear and the tab's Delete are all refused meanwhile.
+        assert!(!s.start_scan(None), "a scan started in the middle of a clear");
+        assert!(s.begin_phone_clear(&["b".into()]).is_err());
+        assert!(s.delete(&["b".into()], None).is_err());
+    }
+
+    #[test]
+    fn what_is_removed_is_what_was_safe_when_the_clear_began_not_what_the_ids_mean_afterwards() {
+        let s = storage_with(vec![item("a", Kind::Cache, 5)], Some(now_ms()));
+        let picked = s.begin_phone_clear(&["a".into()]).unwrap();
+        // The item turns into one that needs a look, as a rescan would show it (the same id, now Review).
+        {
+            let mut inner = s.lock();
+            inner.items[0].risk = Risk::Review;
+        }
+        assert_eq!((picked[0].risk, picked[0].ticked), (Risk::Safe, true), "the clear holds what it found, a snapshot");
+        // And a clear started now, by the same id, refuses it.
+        s.lock().deleting = false;
+        assert!(s.begin_phone_clear(&["a".into()]).unwrap_err().contains("safe to clear"));
+    }
+
+    #[test]
+    fn the_report_is_there_by_the_time_the_clear_is_over() {
+        let s = storage_with(vec![item("gone", Kind::Cache, 5)], Some(now_ms()));
+        let picked = s.begin_phone_clear(&["gone".into()]).unwrap();
+        s.finish_phone_clear(picked, None);
+        let v = s.phone_view();
+        assert!(!v.deleting);
+        let report = v.report.expect("a report");
+        // The path is made up, so removing it fails: one tried, none cleared, and it says so.
+        assert_eq!((report.ok, report.failed), (0, 1));
     }
 
     #[test]

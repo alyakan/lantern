@@ -98,6 +98,12 @@ describe("the Mac's storage", () => {
     expect(t.lastOf("storage_clear")).toEqual({ op: "storage_clear", ids: ["aa000001", "aa000002"] });
   });
 
+  it("shows a clear that is running, and no button to start another", async () => {
+    await open({ answers: { storage: view({ deleting: true }), storage_clear: { started: 1, bytes: 9_400_000_000 } } });
+    // It is clearing already (the view says so): no button, and the line is the Mac's own count once it has said.
+    expect(screen.getByText("Clearing…")).toBeTruthy();
+  });
+
   it("clears nothing if Face ID is cancelled or fails, and says so when it fails", async () => {
     const t = await open({ results: ["cancelled", "failed"] });
     await fireEvent.press(screen.getByRole("button", { name: /Clear safe items/ }));

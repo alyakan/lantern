@@ -30,6 +30,8 @@ export function StorageSheet({ onClose }: { onClose: () => void }) {
   const [problem, setProblem] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  // What the Mac said it started: it may take fewer than the list showed, so this is what the progress line says.
+  const [started, setStarted] = useState<{ started: number; bytes: number } | null>(null);
   const live = useRef(true);
 
   const load = useCallback(async () => {
@@ -85,7 +87,8 @@ export function StorageSheet({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setConfirming(false);
     try {
-      await sync.storageClear(data.items.map((i) => i.id));
+      const said = await sync.storageClear(data.items.map((i) => i.id));
+      if (live.current) setStarted(said);
       await load();
     } catch (e) {
       if (live.current) setProblem((e as Error).message || "The Mac didn't start clearing.");
@@ -133,7 +136,7 @@ export function StorageSheet({ onClose }: { onClose: () => void }) {
               )}
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
                 <Txt variant="small" tone="ink2" accessibilityLiveRegion="polite">
-                  {data.scanning ? (data.progress ? `Scanning: ${data.progress}` : "Scanning…") : data.deleting ? "Clearing…" : scanned?.text}
+                  {data.scanning ? (data.progress ? `Scanning: ${data.progress}` : "Scanning…") : data.deleting ? (started ? `Clearing ${started.started} item${started.started === 1 ? "" : "s"}, about ${bytesText(started.bytes)}…` : "Clearing…") : scanned?.text}
                 </Txt>
                 {!working && <Button label={data.scanned_at === null ? "Scan" : "Scan again"} kind="ghost" disabled={busy} onPress={() => void scan()} />}
               </View>
