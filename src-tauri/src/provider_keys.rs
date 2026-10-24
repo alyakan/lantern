@@ -203,6 +203,11 @@ impl ProviderKeys {
     /// starting a chat never waits on the Keychain, and Settings never triggers a read (or a prompt) by being opened.
     pub fn load(&self) {
         let saved = self.saved.lock().unwrap().clone();
+        // A key saved while this was reading is newer than what the read finds: it stays.
+        let before = {
+            let c = self.cache.lock().unwrap();
+            (c.claude.clone(), c.endpoints.clone())
+        };
         let mut cache = Cache::default();
         let mut read = |account: &str, into: &mut dyn FnMut(Secret)| match self.vault.get(account) {
             Ok(Some(k)) => into(k),
@@ -219,7 +224,8 @@ impl ProviderKeys {
                 endpoints.insert(id.clone(), k);
             });
         }
-        cache.claude = claude;
+        cache.claude = before.0.or(claude);
+        endpoints.extend(before.1);
         cache.endpoints = endpoints;
         *self.cache.lock().unwrap() = cache;
         *self.loaded.lock().unwrap() = true;
@@ -479,10 +485,12 @@ mod tests {
         *vault.fail_reads.lock().unwrap() = false;
         again.load();
         assert!(again.claude_launch().unwrap().is_some());
-        // Missing altogether (the Keychain item was deleted behind the app's back) refuses too.
+        // Missing altogether (the Keychain item was deleted behind the app's back) refuses too, at the next launch.
         vault.delete(CLAUDE).unwrap();
-        again.load();
-        assert!(again.claude_launch().err().unwrap().contains("none is saved"));
+        let next_launch = ProviderKeys::new(vault.clone(), None);
+        *next_launch.saved.lock().unwrap() = k.saved.lock().unwrap().clone();
+        next_launch.load();
+        assert!(next_launch.claude_launch().err().unwrap().contains("none is saved"));
     }
 
     #[test]
@@ -610,6 +618,19 @@ mod tests {
         let err = k.apply_tokio_in(&mut cmd, home.path(), project.path()).unwrap_err();
         assert!(err.contains("ANTHROPIC_BASE_URL"), "{err}");
         assert!(cmd.as_std().get_envs().all(|(name, _)| name != "ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn a_key_saved_while_the_launch_read_is_under_way_is_not_lost_to_it() {
+        let (k, vault) = keys();
+        // The read at launch found nothing (the Keychain had none yet); then the user saved one; a late read must not wipe it.
+        k.load();
+        k.set_claude_key(KEY).unwrap();
+        k.set_endpoint_key("openrouter", "another-key-12345").unwrap();
+        vault.delete(CLAUDE).unwrap();
+        k.load();
+        assert_eq!(k.cache.lock().unwrap().claude.as_ref().map(|s| s.expose().to_string()).as_deref(), Some(KEY));
+        assert_eq!(k.endpoint_key("openrouter").unwrap().unwrap().expose(), "another-key-12345");
     }
 
     #[test]
