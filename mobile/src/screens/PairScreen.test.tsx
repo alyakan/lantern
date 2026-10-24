@@ -1,4 +1,4 @@
-import { StyleSheet } from "react-native";
+import { Keyboard, StyleSheet } from "react-native";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react-native";
 import { toBase64Url } from "../pairing";
 import { makeController, renderWith } from "../test/render";
@@ -110,6 +110,17 @@ describe("pairing by pasting the link", () => {
     await fireEvent.changeText(screen.getByLabelText("Pairing link"), link);
     await fireEvent.press(screen.getByRole("button", { name: "Pair" }));
     await waitFor(() => expect(pair).toHaveBeenCalledWith(link));
+  });
+
+  it("has the link field's Return key say Done and close the keyboard (not add a new line), and a tap on the background closes it too", async () => {
+    const dismiss = jest.spyOn(Keyboard, "dismiss").mockImplementation(() => {});
+    await renderWith(<PairScreen initialPaste />, { connection: { kind: "unpaired" } });
+    const field = screen.getByLabelText("Pairing link");
+    expect(field.props.returnKeyType).toBe("done");
+    expect(field.props.submitBehavior).toBe("blurAndSubmit");
+    await fireEvent.press(screen.getByTestId("dismiss-keyboard", { hidden: true }));
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    dismiss.mockRestore();
   });
 
   it("goes back to the camera", async () => {

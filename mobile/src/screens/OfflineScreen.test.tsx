@@ -1,3 +1,4 @@
+import { Keyboard } from "react-native";
 import { fireEvent, render, screen } from "@testing-library/react-native";
 import type { ConnectionState } from "../net/connection";
 import { connected } from "../test/render";
@@ -37,6 +38,22 @@ describe("the Offline screen", () => {
     await fireEvent.press(screen.getByRole("button", { name: "Connect" }));
     expect(onAddress).toHaveBeenLastCalledWith("100.90.157.106");
     expect(screen.queryByText("That isn't an address.")).toBeNull();
+  });
+
+  it("has the address field's Return key say Done and close the keyboard, not connect (Connect is the button), and a tap on the background closes it too", async () => {
+    const dismiss = jest.spyOn(Keyboard, "dismiss").mockImplementation(() => {});
+    const onAddress = jest.fn(async () => null);
+    const state: ConnectionState = { kind: "offline", reason: "Can't reach Aly's Mac.", retryInMs: 2000 };
+    await render(<OfflineScreen state={state} onRetry={jest.fn()} onUnpair={jest.fn()} onAddress={onAddress} />);
+    await fireEvent.press(screen.getByRole("button", { name: "Enter your Mac's address" }));
+    const field = screen.getByLabelText("Your Mac's address");
+    expect(field.props.returnKeyType).toBe("done");
+    await fireEvent.changeText(field, "100.90.157.106");
+    await fireEvent(field, "submitEditing");
+    expect(onAddress).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByTestId("dismiss-keyboard"));
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    dismiss.mockRestore();
   });
 
   it("stays put while it tries again on its own, so an address being typed isn't taken away", async () => {
