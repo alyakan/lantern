@@ -113,21 +113,30 @@ export interface Group {
   /** The project's name; "" for chats with none. */
   project: string;
   rows: Row[];
+  /** Where the card stands among the cards: 0 if a chat in it needs you, 1 if one is working, else 2. */
+  rank: number;
   /** How many of them need you. */
   needsYou: number;
   /** How many of them are unread. */
   unread: number;
 }
 
+/** The projects by name, those with none last: the order the quiet ones stay in. */
+const byName = (a: Group, b: Group) => (a.project === "" ? 1 : b.project === "" ? -1 : a.project.localeCompare(b.project, undefined, { sensitivity: "base" }) || (a.project < b.project ? -1 : a.project > b.project ? 1 : 0));
+
 /**
- * The rows under their projects: the projects by name (chats with no project last) so they stay where they are however
- * the chats move, and in each the chats in the list's order. Projects are told apart by name, which is all a phone is told of
- * a folder.
+ * The rows under their projects, in the list's order inside each. The projects follow what is in them: those with a chat that
+ * needs you first, then those with one working, each the newest first (by the chat that put it there), and then the rest by
+ * name (chats with no project last), so the quiet ones stay where they are however their chats move. Projects are told apart
+ * by name, which is all a phone is told of a folder.
  */
 export function groups(list: Row[]): Group[] {
   const byProject = new Map<string, Row[]>();
   for (const r of list) byProject.set(r.project, [...(byProject.get(r.project) ?? []), r]);
   return [...byProject]
-    .map(([project, rs]) => ({ project, rows: [...rs].sort(byOrder), needsYou: rs.filter((r) => r.status === "needs_you").length, unread: rs.filter((r) => r.unread).length }))
-    .sort((a, b) => (a.project === "" ? 1 : b.project === "" ? -1 : a.project.localeCompare(b.project, undefined, { sensitivity: "base" }) || (a.project < b.project ? -1 : a.project > b.project ? 1 : 0)));
+    .map(([project, rs]): Group => {
+      const sorted = [...rs].sort(byOrder);
+      return { project, rows: sorted, rank: sorted[0]?.rank ?? 2, needsYou: rs.filter((r) => r.status === "needs_you").length, unread: rs.filter((r) => r.unread).length };
+    })
+    .sort((a, b) => a.rank - b.rank || (a.rank < 2 ? b.rows[0].sortAt - a.rows[0].sortAt : 0) || byName(a, b));
 }
