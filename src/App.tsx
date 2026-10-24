@@ -6,7 +6,7 @@ import { useAutoTidy } from "./lib/useAutoTidy";
 import { pushRestorePoints } from "./lib/restorePointsSetting";
 import { agentsAtRest, canSleep, membersToSleep, sweep, teamSlots, teamsAtRest, useSleepMinutes } from "./lib/idleSleep";
 import { knownProject, menuBarChats, pushMenuBar, validChatText } from "./lib/menuBar";
-import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset, type RemoteSetWorkflow } from "./lib/remoteChats";
+import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, windowProviders, type RemoteContext, type RemoteNewChat, type RemoteSetPermissions, type RemoteSetPreset, type RemoteSetWorkflow } from "./lib/remoteChats";
 import { connectedNames } from "./lib/remoteControl";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ask, open } from "@tauri-apps/plugin-dialog";
@@ -868,9 +868,11 @@ export default function App() {
   }, [state.claudePath]);
   // What a phone may choose, read when it asks: whether Settings let phones use Auto (the backend's saved setting, not anything the
   // request says) and which presets there are.
+  // Where a phone may start a chat: Claude Code and each endpoint (not Codex, whose questions a phone can't answer yet).
+  const phoneProviders = windowProviders(providers.list, providerName);
   const remoteContext = async (): Promise<RemoteContext> => {
     const view = await api.remoteSettings().catch(() => null);
-    return { allowAuto: view?.allow_phone_auto === true, presetIds: presets.map((h) => h.id) };
+    return { allowAuto: view?.allow_phone_auto === true, presetIds: presets.map((h) => h.id), providers: phoneProviders };
   };
   // A paired phone asked to start a chat in a project (the backend checked it too). It starts on Ask or Auto, beside what is on screen:
   // this window doesn't switch to it, and neither the project's Permissions nor the folder to reopen change. The backend is
@@ -886,7 +888,11 @@ export default function App() {
         if (!state.claudePath) return fail("Claude isn't set up on your Mac yet.");
         const slot = `s${++slotSeq.current}`;
         dispatchChats({ type: "add", slot });
-        startIn(slot, r.folder, false, false, r.text, undefined, undefined, { permissions: r.permissions === "auto" ? "auto" : "ask", preset: r.preset ?? null, workflow: r.workflow === "steps" ? "steps" : "chat" });
+        // Where the phone chose, else the project's own; but a project on a provider whose questions a phone can't answer starts on
+        // Claude here (the chat would stop at its first one). Never written down as the project's choice: it is this chat's alone.
+        const own = providerFor(r.folder);
+        const providerId = r.provider ?? (capabilitiesOf(infoOf(own)).phone_approvals ? own : CLAUDE);
+        startIn(slot, r.folder, false, false, r.text, undefined, undefined, { permissions: r.permissions === "auto" ? "auto" : "ask", preset: r.preset ?? null, workflow: r.workflow === "steps" ? "steps" : "chat" }, providerId);
         void api.remoteNewChatDone(r.id, slot, null).catch(() => {});
       },
       () => fail("Lantern couldn't look up your projects."),
@@ -942,11 +948,12 @@ export default function App() {
       off.then((f) => f?.());
     };
   }, []);
-  // The presets a phone may choose between, as Settings › Models has them.
-  const presetsKey = JSON.stringify(windowPresets(presets));
+  // The presets a phone may choose between, as Settings › Models has them, and where it may start a chat: told again when an
+  // endpoint is added or removed, so a phone isn't left offering one that is gone (or missing one that was just set up).
+  const controlsKey = JSON.stringify([windowPresets(presets), phoneProviders]);
   useEffect(() => {
-    void api.remoteWindowControls(windowPresets(presets)).catch(() => {});
-  }, [presetsKey]);
+    void api.remoteWindowControls(windowPresets(presets), phoneProviders).catch(() => {});
+  }, [controlsKey]);
 
   // An agent's conversation is recorded once it has one, so it can be told from the user's own chats.
   useEffect(() => {
@@ -2313,14 +2320,14 @@ export default function App() {
   }, []);
   // The backend's session hub knows where each chat stands from its events; what only this window knows (the title it
   // shows, which chats are asleep) it is told when that changes.
-  // A chat on another provider than Claude's is said so (a restored one that isn't open yet from what was saved of its session),
-  // so nothing said in it is put to Claude for a phone's suggestions.
-  const offClaude = (slot: string) => {
+  // A chat on another provider than Claude's is named (a restored one that isn't open yet from what was saved of its session): a
+  // phone shows it, and nothing said in the chat is put to Claude for a phone's suggestions.
+  const providerLabel = (slot: string) => {
     const s = chats.slots[slot];
     const id = s?.provider ? providerIdOf(s.provider) : ((s?.sessionId && providerBySession[s.sessionId]) || CLAUDE);
-    return id !== CLAUDE;
+    return id !== CLAUDE ? providerName(id) : null;
   };
-  const hubList = windowChats(chats, openByProject, harnessBySlot, projectColors, offClaude);
+  const hubList = windowChats(chats, openByProject, harnessBySlot, projectColors, providerLabel);
   const hubKey = JSON.stringify(hubList);
   useEffect(() => {
     void api.remoteWindowChats(hubList).catch(() => {});

@@ -92,6 +92,10 @@ pub struct Capabilities {
     pub supports_lantern_tools: bool,
     /// It can be the Lead of a team (start agents with Lantern's tools). For now only Claude Code can: a team is built on its Lead.
     pub can_lead_team: bool,
+    /// A paired phone can see and answer the approval cards of a chat on it: they come through Claude Code's permission bridge, which
+    /// is what the phone reads. A provider that asks in its own protocol (Codex) isn't offered for a chat started from a phone, which
+    /// would stop at its first card with nobody able to answer it.
+    pub phone_approvals: bool,
 }
 
 /// A provider and what it can do, as the window is told.
@@ -134,7 +138,7 @@ impl Provider for FakeProvider {
     }
 
     fn capabilities(&self) -> Capabilities {
-        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: false, can_lead_team: false }
+        Capabilities { supports_auto_mode: false, supports_advisor: false, reports_cost_usd: false, supports_skills: false, supports_effort: true, model_switchable: true, supports_lantern_tools: false, can_lead_team: false, phone_approvals: false }
     }
 
     fn models(&self) -> &'static [&'static str] {

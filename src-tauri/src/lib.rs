@@ -482,9 +482,9 @@ impl remote::gateway::Host for RemoteHost {
         })
     }
 
-    fn new_chat(&self, folder: String, text: String, _by: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow) -> remote::gateway::BoxFut<Result<String, String>> {
+    fn new_chat(&self, folder: String, text: String, _by: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow, provider: Option<String>) -> remote::gateway::BoxFut<Result<String, String>> {
         let app = self.app.clone();
-        Box::pin(async move { request_new_chat(&app, folder, text, permissions, preset, workflow).await })
+        Box::pin(async move { request_new_chat(&app, folder, text, permissions, preset, workflow, provider).await })
     }
 
     fn set_workflow(&self, slot: &str, workflow: remote::protocol::RemoteWorkflow) -> Result<(), String> {
@@ -2136,10 +2136,12 @@ async fn respond_permission(state: State<'_, AppState>, slot: String, request_id
     Err("That permission request is no longer pending: it was answered already, or the agent stopped asking.".into())
 }
 
-/// What the window offers a phone to choose between: its presets (Settings › Models), by id, name and a line on what each does.
+/// What the window offers a phone to choose between: its presets (Settings › Models), by id, name and a line on what each does,
+/// and where a chat may run (Claude Code, and an endpoint or two; the window leaves out any whose questions a phone can't answer).
 #[tauri::command]
-fn remote_window_controls(state: State<'_, AppState>, presets: Vec<remote::protocol::RemotePreset>) {
+fn remote_window_controls(state: State<'_, AppState>, presets: Vec<remote::protocol::RemotePreset>, providers: Option<Vec<remote::protocol::RemoteProvider>>) {
     state.remote.hub.set_presets(presets);
+    state.remote.hub.set_providers(providers.unwrap_or_default());
 }
 
 /// What the window knows of its open chats, for the session hub: the titles it shows, and which are asleep.
@@ -2259,10 +2261,10 @@ const NEW_CHAT_LISTED_WAIT: std::time::Duration = std::time::Duration::from_secs
 
 /// Asks the window to start a chat for a paired phone, and says which slot it made once the chat is listed where the phone
 /// can follow it. The window does it (it owns chats and what they start with), on Ask, without switching what it shows.
-async fn request_new_chat(app: &AppHandle, folder: String, text: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow) -> Result<String, String> {
+async fn request_new_chat(app: &AppHandle, folder: String, text: String, permissions: remote::protocol::RemotePermissions, preset: Option<String>, workflow: remote::protocol::RemoteWorkflow, provider: Option<String>) -> Result<String, String> {
     let state = app.state::<AppState>();
     let (id, answer) = state.remote.expect_new_chat();
-    let request = remote::NewChatRequest { id: id.clone(), folder, text, permissions: permissions.as_str(), preset, workflow: workflow.as_str() };
+    let request = remote::NewChatRequest { id: id.clone(), folder, text, permissions: permissions.as_str(), preset, workflow: workflow.as_str(), provider };
     if let Err(e) = app.emit("remote-new-chat", &request) {
         state.remote.forget_new_chat(&id);
         return Err(e.to_string());

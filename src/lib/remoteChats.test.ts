@@ -3,7 +3,9 @@ import type { Chats } from "../sessions";
 import { initialState, type State } from "../store";
 import { BUILT_IN } from "./harness";
 import { PROJECT_COLORS } from "./projectColors";
-import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, type RemoteContext, type SwitchTarget } from "./remoteChats";
+import { checkRemoteClose, checkRemoteNewChat, checkRemoteSwitch, windowChats, windowPresets, windowProviders, type RemoteContext, type SwitchTarget } from "./remoteChats";
+import { CLAUDE_CAPABILITIES } from "./provider";
+import { PLAIN } from "../testProviders";
 import type { ProjectOpen } from "./sidebar";
 
 const chat = (over: Partial<State>): State => ({ ...initialState, folder: "/work/lantern", ...over });
@@ -153,8 +155,46 @@ describe("a chat on another provider than Claude's", () => {
   it("is said so to the backend, and nothing is said of a chat on Claude", () => {
     const chats: Chats = { active: "a", agents: {}, slots: { a: chat({ status: "running", sessionId: "s-a" }), b: chat({ status: "asleep", sessionId: "s-b" }) } };
     const open = { "/work/lantern": project([{ slot: "a", title: "On Claude" }, { slot: "b", title: "On an endpoint" }]) };
-    const told = windowChats(chats, open, {}, {}, (slot) => slot === "b");
-    expect(told.find((c) => c.slot === "b")).toMatchObject({ off_claude: true });
-    expect(told.filter((c) => c.slot !== "b").every((c) => !("off_claude" in c))).toBe(true);
+    const told = windowChats(chats, open, {}, {}, (slot) => (slot === "b" ? "Ollama" : null));
+    expect(told.find((c) => c.slot === "b")).toMatchObject({ provider: "Ollama" });
+    expect(told.filter((c) => c.slot !== "b").every((c) => !("provider" in c))).toBe(true);
+  });
+});
+
+describe("where a phone may start a chat", () => {
+  const claude = { id: "claude", capabilities: CLAUDE_CAPABILITIES };
+  const codex = PLAIN;
+  const endpoint = { id: "gateway:ollama", capabilities: { ...PLAIN.capabilities, supports_skills: true, phone_approvals: true } };
+  const nameOf = (id: string) => ({ claude: "Claude", codex: "Codex", "gateway:ollama": "Ollama" })[id] ?? id;
+
+  it("lists Claude and each endpoint, with what each can do, and leaves out a provider whose questions a phone can't answer", () => {
+    expect(windowProviders([claude, codex, endpoint], nameOf)).toEqual([
+      { id: "claude", name: "Claude", auto: true, presets: true },
+      { id: "gateway:ollama", name: "Ollama", auto: false, presets: false },
+    ]);
+  });
+
+  it("always has Claude, even before the providers are listed", () => {
+    expect(windowProviders([], nameOf)).toEqual([{ id: "claude", name: "Claude", auto: true, presets: true }]);
+  });
+
+  const ctx: RemoteContext = { allowAuto: true, presetIds: ["balanced"], providers: windowProviders([claude, endpoint], nameOf) };
+  const ask = { id: "x", folder: "/p", text: "hi", permissions: "ask" };
+
+  it("takes a provider the window listed, and the project's own when none is named", () => {
+    expect(checkRemoteNewChat({ ...ask, provider: "gateway:ollama" }, true, true, ctx)).toBeNull();
+    expect(checkRemoteNewChat({ ...ask, provider: null }, true, true, ctx)).toBeNull();
+    expect(checkRemoteNewChat(ask, true, true, ctx)).toBeNull();
+  });
+
+  it("refuses one it didn't list, including Codex and a name made up", () => {
+    for (const provider of ["codex", "gateway:other", "", "claude "]) expect(checkRemoteNewChat({ ...ask, provider }, true, true, ctx), provider).toBe("That isn't one of your providers.");
+    expect(checkRemoteNewChat({ ...ask, provider: "gateway:ollama" }, true, true)).toBe("That isn't one of your providers.");
+  });
+
+  it("refuses Auto, or a Claude preset, where the provider has none, in words", () => {
+    expect(checkRemoteNewChat({ ...ask, permissions: "auto", provider: "gateway:ollama" }, true, true, ctx)).toBe("Ollama has no Auto mode: it asks before it acts.");
+    expect(checkRemoteNewChat({ ...ask, preset: "balanced", provider: "gateway:ollama" }, true, true, ctx)).toBe("Ollama runs on its own model: the presets don't apply to it.");
+    expect(checkRemoteNewChat({ ...ask, permissions: "auto", preset: "balanced", provider: "claude" }, true, true, ctx)).toBeNull();
   });
 });
