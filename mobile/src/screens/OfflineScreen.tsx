@@ -162,10 +162,11 @@ function LockRow() {
 }
 
 /** The Mac, as a sheet: its name, where the connection stands, and unpairing this phone. */
-export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice, onWhatsNew }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the optional tips. */ onSupport?: () => void; /** Shows a pairing code for another device (Face ID first). Offered only to a Mac that lists "pair". */ onPairDevice?: () => void; /** Opens what changed in this build; given only when there is something to say. */ onWhatsNew?: () => void }) {
+export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice, onStorage, onWhatsNew }: { state: ConnectionState; onClose: () => void; onUnpair: () => void; /** Opens the optional tips. */ onSupport?: () => void; /** Shows a pairing code for another device (Face ID first). Offered only to a Mac that lists "pair". */ onPairDevice?: () => void; /** Opens the Mac's storage (its disk, and what is safe to clear). Offered only to a Mac that lists "storage". */ onStorage?: () => void; /** Opens what changed in this build; given only when there is something to say. */ onWhatsNew?: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const canPair = state.kind === "connected" && state.welcome.features?.includes("pair") === true && !!onPairDevice;
+  const canStorage = state.kind === "connected" && state.welcome.features?.includes("storage") === true && !!onStorage;
   const where = state.kind === "connected" ? `Connected through ${state.host}` : state.kind === "offline" ? "Not connected" : state.kind === "connecting" ? "Connecting…" : "Not paired";
   return (
     <Sheet onClose={onClose}>
@@ -185,6 +186,7 @@ export function MacSheet({ state, onClose, onUnpair, onSupport, onPairDevice, on
           </Txt>
           <LockRow />
           {canPair && <Button label="Pair another device" kind="ghost" onPress={() => onPairDevice?.()} accessibilityHint="Shows a code for your iPad or another phone to scan. Asks for Face ID first." />}
+          {canStorage && <Button label="Mac storage" kind="ghost" onPress={() => onStorage?.()} accessibilityHint="Shows how much room your Mac has, and what is safe to clear." />}
           {onWhatsNew && <Button label="What's new" kind="ghost" onPress={onWhatsNew} />}
           {onSupport &&<Button label="Support development" kind="ghost" onPress={onSupport} style={{ marginTop: 6 }} />}
           <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ marginTop: onSupport ? 0 : 6 }} />

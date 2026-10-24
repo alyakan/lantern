@@ -8,6 +8,7 @@ import { HomeScreen } from "../screens/HomeScreen";
 import { NewChatSheet, type Draft } from "../screens/NewChatSheet";
 import { MacSheet, OfflineScreen } from "../screens/OfflineScreen";
 import { PairDeviceSheet } from "../screens/PairDevice";
+import { StorageSheet } from "../screens/StorageSheet";
 import { ConfirmLink, PairScreen } from "../screens/PairScreen";
 import { SupportSheet } from "../screens/SupportSheet";
 import { TabletDetail } from "../screens/TabletDetail";
@@ -87,6 +88,8 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   const [macSheet, setMacSheet] = useState(false);
   // A pairing code for another device, from the Mac sheet.
   const [pairingDevice, setPairingDevice] = useState(false);
+  // The Mac's storage, from the Mac sheet.
+  const [storageOpen, setStorageOpen] = useState(false);
   // What changed in this build: once after an update, and from the Mac sheet.
   const [notesOpen, setNotesOpen] = useState(false);
   const [notesDue, setNotesDue] = useState(false);
@@ -126,7 +129,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   }, [homeUp]);
   // Never over another sheet, a decision, a chat (a tapped notification can open one at launch) or the tablet's chats sliding
   // in: it waits until they are gone. A tablet has Home beside the chat all the time, so a chat doesn't hold it back there.
-  const nothingOpen = !macSheet && !pairingDevice && !supporting && !picking && !newChat && !decision(stack) && !chatsOpen && (tablet || atRoot(stack));
+  const nothingOpen = !macSheet && !pairingDevice && !storageOpen && !supporting && !picking && !newChat && !decision(stack) && !chatsOpen && (tablet || atRoot(stack));
   useEffect(() => {
     if (!notesDue || !homeUp || !nothingOpen) return;
     setNotesDue(false);
@@ -139,6 +142,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
     const sub = BackHandler.addEventListener("hardwareBackPress", () => {
       if (notesOpen) return setNotesOpen(false), true;
       if (pairingDevice) return setPairingDevice(false), true;
+      if (storageOpen) return setStorageOpen(false), true;
       if (supporting) return setSupporting(false), true;
       if (newChat) return setNewChat(null), true;
       if (picking) return setPicking(false), true;
@@ -149,7 +153,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
       return true;
     });
     return () => sub.remove();
-  }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice, notesOpen]);
+  }, [stack, macSheet, picking, newChat, supporting, chatsOpen, pairingDevice, storageOpen, notesOpen]);
 
   const back = () => go({ type: "back" });
   // A tablet has Home beside the chat all the time, so a chat taken from it replaces the one shown instead of stacking on it.
@@ -229,6 +233,10 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
             setMacSheet(false);
             setPairingDevice(true);
           }}
+          onStorage={() => {
+            setMacSheet(false);
+            setStorageOpen(true);
+          }}
           onWhatsNew={
             hasNotes(releaseNotes)
               ? () => {
@@ -240,6 +248,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
         />
       )}
       {pairingDevice && <PairDeviceSheet onClose={() => setPairingDevice(false)} />}
+      {storageOpen && <StorageSheet onClose={() => setStorageOpen(false)} />}
       {notesOpen && <WhatsNewSheet notes={releaseNotes} onClose={() => setNotesOpen(false)} />}
       {supporting && <SupportSheet onClose={() => setSupporting(false)} />}
       {newChat && (

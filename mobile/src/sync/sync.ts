@@ -11,6 +11,7 @@ import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import type { RemoteProject } from "../protocol/generated/RemoteProject";
 import type { StartedChat } from "../protocol/generated/StartedChat";
 import type { PairOffer } from "../protocol/generated/PairOffer";
+import type { RemoteStorage } from "../protocol/generated/RemoteStorage";
 import type { Suggestions } from "../protocol/generated/Suggestions";
 import type { RemoteLiveCard } from "../protocol/generated/RemoteLiveCard";
 import type { Waiting } from "../protocol/generated/Waiting";
@@ -293,6 +294,24 @@ export class Sync {
    */
   pairOffer() {
     return this.ask<PairOffer>({ op: "pair_offer" });
+  }
+
+  /** The Mac's disk and the items of it that are safe to clear. Only for a Mac that lists "storage". */
+  storage() {
+    return this.ask<RemoteStorage>({ op: "storage" });
+  }
+
+  /** Starts a scan of the Mac's storage (in the background there: `storage()` says how it goes); whether one started. */
+  storageScan() {
+    return this.ask<boolean>({ op: "storage_scan" });
+  }
+
+  /**
+   * Starts clearing these items on the Mac, those it still finds safe (it never takes the phone's word for what is: it ignores
+   * any id that isn't). How many it started and about how many bytes; rejects with why not (the scan is old, nothing is safe).
+   */
+  storageClear(ids: string[]) {
+    return this.ask<{ started: number; bytes: number }>({ op: "storage_clear", ids });
   }
 
   /** What a finished step printed, if the Mac still keeps it (rejects with why not). Only for a Mac that lists "output". */

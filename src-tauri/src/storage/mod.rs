@@ -8,6 +8,7 @@
 
 mod clean;
 pub mod memory;
+pub mod phone;
 mod scan;
 
 use serde::Serialize;
@@ -182,6 +183,10 @@ struct Inner {
     /// Claude's reasons, by item id.
     suggestions: HashMap<String, String>,
     cancel: Option<Arc<AtomicBool>>,
+    /// A phone's clear is running (see phone.rs): it is `deleting` too once it reaches the delete itself.
+    phone_clearing: bool,
+    /// How the last clear a phone started went.
+    report: Option<phone::Report>,
 }
 
 pub struct Storage {
@@ -380,6 +385,17 @@ pub fn free_bytes(home: &Path) -> Option<u64> {
         return None;
     }
     Some(st.f_bavail as u64 * st.f_frsize as u64)
+}
+
+/// The size of the volume `home` is on.
+pub fn total_bytes(home: &Path) -> Option<u64> {
+    use std::ffi::CString;
+    let path = CString::new(home.as_os_str().as_bytes()).ok()?;
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(path.as_ptr(), &mut st) } != 0 {
+        return None;
+    }
+    Some(st.f_blocks as u64 * st.f_frsize as u64)
 }
 
 pub fn size_text(bytes: u64) -> String {
