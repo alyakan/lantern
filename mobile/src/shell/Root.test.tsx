@@ -58,6 +58,12 @@ describe("which screen is up", () => {
     expect(screen.queryByText("Can't reach your Mac")).toBeNull();
   });
 
+  it("keeps the chats up while it reconnects, instead of the connecting screen", async () => {
+    await open({ connection: { kind: "connecting" }, chats: [chat()] });
+    expect(screen.getByText("Release 0.1.53")).toBeTruthy();
+    expect(screen.queryByLabelText("Connecting to your Mac")).toBeNull();
+  });
+
   it("shows Home once connected, with what waits on you", async () => {
     await open({ chats: [chat()], waiting: [waiting()] });
     expect(screen.getByText("1 thing")).toBeTruthy();

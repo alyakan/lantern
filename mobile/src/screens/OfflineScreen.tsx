@@ -7,7 +7,7 @@ import { EMBER, useRegular } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
 import { AboveKeyboard } from "../ui/keyboard";
 import { DarkLantern } from "../ui/lanterns";
-import { skips } from "../ui/motion";
+import { FadeSlideIn, skips } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { radius, space, useColors } from "../ui/theme";
@@ -127,6 +127,53 @@ export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: 
         </>
       )}
     </AboveKeyboard>
+  );
+}
+
+/** How long a lost connection goes unremarked: waking the phone reconnects in a moment, and a pill for that would only flash. */
+export const PILL_DELAY_MS = 700;
+
+/**
+ * The Mac not being there while there are chats to look at: a small pill at the top with a blinking dot, over whatever is
+ * showing, instead of a screen of its own. It lets touches through to what is under it.
+ */
+export function ReconnectPill({ state }: { state: ConnectionState }) {
+  const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const regular = useRegular();
+  const blink = useRef(new Animated.Value(1)).current;
+  const [due, setDue] = useState(false);
+  const waiting = state.kind === "connecting" || state.kind === "offline";
+  useEffect(() => {
+    if (!waiting) return setDue(false);
+    const t = setTimeout(() => setDue(true), PILL_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [waiting]);
+  useEffect(() => {
+    if (!due || skips()) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(blink, { toValue: 0.25, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+        Animated.timing(blink, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [due, blink]);
+  if (!waiting || !due) return null;
+  // A run that gave up for good (the Mac is too new or too old for this phone) says why; the rest are still trying.
+  const text = state.kind === "offline" && state.retryInMs === null ? state.reason : "Reconnecting to your Mac…";
+  return (
+    <View pointerEvents="none" style={{ position: "absolute", top: insets.top + 6, left: 0, right: 0, alignItems: "center" }}>
+      <FadeSlideIn from={-8} ms={200}>
+        <View accessibilityRole="alert" accessibilityLabel={text} accessible style={{ flexDirection: "row", alignItems: "center", gap: 8, maxWidth: 320, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.rule, shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 3 }}>
+          <Animated.View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: regular ? EMBER : colors.hi, opacity: blink }} />
+          <Txt variant="small" tone="ink2" numberOfLines={2}>
+            {text}
+          </Txt>
+        </View>
+      </FadeSlideIn>
+    </View>
   );
 }
 
