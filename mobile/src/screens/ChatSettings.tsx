@@ -14,7 +14,7 @@ import { PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { radius, shadow, space, useColors } from "../ui/theme";
-import { autoNote, MODES, modeLabel, presetName, whyNotNow, WORKFLOWS, workflowLabel } from "../view/controls";
+import { autoNote, MODES, modeLabel, noAutoOn, presetName, whyNotNow, WORKFLOWS, workflowLabel } from "../view/controls";
 import { contextOf, usageOf } from "../view/plan";
 
 /** How long "Switching…" waits for the chat to say it changed before it gives up and says so. */
@@ -198,7 +198,9 @@ export function ChatSettings({ slot, chat, plan, context, onProblem, onClosed, w
   const usage = plan ? usageOf(plan) : null;
   const low = usage && usage.tone !== "ok" ? (usage.tone === "stop" ? "Limit reached" : `${usage.percent}% used`) : null;
   const held = context ? contextOf(context) : null;
-  const line = [flow, mode, preset, held?.label, low].filter(Boolean).join(" · ");
+  // What it runs on, said first when that isn't Claude Code ("Ollama · Ask · 12k tokens"); a Claude chat's line is as it always was.
+  const provider = chat.provider ?? null;
+  const line = [provider, flow, mode, preset, held?.label, low].filter(Boolean).join(" · ");
 
   return (
     <>
@@ -225,8 +227,9 @@ export function ChatSettings({ slot, chat, plan, context, onProblem, onClosed, w
           loading={!controls}
           workflows={canFlow && (chat.workflow === "chat" || chat.workflow === "steps") ? WORKFLOWS.map((w) => ({ value: w.value, label: w.label, hint: w.hint, off })) : []}
           onWorkflow={(v) => v !== chat.workflow && pick("workflow", v)}
-          modes={MODES.map((m) => ({ value: m.value, label: m.label, hint: m.hint, off: off ?? (m.value === "auto" ? autoNote(controls) : null) }))}
-          presets={(controls?.presets ?? []).map((p) => ({ value: p.id, label: p.name, hint: p.summary, off }))}
+          // Another provider than Claude's has no Auto mode, and the Mac's presets are Claude Code's models: neither is offered for its chat.
+          modes={MODES.map((m) => ({ value: m.value, label: m.label, hint: m.hint, off: off ?? (m.value === "auto" ? (provider ? noAutoOn(provider) : autoNote(controls)) : null) }))}
+          presets={provider ? [] : (controls?.presets ?? []).map((p) => ({ value: p.id, label: p.name, hint: p.summary, off }))}
           onMode={(v) => v !== chat.permissions && pick("mode", v)}
           onPreset={(v) => v !== chat.preset && pick("preset", v)}
           onAskClose={canClose ? () => setClosing(true) : undefined}

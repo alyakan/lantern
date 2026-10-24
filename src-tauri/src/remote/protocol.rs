@@ -377,6 +377,7 @@ pub struct RemoteChat {
     /// What the chat runs on when that isn't Claude Code ("Codex", an endpoint's name), as the Mac's window says. None for a Claude chat,
     /// and from a Mac that doesn't say.
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub provider: Option<String>,
 }
 
@@ -471,7 +472,8 @@ pub struct Controls {
     /// Where a chat may run, when the Mac has more than Claude Code to offer (empty: only Claude Code, as before). A Mac that
     /// doesn't say leaves it out, which reads as empty.
     #[serde(default)]
-    pub providers: Vec<RemoteProvider>,
+    #[ts(optional = nullable)]
+    pub providers: Option<Vec<RemoteProvider>>,
 }
 
 /// A pairing code made for a phone to show another device (the answer to Request::PairOffer). Secret until it is used or has
@@ -694,8 +696,10 @@ pub enum Request {
         /// Step by step, or else a plain Chat. A team is started on the Mac.
         #[serde(default)]
         workflow: Option<RemoteWorkflow>,
-        /// One of Controls' `providers` ids: where it runs, else the project's own. Never sent unless Controls listed it.
+        /// One of Controls' `providers` ids: where it runs, else the project's own. Never sent unless Controls listed it (and left out,
+        /// not null, when nothing was chosen, so a Mac that doesn't know the field is never sent it).
         #[serde(default)]
+        #[ts(optional)]
         provider: Option<String>,
     },
     /// What a phone may choose: whether Auto is allowed, and the presets. Only sent to a Mac that said it has them
@@ -870,7 +874,7 @@ mod tests {
         assert_eq!((chat.permissions, chat.preset, chat.project_color, chat.workflow, chat.provider), (None, None, None, None, None));
         // An older Mac's Controls has no providers: only Claude Code, as before.
         let controls: Controls = serde_json::from_str(r#"{"allow_auto":true,"presets":[]}"#).unwrap();
-        assert!(controls.providers.is_empty());
+        assert!(controls.providers.unwrap_or_default().is_empty());
         let welcome: ServerMessage = serde_json::from_str(r#"{"type":"welcome","protocol":1,"app_version":"0.1.53","mac_name":"M","epoch":3}"#).unwrap();
         assert!(matches!(welcome, ServerMessage::Welcome { features, .. } if features.is_empty()));
     }

@@ -116,6 +116,7 @@ pub trait Host: Send + Sync + 'static {
     /// `permissions` (Auto only when the Mac lets phones use it: the gateway has checked, and the window checks again) and
     /// the `preset` (one of the presets listed), without changing what the window shows; the new chat's slot once it is open.
     /// `provider` (one of the providers listed, or None for the project's own) is where it runs.
+    #[allow(clippy::too_many_arguments)]
     fn new_chat(&self, folder: String, text: String, by: String, permissions: protocol::RemotePermissions, preset: Option<String>, workflow: protocol::RemoteWorkflow, provider: Option<String>) -> BoxFut<Result<String, String>>;
     /// Puts an open chat on Chat or Step by step: its claude restarts on the same session (the gateway has checked it may; never a team).
     fn set_workflow(&self, slot: &str, workflow: protocol::RemoteWorkflow) -> Result<(), String>;
@@ -818,7 +819,7 @@ impl<'a> Session<'a> {
                 }
                 host.set_workflow(&slot, workflow).map(|()| serde_json::Value::Null)
             }
-            Request::Controls => Ok(json(&protocol::Controls { allow_auto: self.gw.store.saved().allow_phone_auto, presets: self.gw.hub.presets(), providers: self.gw.hub.providers() })),
+            Request::Controls => Ok(json(&protocol::Controls { allow_auto: self.gw.store.saved().allow_phone_auto, presets: self.gw.hub.presets(), providers: Some(self.gw.hub.providers()) })),
             Request::SetPermissions { slot, permissions } => {
                 self.gw.check_choice(permissions, None)?;
                 let chat = self.gw.switchable(&slot)?;

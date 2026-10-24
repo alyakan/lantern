@@ -14,4 +14,4 @@ allow_auto: boolean, presets: Array<RemotePreset>,
  * Where a chat may run, when the Mac has more than Claude Code to offer (empty: only Claude Code, as before). A Mac that
  * doesn't say leaves it out, which reads as empty.
  */
-providers: Array<RemoteProvider>, };
+providers?: Array<RemoteProvider> | null, };
