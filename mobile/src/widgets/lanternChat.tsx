@@ -1,5 +1,5 @@
 import { HStack, Image, ProgressView, Spacer, Text, VStack } from "@expo/ui/swift-ui";
-import { font, foregroundStyle, minimumScaleFactor, monospacedDigit, opacity, padding, tint } from "@expo/ui/swift-ui/modifiers";
+import { fixedSize, font, foregroundStyle, minimumScaleFactor, monospacedDigit, multilineTextAlignment, opacity, padding, tint } from "@expo/ui/swift-ui/modifiers";
 import { createLiveActivity, type LiveActivityEnvironment } from "expo-widgets";
 
 /**
@@ -62,7 +62,7 @@ const LanternChat = (props: ChatCardProps, environment: LiveActivityEnvironment)
   const status = working ? (
     <VStack spacing={2} alignment="trailing">
       <Text modifiers={[font({ size: 15, weight: "semibold" }), foregroundStyle(hue)]}>{words}</Text>
-      <Text date={new Date(props.since)} dateStyle="timer" modifiers={[font({ size: 13 }), monospacedDigit(), foregroundStyle(hue)]} />
+      <Text date={new Date(props.since)} dateStyle="timer" modifiers={[font({ size: 13 }), monospacedDigit(), foregroundStyle(hue), fixedSize({ horizontal: true }), multilineTextAlignment("trailing")]} />
     </VStack>
   ) : (
     <Text modifiers={[font({ size: 15, weight: "semibold" }), foregroundStyle(hue)]}>{words}</Text>
