@@ -12,6 +12,7 @@ import { useAccent } from "../ui/accent";
 import { Chevron } from "../ui/Chevron";
 import { Dots, HomeSkeleton } from "../ui/skeleton";
 import { radius, shadow, space, useColors } from "../ui/theme";
+import { countsOf, diffPreviewOf } from "../view/diffPreview";
 import { cards, groups, headline, projectTint, rows, type Card, type Grouping, type Group, type Row } from "../view/home";
 import type { Draft } from "./NewChatSheet";
 import { UsageStrip } from "./ChatExtras";
@@ -68,6 +69,8 @@ function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomePr
   const colors = useColors();
   const front = list[0];
   const behind = Math.min(2, list.length - 1);
+  // A file change says how big it is before it is opened.
+  const change = diffPreviewOf(front.waiting.tool_name, front.waiting.input);
   return (
     <View style={{ marginHorizontal: space.lg, paddingBottom: 14 }}>
       {behind >= 2 && <View style={{ position: "absolute", left: 14, right: 14, top: 14, bottom: -8, backgroundColor: colors.card, borderRadius: radius.card, opacity: 0.6 }} />}
@@ -87,6 +90,12 @@ function Deck({ list, onOpenChat, onReview }: { list: Card[]; onOpenChat: HomePr
               {front.view.detail}
             </Txt>
           </View>
+        )}
+        {!!change && (
+          <Txt variant="small" tone="ink2" testID="deck-change" style={{ marginTop: 6 }}>
+            {change.partial ? "At least " : ""}
+            {countsOf(change)} lines. Review shows the change.
+          </Txt>
         )}
         <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
           <Button label="Open chat" kind="ghost" style={{ flex: 1 }} onPress={() => onOpenChat(front.waiting.slot)} />

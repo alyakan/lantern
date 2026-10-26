@@ -9,7 +9,9 @@ import { buzz, FadeSlideIn, PopIn, PressScale, skips } from "../ui/motion";
 import { Chevron } from "../ui/Chevron";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { radius, space, useColors } from "../ui/theme";
+import { diffPreviewOf } from "../view/diffPreview";
 import { approvalOf, promptView, type PromptView, type Question } from "../view/prompts";
+import { DiffPreviewCard } from "./DiffPreviewCard";
 import type { Waiting } from "../protocol/generated/Waiting";
 
 export interface DecideProps {
@@ -166,6 +168,8 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
   const base: PromptView = promptView(asked.tool_name, asked.input);
   // A question's own words are shown once, above its options; the title only says that Claude asks.
   const view: PromptView = approval ? { ...base, tag: "Approval", title: `Approve ${approval.action}?`, detail: approval.why || null } : base.kind === "question" ? { ...base, title: base.questions.length > 1 ? "Claude has questions" : "Claude has a question" } : base;
+  // A file change is shown as the diff it would make, read from the prompt's own input, so what is approved is what is seen.
+  const preview = view.kind === "allow" && !approval ? diffPreviewOf(asked.tool_name, asked.input) : null;
   const answers = view.kind === "question" ? answersFrom(view.questions, picks, typed) : null;
   const busy = outcome.kind === "sending";
 
@@ -225,6 +229,11 @@ export function DecideScreen({ slot, requestId, onClose }: DecideProps) {
                 {view.detail}
               </Txt>
             </View>
+          </FadeSlideIn>
+        )}
+        {preview && (
+          <FadeSlideIn from={14} delay={270}>
+            <DiffPreviewCard preview={preview} file={null} />
           </FadeSlideIn>
         )}
         {view.kind === "allow" && (

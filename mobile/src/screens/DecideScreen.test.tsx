@@ -284,3 +284,28 @@ describe("a question's answers", () => {
     expect(answersFrom(qs, {}, {})).toBeNull();
   });
 });
+
+describe("a file change", () => {
+  const edit = waiting({ request_id: "e1", tool_name: "Edit", input: { file_path: "/p/a.ts", old_string: "let a = 1;", new_string: "let a = 2;" } });
+
+  it("shows the diff it would make before it is allowed", async () => {
+    await decide(edit);
+    expect(screen.getByTestId("diff-preview")).toBeTruthy();
+    expect(screen.getByText("What changes")).toBeTruthy();
+    expect(screen.getByText("+1 −1")).toBeTruthy();
+    expect(screen.getByText("let a = 1;")).toBeTruthy();
+    expect(screen.getByText("let a = 2;")).toBeTruthy();
+    expect(screen.queryByText(/Only part of this change/)).toBeNull();
+  });
+
+  it("says when only part of the change is shown", async () => {
+    await decide(waiting({ request_id: "e2", tool_name: "Write", input: { file_path: "/p/b.ts", content: "x\n… (cut short: the rest is on your Mac)" } }));
+    expect(screen.getByText(/Only part of this change is shown/)).toBeTruthy();
+    expect(screen.getByText("What it writes")).toBeTruthy();
+  });
+
+  it("has no diff for a command", async () => {
+    await decide();
+    expect(screen.queryByTestId("diff-preview")).toBeNull();
+  });
+});

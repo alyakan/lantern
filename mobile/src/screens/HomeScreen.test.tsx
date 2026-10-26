@@ -507,3 +507,10 @@ describe("the order of the chats", () => {
     expect(titles()).toEqual(["Rest two", "Busy one", "Rest one"]);
   });
 });
+
+describe("a file change waiting on you", () => {
+  it("says how big it is on the card", async () => {
+    await renderWith(<HomeScreen {...handlers()} />, { chats: [chat()], waiting: [waiting({ request_id: "e1", tool_name: "Edit", input: { file_path: "/p/a.ts", old_string: "a", new_string: "b\nc" } })] });
+    expect(screen.getByTestId("deck-change")).toHaveTextContent(/^\+2 −1 lines/);
+  });
+});
