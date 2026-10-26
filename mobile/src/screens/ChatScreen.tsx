@@ -368,7 +368,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
           />
         </View>
       ) : (
-        <Composer disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} />
+        <Composer draftKey={slot} disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} />
       )}
     </>
   );

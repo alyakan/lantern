@@ -8,6 +8,7 @@ import { Button, Chip, Tag, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import { matchCommands, slashQuery } from "../view/slash";
+import { loadDraft, saveDraft } from "../drafts";
 import { commandOf, isTerminal, plainTyped } from "../view/shell";
 import { term } from "../ui/terminal";
 import { SlashPicker, useSeed, type ComposeSeed } from "./ChatExtras";
@@ -26,6 +27,9 @@ import { fonts, radius, shadow, space, useColors } from "../ui/theme";
 import { approvalOf, promptView } from "../view/prompts";
 import { turnLine, type Row, type StepChip } from "../view/timeline";
 import type { PageAction } from "../view/pages";
+
+/** How long after the last key a draft is written to the phone. */
+export const DRAFT_SAVE_MS = 600;
 
 /** "22:09": a message's time, in the phone's own way of writing it. */
 export const timeOf = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -431,11 +435,41 @@ export const TurnRow = memo(function TurnRow({ item }: { item: Extract<Item, { k
  * turns it into a terminal, as on the Mac: the "!" goes, a prompt takes its place, and what is typed is a command for the
  * Mac to run. `onRun` says whether it ran (it asks first); the box is only emptied when it did.
  */
-export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [] }: { /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
+export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [], draftKey }: { /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
   const colors = useColors();
   // Over a list that runs under it, the box has no ground of its own.
   const glass = useGlass();
   const [text, setText] = useState("");
+  // The draft kept for this chat is put back once read (never over words typed meanwhile), and kept as it changes.
+  const [draftRead, setDraftRead] = useState(!draftKey);
+  const latest = useRef(text);
+  latest.current = text;
+  useEffect(() => {
+    if (!draftKey) return;
+    let live = true;
+    void loadDraft(draftKey).then((d) => {
+      if (!live) return;
+      if (d) setText((t) => (t === "" ? d : t));
+      setDraftRead(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, [draftKey]);
+  useEffect(() => {
+    if (!draftKey || !draftRead) return;
+    const t = setTimeout(() => void saveDraft(draftKey, text), text === "" ? 0 : DRAFT_SAVE_MS);
+    return () => clearTimeout(t);
+  }, [draftKey, draftRead, text]);
+  // Leaving the chat inside that pause still keeps what was typed.
+  const read = useRef(draftRead);
+  read.current = draftRead;
+  useEffect(
+    () => () => {
+      if (draftKey && read.current) void saveDraft(draftKey, latest.current);
+    },
+    [draftKey],
+  );
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   const termInput = useRef<ComponentRef<typeof TextInput>>(null);
   // Terminal mode: the box starts with "!" (the "!" itself isn't shown), and the Mac can run commands.
