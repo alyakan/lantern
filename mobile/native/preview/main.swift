@@ -15,6 +15,14 @@ func card(_ json: String, stale: Bool = false, dimmed: Bool = false) -> some Vie
     .background(RoundedRectangle(cornerRadius: 24, style: .continuous).fill(panel))
 }
 
+/// The watch's Smart Stack form, at the width the watch gives it.
+func small(_ json: String, width: CGFloat = 170) -> some View {
+  let look = LanternCardLook(props: LanternCardProps.read(json), stale: false, dimmed: false)
+  return LanternCardSmall(look: look)
+    .frame(width: width)
+    .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(panel))
+}
+
 func island(_ json: String) -> some View {
   let look = LanternCardLook(props: LanternCardProps.read(json), stale: false, dimmed: false)
   return HStack(spacing: 10) {
@@ -41,6 +49,10 @@ struct Sheet: View {
       card(#"{"project":"lantern","status":"working","since":\#(since),"title":"Release 0.1.66","steps_done":3,"steps_total":5,"plan":42}"#, dimmed: true)
       card("not json at all")
       island(#"{"project":"lantern","status":"working","since":\#(since),"steps_done":3,"steps_total":5}"#)
+      small(#"{"project":"lantern","status":"working","since":\#(since),"title":"Release 0.1.66","steps_done":3,"steps_total":5}"#)
+      small(#"{"project":"lantern","status":"needs_you","since":\#(since),"needs":"command","steps_done":3,"steps_total":5}"#)
+      small(#"{"project":"lantern","status":"done","since":\#(since)}"#)
+      small(#"{"project":"lantern","status":"working","since":\#(since)}"#, width: 150)
     }
     .padding(20)
     .background(Color(red: 0.30, green: 0.45, blue: 0.50))

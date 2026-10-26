@@ -339,27 +339,48 @@ struct LanternExpandedBottom: View {
   }
 }
 
-/// The small form (the Apple Watch's Smart Stack, from iOS 18): the mark, the state and the time, nothing more.
+/// The small form (the Apple Watch's Smart Stack, from iOS 18): the state first, since that is what a glance is for, with the
+/// time beside it, and under it what the chat is (its title, else the project) with how far its steps are, or what it needs.
+/// Nothing is cut to make room for a name: the state shrinks before it loses a letter.
 struct LanternCardSmall: View {
   let look: LanternCardLook
 
   var body: some View {
-    HStack(spacing: 8) {
-      LanternMark(height: 30, stale: look.isStale, dimmed: look.dimmed)
-      VStack(alignment: .leading, spacing: 1) {
-        Text(look.props.project).font(.system(size: 13, weight: .bold)).foregroundColor(.white).lineLimit(1)
-        Text(look.words).font(.system(size: 12, weight: .semibold)).foregroundColor(look.hue).lineLimit(1)
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: 6) {
+        LanternMark(height: 22, stale: look.isStale, dimmed: look.dimmed)
+        Text(look.words)
+          .font(.system(size: 15, weight: .bold))
+          .foregroundColor(look.hue)
+          .lineLimit(1)
+          .minimumScaleFactor(0.6)
+          .layoutPriority(2)
+        Spacer(minLength: 2)
+        if look.working, let since = look.since {
+          Text(since, style: .timer)
+            .font(.system(size: 13, weight: .medium))
+            .monospacedDigit()
+            .foregroundColor(Color.white.opacity(0.75))
+            .multilineTextAlignment(.trailing)
+            .frame(width: 44, alignment: .trailing)
+            .layoutPriority(1)
+        }
       }
-      Spacer(minLength: 4)
-      if look.working, let since = look.since {
-        Text(since, style: .timer)
-          .font(.system(size: 12, weight: .medium))
-          .monospacedDigit()
-          .foregroundColor(Color.white.opacity(0.75))
-          .multilineTextAlignment(.trailing)
-          .frame(width: 46, alignment: .trailing)
-      }
+      Text(look.smallLine)
+        .font(.system(size: 12))
+        .foregroundColor(Color.white.opacity(0.7))
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
     }
     .padding(10)
+  }
+}
+
+extension LanternCardLook {
+  /// The watch card's second line: what it asks for, else the chat's title (or the project) with how many steps are done.
+  var smallLine: String {
+    if !asks.isEmpty { return asks }
+    let base = title.isEmpty ? props.project : title
+    return stepsTotal > 0 ? "\(base) · \(stepsDone)/\(stepsTotal)" : base
   }
 }
