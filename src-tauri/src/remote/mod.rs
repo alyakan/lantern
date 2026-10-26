@@ -10,6 +10,7 @@ pub mod keys;
 pub mod live_activity;
 pub mod notifier;
 pub mod pairing;
+pub mod push_log;
 pub mod protocol;
 pub mod secure;
 pub mod suggest;

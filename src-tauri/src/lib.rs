@@ -177,6 +177,12 @@ fn window_remote(app: &AppHandle) -> remote::Remote {
     // app's, so trying things out never touches them.
     let dev_file = std::env::var_os("LANTERN_REMOTE_FILE").map(std::path::PathBuf::from);
     let store = remote::pairing::RemoteStore::load(dev_file.clone().or_else(|| app.path().app_data_dir().ok().map(|d| d.join("remote.json"))));
+    // What the Mac did about each push (see remote/push_log.rs); a dev run keeps none.
+    if dev_file.is_none() {
+        if let Ok(dir) = app.path().app_data_dir() {
+            remote::push_log::set_path(dir.join("push.log"));
+        }
+    }
     let service = if dev_file.is_some() { "Lantern Remote control (dev)" } else { remote::keys::SERVICE };
     let remote = remote::Remote::new(store, Box::new(remote::keys::Keychain { service }));
     // The push key for the lock-screen cards is kept there too, as an item of its own.

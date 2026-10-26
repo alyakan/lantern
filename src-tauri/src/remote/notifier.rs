@@ -13,6 +13,7 @@ use super::gateway::BoxFut;
 use super::hub::{ChatStatus, SessionHub};
 use super::live_activity::{Alert, Apns, Needs};
 use super::pairing::{is_apns_token, Device, RemoteStore};
+use super::push_log::note;
 use crate::ui_event::UiEvent;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -202,13 +203,19 @@ impl Notifier {
         let saved = self.store.saved();
         // Remote control off, nobody to tell, or a phone is looking at this very chat.
         if !saved.enabled || (self.watched)(slot) {
+            note(&format!("{} not pushed: {}", kind_name(kind), if saved.enabled { "a phone is looking at the chat" } else { "Remote control is off" }));
             return;
         }
         let devices: Vec<&Device> = saved.devices.iter().filter(|d| d.push_token.is_some()).collect();
         // A prompt a button answers is its own news; the rest is one push per chat and kind.
         let answerable = ask.as_ref().filter(|a| a.answerable());
         let key = (slot.to_string(), kind, answerable.and_then(|a| a.request_id.clone()));
-        if devices.is_empty() || !self.sent.lock().unwrap().insert(key) {
+        if devices.is_empty() {
+            note(&format!("{} not pushed: no phone has a push token", kind_name(kind)));
+            return;
+        }
+        if !self.sent.lock().unwrap().insert(key) {
+            note(&format!("{} not pushed: already pushed and not looked at since", kind_name(kind)));
             return;
         }
         let title = saved.show_titles.then(|| self.hub.chat(slot).and_then(|c| c.title)).flatten().map(|t| t.chars().take(60).collect::<String>());
@@ -222,6 +229,7 @@ impl Notifier {
                 .collect();
             match self.sender.send(messages).await {
                 Ok(tickets) => {
+                    note(&format!("{} to Expo: sent", kind_name(kind)));
                     // A phone that no longer has the app is forgotten for push (it stays paired).
                     for (device, ticket) in expo.iter().zip(tickets) {
                         if ticket.error.as_deref() == Some("DeviceNotRegistered") {
@@ -229,7 +237,10 @@ impl Notifier {
                         }
                     }
                 }
-                Err(_) => failed = true,
+                Err(_) => {
+                    note(&format!("{} to Expo: not sent", kind_name(kind)));
+                    failed = true;
+                }
             }
         }
         if !apple.is_empty() {
@@ -249,6 +260,14 @@ impl Notifier {
         if failed {
             self.forget(slot, &[kind]);
         }
+    }
+}
+
+fn kind_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::NeedsYou => "needs-you",
+        Kind::Finished => "finished",
+        Kind::Failed => "failed",
     }
 }
 
