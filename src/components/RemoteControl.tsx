@@ -225,14 +225,14 @@ export function RemoteControl({ now = Date.now }: { now?: () => number }) {
               <input type="checkbox" checked={view.show_titles} onChange={(e) => act(api.remoteSetShowTitles(e.target.checked))} />
               <span>Show chat titles in notifications</span>
             </label>
-            <span className="settings-muted">Notifications pass through Apple's, Google's and Expo's servers. Off, they only say that a chat needs you or finished.</span>
+            <span className="settings-muted">Notifications pass through Apple's, Google's and Expo's servers. Off, they say the project's name and that a chat needs you or finished. On, they also give the chat's title, and name the tool, the program of a command (never what it is given) or the file's name that a chat wants to use.</span>
           </section>
           <section className="general-section" aria-labelledby="remote-live">
             <h3 id="remote-live" className="general-title">
               Lock screen cards
             </h3>
             <span className="settings-muted">
-              A phone can show a card on its lock screen for the chat you last messaged: working, needs you, done. This Mac keeps it right by sending Apple a small update each time, signed with a push key you made at developer.apple.com, so it only updates while this Mac is awake. A card says the project's name and what state it is in, never a chat's title, a command or a file.
+              A phone can show a card on its lock screen for the chat you last messaged: working, needs you, done. This Mac keeps it right by sending Apple a small update each time, signed with a push key you made at developer.apple.com, so it only updates while this Mac is awake. A card says the project's name and what state it is in, with the chat's title, how far its plan has got, what it needs in a word and the plan's usage when it has them, never a command, a file or a question.
             </span>
             <p>{view.live_key ? `Push key: ${view.live_key}` : "No push key yet, so no card is kept up to date."}</p>
             {keyForm ? (
