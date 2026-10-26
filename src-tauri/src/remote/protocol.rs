@@ -288,6 +288,7 @@ pub fn to_remote(event: &UiEvent) -> Option<RemoteEvent> {
         | U::Todos { parent: Some(_), .. }
         // The account's usage goes to the phone as a message of its own (ServerMessage::Plan), not as a chat's event.
         | U::PlanUsage { .. }
+        | U::WeekUsage { .. }
         | U::Unknown { .. }
         | U::ParseError { .. } => return None,
     })
@@ -819,7 +820,7 @@ pub enum ServerMessage {
     },
     /// The chat list changed (a chat opened, closed, or moved on).
     Chats { chats: Vec<RemoteChat> },
-    /// The subscription's five-hour window, for the whole account: `used` from 0 to 1, `resets_at` in unix seconds, and the
+    /// The subscription's five-hour window (and its weekly one, when known), for the whole account: `used` from 0 to 1, `resets_at` in unix seconds, and the
     /// CLI's status for it ("allowed", "allowed_warning", "rejected"). Sent when it first connects and when it changes, and
     /// only to a phone that said "extras".
     Plan {
@@ -827,6 +828,13 @@ pub enum ServerMessage {
         #[ts(type = "number | null")]
         resets_at: Option<u64>,
         status: String,
+        /// The weekly window, when the Mac knows it: how much of it (0 to 1) and when it resets. An older phone ignores both.
+        #[serde(default)]
+        #[ts(optional)]
+        week_used: Option<f64>,
+        #[serde(default)]
+        #[ts(optional, type = "number | null")]
+        week_resets_at: Option<u64>,
     },
 }
 

@@ -230,12 +230,20 @@ pub fn without_notes(text: &str) -> &str {
     rest
 }
 
+/// What the account's two usage windows were last said to be.
+#[derive(Default)]
+struct PlanSeen {
+    five: Option<UiEvent>,
+    /// How much of the weekly window, and when it resets.
+    week: Option<(f64, Option<u64>)>,
+}
+
 pub struct SessionHub {
     chats: Mutex<HashMap<String, Log>>,
     /// The presets the window offers (Settings › Models), as it last said.
     presets: Mutex<Vec<RemotePreset>>,
     /// The subscription's usage as the last chat to report it said (it is the account's, the same in every chat).
-    plan: Mutex<Option<UiEvent>>,
+    plan: Mutex<PlanSeen>,
     cap: usize,
     now: fn() -> u64,
 }
@@ -257,8 +265,10 @@ impl SessionHub {
 
     /// Keeps an event the bus numbered, and what it says about where its chat stands.
     pub fn record(&self, ev: &BusEvent) {
-        if matches!(ev.event, UiEvent::PlanUsage { .. }) {
-            *self.plan.lock().unwrap() = Some(ev.event.clone());
+        match &ev.event {
+            UiEvent::PlanUsage { .. } => self.plan.lock().unwrap().five = Some(ev.event.clone()),
+            UiEvent::WeekUsage { used, resets_at } => self.plan.lock().unwrap().week = Some((*used, *resets_at)),
+            _ => {}
         }
         let mut chats = self.chats.lock().unwrap();
         let log = chats.entry(ev.slot.clone()).or_default();
@@ -409,10 +419,15 @@ impl SessionHub {
 
     /// The subscription's usage as the last chat to report it said: how much of the window, when it resets, and the status.
     pub fn plan(&self) -> Option<(f64, Option<u64>, String)> {
-        match self.plan.lock().unwrap().as_ref()? {
+        match self.plan.lock().unwrap().five.as_ref()? {
             UiEvent::PlanUsage { used, resets_at, status } => Some((*used, *resets_at, status.clone())),
             _ => None,
         }
+    }
+
+    /// The weekly window as the last chat to report it said: how much of it, and when it resets.
+    pub fn week(&self) -> Option<(f64, Option<u64>)> {
+        self.plan.lock().unwrap().week
     }
 
     /// What the chat's step printed when it finished, if the hub still keeps it, cut to what a phone is sent. Only for the
@@ -543,6 +558,10 @@ mod tests {
         assert_eq!(told[1], R::Context { tokens: 50_000, window: None });
         assert_eq!(told.len(), 2);
         assert_eq!(hub.plan(), Some((0.3, Some(5), "allowed".to_string())), "the account's usage is the last one said, by any chat");
+        assert_eq!(hub.week(), None, "nothing has said the week yet");
+        feed(&hub, "a", vec![UiEvent::WeekUsage { used: 0.12, resets_at: Some(900) }]);
+        feed(&hub, "b", vec![UiEvent::PlanUsage { used: 0.5, resets_at: Some(6), status: "allowed".into() }]);
+        assert_eq!(hub.week(), Some((0.12, Some(900))), "the week is kept apart from the five-hour window, whichever is said after");
         // A turn's result says the model's context size, and it is told from then on.
         let mut finished = done();
         if let UiEvent::TurnDone { context_window, .. } = &mut finished {

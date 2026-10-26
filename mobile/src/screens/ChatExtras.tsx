@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import type { RemoteTodo } from "../protocol/generated/RemoteTodo";
 import type { PlanUsage } from "../sync/reducer";
-import { contextOf, progressOf, shortTokens, usageOf } from "../view/plan";
+import { contextOf, progressOf, shortTokens, usageOf, weekOf } from "../view/plan";
 import { ScrollView, Text, TextInput, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -295,6 +295,31 @@ export function UsageRow({ plan }: { plan: PlanUsage }) {
   );
 }
 
+/** The weekly limit, as a bar with where the pace so far leads (when it runs out, or where the week ends up). */
+export function WeekRow({ week }: { week: { used: number; resetsAt: number | null } }) {
+  const colors = useColors();
+  const w = weekOf(week);
+  const fill = w.tone === "stop" ? colors.stop : w.tone === "warn" ? colors.hi : colors.go;
+  return (
+    <View accessibilityLabel={`Weekly limit: ${w.sentence}`} style={{ backgroundColor: colors.paper, borderRadius: radius.inner, paddingVertical: 12, paddingHorizontal: 14, gap: 8 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" }}>
+        <Txt variant="body" style={{ fontWeight: "700" }}>
+          Weekly limit
+        </Txt>
+        <Txt variant="small" tone={w.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700" }}>
+          {w.tone === "stop" ? "Limit reached" : `${w.percent}% used`}
+        </Txt>
+      </View>
+      <View style={{ height: 6, borderRadius: 3, backgroundColor: colors.rule, overflow: "hidden" }}>
+        <View style={{ width: `${Math.max(w.percent, 2)}%`, height: 6, backgroundColor: fill }} />
+      </View>
+      <Txt variant="tiny" tone="ink2">
+        {w.sentence.replace(/^\d+% of the weekly limit used\. /, "")}
+      </Txt>
+    </View>
+  );
+}
+
 /** How full the chat's context is, as a bar with the tokens it holds. */
 export function ContextRow({ context }: { context: { tokens: number; window: number | null } }) {
   const colors = useColors();
@@ -342,6 +367,31 @@ export function UsageStrip({ plan }: { plan: PlanUsage }) {
       </View>
       <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.rule, overflow: "hidden" }}>
         <View style={{ width: `${Math.max(u.percent, 2)}%`, height: 4, backgroundColor: fill }} />
+      </View>
+      {plan.week && <WeekStrip week={plan.week} />}
+    </View>
+  );
+}
+
+/** The weekly limit under the five-hour one: how much is used, and where the pace so far leads. */
+function WeekStrip({ week }: { week: { used: number; resetsAt: number | null } }) {
+  const colors = useColors();
+  const w = weekOf(week);
+  const fill = w.tone === "stop" ? colors.stop : w.tone === "warn" ? colors.hi : colors.go;
+  return (
+    <View accessible accessibilityLabel={`Weekly limit: ${w.sentence}`} style={{ gap: 5, marginTop: 6 }}>
+      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+        <Txt variant="tiny" tone={w.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700" }}>
+          {w.tone === "stop" ? "Weekly limit reached" : `Week · ${w.percent}% used`}
+        </Txt>
+        {w.short !== "" && (
+          <Txt variant="tiny" tone={w.tone === "warn" ? "ink2" : "ink3"} style={w.tone === "warn" ? { fontWeight: "700" } : undefined}>
+            {w.short}
+          </Txt>
+        )}
+      </View>
+      <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.rule, overflow: "hidden" }}>
+        <View style={{ width: `${Math.max(w.percent, 2)}%`, height: 4, backgroundColor: fill }} />
       </View>
     </View>
   );

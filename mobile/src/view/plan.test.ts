@@ -1,5 +1,5 @@
 import { matchCommands, slashQuery } from "./slash";
-import { contextOf, progressOf, shortTokens, untilText, usageOf } from "./plan";
+import { contextOf, progressOf, shortTokens, untilText, usageOf, weekForecast, weekOf } from "./plan";
 
 const todo = (content: string, status: string, active_form = `${content}…`) => ({ content, status, active_form });
 
@@ -82,5 +82,38 @@ describe("slash commands", () => {
     expect(matchCommands(all, "it").map((x) => x.name)).toEqual(["init"]);
     expect(matchCommands(all, "zzz")).toEqual([]);
     expect(matchCommands(all, "", 2)).toHaveLength(2);
+  });
+});
+
+describe("the weekly limit's pace", () => {
+  const DAY = 24 * 3600;
+  const RESET = 1_800_000_000;
+  const at = (days: number) => (RESET - 7 * DAY + days * DAY) * 1000;
+
+  it("carries what is used so far on at the same pace, to when it runs out and where it is by the reset", () => {
+    const f = weekForecast({ used: 0.7, resetsAt: RESET }, at(3.5))!;
+    expect(f.byReset).toBeCloseTo(1.4, 6);
+    expect(f.runsOutAt).toBeCloseTo(RESET - 7 * DAY + 5 * DAY, 3);
+    expect(weekForecast({ used: 0.3, resetsAt: RESET }, at(3.5))!.runsOutAt).toBeNull();
+  });
+
+  it("makes no forecast from the first hours of a week, from nothing used, from an unknown reset or from a window that is over", () => {
+    expect(weekForecast({ used: 0.2, resetsAt: RESET }, at(0.1))).toBeNull();
+    expect(weekForecast({ used: 0, resetsAt: RESET }, at(3))).toBeNull();
+    expect(weekForecast({ used: 0.5, resetsAt: null }, at(3))).toBeNull();
+    expect(weekForecast({ used: 0.5, resetsAt: RESET }, (RESET + 10) * 1000)).toBeNull();
+  });
+
+  it("says it in words, amber when the pace runs it out before the reset and red at the limit", () => {
+    const out = weekOf({ used: 0.7, resetsAt: RESET }, at(3.5));
+    expect(out).toMatchObject({ percent: 70, tone: "warn" });
+    expect(out.short).toMatch(/^Out /);
+    expect(out.sentence).toMatch(/^70% of the weekly limit used\. At this pace it runs out .*, before it resets /);
+    const calm = weekOf({ used: 0.3, resetsAt: RESET }, at(3.5));
+    expect(calm).toMatchObject({ percent: 30, short: "On pace for 60%", tone: "ok" });
+    expect(weekOf({ used: 0.2, resetsAt: RESET }, at(0.1)).sentence).toMatch(/Too early in the week to tell/);
+    expect(weekOf({ used: 1, resetsAt: RESET }, at(4))).toMatchObject({ percent: 100, tone: "stop" });
+    expect(weekOf({ used: 0.4, resetsAt: null }, at(4))).toMatchObject({ percent: 40, short: "", sentence: "40% of the weekly limit used." });
+    expect(weekOf({ used: 0.85, resetsAt: RESET }, at(6.9)).tone).toBe("warn");
   });
 });

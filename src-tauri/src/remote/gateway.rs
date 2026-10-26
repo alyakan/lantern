@@ -514,7 +514,7 @@ struct Session<'a> {
     /// The chats it subscribed to, with the number of the last event it was sent of each.
     subscribed: HashMap<String, u64>,
     /// The account's usage as it was last sent to this phone (it is sent again only when it changes).
-    last_plan: Option<(f64, Option<u64>, String)>,
+    last_plan: Option<PlanSent>,
     /// Chats it was sent a reset of before the hub knew their session, so before their transcript could be found: they
     /// are reset again once it is known (a chat restored from History is opened on the phone before the window says which
     /// session it is).
@@ -530,6 +530,9 @@ impl Drop for Session<'_> {
         }
     }
 }
+
+/// The five-hour window and the weekly one, as a phone was last told them.
+type PlanSent = ((f64, Option<u64>, String), Option<(f64, Option<u64>)>);
 
 /// The answer to request `id`, sealed and queued for the phone.
 fn respond(link: &Link, channel: &mut Channel, id: u64, answer: Result<serde_json::Value, String>) -> Result<(), String> {
@@ -638,14 +641,14 @@ impl<'a> Session<'a> {
 
     /// The subscription's usage, to a phone that can read it: when it has been said and differs from what this phone was told.
     fn send_plan(&mut self, link: &Link, channel: &mut Channel) -> Result<(), String> {
-        let plan = self.gw.hub.plan();
-        if !self.extras || plan.is_none() || plan == self.last_plan {
+        let sent: Option<PlanSent> = self.gw.hub.plan().map(|five| (five, self.gw.hub.week()));
+        if !self.extras || sent.is_none() || sent == self.last_plan {
             return Ok(());
         }
-        if let Some((used, resets_at, status)) = plan.clone() {
-            send_message(link, channel, &ServerMessage::Plan { used, resets_at, status })?;
+        if let Some(((used, resets_at, status), week)) = sent.clone() {
+            send_message(link, channel, &ServerMessage::Plan { used, resets_at, status, week_used: week.map(|w| w.0), week_resets_at: week.and_then(|w| w.1) })?;
         }
-        self.last_plan = plan;
+        self.last_plan = sent;
         Ok(())
     }
 
@@ -1336,6 +1339,7 @@ pub(crate) mod tests {
         r.bus.publish("a", UiEvent::ContextUsed { tokens: 90_000 });
         r.bus.publish("a", UiEvent::TurnDone { is_error: false, result: None, cost_usd: None, tokens: None, session_cost_usd: None, session_tokens: 0, duration_ms: None, auth_hint: false, denied: 0, context_window: Some(200_000) });
         r.bus.publish("b", UiEvent::PlanUsage { used: 0.4, resets_at: Some(99), status: "allowed".into() });
+        r.bus.publish("b", UiEvent::WeekUsage { used: 0.25, resets_at: Some(777) });
         let reset_of = |before: Vec<ServerMessage>| -> Vec<RemoteEvent> { before.into_iter().filter_map(|m| if let ServerMessage::Reset { events, .. } = m { Some(events) } else { None }).flatten().collect() };
 
         let key = generate_keypair().unwrap();
@@ -1347,7 +1351,7 @@ pub(crate) mod tests {
         let key = generate_keypair().unwrap();
         let mut new = phone_with(&r.gw, &key, Some(offer_secret(&r.store)), PROTOCOL_VERSION, &[protocol::PHONE_EXTRAS]).await.unwrap();
         let (_, _, before) = new.ask(Request::Subscribe { slot: "a".into(), after: 0, epoch: EPOCH }).await;
-        let usage = |msgs: &[ServerMessage]| msgs.iter().find_map(|m| if let ServerMessage::Plan { used, resets_at, .. } = m { Some((*used, *resets_at)) } else { None });
+        let usage = |msgs: &[ServerMessage]| msgs.iter().find_map(|m| if let ServerMessage::Plan { used, resets_at, week_used, week_resets_at, .. } = m { Some((*used, *resets_at, *week_used, *week_resets_at)) } else { None });
         let mut plan = usage(&before);
         let events: Vec<RemoteEvent> = reset_of(before).into_iter().filter(|e| e.is_extra()).collect();
         assert_eq!(events.len(), 3, "the latest of each, however many were said: {events:?}");
@@ -1358,7 +1362,7 @@ pub(crate) mod tests {
         while plan.is_none() {
             plan = usage(&[new.next().await.unwrap()]);
         }
-        assert_eq!(plan, Some((0.4, Some(99))));
+        assert_eq!(plan, Some((0.4, Some(99), Some(0.25), Some(777))), "the weekly window comes with it");
 
         // Live, too: one that said it can read them gets a new plan at once; the other doesn't.
         r.bus.publish("a", UiEvent::Todos { parent: None, items: vec![todo("in_progress")] });

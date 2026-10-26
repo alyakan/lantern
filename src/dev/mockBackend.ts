@@ -147,6 +147,8 @@ async function reportUsage(send: (ev: UiEvent) => Promise<void> | void, models: 
   if (!showUsage()) return;
   await send({ kind: "model_usage", models: models.map(([model, cost_usd, tokens]) => ({ model, cost_usd, input_tokens: Math.round(tokens * 0.95), output_tokens: Math.round(tokens * 0.05) })) });
   await send({ kind: "plan_usage", used: planUsed(), resets_at: Math.floor(Date.now() / 1000) + 100 * 60, status: "allowed" });
+  // Three and a half days into a week with 70% used: the pace runs it out before the reset.
+  await send({ kind: "week_usage", used: 0.7, resets_at: Math.floor(Date.now() / 1000) + 3.5 * 24 * 3600 });
 }
 
 // Each chat's permission mode, as the backend would run it.

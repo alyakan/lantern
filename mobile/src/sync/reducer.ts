@@ -39,6 +39,8 @@ export interface PlanUsage {
   /** Unix seconds. */
   resetsAt: number | null;
   status: string;
+  /** The weekly window, when the Mac says it (an older Mac doesn't). */
+  week?: { used: number; resetsAt: number | null };
 }
 
 export interface ChatView {
@@ -270,7 +272,7 @@ export function reducer(state: State, action: Action): State {
         case "chats":
           return { ...state, chatsLoaded: true, chats: msg.chats, workingSince: workingSince(state.workingSince, msg.chats) };
         case "plan":
-          return { ...state, plan: { used: msg.used, resetsAt: msg.resets_at, status: msg.status } };
+          return { ...state, plan: { used: msg.used, resetsAt: msg.resets_at, status: msg.status, ...(typeof msg.week_used === "number" ? { week: { used: msg.week_used, resetsAt: msg.week_resets_at ?? null } } : {}) } };
         // A message of a kind this app doesn't know (a newer Mac's): left alone.
         default:
           return state;

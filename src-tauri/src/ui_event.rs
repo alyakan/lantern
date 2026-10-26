@@ -236,6 +236,9 @@ pub enum UiEvent {
     /// The subscription's five-hour window: `used` from 0 to 1, when it resets (unix seconds), and the CLI's status for it
     /// ("allowed", "allowed_warning", "rejected"). For the whole account, so every chat reports the same.
     PlanUsage { used: f64, resets_at: Option<u64>, status: String },
+    /// The subscription's weekly (seven-day) window: `used` from 0 to 1 and when it resets (unix seconds). Said by the same
+    /// `rate_limit_event` as the five-hour one, and for the whole account too.
+    WeekUsage { used: f64, resets_at: Option<u64> },
     /// The plan Claude keeps with TodoWrite, whole each time it changes. Only the phone shows it, so the window isn't sent it.
     Todos { parent: Option<String>, items: Vec<Todo> },
     Unknown { raw: Value },

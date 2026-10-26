@@ -324,6 +324,10 @@ describe("the commands, plan, context and usage a Mac with extras sends", () => 
   it("make the account's usage the app's, whichever chat is open, and ignore a message it doesn't know", () => {
     const plan: Action = { type: "pushed", msg: { type: "plan", used: 0.4, resets_at: 99, status: "allowed" } };
     expect(run([plan]).plan).toEqual({ used: 0.4, resetsAt: 99, status: "allowed" });
+    // The weekly window comes with it from a Mac that knows it, and is gone again from one message that doesn't have it.
+    const withWeek: Action = { type: "pushed", msg: { type: "plan", used: 0.4, resets_at: 99, status: "allowed", week_used: 0.25, week_resets_at: 777 } };
+    expect(run([withWeek]).plan).toEqual({ used: 0.4, resetsAt: 99, status: "allowed", week: { used: 0.25, resetsAt: 777 } });
+    expect(run([withWeek, plan]).plan?.week).toBeUndefined();
     const unknown = { type: "from_a_newer_mac" } as unknown as Action extends { msg: infer M } ? M : never;
     const before = run([plan]);
     expect(reducer(before, { type: "pushed", msg: unknown } as Action)).toEqual(before);
