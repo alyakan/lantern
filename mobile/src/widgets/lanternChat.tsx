@@ -1,5 +1,5 @@
-import { HStack, ProgressView, RoundedRectangle, Spacer, Text, UnevenRoundedRectangle, VStack, ZStack } from "@expo/ui/swift-ui";
-import { fixedSize, font, foregroundStyle, frame, minimumScaleFactor, monospacedDigit, multilineTextAlignment, opacity, padding, tint } from "@expo/ui/swift-ui/modifiers";
+import { HStack, Image, ProgressView, Spacer, Text, VStack } from "@expo/ui/swift-ui";
+import { font, foregroundStyle, minimumScaleFactor, monospacedDigit, opacity, padding, tint } from "@expo/ui/swift-ui/modifiers";
 import { createLiveActivity, type LiveActivityEnvironment } from "expo-widgets";
 
 /**
@@ -37,29 +37,7 @@ const LanternChat = (props: ChatCardProps, environment: LiveActivityEnvironment)
   const working = props.status === "working" && !stale;
   const words = stale ? "Not updating" : props.status === "working" ? "Working" : props.status === "needs_you" ? "Needs you" : props.status === "done" ? "Done" : "Stopped";
   const colour = stale ? "#8E8E93" : props.status === "working" ? "#3B82F6" : props.status === "needs_you" ? "#F59E0B" : props.status === "done" ? "#22C55E" : "#EF4444";
-  const tone = stale ? "#8E8E93" : environment.isLuminanceReduced ? "#FFFFFF" : "#FFB347";
-  const lantern = (size: number) => (
-    <VStack spacing={size * 0.03} modifiers={[frame({ width: size * 0.8, height: size })]}>
-      <UnevenRoundedRectangle topLeadingRadius={size * 0.17} topTrailingRadius={size * 0.17} modifiers={[frame({ width: size * 0.36, height: size * 0.14 }), foregroundStyle(tone)]} />
-      <ZStack>
-        <RoundedRectangle cornerRadius={size * 0.16} modifiers={[frame({ width: size * 0.8, height: size * 0.8 }), foregroundStyle(tone)]} />
-        <VStack spacing={size * 0.06} modifiers={[frame({ width: size * 0.8, height: size * 0.8 }), padding({ all: size * 0.07 })]}>
-          <HStack spacing={0}>
-            <RoundedRectangle cornerRadius={size * 0.08} modifiers={[frame({ width: size * 0.5, height: size * 0.17 }), foregroundStyle("#2B303B")]} />
-            <Spacer />
-          </HStack>
-          <HStack spacing={0}>
-            <Spacer />
-            <RoundedRectangle cornerRadius={size * 0.08} modifiers={[frame({ width: size * 0.5, height: size * 0.17 }), foregroundStyle("#2B303B")]} />
-          </HStack>
-          <HStack spacing={0}>
-            <RoundedRectangle cornerRadius={size * 0.08} modifiers={[frame({ width: size * 0.5, height: size * 0.17 }), foregroundStyle("#2B303B")]} />
-            <Spacer />
-          </HStack>
-        </VStack>
-      </ZStack>
-    </VStack>
-  );
+  const symbol = stale ? "zzz" : props.status === "working" ? "ellipsis.bubble.fill" : props.status === "needs_you" ? "exclamationmark.bubble.fill" : props.status === "done" ? "checkmark.circle.fill" : "xmark.octagon.fill";
   const hue = environment.isLuminanceReduced ? "#FFFFFF" : colour;
   const title = typeof props.title === "string" ? props.title : "";
   const total = typeof props.steps_total === "number" && props.steps_total > 0 ? Math.round(props.steps_total) : 0;
@@ -84,7 +62,7 @@ const LanternChat = (props: ChatCardProps, environment: LiveActivityEnvironment)
   const status = working ? (
     <VStack spacing={2} alignment="trailing">
       <Text modifiers={[font({ size: 15, weight: "semibold" }), foregroundStyle(hue)]}>{words}</Text>
-      <Text date={new Date(props.since)} dateStyle="timer" modifiers={[font({ size: 13 }), monospacedDigit(), foregroundStyle(hue), fixedSize({ horizontal: true }), multilineTextAlignment("trailing")]} />
+      <Text date={new Date(props.since)} dateStyle="timer" modifiers={[font({ size: 13 }), monospacedDigit(), foregroundStyle(hue)]} />
     </VStack>
   ) : (
     <Text modifiers={[font({ size: 15, weight: "semibold" }), foregroundStyle(hue)]}>{words}</Text>
@@ -99,7 +77,7 @@ const LanternChat = (props: ChatCardProps, environment: LiveActivityEnvironment)
     banner: (
       <VStack spacing={8} alignment="leading" modifiers={[padding({ all: 14 })]}>
         <HStack spacing={12}>
-          {lantern(30)}
+          <Image systemName={symbol} color={hue} size={26} />
           {heading}
           <Spacer />
           {status}
@@ -108,12 +86,12 @@ const LanternChat = (props: ChatCardProps, environment: LiveActivityEnvironment)
         {footer}
       </VStack>
     ),
-    compactLeading: lantern(18),
+    compactLeading: <Image systemName={symbol} color={hue} />,
     compactTrailing: <Text modifiers={[font({ size: 13, weight: "semibold" }), monospacedDigit(), foregroundStyle(hue)]}>{total > 0 && working ? `${done}/${total}` : words}</Text>,
-    minimal: lantern(18),
+    minimal: <Image systemName={symbol} color={hue} />,
     expandedLeading: (
       <VStack modifiers={[padding({ all: 12 })]}>
-        {lantern(30)}
+        <Image systemName={symbol} color={hue} size={28} />
       </VStack>
     ),
     expandedTrailing: (

@@ -10,8 +10,8 @@ jest.mock("expo-widgets", () => ({ createLiveActivity: (_name: string, layout: u
 jest.mock("@expo/ui/swift-ui", () => ({}));
 jest.mock("@expo/ui/swift-ui/modifiers", () => ({}));
 
-const COMPONENTS = ["HStack", "VStack", "ZStack", "Image", "Text", "ProgressView", "Spacer", "Gauge", "RoundedRectangle", "UnevenRoundedRectangle"];
-const MODIFIERS = ["font", "foregroundStyle", "minimumScaleFactor", "monospacedDigit", "opacity", "padding", "tint", "lineLimit", "bold", "frame", "fixedSize", "multilineTextAlignment"];
+const COMPONENTS = ["HStack", "VStack", "ZStack", "Image", "Text", "ProgressView", "Spacer", "Gauge"];
+const MODIFIERS = ["font", "foregroundStyle", "minimumScaleFactor", "monospacedDigit", "opacity", "padding", "tint", "lineLimit", "bold", "frame"];
 const source = (require("./lanternChat") as { default: { layout: string } }).default.layout;
 
 const jsx = (type: string, props: Record<string, unknown>): Node => ({ type, props });
@@ -45,26 +45,6 @@ describe("the lock-screen card", () => {
     expect(all(out.banner, "ProgressView")).toHaveLength(0);
     expect(texts(out.banner).some((t) => /steps|Plan/.test(t))).toBe(false);
     expect(texts(out.compactTrailing)).toEqual(["Working"]);
-  });
-
-  it("keeps the timer to its own width, at the right under the state, instead of letting it spread across the card", () => {
-    const timer = all(draw({}).banner, "Text").find((t) => t.props.dateStyle === "timer")!;
-    const names = (timer.props.modifiers as { name: string; args: unknown[] }[]).map((m) => m.name);
-    expect(names).toEqual(expect.arrayContaining(["fixedSize", "multilineTextAlignment"]));
-    expect((timer.props.modifiers as { name: string; args: unknown[] }[]).find((m) => m.name === "multilineTextAlignment")!.args).toEqual(["trailing"]);
-  });
-
-  it("draws Lantern's own mark (the amber lantern with its three messages) where a symbol was, in grey when stale and white when dimmed", () => {
-    const out = draw({});
-    expect(all(out.banner, "Image")).toHaveLength(0);
-    expect(all(out.banner, "UnevenRoundedRectangle")).toHaveLength(1);
-    expect(all(out.banner, "RoundedRectangle")).toHaveLength(4);
-    const tones = (node: unknown) => all(node, "RoundedRectangle").concat(all(node, "UnevenRoundedRectangle")).flatMap((n) => (n.props.modifiers as { name: string; args: unknown[] }[]).filter((m) => m.name === "foregroundStyle").map((m) => m.args[0]));
-    expect(new Set(tones(out.banner))).toEqual(new Set(["#FFB347", "#2B303B"]));
-    expect(all(out.minimal, "RoundedRectangle")).toHaveLength(4);
-    expect(all(out.compactLeading, "RoundedRectangle")).toHaveLength(4);
-    expect(new Set(tones(draw({}, { isStale: true }).banner))).toContain("#8E8E93");
-    expect(new Set(tones(draw({}, { isLuminanceReduced: true }).banner))).toContain("#FFFFFF");
   });
 
   it("adds the chat's title under the project", () => {
