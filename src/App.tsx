@@ -1,4 +1,5 @@
 import { setPlanUsage } from "./lib/planUsage";
+import { setWeekUsage } from "./lib/weekUsage";
 import { pushAgentLimit } from "./lib/agentLimit";
 import { pushAutoMergeTests } from "./lib/mergeTests";
 import { useAutoTidy } from "./lib/useAutoTidy";
@@ -375,6 +376,7 @@ export default function App() {
     const unlisten = api.onUiEvent((slot, event) => {
       // The plan's usage is the account's, not the chat's: kept once, for the top bar and the canvas.
       if (event.kind === "plan_usage") setPlanUsage({ used: event.used, resetsAt: event.resets_at });
+      else if (event.kind === "week_usage") setWeekUsage({ used: event.used, resetsAt: event.resets_at });
       else batch.push({ slot, event });
     });
     locate(null);

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { planLevel, planLine, planSentence, usePlanUsage } from "../lib/planUsage";
+import { useWeekUsage, weekLevel, weekLine, weekSentence } from "../lib/weekUsage";
 import { usageLine } from "../lib/cost";
 import { modelLine, type ModelShare, type UsageRow, type UsageState } from "../lib/usage";
 import { usePopover } from "../lib/usePopover";
@@ -18,16 +19,26 @@ const STATE_LABEL: Record<UsageState, string> = { working: "Working", waiting: "
  */
 export function PlanMeter({ usage }: Props) {
   const plan = usePlanUsage();
+  const week = useWeekUsage();
   const [open, setOpen] = useState(false);
   const { box, button, list, id } = usePopover(open, () => setOpen(false));
   if (!plan) return null;
   const level = planLevel(plan);
   const title = level === "stop" ? "Nearly used up: no new agents start until it resets." : level === "warn" ? "Getting close to the plan's five-hour limit." : "The plan's five-hour window, for every chat and team. Press to see where it went.";
+  // The weekly window beside it: its own colour (amber when the pace runs it out before the reset), its forecast in the tooltip.
+  const weekMeter = week && (
+    <span className={`plan-meter ${weekLevel(week)}`} role="status" title={weekSentence(week)}>
+      {weekLine(week)}
+    </span>
+  );
   if (!usage) {
     return (
-      <span className={`plan-meter ${level}`} role="status" title={title}>
-        {planLine(plan)}
-      </span>
+      <>
+        <span className={`plan-meter ${level}`} role="status" title={title}>
+          {planLine(plan)}
+        </span>
+        {weekMeter}
+      </>
     );
   }
   return (
@@ -35,9 +46,11 @@ export function PlanMeter({ usage }: Props) {
       <button ref={button} className={`plan-meter ${level}`} aria-expanded={open} aria-haspopup="dialog" aria-controls={open ? id : undefined} title={title} onClick={() => setOpen(!open)}>
         {planLine(plan)}
       </button>
+      {weekMeter}
       {open && (
         <div id={id} ref={list} className="usage-pop" role="dialog" aria-label="Where the plan's usage went">
           <p className="usage-plan">{planSentence(plan)}</p>
+          {week && <p className="usage-plan">{weekSentence(week)}</p>}
           <UsageList
             rows={usage.rows()}
             onOpen={(slot) => {

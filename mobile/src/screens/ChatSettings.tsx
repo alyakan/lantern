@@ -7,7 +7,7 @@ import type { RemoteWorkflow } from "../protocol/generated/RemoteWorkflow";
 import type { PlanUsage } from "../sync/reducer";
 import { useController } from "../shell/hooks";
 import { useControls, useMacCan } from "../shell/useControls";
-import { ContextRow, UsageRow } from "./ChatExtras";
+import { ContextRow, UsageRow, WeekRow } from "./ChatExtras";
 import { CloseChatSheet } from "./CloseChat";
 import { Button, Txt } from "../ui/components";
 import { PressScale } from "../ui/motion";
@@ -70,6 +70,7 @@ function SettingsSheet({ chat, plan, context, off, loading, workflows, modes, pr
             </Txt>
             {context && <ContextRow context={context} />}
             {plan && <UsageRow plan={plan} />}
+            {plan?.week && <WeekRow week={plan.week} />}
             {loading ? (
               <View accessibilityLabel="Loading" accessibilityRole="progressbar" accessible style={{ paddingVertical: 16 }}>
                 <Dots />

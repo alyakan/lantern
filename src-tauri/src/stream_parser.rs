@@ -111,7 +111,7 @@ impl StreamParser {
             "control_response" => initialize_events(&v),
             // `/clear` started a fresh conversation in the same process.
             "conversation_reset" => vec![UiEvent::ConversationReset],
-            "rate_limit_event" => plan_usage(&v).into_iter().collect(),
+            "rate_limit_event" => plan_usage(&v),
             _ => vec![UiEvent::Unknown { raw: v }],
         }
     }
@@ -422,13 +422,21 @@ fn result_event(v: &Value, turn: Option<&Turn>, session: &Totals, main_model: Op
     }
 }
 
-/// How much of the plan's five-hour window is used, as a `rate_limit_event` says (the subscription's limit, shared by every
-/// chat and team). None when it doesn't say.
-fn plan_usage(v: &Value) -> Option<UiEvent> {
+/// How much of the plan's five-hour window and of its weekly window is used, as a `rate_limit_event` says (the subscription's
+/// limits, shared by every chat and team). Each only when it says.
+fn plan_usage(v: &Value) -> Vec<UiEvent> {
     let info = &v["rate_limit_info"];
-    let window = &info["unifiedWindows"]["five_hour"];
-    let used = window["utilization"].as_f64()?;
-    Some(UiEvent::PlanUsage { used, resets_at: window["resetsAt"].as_u64().or(info["resetsAt"].as_u64()), status: info["status"].as_str().unwrap_or("").to_string() })
+    let windows = &info["unifiedWindows"];
+    let mut out = Vec::new();
+    let five = &windows["five_hour"];
+    if let Some(used) = five["utilization"].as_f64() {
+        out.push(UiEvent::PlanUsage { used, resets_at: five["resetsAt"].as_u64().or(info["resetsAt"].as_u64()), status: info["status"].as_str().unwrap_or("").to_string() });
+    }
+    let week = &windows["seven_day"];
+    if let Some(used) = week["utilization"].as_f64() {
+        out.push(UiEvent::WeekUsage { used, resets_at: week["resetsAt"].as_u64() });
+    }
+    out
 }
 
 /// What an `initialize` reply offers: the slash commands (built-ins, custom commands, skills) and the models.
@@ -1065,8 +1073,10 @@ mod tests {
     fn the_plans_five_hour_window_is_read_from_a_rate_limit_event() {
         let mut p = StreamParser::default();
         let ev = p.parse_line(r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1792066200,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":0.16,"resetsAt":1792066200},"seven_day":{"utilization":0.12,"resetsAt":1792393200}}}}"#);
-        assert!(matches!(ev.as_slice(), [UiEvent::PlanUsage { used, resets_at: Some(1792066200), status }] if (*used - 0.16).abs() < 1e-9 && status == "allowed"), "{ev:?}");
-        // One that doesn't say how full the window is shows nothing.
+        assert!(matches!(ev.as_slice(), [UiEvent::PlanUsage { used, resets_at: Some(1792066200), status }, UiEvent::WeekUsage { used: week, resets_at: Some(1792393200) }] if (*used - 0.16).abs() < 1e-9 && status == "allowed" && (*week - 0.12).abs() < 1e-9), "{ev:?}");
+        // One that says only the week is only the week, and one that says neither shows nothing.
+        let only_week = p.parse_line(r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"seven_day":{"utilization":0.5,"resetsAt":1792393200}}}}"#);
+        assert!(matches!(only_week.as_slice(), [UiEvent::WeekUsage { resets_at: Some(1792393200), .. }]), "{only_week:?}");
         assert!(p.parse_line(r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}"#).is_empty());
     }
 
