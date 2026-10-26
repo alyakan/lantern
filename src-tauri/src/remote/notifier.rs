@@ -124,6 +124,9 @@ pub struct Notifier {
 struct Ask {
     request_id: Option<String>,
     needs: Needs,
+    /// The one name that says which: the program of a command, the file's name, the tool's. Only used when the user turned
+    /// "Show titles" on (see `detail_of`).
+    detail: Option<String>,
 }
 
 impl Ask {
@@ -181,8 +184,11 @@ impl Notifier {
     pub async fn handle(&self, ev: &BusEvent) {
         let slot = ev.slot.as_str();
         match &ev.event {
-            UiEvent::PermissionRequested { request_id, tool_name, .. } => self.push(slot, Kind::NeedsYou, Some(Ask { request_id: Some(request_id.clone()), needs: Needs::of_tool(tool_name) })).await,
-            UiEvent::MergeProposed { .. } => self.push(slot, Kind::NeedsYou, Some(Ask { request_id: None, needs: Needs::Approval })).await,
+            UiEvent::PermissionRequested { request_id, tool_name, input } => {
+                let needs = Needs::of_tool(tool_name);
+                self.push(slot, Kind::NeedsYou, Some(Ask { request_id: Some(request_id.clone()), needs, detail: detail_of(needs, tool_name, input) })).await
+            }
+            UiEvent::MergeProposed { .. } => self.push(slot, Kind::NeedsYou, Some(Ask { request_id: None, needs: Needs::Approval, detail: None })).await,
             // Nothing waits any more (answered anywhere, or withdrawn): the next thing that waits is news again.
             UiEvent::PermissionResolved { .. } | UiEvent::PermissionWithdrawn { .. } | UiEvent::MergeResolved { .. } => {
                 if self.hub.chat(slot).is_none_or(|c| c.status != ChatStatus::NeedsYou) {
@@ -246,7 +252,9 @@ impl Notifier {
         if !apple.is_empty() {
             // The project's name is on the lock-screen card whatever the setting, so it is in the notification too.
             let project = self.hub.chat(slot).and_then(|c| c.folder).and_then(|f| std::path::Path::new(&f).file_name().map(|n| n.to_string_lossy().into_owned()));
-            let alert = alert_for(slot, kind, ask.as_ref(), title.as_deref(), project.as_deref());
+            // Which tool, program or file: only with "Show titles" on, as the chat's own title is.
+            let detail = if saved.show_titles { ask.as_ref().and_then(|a| a.detail.as_deref()) } else { None };
+            let alert = alert_for(slot, kind, ask.as_ref(), title.as_deref(), project.as_deref(), detail);
             for device in apple {
                 match self.apns.alert(device.push_token.as_deref().unwrap_or_default(), &alert).await {
                     // A phone Apple no longer knows (the app was removed) is forgotten for push (it stays paired).
@@ -276,7 +284,7 @@ fn kind_name(kind: Kind) -> &'static str {
 /// The words of a notification straight to Apple: what a prompt asks for in a few words (never the command, the file or the
 /// question). The project's name leads when it is known, with the chat's title under it only if the user turned that on;
 /// without a project the title (if on) leads, else it is just "Lantern". Returns the title line, a subtitle and the body.
-fn apple_words(kind: Kind, needs: Option<Needs>, title: Option<&str>, project: Option<&str>) -> (String, Option<String>, String) {
+fn apple_words(kind: Kind, needs: Option<Needs>, title: Option<&str>, project: Option<&str>, detail: Option<&str>) -> (String, Option<String>, String) {
     let (plain, with_title) = match (kind, needs) {
         (Kind::NeedsYou, Some(Needs::Command)) => ("A chat wants to run a command.", "Wants to run a command."),
         (Kind::NeedsYou, Some(Needs::Edit)) => ("A chat wants to change a file.", "Wants to change a file."),
@@ -286,17 +294,63 @@ fn apple_words(kind: Kind, needs: Option<Needs>, title: Option<&str>, project: O
         (Kind::Finished, _) => ("A chat finished.", "Finished."),
         (Kind::Failed, _) => ("A chat stopped with an error.", "Stopped with an error."),
     };
+    // Which tool, program or file, in place of the general words.
+    let named = match (kind, needs, detail) {
+        (Kind::NeedsYou, Some(Needs::Command), Some(d)) => Some(format!("Wants to run {d}.")),
+        (Kind::NeedsYou, Some(Needs::Edit), Some(d)) => Some(format!("Wants to change {d}.")),
+        (Kind::NeedsYou, Some(Needs::Tool), Some(d)) => Some(format!("Wants to use {d}.")),
+        _ => None,
+    };
+    let short = named.clone().unwrap_or_else(|| with_title.to_string());
     match (project, title) {
-        (Some(p), t) => (p.into(), t.map(Into::into), with_title.into()),
-        (None, Some(t)) => (t.into(), None, with_title.into()),
-        (None, None) => ("Lantern".into(), None, plain.into()),
+        (Some(p), t) => (p.into(), t.map(Into::into), short),
+        (None, Some(t)) => (t.into(), None, short),
+        (None, None) => ("Lantern".into(), None, named.unwrap_or_else(|| plain.to_string())),
+    }
+}
+
+/// The one name that says which tool, program or file a prompt is about, short and plain: a command's program (not its
+/// arguments, which may hold a password or a token), a file's name (not its folders or its contents), a tool's name. None when
+/// there is no such name, or it isn't plain.
+fn detail_of(needs: Needs, tool_name: &str, input: &serde_json::Value) -> Option<String> {
+    let plain = |s: &str, max: usize| -> Option<String> {
+        let s = s.trim();
+        (!s.is_empty() && s.chars().count() <= max && s.chars().all(|c| c.is_alphanumeric() || " ._+-:/".contains(c))).then(|| s.to_string())
+    };
+    match needs {
+        Needs::Command => {
+            // The first program of the command's parts that isn't set-up: a part that is only a `cd`, an `export` and the like
+            // is passed over whole (its words are not programs), and a `sudo` or `env` or `FOO=bar` before a program is passed over.
+            let set_up = ["cd", "export", "source", ".", "set", "then", "do", "if"];
+            let wrappers = ["sudo", "env", "time", "nohup", "command", "exec", "nice"];
+            let assignment = |w: &str| w.split_once('=').is_some_and(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_alphanumeric() || c == '_'));
+            input["command"].as_str()?.replace("&&", "\u{1}").replace("||", "\u{1}").replace([';', '|', '\n'], "\u{1}").split('\u{1}').find_map(|part| {
+                let word = part.split_whitespace().find(|w| !wrappers.contains(w) && !assignment(w))?;
+                if set_up.contains(&word) {
+                    return None;
+                }
+                plain(word.rsplit('/').next()?, 32)
+            })
+        }
+        Needs::Edit => {
+            let path = input["file_path"].as_str().or_else(|| input["notebook_path"].as_str())?;
+            plain(std::path::Path::new(path).file_name()?.to_str()?, 48)
+        }
+        Needs::Tool => match tool_name.strip_prefix("mcp__") {
+            Some(rest) => {
+                let (server, tool) = rest.split_once("__")?;
+                plain(&format!("{server}: {}", tool.replace('_', " ")), 48)
+            }
+            None => plain(tool_name, 32),
+        },
+        _ => None,
     }
 }
 
 /// The notification for one chat and kind. The app reads `body` (the way Expo's service wraps its data): the chat, the kind, and
 /// the prompt's id when a button answers it.
-fn alert_for(slot: &str, kind: Kind, ask: Option<&Ask>, title: Option<&str>, project: Option<&str>) -> Alert {
-    let (title, subtitle, body) = apple_words(kind, ask.map(|a| a.needs), title, project);
+fn alert_for(slot: &str, kind: Kind, ask: Option<&Ask>, title: Option<&str>, project: Option<&str>, detail: Option<&str>) -> Alert {
+    let (title, subtitle, body) = apple_words(kind, ask.map(|a| a.needs), title, project, detail);
     let answerable = ask.filter(|a| a.answerable());
     let category = match (kind, answerable) {
         (Kind::NeedsYou, Some(_)) => Some(CATEGORY_DECIDE),
@@ -650,7 +704,41 @@ pub(crate) mod tests {
         r.store.set_show_titles(true).unwrap();
         r.event("a", ask("p1")).await;
         let alert = &r.alerts()[0].1["aps"]["alert"];
-        assert_eq!((alert["title"].as_str(), alert["subtitle"].as_str(), alert["body"].as_str()), (Some("p"), Some("Release 0.1.53"), Some("Wants to run a command.")));
+        assert_eq!((alert["title"].as_str(), alert["subtitle"].as_str(), alert["body"].as_str()), (Some("p"), Some("Release 0.1.53"), Some("Wants to run echo.")));
+    }
+
+    #[test]
+    fn what_a_prompt_is_about_is_one_plain_name_and_never_arguments_paths_or_contents() {
+        let d = |tool: &str, input: serde_json::Value| detail_of(Needs::of_tool(tool), tool, &input);
+        // A command: its program, past the set-up of it, and never what it is given.
+        assert_eq!(d("Bash", serde_json::json!({"command": "git push --force origin main"})).as_deref(), Some("git"));
+        assert_eq!(d("Bash", serde_json::json!({"command": "cd ~/dev/app && FOO=bar npm run build -- --token=SECRET"})).as_deref(), Some("npm"));
+        assert_eq!(d("Bash", serde_json::json!({"command": "sudo /usr/local/bin/brew install node"})).as_deref(), Some("brew"));
+        assert_eq!(d("Bash", serde_json::json!({"command": "cd /tmp"})), None, "nothing but set-up is no program");
+        assert_eq!(d("Bash", serde_json::json!({"command": "`curl evil`"})), None, "a word that isn't plain is none");
+        // A file: its name, not its folders.
+        assert_eq!(d("Edit", serde_json::json!({"file_path": "/Users/me/secret-project/src/LanternCard.swift"})).as_deref(), Some("LanternCard.swift"));
+        assert_eq!(d("NotebookEdit", serde_json::json!({"notebook_path": "/a/b/analysis.ipynb"})).as_deref(), Some("analysis.ipynb"));
+        // A tool: its name, and an MCP tool's server with its name in words.
+        assert_eq!(d("WebFetch", serde_json::json!({"url": "https://SECRET-URL"})).as_deref(), Some("WebFetch"));
+        assert_eq!(d("mcp__lantern__network_watch", serde_json::json!({})).as_deref(), Some("lantern: network watch"));
+        // A question or an approval says nothing more.
+        assert_eq!(d("AskUserQuestion", serde_json::json!({"questions": []})), None);
+    }
+
+    #[tokio::test]
+    async fn a_prompt_names_its_tool_program_or_file_only_when_titles_are_on_and_never_its_arguments() {
+        let r = rig_apple(1);
+        r.hub.opened("a", "/Users/me/lantern");
+        r.event("a", UiEvent::PermissionRequested { request_id: "c1".into(), tool_name: "Bash".into(), input: serde_json::json!({"command": "git push --token=SECRET-TOKEN"}) }).await;
+        assert_eq!(r.alerts()[0].1["aps"]["alert"]["body"].as_str(), Some("Wants to run a command."), "off by default");
+        r.store.set_show_titles(true).unwrap();
+        r.event("a", UiEvent::PermissionRequested { request_id: "c2".into(), tool_name: "Bash".into(), input: serde_json::json!({"command": "git push --token=SECRET-TOKEN"}) }).await;
+        r.event("a", UiEvent::PermissionRequested { request_id: "e1".into(), tool_name: "Write".into(), input: serde_json::json!({"file_path": "/Users/me/secret/LanternCard.swift"}) }).await;
+        r.event("a", UiEvent::PermissionRequested { request_id: "t1".into(), tool_name: "WebFetch".into(), input: serde_json::json!({"url": "https://SECRET-URL"}) }).await;
+        let bodies: Vec<String> = r.alerts().iter().map(|(_, a)| a["aps"]["alert"]["body"].as_str().unwrap().to_string()).collect();
+        assert_eq!(bodies[1..], ["Wants to run git.", "Wants to change LanternCard.swift.", "Wants to use WebFetch."]);
+        assert!(!serde_json::to_string(&r.alerts()).unwrap().contains("SECRET"), "no argument, path or url reaches Apple");
     }
 
     #[tokio::test]
