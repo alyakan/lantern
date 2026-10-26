@@ -96,7 +96,8 @@
         {
           "enablePushNotifications": true
         }
-      ]
+      ],
+      "./plugins/withLanternCard"
     ]
   }
 }
