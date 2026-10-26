@@ -468,6 +468,19 @@ impl ApnsHttp {
         let signer = self.key.signer();
         let url = format!("{APNS_URL}{token}");
         Box::pin(async move {
+            let answer = Self::deliver(client, signer, url, kind, topic, priority, expiration, body).await;
+            // Never the token (a send error carries the address it went to) or anything of the body.
+            match &answer {
+                Ok(reply) => super::push_log::note(&format!("apple {kind} priority {priority}: {}", reply.words())),
+                Err(why) => super::push_log::note(&format!("apple {kind} priority {priority}: not sent, {why}")),
+            }
+            answer
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn deliver(client: reqwest::Client, signer: Result<Option<Arc<Signer>>, String>, url: String, kind: &'static str, topic: &'static str, priority: u8, expiration: Option<u64>, body: Value) -> Result<Reply, String> {
+        {
             let signer = signer?.ok_or("No push key has been imported (Settings > Remote control).")?;
             let mut request = client
                 .post(url)
@@ -478,7 +491,7 @@ impl ApnsHttp {
             if let Some(at) = expiration {
                 request = request.header("apns-expiration", at.to_string());
             }
-            let response = request.json(&body).send().await.map_err(|e| e.to_string())?;
+            let response = request.json(&body).send().await.map_err(|e| if e.is_timeout() { "Apple did not answer in time.".to_string() } else if e.is_connect() { "Couldn't reach Apple.".to_string() } else { "The push to Apple failed.".to_string() })?;
             let status = response.status().as_u16();
             let reason = response.json::<Value>().await.ok().and_then(|b| b["reason"].as_str().map(str::to_string));
             // A signed token Apple refused isn't used again: the next push makes a new one.
@@ -486,7 +499,7 @@ impl ApnsHttp {
                 signer.forget_bearer();
             }
             Ok(Reply { status, reason })
-        })
+        }
     }
 }
 
