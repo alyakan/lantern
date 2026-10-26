@@ -14,6 +14,7 @@ import { space, useColors } from "../ui/theme";
 import { quickReplies, quote, searchRows } from "../view/chatText";
 import { projectColorOf } from "../view/home";
 import { hasHiddenChars } from "../view/shell";
+import { queuedIds } from "../view/queue";
 import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
@@ -65,6 +66,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   const chat = chats.find((c) => c.slot === slot);
   const view = views[slot] ?? emptyView;
   const rows = useMemo(() => timeline(view.items), [view.items]);
+  const working = chat?.status === "working";
+  // Messages sent while Claude was busy say they are waiting for it.
+  const queued = useMemo(() => queuedIds(view.items, working), [view.items, working]);
   const [answered, setAnswered] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<string[] | null>(null);
   const [banner, setBanner] = useState(false);
@@ -133,7 +137,6 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
     const t = setTimeout(() => setWaking(false), WAKE_WAIT_MS);
     return () => clearTimeout(t);
   }, [waking, asleep]);
-  const working = chat?.status === "working";
   const loadDiff = useCallback((path: string) => sync.diff(slot, path), [sync, slot]);
 
   const reply = (id: string, a: PageAction) => {
@@ -207,7 +210,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
     const body = (() => {
       switch (row.kind) {
         case "user":
-          return <UserRow item={row.item} onActions={() => setActions({ text: row.item.text, own: true, last: row.key === lastUser })} />;
+          return <UserRow item={row.item} queued={queued.has(row.item.id)} onActions={() => setActions({ text: row.item.text, own: true, last: row.key === lastUser })} />;
         case "assistant":
           return <AssistantRow item={row.item} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
         case "summary":

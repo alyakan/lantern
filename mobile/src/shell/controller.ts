@@ -8,6 +8,7 @@ import { keypairFrom } from "../noise/noise";
 import { fromBase64Url, readPairingLink, toBase64Url, type PairingOffer } from "../pairing";
 import { Sync, type SyncDeps } from "../sync/sync";
 import { LiveCards, type CardFactory } from "../liveActivity";
+import { forgetLastKnown } from "../lastKnown";
 
 export interface ControllerDeps {
   transport: Transport;
@@ -124,5 +125,7 @@ export class Controller {
   async unpair() {
     await this.connection.forget();
     this.sync.reset();
+    // What the offline screen remembers of that Mac's chats goes with it.
+    void forgetLastKnown();
   }
 }

@@ -36,7 +36,7 @@ export const timeOf = (at: number) => new Date(at).toLocaleTimeString([], { hour
 
 type UserItem = Extract<Item, { kind: "user" }>;
 
-export const UserRow = memo(function UserRow({ item, onActions }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void }) {
+export const UserRow = memo(function UserRow({ item, onActions, queued = false }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean }) {
   const colors = useColors();
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12, alignItems: "flex-start" }}>
@@ -65,6 +65,11 @@ export const UserRow = memo(function UserRow({ item, onActions }: { item: UserIt
       {item.failed && (
         <Txt variant="small" tone="stop" style={{ marginTop: 4, marginLeft: 2 }}>
           Not sent. {item.failed}
+        </Txt>
+      )}
+      {queued && !item.failed && (
+        <Txt variant="tiny" tone="ink3" accessibilityLabel="Queued: Claude reads it after this step" style={{ marginTop: 4, marginLeft: 2 }}>
+          Queued · Claude reads it after this step
         </Txt>
       )}
     </View>

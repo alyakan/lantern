@@ -64,3 +64,28 @@ describe("a message not sent yet", () => {
     expect(box().props.value).toBe("");
   });
 });
+
+describe("a message sent while Claude is busy", () => {
+  const events = [
+    { kind: "user_text" as const, text: "Start the build.", at: 1_000_000, sent_by: "desktop" },
+    { kind: "tool_started" as const, tool_use_id: "t1", name: "Bash", summary: "npm run build" },
+    { kind: "user_text" as const, text: "Then run the tests.", at: 1_000_100, sent_by: "desktop" },
+  ];
+
+  async function chatWith(status: "working" | "idle") {
+    const { controller } = makeController();
+    attachSession(controller);
+    await renderWith(<ChatScreen slot="a" onBack={jest.fn()} onReview={jest.fn()} />, { chats: [chat({ status })], events: { a: events } }, controller);
+    await act(async () => void (await new Promise((r) => setTimeout(r, 30))));
+  }
+
+  it("says it is queued until Claude goes on", async () => {
+    await chatWith("working");
+    expect(screen.getAllByText(/Queued · Claude reads it after this step/)).toHaveLength(1);
+  });
+
+  it("says nothing once the chat is idle", async () => {
+    await chatWith("idle");
+    expect(screen.queryByText(/Queued/)).toBeNull();
+  });
+});
