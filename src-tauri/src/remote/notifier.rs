@@ -244,7 +244,9 @@ impl Notifier {
             }
         }
         if !apple.is_empty() {
-            let alert = alert_for(slot, kind, ask.as_ref(), title.as_deref());
+            // The project's name is on the lock-screen card whatever the setting, so it is in the notification too.
+            let project = self.hub.chat(slot).and_then(|c| c.folder).and_then(|f| std::path::Path::new(&f).file_name().map(|n| n.to_string_lossy().into_owned()));
+            let alert = alert_for(slot, kind, ask.as_ref(), title.as_deref(), project.as_deref());
             for device in apple {
                 match self.apns.alert(device.push_token.as_deref().unwrap_or_default(), &alert).await {
                     // A phone Apple no longer knows (the app was removed) is forgotten for push (it stays paired).
@@ -272,8 +274,9 @@ fn kind_name(kind: Kind) -> &'static str {
 }
 
 /// The words of a notification straight to Apple: what a prompt asks for in a few words (never the command, the file or the
-/// question), with the chat's title in front of them only if the user turned that on.
-fn apple_words(kind: Kind, needs: Option<Needs>, title: Option<&str>) -> (String, String) {
+/// question). The project's name leads when it is known, with the chat's title under it only if the user turned that on;
+/// without a project the title (if on) leads, else it is just "Lantern". Returns the title line, a subtitle and the body.
+fn apple_words(kind: Kind, needs: Option<Needs>, title: Option<&str>, project: Option<&str>) -> (String, Option<String>, String) {
     let (plain, with_title) = match (kind, needs) {
         (Kind::NeedsYou, Some(Needs::Command)) => ("A chat wants to run a command.", "Wants to run a command."),
         (Kind::NeedsYou, Some(Needs::Edit)) => ("A chat wants to change a file.", "Wants to change a file."),
@@ -283,23 +286,28 @@ fn apple_words(kind: Kind, needs: Option<Needs>, title: Option<&str>) -> (String
         (Kind::Finished, _) => ("A chat finished.", "Finished."),
         (Kind::Failed, _) => ("A chat stopped with an error.", "Stopped with an error."),
     };
-    match title {
-        Some(t) => (t.into(), with_title.into()),
-        None => ("Lantern".into(), plain.into()),
+    match (project, title) {
+        (Some(p), t) => (p.into(), t.map(Into::into), with_title.into()),
+        (None, Some(t)) => (t.into(), None, with_title.into()),
+        (None, None) => ("Lantern".into(), None, plain.into()),
     }
 }
 
 /// The notification for one chat and kind. The app reads `body` (the way Expo's service wraps its data): the chat, the kind, and
 /// the prompt's id when a button answers it.
-fn alert_for(slot: &str, kind: Kind, ask: Option<&Ask>, title: Option<&str>) -> Alert {
-    let (title, body) = apple_words(kind, ask.map(|a| a.needs), title);
+fn alert_for(slot: &str, kind: Kind, ask: Option<&Ask>, title: Option<&str>, project: Option<&str>) -> Alert {
+    let (title, subtitle, body) = apple_words(kind, ask.map(|a| a.needs), title, project);
     let answerable = ask.filter(|a| a.answerable());
     let category = match (kind, answerable) {
         (Kind::NeedsYou, Some(_)) => Some(CATEGORY_DECIDE),
         (Kind::Finished, _) => Some(CATEGORY_REPLY),
         _ => None,
     };
-    let mut aps = serde_json::json!({"alert": {"title": title, "body": body}, "sound": "default", "thread-id": slot});
+    let mut alert = serde_json::json!({"title": title, "body": body});
+    if let Some(subtitle) = subtitle {
+        alert["subtitle"] = subtitle.into();
+    }
+    let mut aps = serde_json::json!({"alert": alert, "sound": "default", "thread-id": slot});
     if let Some(category) = category {
         aps["category"] = category.into();
     }
@@ -596,7 +604,7 @@ pub(crate) mod tests {
         assert_eq!(
             sent[0].1,
             serde_json::json!({
-                "aps": {"alert": {"title": "Lantern", "body": "A chat wants to run a command."}, "sound": "default", "thread-id": "a", "category": "lantern_decide"},
+                "aps": {"alert": {"title": "p", "body": "Wants to run a command."}, "sound": "default", "thread-id": "a", "category": "lantern_decide"},
                 "body": {"slot": "a", "kind": "needs_you", "request_id": "p1"},
             })
         );
@@ -642,7 +650,18 @@ pub(crate) mod tests {
         r.store.set_show_titles(true).unwrap();
         r.event("a", ask("p1")).await;
         let alert = &r.alerts()[0].1["aps"]["alert"];
-        assert_eq!((alert["title"].as_str(), alert["body"].as_str()), (Some("Release 0.1.53"), Some("Wants to run a command.")));
+        assert_eq!((alert["title"].as_str(), alert["subtitle"].as_str(), alert["body"].as_str()), (Some("p"), Some("Release 0.1.53"), Some("Wants to run a command.")));
+    }
+
+    #[tokio::test]
+    async fn the_project_leads_a_push_to_apple_and_the_chats_title_stays_out_unless_the_user_turned_it_on() {
+        let r = rig_apple(1);
+        r.hub.opened("a", "/Users/me/dev/lantern");
+        r.hub.titled("a", "Release 0.1.53");
+        r.event("a", ask("p1")).await;
+        let alert = &r.alerts()[0].1["aps"]["alert"];
+        assert_eq!((alert["title"].as_str(), alert["body"].as_str()), (Some("lantern"), Some("Wants to run a command.")));
+        assert!(alert.get("subtitle").is_none(), "no title without the setting: {alert}");
     }
 
     #[tokio::test]
