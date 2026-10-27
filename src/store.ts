@@ -339,6 +339,7 @@ const signInText = (p: ProviderInfo | null): string => {
   const id = providerIdOf(p);
   if (id === "claude") return "Claude isn't logged in. Run `claude /login` in a terminal, then send your message again.";
   if (id === "codex") return "Codex isn't signed in. Run `codex login` in a terminal, then send your message again.";
+  if (id === "gemini") return "Gemini isn't signed in. Run `gemini` in a terminal and choose how to sign in, then send your message again.";
   return `${agentName(p)} isn't logged in. Log in with its own CLI in a terminal, then send your message again.`;
 };
 

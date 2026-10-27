@@ -5,6 +5,7 @@ import type { ChatItem } from "../store";
 import { QuestionCard } from "./QuestionCard";
 import { QUESTION_TOOL } from "../lib/questions";
 import { describeRule, newRule, RULE_SCOPES, ruleChoices } from "../lib/permissionRules";
+import { providerName } from "../lib/provider";
 import type { NewRule } from "../types";
 
 type PermissionItem = Extract<ChatItem, { type: "permission" }>;
@@ -103,7 +104,7 @@ const firstLine = (s: string) => {
   return lines.length > 1 ? `${lines[0]} (+${lines.length - 1} more lines)` : lines[0] ?? "";
 };
 
-// A request from another agent (Codex), as its backend wrote it out: every character that could hide or fake something is
+// A request from another agent (Codex, Gemini), as its backend wrote it out: every character that could hide or fake something is
 // already an escape, and what it will do is in labelled parts, never one string that could pose as another. Allow stays off
 // until all of it has been shown; there is no Always allow…, since a rule here would be one for Claude's tools, not this agent's.
 function ProviderCard({ item, onDecide }: { item: PermissionItem; onDecide: Decide }) {
@@ -142,7 +143,7 @@ function ProviderCard({ item, onDecide }: { item: PermissionItem; onDecide: Deci
           </button>
         </div>
       )}
-      {unreadable && <div className="permission-warning">Codex didn't say what this would do. Deny it.</div>}
+      {unreadable && <div className="permission-warning">{providerName(item.provider ?? "")} didn't say what this would do. Deny it.</div>}
       <dl className="permission-facts">
         {facts.filter(([, v]) => v).map(([k, v]) => (
           <div key={k}>
@@ -153,7 +154,7 @@ function ProviderCard({ item, onDecide }: { item: PermissionItem; onDecide: Deci
       </dl>
       {reason && (
         <div className="permission-reason">
-          <span>Codex says, and Lantern doesn't check:</span> {reason}
+          <span>{providerName(item.provider ?? "")} says, and Lantern doesn't check:</span> {reason}
         </div>
       )}
       {warnings.map((w) => (

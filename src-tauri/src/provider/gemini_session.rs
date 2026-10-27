@@ -37,6 +37,11 @@ const READY_WAIT: Duration = Duration::from_secs(90);
 const EOF_GRACE: Duration = if cfg!(test) { Duration::from_millis(400) } else { Duration::from_secs(3) };
 const TERM_GRACE: Duration = if cfg!(test) { Duration::from_millis(600) } else { Duration::from_secs(5) };
 
+/// How long Gemini has to be quiet before the history it replays to a loaded conversation is over (it sends no end of it), and
+/// the longest a chat waits for that.
+const REPLAY_QUIET: Duration = if cfg!(test) { Duration::from_millis(150) } else { Duration::from_millis(400) };
+const REPLAY_MAX: Duration = Duration::from_secs(8);
+
 /// The protocol version Lantern speaks (ACP's first, which is the one Gemini CLI answers with).
 const PROTOCOL_VERSION: u64 = 1;
 
@@ -90,6 +95,8 @@ struct State {
     pending: HashMap<String, Pending>,
     /// What `initialize` said Gemini's version is, for the session's start event.
     version: Option<String>,
+    /// When the last update arrived while no turn ran: the history Gemini replays to a loaded conversation.
+    last_replay: Option<Instant>,
 }
 
 /// Cards are numbered across every session of the app, not within one: a card left on screen from a session that was
@@ -157,7 +164,10 @@ impl Ctx {
             let mut p = base.clone();
             p["sessionId"] = id.into();
             match self.request("session/load", p, OPEN_WAIT).await {
-                Ok(r) => opened = Some((id.to_string(), r)),
+                Ok(r) => {
+                    self.let_replay_finish().await;
+                    opened = Some((id.to_string(), r));
+                }
                 Err((code, why)) if signed_out(code, &why) => return Ok(self.not_signed_in()),
                 // A conversation that never had a message isn't on disk to load (a chat restarted before its first turn).
                 Err((_, why)) if looks_missing(&why) => {}
@@ -198,6 +208,20 @@ impl Ctx {
         };
         sink(UiEvent::SessionStarted { session_id: id.clone(), model, cwd: self.cwd.clone(), permission_mode: mode.to_string(), claude_version: format!("gemini {version}").trim().to_string() });
         Ok(Some(id))
+    }
+
+    /// Gemini replays a loaded conversation's messages as updates, after it has answered the load and with nothing to say where
+    /// it ends. They are the chat's own already, and are dropped (see `notification`); the chat is ready once Gemini has been
+    /// quiet a moment, so a first message can't be mistaken for part of them.
+    async fn let_replay_finish(&self) {
+        let began = Instant::now();
+        loop {
+            tokio::time::sleep(REPLAY_QUIET / 4).await;
+            let last = self.state.lock().unwrap().last_replay.unwrap_or(began);
+            if last.elapsed() >= REPLAY_QUIET || began.elapsed() >= REPLAY_MAX {
+                break;
+            }
+        }
     }
 
     /// Gemini has no sign-in: remembered, so a message says so (and how to fix it) instead of failing a turn.
@@ -656,8 +680,12 @@ fn notification(ctx: &Ctx, method: &str, params: &Value) {
         return;
     }
     {
-        let s = ctx.state.lock().unwrap();
-        if !s.busy || params["sessionId"].as_str() != s.session_id.as_deref() {
+        let mut s = ctx.state.lock().unwrap();
+        if !s.busy {
+            s.last_replay = Some(Instant::now());
+            return;
+        }
+        if params["sessionId"].as_str() != s.session_id.as_deref() {
             return;
         }
     }
@@ -732,5 +760,393 @@ mod tests {
         assert!(looks_missing("No such file or directory"));
         assert!(!looks_missing("Invalid session identifier format."));
         assert!(!looks_missing("Authentication required."));
+    }
+}
+
+#[cfg(test)]
+mod fake_server_tests {
+    use super::*;
+    use crate::args::HelperConfig;
+    use crate::provider::ProviderId;
+    use crate::session::Session;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+    use tokio::sync::mpsc;
+
+    const NOTHING: &str = ":";
+    const END_TURN: &str = r#"reply "$id" '{"stopReason":"end_turn","usage":{"totalTokens":42}}'"#;
+    const NEW: &str = r#"reply "$id" '{"sessionId":"sess-1","modes":{"availableModes":[{"id":"default"},{"id":"autoEdit"},{"id":"yolo"},{"id":"plan"}],"currentModeId":"yolo"},"models":{"availableModels":[{"modelId":"auto","name":"Auto"},{"modelId":"gemini-2.5-pro","name":"Gemini 2.5 Pro"}],"currentModelId":"auto"}}'"#;
+
+    /// A stand-in for `gemini --acp`: a shell script that answers what Lantern sends, and logs it.
+    struct Fake {
+        version: &'static str,
+        new: &'static str,
+        load: &'static str,
+        set_mode: &'static str,
+        /// What it does when a prompt arrives (shell, given `$id`): the turn's own updates and its reply.
+        on_prompt: String,
+        /// It starts a background command, and stays alive after its input closes (a Gemini that won't stop).
+        hangs: bool,
+    }
+
+    impl Fake {
+        fn new(on_prompt: &str) -> Fake {
+            Fake { version: "0.65.0", new: NEW, load: NEW, set_mode: r#"reply "$id" 'null'"#, on_prompt: on_prompt.to_string(), hangs: false }
+        }
+
+        fn script(&self, dir: &Path) -> PathBuf {
+            let body = r#"#!/bin/sh
+LOG=@DIR@/stdin.txt
+reply() { printf '{"jsonrpc":"2.0","id":%s,"result":%s}\n' "$1" "$2"; }
+fail() { printf '{"jsonrpc":"2.0","id":%s,"error":{"code":%s,"message":"%s"}}\n' "$1" "$2" "$3"; }
+say() { printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1","update":%s}}\n' "$1"; }
+@START@
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$LOG"
+  id=$(printf '%s' "$line" | sed -n 's/^{"id":\([0-9]*\),.*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) reply "$id" '{"protocolVersion":1,"authMethods":[],"agentInfo":{"name":"gemini-cli","title":"Gemini CLI","version":"@VERSION@"},"agentCapabilities":{"loadSession":true}}' ;;
+    *'"method":"session/new"'*) @NEW@ ;;
+    *'"method":"session/load"'*) @LOAD@ ;;
+    *'"method":"session/set_mode"'*) @SET_MODE@ ;;
+    *'"method":"session/set_model"'*) reply "$id" 'null' ;;
+    *'"method":"session/prompt"'*)
+@ON_PROMPT@
+      ;;
+  esac
+done
+@END@
+"#;
+            let start = if self.hangs { format!("sleep 300 &\necho $! > {}/child.pid", dir.display()) } else { String::new() };
+            let end = if self.hangs { "sleep 300" } else { "" };
+            let body = body.replace("@DIR@", &dir.display().to_string()).replace("@VERSION@", self.version).replace("@NEW@", self.new).replace("@LOAD@", self.load).replace("@SET_MODE@", self.set_mode).replace("@ON_PROMPT@", &self.on_prompt).replace("@START@", &start).replace("@END@", end);
+            let p = dir.join("fake-gemini");
+            std::fs::write(&p, body).unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            p
+        }
+    }
+
+    fn config(binary: PathBuf, folder: &Path, resume: Option<&str>, role: Role) -> SessionConfig {
+        SessionConfig {
+            provider: ProviderId::Gemini,
+            binary,
+            folder: folder.to_path_buf(),
+            mode: Mode::Ask,
+            auto_approve: false,
+            resume: resume.map(String::from),
+            model: None,
+            effort: None,
+            advisor: None,
+            subagent_model: None,
+            helper: HelperConfig { exe: "/usr/bin/true".into(), socket: "/tmp/none.sock".into(), role, providers: vec![], project_notes: None },
+            path_env: None,
+            endpoint: None,
+        }
+    }
+
+    fn channel_sink() -> (Sink, mpsc::UnboundedReceiver<UiEvent>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (Arc::new(move |ev| { let _ = tx.send(ev); }), rx)
+    }
+
+    fn no_edits() -> EditHook {
+        Arc::new(|_: &str, _: Option<String>| {})
+    }
+
+    async fn next_matching(rx: &mut mpsc::UnboundedReceiver<UiEvent>, pred: impl Fn(&UiEvent) -> bool) -> UiEvent {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                let ev = rx.recv().await.expect("event channel closed");
+                if pred(&ev) {
+                    return ev;
+                }
+            }
+        })
+        .await
+        .expect("timed out waiting for event")
+    }
+
+    fn sent(dir: &Path) -> Vec<Value> {
+        std::fs::read_to_string(dir.join("stdin.txt")).unwrap_or_default().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+    }
+
+    fn requests(dir: &Path, method: &str) -> Vec<Value> {
+        sent(dir).into_iter().filter(|m| m["method"] == method).collect()
+    }
+
+    async fn wait_sent(dir: &Path, enough: impl Fn(&[Value]) -> bool) -> Vec<Value> {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                let all = sent(dir);
+                if enough(&all) {
+                    return all;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("timed out waiting for what Lantern sends")
+    }
+
+    async fn open_as(fake: &Fake, dir: &Path, resume: Option<&str>, role: Role) -> (Session, mpsc::UnboundedReceiver<UiEvent>) {
+        let (sink, rx) = channel_sink();
+        let mut s = Session::spawn(&config(fake.script(dir), dir, resume, role), sink, no_edits()).unwrap();
+        s.initialize().await;
+        (s, rx)
+    }
+
+    async fn open(fake: &Fake, dir: &Path) -> (Session, mpsc::UnboundedReceiver<UiEvent>) {
+        open_as(fake, dir, None, Role::Normal).await
+    }
+
+    /// A tool call that waits for the user: the agent asks, then reads the answer from its input and finishes the call.
+    fn asks_to_run(command: &str) -> String {
+        format!(
+            r#"say '{{"sessionUpdate":"tool_call","toolCallId":"t1","status":"pending","title":"{command}","kind":"execute","content":[]}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":900,"method":"session/request_permission","params":{{"sessionId":"sess-1","options":[{{"optionId":"proceed_always","name":"Allow for this session","kind":"allow_always"}},{{"optionId":"proceed_once","name":"Allow","kind":"allow_once"}},{{"optionId":"cancel","name":"Reject","kind":"reject_once"}}],"toolCall":{{"toolCallId":"t1","status":"pending","title":"{command}","kind":"execute","content":[]}}}}}}'
+IFS= read -r answer
+printf '%s\n' "$answer" >> "$LOG"
+case "$answer" in
+  *proceed_once*) say '{{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed","content":[{{"type":"content","content":{{"type":"text","text":"done"}}}}]}}' ;;
+  *) say '{{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"failed","content":[{{"type":"content","content":{{"type":"text","text":"Tool \"run_shell_command\" was canceled by the user."}}}}]}}' ;;
+esac
+{END_TURN}"#
+        )
+    }
+
+    #[tokio::test]
+    async fn the_handshake_opens_a_conversation_in_the_mode_lantern_runs_a_chat_in_and_never_signs_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let (s, mut rx) = open(&Fake::new(NOTHING), dir.path()).await;
+        let models = match next_matching(&mut rx, |e| matches!(e, UiEvent::Models { .. })).await {
+            UiEvent::Models { models } => models,
+            _ => unreachable!(),
+        };
+        assert_eq!(models.iter().map(|m| m.value.as_str()).collect::<Vec<_>>(), ["auto", "gemini-2.5-pro"]);
+        match next_matching(&mut rx, |e| matches!(e, UiEvent::SessionStarted { .. })).await {
+            UiEvent::SessionStarted { session_id, model, permission_mode, claude_version, .. } => {
+                assert_eq!((session_id.as_str(), model.as_str(), permission_mode.as_str(), claude_version.as_str()), ("sess-1", "auto", "autoEdit", "gemini 0.65.0"));
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(s.session_id().as_deref(), Some("sess-1"));
+        let all = sent(dir.path());
+        let methods: Vec<&str> = all.iter().filter_map(|m| m["method"].as_str()).collect();
+        // It was running in `yolo` (the user's own setting, say): the mode is set before anything else happens.
+        assert_eq!(methods, ["initialize", "session/new", "session/set_mode"]);
+        assert_eq!(all[0]["params"]["clientCapabilities"], json!({"fs": {"readTextFile": false, "writeTextFile": false}, "terminal": false}));
+        assert_eq!(all[1]["params"], json!({"cwd": dir.path().display().to_string(), "mcpServers": []}));
+        assert_eq!(all[2]["params"], json!({"sessionId": "sess-1", "modeId": "autoEdit"}));
+        assert!(requests(dir.path(), "authenticate").is_empty());
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_session_that_cannot_be_put_in_a_mode_that_asks_does_not_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut fake = Fake::new(NOTHING);
+        fake.set_mode = r#"fail "$id" -32603 "Invalid or unavailable mode""#;
+        let (s, mut rx) = open(&fake, dir.path()).await;
+        match next_matching(&mut rx, |e| matches!(e, UiEvent::SessionEnded { .. })).await {
+            UiEvent::SessionEnded { stderr_tail, .. } => assert!(stderr_tail.contains("Couldn't set Gemini's approval mode to autoEdit"), "{stderr_tail}"),
+            _ => unreachable!(),
+        }
+        assert!(s.session_id().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_gemini_with_no_sign_in_says_how_to_sign_in_on_the_first_message_and_never_does_it_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut fake = Fake::new(NOTHING);
+        fake.new = r#"fail "$id" -32000 "Authentication required.""#;
+        let (mut s, mut rx) = open(&fake, dir.path()).await;
+        s.send("hello").await.unwrap();
+        match next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await {
+            UiEvent::TurnDone { is_error, auth_hint, result, .. } => {
+                assert!(is_error && auth_hint);
+                assert!(result.unwrap().contains("Run `gemini` in a terminal"));
+            }
+            _ => unreachable!(),
+        }
+        assert!(requests(dir.path(), "authenticate").is_empty());
+        assert!(requests(dir.path(), "session/prompt").is_empty());
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_turn_streams_its_text_and_ends_with_its_tokens_and_no_dollars() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt = format!(r#"say '{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"Hi"}}}}'
+{END_TURN}"#);
+        let (mut s, mut rx) = open(&Fake::new(&prompt), dir.path()).await;
+        s.send("hello").await.unwrap();
+        assert!(matches!(next_matching(&mut rx, |e| matches!(e, UiEvent::TextDelta { .. })).await, UiEvent::TextDelta { text, .. } if text == "Hi"));
+        assert!(matches!(next_matching(&mut rx, |e| matches!(e, UiEvent::AssistantText { .. })).await, UiEvent::AssistantText { text, .. } if text == "Hi"));
+        assert!(matches!(next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await, UiEvent::TurnDone { is_error: false, tokens: Some(42), cost_usd: None, .. }));
+        let prompts = requests(dir.path(), "session/prompt");
+        assert_eq!(prompts[0]["params"], json!({"sessionId": "sess-1", "prompt": [{"type": "text", "text": "hello"}]}));
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_card_is_answered_with_the_option_for_this_one_action_and_an_allowed_step_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, mut rx) = open(&Fake::new(&asks_to_run("cargo test")), dir.path()).await;
+        s.send("run the tests").await.unwrap();
+        let (request_id, tool, input) = match next_matching(&mut rx, |e| matches!(e, UiEvent::PermissionRequested { .. })).await {
+            UiEvent::PermissionRequested { request_id, tool_name, input } => (request_id, tool_name, input),
+            _ => unreachable!(),
+        };
+        assert_eq!((tool.as_str(), input["command"].as_str(), input["provider"].as_str()), ("Bash", Some("cargo test"), Some("gemini")));
+        assert!(s.respond_permission(&request_id, true).await);
+        // Answered once: a second answer finds no card.
+        assert!(!s.respond_permission(&request_id, true).await);
+        assert!(matches!(next_matching(&mut rx, |e| matches!(e, UiEvent::ToolFinished { .. })).await, UiEvent::ToolFinished { is_error: false, output, .. } if output == "done"));
+        let all = wait_sent(dir.path(), |all| all.iter().any(|m| m["id"] == 900)).await;
+        let answer = all.iter().find(|m| m["id"] == 900).unwrap();
+        assert_eq!(answer["result"], json!({"outcome": {"outcome": "selected", "optionId": "proceed_once"}}));
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_denied_card_picks_the_reject_option_and_the_step_counts_as_denied() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, mut rx) = open(&Fake::new(&asks_to_run("rm -rf x")), dir.path()).await;
+        s.send("clean up").await.unwrap();
+        let request_id = match next_matching(&mut rx, |e| matches!(e, UiEvent::PermissionRequested { .. })).await {
+            UiEvent::PermissionRequested { request_id, .. } => request_id,
+            _ => unreachable!(),
+        };
+        assert!(s.respond_permission(&request_id, false).await);
+        assert!(matches!(next_matching(&mut rx, |e| matches!(e, UiEvent::ToolFinished { .. })).await, UiEvent::ToolFinished { is_error: true, output, .. } if output == "Declined."));
+        assert!(matches!(next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await, UiEvent::TurnDone { denied: 1, .. }));
+        let all = wait_sent(dir.path(), |all| all.iter().any(|m| m["id"] == 900)).await;
+        assert_eq!(all.iter().find(|m| m["id"] == 900).unwrap()["result"], json!({"outcome": {"outcome": "selected", "optionId": "cancel"}}));
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn stopping_a_turn_takes_its_card_off_answers_it_cancelled_and_tells_gemini_to_cancel() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut s, mut rx) = open(&Fake::new(&asks_to_run("sleep 100")), dir.path()).await;
+        s.send("wait").await.unwrap();
+        let request_id = match next_matching(&mut rx, |e| matches!(e, UiEvent::PermissionRequested { .. })).await {
+            UiEvent::PermissionRequested { request_id, .. } => request_id,
+            _ => unreachable!(),
+        };
+        s.interrupt().await;
+        assert!(matches!(next_matching(&mut rx, |e| matches!(e, UiEvent::PermissionWithdrawn { .. })).await, UiEvent::PermissionWithdrawn { request_id: r } if r == request_id));
+        let all = wait_sent(dir.path(), |all| all.iter().any(|m| m["method"] == "session/cancel") && all.iter().any(|m| m["id"] == 900)).await;
+        assert_eq!(all.iter().find(|m| m["id"] == 900).unwrap()["result"], json!({"outcome": {"outcome": "cancelled"}}));
+        assert_eq!(all.iter().find(|m| m["method"] == "session/cancel").unwrap()["params"], json!({"sessionId": "sess-1"}));
+        // The card can't be answered afterwards.
+        assert!(!s.respond_permission(&request_id, true).await);
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_read_only_agent_is_put_in_plan_mode_and_nothing_it_asks_for_is_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let role = Role::Worker { name: "scout".into(), read_only: true };
+        let (mut s, mut rx) = open_as(&Fake::new(&asks_to_run("touch x")), dir.path(), None, role).await;
+        assert_eq!(requests(dir.path(), "session/set_mode")[0]["params"]["modeId"], "plan");
+        s.send("go").await.unwrap();
+        // No card: it is declined, said in the chat, and Gemini is answered as cancelled.
+        let said = next_matching(&mut rx, |e| matches!(e, UiEvent::ToolFinished { tool_use_id, .. } if tool_use_id.starts_with("declined-"))).await;
+        assert!(matches!(said, UiEvent::ToolFinished { is_error: true, output, .. } if output.contains("this agent is read-only")));
+        let all = wait_sent(dir.path(), |all| all.iter().any(|m| m["id"] == 900)).await;
+        assert_eq!(all.iter().find(|m| m["id"] == 900).unwrap()["result"], json!({"outcome": {"outcome": "cancelled"}}));
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn what_gemini_replays_of_a_loaded_conversation_is_not_shown_and_a_turn_after_it_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut fake = Fake::new(&format!(r#"say '{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"new"}}}}'
+{END_TURN}"#));
+        fake.load = r#"reply "$id" '{"modes":{"availableModes":[{"id":"autoEdit"}],"currentModeId":"autoEdit"},"models":{"availableModels":[],"currentModelId":"auto"}}'
+say '{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"old history"}}'"#;
+        let (mut s, mut rx) = open_as(&fake, dir.path(), Some("sess-1"), Role::Normal).await;
+        assert_eq!(requests(dir.path(), "session/load")[0]["params"]["sessionId"], "sess-1");
+        assert!(requests(dir.path(), "session/new").is_empty());
+        s.send("next").await.unwrap();
+        let mut said = vec![];
+        loop {
+            match next_matching(&mut rx, |e| matches!(e, UiEvent::TextDelta { .. } | UiEvent::TurnDone { .. })).await {
+                UiEvent::TextDelta { text, .. } => said.push(text),
+                _ => break,
+            }
+        }
+        assert_eq!(said, ["new"]);
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_conversation_that_is_not_there_is_started_anew_but_one_that_fails_to_load_is_not_papered_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut fake = Fake::new(NOTHING);
+        fake.load = r#"fail "$id" -32602 "Session not found: gone""#;
+        let (s, _rx) = open_as(&fake, dir.path(), Some("gone"), Role::Normal).await;
+        assert_eq!(s.session_id().as_deref(), Some("sess-1"));
+        s.stop().await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut fake = Fake::new(NOTHING);
+        fake.load = r#"fail "$id" -32603 "The session file is corrupt""#;
+        let (s, mut rx) = open_as(&fake, dir.path(), Some("bad"), Role::Normal).await;
+        match next_matching(&mut rx, |e| matches!(e, UiEvent::SessionEnded { .. })).await {
+            UiEvent::SessionEnded { stderr_tail, .. } => assert!(stderr_tail.contains("Couldn't resume the Gemini conversation"), "{stderr_tail}"),
+            _ => unreachable!(),
+        }
+        assert!(requests(dir.path(), "session/new").is_empty());
+        assert!(s.session_id().is_none());
+    }
+
+    #[tokio::test]
+    async fn a_gemini_older_than_the_one_this_was_checked_against_is_refused_with_how_to_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut fake = Fake::new(NOTHING);
+        fake.version = "0.40.0";
+        let (_s, mut rx) = open(&fake, dir.path()).await;
+        match next_matching(&mut rx, |e| matches!(e, UiEvent::SessionEnded { .. })).await {
+            UiEvent::SessionEnded { stderr_tail, .. } => assert!(stderr_tail.contains("older than the 0.65.0") && stderr_tail.contains("npm i -g @google/gemini-cli"), "{stderr_tail}"),
+            _ => unreachable!(),
+        }
+        assert!(requests(dir.path(), "session/new").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_message_sent_while_a_turn_runs_waits_for_it_and_a_model_switch_reaches_the_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let prompt = format!("sleep 0.3\n{END_TURN}");
+        let (mut s, mut rx) = open(&Fake::new(&prompt), dir.path()).await;
+        s.send("one").await.unwrap();
+        s.send("two").await.unwrap();
+        next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
+        next_matching(&mut rx, |e| matches!(e, UiEvent::TurnDone { .. })).await;
+        let prompts = requests(dir.path(), "session/prompt");
+        assert_eq!(prompts.iter().map(|p| p["params"]["prompt"][0]["text"].as_str().unwrap()).collect::<Vec<_>>(), ["one", "two"]);
+        s.set_model(Some("gemini-2.5-pro")).await.unwrap();
+        assert_eq!(requests(dir.path(), "session/set_model")[0]["params"], json!({"sessionId": "sess-1", "modelId": "gemini-2.5-pro"}));
+        s.stop().await;
+    }
+
+    #[tokio::test]
+    async fn a_chat_that_is_closed_takes_a_gemini_that_will_not_stop_and_what_it_started_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut fake = Fake::new(NOTHING);
+        fake.hangs = true;
+        let (s, _rx) = open(&fake, dir.path()).await;
+        let pid: i32 = std::fs::read_to_string(dir.path().join("child.pid")).unwrap().trim().parse().unwrap();
+        assert_eq!(unsafe { libc::kill(pid, 0) }, 0, "the command it started is running");
+        s.stop().await;
+        let gone = tokio::time::timeout(Duration::from_secs(5), async {
+            while unsafe { libc::kill(pid, 0) } == 0 {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await;
+        assert!(gone.is_ok(), "the command it started was left running");
     }
 }

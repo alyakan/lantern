@@ -22,6 +22,8 @@ describe("what a chat's provider can do", () => {
   it("is named for the screen, with a name for an id this build doesn't know", () => {
     expect(providerName("claude")).toBe("Claude");
     expect(providerName("codex")).toBe("Codex");
+    expect(providerName("gemini")).toBe("Gemini");
+    expect(wireProvider("gemini")).toEqual({ provider: "gemini" });
     expect(providerName("aider")).toBe("Aider");
     expect(agentName(null)).toBe("Claude");
     expect(agentName(PLAIN)).toBe("Codex");
