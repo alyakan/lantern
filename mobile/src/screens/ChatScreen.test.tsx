@@ -210,6 +210,28 @@ describe("a chat", () => {
       await waitFor(() => expect(screen.getByLabelText("Message").props.value).toBe("half a thought"));
     });
 
+    it("gives the circle's room to the bar while words are being typed in it, and takes it back when they stop", async () => {
+      await withSession(talk);
+      expect(screen.getByRole("button", { name: "Search this chat" })).toBeTruthy();
+      await fireEvent(screen.getByLabelText("Message"), "focus");
+      expect(screen.queryByRole("button", { name: "Search this chat" })).toBeNull();
+      await fireEvent(screen.getByLabelText("Message"), "blur");
+      expect(screen.getByRole("button", { name: "Search this chat" })).toBeTruthy();
+    });
+
+    it("makes the circle as tall as the bar is at rest, and not taller when the bar grows with a long message", async () => {
+      await withSession(talk);
+      const lay = (height: number) => fireEvent(screen.getByTestId("chat-bar"), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height } } });
+      const circle = () => StyleSheet.flatten(screen.getByTestId("search-circle").props.style).height;
+      await lay(52);
+      expect(circle()).toBe(52);
+      await lay(96);
+      expect(circle()).toBe(52);
+      // Text size changing it for the better: the least it has been.
+      await lay(50);
+      expect(circle()).toBe(50);
+    });
+
     it("can still be searched while it sleeps: the circle is beside the Wake button, and the field replaces it while searching", async () => {
       await withSession(talk, {}, {}, { status: "asleep" });
       expect(screen.getByRole("button", { name: "Wake this chat" })).toBeTruthy();

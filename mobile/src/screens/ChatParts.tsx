@@ -506,6 +506,8 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
     [draftKey],
   );
   const input = useRef<ComponentRef<typeof TextInput>>(null);
+  // Words are being typed in the message box: the search circle beside it makes room.
+  const [typing, setTyping] = useState(false);
   const termInput = useRef<ComponentRef<typeof TextInput>>(null);
   // Terminal mode: the box starts with "!" (the "!" itself isn't shown), and the Mac can run commands.
   const terminal = !!onRun && isTerminal(text);
@@ -649,7 +651,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
         </View>
       )}
       {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
-      <SearchBar search={search} capsule={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: canAttach ? 4 : 16, paddingRight: 6, paddingVertical: 6 }} lift={0.12} fill={COMPOSER_FILL} inset={canAttach ? 12 : 0} back={() => input.current?.focus()}>
+      <SearchBar search={search} typing={typing} capsule={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: canAttach ? 4 : 16, paddingRight: 6, paddingVertical: 6 }} lift={0.12} fill={COMPOSER_FILL} inset={canAttach ? 12 : 0} back={() => input.current?.focus()}>
         {canAttach && <PlusButton busy={attach.busy} full={attach.full} onPress={() => setChoosing(true)} />}
         <TextInput
           ref={input}
@@ -661,6 +663,8 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
             dictation.edited();
             list.onChangeText(v);
           }}
+          onFocus={() => setTyping(true)}
+          onBlur={() => setTyping(false)}
           placeholder={dictation.listening ? "Listening…" : placeholder}
           placeholderTextColor={colors.ink3}
           multiline
