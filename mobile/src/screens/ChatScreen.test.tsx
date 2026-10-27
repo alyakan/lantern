@@ -258,6 +258,35 @@ describe("a chat", () => {
       expect(screen.getByLabelText("Message").props.value).toBe("still works");
     });
 
+    // The opacity the nearest drawn layer above this node says (the message box's row fades while a search is on).
+    const opacityOf = (node: { props?: ViewProps; parent?: unknown } | null | undefined): number | undefined => {
+      for (let n = node as { props?: ViewProps; parent?: unknown } | null | undefined; n; n = n.parent as typeof n) {
+        const o = StyleSheet.flatten(n.props?.style)?.opacity;
+        if (typeof o === "number") return o;
+      }
+      return undefined;
+    };
+
+    it("never fades the message box while words are typed in it: the bar only gives the circle's room away, it doesn't go blank", async () => {
+      await withSession(talk);
+      expect(opacityOf(screen.getByLabelText("Message"))).toBe(1);
+      await fireEvent(screen.getByLabelText("Message"), "focus");
+      expect(screen.queryByRole("button", { name: "Search this chat" })).toBeNull();
+      expect(opacityOf(screen.getByLabelText("Message"))).toBe(1);
+      await fireEvent.changeText(screen.getByLabelText("Message"), "typing a message");
+      expect(opacityOf(screen.getByLabelText("Message"))).toBe(1);
+      await fireEvent(screen.getByLabelText("Message"), "blur");
+      expect(opacityOf(screen.getByLabelText("Message"))).toBe(1);
+    });
+
+    it("fades the message box out only while the search is on, and brings it back", async () => {
+      await withSession(talk);
+      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      expect(opacityOf(screen.getByLabelText("Message", { includeHiddenElements: true }))).toBe(0);
+      await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
+      await waitFor(() => expect(opacityOf(screen.getByLabelText("Message"))).toBe(1));
+    });
+
     it("sizes the circle by the bar at rest, not by a layout in passing", async () => {
       await withSession(talk);
       const lay = (height: number) => fireEvent(screen.getByTestId("chat-bar"), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height } } });

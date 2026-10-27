@@ -138,6 +138,9 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
   // The circle is out while the bar is the search field and while words are being typed in the message box.
   const shut = active || typing;
   const t = useSwap(shut);
+  // The search field and the message box fading in and out of each other follow the SEARCH alone. They must not follow `t`, which
+  // also moves while words are typed in the message box (the circle makes room): that faded the box out and left the bar blank.
+  const f = useSwap(active);
   // The circle is as tall as the bar is at rest: the least height the bar has had (it grows with a long message, the circle doesn't).
   const [seen, setSeen] = useState<number | null>(null);
   const size = seen ?? CIRCLE;
@@ -167,8 +170,8 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
   const shrink = t.interpolate({ inputRange: [0, 1], outputRange: [1, 0.3], extrapolate: "clamp" });
   const none = !!search && search.query.trim().length >= 2 && search.count === 0;
   // The message box fades out as the field fades in over it. Nothing is ever made untouchable: the field is there only while searching.
-  const boxFade = t.interpolate({ inputRange: [0, 0.5], outputRange: [1, 0], extrapolate: "clamp" });
-  const fieldFade = t.interpolate({ inputRange: [0.25, 0.8], outputRange: [0, 1], extrapolate: "clamp" });
+  const boxFade = f.interpolate({ inputRange: [0, 0.5], outputRange: [1, 0], extrapolate: "clamp" });
+  const fieldFade = f.interpolate({ inputRange: [0.25, 0.8], outputRange: [0, 1], extrapolate: "clamp" });
 
   return (
     <View>
