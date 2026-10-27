@@ -34,6 +34,9 @@ export type Row =
 
 type Step = Extract<Item, { kind: "step" }>;
 
+/** The tools that change a file (their lines come once the change is made). */
+const EDIT_TOOLS = ["Edit", "MultiEdit", "Write", "NotebookEdit"];
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 
@@ -47,12 +50,14 @@ export function stepChips(steps: Step[]): StepChip[] {
   const searches = named("Grep", "Glob", "WebSearch", "WebFetch");
   if (searches.length) chips.push({ key: "search", label: searches.every((s) => s.name.startsWith("Web")) ? `Looked up ${plural(searches.length, "page")}` : `Searched ${plural(searches.length, "time")}`, tone: "plain", ...going(searches) });
 
+  // An edit still going has no lines yet: it is the edits chip already, spinning, not "another tool" that later turns into one.
+  const editing = steps.filter((s) => EDIT_TOOLS.includes(s.name) && !s.edits.length && !s.done);
   const edits = new Map<string, { added: number; removed: number }>();
   for (const s of steps) for (const e of s.edits) edits.set(e.path, { added: (edits.get(e.path)?.added ?? 0) + e.added, removed: (edits.get(e.path)?.removed ?? 0) + e.removed });
   if (edits.size) {
     const [added, removed] = [...edits.values()].reduce<[number, number]>(([a, r], e) => [a + e.added, r + e.removed], [0, 0]);
-    chips.push({ key: "edits", label: `Edited ${plural(edits.size, "file")} +${added} −${removed}`, tone: "plain", files: [...edits.keys()], ...going(steps.filter((s) => s.edits.length)) });
-  }
+    chips.push({ key: "edits", label: `Edited ${plural(edits.size, "file")} +${added} −${removed}`, tone: "plain", files: [...edits.keys()], ...going([...steps.filter((s) => s.edits.length), ...editing]) });
+  } else if (editing.length) chips.push({ key: "edits", label: `Editing ${plural(editing.length, "file")}`, tone: "plain", running: true });
 
   const tested = steps.filter((s) => s.tests);
   if (tested.length) {
@@ -62,7 +67,7 @@ export function stepChips(steps: Step[]): StepChip[] {
 
   // What is left is grouped by kind, as the desktop's summary line is ("Ran 5 commands, used 2 skills"), each group
   // opening to its steps.
-  const rest = steps.filter((s) => !s.tests && !s.edits.length && !["Read", "Grep", "Glob", "WebSearch", "WebFetch"].includes(s.name));
+  const rest = steps.filter((s) => !s.tests && !s.edits.length && !editing.includes(s) && !["Read", "Grep", "Glob", "WebSearch", "WebFetch"].includes(s.name));
   const group = (key: string, label: string, of: Step[], line: (s: Step) => string) => {
     if (of.length) chips.push({ key, label, tone: "plain", items: of.map((s) => ({ text: clip(line(s), 200), bad: s.isError, id: s.id })), ...going(of) });
   };
@@ -148,7 +153,9 @@ function apart(items: Item[]): { main: Item[]; hooks: Map<number, HookRun> } {
       run.said.push(it.text);
       continue;
     }
-    if (run && (it.kind === "turn" || it.kind === "user")) {
+    // The hook is over at its turn's end, or (a chat replayed from its transcript has no turn ends) at the next message: not one
+    // this phone is still sending, which may be typed while the hook runs.
+    if (run && (it.kind === "turn" || (it.kind === "user" && !it.sending))) {
       hooks.set(main.length, { ...run, going: false });
       run = null;
     }
@@ -191,12 +198,26 @@ export function tookOf(durationMs: number | null): string | null {
   return s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
 }
 
+/** No files: the same list every time, so a row with none is not drawn again as words stream in. */
+const NO_FILES: string[] = [];
+/** Lists of files already made, by what is in them: the same files are the same list, for the same reason. */
+const fileLists = new Map<string, string[]>();
+function sameList(files: string[]): string[] {
+  if (files.length === 0) return NO_FILES;
+  const key = files.join("\n");
+  const known = fileLists.get(key);
+  if (known) return known;
+  if (fileLists.size > 500) fileLists.clear();
+  fileLists.set(key, files);
+  return files;
+}
+
 /** The files each turn edited, by the place in `items` of each of its items. */
 function filesByItem(items: Item[]): string[][] {
   const out: string[][] = [];
   let from = 0;
   const close = (to: number) => {
-    const files = [...new Set(items.slice(from, to).flatMap((it) => (it.kind === "step" ? it.edits.map((e) => e.path) : [])))];
+    const files = sameList([...new Set(items.slice(from, to).flatMap((it) => (it.kind === "step" ? it.edits.map((e) => e.path) : [])))]);
     for (let k = from; k < to; k++) out[k] = files;
     from = to;
   };
@@ -207,7 +228,7 @@ function filesByItem(items: Item[]): string[][] {
   return out;
 }
 
-export function timeline(all: Item[], now = Date.now()): Row[] {
+export function timeline(all: Item[], now = Date.now(), working = false): Row[] {
   const { main: items, hooks } = apart(all);
   const files = filesByItem(items);
   const rows: Row[] = [];
@@ -225,7 +246,8 @@ export function timeline(all: Item[], now = Date.now()): Row[] {
     if (!h) return;
     endRun();
     const said = h.said.join("\n\n");
-    rows.push({ key: `hk-${h.id}`, kind: "hook", text: h.text, said, chips: stepChips(h.steps), going: h.going });
+    // Still going only while the chat works: a replayed chat's last hook has no end, and is long over.
+    rows.push({ key: `hk-${h.id}`, kind: "hook", text: h.text, said, chips: stepChips(h.steps), going: h.going && working });
   };
   items.forEach((item, i) => {
     hookAt(i);
@@ -250,8 +272,8 @@ export function timeline(all: Item[], now = Date.now()): Row[] {
         const page = readPage(item.text);
         if (page && !item.streaming) return void rows.push({ key: `a-${item.id}`, kind: "page", item, page, live: livePage(items, i) });
         const summary = summaryOf(items, i);
-        if (summary) return void rows.push({ key: `a-${item.id}`, kind: "summary", item, ...summary, files: files[i] ?? [] });
-        return void rows.push({ key: `a-${item.id}`, kind: "assistant", item, files: files[i] ?? [] });
+        if (summary) return void rows.push({ key: `a-${item.id}`, kind: "summary", item, ...summary, files: files[i] ?? NO_FILES });
+        return void rows.push({ key: `a-${item.id}`, kind: "assistant", item, files: files[i] ?? NO_FILES });
       }
       case "prompt":
         return void rows.push({ key: `p-${item.id}`, kind: "prompt", item });

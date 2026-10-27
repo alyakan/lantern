@@ -217,7 +217,7 @@ export const HookRow = memo(function HookRow({ row, onFiles, onOutput }: { row: 
             <Txt variant="tiny" tone="ink3">
               {row.text}
             </Txt>
-            {row.chips.length > 0 && <StepsRow chips={row.chips} onFiles={onFiles} onOutput={onOutput} took={null} inset={0} />}
+            {row.chips.length > 0 && <StepsRow rowKey={row.key} chips={row.chips} onFiles={onFiles} onOutput={onOutput} took={null} inset={0} />}
             {!!row.said && <Markdown text={row.said} />}
           </View>
         </FadeSlideIn>
@@ -226,13 +226,16 @@ export const HookRow = memo(function HookRow({ row, onFiles, onOutput }: { row: 
   );
 });
 
-export const StepsRow = memo(function StepsRow({ chips, onFiles, onOutput, took = null, inset = space.lg }: { chips: StepChip[]; onFiles: (files: string[]) => void; /** Present when the Mac can say what a step printed: a tap on one of a chip's lines asks. */ onOutput?: (step: { id: string; text: string }) => void; /** How long the turn took, at the end of the row, once it has ended ("42 s"). */ took?: string | null; inset?: number }) {
+export const StepsRow = memo(function StepsRow({ rowKey, chips, onFiles, onOutput, took = null, inset = space.lg }: { /** Which row of steps this is: a list's cell drawn again for another row starts afresh (its chips don't pop). */ rowKey?: string; chips: StepChip[]; onFiles: (files: string[]) => void; /** Present when the Mac can say what a step printed: a tap on one of a chip's lines asks. */ onOutput?: (step: { id: string; text: string }) => void; /** How long the turn took, at the end of the row, once it has ended ("42 s"). */ took?: string | null; inset?: number }) {
   const colors = useColors();
   // A grouped chip ("Ran 5 commands") opens to what it stands for, one line each.
   const [open, setOpen] = useState<string | null>(null);
   const opened = chips.find((c) => c.key === open && c.items);
-  // The chips there when the row was first drawn just are; one that comes after (a new kind of step) pops in.
-  const first = useRef(new Set(chips.map((c) => c.key))).current;
+  // The chips there when the row was first drawn just are; one that comes after (a new kind of step) pops in. A cell the list reuses
+  // for another row is that row's first drawing.
+  const seen = useRef<{ row: string | undefined; keys: Set<string> }>({ row: rowKey, keys: new Set(chips.map((c) => c.key)) });
+  if (seen.current.row !== rowKey) seen.current = { row: rowKey, keys: new Set(chips.map((c) => c.key)) };
+  const first = seen.current.keys;
   return (
     <View style={{ paddingHorizontal: inset, paddingTop: 10, gap: 8 }}>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, alignItems: "center" }}>

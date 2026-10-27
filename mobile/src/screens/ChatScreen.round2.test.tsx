@@ -95,3 +95,11 @@ describe("a turn that failed", () => {
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 });
+
+describe("a turn whose post-hook failed", () => {
+  it("offers no Try again: the task itself is done, and would run all over", async () => {
+    await withSession([asked, { kind: "assistant_text", block_id: "b1", text: "All fixed." }, { kind: "hook_turn", text: "Update the brain" }, { kind: "turn_done", is_error: true, result: "hook failed", duration_ms: 1, context_window: null }]);
+    expect(screen.getByText(/Stopped with an error/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+});

@@ -186,7 +186,7 @@ describe("a post-hook in the timeline", () => {
   });
 
   it("is still going until the turn ends", () => {
-    const rows = timeline([you("u1", "go"), said("a1", "Hi."), hook, step("h1", "Bash", { done: false })]);
+    const rows = timeline([you("u1", "go"), said("a1", "Hi."), hook, step("h1", "Bash", { done: false })], Date.now(), true);
     expect(rows.at(-1)?.kind === "hook" && rows.at(-1)).toMatchObject({ going: true });
   });
 
@@ -208,5 +208,44 @@ describe("a chip whose step is still going", () => {
     expect(stepChips([step("1", "Bash", { done: false })])[0].running).toBe(true);
     expect(stepChips([step("1", "Bash")])[0].running).toBeUndefined();
     expect(stepChips([step("1", "Read", { done: false })])[0].running).toBe(true);
+  });
+});
+
+describe("a post-hook in a chat replayed from its transcript (no turn ends)", () => {
+  const hook: Item = { kind: "hook", id: "hook-u1", text: "Update the brain" };
+  it("ends at the next message, and isn't going once the chat has stopped", () => {
+    const rows = timeline([you("u1", "go"), said("a1", "Done."), hook, said("h1", "Updated."), you("u2", "next"), said("a2", "Ok."), { kind: "hook", id: "hook-u2", text: "Update the brain" }, said("h2", "Nothing new.")]);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "assistant", "hook", "user", "assistant", "hook"]);
+    expect(rows.filter((r) => r.kind === "hook").map((r) => r.kind === "hook" && r.going)).toEqual([false, false]);
+  });
+  it("is going only while the chat works", () => {
+    const items = [you("u1", "go"), said("a1", "Done."), hook];
+    expect(timeline(items, Date.now(), true).at(-1)).toMatchObject({ kind: "hook", going: true });
+    expect(timeline(items, Date.now(), false).at(-1)).toMatchObject({ kind: "hook", going: false });
+  });
+  it("isn't ended by a message this phone is still sending", () => {
+    const sending: Item = { kind: "user", id: "local-1", text: "also", at: null, sentBy: null, sending: true };
+    const rows = timeline([you("u1", "go"), said("a1", "Done."), hook, sending, said("h1", "Updated.")], Date.now(), true);
+    expect(rows.map((r) => r.kind)).toEqual(["user", "assistant", "user", "hook"]);
+  });
+});
+
+describe("rows drawn again as words stream in", () => {
+  it("keep the same list of files, so their words aren't drawn again", () => {
+    const edit = step("1", "Edit", { edits: [{ path: "/p/a.ts", created: false, added: 1, removed: 0 }] });
+    const a = timeline([you("u1", "go"), edit, said("a1", "Changed it.")]);
+    const b = timeline([you("u1", "go"), edit, said("a1", "Changed it."), said("a2", "More", true)]);
+    const files = (rows: ReturnType<typeof timeline>) => rows.find((r) => r.kind === "assistant" && r.key === "a-a1");
+    expect((files(a) as { files: string[] }).files).toBe((files(b) as { files: string[] }).files);
+    const none = timeline([you("u1", "hi"), said("a1", "Hello.")]).find((r) => r.kind === "assistant") as { files: string[] };
+    expect(none.files).toBe((timeline([you("u2", "x"), said("a9", "y")]).find((r) => r.kind === "assistant") as { files: string[] }).files);
+  });
+});
+
+describe("an edit still going", () => {
+  it("is the edits chip, spinning, not another tool", () => {
+    expect(stepChips([step("1", "Edit", { done: false, summary: "a.ts" })])).toEqual([{ key: "edits", label: "Editing 1 file", tone: "plain", running: true }]);
+    // One that failed with no change made is still said as a tool that was used.
+    expect(stepChips([step("1", "Edit", { isError: true })]).map((c) => c.label)).toEqual(["Used 1 other tool", "1 step failed"]);
   });
 });

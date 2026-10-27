@@ -53,12 +53,17 @@ function WorkingFooter({ activity, since }: { activity: string; since: number | 
     return () => clearInterval(t);
   }, []);
   return (
-    <View accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: space.lg, paddingTop: 12, paddingBottom: 6 }}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: space.lg, paddingTop: 12, paddingBottom: 6 }}>
       <Dots />
-      <Txt variant="small" tone="ink3" numberOfLines={1} style={{ flexShrink: 1 }}>
+      {/* What it is doing is said when it changes; the seconds are not read out each time they tick. */}
+      <Txt variant="small" tone="ink3" numberOfLines={1} accessibilityLiveRegion="polite" style={{ flexShrink: 1 }}>
         {activity}
-        {since !== null ? ` · ${elapsed(now - since)}` : ""}
       </Txt>
+      {since !== null && (
+        <Txt variant="small" tone="ink3" accessibilityElementsHidden importantForAccessibility="no">
+          · {elapsed(now - since)}
+        </Txt>
+      )}
     </View>
   );
 }
@@ -92,8 +97,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   const [bottom, setBottom] = useState(0);
   const chat = chats.find((c) => c.slot === slot);
   const view = views[slot] ?? emptyView;
-  const rows = useMemo(() => timeline(view.items), [view.items]);
   const working = chat?.status === "working";
+  const rows = useMemo(() => timeline(view.items, Date.now(), working), [view.items, working]);
   // Messages sent while Claude was busy say they are waiting for it.
   const queued = useMemo(() => queuedIds(view.items, working), [view.items, working]);
   const [answered, setAnswered] = useState<Set<string>>(new Set());
@@ -256,7 +261,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   // A turn that failed can be tried again: its message is sent once more (only the last turn, and only its words).
   const lastTurn = [...rows].reverse().find((r) => r.kind === "turn" || r.kind === "user");
   const lastUserText = [...rows].reverse().find((r) => r.kind === "user");
-  const retry = lastTurn?.kind === "turn" && lastTurn.item.isError && lastUserText?.kind === "user" && lastUserText.item.text ? () => void sync.send(slot, (lastUserText as Extract<Row, { kind: "user" }>).item.text) : undefined;
+  // Not when it was the post-hook that failed (that marks the whole turn failed): the task itself is done, and sending its message
+  // again would do it all over.
+  const hookFailed = lastTurn?.kind === "turn" && rows.slice(rows.indexOf(lastUserText as Row) + 1, rows.indexOf(lastTurn)).some((r) => r.kind === "hook");
+  const retry = lastTurn?.kind === "turn" && lastTurn.item.isError && !hookFailed && lastUserText?.kind === "user" && lastUserText.item.text ? () => void sync.send(slot, (lastUserText as Extract<Row, { kind: "user" }>).item.text) : undefined;
   const openFile = useCallback((path: string) => setFiles([path]), []);
   const open = chat?.status === "needs_you";
   const replies = lastWords && (lastWords.kind === "assistant" || lastWords.kind === "summary") && !working && !open && !asleep && repliedTo !== lastWords.key ? quickReplies(lastWords.item.text) : [];
@@ -286,7 +294,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         case "page":
           return <PageRow row={row} answered={answered.has(row.item.id)} mark={term} onAction={(a) => reply(row.item.id, a)} />;
         case "steps":
-          return <StepsRow chips={row.chips} took={row.took} onFiles={setFiles} onOutput={canOutput ? setOutput : undefined} />;
+          return <StepsRow rowKey={row.key} chips={row.chips} took={row.took} onFiles={setFiles} onOutput={canOutput ? setOutput : undefined} />;
         case "prompt":
           return (
             <PromptRow
