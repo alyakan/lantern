@@ -34,7 +34,7 @@ export function HomeSearch({ active, query, found, lift = 0, onOpen, onChange, o
     <KeyboardStickyView offset={{ closed: 0, opened: insets.bottom - 8 }} style={{ position: "absolute", left: 0, right: 0, bottom: 0 }} pointerEvents="box-none">
       <View pointerEvents="box-none" style={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 14 + lift, alignItems: "flex-end" }}>
         {active ? (
-          <FadeSlideIn from={10} ms={180} style={{ alignSelf: "stretch" }}>
+          <FadeSlideIn glass from={10} ms={180} style={{ alignSelf: "stretch" }}>
             <Glass style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: CIRCLE, paddingLeft: 16, paddingRight: 8, borderRadius: CIRCLE / 2 }}>
               <Magnifier color={colors.ink3} />
               <TextInput
@@ -67,7 +67,7 @@ export function HomeSearch({ active, query, found, lift = 0, onOpen, onChange, o
             </Glass>
           </FadeSlideIn>
         ) : (
-          <PopIn>
+          <PopIn glass>
             <PressScale accessibilityRole="button" accessibilityLabel="Search chats" onPress={onOpen} scaleTo={0.9} haptic="light">
               <Glass style={{ width: CIRCLE, height: CIRCLE, borderRadius: CIRCLE / 2, alignItems: "center", justifyContent: "center" }}>
                 <Magnifier />

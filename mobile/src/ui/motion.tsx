@@ -71,26 +71,35 @@ export function buzz(kind: "light" | "select" | "success" | "warning" = "light")
 }
 
 /**
- * Fades its content in, and up from `from` points below, when it appears (after `delay`). A new `key` is a new arrival.
- * `animate={false}` is for things that were there from the start: they just are.
+ * Opacity that rises from nothing over Liquid Glass leaves the glass clear: not only glass there as it fades in, but glass that
+ * comes inside it later (a chat opened a minute after the app faded in had a clear header and message box). Seen on the
+ * simulator with the fade run natively and in JavaScript alike; glass that was already drawn and then faded out and back was
+ * fine, and so was glass that only moved in. So what holds glass moves in and doesn't fade (`glass`).
  */
-export function FadeSlideIn({ children, from = 10, ms = 240, delay = 0, animate = true, style }: { children: ReactNode; from?: number; ms?: number; delay?: number; animate?: boolean; style?: StyleProp<ViewStyle> }) {
+const opacityOf = (p: Animated.Value, glass: boolean) => (glass ? 1 : p);
+
+/**
+ * Fades its content in, and up from `from` points below, when it appears (after `delay`). A new `key` is a new arrival.
+ * `animate={false}` is for things that were there from the start: they just are. `glass`: it holds Liquid Glass, so it only
+ * moves up, without the fade (see `opacityOf`).
+ */
+export function FadeSlideIn({ children, from = 10, ms = 240, delay = 0, animate = true, glass = false, style }: { children: ReactNode; from?: number; ms?: number; delay?: number; animate?: boolean; glass?: boolean; style?: StyleProp<ViewStyle> }) {
   const p = useRef(new Animated.Value(skips() || !animate ? 1 : 0)).current;
   useEffect(() => {
     if (animate) run(p, 1, ms, undefined, delay);
     // Only when it appears: a list's recycled cell holding another item must not play it again.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return <Animated.View style={[style, { opacity: p, transform: [{ translateY: p.interpolate({ inputRange: [0, 1], outputRange: [from, 0] }) }] }]}>{children}</Animated.View>;
+  return <Animated.View style={[style, { opacity: opacityOf(p, glass), transform: [{ translateY: p.interpolate({ inputRange: [0, 1], outputRange: [from, 0] }) }] }]}>{children}</Animated.View>;
 }
 
-/** Pops its content in from small, with a little overshoot (a check mark, a badge). */
-export function PopIn({ children, delay = 0, style }: { children: ReactNode; delay?: number; style?: StyleProp<ViewStyle> }) {
+/** Pops its content in from small, with a little overshoot (a check mark, a badge). `glass`: it only grows, without the fade. */
+export function PopIn({ children, delay = 0, glass = false, style }: { children: ReactNode; delay?: number; glass?: boolean; style?: StyleProp<ViewStyle> }) {
   const p = useRef(new Animated.Value(skips() ? 1 : 0)).current;
   useEffect(() => {
     bounce(p, 1, { delay, bounciness: 16 });
   }, [p, delay]);
-  return <Animated.View style={[style, { opacity: p.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 1, 1] }), transform: [{ scale: p.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) }] }]}>{children}</Animated.View>;
+  return <Animated.View style={[style, { opacity: glass ? 1 : p.interpolate({ inputRange: [0, 0.4, 1], outputRange: [0, 1, 1] }), transform: [{ scale: p.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) }] }]}>{children}</Animated.View>;
 }
 
 const APressable = Animated.createAnimatedComponent(Pressable);
