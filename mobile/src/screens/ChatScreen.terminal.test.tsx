@@ -49,6 +49,7 @@ describe("the message box as a terminal", () => {
   it("turns into one when it starts with '!', hiding the '!' and saying where it runs", async () => {
     await terminal();
     await type("!ls -la");
+    await fireEvent(screen.getByLabelText("Shell command"), "focus");
     expect(screen.queryByLabelText("Message")).toBeNull();
     expect(screen.getByLabelText("Shell command").props.value).toBe("ls -la");
     expect(screen.getByRole("button", { name: "Run" })).toBeTruthy();
@@ -65,11 +66,30 @@ describe("the message box as a terminal", () => {
     expect(screen.queryByLabelText("Shell command")).toBeNull();
     const box = screen.getByLabelText("Message");
     await type("!ls");
+    // The terminal comes in over the message box, which stays in view until the terminal has the keyboard: a box put away
+    // while it has the keyboard takes the keyboard down with it (seen on the simulator).
     expect(screen.getByLabelText("Shell command")).toBeTruthy();
+    expect(screen.getByLabelText("Message")).toBe(box);
+    await fireEvent(screen.getByLabelText("Shell command"), "focus");
     expect(screen.queryByLabelText("Message")).toBeNull();
     // The same message box, not a new one: it was never taken away, so nothing let go of the keyboard.
     expect(screen.getByLabelText("Message", hidden)).toBe(box);
     expect(screen.getByLabelText("Message", hidden).props.value).toBe("!ls");
+    // And back: the message box comes in, and the terminal is put away once the box has the keyboard.
+    await typeCommand("");
+    await fireEvent(screen.getByLabelText("Shell command"), "keyPress", { nativeEvent: { key: "Backspace" } });
+    expect(screen.getByLabelText("Shell command")).toBeTruthy();
+    await fireEvent(screen.getByLabelText("Message"), "focus");
+    expect(screen.queryByLabelText("Shell command")).toBeNull();
+  });
+
+  it("puts the box going away anyway when the other can't take the keyboard", async () => {
+    await terminal();
+    await type("!ls");
+    expect(screen.getByLabelText("Message")).toBeTruthy();
+    await act(async () => void (await new Promise((r) => setTimeout(r, 400))));
+    expect(screen.queryByLabelText("Message")).toBeNull();
+    expect(screen.getByLabelText("Shell command")).toBeTruthy();
   });
 
   it("is an ordinary message box for words, and for a '!' anywhere but the start", async () => {

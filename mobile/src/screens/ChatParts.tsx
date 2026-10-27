@@ -454,16 +454,22 @@ export const TurnRow = memo(function TurnRow({ item }: { item: Extract<Item, { k
 });
 
 /**
- * Which of the message box and the terminal is in view. Both stay mounted: swapping one for the other would end the first one's
- * hold on the keyboard (it drops, and comes back for the second), where handing focus from one to the other keeps it up. The one
- * out of view has no height, can't be touched and isn't read out.
+ * Which of the message box and the terminal is in view. Both stay mounted, and the keyboard stays up across the change because
+ * the box that has it stays in view until the other has taken it: seen on the simulator, a box that had the keyboard and was
+ * hidden (collapsed, or only made see-through) the moment the other was focused took the keyboard down with it, and it came
+ * back up for the other. So the box coming in is laid over the one going ("incoming") until it says it has the keyboard; then
+ * it takes its place and the other is put away. The one put away has no height, can't be touched and isn't read out.
  */
-const inView = (shown: boolean) => ({
-  style: shown ? undefined : ({ height: 0, opacity: 0, overflow: "hidden" } as const),
-  pointerEvents: shown ? ("auto" as const) : ("none" as const),
-  accessibilityElementsHidden: !shown,
-  importantForAccessibility: shown ? ("auto" as const) : ("no-hide-descendants" as const),
+type BoxState = "shown" | "incoming" | "hidden";
+const inView = (state: BoxState) => ({
+  style: state === "shown" ? undefined : state === "incoming" ? ({ position: "absolute", left: 0, right: 0, bottom: 0 } as const) : ({ height: 0, opacity: 0, overflow: "hidden" } as const),
+  pointerEvents: state === "hidden" ? ("none" as const) : ("auto" as const),
+  accessibilityElementsHidden: state === "hidden",
+  importantForAccessibility: state === "hidden" ? ("no-hide-descendants" as const) : ("auto" as const),
 });
+
+/** How long the box going waits for the one coming in to say it has the keyboard, before it is put away anyway (it can't be focused while the terminal runs). */
+const HANDOFF_MS = 300;
 
 /**
  * The message box: a capsule with a send button; typing and sending only while connected. With `onRun` a "!" at the start
@@ -533,12 +539,18 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   useEffect(() => {
     if (terminal || disabled) dictation.cancel();
   }, [terminal, disabled, dictation.cancel]);
-  // The keyboard stays up across the change: focus moves from the one box to the other, both being there.
+  // The keyboard stays up across the change: focus moves from the one box to the other while both are in view, and the one
+  // that had it is put away once the other says it has it (see `inView`).
+  const [holder, setHolder] = useState<"message" | "terminal">(terminal ? "terminal" : "message");
   useEffect(() => {
     if (terminal) termInput.current?.focus();
     else if (wasTerminal.current) input.current?.focus();
     wasTerminal.current = terminal;
+    const t = setTimeout(() => setHolder(terminal ? "terminal" : "message"), HANDOFF_MS);
+    return () => clearTimeout(t);
   }, [terminal]);
+  const termState: BoxState = holder === "terminal" ? "shown" : terminal ? "incoming" : "hidden";
+  const messageState: BoxState = holder === "message" ? "shown" : !terminal ? "incoming" : "hidden";
   const run = async () => {
     const typed = command.trim();
     if (!onRun || !typed || running || disabled) return;
@@ -580,7 +592,9 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
         }}
       />
       <View style={{ paddingHorizontal: 12 }}>
-      <View {...inView(terminal)}>
+      {/* (The two boxes' own frame: the one coming in is laid over the one going, edge to edge.) */}
+      <View>
+      <View {...inView(termState)}>
         <>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 22, borderWidth: 1, borderColor: term.line, backgroundColor: term.bg, paddingLeft: 16, paddingRight: 6, paddingVertical: 6 }}>
             <Text accessibilityElementsHidden style={{ color: term.bright, fontFamily: fonts.mono, fontSize: 16 }}>
@@ -598,6 +612,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
                 if (e.nativeEvent.key === "Backspace" && command === "") setText("");
               }}
               onSubmitEditing={() => void run()}
+              onFocus={() => setHolder("terminal")}
               returnKeyType="go"
               blurOnSubmit={false}
               autoCapitalize="none"
@@ -626,7 +641,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           </Txt>
         </>
       </View>
-      <View {...inView(!terminal)}>
+      <View {...inView(messageState)}>
       <>
       {problem && (
         <View accessibilityRole="alert" style={{ flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6, marginHorizontal: 8 }}>
@@ -675,7 +690,10 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
             dictation.edited();
             list.onChangeText(v);
           }}
-          onFocus={() => setTyping(true)}
+          onFocus={() => {
+            setTyping(true);
+            setHolder("message");
+          }}
           onBlur={() => setTyping(false)}
           placeholder={dictation.listening ? "Listening…" : placeholder}
           placeholderTextColor={colors.ink3}
@@ -697,6 +715,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
         />
       )}
       </>
+      </View>
       </View>
       </View>
     </View>

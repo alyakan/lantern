@@ -11,6 +11,7 @@ import { renderHook } from "@testing-library/react-native";
 import { resetSeen, useSeen } from "../seen";
 import { COMPOSER_FILL } from "../ui/Glass";
 import { control } from "../ui/theme";
+import { barRoom, KEYBOARD_GAP } from "../ui/keyboard";
 import { motion } from "../ui/motion";
 import { lightColors } from "../ui/theme";
 
@@ -300,7 +301,7 @@ describe("a chat", () => {
       return undefined;
     };
 
-    it("grows the circle itself into the field over the bar, which keeps its width, and shrinks it back", async () => {
+    it("grows the circle into the field while the bar shrinks away beside it (it doesn't slide over the bar), and back", async () => {
       await withSession(talk);
       await fireEvent(screen.getByTestId("chat-bar-row"), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height: 48 } } });
       const circle = () => StyleSheet.flatten(screen.getByTestId("search-circle").props.style);
@@ -311,13 +312,26 @@ describe("a chat", () => {
       const room = bar().marginRight;
       expect(room).toBeGreaterThan(0);
       await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
-      // Searching: the circle has grown to the whole row; the bar is where it was (its room is the same), and it has faded.
+      // Searching: the circle has grown to the whole row, and the bar has given all of it up (it is as wide as nothing), and faded.
       expect(circle().width).toBe(300);
-      expect(bar().marginRight).toBe(room);
+      expect(bar().marginRight).toBeGreaterThanOrEqual(300);
       expect(bar().opacity).toBe(0);
       await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
       await waitFor(() => expect(circle().width).toBe(circle().height));
+      // And back: the bar has its width again, beside the circle.
+      expect(bar().marginRight).toBe(room);
       expect(bar().opacity).toBe(1);
+    });
+
+    it("keeps the bar's words at their width as the bar shrinks, so a typed draft doesn't wrap and make it taller", async () => {
+      await withSession(talk);
+      const content = (hidden = false) => screen.getByTestId("chat-bar-content", { includeHiddenElements: hidden });
+      await fireEvent(content(), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 240, height: 36 } } });
+      expect(StyleSheet.flatten(content().props.style).minWidth).toBeUndefined();
+      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      expect(StyleSheet.flatten(content(true).props.style).minWidth).toBe(240);
+      await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
+      await waitFor(() => expect(StyleSheet.flatten(content().props.style).minWidth).toBeUndefined());
     });
 
     it("lets the bar widen into the circle's room only while words are typed in it, not while it is searched", async () => {
@@ -329,6 +343,26 @@ describe("a chat", () => {
       expect(bar().marginRight).toBe(0);
       await fireEvent(screen.getByLabelText("Message"), "blur");
       expect(bar().marginRight).toBe(room);
+    });
+
+    it("moves the messages up with the keyboard by as much as the bar, instead of making the list shorter (that scrolled twice)", async () => {
+      await withSession(talk);
+      // (The library's views are plain ones in tests, so what they were told is on them.)
+      type Node = { props: Record<string, unknown>; children?: unknown[] | null };
+      const all: Node[] = [];
+      const walk = (n: unknown) => {
+        if (!n || typeof n !== "object") return;
+        const node = n as Node;
+        all.push(node);
+        (node.children ?? []).forEach(walk);
+      };
+      walk(screen.toJSON());
+      const lift = barRoom(0) - KEYBOARD_GAP;
+      const list = all.find((n) => n.props.keyboardLiftBehavior !== undefined);
+      expect(list?.props.keyboardLiftBehavior).toBe("always");
+      expect(list?.props.offset).toBe(lift);
+      // The bar rides the keyboard by the same: the room it has under it is not lifted twice.
+      expect(all.some((n) => (n.props.offset as { opened?: number } | undefined)?.opened === lift)).toBe(true);
     });
 
     it("gives the back button, the title bar, the search circle and the chat bar one height", async () => {

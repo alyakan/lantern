@@ -234,9 +234,11 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
   }, [toast, stack, tablet, columnShown]);
   const clearToast = useCallback(() => setToast(null), []);
 
-  // A screen that is not part of the stack comes in with a fade, so changing from one to another isn't a cut.
+  // A screen that is not part of the stack comes in with a fade, so changing from one to another isn't a cut. Not the stack itself:
+  // its chats are glass (the header, the message box), and under a fade from nothing all of their glass stayed clear, also in a
+  // chat opened long after the fade was over (see `FadeSlideIn`'s `glass`). It is just there.
   const fade = (key: string, screen: ReactNode) => (
-    <FadeSlideIn key={key} from={0} ms={200} style={{ flex: 1 }}>
+    <FadeSlideIn key={key} from={0} ms={200} glass={key === "stack"} style={{ flex: 1 }}>
       {screen}
     </FadeSlideIn>
   );

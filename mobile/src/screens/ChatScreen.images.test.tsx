@@ -130,6 +130,8 @@ describe("attaching photos to a message", () => {
   it("is not offered in the terminal", async () => {
     await chatWith(["images", "shell"]);
     await fireEvent.changeText(screen.getByLabelText("Message"), "!");
+    // (Once the terminal has the keyboard: until then the message box stays in view under it, see ChatParts' `inView`.)
+    await fireEvent(screen.getByLabelText("Shell command"), "focus");
     expect(screen.queryByRole("button", { name: "Attach photos" })).toBeNull();
   });
 

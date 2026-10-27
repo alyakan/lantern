@@ -36,9 +36,6 @@ export function useGlass(): boolean {
   return available() && !reduced;
 }
 
-/** How long after it mounts a surface makes its glass again: longer than the longest slide of a screen into the stack (340 ms) and the fade of a screen that is swapped in (200). */
-export const GLASS_SETTLE_MS = 400;
-
 /** How much of the card's colour (hex alpha, about 15%) the surface keeps under its glass. */
 export const GLASS_FILL = "26";
 
@@ -58,16 +55,8 @@ export function Glass({ style, lift = 0.08, solid = false, fill = GLASS_FILL, ch
   const glass = useGlass();
   const colors = useColors();
   const scheme = useColorScheme() === "dark" ? "dark" : "light";
-  const drawn = glass && !solid;
-  // A chat comes in sliding from the side, and the glass of its header and message box mounts as it goes: it has come up clear,
-  // both together. Made again once the slide is over it draws (the way a change of look puts it right).
-  const [settled, setSettled] = useState(false);
-  useEffect(() => {
-    if (!drawn) return;
-    const timer = setTimeout(() => setSettled(true), GLASS_SETTLE_MS);
-    return () => clearTimeout(timer);
-  }, [drawn]);
-  if (drawn) {
+  if (glass && !solid) {
+    // (Never put this where it fades in from nothing: the glass then stays clear. See `FadeSlideIn`'s `glass` in motion.tsx.)
     // The glass is a layer behind the children. The surface itself has a faint fill of the card's colour and a hairline, which
     // don't depend on it: a glass view that mounts late (a chat's message box when the chat wakes) has sometimes drawn nothing,
     // and over a plain page there was then no edge at all. The fill is under the glass, so what the glass blurs includes it: a
@@ -77,7 +66,7 @@ export function Glass({ style, lift = 0.08, solid = false, fill = GLASS_FILL, ch
     return (
       <View style={[{ backgroundColor: `${colors.card}${fill}`, borderWidth: StyleSheet.hairlineWidth * 2, borderColor: colors.rule }, style]} {...rest}>
         {/* The glass is told which look the app is in, and is made again when that changes: left to follow the system by itself it has stayed clear (switching light and dark put it right). */}
-        <GlassView key={`${scheme}:${settled}`} colorScheme={scheme} pointerEvents="none" glassEffectStyle="regular" style={[StyleSheet.absoluteFill, radius === undefined ? null : { borderRadius: radius }]} />
+        <GlassView key={scheme} colorScheme={scheme} pointerEvents="none" glassEffectStyle="regular" style={[StyleSheet.absoluteFill, radius === undefined ? null : { borderRadius: radius }]} />
         {children}
       </View>
     );
