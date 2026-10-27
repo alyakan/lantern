@@ -477,6 +477,48 @@ describe("a chat", () => {
     await waitFor(() => expect(lastOf("interrupt")).toEqual({ op: "interrupt", slot: "a" }));
   });
 
+  it("puts Stop in the chat bar, in Send's place, as a square with no words, and not in the header", async () => {
+    const quiet = await withSession(turn);
+    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    await quiet.unmount();
+    await withSession(turn, {}, {}, { status: "working" });
+    // Stop has taken Send's place, and says nothing in words (the label is for a screen reader).
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect(screen.queryByText("Stop")).toBeNull();
+    const stop = screen.getByRole("button", { name: "Stop" });
+    // It is in the chat bar: the message box and Stop share the bar's box.
+    const above = (node: { parent?: unknown } | null | undefined) => {
+      const chain: unknown[] = [];
+      for (let n = node; n; n = n.parent as typeof n) chain.push(n);
+      return chain;
+    };
+    const shared = above(stop as never).filter((n) => above(screen.getByLabelText("Message") as never).includes(n));
+    expect(shared.length).toBeGreaterThan(0);
+    // ...and the title bar has nothing but the title.
+    const header = screen.getByRole("header");
+    expect(above(stop as never).includes(header)).toBe(false);
+  });
+
+  it("queues what is typed while Claude works with a small link above the bar, and only then", async () => {
+    const { lastOf } = await withSession(turn, {}, {}, { status: "working" });
+    // Nothing typed: nothing to queue.
+    expect(screen.queryByRole("button", { name: "Queue message" })).toBeNull();
+    await fireEvent.changeText(screen.getByLabelText("Message"), "and then run the tests");
+    await fireEvent.press(await screen.findByRole("button", { name: "Queue message" }));
+    await waitFor(() => expect(lastOf("send")).toMatchObject({ op: "send", slot: "a", text: "and then run the tests" }));
+    // It is sent and the box is emptied, so the link goes.
+    await waitFor(() => expect(screen.getByLabelText("Message").props.value).toBe(""));
+    expect(screen.queryByRole("button", { name: "Queue message" })).toBeNull();
+  });
+
+  it("has no queue link when Claude is not working: Send does that", async () => {
+    await withSession(turn);
+    await fireEvent.changeText(screen.getByLabelText("Message"), "hello");
+    expect(screen.queryByRole("button", { name: "Queue message" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
+  });
+
   it("wakes a sleeping chat before it can be messaged", async () => {
     const { lastOf } = await withSession(turn, {}, {}, { status: "asleep" });
     expect(screen.queryByLabelText("Message")).toBeNull();

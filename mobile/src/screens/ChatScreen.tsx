@@ -338,16 +338,6 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
             </Glass>
           )}
         </ChatSettings>
-        {working && (
-          <FadeSlideIn from={-6} ms={200}>
-            <PressScale accessibilityRole="button" accessibilityLabel="Stop" onPress={() => sync.interrupt(slot).catch(fail)} hitSlop={8} scaleTo={0.92} style={{ height: control, paddingHorizontal: 18, borderRadius: control / 2, backgroundColor: colors.ink, flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <View style={{ width: 11, height: 11, borderRadius: 2, backgroundColor: colors.onInk }} />
-              <Txt variant="small" tone="on-ink" style={{ fontWeight: "700" }}>
-                Stop
-              </Txt>
-            </PressScale>
-          </FadeSlideIn>
-        )}
       </View>
 
       {banner && (
@@ -412,7 +402,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
           </SearchBar>
         </View>
       ) : (
-        <Composer draftKey={slot} disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} />
+        <Composer draftKey={slot} disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} search={barSearch} working={working} onStop={() => sync.interrupt(slot).catch(fail)} />
       )}
     </>
   );
