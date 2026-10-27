@@ -150,6 +150,14 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
   const size = seen ?? CIRCLE;
   // How wide the row is, which is how wide the field grows to (until it is measured, the screen less the page's margins).
   const [rowWidth, setRowWidth] = useState(screenWidth - 24);
+  // While the bar is shrunk (any part of the way), its words and buttons keep the width they had at rest and run on, faded, under
+  // the field: let narrow, a typed draft would wrap to more lines, and the bar would grow taller as it shrank.
+  const [innerWidth, setInnerWidth] = useState<number | null>(null);
+  const [shrunk, setShrunk] = useState(active);
+  useEffect(() => {
+    const id = open.addListener(({ value }) => setShrunk(value > 0.01));
+    return () => open.removeListener(id);
+  }, [open]);
   const keyboardBefore = useRef(false);
   const was = useRef(false);
   useEffect(() => {
@@ -169,14 +177,17 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
     // (Only the search starting or ending runs this: the keyboard moving is read here, not a reason to run it again.)
   }, [active]);
 
-  // The bar: it keeps its width while the field grows over it, and fades; it only widens when the circle gives its room away.
-  const barRight = gone.interpolate({ inputRange: [0, 1], outputRange: [size + GAP, 0], extrapolateRight: "clamp" });
-  const barFade = open.interpolate({ inputRange: [0, 0.6], outputRange: [1, 0], extrapolate: "clamp" });
   // The circle: its width is the circle's (which goes to nothing as the bar takes its room) until it opens, then the whole row's.
   const base = gone.interpolate({ inputRange: [0, 1], outputRange: [size, 0], extrapolateRight: "clamp" });
   const notOpen = open.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
   // (The field's share of the width never goes below nothing: a spring that passed 0 on its way back took the circle well under its size.)
   const width = Animated.add(Animated.multiply(base, notOpen), open.interpolate({ inputRange: [0, 1], outputRange: [0, rowWidth], extrapolateLeft: "clamp" }));
+  // The bar has what the circle leaves: as the circle grows into the field the bar shrinks away beside it (the field doesn't
+  // slide over it), and as words are typed it widens into the circle's room. Its words and buttons fade first, so what is seen
+  // shrinking is the bar itself; the bar fades at the end, as it is all but gone.
+  const barRight = Animated.add(width, gone.interpolate({ inputRange: [0, 1], outputRange: [GAP, 0], extrapolate: "clamp" }));
+  const contentFade = open.interpolate({ inputRange: [0, 0.3], outputRange: [1, 0], extrapolate: "clamp" });
+  const barFade = open.interpolate({ inputRange: [0.6, 0.95], outputRange: [1, 0], extrapolate: "clamp" });
   const shown = Animated.add(gone.interpolate({ inputRange: [0, 0.6], outputRange: [1, 0], extrapolate: "clamp" }), open).interpolate({ inputRange: [0, 1], outputRange: [0, 1], extrapolate: "clamp" });
   const pop = open.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 1.03, 1], extrapolate: "clamp" });
   // The magnifier moves from the middle of the circle to the field's left; the rest comes in beside it.
@@ -204,7 +215,15 @@ export function SearchBar({ search, circle = true, typing = false, capsule, lift
           }}
         >
           <Glass lift={lift} fill={fill} style={capsule}>
-            <View style={{ flex: 1, flexDirection: "row", alignItems: "flex-end", gap: GAP }}>{children}</View>
+            <Animated.View
+              testID="chat-bar-content"
+              style={{ flex: 1, flexDirection: "row", alignItems: "flex-end", gap: GAP, opacity: contentFade, minWidth: (active || shrunk) && innerWidth !== null ? innerWidth : undefined }}
+              onLayout={(e) => {
+                if (!active && !shrunk) setInnerWidth(e.nativeEvent.layout.width);
+              }}
+            >
+              {children}
+            </Animated.View>
           </Glass>
         </Animated.View>
         {hasCircle && search && (

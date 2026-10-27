@@ -300,7 +300,7 @@ describe("a chat", () => {
       return undefined;
     };
 
-    it("grows the circle itself into the field over the bar, which keeps its width, and shrinks it back", async () => {
+    it("grows the circle into the field while the bar shrinks away beside it (it doesn't slide over the bar), and back", async () => {
       await withSession(talk);
       await fireEvent(screen.getByTestId("chat-bar-row"), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height: 48 } } });
       const circle = () => StyleSheet.flatten(screen.getByTestId("search-circle").props.style);
@@ -311,13 +311,26 @@ describe("a chat", () => {
       const room = bar().marginRight;
       expect(room).toBeGreaterThan(0);
       await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
-      // Searching: the circle has grown to the whole row; the bar is where it was (its room is the same), and it has faded.
+      // Searching: the circle has grown to the whole row, and the bar has given all of it up (it is as wide as nothing), and faded.
       expect(circle().width).toBe(300);
-      expect(bar().marginRight).toBe(room);
+      expect(bar().marginRight).toBeGreaterThanOrEqual(300);
       expect(bar().opacity).toBe(0);
       await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
       await waitFor(() => expect(circle().width).toBe(circle().height));
+      // And back: the bar has its width again, beside the circle.
+      expect(bar().marginRight).toBe(room);
       expect(bar().opacity).toBe(1);
+    });
+
+    it("keeps the bar's words at their width as the bar shrinks, so a typed draft doesn't wrap and make it taller", async () => {
+      await withSession(talk);
+      const content = (hidden = false) => screen.getByTestId("chat-bar-content", { includeHiddenElements: hidden });
+      await fireEvent(content(), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 240, height: 36 } } });
+      expect(StyleSheet.flatten(content().props.style).minWidth).toBeUndefined();
+      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      expect(StyleSheet.flatten(content(true).props.style).minWidth).toBe(240);
+      await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
+      await waitFor(() => expect(StyleSheet.flatten(content().props.style).minWidth).toBeUndefined());
     });
 
     it("lets the bar widen into the circle's room only while words are typed in it, not while it is searched", async () => {
