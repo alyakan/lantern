@@ -1,7 +1,8 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { Linking, ScrollView, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { parseMarkdown, plainText, type Align, type Block, type Span } from "../view/markdown";
+import { foldOf, FOLDED_LINES, highlight, type TokenKind } from "../view/highlight";
 import { useAccent } from "./accent";
 import { fonts, radius, type as scale, useColors, type Palette } from "./theme";
 import { Txt } from "./components";
@@ -72,9 +73,31 @@ function TaskBox({ checked }: { checked: boolean }) {
   );
 }
 
-/** A code block: the language and a Copy on top, the code below (it scrolls sideways rather than wrapping). */
+/** What each kind of token is coloured, for code on the page (your own message and the night screens keep it plain). */
+function tokenColour(kind: TokenKind, colors: Palette): string | undefined {
+  switch (kind) {
+    case "keyword":
+      return colors.cobalt;
+    case "string":
+      return colors.go;
+    case "comment":
+    case "meta":
+      return colors.ink3;
+    case "number":
+      return colors.isDark ? "#e0a458" : "#a15c00";
+    case "add":
+      return colors.go;
+    case "del":
+      return colors.stop;
+    default:
+      return undefined;
+  }
+}
+
+/** A code block: the language and a Copy on top, the code below (it scrolls sideways rather than wrapping), a long one folded until opened. */
 function CodeBlock({ lang, text, tone }: { lang: string; text: string; tone: Tone }) {
   const [copied, setCopied] = useState(false);
+  const [open, setOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
   const copy = () => {
@@ -85,6 +108,11 @@ function CodeBlock({ lang, text, tone }: { lang: string; text: string; tone: Ton
   };
   const colors = useColors();
   const l = look(tone, colors);
+  const { lines: total, folds } = useMemo(() => foldOf(text), [text]);
+  const folded = folds && !open;
+  // Colour only on the page itself: on an ink bubble or the night screens the words stay one colour, as they always were.
+  const lines = useMemo(() => highlight(text, tone === "ink" ? lang : ""), [text, lang, tone]);
+  const shown = folded ? lines.slice(0, FOLDED_LINES) : lines;
   return (
     <View style={{ backgroundColor: l.raised, borderRadius: radius.inner, overflow: "hidden" }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingLeft: 12, paddingRight: 6, minHeight: 30 }}>
@@ -97,11 +125,32 @@ function CodeBlock({ lang, text, tone }: { lang: string; text: string; tone: Ton
           </Txt>
         </PressScale>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 12 }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: folds ? 6 : 12 }}>
         <Text selectable style={[scale.mono, { color: l.code }]}>
-          {text}
+          {shown.map((line, i) => (
+            <Fragment key={i}>
+              {i > 0 ? "\n" : ""}
+              {line.map((t, j) => {
+                const colour = tokenColour(t.kind, colors);
+                return colour ? (
+                  <Text key={j} style={{ color: colour }}>
+                    {t.text}
+                  </Text>
+                ) : (
+                  t.text
+                );
+              })}
+            </Fragment>
+          ))}
         </Text>
       </ScrollView>
+      {folds && (
+        <PressScale accessibilityRole="button" accessibilityLabel={open ? "Show less code" : `Show ${total - FOLDED_LINES} more lines of code`} accessibilityState={{ expanded: open }} onPress={() => setOpen((o) => !o)} haptic="select" scaleTo={0.97} style={{ paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, borderTopColor: l.line }}>
+          <Txt variant="tiny" tone="cobalt" style={{ fontWeight: "700" }}>
+            {open ? "Show less" : `Show ${total - FOLDED_LINES} more lines`}
+          </Txt>
+        </PressScale>
+      )}
     </View>
   );
 }

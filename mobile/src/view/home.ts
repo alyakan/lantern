@@ -70,6 +70,8 @@ export interface Row {
   rank: number;
   /** What the chat is ordered by within its rank, newest first: when it started (working), else when it was last active. */
   sortAt: number;
+  /** Pinned to the top of the list on this phone. */
+  pinned?: boolean;
 }
 
 const STATUS_NOTE: Record<RemoteChat["status"], (c: RemoteChat, now: number) => string | null> = {
@@ -93,15 +95,16 @@ const RANK: Record<RemoteChat["status"], number> = { needs_you: 0, working: 1, i
  * under the finger while several work. Ties fall to the slot, so the order is always the same one.
  */
 export function byOrder(a: Row, b: Row): number {
-  return a.rank - b.rank || b.sortAt - a.sortAt || (a.slot < b.slot ? -1 : a.slot > b.slot ? 1 : 0);
+  // A pinned chat is at the top, whatever it is doing; the pinned ones are in the list's usual order among themselves.
+  return (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || a.rank - b.rank || b.sortAt - a.sortAt || (a.slot < b.slot ? -1 : a.slot > b.slot ? 1 : 0);
 }
 
 /** Every chat as a row, in the list's order (see `byOrder`). `workingSince` is when each working chat was first seen working. */
-export function rows(chats: RemoteChat[], now: number, seen: Record<string, number> | null = null, workingSince: Record<string, number> = {}): Row[] {
+export function rows(chats: RemoteChat[], now: number, seen: Record<string, number> | null = null, workingSince: Record<string, number> = {}, pins: string[] = []): Row[] {
   return chats
     .map((c): Row => {
       const title = c.title?.trim() || "New chat";
-      return { rank: RANK[c.status], sortAt: c.status === "working" ? workingSince[c.slot] ?? c.active_at : c.active_at, slot: c.slot, title, project: c.project ?? "", projectColor: projectColorOf(c.project_color), initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now), unread: isUnread(c, seen) };
+      return { rank: RANK[c.status], sortAt: c.status === "working" ? workingSince[c.slot] ?? c.active_at : c.active_at, slot: c.slot, title, project: c.project ?? "", projectColor: projectColorOf(c.project_color), initial: ([...title][0] ?? "?").toUpperCase(), status: c.status, activeAt: c.active_at, note: STATUS_NOTE[c.status](c, now), unread: isUnread(c, seen), ...(pins.includes(c.slot) ? { pinned: true } : {}) };
     })
     .sort(byOrder);
 }

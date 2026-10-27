@@ -37,7 +37,7 @@ function ActionRow({ label, hint, onPress, tone = "ink" }: { label: string; hint
  * What can be done with a message held down: copy it, quote it in a reply, select part of it, and (your own last one) edit
  * it and send it again. Each does it and closes the sheet.
  */
-export function MessageActionsSheet({ text, onQuote, onEdit, onClose }: { text: string; onQuote: () => void; /** Only for your own last message. */ onEdit?: () => void; onClose: () => void }) {
+export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, reading = false, onClose }: { text: string; onQuote: () => void; /** Only for your own last message. */ onEdit?: () => void; /** Reads the message aloud (or stops reading it). */ onReadAloud?: () => void; reading?: boolean; onClose: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const [selecting, setSelecting] = useState(false);
@@ -75,6 +75,16 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onClose }: { text: 
                 }}
               />
               <ActionRow label="Select text" hint="Pick just the part you want" onPress={() => setSelecting(true)} />
+              {onReadAloud && (
+                <ActionRow
+                  label={reading ? "Stop reading" : "Read aloud"}
+                  hint={reading ? undefined : "The phone's voice reads the words, not the code"}
+                  onPress={() => {
+                    onReadAloud();
+                    close();
+                  }}
+                />
+              )}
               {onEdit && (
                 <ActionRow
                   label="Edit and send again"
@@ -349,12 +359,12 @@ export function ContextRow({ context }: { context: { tokens: number; window: num
 }
 
 /** On Home: how much of the subscription's five-hour window is used, in a line with a thin bar under it. */
-export function UsageStrip({ plan }: { plan: PlanUsage }) {
+export function UsageStrip({ plan, onPress }: { plan: PlanUsage; /** Opens the usage in full (the chart). */ onPress?: () => void }) {
   const colors = useColors();
   const u = usageOf(plan);
   const fill = u.tone === "stop" ? colors.stop : u.tone === "warn" ? colors.hi : colors.go;
   return (
-    <View accessibilityLabel={`Plan usage: ${u.percent} percent of the five-hour window used. ${u.resets}`} accessible style={{ marginHorizontal: space.xl, marginTop: 10, gap: 5 }}>
+    <PressScale accessibilityRole={onPress ? "button" : undefined} accessibilityLabel={`Plan usage: ${u.percent} percent of the five-hour window used. ${u.resets}`} accessibilityHint={onPress ? "Opens the usage history" : undefined} accessible disabled={!onPress} onPress={onPress} haptic="select" scaleTo={0.98} style={{ marginHorizontal: space.xl, marginTop: 10, gap: 5 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
         <Txt variant="tiny" tone={u.tone === "stop" ? "stop" : "ink2"} style={{ fontWeight: "700" }}>
           {u.tone === "stop" ? "Plan limit reached" : `Plan · ${u.percent}% used`}
@@ -369,7 +379,7 @@ export function UsageStrip({ plan }: { plan: PlanUsage }) {
         <View style={{ width: `${Math.max(u.percent, 2)}%`, height: 4, backgroundColor: fill }} />
       </View>
       {plan.week && <WeekStrip week={plan.week} />}
-    </View>
+    </PressScale>
   );
 }
 

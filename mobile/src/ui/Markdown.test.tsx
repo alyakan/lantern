@@ -105,6 +105,39 @@ describe("the rest of the formatting", () => {
   });
 });
 
+describe("a code block", () => {
+  const long = (n: number) => Array.from({ length: n }, (_, i) => `line ${i + 1}`).join("\n");
+
+  it("colours what it knows how to on the page, and never changes the text", async () => {
+    await render(<Markdown text={"```ts\nconst a = 1; // one\n```"} />);
+    const keyword = screen.getByText("const");
+    expect(StyleSheet.flatten(keyword.props.style).color).toBeTruthy();
+    expect(screen.getByText("// one")).toBeTruthy();
+  });
+
+  it("keeps your own message's code one colour", async () => {
+    await render(<Markdown tone="on-ink" text={"```ts\nconst a = 1;\n```"} />);
+    expect(screen.queryByText("const")).toBeNull();
+    expect(screen.getByText("const a = 1;")).toBeTruthy();
+  });
+
+  it("folds a long one until it is opened, and Copy still copies all of it", async () => {
+    await render(<Markdown text={"```\n" + long(30) + "\n```"} />);
+    expect(screen.queryByText(/line 30/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Show 18 more lines of code" })).toBeTruthy();
+    await fireEvent.press(screen.getByRole("button", { name: "Copy code" }));
+    expect(Clipboard.setStringAsync).toHaveBeenCalledWith(long(30));
+    await fireEvent.press(screen.getByRole("button", { name: "Show 18 more lines of code" }));
+    expect(screen.getByText(/line 30/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show less code" })).toBeTruthy();
+  });
+
+  it("does not fold a short one", async () => {
+    await render(<Markdown text={"```\n" + long(10) + "\n```"} />);
+    expect(screen.queryByRole("button", { name: /more lines/ })).toBeNull();
+  });
+});
+
 describe("a list in a message that wraps its own width (your bubble)", () => {
   it("lets a list item's words size their row, not start from nothing: a zero basis collapses a shrink-wrapped bubble to the bullet", async () => {
     await render(<Markdown text={"- first thing to do\n- second thing to do"} />);

@@ -7,13 +7,15 @@ import { useConnectionState, useController, useDeviceId, useSyncState } from "..
 import { emptyView } from "../sync/reducer";
 import { Button, ProjectTag, Txt } from "../ui/components";
 import { AboveKeyboard } from "../ui/keyboard";
-import { FadeSlideIn, PressScale } from "../ui/motion";
+import { buzz, FadeSlideIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { Glass, useGlass } from "../ui/Glass";
 import { space, useColors } from "../ui/theme";
+import { platformSpeech } from "../platformSpeech";
 import { quickReplies, quote, searchRows } from "../view/chatText";
 import { projectColorOf } from "../view/home";
-import { hasHiddenChars } from "../view/shell";
+import { hasHiddenChars, tellClaude } from "../view/shell";
+import { queuedIds } from "../view/queue";
 import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
@@ -65,6 +67,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   const chat = chats.find((c) => c.slot === slot);
   const view = views[slot] ?? emptyView;
   const rows = useMemo(() => timeline(view.items), [view.items]);
+  const working = chat?.status === "working";
+  // Messages sent while Claude was busy say they are waiting for it.
+  const queued = useMemo(() => queuedIds(view.items, working), [view.items, working]);
   const [answered, setAnswered] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<string[] | null>(null);
   const [banner, setBanner] = useState(false);
@@ -77,6 +82,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   // the message box (a quote, an edit).
   const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean } | null>(null);
   const [searching, setSearching] = useState(false);
+  // A message being read aloud: reading stops when the chat is left.
+  const [reading, setReading] = useState(false);
+  useEffect(() => () => platformSpeech.stop(), []);
   const [away, setAway] = useState<{ since: number } | null>(null);
   const [seed, setSeed] = useState<ComposeSeed | undefined>(undefined);
   const [repliedTo, setRepliedTo] = useState<string | null>(null);
@@ -133,14 +141,16 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
     const t = setTimeout(() => setWaking(false), WAKE_WAIT_MS);
     return () => clearTimeout(t);
   }, [waking, asleep]);
-  const working = chat?.status === "working";
   const loadDiff = useCallback((path: string) => sync.diff(slot, path), [sync, slot]);
 
   const reply = (id: string, a: PageAction) => {
     setAnswered((s) => new Set(s).add(id));
     if (a.reply) void sync.send(slot, a.reply);
   };
-  const fail = (e: unknown) => setProblem((e as Error).message);
+  const fail = (e: unknown) => {
+    setProblem((e as Error).message);
+    buzz("warning");
+  };
 
   /**
    * A command typed in the terminal. The phone first checks who is holding it by Face ID (or Touch ID, never the passcode
@@ -207,7 +217,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
     const body = (() => {
       switch (row.kind) {
         case "user":
-          return <UserRow item={row.item} onActions={() => setActions({ text: row.item.text, own: true, last: row.key === lastUser })} />;
+          return <UserRow item={row.item} queued={queued.has(row.item.id)} onActions={() => setActions({ text: row.item.text, own: true, last: row.key === lastUser })} />;
         case "assistant":
           return <AssistantRow item={row.item} onActions={() => setActions({ text: row.item.text, own: false, last: false })} />;
         case "summary":
@@ -238,7 +248,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         case "shell":
           return (
             <View style={{ paddingHorizontal: space.lg, paddingTop: 10 }}>
-              <ShellCard item={row.item} onInput={(text) => sync.shellInput(slot, row.item.id, text).catch(fail)} onStop={() => sync.shellStop(slot, row.item.id).catch(fail)} />
+              <ShellCard item={row.item} onTell={() => setSeed({ id: Date.now(), text: tellClaude(row.item.command, row.item.output, row.item.status, row.item.code), mode: "append" })} onInput={(text) => sync.shellInput(slot, row.item.id, text).catch(fail)} onStop={() => sync.shellStop(slot, row.item.id).catch(fail)} />
             </View>
           );
       }
@@ -368,7 +378,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
           />
         </View>
       ) : (
-        <Composer disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} />
+        <Composer draftKey={slot} disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} />
       )}
     </>
   );
@@ -472,6 +482,22 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
           text={actions.text}
           onQuote={() => setSeed({ id: Date.now(), text: quote(actions.text), mode: "append" })}
           onEdit={actions.own && actions.last ? () => setSeed({ id: Date.now(), text: actions.text, mode: "replace" }) : undefined}
+          reading={reading}
+          onReadAloud={() => {
+            if (reading) {
+              platformSpeech.stop();
+              setReading(false);
+              return;
+            }
+            setReading(true);
+            platformSpeech.read(actions.text).then(
+              () => setReading(false),
+              (e: Error) => {
+                setReading(false);
+                fail(e);
+              },
+            );
+          }}
           onClose={() => setActions(null)}
         />
       )}

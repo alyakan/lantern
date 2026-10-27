@@ -7,12 +7,16 @@ import { projectTint } from "../view/home";
 import { MIN_TARGET, radius, space, type as scale, useColors, type Variant } from "./theme";
 
 /** Text in the type scale. Ink by default; `tone` picks another of the palette's. "white" is always white (on night, go and stop); "on-ink" is what is written on an ink fill. */
+/** How far larger than normal the phone's text size may make Lantern's text (a person who needs more can still read it: 1.8 is large). */
+export const MAX_TEXT_SCALE = 1.8;
+
 export function Txt({ variant = "body", tone = "ink", style, ...rest }: TextProps & { variant?: Variant; tone?: "ink" | "ink2" | "ink3" | "white" | "on-ink" | "on-hi" | "night" | "go" | "stop" | "cobalt" | "night-stop" }) {
   // "cobalt" is the accent: another colour for someone who is a regular.
   const accent = useAccent();
   const colors = useColors();
   const color = { ink: colors.ink, ink2: colors.ink2, ink3: colors.ink3, white: colors.white, "on-ink": colors.onInk, "on-hi": colors.onHi, night: colors.nightText, go: colors.go, stop: colors.stop, cobalt: accent, "night-stop": colors.nightStop }[tone];
-  return <Text {...rest} style={[scale[variant], { color }, style]} />;
+  // The phone's text size is followed (Dynamic Type), up to a limit past which fixed-size things (a swipe bar, a tile) would break.
+  return <Text maxFontSizeMultiplier={MAX_TEXT_SCALE} {...rest} style={[scale[variant], { color }, style]} />;
 }
 
 type ButtonKind = "ink" | "ghost" | "go" | "hi" | "night-stop" | "night-ghost";

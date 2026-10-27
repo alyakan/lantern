@@ -1,4 +1,4 @@
-import { layoutFor } from "./layout";
+import { CHANGES_MIN, hasRoomForChanges, layoutFor } from "./layout";
 
 describe("layoutFor", () => {
   it("keeps the phone's layout on a phone, and in a narrow Split View or Slide Over pane", () => {
@@ -26,5 +26,14 @@ describe("layoutFor", () => {
     expect(layoutFor(700, 700)).toBe("overlay");
     expect(layoutFor(800, 500)).toBe("overlay");
     expect(layoutFor(900, 600)).toBe("split");
+  });
+});
+
+describe("the Changes pane's room", () => {
+  it("needs the chats beside the chat and a window wide enough for a third column", () => {
+    expect(hasRoomForChanges("split", CHANGES_MIN)).toBe(true);
+    expect(hasRoomForChanges("split", CHANGES_MIN - 1)).toBe(false);
+    expect(hasRoomForChanges("overlay", 1400)).toBe(false);
+    expect(hasRoomForChanges("phone", 1400)).toBe(false);
   });
 });

@@ -7,6 +7,7 @@ import { DecideScreen } from "../screens/DecideScreen";
 import { HomeScreen } from "../screens/HomeScreen";
 import { NewChatSheet, type Draft } from "../screens/NewChatSheet";
 import { MacSheet, OfflineScreen, ReconnectPill } from "../screens/OfflineScreen";
+import { RememberChats } from "./RememberChats";
 import { PairDeviceSheet } from "../screens/PairDevice";
 import { StorageSheet } from "../screens/StorageSheet";
 import { ConfirmLink, PairScreen } from "../screens/PairScreen";
@@ -310,6 +311,7 @@ function Screens({ pendingLink, onClearLink, openSlot, onOpened }: Omit<RootProp
         />
       )}
       <ReconnectPill state={connection} />
+      <RememberChats />
       <ChatToast toast={toast} onOpen={openChat} onDone={clearToast} />
       {pairingDevice && <PairDeviceSheet onClose={() => setPairingDevice(false)} />}
       {storageOpen && <StorageSheet onClose={() => setStorageOpen(false)} />}

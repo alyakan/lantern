@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Animated, Easing, Switch, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { ConnectionState } from "../net/connection";
+import { ageText, loadLastKnown, type LastKnown } from "../lastKnown";
 import { useAppLock, useLockState } from "../shell/lockContext";
 import { EMBER, useRegular } from "../ui/accent";
 import { Button, Txt } from "../ui/components";
@@ -89,6 +90,46 @@ function AddressField({ onAddress }: { onAddress: (text: string) => Promise<stri
   );
 }
 
+/** What the Mac listed last time, greyed and not to be pressed: so "can't reach" still says what is waiting there, and since when. */
+export function LastKnownList() {
+  const colors = useColors();
+  const [known, setKnown] = useState<LastKnown | null>(null);
+  useEffect(() => {
+    let live = true;
+    void loadLastKnown().then((k) => live && setKnown(k));
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!known) return null;
+  const shown = known.chats.slice(0, 5);
+  const more = known.chats.length - shown.length;
+  return (
+    <View testID="last-known" accessible accessibilityLabel={`Last time your Mac was here, ${ageText(known.at, Date.now())}: ${shown.map((c) => c.title).join(", ")}. Read only.`} style={{ alignSelf: "stretch", marginTop: 22, padding: 14, borderRadius: radius.inner, backgroundColor: colors.card, gap: 8, opacity: 0.65 }}>
+      <Txt variant="small" tone="ink3" style={{ fontWeight: "700" }}>
+        {`${known.mac ?? "Your Mac"} · ${ageText(known.at, Date.now())}`}
+      </Txt>
+      {shown.map((c, i) => (
+        <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Txt variant="small" numberOfLines={1} style={{ flex: 1 }}>
+            {c.title}
+          </Txt>
+          {!!c.project && (
+            <Txt variant="tiny" tone="ink3" numberOfLines={1} style={{ maxWidth: 110 }}>
+              {c.project}
+            </Txt>
+          )}
+        </View>
+      ))}
+      {more > 0 && (
+        <Txt variant="tiny" tone="ink3">
+          and {more} more
+        </Txt>
+      )}
+    </View>
+  );
+}
+
 /**
  * Not connected yet: connecting (a moment), or why not and what to check. Once a try has failed it stays on why, through
  * the tries that follow on their own, so the address being typed in isn't swept away by each one.
@@ -123,6 +164,7 @@ export function OfflineScreen({ state, onRetry, onUnpair, onAddress }: { state: 
           )}
           <Button label="Try again" onPress={onRetry} style={{ alignSelf: "stretch" }} />
           {onAddress && <AddressField onAddress={onAddress} />}
+          <LastKnownList />
           <Button label="Unpair this phone" kind="ghost" onPress={onUnpair} style={{ alignSelf: "stretch", marginTop: 10, backgroundColor: "transparent" }} />
         </>
       )}

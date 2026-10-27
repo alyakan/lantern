@@ -8,6 +8,7 @@ import { Button, Chip, Tag, Txt } from "../ui/components";
 import { useKeyboardUp } from "../ui/keyboard";
 import type { RemoteCommand } from "../protocol/generated/RemoteCommand";
 import { matchCommands, slashQuery } from "../view/slash";
+import { loadDraft, saveDraft } from "../drafts";
 import { commandOf, isTerminal, plainTyped } from "../view/shell";
 import { term } from "../ui/terminal";
 import { SlashPicker, useSeed, type ComposeSeed } from "./ChatExtras";
@@ -23,16 +24,22 @@ import { DiffSkeleton } from "../ui/skeleton";
 import { SwipeToAllow } from "../ui/SwipeToAllow";
 import { COMPOSER_FILL, Glass, useGlass } from "../ui/Glass";
 import { fonts, radius, shadow, space, useColors } from "../ui/theme";
+import { diffPreviewOf, fitsInline } from "../view/diffPreview";
 import { approvalOf, promptView } from "../view/prompts";
+import { DiffPreviewCard } from "./DiffPreviewCard";
+import { MarkupSheet } from "./MarkupSheet";
 import { turnLine, type Row, type StepChip } from "../view/timeline";
 import type { PageAction } from "../view/pages";
+
+/** How long after the last key a draft is written to the phone. */
+export const DRAFT_SAVE_MS = 600;
 
 /** "22:09": a message's time, in the phone's own way of writing it. */
 export const timeOf = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 type UserItem = Extract<Item, { kind: "user" }>;
 
-export const UserRow = memo(function UserRow({ item, onActions }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void }) {
+export const UserRow = memo(function UserRow({ item, onActions, queued = false }: { item: UserItem; /** Holding the message down: what can be done with it. */ onActions?: () => void; /** Sent while Claude was busy, and not acted on yet. */ queued?: boolean }) {
   const colors = useColors();
   return (
     <View style={{ paddingHorizontal: space.lg, paddingTop: 12, alignItems: "flex-start" }}>
@@ -61,6 +68,11 @@ export const UserRow = memo(function UserRow({ item, onActions }: { item: UserIt
       {item.failed && (
         <Txt variant="small" tone="stop" style={{ marginTop: 4, marginLeft: 2 }}>
           Not sent. {item.failed}
+        </Txt>
+      )}
+      {queued && !item.failed && (
+        <Txt variant="tiny" tone="ink3" accessibilityLabel="Queued: Claude reads it after this step" style={{ marginTop: 4, marginLeft: 2 }}>
+          Queued · Claude reads it after this step
         </Txt>
       )}
     </View>
@@ -313,8 +325,12 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
     return () => clearTimeout(t);
   }, [settling, h, openOpacity, doneOpacity]);
 
-  const swipe = view.kind === "allow" && !!onAllow;
   const approval = approvalOf(item.toolName, item.input);
+  // A file change is drawn in the card, and can only be swiped to allow here when all of it can be read here: a change that is cut
+  // short, longer than the card shows, or "everywhere it appears" is opened to be read first.
+  const preview = approval ? null : diffPreviewOf(item.toolName, item.input);
+  const readHere = !preview || fitsInline(preview);
+  const swipe = view.kind === "allow" && !!onAllow && readHere;
   const openCard = (
     <View style={{ backgroundColor: colors.hiSoft, borderColor: colors.hi, borderWidth: 1.5, borderRadius: 18, padding: 14, gap: 6 }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
@@ -336,6 +352,12 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
           {view.detail}
         </Txt>
       )}
+      {preview && <DiffPreviewCard preview={preview} file={null} tone="paper" />}
+      {preview && !readHere && (
+        <Txt variant="small" tone="ink2" testID="read-first">
+          This is more than fits here. Open it to read all of it before you decide.
+        </Txt>
+      )}
       {swipe ? (
         // Half the card's width, from the middle to the right edge, where the thumb is.
         <View style={{ marginTop: 8, width: "50%", alignSelf: "flex-end" }}>
@@ -343,7 +365,7 @@ export const PromptRow = memo(function PromptRow({ item, me, onReview, onAllow, 
           <SwipeToAllow key={`${item.id}:${tries}`} compact onDrag={onSwiping} label={approval ? "Swipe to approve" : "Swipe to allow"} doneLabel={approval ? "Approved" : "Allowed"} onAllow={() => void onAllow().catch(() => setTries((t) => t + 1))} />
         </View>
       ) : (
-        <Button label="Review" style={{ marginTop: 6 }} onPress={onReview} />
+        <Button label={preview ? "Review the change" : "Review"} style={{ marginTop: 6 }} onPress={onReview} />
       )}
     </View>
   );
@@ -431,11 +453,41 @@ export const TurnRow = memo(function TurnRow({ item }: { item: Extract<Item, { k
  * turns it into a terminal, as on the Mac: the "!" goes, a prompt takes its place, and what is typed is a command for the
  * Mac to run. `onRun` says whether it ran (it asks first); the box is only emptied when it did.
  */
-export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [] }: { /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
+export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Message Claude", seed, commands = [], draftKey }: { /** A chat's slot: what is typed and not sent is kept for it on this phone, and put back when it is opened again. */ draftKey?: string; /** `images`: the pictures attached, when any (then `text` may be empty). */ onSend: (text: string, images?: PickedImage[]) => void; onRun?: (command: string) => Promise<boolean>; /** The Mac takes pictures: a + offers the photo library and the camera. */ canAttach?: boolean; disabled?: boolean; placeholder?: string; /** Words to put in the box (a quote, a message to edit): each new seed once. */ seed?: ComposeSeed; /** What claude offers after a "/": typing one offers the matches. */ commands?: RemoteCommand[] }) {
   const colors = useColors();
   // Over a list that runs under it, the box has no ground of its own.
   const glass = useGlass();
   const [text, setText] = useState("");
+  // The draft kept for this chat is put back once read (never over words typed meanwhile), and kept as it changes.
+  const [draftRead, setDraftRead] = useState(!draftKey);
+  const latest = useRef(text);
+  latest.current = text;
+  useEffect(() => {
+    if (!draftKey) return;
+    let live = true;
+    void loadDraft(draftKey).then((d) => {
+      if (!live) return;
+      if (d) setText((t) => (t === "" ? d : t));
+      setDraftRead(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, [draftKey]);
+  useEffect(() => {
+    if (!draftKey || !draftRead) return;
+    const t = setTimeout(() => void saveDraft(draftKey, text), text === "" ? 0 : DRAFT_SAVE_MS);
+    return () => clearTimeout(t);
+  }, [draftKey, draftRead, text]);
+  // Leaving the chat inside that pause still keeps what was typed.
+  const read = useRef(draftRead);
+  read.current = draftRead;
+  useEffect(
+    () => () => {
+      if (draftKey && read.current) void saveDraft(draftKey, latest.current);
+    },
+    [draftKey],
+  );
   const input = useRef<ComponentRef<typeof TextInput>>(null);
   const termInput = useRef<ComponentRef<typeof TextInput>>(null);
   // Terminal mode: the box starts with "!" (the "!" itself isn't shown), and the Mac can run commands.
@@ -447,6 +499,8 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
   const attach = useAttachments();
   // The picker is a screen of its own: it is launched once the sheet that offered it has gone (iOS can't show one over the other).
   const [choosing, setChoosing] = useState(false);
+  // The photo being drawn on.
+  const [marking, setMarking] = useState<PickedImage | null>(null);
   const chosen = useRef<ImageSource | null>(null);
   useEffect(() => {
     if (choosing || !chosen.current) return;
@@ -577,7 +631,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           </PressScale>
         </View>
       )}
-      {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} />}
+      {attach.images.length > 0 && <Thumbnails images={attach.images} onRemove={attach.remove} onMarkUp={setMarking} />}
       <Glass lift={0.12} fill={COMPOSER_FILL} style={{ flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 26, paddingLeft: canAttach ? 4 : 16, paddingRight: 6, paddingVertical: 6 }}>
         {canAttach && <PlusButton busy={attach.busy} full={attach.full} onPress={() => setChoosing(true)} />}
         <TextInput
@@ -607,6 +661,7 @@ export function Composer({ onSend, onRun, canAttach, disabled, placeholder = "Me
           }}
         />
       </Glass>
+      {marking && <MarkupSheet image={marking} onDone={(marked) => attach.replace(marking.id, marked)} onClose={() => setMarking(null)} />}
       {choosing && (
         <AttachSheet
           onClose={() => setChoosing(false)}
@@ -735,13 +790,18 @@ function PlusButton({ busy, full, onPress }: { busy: boolean; full: boolean; onP
 }
 
 /** The pictures attached so far, as small squares above the box, each with a × that takes it off. */
-function Thumbnails({ images, onRemove }: { images: PickedImage[]; onRemove: (id: string) => void }) {
+function Thumbnails({ images, onRemove, onMarkUp }: { images: PickedImage[]; onRemove: (id: string) => void; /** Opens the photo to draw on. */ onMarkUp: (image: PickedImage) => void }) {
   const colors = useColors();
   return (
     <ScrollView horizontal accessibilityLabel="Attached photos" showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingHorizontal: 8, paddingTop: 8, paddingBottom: 10 }} style={{ flexGrow: 0 }}>
       {images.map((image, i) => (
         <View key={image.id} style={{ width: 64, height: 64 }}>
           <Image accessibilityLabel={`Photo ${i + 1}`} source={{ uri: image.uri }} style={{ width: 64, height: 64, borderRadius: 12, backgroundColor: colors.rule }} />
+          <PressScale accessibilityRole="button" accessibilityLabel={`Mark up photo ${i + 1}`} accessibilityHint="Draw on it before it is sent" onPress={() => onMarkUp(image)} hitSlop={6} haptic="select" scaleTo={0.9} style={{ position: "absolute", left: 4, bottom: 4, height: 22, paddingHorizontal: 7, borderRadius: 11, backgroundColor: colors.ink, justifyContent: "center" }}>
+            <Txt variant="tiny" tone="on-ink" style={{ fontWeight: "800" }}>
+              ✎
+            </Txt>
+          </PressScale>
           <PressScale accessibilityRole="button" accessibilityLabel={`Remove photo ${i + 1}`} onPress={() => onRemove(image.id)} hitSlop={8} haptic="light" scaleTo={0.9} style={{ position: "absolute", top: -7, right: -7, width: 22, height: 22, borderRadius: 11, backgroundColor: colors.ink, alignItems: "center", justifyContent: "center" }}>
             <Txt variant="small" tone="on-ink" style={{ fontWeight: "800", lineHeight: 16 }}>
               ×

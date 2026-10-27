@@ -67,6 +67,15 @@ export function markSeen(slot: string, at: number) {
   });
 }
 
+/** Marks a chat unread again, as a mail app does: its mark goes back to before everything in it (it shows unread while it is waiting). */
+export function markUnread(slot: string) {
+  void ensureLoaded().then(() => {
+    marks[slot] = 0;
+    emit();
+    save();
+  });
+}
+
 /** The chats the Mac lists now: the first time ever they count as seen, and a chat no longer listed has its mark dropped. */
 export function settleSeen(chats: { slot: string; active_at: number }[]) {
   if (chats.length === 0) return;
