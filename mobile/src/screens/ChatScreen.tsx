@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppState, Pressable, StyleSheet, View } from "react-native";
+import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppState, Pressable, StyleSheet, View, type ScrollViewProps } from "react-native";
+import { KeyboardChatScrollView, KeyboardStickyView } from "react-native-keyboard-controller";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { markSeen } from "../seen";
 import { useConnectionState, useController, useDeviceId, useSyncState } from "../shell/hooks";
 import { emptyView } from "../sync/reducer";
 import { Button, ProjectTag, Txt } from "../ui/components";
-import { AboveKeyboard, barRoom, KEYBOARD_GAP } from "../ui/keyboard";
+import { barRoom, KEYBOARD_GAP } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { Glass, useGlass } from "../ui/Glass";
@@ -406,8 +407,18 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
       )}
     </>
   );
+  // The keyboard. The list keeps its size, and what is in it rises with the keyboard, frame by frame, by as much as the bar does
+  // (the keyboard's height less the room the bar already has under it): once, with the keyboard. It used to get shorter as the
+  // keyboard came, which held the messages at the top where they were, with the last ones behind the keyboard, and then scrolled
+  // them up after it (seen on the simulator: two moves, the first leaving the end hidden).
+  const lift = barRoom(insets.bottom) - KEYBOARD_GAP;
+  const scrollComponent = useMemo(
+    () => forwardRef<never, ScrollViewProps>((props, ref) => <KeyboardChatScrollView ref={ref} {...props} offset={lift} keyboardLiftBehavior="always" />),
+    [lift],
+  );
   const listEl = (
       <FlashList
+        renderScrollComponent={scrollComponent}
         testID="chat-list"
         contentContainerStyle={glass ? { paddingTop: top, paddingBottom: bottom } : undefined}
         ref={list}
@@ -469,16 +480,23 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         }
       />
   );
+  // What floats over the list rides the keyboard with the bar.
+  const riding = (el: React.ReactNode) =>
+    el ? (
+      <KeyboardStickyView offset={{ closed: 0, opened: lift }} style={StyleSheet.absoluteFill} pointerEvents="box-none">
+        {el}
+      </KeyboardStickyView>
+    ) : null;
   const jump = away && <JumpToBottom unseen={unseen} lift={glass ? bottom : 0} onPress={() => list.current?.scrollToEnd({ animated: true })} />;
 
   return (
-    <AboveKeyboard style={{ backgroundColor: colors.paper }} offset={KEYBOARD_GAP - barRoom(insets.bottom)}>
+    <View style={{ flex: 1, backgroundColor: colors.paper }}>
       {glass ? (
         <View style={{ flex: 1 }}>
           <View style={StyleSheet.absoluteFill} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)}>
             {listEl}
           </View>
-          {jump}
+          {riding(jump)}
           {/* The back button, the title and the rest float over the chat as glass. The page's colour fades out behind them (strong at
               the top, where the clock is, to nothing below) so the words under them never run into them. */}
           <View style={{ position: "absolute", top: 0, left: 0, right: 0 }} onLayout={(e) => setTop(e.nativeEvent.layout.height)}>
@@ -491,7 +509,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
             <View style={{ height: 18 }} />
           </View>
           <View style={{ position: "absolute", bottom: 0, left: 0, right: 0 }} onLayout={(e) => setBottom(e.nativeEvent.layout.height)}>
-            {foot}
+            <KeyboardStickyView offset={{ closed: 0, opened: lift }}>{foot}</KeyboardStickyView>
           </View>
         </View>
       ) : (
@@ -499,9 +517,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
           {head}
           <View style={{ flex: 1 }} onLayout={(e) => keep.widthChanged(e.nativeEvent.layout.width)}>
             {listEl}
-            {jump}
+            {riding(jump)}
           </View>
-          {foot}
+          <KeyboardStickyView offset={{ closed: 0, opened: lift }}>{foot}</KeyboardStickyView>
         </>
       )}
       {actions && (
@@ -530,6 +548,6 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
       )}
       {files && <DiffSheet files={files} load={loadDiff} onClose={() => setFiles(null)} />}
       {output && <StepOutputSheet title={output.text} load={() => sync.stepOutput(slot, output.id)} onClose={() => setOutput(null)} />}
-    </AboveKeyboard>
+    </View>
   );
 }

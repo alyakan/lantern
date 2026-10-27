@@ -11,6 +11,7 @@ import { renderHook } from "@testing-library/react-native";
 import { resetSeen, useSeen } from "../seen";
 import { COMPOSER_FILL } from "../ui/Glass";
 import { control } from "../ui/theme";
+import { barRoom, KEYBOARD_GAP } from "../ui/keyboard";
 import { motion } from "../ui/motion";
 import { lightColors } from "../ui/theme";
 
@@ -342,6 +343,26 @@ describe("a chat", () => {
       expect(bar().marginRight).toBe(0);
       await fireEvent(screen.getByLabelText("Message"), "blur");
       expect(bar().marginRight).toBe(room);
+    });
+
+    it("moves the messages up with the keyboard by as much as the bar, instead of making the list shorter (that scrolled twice)", async () => {
+      await withSession(talk);
+      // (The library's views are plain ones in tests, so what they were told is on them.)
+      type Node = { props: Record<string, unknown>; children?: unknown[] | null };
+      const all: Node[] = [];
+      const walk = (n: unknown) => {
+        if (!n || typeof n !== "object") return;
+        const node = n as Node;
+        all.push(node);
+        (node.children ?? []).forEach(walk);
+      };
+      walk(screen.toJSON());
+      const lift = barRoom(0) - KEYBOARD_GAP;
+      const list = all.find((n) => n.props.keyboardLiftBehavior !== undefined);
+      expect(list?.props.keyboardLiftBehavior).toBe("always");
+      expect(list?.props.offset).toBe(lift);
+      // The bar rides the keyboard by the same: the room it has under it is not lifted twice.
+      expect(all.some((n) => (n.props.offset as { opened?: number } | undefined)?.opened === lift)).toBe(true);
     });
 
     it("gives the back button, the title bar, the search circle and the chat bar one height", async () => {
