@@ -10,16 +10,16 @@ import { AboveKeyboard } from "../ui/keyboard";
 import { buzz, FadeSlideIn, PressScale } from "../ui/motion";
 import { ChatSkeleton, Dots } from "../ui/skeleton";
 import { Glass, useGlass } from "../ui/Glass";
-import { space, useColors } from "../ui/theme";
+import { radius, space, useColors } from "../ui/theme";
 import { platformSpeech } from "../platformSpeech";
-import { quickReplies, quote, searchRows } from "../view/chatText";
+import { currentMatch, findRows, quickReplies, quote, stepMatch } from "../view/chatText";
 import { projectColorOf } from "../view/home";
 import { hasHiddenChars, tellClaude } from "../view/shell";
 import { queuedIds } from "../view/queue";
 import { timeline, type Row } from "../view/timeline";
 import type { PageAction } from "../view/pages";
 import { useKeepPlace } from "./useKeepPlace";
-import { ChatSearchSheet, distanceFromEnd, JumpToBottom, MessageActionsSheet, PlanCard, QuickReplies, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
+import { distanceFromEnd, FindBar, JumpToBottom, Magnifier, MessageActionsSheet, PlanCard, QuickReplies, SearchField, StepOutputSheet, type ComposeSeed } from "./ChatExtras";
 import { useMacCan } from "../shell/useControls";
 import { useAppLock } from "../shell/lockContext";
 import { ChatSettings } from "./ChatSettings";
@@ -81,7 +81,24 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   // Holding a message down (what can be done with it), searching the chat, being scrolled away from its end, and words put in
   // the message box (a quote, an edit).
   const [actions, setActions] = useState<{ text: string; own: boolean; last: boolean } | null>(null);
-  const [searching, setSearching] = useState(false);
+  // Searching: what is typed, and which match it is on (a message's key; none means the newest, where looking starts). Null when not searching.
+  const [find, setFind] = useState<{ query: string; cursor: string | null } | null>(null);
+  const matches = useMemo(() => (find ? findRows(rows, find.query) : []), [rows, find]);
+  const here = find ? currentMatch(matches, find.cursor) : null;
+  const marks = useMemo(() => ({ here: here?.key ?? null, all: new Set(matches.map((m) => m.key)) }), [matches, here]);
+  // The chat goes to each match as it is chosen (and to the newest as the search finds it).
+  const hereRef = useRef(here);
+  hereRef.current = here;
+  const hereKey = here?.key;
+  useEffect(() => {
+    const m = hereRef.current;
+    if (m) list.current?.scrollToIndex({ index: m.index, animated: true, viewPosition: 0.3 });
+  }, [hereKey]);
+  const step = (dir: 1 | -1) => {
+    if (!find) return;
+    const m = stepMatch(matches, find.cursor, dir);
+    if (m) setFind({ ...find, cursor: m.key });
+  };
   // A message being read aloud: reading stops when the chat is left.
   const [reading, setReading] = useState(false);
   useEffect(() => () => platformSpeech.stop(), []);
@@ -253,9 +270,12 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
           );
       }
     })();
+    // While searching, the match being looked at has an outline in the accent, and the other matches a faint one.
+    const mark = marks.here === row.key ? "here" : marks.all.has(row.key) ? "other" : null;
     return (
       <FadeSlideIn animate={arrives(row.key)} from={row.kind === "user" ? 18 : 12} ms={row.kind === "user" ? 280 : 240}>
         {body}
+        {mark && <View testID={`match-${mark}`} pointerEvents="none" style={[StyleSheet.absoluteFill, { marginHorizontal: 6, borderRadius: radius.inner, borderWidth: mark === "here" ? 2 : 1, borderColor: mark === "here" ? colors.cobalt : `${colors.cobalt}55` }]} />}
       </FadeSlideIn>
     );
   };
@@ -281,6 +301,10 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
             </Glass>
           </PressScale>
         )}
+        {find ? (
+          <SearchField query={find.query} onChange={(query) => setFind({ query, cursor: null })} onNext={() => step(-1)} onCancel={() => setFind(null)} />
+        ) : (
+          <>
         {/* The title bar opens the chat's settings (what it runs on, and its models) when the Mac can say what those are. */}
         <ChatSettings slot={slot} chat={chat} plan={plan} context={view.context} onProblem={setProblem} onClosed={onBack}>
           {(line) => (
@@ -301,12 +325,9 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
           )}
         </ChatSettings>
         {/* Looking for something said in this chat. */}
-        <PressScale accessibilityRole="button" accessibilityLabel="Search this chat" onPress={() => setSearching(true)} hitSlop={8} scaleTo={0.88}>
+        <PressScale accessibilityRole="button" accessibilityLabel="Search this chat" onPress={() => setFind({ query: "", cursor: null })} hitSlop={8} scaleTo={0.88}>
           <Glass style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
-            <View accessibilityElementsHidden style={{ width: 20, height: 20 }}>
-              <View style={{ width: 13, height: 13, borderRadius: 7, borderWidth: 2, borderColor: colors.ink }} />
-              <View style={{ position: "absolute", left: 11, top: 12, width: 8, height: 2.5, borderRadius: 2, backgroundColor: colors.ink, transform: [{ rotate: "45deg" }] }} />
-            </View>
+            <Magnifier />
           </Glass>
         </PressScale>
         {working && (
@@ -318,6 +339,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
               </Txt>
             </PressScale>
           </FadeSlideIn>
+        )}
+          </>
         )}
       </View>
 
@@ -340,6 +363,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
   );
   const foot = (
     <>
+      {find && <FindBar query={find.query} count={matches.length} position={here ? matches.indexOf(here) + 1 : 0} onOlder={() => step(-1)} onNewer={() => step(1)} />}
+      <View style={find ? { display: "none" } : undefined}>
       <PlanCard todos={view.todos} />
       {replies.length > 0 && <QuickReplies replies={replies} onSend={send} />}
       {/* A command typed in the terminal, shown back to be run by a swipe: here in the chat, where the swipe takes a drag. */}
@@ -380,6 +405,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
       ) : (
         <Composer draftKey={slot} disabled={!online} canAttach={canImages} onSend={(text, images) => void sync.send(slot, text, images)} onRun={canShell ? runCommand : undefined} seed={seed} commands={view.commands} />
       )}
+      </View>
     </>
   );
   const listEl = (
@@ -390,6 +416,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         onScroll={onScroll}
         scrollEventThrottle={64}
         data={rows}
+        extraData={marks}
         renderItem={renderRow}
         keyExtractor={(r) => r.key}
         scrollEnabled={!swiping}
@@ -499,15 +526,6 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
             );
           }}
           onClose={() => setActions(null)}
-        />
-      )}
-      {searching && (
-        <ChatSearchSheet
-          search={(q) => searchRows(rows, q)}
-          onPick={(hit) => {
-            list.current?.scrollToIndex({ index: hit.index, animated: true, viewPosition: 0.3 });
-          }}
-          onClose={() => setSearching(false)}
         />
       )}
       {files && <DiffSheet files={files} load={loadDiff} onClose={() => setFiles(null)} />}

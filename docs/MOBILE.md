@@ -63,6 +63,8 @@ The phone never sends tool input. To answer an `AskUserQuestion` it sends only t
 
 **On a wide iPad** (landscape, 1200 points or more) the files the open chat has changed sit beside it with a diff of each (`screens/ChangesPane.tsx`), read from the same `diff` request the chat's "What changed" sheet uses. No Mac change; a Files tree would need new requests and isn't built.
 
+**Searching a chat.** The magnifier in the chat's header turns into a search field over where the title was (Cancel puts the header back); the chat stays in view and goes to the newest message that says it, outlined in the accent, the other matches faintly. A bar over the keyboard says which one it is ("12 of 12", counted from the oldest) with arrows to the older and the newer (Return is the older), round at the ends. Only the messages loaded on the phone are searched, one match per message, and the message box is kept, unseen, so what was typed in it is still there (`findRows`, `stepMatch` in `view/chatText.ts`).
+
 **Read aloud.** Hold a message, Read aloud: the phone's own voice (`expo-speech`, a native module) reads the words and names code blocks and tables instead of reading them out (`view/speech.ts`).
 
 **Tell Claude.** A finished terminal command has a Tell Claude button that puts the command, how it ended and the end of its output in the message box (`view/shell.ts` `tellClaude`, in a fence the output can't close early). The person reads and sends it; nothing is sent for them, and a command that read a password offers nothing. This is the phone-side answer to "Claude does not see output of phone-run commands": no Mac change.

@@ -14,7 +14,6 @@ import { FadeSlideIn, PressScale } from "../ui/motion";
 import { Sheet } from "../ui/Sheet";
 import { Dots } from "../ui/skeleton";
 import { fonts, radius, shadow, space, useColors } from "../ui/theme";
-import type { Hit } from "../view/chatText";
 
 /** One thing a sheet offers: a row with a name. */
 function ActionRow({ label, hint, onPress, tone = "ink" }: { label: string; hint?: string; onPress: () => void; tone?: "ink" | "stop" }) {
@@ -104,57 +103,81 @@ export function MessageActionsSheet({ text, onQuote, onEdit, onReadAloud, readin
   );
 }
 
-/** Looking for something in the chat: type, and the messages that say it come, the newest first; one opens where it is. */
-export function ChatSearchSheet({ search, onPick, onClose }: { search: (query: string) => Hit[]; onPick: (hit: Hit) => void; onClose: () => void }) {
+/** A magnifying glass, drawn from a ring and a handle. */
+export function Magnifier({ color }: { color?: string }) {
+  const colors = useColors();
+  const tint = color ?? colors.ink;
+  return (
+    <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 20, height: 20 }}>
+      <View style={{ width: 13, height: 13, borderRadius: 7, borderWidth: 2, borderColor: tint }} />
+      <View style={{ position: "absolute", left: 11, top: 12, width: 8, height: 2.5, borderRadius: 2, backgroundColor: tint, transform: [{ rotate: "45deg" }] }} />
+    </View>
+  );
+}
+
+/**
+ * Looking for something in the chat, in the header: the search button grows into this field, over where the title was, with
+ * Cancel at its end. The chat stays in view beneath, at the message the search is on.
+ */
+export function SearchField({ query, onChange, onNext, onCancel }: { query: string; onChange: (text: string) => void; /** Return: on to the next older match. */ onNext: () => void; onCancel: () => void }) {
+  const colors = useColors();
+  return (
+    <FadeSlideIn from={14} ms={180} style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 10 }}>
+      <Glass style={{ flex: 1, height: 40, borderRadius: 20, paddingHorizontal: 13, flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Magnifier color={colors.ink3} />
+        <TextInput
+          accessibilityLabel="Search"
+          autoFocus
+          value={query}
+          onChangeText={onChange}
+          onSubmitEditing={onNext}
+          blurOnSubmit={false}
+          placeholder="Search this chat"
+          placeholderTextColor={colors.ink3}
+          autoCorrect={false}
+          autoCapitalize="none"
+          returnKeyType="search"
+          clearButtonMode="while-editing"
+          style={{ flex: 1, fontSize: 16, color: colors.ink, paddingVertical: 0 }}
+        />
+      </Glass>
+      <PressScale accessibilityRole="button" accessibilityLabel="Cancel search" onPress={onCancel} hitSlop={8} scaleTo={0.92}>
+        <Txt variant="body" style={{ fontWeight: "700" }}>
+          Cancel
+        </Txt>
+      </PressScale>
+    </FadeSlideIn>
+  );
+}
+
+/**
+ * The bar over the keyboard while searching: which match this is ("12 of 12", the newest first), and arrows to the older and
+ * the newer. Without a match it says why, so a blank result is never a silence.
+ */
+export function FindBar({ query, count, position, onOlder, onNewer }: { query: string; count: number; /** 1-based, from the oldest. */ position: number; onOlder: () => void; onNewer: () => void }) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const keyboard = useKeyboardUp();
-  const [query, setQuery] = useState("");
-  const hits = search(query);
+  const typed = query.trim().length >= 2;
+  const says = !typed ? "Type two letters or more" : count === 0 ? "Nothing says that in the messages loaded here. Earlier turns are loaded from the top of the chat." : `${position} of ${count}`;
   return (
-    <Sheet onClose={onClose}>
-      {(close) => (
-        <View style={[{ backgroundColor: colors.card, borderTopLeftRadius: radius.sheet, borderTopRightRadius: radius.sheet, padding: space.xl, paddingBottom: keyboard ? 12 : Math.max(insets.bottom, 16) + 8, gap: 10 }, shadow.float]}>
-          <Txt variant="heading" accessibilityRole="header">
-            Search this chat
-          </Txt>
-          <TextInput accessibilityLabel="Search" autoFocus value={query} onChangeText={setQuery} placeholder="Words in a message" placeholderTextColor={colors.ink3} autoCorrect={false} autoCapitalize="none" returnKeyType="search" style={{ backgroundColor: colors.paper, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 11, fontSize: 15, color: colors.ink }} />
-          <ScrollView style={{ maxHeight: 340 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 6 }}>
-            {query.trim().length >= 2 && hits.length === 0 && (
-              <Txt variant="small" tone="ink2">
-                Nothing says that in the messages loaded here. Earlier turns are loaded from the top of the chat.
-              </Txt>
-            )}
-            {hits.map((h) => (
-              <PressScale
-                key={h.key}
-                accessibilityRole="button"
-                accessibilityLabel={`${h.who}: ${h.before}${h.match}${h.after}`}
-                onPress={() => {
-                  onPick(h);
-                  close();
-                }}
-                haptic="select"
-                scaleTo={0.98}
-                style={{ borderRadius: radius.inner, backgroundColor: colors.paper, padding: 11, gap: 3 }}
-              >
-                <Txt variant="tiny" tone="ink3" style={{ fontWeight: "700" }}>
-                  {h.who}
-                </Txt>
-                <Txt variant="small" numberOfLines={3}>
-                  {h.before}
-                  <Txt variant="small" style={{ fontWeight: "700", backgroundColor: colors.hiSoft }}>
-                    {h.match}
-                  </Txt>
-                  {h.after}
-                </Txt>
-              </PressScale>
-            ))}
-          </ScrollView>
-          <Button label="Close" kind="ghost" onPress={close} />
-        </View>
-      )}
-    </Sheet>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: space.lg, paddingTop: 8, paddingBottom: keyboard ? 8 : Math.max(insets.bottom, 12), backgroundColor: colors.paper }}>
+      <Txt accessibilityLiveRegion="polite" variant="small" tone="ink2" style={{ flex: 1 }}>
+        {says}
+      </Txt>
+      {[
+        { label: "Older match", turn: "-90deg", press: onOlder },
+        { label: "Newer match", turn: "90deg", press: onNewer },
+      ].map((b) => (
+        <PressScale key={b.label} accessibilityRole="button" accessibilityLabel={b.label} accessibilityState={{ disabled: count === 0 }} disabled={count === 0} onPress={b.press} haptic="select" scaleTo={0.9} opacity={count === 0 ? 0.4 : 1}>
+          <Glass style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" }}>
+            <View style={{ transform: [{ rotate: b.turn }] }}>
+              <Chevron open={false} color={colors.ink} />
+            </View>
+          </Glass>
+        </PressScale>
+      ))}
+    </View>
   );
 }
 
