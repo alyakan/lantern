@@ -613,13 +613,13 @@ fn lookalike(c: char) -> bool {
 
 /// The characters of a card's texts that can pass for others, in the order they were met: said once, in words, under it.
 #[derive(Default)]
-struct Lookalikes(Vec<char>);
+pub(super) struct Lookalikes(Vec<char>);
 
 impl Lookalikes {
     const MOST: usize = 6;
 
     /// `text` as `visible` writes it, noting its lookalikes.
-    fn shown(&mut self, text: &str, lines: bool) -> String {
+    pub(super) fn shown(&mut self, text: &str, lines: bool) -> String {
         for c in text.chars().filter(|c| lookalike(*c)) {
             if !self.0.contains(&c) {
                 self.0.push(c);
@@ -628,7 +628,7 @@ impl Lookalikes {
         visible(text, lines)
     }
 
-    fn warning(&self) -> Option<String> {
+    pub(super) fn warning(&self) -> Option<String> {
         if self.0.is_empty() {
             return None;
         }
@@ -637,7 +637,7 @@ impl Lookalikes {
         Some(format!("Has characters that can pass for another one: {shown}{more}."))
     }
 
-    fn add_to(&self, input: &mut Value) {
+    pub(super) fn add_to(&self, input: &mut Value) {
         if let Some(w) = self.warning() {
             input["warnings"] = json!([w]);
         }
@@ -714,7 +714,7 @@ fn changes_of(v: &Value) -> Vec<Change> {
         .collect()
 }
 
-fn str_of(v: &Value, key: &str) -> String {
+pub(super) fn str_of(v: &Value, key: &str) -> String {
     v.get(key).and_then(Value::as_str).unwrap_or("").to_string()
 }
 
@@ -740,7 +740,7 @@ pub fn unwrap_shell(command: &str) -> String {
 }
 
 /// The hunks of a whole file's text as added (`+`) or removed (`-`): what a created or deleted file's diff is.
-fn whole_file(content: &str, sign: char) -> Vec<Hunk> {
+pub(super) fn whole_file(content: &str, sign: char) -> Vec<Hunk> {
     let lines: Vec<String> = content.lines().map(|l| format!("{sign}{l}")).collect();
     if lines.is_empty() {
         return vec![];

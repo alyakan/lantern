@@ -44,6 +44,20 @@ pub fn locate_hermes() -> Result<PathBuf, String> {
     found
 }
 
+/// Where Gemini CLI is usually installed: npm's global bin (under nvm too, which a launcher with no shell has no PATH for),
+/// Homebrew, bun.
+pub fn gemini_candidate_paths(home: &Path) -> Vec<PathBuf> {
+    let mut paths = vec![home.join(".local/bin/gemini"), home.join(".npm-global/bin/gemini"), home.join(".bun/bin/gemini"), PathBuf::from("/opt/homebrew/bin/gemini"), PathBuf::from("/usr/local/bin/gemini")];
+    // Every Node nvm has installed, the newest name last so a later one wins on a tie (see `locate_cli`, which takes the first).
+    if let Ok(versions) = std::fs::read_dir(home.join(".nvm/versions/node")) {
+        let mut found: Vec<PathBuf> = versions.filter_map(Result::ok).map(|v| v.path().join("bin/gemini")).collect();
+        found.sort();
+        found.reverse();
+        paths.extend(found);
+    }
+    paths
+}
+
 /// How long a search that found no Codex stands: a main agent looks for it every time it starts, and without it each of
 /// those would wait on the login shell.
 const NOT_FOUND_FOR: Duration = Duration::from_secs(60);
@@ -60,6 +74,24 @@ pub fn locate_codex(override_path: Option<&str>) -> Result<PathBuf, String> {
     }
     let found = locate_cli("codex", override_path, codex_candidate_paths, "Could not find the `codex` CLI. Install Codex (npm i -g @openai/codex), or enter its path.");
     if override_path.map(str::trim).is_none_or(|p| p.is_empty()) {
+        *NOT_FOUND.lock().unwrap() = found.as_ref().err().map(|why| (Instant::now(), why.clone()));
+    }
+    found
+}
+
+/// The Gemini CLI: `override_path` when the user gave one, else the usual places, else the login shell's PATH.
+pub fn locate_gemini(override_path: Option<&str>) -> Result<PathBuf, String> {
+    static NOT_FOUND: std::sync::Mutex<Option<(Instant, String)>> = std::sync::Mutex::new(None);
+    let default = override_path.map(str::trim).is_none_or(|p| p.is_empty());
+    if default {
+        if let Some((at, why)) = NOT_FOUND.lock().unwrap().as_ref() {
+            if at.elapsed() < NOT_FOUND_FOR {
+                return Err(why.clone());
+            }
+        }
+    }
+    let found = locate_cli("gemini", override_path, gemini_candidate_paths, "Could not find the `gemini` CLI. Install Gemini CLI (npm i -g @google/gemini-cli), or enter its path.");
+    if default {
         *NOT_FOUND.lock().unwrap() = found.as_ref().err().map(|why| (Instant::now(), why.clone()));
     }
     found

@@ -3005,6 +3005,7 @@ async fn claude_mcp(state: &AppState, slot: &str, args: Vec<String>) -> Result<S
             // (A gateway chat is Claude Code too: its MCP servers are the same ones.)
             ProviderId::Claude | ProviderId::Gateway => cfg.binary.clone(),
             ProviderId::Codex => return Err("MCP servers for Codex are set up in its own config (~/.codex/config.toml), not from here.".into()),
+            ProviderId::Gemini => return Err("MCP servers for Gemini are set up in its own config (~/.gemini/settings.json), not from here.".into()),
             #[cfg(test)]
             ProviderId::Fake => return Err("The fake CLI has no mcp command.".into()),
         };
