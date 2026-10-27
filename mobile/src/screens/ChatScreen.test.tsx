@@ -10,6 +10,7 @@ import { PromptRow } from "./ChatParts";
 import { renderHook } from "@testing-library/react-native";
 import { resetSeen, useSeen } from "../seen";
 import { COMPOSER_FILL } from "../ui/Glass";
+import { control } from "../ui/theme";
 import { motion } from "../ui/motion";
 import { lightColors } from "../ui/theme";
 
@@ -285,6 +286,65 @@ describe("a chat", () => {
       expect(opacityOf(screen.getByLabelText("Message", { includeHiddenElements: true }))).toBe(0);
       await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
       await waitFor(() => expect(opacityOf(screen.getByLabelText("Message"))).toBe(1));
+    });
+
+    // The first height (a number) a node or anything below it says.
+    const heightWithin = (node: { props?: ViewProps; children?: unknown[] } | null | undefined): number | undefined => {
+      if (!node || typeof node !== "object") return undefined;
+      const h = StyleSheet.flatten(node.props?.style)?.height;
+      if (typeof h === "number") return h;
+      for (const c of node.children ?? []) {
+        const found = heightWithin(c as { props?: ViewProps; children?: unknown[] });
+        if (found !== undefined) return found;
+      }
+      return undefined;
+    };
+
+    it("grows the circle itself into the field over the bar, which keeps its width, and shrinks it back", async () => {
+      await withSession(talk);
+      await fireEvent(screen.getByTestId("chat-bar-row"), "layout", { nativeEvent: { layout: { x: 0, y: 0, width: 300, height: 48 } } });
+      const circle = () => StyleSheet.flatten(screen.getByTestId("search-circle").props.style);
+      // (The bar is hidden from screen readers while searching, which is why it is asked for as hidden too.)
+      const bar = () => StyleSheet.flatten(screen.getByTestId("chat-bar", { includeHiddenElements: true }).props.style);
+      // At rest: a circle (as wide as it is tall), and the bar leaves room for it.
+      expect(circle().width).toBe(circle().height);
+      const room = bar().marginRight;
+      expect(room).toBeGreaterThan(0);
+      await fireEvent.press(screen.getByRole("button", { name: "Search this chat" }));
+      // Searching: the circle has grown to the whole row; the bar is where it was (its room is the same), and it has faded.
+      expect(circle().width).toBe(300);
+      expect(bar().marginRight).toBe(room);
+      expect(bar().opacity).toBe(0);
+      await fireEvent.press(screen.getByRole("button", { name: "Cancel search" }));
+      await waitFor(() => expect(circle().width).toBe(circle().height));
+      expect(bar().opacity).toBe(1);
+    });
+
+    it("lets the bar widen into the circle's room only while words are typed in it, not while it is searched", async () => {
+      await withSession(talk);
+      const bar = () => StyleSheet.flatten(screen.getByTestId("chat-bar").props.style);
+      const room = bar().marginRight;
+      expect(room).toBeGreaterThan(0);
+      await fireEvent(screen.getByLabelText("Message"), "focus");
+      expect(bar().marginRight).toBe(0);
+      await fireEvent(screen.getByLabelText("Message"), "blur");
+      expect(bar().marginRight).toBe(room);
+    });
+
+    it("gives the back button, the title bar, the search circle and the chat bar one height", async () => {
+      await withSession(talk);
+      expect(heightWithin(screen.getByRole("button", { name: "Back" }))).toBe(control);
+      // The title bar: the nearest box above the title that has a height.
+      type Up = { props?: ViewProps; parent?: Up | null };
+      let titleHeight: number | undefined;
+      for (let n: Up | null = screen.getByRole("header") as unknown as Up; n && titleHeight === undefined; n = n.parent ?? null) {
+        const h = StyleSheet.flatten(n.props?.style)?.height;
+        if (typeof h === "number") titleHeight = h;
+      }
+      expect(titleHeight).toBe(control);
+      expect(StyleSheet.flatten(screen.getByTestId("search-circle").props.style).height).toBe(control);
+      // The message box at rest is the same height: its field's minimum is the shared height less the capsule's own padding.
+      expect(StyleSheet.flatten(screen.getByLabelText("Message").props.style).minHeight).toBe(control - 12);
     });
 
     it("sizes the circle by the bar at rest, not by a layout in passing", async () => {

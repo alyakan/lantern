@@ -126,6 +126,13 @@ export const fonts = {
 /** The names of the font files to load, as expo-font takes them. */
 export const FONT_FILES = ["BricolageGrotesque_700Bold", "BricolageGrotesque_800ExtraBold"] as const;
 
+/**
+ * The height of the round buttons, the title bar and the chat bar that sit near one another in a chat (the back button, the title,
+ * Stop, the search circle, the message box at rest): one number, so they line up. The message box's own field is `control - 12`
+ * (6 points of capsule around it).
+ */
+export const control = 48;
+
 export const radius = { card: 24, inner: 14, pill: 999, sheet: 22 } as const;
 
 export const space = { xs: 4, sm: 8, md: 12, lg: 16, xl: 20, xxl: 28 } as const;
