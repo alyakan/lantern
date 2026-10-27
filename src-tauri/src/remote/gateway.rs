@@ -675,7 +675,7 @@ impl<'a> Session<'a> {
     fn send_chats(&mut self, link: &Link, channel: &mut Channel, always: bool) -> Result<(), String> {
         let chats: Vec<RemoteChat> = self.gw.hub.chats().into_iter().map(RemoteChat::from).collect();
         // Only what a list shows counts as a change, not every new event's number (a chat's mode and preset are shown).
-        let shown = |c: &[RemoteChat]| c.iter().map(|c| (c.slot.clone(), c.title.clone(), c.status, c.permissions, c.preset.clone(), c.project_color.clone(), c.workflow)).collect::<Vec<_>>();
+        let shown = |c: &[RemoteChat]| c.iter().map(|c| (c.slot.clone(), c.title.clone(), c.status, c.permissions, c.preset.clone(), c.project_color.clone(), c.workflow, c.preview.clone())).collect::<Vec<_>>();
         if always || shown(&chats) != shown(&self.last_chats) {
             send_message(link, channel, &ServerMessage::Chats { chats: chats.clone() })?;
         }
@@ -2255,6 +2255,10 @@ pub(crate) mod tests {
         r.hub.colored("a", Some("#0f8a7e"));
         let again = next_chats(&mut p).await;
         assert_eq!(again[0].project_color.as_deref(), Some("#0f8a7e"), "a project's colour changing is shown too");
+        // What the chat is doing is the row's preview line, and a change in it is sent too.
+        r.bus.publish("a", UiEvent::ToolStarted { parent: None, tool_use_id: "t1".into(), name: "Bash".into(), summary: "npm test".into() });
+        let again = next_chats(&mut p).await;
+        assert_eq!(again[0].preview.as_deref(), Some("Bash npm test"));
     }
 
     /// A phone's side over a real transport link (the Wi-Fi one), as `phone` does over memory.
