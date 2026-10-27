@@ -43,6 +43,9 @@ const BANNER_MS = 4000;
 export const WAKE_WAIT_MS = 20_000;
 
 /** A chat, as a timeline with a message box under it. */
+/** How much of the page's colour is left at each step down the header's fade, from its top to its bottom edge. */
+const HEADER_FADE = [0.96, 0.92, 0.85, 0.75, 0.6, 0.42, 0.25, 0.1, 0];
+
 export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }: ChatProps) {
   const colors = useColors();
   const controller = useController();
@@ -310,7 +313,8 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
         {/* The title bar opens the chat's settings (what it runs on, and its models) when the Mac can say what those are. */}
         <ChatSettings slot={slot} chat={chat} plan={plan} context={view.context} onProblem={setProblem} onClosed={onBack}>
           {(line) => (
-            <View style={{ flex: 1 }}>
+            // A capsule of glass like the buttons beside it (a solid card with its shadow where there is no glass).
+            <Glass style={{ flex: 1, minHeight: 48, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 6, justifyContent: "center" }}>
               <Txt variant="heading" numberOfLines={1} accessibilityRole="header">
                 {chat?.title?.trim() || "Chat"}
               </Txt>
@@ -323,7 +327,7 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
                   </Txt>
                 )}
               </View>
-            </View>
+            </Glass>
           )}
         </ChatSettings>
         {/* Looking for something said in this chat. */}
@@ -483,14 +487,16 @@ export function ChatScreen({ slot, onBack, onReview, lead = "back", onSidebar }:
             {listEl}
           </View>
           {jump}
-          {/* The header is solid, with the page's colour fading out below it, so the words under it never run into the title. */}
+          {/* The back button, the title and the rest float over the chat as glass. The page's colour fades out behind them (strong at
+              the top, where the clock is, to nothing below) so the words under them never run into them. */}
           <View style={{ position: "absolute", top: 0, left: 0, right: 0 }} onLayout={(e) => setTop(e.nativeEvent.layout.height)}>
-            <View style={{ backgroundColor: colors.paper }}>{head}</View>
-            <View pointerEvents="none" style={{ height: 18 }}>
-              {[0.95, 0.7, 0.4, 0.15].map((a) => (
+            <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+              {HEADER_FADE.map((a) => (
                 <View key={a} style={{ flex: 1, backgroundColor: `${colors.paper}${Math.round(a * 255).toString(16).padStart(2, "0")}` }} />
               ))}
             </View>
+            {head}
+            <View style={{ height: 18 }} />
           </View>
           <View style={{ position: "absolute", bottom: 0, left: 0, right: 0 }} onLayout={(e) => setBottom(e.nativeEvent.layout.height)}>
             {foot}
