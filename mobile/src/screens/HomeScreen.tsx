@@ -11,6 +11,7 @@ import { Button, ProjectTag, Tag, Tile, Txt } from "../ui/components";
 import { FadeSlideIn, PressScale, PulseDot, skips } from "../ui/motion";
 import { useAccent } from "../ui/accent";
 import { Chevron } from "../ui/Chevron";
+import { Glide } from "../ui/Glide";
 import { DarkLantern } from "../ui/lanterns";
 import { PinIcon } from "../ui/PinIcon";
 import { Dots, HomeSkeleton } from "../ui/skeleton";
@@ -184,22 +185,25 @@ function ChatRow({ row, index, onPress, onLongPress, showProject = true, inset =
     </PressScale>
   );
   return (
-    // The rows come in one after the other when Home opens (and a new chat comes in alone); a press gives under the finger.
-    <FadeSlideIn from={14} delay={Math.min(index, 8) * 45 + 120}>
-      {swipe ? (
-        <SwipeRow
-          background={background}
-          open={swipe.open}
-          onOpenChange={swipe.onOpenChange}
-          pin={{ label: row.pinned ? "Unpin" : "Pin", onTrigger: swipe.onPin }}
-          tray={[...(swipe.onToggleUnread ? [{ key: "read", label: row.unread ? "Read" : "Unread", onPress: swipe.onToggleUnread }] : []), ...(swipe.onClose ? [{ key: "close", label: "Close", tone: "danger" as const, onPress: swipe.onClose }] : [])]}
-        >
-          {body}
-        </SwipeRow>
-      ) : (
-        body
-      )}
-    </FadeSlideIn>
+    // A row glides to its new place when the list reorders; the rows come in one after the other when Home opens (and a new chat
+    // comes in alone); a press gives under the finger.
+    <Glide>
+      <FadeSlideIn from={14} delay={Math.min(index, 8) * 45 + 120}>
+        {swipe ? (
+          <SwipeRow
+            background={background}
+            open={swipe.open}
+            onOpenChange={swipe.onOpenChange}
+            pin={{ label: row.pinned ? "Unpin" : "Pin", onTrigger: swipe.onPin }}
+            tray={[...(swipe.onToggleUnread ? [{ key: "read", label: row.unread ? "Read" : "Unread", onPress: swipe.onToggleUnread }] : []), ...(swipe.onClose ? [{ key: "close", label: "Close", tone: "danger" as const, onPress: swipe.onClose }] : [])]}
+          >
+            {body}
+          </SwipeRow>
+        ) : (
+          body
+        )}
+      </FadeSlideIn>
+    </Glide>
   );
 }
 
@@ -338,7 +342,7 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   };
   const toggle = (project: string) => {
     const next = folded.includes(project) ? folded.filter((p) => p !== project) : [...folded, project];
-    // A card folds and unfolds as a height, with what is under it following.
+    // A card folds and unfolds as a height, with what is under it following (asked for by the press itself, so only Home's own layout moves).
     if (!skips()) LayoutAnimation.configureNext(LayoutAnimation.create(220, "easeInEaseOut", "opacity"));
     setFolded(next);
     void saveFolded(next);
@@ -358,13 +362,6 @@ export function HomeScreen({ onOpenChat, onReview, onOpenMac, onCompose, onNewCh
   // What is searched for narrows the list; while it is, the rest of Home (what waits on you) steps aside.
   const asked = searching ? query.trim() : "";
   const shown = asked ? list.filter((r) => matches(r, asked)) : list;
-
-  // The rows glide to their places when a chat changes status or is pinned (and the list narrows), instead of jumping. It is asked for
-  // here, as the new order is drawn: what the order comes from is the Mac's, not a press of ours, so there is no earlier moment.
-  const order = `${grouping}:${shown.map((r) => r.slot).join(",")}`;
-  const was = useRef<string | null>(null);
-  if (was.current !== null && was.current !== order && !loading && !skips()) LayoutAnimation.configureNext(LayoutAnimation.create(240, "easeInEaseOut", "opacity"));
-  was.current = order;
 
   const swipeFor = (r: Row): RowSwipe => ({
     open: openSlot === r.slot,
